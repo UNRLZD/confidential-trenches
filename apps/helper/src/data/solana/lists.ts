@@ -38,8 +38,10 @@ export type Snapshot = { chain: "solana"; lists: Record<(typeof LISTS)[number], 
 export const LIST_MAX = 100;
 /** The Jupiter reads, each with limit=100 (D-S2, D-S3). */
 export const READS = { new: "/tokens/v2/recent", trending_5m: "/tokens/v2/toptrending/5m", trending_1h: "/tokens/v2/toptrending/1h" } as const;
-/** A snapshot younger than this is served as is; older, it is still served (up to STALE_MS) while one refresh runs. */
-export const FRESH_MS = 10_000;
+/** The refresh cadence (D-S2's 12 s): a snapshot built within it is served as is; older, it is still served (up to
+ *  STALE_MS) while one refresh runs. warm() refreshes on this cadence, so no caller waits on a vendor: a cold read of
+ *  the three lists and the curve accounts took 1.6 s from a Mac (Jupiter's 1h list alone 2.4 s once, 1 Nov 15:25Z). */
+export const FRESH_MS = 12_000;
 /** The last good snapshot serves up to 60 s; after that, with no new read, the lists answer 503 (D1's helper rules). */
 export const STALE_MS = 60_000;
 
@@ -389,5 +391,14 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
     return start();
   }
 
-  return { get };
+  /** Keep the snapshot fresh on its own: one refresh now and one every FRESH_MS (the server's start only; the timer
+   *  never holds the process open). Returns the stop. */
+  function warm(): () => void {
+    void start();
+    const t = setInterval(() => void start(), FRESH_MS);
+    t.unref();
+    return () => clearInterval(t);
+  }
+
+  return { get, warm };
 }

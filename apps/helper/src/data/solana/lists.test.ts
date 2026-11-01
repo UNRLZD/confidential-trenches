@@ -7,7 +7,7 @@
 // forms, and pass the terminal's one curve rule (apps/terminal/src/screens/market/curve.ts).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { gunzipSync } from "node:zlib";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { onCurve } from "../../../../terminal/src/screens/market/curve.ts";
@@ -273,4 +273,28 @@ test("the lists: past FRESH_MS the last answer serves while one refresh runs; wi
 test("the lists: one list down or not a list answers 503 when there is no last answer", async () => {
   const lists = createSolanaLists({ handle: async (_v: string, p: string) => ({ status: 200, headers: {}, body: p === READS.new ? '{"oops":1}' : JSON.stringify(RAW.trending_5m) }) }, recordedRpc);
   assert.equal((await lists.get()).status, 503);
+});
+
+test("warm(): one refresh at once and one every FRESH_MS, so a caller never waits on a vendor; the stop ends it", async (t) => {
+  mock.timers.enable({ apis: ["setInterval"] });
+  t.after(() => mock.timers.reset());
+  const f = fakes();
+  const lists = createSolanaLists(f.proxy, recordedRpc, { now: f.now });
+  const stop = lists.warm();
+  await new Promise((ok) => setImmediate(ok));
+  assert.equal(f.calls.length, 3);
+  for (let i = 1; i <= 3; i++) {
+    f.step(FRESH_MS);
+    mock.timers.tick(FRESH_MS);
+    await new Promise((ok) => setImmediate(ok));
+    assert.equal(f.calls.length, 3 + 3 * i);
+    const a = await lists.get();
+    assert.equal(a.status, 200);
+    assert.equal(f.calls.length, 3 + 3 * i, "served from the warm snapshot, no read of its own");
+  }
+  stop();
+  f.step(FRESH_MS);
+  mock.timers.tick(FRESH_MS);
+  await new Promise((ok) => setImmediate(ok));
+  assert.equal(f.calls.length, 12);
 });

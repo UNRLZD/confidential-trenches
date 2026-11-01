@@ -234,7 +234,11 @@ if (import.meta.main) {
   }
   let server: Server;
   try {
-    server = start(commit, port);
+    const proxy = createProxy(process.env);
+    const rpc = createRpc(process.env);
+    const lists = createSolanaLists(proxy, rpc);
+    server = start(commit, port, proxy, rpc, undefined, lists);
+    lists.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);
