@@ -159,7 +159,7 @@ test("births: PLANNED for a return, move or second note; UNSPENT with its leaf; 
   await assert.rejects(t.ns.add({ ref: ch, scope: 5n, precommitment: pc(ch), state: "PLANNED" }), /born UNSPENT/);
   await assert.rejects(t.ns.add({ ref: ch, scope: 5n, precommitment: pc(ch), state: "UNSPENT" }), /leaf/);
   await assert.rejects(t.ns.add({ ref: ch, scope: 5n, precommitment: pc(ch), state: "HELD" as "UNSPENT", leaf: leafOf(pc(ch)) }), /born PLANNED or UNSPENT/);
-  await assert.rejects(t.ns.add({ ref: ch, scope: 5n, precommitment: pc(ch), state: "UNSPENT", leaf: leafOf(pc(ch)), parent: r.id }), /is not the note change index 0 of label 41 comes from/);
+  await assert.rejects(t.ns.add({ ref: ch, scope: 5n, precommitment: pc(ch), state: "UNSPENT", leaf: leafOf(pc(ch), BIG, L), parent: r.id }), /is not the note change index 0 of label 41 comes from/);
   await assert.rejects(t.ns.add({ ref: mv, scope: 5n, precommitment: pc(mv), state: "UNSPENT", leaf: leafOf(pc(mv)), parent: r.id }), /only a change or refund/);
   await assert.rejects(t.ns.add({ ref: mv, scope: 5n, precommitment: pc(mv), state: "PLANNED", nullifier: 1n } as never), /may not hold nullifier/);
   await assert.rejects(t.ns.add({ ref: { kind: "deposit", s: 6n, i: 0 }, scope: 5n, precommitment: pc(dep), state: "UNSPENT", leaf: leafOf(pc(dep)) }), /scope is its s/);
@@ -362,7 +362,7 @@ test("F2: the parent comes from the child's (l, j): a wrong parent, j, label or 
   await assert.rejects(t.ns.add({ ref: ch0, scope: 911n, precommitment: pc(ch0), state: "UNSPENT", leaf: leafOf(pc(ch0), 60n, 9101n, 9n), parent: Y.id }), /is not the note/, "X's change naming Y");
   const ch1: NoteRef = { kind: "change", l: 9101n, j: 1 };
   await assert.rejects(t.ns.add({ ref: ch1, scope: 911n, precommitment: pc(ch1), state: "UNSPENT", leaf: leafOf(pc(ch1), 60n, 9101n, 9n), parent: X.id }), /is not the note/, "j 1 is not a deposit's change");
-  await assert.rejects(t.ns.add({ ref: ch0, scope: 911n, precommitment: pc(ch0), state: "UNSPENT", leaf: leafOf(pc(ch0), 60n, 9999n, 9n), parent: X.id }), /keeps its parent's label/);
+  await assert.rejects(t.ns.add({ ref: ch0, scope: 911n, precommitment: pc(ch0), state: "UNSPENT", leaf: leafOf(pc(ch0), 60n, 9999n, 9n), parent: X.id }), /keeps its label/);
   await assert.rejects(t.ns.add({ ref: ch0, scope: 912n, precommitment: pc(ch0), state: "UNSPENT", leaf: leafOf(pc(ch0), 60n, 9101n, 9n), parent: X.id }), /is not the note/, "another scope");
   assert.equal(t.puts(), puts);
   // named nowhere, still linked: the store finds X from (l, j) and X goes SPENT
@@ -416,8 +416,8 @@ test("F5: a precommitmentOf that throws burns no index", async () => {
   assert.equal(((await t.ns.planDeposit(941n, pc)).ref as { i: number }).i, t.w.lane, "the first index is the lane's first");
 });
 
-test("T3/F6: tab A killed between the child and the parent write: already-open tab B sees the parent SPENT on list, get and move (RESERVED and UNSPENT parents)", async () => {
-  for (const parentState of ["RESERVED", "UNSPENT"] as const) {
+test("T3/F6: tab A killed between the child and the parent write: already-open tab B sees the parent SPENT whichever it calls first, list, get or move (RESERVED and UNSPENT parents)", async () => {
+  for (const [parentState, first] of [["RESERVED", "list"], ["UNSPENT", "list"], ["RESERVED", "get"], ["UNSPENT", "get"], ["RESERVED", "move"], ["UNSPENT", "move"]] as const) {
     const idb = new IDBFactory();
     const wa = await openWalletStore({ indexedDB: idb });
     opened.push(wa);
@@ -439,13 +439,21 @@ test("T3/F6: tab A killed between the child and the parent write: already-open t
     killAfter = n + 1; // the child's write lands, then the page dies
     await assert.rejects(a.add({ ref: ch, scope: 951n, precommitment: pc(ch), state: "UNSPENT", leaf: leafOf(pc(ch), 30n, 9501n, 9n), parent: X.id }), /killed/);
     a.close();
-    // first a move on an edge that would be legal for the stale state, then get and list
-    const stale = parentState === "RESERVED" ? b.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 8n }) : b.move(X.id, "UNSPENT", "HELD", { deadlineMs: 1n });
-    await assert.rejects(stale, /is SPENT/, `${parentState}: move`);
-    assert.equal((await b.get(X.id))?.state, "SPENT", `${parentState}: get`);
+    // B's first call after the kill is `first`; each must see the parent SPENT on its own
+    const at = `${parentState}, ${first} first`;
+    if (first === "list") {
+      const all = await b.list();
+      assert.equal(all.find((x) => x.id === X.id)?.state, "SPENT", at);
+      assert.equal(all.filter((x) => x.state === "UNSPENT" || x.state === "HELD").reduce((s, x) => s + x.leaf!.value, 0n), 30n, `${at}: counted once`);
+    } else if (first === "get") {
+      assert.equal((await b.get(X.id))?.state, "SPENT", at);
+    } else {
+      // an edge that would be legal for the stale state
+      const stale = parentState === "RESERVED" ? b.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 8n }) : b.move(X.id, "UNSPENT", "HELD", { deadlineMs: 1n });
+      await assert.rejects(stale, /is SPENT/, at);
+    }
     const all = await b.list();
-    assert.equal(all.find((x) => x.id === X.id)?.state, "SPENT", `${parentState}: list`);
-    assert.equal(all.filter((x) => x.state === "UNSPENT" || x.state === "HELD").reduce((s, x) => s + x.leaf!.value, 0n), 30n, "counted once");
+    assert.equal(all.filter((x) => x.state === "UNSPENT" || x.state === "HELD").reduce((s, x) => s + x.leaf!.value, 0n), 30n, `${at}: counted once after`);
   }
 });
 
@@ -475,4 +483,18 @@ test("a closed store writes nothing, also for a move already in flight", async (
   t.ns.close();
   await assert.rejects(p, /closed/);
   assert.equal((await (await tab(t.idb)).ns.get(X.id))?.state, "UNSPENT", "the dead tab's HELD note is freed, never RESERVED");
+});
+
+test("N1: a change note keeps its label: one whose leaf label is not its l is refused, with or without a parent in the store", async () => {
+  const t = await tab();
+  const c0: NoteRef = { kind: "change", l: 5n, j: 0 };
+  const puts = t.puts();
+  await assert.rejects(t.ns.add({ ref: c0, scope: 3n, precommitment: pc(c0), state: "UNSPENT", leaf: leafOf(pc(c0), 100n, 77n) }), /keeps its label/);
+  assert.equal(t.puts(), puts);
+  // with the right label it is a note restore found, and its own change finds it as parent
+  const a = await t.ns.add({ ref: c0, scope: 3n, precommitment: pc(c0), state: "UNSPENT", leaf: leafOf(pc(c0), 100n, 5n) });
+  const c1: NoteRef = { kind: "change", l: 5n, j: 1 };
+  const b = await t.ns.add({ ref: c1, scope: 3n, precommitment: pc(c1), state: "UNSPENT", leaf: leafOf(pc(c1), 60n, 5n, 4n) });
+  assert.equal(b.parent, a.id);
+  assert.equal((await t.ns.list()).filter((n) => n.state === "UNSPENT").reduce((s, n) => s + n.leaf!.value, 0n), 60n);
 });

@@ -10,6 +10,8 @@
 // - Await move(HELD -> RESERVED) before anything of that proof leaves the device: no keepalive fetch, no service-worker
 //   send, no beacon started before the write has resolved. Await planDeposit before the precommitment leaves.
 // - Every block time handed in (blockTimeMs) is the chain's, read on two RPCs, never the device clock.
+// - Mark a deposit note TAKEN only before its index's first quote leaves the device. History on that index after that is
+//   our own (the user's send), so the note moves to INCOMING instead.
 // - The wallet store's own put/delete on "notes" stay open to callers today; only this module writes notes.
 //
 // - Every record goes through the wallet store's put, one IndexedDB transaction with strict durability, wrapped under
@@ -370,13 +372,15 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       }
     } else if (note.state === "UNSPENT") {
       n.leaf = checkLeaf(note.leaf, precommitment);
+      // a change note keeps the label it is named by, parent in the store or not (restore), so its own change finds it
+      if (note.ref.kind === "change" && n.leaf.label !== note.ref.l) throw new Error("a change note keeps its label: its leaf's label is its l");
       if (note.parent !== undefined && kind !== "change" && kind !== "refund") throw new Error("only a change or refund note has a parent");
       // the parent comes from the child's (l, j); a named parent must be that note
       parent = parentOf(note.ref, scope, all);
       if (note.parent !== undefined && parent?.id !== note.parent) throw new Error(`parent ${String(note.parent)} is not the note change index ${(note.ref as { j: number }).j} of label ${(note.ref as { l: bigint }).l} comes from`);
       if (parent !== undefined) {
         if (!LANDED.includes(parent.state)) throw new Error(`parent ${parent.id} is not a landed note`);
-        if (kind === "change" && n.leaf.label !== parent.leaf!.label) throw new Error("a change note keeps its parent's label");
+        // a change note's label is its l (checked above), the label its parent was found by
         n.parent = parent.id;
       }
     } else throw new Error("a note is born PLANNED or UNSPENT");
