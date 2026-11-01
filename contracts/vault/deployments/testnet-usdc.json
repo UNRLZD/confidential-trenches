@@ -1,0 +1,257 @@
+{
+  "network": "testnet",
+  "account_id": "bf-usdc-20261101t022248.testnet",
+  "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+  "wasm_sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+  "wasm_bytes": 321491,
+  "wasm_from": "view_code of mainnet 17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1 on https://rpc.mainnet.fastnear.com and https://near.drpc.org, equal bytes",
+  "key": {
+    "public_key": "ed25519:C7zETSXQq5C4r15ov4BPFk4TF6RPbfktK457V5TrJVfV",
+    "keychain": {
+      "service": "ct-testnet-usdc",
+      "account": "bf-usdc-20261101t022248.testnet"
+    },
+    "holders": [
+      "bf-usdc-20261101t022248.testnet",
+      "admin.bf-usdc-20261101t022248.testnet",
+      "owner.bf-usdc-20261101t022248.testnet",
+      "pauser.bf-usdc-20261101t022248.testnet",
+      "blocklister.bf-usdc-20261101t022248.testnet",
+      "mm1.bf-usdc-20261101t022248.testnet",
+      "mm2.bf-usdc-20261101t022248.testnet",
+      "minter.bf-usdc-20261101t022248.testnet",
+      "ctl1.bf-usdc-20261101t022248.testnet",
+      "ctl2.bf-usdc-20261101t022248.testnet",
+      "holder.bf-usdc-20261101t022248.testnet"
+    ]
+  },
+  "roles": {
+    "admin": "admin.bf-usdc-20261101t022248.testnet",
+    "owner": "owner.bf-usdc-20261101t022248.testnet",
+    "pauser": "pauser.bf-usdc-20261101t022248.testnet",
+    "blocklister": "blocklister.bf-usdc-20261101t022248.testnet",
+    "mm1": "mm1.bf-usdc-20261101t022248.testnet",
+    "mm2": "mm2.bf-usdc-20261101t022248.testnet",
+    "minter": "minter.bf-usdc-20261101t022248.testnet",
+    "ctl1": "ctl1.bf-usdc-20261101t022248.testnet",
+    "ctl2": "ctl2.bf-usdc-20261101t022248.testnet",
+    "holder": "holder.bf-usdc-20261101t022248.testnet"
+  },
+  "init": {
+    "admin_ids": [
+      "admin.bf-usdc-20261101t022248.testnet"
+    ],
+    "master_minter_ids": [
+      "mm1.bf-usdc-20261101t022248.testnet",
+      "mm2.bf-usdc-20261101t022248.testnet"
+    ],
+    "owner_ids": [
+      "owner.bf-usdc-20261101t022248.testnet"
+    ],
+    "pauser_ids": [
+      "pauser.bf-usdc-20261101t022248.testnet"
+    ],
+    "blocklister_id": "blocklister.bf-usdc-20261101t022248.testnet",
+    "metadata": {
+      "spec": "ft-1.0.0",
+      "name": "USDC",
+      "symbol": "USDC",
+      "icon": "<mainnet's icon, 1661 chars>",
+      "reference": null,
+      "reference_hash": null,
+      "decimals": 6
+    }
+  },
+  "minter_allowance": "1000000000000000",
+  "holder": "holder.bf-usdc-20261101t022248.testnet",
+  "minted": "1000000000000",
+  "storage_balance_bounds": {
+    "min": "1250000000000000000000",
+    "max": "1250000000000000000000"
+  },
+  "txs": [
+    {
+      "what": "faucet: create the token account",
+      "hash": "4Twid1qBm8SxHNFR3s7mvmGTS39rUwZRKMw8iG3oAyYx",
+      "signer": "testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet"
+    },
+    {
+      "what": "create admin.bf-usdc-20261101t022248.testnet",
+      "hash": "djMpFgXuMg5hDcnYFXgo7gfJPayfWE4oiVNZE6bvWEC",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "admin.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create owner.bf-usdc-20261101t022248.testnet",
+      "hash": "6oFdTV6xQ5gMnDyf4jd2TJDL1qgyn2CeS583aGdyRQgf",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "owner.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create pauser.bf-usdc-20261101t022248.testnet",
+      "hash": "9G7rBBMrZLwiW93chGepoZT6VwCGmsJLMbUhutzP4A9Z",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "pauser.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create blocklister.bf-usdc-20261101t022248.testnet",
+      "hash": "EjdNGdkJ6t6bKtfMPD8qnhNBf3voUMzJX9TbMxUjuU3S",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "blocklister.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create mm1.bf-usdc-20261101t022248.testnet",
+      "hash": "7wBx49pYrSzcPei3rxES7sCVoimiweJrk1mZhqqPePAE",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "mm1.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create mm2.bf-usdc-20261101t022248.testnet",
+      "hash": "81LzBAA6pgA8fYtX3h3rytTdENFtiCw1UBeGAVoa7NEz",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "mm2.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create minter.bf-usdc-20261101t022248.testnet",
+      "hash": "6qff5yg6tzCdK7t3bigt1wQPTvLsicXiNpbyhY7dWhek",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "minter.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create ctl1.bf-usdc-20261101t022248.testnet",
+      "hash": "7N5Phhkzu4C7n7Zou7oMt4bnP8mspFGNZDDz9aJVyTSK",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "ctl1.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create ctl2.bf-usdc-20261101t022248.testnet",
+      "hash": "GaZFDXeVwZp4bBBThqctSTiDMFEDaHRtSr1EZHf76zDG",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "ctl2.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "create holder.bf-usdc-20261101t022248.testnet",
+      "hash": "EFJbA8g7QXwjGaGo7dH2WemCvsTMyZpFLo1ZWqK6zv4M",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "holder.bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "8573077937500"
+    },
+    {
+      "what": "deploy the USDC wasm + init",
+      "hash": "HVkQ7DY9pYjCiuKeXdCPencjHyzwzs3NBUVzSHgHEK7m",
+      "signer": "bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "30452373106663"
+    },
+    {
+      "what": "ConfigureController ctl1: mm1 creates request 0",
+      "hash": "xiphLba5d5hpHdoUbySnoVCCZa9hhoKChcVrhChxkKx",
+      "signer": "mm1.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2752779557036"
+    },
+    {
+      "what": "ConfigureController ctl1: mm1 approves request 0",
+      "hash": "3xN5Y6JeyyNCEZFLywhmG3UqtCiK4JkXg85jThmsPtZY",
+      "signer": "mm1.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2679976125936"
+    },
+    {
+      "what": "ConfigureController ctl1: mm2 approves request 0",
+      "hash": "64jQRWmUEuk8753kgsLRRa1XE6wM72e6uK4ZQTFGLcmE",
+      "signer": "mm2.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2691094886025"
+    },
+    {
+      "what": "ConfigureController ctl1: mm2 executes request 0",
+      "hash": "2AFDar6KWL7xswaNG3PNqcZ6uxUXWifVDr2UcVAEKpGP",
+      "signer": "mm2.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "4451046487359"
+    },
+    {
+      "what": "ConfigureController ctl2: mm1 creates request 1",
+      "hash": "j75goEERHJN4bbAbzdfped3B1j4ESA7VpV3muY2v5Py",
+      "signer": "mm1.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2774439699205"
+    },
+    {
+      "what": "ConfigureController ctl2: mm1 approves request 1",
+      "hash": "6jkivcnAbRDqBTETXa8c3Un364UXNHo4y6w7er8VTQjQ",
+      "signer": "mm1.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2679990935544"
+    },
+    {
+      "what": "ConfigureController ctl2: mm2 approves request 1",
+      "hash": "9MZYLmBnW3yvFTg2hAGibmikE5eAeZc4wR159czdeg1v",
+      "signer": "mm2.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2691109695633"
+    },
+    {
+      "what": "ConfigureController ctl2: mm2 executes request 1",
+      "hash": "2M7wME38G2WBaeBRoFRenFSft6UkCmNjjtPX3WR6VwR3",
+      "signer": "mm2.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "4475558552151"
+    },
+    {
+      "what": "ConfigureMinterAllowance: ctl1 creates request 2",
+      "hash": "9tRQDHKNkFwkaSWFfs5PcR3rgw5fuH8wKVjS1hRaWDJB",
+      "signer": "ctl1.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2773027505263"
+    },
+    {
+      "what": "ConfigureMinterAllowance: ctl1 approves request 2",
+      "hash": "HJuVtyFU5BxyxhCgTLvUGNXEpRFGKvyzatYvvoJyhejG",
+      "signer": "ctl1.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2780687976929"
+    },
+    {
+      "what": "ConfigureMinterAllowance: ctl2 approves request 2",
+      "hash": "BghBbZpKw5HeGNh5wd9m8Qye6A72oeesbsnEjinroWTD",
+      "signer": "ctl2.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2882969518906"
+    },
+    {
+      "what": "ConfigureMinterAllowance: ctl2 executes request 2",
+      "hash": "6tpsTmQmRGg28vHuyxAQqCP8q2j5MB6p2aybqTdMN6tH",
+      "signer": "ctl2.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "4158328159969"
+    },
+    {
+      "what": "holder registers (storage_deposit)",
+      "hash": "4ficAB7v4G2CyrgTKeMaitzmXWDsckGK5PwgF4qFrbL4",
+      "signer": "holder.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2376787831459"
+    },
+    {
+      "what": "minter mints 1000000000000 to the holder",
+      "hash": "4LbTbYxQBWqEc1ZzwQBK6S1Dsi4K5E5DAJ2scXseH7ym",
+      "signer": "minter.bf-usdc-20261101t022248.testnet",
+      "receiver": "bf-usdc-20261101t022248.testnet",
+      "gas_burnt": "2784262933438"
+    }
+  ],
+  "deployed_at": "2026-11-01T02:24:36.844Z",
+  "assembled": "run 1's read-back was stopped (archival-rpc.testnet.near.org answered 429, Retry-After 279 s, on every tx); this record was assembled from its log, each tx's gas and receiver read on archival-rpc.testnet.fastnear.com; the script now writes the record before the read-back and stops at two ok"
+}
