@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/money-gate-testnet.test.mjs: the live check replays a recorded run
 // (money-gate-testnet.answers.json: every RPC answer of a real run on 2026-11-01, the three testnet RPCs and the three
 // mainnet ones). The fresh tx is the vault skeleton's keyless deploy on NEAR testnet (card vault-skeleton,
-// 2026-11-01T00:55Z, signed by its faucet-made parent); the old tx is the first deposit of the vault-gas run on NEAR
+// 2026-11-01T01:22Z, signed by its faucet-made parent); the old tx is the first deposit of the vault-gas run on NEAR
 // testnet (2026-10-26T03:45:21Z). The good answer replays it under the gate's own FLOOR: PASS. The bad answer replays the
 // same answers with the floor moved past the deploy, where the fresh tx is old too: FAIL.
 import assert from "node:assert/strict";
@@ -14,8 +14,8 @@ import { check, OLD } from "./money-gate-testnet.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "money-gate-testnet.answers.json"), "utf8"));
-const FRESH = { hash: "Ei6rPF9GPoEe4FqJ57b88sGXNC2dk24XLBFbPfghy8QM", signer: "bf-vs-20261101t005509.testnet" };
-const AFTER_DEPLOY = Date.parse("2026-11-01T01:00:00Z");
+const FRESH = { hash: "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML", signer: "bf-vs-20261101t012200.testnet" };
+const AFTER_DEPLOY = Date.parse("2026-11-01T01:30:00Z");
 
 // each request gets the recorded answers to the same request in order, the last one again once they run out
 function replay(answers) {
@@ -54,7 +54,7 @@ test("recorded good answer: fresh after the gate's FLOOR, old before it, the fre
 test("recorded bad answer: the fresh tx from before the floor: FAIL", async () => {
   const r = await check({ fresh: FRESH, fetchFn: replay(ANSWERS), floor: AFTER_DEPLOY });
   assert.equal(r.ok, false, r.lines.join("\n"));
-  assert.match(r.lines[0], /^BAD the fresh tx as near-testnet reads ok on 0 testnet RPC\(s\): .*old: 2026-11-01T00:55:\d\d\.\d{3}Z is before 2026-11-01T01:00:00\.000Z/);
+  assert.match(r.lines[0], /^BAD the fresh tx as near-testnet reads ok on 0 testnet RPC\(s\): .*old: 2026-11-01T01:22:\d\d\.\d{3}Z is before 2026-11-01T01:30:00\.000Z/);
 });
 
 test("the CLI with no fresh tx is an error, exit 2", () => {

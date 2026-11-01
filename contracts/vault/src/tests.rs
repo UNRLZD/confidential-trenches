@@ -14,20 +14,24 @@ fn dec_of(n: &field::U256) -> String {
     field::to_decimal(n)
 }
 
-// VT-U02's scope vectors, made by the kit's own TypeScript (packages/kit/test/vectors/vault-v1.json on card
-// kit-freeze-vault): an implementation apart from this one.
+// VT-U02's scope vectors, all 8, made by the kit's own TypeScript (packages/kit/test/vectors/vault-v1.json on card
+// kit-freeze-vault at 4627f82): an implementation apart from this one. They include the mainnet names
+// vault.confidential.unrlzd.near and vault-test.confidential.unrlzd.near.
+const KIT_SCOPE_VECTORS: [(&str, &str, &str); 8] = [
+    ("vault.test.near", "token.test.near", "5072219746749309470750818130492706027783139455468960929403255949759297921774"),
+    ("vault.blindfill.near", "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", "16662280991785675369497844937667382859880671281709203477245988256153950627371"),
+    ("blindfill-vault.testnet", "usdc.fakes.testnet", "14090770524410888430224531465369551299190548835170249055311171831321123385000"),
+    ("ab", "cd", "20140971955816724150720695925831920467796116491617058689276657274348330201270"),
+    ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.test.near", "0xabababababababababababababababababababab", "9034959744937537139939941921384637516008514430191250421905699374517591735340"),
+    ("vault.confidential.unrlzd.near", "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", "2696045386038969515385069783440640732471742599039067451316404212202914210601"),
+    ("vault-test.confidential.unrlzd.near", "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", "8086271268364488307551911707115823685859436809391798291511922449751894623475"),
+    ("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv.near", "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "7224455128834488627368050912648686451945915340954810834723647495687916324593"),
+];
+
 #[test]
-fn scope_matches_the_kit_vectors() {
+fn scope_matches_every_kit_vector() {
     at("vault.testnet");
-    for (vault, token, want) in [
-        ("vault.test.near", "token.test.near", "5072219746749309470750818130492706027783139455468960929403255949759297921774"),
-        (
-            "vault.blindfill.near",
-            "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
-            "16662280991785675369497844937667382859880671281709203477245988256153950627371",
-        ),
-        ("blindfill-vault.testnet", "usdc.fakes.testnet", "14090770524410888430224531465369551299190548835170249055311171831321123385000"),
-    ] {
+    for (vault, token, want) in KIT_SCOPE_VECTORS {
         assert_eq!(dec_of(&scope_for(vault, token)), want, "{vault} {token}");
     }
 }
@@ -121,12 +125,11 @@ fn pages_are_capped_and_never_skip_a_row() {
     at("vault.skeleton.testnet");
     let mut v = Vault::default();
     for i in 0..1_005u64 {
-        v.deposits.insert(&i, &deposit(i));
+        v.deposits.push(&deposit(i));
         let mut leaf = [0u8; 32];
         leaf[24..].copy_from_slice(&(i + 1).to_be_bytes());
         v.state_tree.leaf_at.insert(&i, &leaf);
     }
-    v.deposits_len = 1_005;
     v.state_tree.size = 1_005;
     let all = v.deposits(0, u64::MAX);
     assert_eq!(all.len(), 1_000, "capped at PAGE_MAX");
@@ -159,9 +162,61 @@ fn the_state_record_is_a_fixed_size() {
     at("vault.skeleton.testnet");
     let mut v = Vault::default();
     let before = borsh::to_vec(&v).unwrap().len();
-    v.deposits.insert(&0, &deposit(0));
-    v.deposits_len = 1;
+    v.deposits.push(&deposit(0));
+    v.spends.push(&spend(0));
     v.nonce = u64::MAX;
     v.totals.deposited = U128(u128::MAX);
     assert_eq!(borsh::to_vec(&v).unwrap().len(), before);
+}
+
+fn spend(i: u64) -> Spend {
+    let mut b = [0u8; 32];
+    b[24..].copy_from_slice(&i.to_be_bytes());
+    Spend {
+        nullifier_hash: b,
+        withdrawn: 5,
+        new_leaf_index: i,
+        refund_precommitment: b,
+        refund_value: 0,
+        refund_label: [0; 32],
+        refund_leaf_index: 0,
+        status: Status::InFlight,
+        payer: "relay.testnet".parse().unwrap(),
+        reserve: 7,
+        recipient: "r.testnet".parse().unwrap(),
+        fee: 1,
+        context: b,
+    }
+}
+
+// deposits and spends are append-only Vectors: a push writes the row and its count together, so a row can never be
+// written without its count (or a count without its row), and each row sits at the key 2.3 counts: the collection's
+// one-byte prefix, then the index as 8 little-endian bytes (near-sdk 5.29.1 collections/vector.rs l.98-99).
+#[test]
+fn deposits_and_spends_append_with_their_count_at_two_point_three_keys() {
+    at("vault.skeleton.testnet");
+    let mut v = Vault::default();
+    v.deposits.push(&deposit(0));
+    v.deposits.push(&deposit(1));
+    v.spends.push(&spend(0));
+    assert_eq!(v.deposits(0, 10).iter().map(|d| d.index).collect::<Vec<_>>(), vec![0, 1]);
+    assert_eq!(v.spends(0, 10).len(), 1);
+    assert_eq!(v.spends(0, 10)[0].status, Status::InFlight);
+    let key = |prefix: Key, i: u64| {
+        let mut k = borsh::to_vec(&prefix).unwrap();
+        assert_eq!(k.len(), 1, "a one-byte prefix");
+        k.extend_from_slice(&i.to_le_bytes());
+        k
+    };
+    assert_eq!(env::storage_read(&key(Key::Deposits, 1)).unwrap(), borsh::to_vec(&deposit(1)).unwrap());
+    assert_eq!(env::storage_read(&key(Key::Spends, 0)).unwrap(), borsh::to_vec(&spend(0)).unwrap());
+    assert!(env::storage_read(&key(Key::Deposits, 2)).is_none());
+}
+
+#[test]
+fn the_notice_credits_privacy_pools() {
+    let notice = include_str!("../NOTICE");
+    for want in ["Privacy Pools", "0XBOW LTD", "Apache License, Version 2.0", "v1.3.0"] {
+        assert!(notice.contains(want), "NOTICE names {want}");
+    }
 }

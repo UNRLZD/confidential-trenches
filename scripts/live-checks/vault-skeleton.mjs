@@ -4,7 +4,8 @@
 //   - view_code: its sha256 equals contracts/vault/deployments/testnet-skeleton.json's wasm_sha256;
 //   - the wasm's imports: none of vault.md 2.8's banned actions, and its promise imports a subset of the seven allowed;
 //   - the wasm's function exports: nothing outside vault.md 2.5.7's list (no init, no setter, no __contract_abi);
-//   - config(): it answers, naming the deployment's token as its asset.
+//   - config(): it answers, naming Circle's testnet USDC as its asset and a testnet version. Both are pinned here, never
+//     taken from the deployment record (which the deploy script writes from config() itself).
 //   node scripts/live-checks/vault-skeleton.mjs [--account <id>] [--deployment <file>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --account checks another account against the same deployment record (the recorded bad answers). --record writes every
@@ -17,6 +18,12 @@ import { fileURLToPath } from "node:url";
 const KEY = "vault-skeleton";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEPLOYMENT = path.join(HERE, "../../contracts/vault/deployments/testnet-skeleton.json");
+// Circle's testnet USDC on NEAR (developers.circle.com/stablecoins/usdc-contract-addresses, read 2026-11-01 00:31Z; its
+// ft_metadata on NEAR testnet answers symbol USDC at block 275,674,154). Mainnet's is 17208628…33a1.
+export const TESTNET_USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
+const MAINNET_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
+// config().version ends with the build's network (contracts/vault/src/constants.rs NETWORK)
+export const TESTNET_VERSION = /^blindfill-vault \S+ testnet$/;
 // two independent providers, as the vault-gas proof read its testnet vaults back
 export const RPCS = ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"];
 
@@ -126,6 +133,18 @@ export function wasmLists(buf) {
   return { imports, exports };
 }
 
+// What makes a wasm not a testnet build, read from its bytes: the testnet build holds Circle's testnet USDC id and the
+// word "testnet" (constants.rs TOKEN, NETWORK) and neither mainnet's id nor "mainnet".
+export function networkProblems(buf) {
+  const b = Buffer.from(buf);
+  const problems = [];
+  if (!b.includes(TESTNET_USDC)) problems.push(`does not hold Circle's testnet USDC ${TESTNET_USDC}`);
+  if (b.includes(MAINNET_USDC)) problems.push(`holds mainnet USDC ${MAINNET_USDC}`);
+  if (!b.includes("testnet")) problems.push('does not hold "testnet"');
+  if (b.includes("mainnet")) problems.push('holds "mainnet"');
+  return problems;
+}
+
 // What a wasm breaks of vault.md 2.8 and 2.5.7: { banned, promises, exports } (each the names out of line)
 export function wasmProblems(buf) {
   const { imports, exports } = wasmLists(buf);
@@ -184,7 +203,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
     try {
       const r = await query(fetchFn, url, { request_type: "call_function", account_id: account, method_name: "config", args_base64: "e30=", finality: "final" });
       const cfg = JSON.parse(Buffer.from(r.result).toString("utf8"));
-      const good = cfg.asset === deployment.asset && /^\d+$/.test(cfg.scope) && typeof cfg.version === "string";
+      const good = cfg.asset === TESTNET_USDC && deployment.asset === TESTNET_USDC && /^\d+$/.test(cfg.scope) && TESTNET_VERSION.test(cfg.version);
       say(good, `config() answers ${at}: asset ${cfg.asset}, scope ${cfg.scope}, version ${cfg.version}`);
     } catch (e) {
       say(false, `config() ${at}: ${e.message}`);

@@ -10,13 +10,14 @@
 //   node contracts/vault/scripts/deploy-testnet.mjs --wasm <file> [--parent <name>.testnet] [--out <file>]
 //     [--build "<the build command>"]
 // Before anything is sent it refuses a wasm that fails the live check's static rules (vault.md 2.8 imports, 2.5.7
-// exports). It writes the account, the tx hash and the wasm's sha256 to --out (default
+// exports) or is not a testnet build (its bytes must name Circle's testnet USDC and "testnet", never mainnet's id or
+// "mainnet"), and after the deploy it refuses a config() that names anything but those pinned values. It writes the account, the tx hash and the wasm's sha256 to --out (default
 // contracts/vault/deployments/testnet-skeleton.json); then run scripts/live-checks/vault-skeleton.mjs.
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
+import { RPCS, TESTNET_USDC, TESTNET_VERSION, networkProblems, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // near-cli-rs's testnet faucet (`create-account sponsor-by-faucet-service`), as the vault-gas proof used it
@@ -104,6 +105,8 @@ async function main() {
   const sha = createHash("sha256").update(wasm).digest("hex");
   const w = wasmProblems(wasm);
   if (w.banned.length || w.promises.length || w.exports.length) throw new Error(`refused before any send: the wasm breaks vault.md 2.8 or 2.5.7: ${JSON.stringify({ banned: w.banned, promises: w.promises, exports: w.exports })}`);
+  const n = networkProblems(wasm);
+  if (n.length) throw new Error(`refused before any send: not a testnet build: ${n.join("; ")}`);
   console.log(`wasm ${wasmPath}: ${wasm.length} B, sha256 ${sha}; exports [${w.functionExports.join(", ")}]; promise imports [${w.promiseImports.join(", ")}]`);
 
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "t").toLowerCase();
@@ -157,6 +160,7 @@ async function main() {
   if (!("SuccessValue" in (r.status ?? {})) || failed.length) throw new Error(`deploy failed: ${JSON.stringify(r.status).slice(0, 400)}`);
   const vaultReceipt = r.receipts_outcome.find((o) => o.outcome.executor_id === vault);
   const config = JSON.parse(Buffer.from(r.status.SuccessValue, "base64").toString("utf8"));
+  if (config.asset !== TESTNET_USDC || !TESTNET_VERSION.test(config.version)) throw new Error(`deployed, but config() names asset ${config.asset}, version ${config.version}: not the testnet build; no record written`);
   console.log(`deployed: tx ${txHash}; config() answered asset ${config.asset}, scope ${config.scope}; the vault's receipt burnt ${vaultReceipt?.outcome.gas_burnt} gas`);
 
   const doc = {
@@ -172,7 +176,7 @@ async function main() {
     wasm_sha256: sha,
     wasm_bytes: wasm.length,
     code_hash: b58encode(Buffer.from(sha, "hex")),
-    asset: config.asset,
+    asset: TESTNET_USDC,
     scope: config.scope,
     version: config.version,
     build: opt("--build", null),

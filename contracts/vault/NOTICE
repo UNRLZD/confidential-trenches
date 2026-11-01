@@ -1,0 +1,13 @@
+Blindfill vault
+Copyright 2026 the Confidential Trenches contributors
+Licensed under the Apache License, Version 2.0 (LICENSE at the repository root).
+
+This contract is a NEAR port of Privacy Pools v1 core (github.com/0xbow-io/privacy-pools-core, tag v1.3.0),
+Copyright 2025 0XBOW LTD, licensed under the Apache License, Version 2.0. Its state layout, constants and, in later
+parts, its deposit, withdrawal and ragequit logic follow Privacy Pools' contracts (State.sol, PrivacyPool.sol,
+Entrypoint.sol); each ported file names its source. Privacy Pools ships no NOTICE file at that tag. The changes from
+Privacy Pools are listed in the vault's design: no Entrypoint and no admin, no ASP postman (the vault approves every
+deposit's label itself), NEAR storage, and the relayer fee as an absolute amount.
+
+Later parts of the vault port the LeanIMT of zk-kit (Privacy & Scaling Explorations, Ethereum Foundation; MIT
+License) and use light-poseidon (Light Protocol; Apache License, Version 2.0).

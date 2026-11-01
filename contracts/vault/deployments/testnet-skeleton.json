@@ -1,24 +1,24 @@
 {
   "network": "testnet",
-  "account_id": "vault.bf-vs-20261101t005509.testnet",
-  "parent": "bf-vs-20261101t005509.testnet",
-  "parent_tx": "9j2ajmPH3qZkd5VZSYraRB2ZJaVbJ1uyEfdZLdRg1HAQ",
-  "tx_hash": "Ei6rPF9GPoEe4FqJ57b88sGXNC2dk24XLBFbPfghy8QM",
+  "account_id": "vault.bf-vs-20261101t012200.testnet",
+  "parent": "bf-vs-20261101t012200.testnet",
+  "parent_tx": "CYHXWbtsZNdh7D52kR75MkFwM44hh5BLaozvh6Di4UBy",
+  "tx_hash": "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML",
   "tx_actions": [
     "CreateAccount",
     "Transfer",
     "DeployContract",
     "FunctionCall(config)"
   ],
-  "transfer_yocto": "1307830000000000000000000",
+  "transfer_yocto": "1302720000000000000000000",
   "config_gas": "100000000000000",
-  "vault_receipt_gas_burnt": "17126610135092",
-  "wasm_sha256": "43b997ad6a0b3842b776a5c36398b0ca817c91824f6a70c262464fdf13f5cf70",
-  "wasm_bytes": 129683,
-  "code_hash": "5ZNTNaFeJeL4taZJEhGt4UDLLitwU18gB6VbHfetsCQF",
+  "vault_receipt_gas_burnt": "17091808297664",
+  "wasm_sha256": "e2e280869bdff90ad54f7be2bc1181dcef6e229eaa8f17b99f2e8bc33a422037",
+  "wasm_bytes": 129172,
+  "code_hash": "GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn",
   "asset": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
-  "scope": "1734515797507742386390568949456159684026356318528259603633202178260389104245",
+  "scope": "20545538849474029115763149114674867753589201314404884747672366183146404171958",
   "version": "blindfill-vault 0.1.0 testnet",
-  "build": "cargo +1.96.0 near build non-reproducible-wasm --no-embed-abi --features testnet --locked (cargo-near 0.22.0, rustc 1.96.0, aarch64 macOS through scripts/heavy.sh)",
-  "deployed_at": "2026-11-01T00:55:20.306Z"
+  "build": "cargo +1.96.0 near build non-reproducible-wasm --no-embed-abi --features testnet --locked (cargo-near 0.22.0, rustc 1.96.0, x86_64 Linux box)",
+  "deployed_at": "2026-11-01T01:22:12.146Z"
 }

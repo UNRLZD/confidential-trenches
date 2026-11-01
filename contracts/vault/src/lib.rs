@@ -15,7 +15,7 @@ pub mod constants;
 pub mod field;
 
 use constants::*;
-use near_sdk::collections::{LookupMap, LookupSet};
+use near_sdk::collections::{LookupMap, LookupSet, Vector};
 use near_sdk::json_types::U128;
 use near_sdk::{env, near, AccountId, BorshStorageKey};
 
@@ -123,11 +123,11 @@ pub struct Vault {
     state_roots: LookupSet<Bytes32>,
     label_roots: LookupSet<Bytes32>,
     spent: LookupMap<Bytes32, u64>,
-    spends: LookupMap<u64, Spend>,
-    spends_len: u64,
+    /// append-only: a push writes the row and its count together (key: prefix, then the index as 8 LE bytes)
+    spends: Vector<Spend>,
     precommitments: LookupMap<Bytes32, u64>,
-    deposits: LookupMap<u64, Deposit>,
-    deposits_len: u64,
+    /// append-only, as `spends`
+    deposits: Vector<Deposit>,
     label_index: LookupMap<Bytes32, u64>,
     prepaid: LookupMap<Bytes32, u128>,
     totals: Totals,
@@ -143,11 +143,9 @@ impl Default for Vault {
             state_roots: LookupSet::new(Key::StateRoots),
             label_roots: LookupSet::new(Key::LabelRoots),
             spent: LookupMap::new(Key::Spent),
-            spends: LookupMap::new(Key::Spends),
-            spends_len: 0,
+            spends: Vector::new(Key::Spends),
             precommitments: LookupMap::new(Key::Precommitments),
-            deposits: LookupMap::new(Key::Deposits),
-            deposits_len: 0,
+            deposits: Vector::new(Key::Deposits),
             label_index: LookupMap::new(Key::LabelIndex),
             prepaid: LookupMap::new(Key::Prepaid),
             totals: Totals::default(),
@@ -293,9 +291,9 @@ impl Vault {
     }
 
     pub fn deposits(&self, from: u64, limit: u64) -> Vec<DepositView> {
-        page(from, limit, self.deposits_len)
+        page(from, limit, self.deposits.len())
             .map(|i| {
-                let d = self.deposits.get(&i).expect("deposits holds every index below its length");
+                let d = self.deposits.get(i).expect("deposits holds every index below its length");
                 DepositView {
                     index: i,
                     precommitment: dec(&d.precommitment),
@@ -310,9 +308,9 @@ impl Vault {
 
     /// Every spend with its request data and its refund note's fields.
     pub fn spends(&self, from: u64, limit: u64) -> Vec<SpendView> {
-        page(from, limit, self.spends_len)
+        page(from, limit, self.spends.len())
             .map(|i| {
-                let s = self.spends.get(&i).expect("spends holds every index below its length");
+                let s = self.spends.get(i).expect("spends holds every index below its length");
                 SpendView {
                     index: i,
                     nullifier_hash: dec(&s.nullifier_hash),
