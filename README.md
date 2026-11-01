@@ -1,4 +1,4 @@
-Blindfill is the private engine for every app: wallets, terminals, bots and AI agents plug in and trade as strangers.
+Blindfill is the private engine without limit and compromise for every app: wallets, terminals, bots and AI agents plug in and trade as strangers.
 
 <img alt="Confidential Trenches by UNRLZD. Trade confidentially without limit and compromise. Speed: 1.2 s. Chains: any. Keys: self custody. Trades: confidential." src="assets/banner.png" width="100%">
 
