@@ -146,7 +146,7 @@ jobs:
             *) node scripts/ci/money-gate.mjs --all ;;
           esac
 
-  # Each package's own fast tests. Two suites stay on scripts/heavy.sh and out of this job: the near-sandbox tests (a
+  # Each package's own fast tests. Two heavy suites stay out of this job: the near-sandbox tests (a
   # cargo test target with required-features = ["sandbox"], which a plain cargo test skips) and Playwright (a
   # package's test:e2e script, never its test script).
   test:

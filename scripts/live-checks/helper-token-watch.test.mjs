@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/helper-token-watch.test.mjs: the live check replays recorded runs
-// (helper-token-watch.answers.json). good: apps/helper at cdf50e0 on the owner's Mac reading mainnet on FastNEAR and
+// (helper-token-watch.answers.json). good: apps/helper at cdf50e0 on a Mac reading mainnet on FastNEAR and
 // dRPC: PASS. bad_hash: the same build whose two providers report another code hash for USDC: FAIL on the pin. Made
 // from the good run: a halted answer, a blocked vault, the kit's null rule broken, another token answered, a missing
 // read: each FAIL.

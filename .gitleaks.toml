@@ -24,7 +24,7 @@ regexTarget = "line"
 regexes = ['''^\s*"signature"\s*:\s*"ed25519:[1-9A-HJ-NP-Za-km-z]{86,88}",?\s*$''']
 
 # A machine's name on a tailnet (Tailscale MagicDNS): labels, then the tailnet suffix, in any case. No such name is ever
-# committed here, made-up ones included (card host-name-out in the research repo).
+# committed here, made-up ones included.
 [[rules]]
 id = "tailnet-host"
 description = "Tailscale machine or tailnet name"
