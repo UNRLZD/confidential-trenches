@@ -3,13 +3,15 @@
 // Builds the vault reproducibly, deploys it with no key and registers it on its token (vault.md 2.8, V1.6).
 //
 // 1. Build: two clean builds with the pinned toolchain and flags, each in its own new target dir, and their sha256
-//    compared. Two different builds stop the run before anything is sent. The flags are fixed here: Rust 1.96.0,
+//    compared. Two different builds stop the run before anything is sent. Both target dirs are removed on every exit;
+//    the wasm stays at <build-dir>/blindfill_vault.wasm. The flags are fixed here: Rust 1.96.0,
 //    cargo-near's `build non-reproducible-wasm --no-embed-abi --locked`, the release profile of Cargo.toml, and
 //    RUSTFLAGS `-C link-arg=-s --remap-path-prefix=<CARGO_HOME>=/cargo`, so no home path of the machine that built it
 //    is in the bytes (near-sdk's panic locations name the registry's source paths). Two machines of different
 //    architectures still build different bytes (tests/harness/mod.rs names a Linux x86_64 and a macOS arm64 build).
-// 2. Static checks on the wasm: none of 2.8's banned imports, its promise imports inside the seven, its exports inside
-//    2.5.7's list (scripts/live-checks/vault-skeleton.mjs wasmProblems); every function body at most 196,608 B
+// 2. Static checks on the wasm: every problem list scripts/live-checks/vault-skeleton.mjs wasmProblems returns is empty
+//    (fail-closed: a field it adds later refuses here too; today none of 2.8's banned imports, promise imports inside
+//    the seven, exports inside 2.5.7's list); every function body at most 196,608 B
 //    (`max_function_body_size`); a testnet deploy must be the testnet build (it names Circle's testnet USDC).
 // 3. The recipe: the parent signs one transaction to vault.<parent> with [CreateAccount, Transfer(code storage +
 //    0.01 N), DeployContract(wasm), FunctionCall(config, 0 deposit)] and no AddKey; the config() call in the same
@@ -23,7 +25,8 @@
 //
 // The signer's key comes from --key-file, a path given at run time: the near CLI's keychain file
 // (~/.near-credentials/<network>/<parent>.json) or any file holding {account_id, public_key, private_key}. A path inside
-// this repository is refused. The key is read into this process only, to sign: it is never printed, written or sent.
+// this repository is refused. The key is read and checked before the build, into this process only, to sign: it is
+// never printed, written or sent.
 // Sandbox runs use the sandbox's own genesis key. No mainnet: a mainnet deploy is the owner's, by another card.
 //
 //   node contracts/vault/scripts/deploy.mjs --build-only [--flavor testnet|mainnet] [--build-dir <new dir>]
@@ -34,11 +37,11 @@
 import "../../../scripts/net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { b58decode, b58encode, recipeTx } from "./deploy-testnet.mjs";
+import { b58decode, b58encode, functionCallTx, recipeTx } from "./near-tx.mjs";
 import { RPCS as TESTNET_RPCS, TESTNET_USDC, TESTNET_VERSION, networkProblems, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -81,19 +84,23 @@ export function reproducibleBuild({ flavor, buildDir, log = console.log }) {
   delete env.RUSTFLAGS;
   delete env.CARGO_ENCODED_RUSTFLAGS;
   const out = [];
-  for (const name of ["a", "b"]) {
-    const target = path.join(buildDir, name);
-    log(`build ${name}: CARGO_TARGET_DIR=${target} ${cmd} ${args.join(" ")} (in ${CRATE})`);
-    const r = spawnSync(cmd, args, { cwd: CRATE, env: { ...env, CARGO_TARGET_DIR: target }, encoding: "utf8", maxBuffer: 64 << 20 });
-    if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status}): ${(r.stderr || r.stdout || String(r.error)).split("\n").slice(-15).join("\n")}`);
-    const file = path.join(target, "near", "blindfill_vault.wasm");
-    const wasm = readFileSync(file);
-    out.push({ file, wasm, sha: sha256(wasm) });
-    log(`build ${name}: ${file} ${wasm.length} B sha256 ${out.at(-1).sha}`);
-  }
-  if (out[0].sha !== out[1].sha) throw new Error(`the two clean builds differ: ${out[0].sha} (${out[0].wasm.length} B) and ${out[1].sha} (${out[1].wasm.length} B); nothing was sent`);
   const file = path.join(buildDir, "blindfill_vault.wasm");
-  copyFileSync(out[0].file, file);
+  // the two target dirs (about 0.5 GB each) go on every exit: a pass, a failed build, two different builds
+  try {
+    for (const name of ["a", "b"]) {
+      const target = path.join(buildDir, name);
+      log(`build ${name}: CARGO_TARGET_DIR=${target} ${cmd} ${args.join(" ")} (in ${CRATE})`);
+      const r = spawnSync(cmd, args, { cwd: CRATE, env: { ...env, CARGO_TARGET_DIR: target }, encoding: "utf8", maxBuffer: 64 << 20 });
+      if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status}): ${(r.stderr || r.stdout || String(r.error)).split("\n").slice(-15).join("\n")}`);
+      const wasm = readFileSync(path.join(target, "near", "blindfill_vault.wasm"));
+      out.push({ wasm, sha: sha256(wasm) });
+      log(`build ${name}: ${wasm.length} B sha256 ${out.at(-1).sha}`);
+    }
+    if (out[0].sha !== out[1].sha) throw new Error(`the two clean builds differ: ${out[0].sha} (${out[0].wasm.length} B) and ${out[1].sha} (${out[1].wasm.length} B); nothing was sent`);
+    writeFileSync(file, out[0].wasm);
+  } finally {
+    for (const name of ["a", "b"]) rmSync(path.join(buildDir, name), { recursive: true, force: true });
+  }
   const rustc = execFileSync("rustc", [`+${TOOLCHAIN}`, "--version"], { encoding: "utf8" }).trim();
   const near = execFileSync("cargo", [`+${TOOLCHAIN}`, "near", "--version"], { encoding: "utf8" }).trim();
   return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), build: `${cmd} ${args.join(" ")} (${near}, ${rustc}, ${os.platform()} ${os.arch()})` };
@@ -132,13 +139,19 @@ export function functionBodies(buf) {
   return [];
 }
 
-// What stops this wasm from being deployed on `network`: [] when nothing does.
-export function deployProblems(wasm, network) {
+// wasmProblems' fields that only describe the wasm; every other field is a problem list.
+export const WASM_INFO = new Set(["functionExports", "promiseImports"]);
+
+// What stops this wasm from being deployed on `network`: [] when nothing does. Fail-closed: any wasmProblems field
+// outside WASM_INFO that is not an empty list refuses, so a rule added to the live check later refuses here with no
+// edit to this file.
+export function deployProblems(wasm, network, problems = wasmProblems) {
   const p = [];
-  const w = wasmProblems(wasm);
-  if (w.banned.length) p.push(`banned imports (vault.md 2.8): ${w.banned.join(", ")}`);
-  if (w.promises.length) p.push(`promise imports outside 2.8's seven: ${w.promises.join(", ")}`);
-  if (w.exports.length) p.push(`exports outside 2.5.7's list: ${w.exports.join(", ")}`);
+  for (const [field, list] of Object.entries(problems(wasm))) {
+    if (WASM_INFO.has(field)) continue;
+    if (!Array.isArray(list)) p.push(`wasmProblems.${field} is not a list: ${JSON.stringify(list)}`);
+    else if (list.length) p.push(`${field} (vault.md 2.8, 2.5.7): ${list.join(", ")}`);
+  }
   const big = functionBodies(wasm).filter((n) => n > MAX_FUNCTION_BODY);
   if (big.length) p.push(`${big.length} function bod${big.length === 1 ? "y" : "ies"} over ${MAX_FUNCTION_BODY} B: ${big.join(", ")}`);
   if (network === "testnet") p.push(...networkProblems(wasm).map((x) => `not a testnet build: ${x}`));
@@ -153,7 +166,7 @@ export function vaultIdProblems(vault, parent) {
 }
 
 // The repository's roots: this checkout and, for a worktree, the main checkout.
-function repoRoots() {
+export function repoRoots() {
   const roots = [path.resolve(HERE, "../../..")];
   try {
     const common = execFileSync("git", ["-C", HERE, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim();
@@ -188,28 +201,6 @@ export function loadKey(file, parent, roots = repoRoots()) {
   if (!derived.equals(pub)) throw new Error("--key-file: the private key's public half does not match its seed");
   if (j.public_key !== undefined && j.public_key !== `ed25519:${b58encode(pub)}`) throw new Error("--key-file: public_key does not match the private key");
   return { pub: Buffer.from(pub), privateKey };
-}
-
-// nearcore's Transaction V0 (Borsh) with one FunctionCall; Action FunctionCall = 2, ED25519 = 0.
-export function functionCallTx({ signer, publicKey, nonce, receiver, blockHash, method, args, gas, deposit }) {
-  const str = (s) => {
-    const b = Buffer.from(s, "utf8");
-    const n = Buffer.alloc(4);
-    n.writeUInt32LE(b.length);
-    return Buffer.concat([n, b]);
-  };
-  const u64 = (x) => {
-    const b = Buffer.alloc(8);
-    b.writeBigUInt64LE(BigInt(x));
-    return b;
-  };
-  const u128 = (x) => Buffer.concat([u64(BigInt(x) & 0xffffffffffffffffn), u64(BigInt(x) >> 64n)]);
-  const one = Buffer.alloc(4);
-  one.writeUInt32LE(1);
-  const a = Buffer.from(args, "utf8");
-  const alen = Buffer.alloc(4);
-  alen.writeUInt32LE(a.length);
-  return Buffer.concat([str(signer), Buffer.from([0]), publicKey, u64(nonce), str(receiver), blockHash, one, Buffer.from([2]), str(method), alen, a, u64(gas), u128(deposit)]);
 }
 
 function signTx(tx, privateKey) {
@@ -289,6 +280,10 @@ async function main() {
   const out = o.out ?? (network === "testnet" ? path.join(CRATE, "deployments", "testnet-vault.json") : null);
   if (!out) throw new Error("--network sandbox needs --out <file>");
 
+  // the parent's key, read and checked before the build so a wrong key costs no build
+  const { pub, privateKey } = loadKey(o["key-file"], parent);
+  const pubText = `ed25519:${b58encode(pub)}`;
+
   // 1-2. the wasm: built twice here, or (sandbox only) the file given; refused before any send if it breaks a rule
   let wasm, build, shas;
   if (o.wasm) {
@@ -308,9 +303,7 @@ async function main() {
   const bodies = functionBodies(wasm);
   console.log(`wasm ${wasm.length} B, sha256 ${sha}, ${bodies.length} functions, largest body ${Math.max(...bodies)} B (limit ${MAX_FUNCTION_BODY})`);
 
-  // 3. the parent's key and nonce; the vault must not exist yet
-  const { pub, privateKey } = loadKey(o["key-file"], parent);
-  const pubText = `ed25519:${b58encode(pub)}`;
+  // 3. the parent's nonce; the vault must not exist yet
   const ak = await rpc(url, "query", { request_type: "view_access_key", account_id: parent, public_key: pubText, finality: "optimistic" });
   if (ak.permission !== "FullAccess") throw new Error(`${parent}'s key ${pubText} is not a full-access key`);
   try {

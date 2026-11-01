@@ -15,7 +15,7 @@ const SHARED = path.join(ROOT, "scripts/net-window.mjs");
 // Every entry that opens a connection (fetch, a library that fetches, a WebSocket): each one imports the shared module.
 export const CHANGED = [
   "apps/helper/deploy/create-server.mjs",
-  "contracts/vault/scripts/deploy-testnet.mjs",
+  "contracts/vault/scripts/deploy.mjs",
   "contracts/vault/scripts/testnet-usdc.mjs",
   "scripts/ci/money-gate.mjs",
   "scripts/live-checks/app-host-gate.mjs",

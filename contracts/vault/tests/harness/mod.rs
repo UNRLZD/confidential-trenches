@@ -90,7 +90,7 @@ pub const USDC_HALTED: &str = "FiatToken: paused";
 pub const REAL_WASM: &str = include_str!("../fixtures/real-wasm.json");
 /// Yocto per storage byte (nearcore `storage_amount_per_byte`, 10^19).
 pub const YOCTO_PER_BYTE: u128 = 10_000_000_000_000_000_000;
-/// The recipe's config() call gas, as scripts/deploy-testnet.mjs sends it.
+/// The recipe's config() call gas, as scripts/deploy.mjs sends it (`CONFIG_GAS`).
 pub const CONFIG_GAS: Gas = Gas::from_tgas(100);
 /// USDC's `storage_balance_bounds` min = max (vault.md 2.8).
 pub const TOKEN_STORAGE: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
