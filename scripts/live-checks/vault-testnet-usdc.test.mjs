@@ -3,7 +3,7 @@
 //   - vault-testnet-usdc.bad-code.answers.json: an account running other code (the vault skeleton,
 //     vault.bf-vs-20261101t012200.testnet) checked against the same record.
 // Two more bad answers are made here from the good one: a holder balance one base unit short, and the deploy tx read as
-// failed. The deploy script's refusal of bytes that are not the pin, and its init's six names, are tested too.
+// failed. The deploy script's own tests live beside it, contracts/vault/scripts/testnet-usdc.test.mjs.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -11,7 +11,6 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { check, liveRecord, DEPLOYMENT, USDC_CODE_HASH } from "./vault-testnet-usdc.mjs";
 import { parseLive } from "../ci/money-gate.mjs";
-import { wasmProblems, initArgs, INIT_NAMES, encodeTx, act } from "../../contracts/vault/scripts/testnet-usdc.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -80,21 +79,6 @@ test("the live record parses for the money gate: Money path yes, every tx a near
   assert.equal(live.moneyPath, true);
   assert.equal(live.txs.length, 26);
   assert.equal(live.real.length, 0);
-});
-
-test("the deploy script refuses any bytes but the pin, and its init names are the six the code reads", () => {
-  const notUsdc = Buffer.concat([Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]), Buffer.alloc(100)]);
-  const p = wasmProblems(notUsdc, USDC_CODE_HASH);
-  assert.ok(p.some((x) => /want 321491/.test(x)) && p.some((x) => /want b98ccd53/.test(x)) && p.some((x) => /the RPC reports/.test(x)), p.join("; "));
-  assert.deepEqual(Object.keys(initArgs("t.testnet", {})), INIT_NAMES);
-  assert.deepEqual(INIT_NAMES, ["admin_ids", "master_minter_ids", "owner_ids", "pauser_ids", "blocklister_id", "metadata"]);
-  assert.deepEqual(Object.keys(deployment.init), INIT_NAMES);
-});
-
-test("the deploy script's AddKey is a full-access key (nearcore Action 5, AccessKey { nonce 0, FullAccess = 1 })", () => {
-  const pub = Buffer.alloc(32, 7);
-  const tx = encodeTx({ signer: "a", publicKey: pub, nonce: 1n, receiver: "b", blockHash: Buffer.alloc(32), actions: [act.fullKey(pub)] });
-  assert.deepEqual([...tx.subarray(tx.length - 43)], [5, 0, ...pub, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
 });
 
 test("a 429 on a state read is waited out, never read as an answer (the first bad-answer recording read it as BAD)", async () => {
