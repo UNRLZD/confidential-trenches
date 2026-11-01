@@ -194,7 +194,7 @@ const LOCK_WAIT_MS = 250;
 
 /**
  * A store of small JSON files in `dir`, owned by one process. The owner holds an exclusive SQLite lock on `dir/lock`
- * (node:sqlite, BEGIN EXCLUSIVE in exclusive locking mode): an fcntl lock the kernel keeps for the life of the
+ * (node:sqlite, a BEGIN EXCLUSIVE never ended): an fcntl lock the kernel keeps for the life of the
  * process and drops when it dies, however it dies, so a killed process never leaves a stale lock and two starts at
  * once leave one holder. Every write is whole and durable: a replace is write, fsync, rename, fsync of the directory;
  * a create-if-absent is write and fsync of a temp file, link to the name (EEXIST: it is there), unlink of the temp,
@@ -208,7 +208,6 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
   const take = (): DatabaseSync => {
     const db = new DatabaseSync(path("lock"), { timeout: LOCK_WAIT_MS });
     try {
-      db.exec("PRAGMA locking_mode=EXCLUSIVE");
       db.exec("BEGIN EXCLUSIVE");
       return db;
     } catch (e) {

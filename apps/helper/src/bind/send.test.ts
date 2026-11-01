@@ -1016,6 +1016,15 @@ test("PROBE N3: starts at the same moment leave exactly one holder", async () =>
   await Promise.all(kids.map(exited));
 });
 
+test("a start that meets a holder in its last moments (a restart overlapping the old process's exit) waits it out and opens", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-overlap-"));
+  const child = storeChild(dir, "old", 100);
+  while (!existsSync(join(dir, "old"))) await new Promise((r) => setTimeout(r, 1));
+  assert.equal(readFileSync(join(dir, "old"), "utf8"), "won");
+  createFileStore(dir).close(); // the old holder lets go within the wait
+  await exited(child);
+});
+
 test("PROBE N3, scheduled: B pauses right after any read of the lock while A takes the store; B resumes: still exactly one holder", async () => {
   // the review's interleaving (lockchild2.mjs): a start that reads the lock's contents and acts on them later can
   // remove a live holder's lock; a kernel lock has nothing to read, so the pause point never comes and A waits it out
@@ -1370,6 +1379,18 @@ test("nonces: transactions in flight at once get distinct nonces; a refused one 
   assert.equal(again[0]!.nonce, "41");
 });
 
+test("an InvalidNonce re-reads the key before the next transaction in the queue: the call queued behind the refused one is signed above the key", async () => {
+  const node = new Node();
+  node.landMs = () => 50;
+  const r = node.relayer(500);
+  assert.equal((await r.send(prepayAction(1n), open, () => undefined)).kind, "final");
+  node.keyNonce = 40n; // the key moved after the relayer read it
+  const tx: TxRef[] = [];
+  const [a, b] = await Promise.all([r.send(prepayAction(2n), open, keep(tx)), r.send(prepayAction(3n), open, keep(tx))]);
+  assert.deepEqual([a.kind, b.kind], ["dropped", "final"]);
+  assert.deepEqual(tx.map((x) => x.nonce), ["12", "41"]);
+});
+
 test("a drop read by resolve also re-reads the key for the next transaction", async () => {
   const node = new Node();
   let down = true;
@@ -1397,6 +1418,19 @@ test("PROBE E: one provider names the hash unknown past its nonce while the othe
   assert.equal((await r.resolve(tx[0]!, resend)).kind, "unknown");
   down = new Set(["0:send_tx", "1:send_tx"]);
   assert.equal((await r.resolve(tx[0]!, resend)).kind, "dropped");
+});
+
+test("PROBE E, gone: a send whose delegate expired is still unknown while one regular provider cannot be read; dropped once both read it unknown", async () => {
+  const node = new Node();
+  let down = new Set<string>(["0:send_tx", "1:send_tx"]);
+  node.fail = (i, m) => (down.has(`${i}:${m}`) ? new Error("fetch failed") : undefined);
+  const r = node.relayer(50);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  down = new Set(["0:send_tx", "1:send_tx", "1:query", "1:tx"]);
+  assert.equal((await r.resolve(tx[0]!, { resend: false, gone: true })).kind, "unknown");
+  down = new Set(["0:send_tx", "1:send_tx"]);
+  assert.equal((await r.resolve(tx[0]!, { resend: false, gone: true })).kind, "dropped");
 });
 
 test("Low 4: a landed transaction a regular provider forgot (garbage collection) reads final from the archival one, never dropped", async () => {
