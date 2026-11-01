@@ -683,5 +683,15 @@
    "keccak_hex": "fe5dad3d5d35ae09822e0ae161520d734d06512e7eb51429a85382c14ce8f8d0",
    "context": "5611761614468543469433750063314045038162133186690392029844472952294663059659"
   }
+ ],
+ "withdrawal_refusals": [
+  {
+   "name": "a key outside 7.1's seven (processor)",
+   "note": "the withdrawal as sent, a JSON text; without the extra key it is a request both sides take (vault vault.confidential.unrlzd.near, now 1793750000000 ms, withdrawn 1000000)",
+   "json": "{\"recipient\":\"bob.near\",\"register_deposit\":\"0\",\"fee_recipient\":\"relayer.confidential.unrlzd.near\",\"relay_fee\":\"30000\",\"refund_precommitment\":\"7\",\"deadline_ms\":1793750600000,\"salt\":\"00000000000000000000000000000000\",\"processor\":\"other-vault.near\"}",
+   "key": "processor",
+   "vault": "unknown field `processor`",
+   "kit": "processor: not a field of the withdrawal"
+  }
  ]
 }

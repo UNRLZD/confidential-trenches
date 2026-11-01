@@ -6,12 +6,13 @@ import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./discover.css";
 import { Avatar } from "../market/Avatar.tsx";
+import { useDiscoverData } from "./data.ts";
 
 // S5 Discover (A2.1, app.md:1454; 09-design-brief S5), drawn after R5's discover-1440.html and discover-390.html
 // (design-lock-r5) from a 06b snapshot: four columns from 768 px, one list with tabs on the phone (S5.18). States:
-// S5.1 skeleton rows, S5.2 rows, S5.3 No tokens, S5.5 Offline with Retry. The snapshot comes from the caller; the
-// helper read is card app-discover-live. Not here yet, each on its own card: the quick buy, the toolbar's presets,
-// chips and filters, search, pause, the watchlist and the stale pill.
+// S5.1 skeleton rows, S5.2 rows, S5.3 No tokens, S5.5 Offline with Retry. The snapshot comes from the caller;
+// DiscoverRoute reads it from the helper (data.ts, card app-discover-live). Not here yet, each on its own card: the quick
+// buy, the toolbar's presets, chips and filters, search, pause, the watchlist and the stale pill.
 
 export type DiscoverData = { status: "loading" } | { status: "error" } | { status: "ready"; snapshot: MarketSnapshot };
 
@@ -237,4 +238,10 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
       </div>
     </section>
   );
+}
+
+/** The Discover route: the screen on the helper's lists (data.ts). */
+export function DiscoverRoute() {
+  const { data, nowMs, retry } = useDiscoverData();
+  return <Discover data={data} nowMs={nowMs} onRetry={retry} />;
 }

@@ -298,3 +298,35 @@ test("vaultWithdrawalProblems: every refusal of 2.5.2 rows 1, 2 and 8 the device
   has({ register_deposit: "01" }, /register_deposit/);
   has({ recipient: "Bob.near" }, /recipient/);
 });
+
+// Card vault-withdraw-context: the withdrawal refusals the vault and the kit share. The vault's unit
+// test (contracts/vault/tests/withdraw_vectors.rs) reads the same vectors and refuses each when it reads the call.
+test("withdrawal_refusals: the kit refuses each shared vector with exactly its problem, and takes it without the key", () => {
+  assert.equal(V.withdrawal_refusals.length, 1);
+  for (const r of V.withdrawal_refusals) {
+    const w = JSON.parse(r.json);
+    assert.ok(r.key in w, r.name);
+    const p = (x) => S.vaultWithdrawalProblems(x, 1_000_000n, "vault.confidential.unrlzd.near", 1_793_750_000_000);
+    assert.deepEqual(p(w), [r.kit], r.name);
+    const { [r.key]: _, ...rest } = w;
+    assert.deepEqual(p(rest), [], `${r.name}: without the key`);
+  }
+});
+
+test("the withdrawal's keys are exactly VAULT_CONTEXT_FIELDS less processor: no other key is taken, none is missed", () => {
+  const vault = "vault.confidential.unrlzd.near";
+  const now = 1_793_750_000_000;
+  const w = JSON.parse(V.withdrawal_refusals[0].json);
+  delete w[V.withdrawal_refusals[0].key];
+  const p = (x) => S.vaultWithdrawalProblems(x, 1_000_000n, vault, now);
+  const seven = S.VAULT_CONTEXT_FIELDS.map(([name]) => name).filter((name) => name !== "processor");
+  assert.deepEqual(Object.keys(w), seven);
+  assert.deepEqual(p(w), []);
+  for (const k of ["memo", "processor", "context", "scope", "proof", "public_signals", "__proto__x"]) {
+    assert.deepEqual(p({ ...w, [k]: "1" }), [`${k}: not a field of the withdrawal`], k);
+  }
+  for (const k of seven) {
+    const { [k]: _, ...rest } = w;
+    assert.ok(p(rest).some((m) => m.startsWith(`${k}:`)), `without ${k}: ${p(rest)}`);
+  }
+});

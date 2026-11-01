@@ -76,11 +76,11 @@ export interface RowView {
   launchpad: string | null;
 }
 
-/** A row's drawn values for a window. Row carries buys and sells for 5m only, so the 1h window draws them as the dash. */
+/** A row's drawn values for a window: its change, volume, and buys and sells. */
 export function rowView(r: MarketRow, win: Win, nowMs: number): RowView {
   const c = win === "1h" ? r.chg_1h_bps : r.chg_5m_bps;
-  const b = win === "5m" ? r.buys_5m : null;
-  const s = win === "5m" ? r.sells_5m : null;
+  const b = win === "5m" ? r.buys_5m : r.buys_1h;
+  const s = win === "5m" ? r.sells_5m : r.sells_1h;
   const known = typeof b === "number" && typeof s === "number";
   const created = typeof r.created_s === "number" ? Math.floor(nowMs / 1000) - r.created_s : null;
   const stage = onCurve(r)
