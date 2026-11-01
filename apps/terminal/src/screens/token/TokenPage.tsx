@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "react-router";
+import { Avatar } from "../market/Avatar.tsx";
 import { FIXTURE_NOW_MS } from "./fixtures.ts";
 import { tokenView } from "./model.ts";
 import type { Curve, TokenView } from "./model.ts";
@@ -25,18 +26,6 @@ function W({ id }: { id: WordId }) {
 /** Timeframes R5 draws (token.js TF_LABEL; token-390.html mt-tfs); 15m is the default (BRF v2.0.5, M157). */
 const TFS = ["1m", "5m", "15m", "1H", "4H", "1D"] as const;
 const QUICK = [10, 25, 50, 100] as const;
-
-/** The token avatar (UNRLZD TokenAvatar, as Discover's): two initials on a gradient from the symbol. */
-function Avatar({ symbol, size }: { symbol: string; size: number }) {
-  let h = 7;
-  for (const ch of symbol) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  const letters = Array.from(symbol.replace(/^\$/, "").normalize("NFKC").replace(/\p{M}/gu, "")).slice(0, 2).join("");
-  return (
-    <span className="tkp-av" aria-hidden="true" style={{ width: size, height: size, background: `conic-gradient(from ${h}deg at 35% 30%, oklch(0.62 0.15 ${h}), oklch(0.34 0.09 ${(h + 70) % 360}), oklch(0.5 0.13 ${h}), oklch(0.62 0.15 ${h}))`, color: `oklch(0.97 0.03 ${h})`, fontSize: Math.round(size * 0.36) }}>
-      {letters}
-    </span>
-  );
-}
 
 const Sk = ({ w, h }: { w: number | string; h: number }) => <span className="tkp-sk" style={{ width: w, height: h }} />;
 
