@@ -38,7 +38,8 @@
 //     seed record only { iv, ct }, localStorage empty.
 //   no-prf run (hasPrf false; card wallet-typed-words, 06b ses.4, ses.5, ses.12, W:914): Create passkey stores a random
 //     seed, wrapped, with code_saved false and goes on in the same visit to the backup screen (data-signin="backup")
-//     with its account and 12 words drawn (counted, never read); Saved then signs in as the same account with
+//     with its account and 12 words drawn (counted, never read); a mouse press on Saved within 500 ms of it drawn does
+//     nothing (the same activation guard as Sign out's), and one after the window signs in as the same account with
 //     code_saved true and Sign out drawn. In a fresh store, Recovery code with words that fail the BIP-39 checksum shows
 //     "invalid-code" and stores nothing; the 12 words of A.8's seed (16 zero bytes, built from the pinned BIP-39 list)
 //     sign in as A.8's T_0, the check's own derivation, with code_saved true.
@@ -84,6 +85,11 @@ const DRAWN = () => {
     if (b && b !== globalThis.__ctSignout) {
       globalThis.__ctSignout = b;
       globalThis.__ctDrawn = performance.now();
+    }
+    const v = document.querySelector('[data-action="saved"]');
+    if (v && v !== globalThis.__ctSaved) {
+      globalThis.__ctSaved = v;
+      globalThis.__ctSavedDrawn = performance.now();
     }
   }).observe(document, { childList: true, subtree: true });
 };
@@ -154,6 +160,10 @@ export function judge(rec) {
   const c = n.create ?? {};
   say(c.state === "backup" && HEX64.test(c.account ?? "") && c.seed === true && c.seedWrapped === true && c.codeSaved === "false" && c.words === 12,
     `no-prf: Create passkey stores a random seed and opens the backup screen with its 12 words (${c.state}, account ${c.account ? "shown" : "none"}, seed ${c.seed ? "stored" : "none"}, code_saved ${c.codeSaved}, ${c.words ?? 0} words)`);
+  const se = n.savedEarly ?? {};
+  say(se.pressed === true && se.pressOn === "saved" && typeof se.withinMs === "number" && se.withinMs < PROTECT_MS &&
+      se.after?.state === "backup" && se.after?.codeSaved === "false",
+    `no-prf: a press on Saved within 500 ms of it drawn does nothing (${ms(se)}, ${se.after?.state}, code_saved ${se.after?.codeSaved})`);
   const sv = n.saved ?? {};
   say(sv.state === "signed-in" && HEX64.test(c.account ?? "") && sv.account === c.account && sv.codeSaved === "true" && sv.signoutButtons === 1 && sv.words === 0,
     `no-prf: Saved signs in as the same account with code_saved true and Sign out drawn (${sv.state}, code_saved ${sv.codeSaved}, ${sv.signoutButtons ?? 0} Sign out)`);
@@ -585,13 +595,22 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
   {
     const h = await launch({ harness, site });
     try {
-      const page = await (await h.browser.newContext()).newPage();
+      const nctx = await h.browser.newContext();
+      await nctx.addInitScript(DRAWN);
+      const page = await nctx.newPage();
       watch(page, errors);
       await authenticator(page, false);
       await page.goto(url);
       record.noPrf.open = await settled(page);
       record.noPrf.create = await click(page, "create");
       record.noPrf.create.words = await page.locator("[data-words] li").count();
+      // a press on Saved at once, inside the guard's 500 ms from Saved drawn: nothing happens
+      const pressed = await page.click('[data-action="saved"]', { timeout: WAIT_MS }).then(() => true, () => false);
+      const t = await page.evaluate(() => ({ at: globalThis.__ctPresses?.at(-1)?.at ?? null, drawn: globalThis.__ctSavedDrawn ?? null, pressOn: globalThis.__ctPressOn ?? null }));
+      await page.waitForTimeout(300);
+      record.noPrf.savedEarly = { pressed, pressOn: t.pressOn, withinMs: t.at !== null && t.drawn !== null ? t.at - t.drawn : null, after: await settled(page) };
+      // past the window from Saved drawn and from that press
+      await page.waitForTimeout(PROTECT_MS + 200);
       record.noPrf.saved = await click(page, "saved");
       record.noPrf.saved.signoutButtons = await page.locator('[data-action="signout"]').count();
       record.noPrf.saved.words = await page.locator("[data-words] li").count();

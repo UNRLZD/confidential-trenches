@@ -13,8 +13,9 @@
 // (prf.protect, phone), records made before the trigger steps (bad23f373f and older) hold no prf.triggers, and records
 // made before round 5 hold no prf.burst or prf.repeat: those steps' lines are BAD on them for that reason, checked as
 // such below. Card wallet-typed-words: good re-recorded with the no-PRF run's backup, Saved and typed-words steps;
-// bad18cd57a, the page at 18cd57a (no-PRF Create stores nothing and opens no backup; no typed words), fails on those four
-// lines only. Every record before it fails those four lines for that reason (its no-PRF Create was right then), checked
+// bad18cd57a, the page at 18cd57a (no-PRF Create stores nothing and opens no backup; no typed words), fails on those five
+// lines only; bad3fd742b, the card's page at 3fd742b (Saved without the activation guard), fails on the early Saved
+// press only. Every record before it fails those four lines for that reason (its no-PRF Create was right then), checked
 // as such below.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
@@ -39,11 +40,12 @@ const BAD = (rec) => bad(rec).map((l) => l.split(" (")[0]);
 // card wallet-typed-words' steps: a record made before it fails each (the no-PRF Create then opened no backup)
 const TW = [
   "BAD no-prf: Create passkey stores a random seed and opens the backup screen with its 12 words",
+  "BAD no-prf: a press on Saved within 500 ms of it drawn does nothing",
   "BAD no-prf: Saved signs in as the same account with code_saved true and Sign out drawn",
   "BAD no-prf: typed words that fail the checksum show Invalid code and store nothing",
   "BAD no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true",
 ];
-// a record made before wallet-typed-words: its four lines are all BAD, and the rest is returned
+// a record made before wallet-typed-words: its five lines are all BAD, and the rest is returned
 function beforeTW(rec) {
   assert.equal(rec.noPrf.typed, undefined);
   const lines = BAD(rec);
@@ -97,7 +99,7 @@ test("the recorded bad answer (no PRF falls back to a random seed without notice
   assert.equal(answers.bad.noPrf.create.seed, true);
 });
 
-test("card wallet-typed-words' recorded red (the page at 18cd57a) fails on its four no-PRF lines only", () => {
+test("card wallet-typed-words' recorded red (the page at 18cd57a) fails on its five no-PRF lines only", () => {
   const r = answers.bad18cd57a;
   assert.equal(judge(r).pass, false);
   assert.deepEqual(BAD(r), TW);
@@ -105,6 +107,14 @@ test("card wallet-typed-words' recorded red (the page at 18cd57a) fails on its f
   assert.deepEqual([r.noPrf.create.state, r.noPrf.create.seed, r.noPrf.create.words], ["no-prf", false, 0]);
   assert.equal(r.noPrf.invalid.noInput, true);
   assert.equal(r.noPrf.typed.noInput, true);
+});
+
+test("card wallet-typed-words' red at 3fd742b (Saved with no activation guard) fails on the early Saved press only", () => {
+  const r = answers.bad3fd742b;
+  assert.deepEqual(BAD(r), ["BAD no-prf: a press on Saved within 500 ms of it drawn does nothing"]);
+  // the press reached Saved inside the window and marked the words saved
+  assert.ok(r.noPrf.savedEarly.withinMs < 500 && r.noPrf.savedEarly.pressOn === "saved");
+  assert.deepEqual([r.noPrf.savedEarly.after.state, r.noPrf.savedEarly.after.codeSaved], ["signed-in", "true"]);
 });
 
 test("round 2's recorded reds fail on their own lines", () => {
@@ -185,6 +195,10 @@ test("each broken step fails the check", () => {
     ["a backup screen with 11 words drawn", (r) => (r.noPrf.create.words = 11)],
     ["a backup screen with no account", (r) => (r.noPrf.create.account = null)],
     ["a no-PRF seed stored in the clear", (r) => (r.noPrf.create.seedWrapped = false)],
+    ["an early Saved press that marks the words saved", (r) => (r.noPrf.savedEarly.after = { ...r.noPrf.savedEarly.after, state: "signed-in", codeSaved: "true" })],
+    ["an early Saved press that came after the window", (r) => (r.noPrf.savedEarly.withinMs = 500)],
+    ["an early Saved press that missed Saved", (r) => (r.noPrf.savedEarly.pressOn = "BODY")],
+    ["no early Saved press", (r) => delete r.noPrf.savedEarly],
     ["Saved that leaves code_saved false", (r) => (r.noPrf.saved.codeSaved = "false")],
     ["Saved on another account", (r) => (r.noPrf.saved.account = "00".repeat(32))],
     ["Saved with no Sign out drawn", (r) => (r.noPrf.saved.signoutButtons = 0)],

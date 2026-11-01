@@ -26,8 +26,10 @@
 //   keydown, or within 500 ms of Sign out being drawn, the page becoming visible (visibilitychange, pageshow) or the
 //   window gaining focus; the same for mouse, touch, pen and keyboard. A click that a cross-site page lined up before
 //   sending this window here (a double-click trick, a burst of clicks, a held Enter) does nothing; a press after a
-//   500 ms pause works on every input. Sign out is the one control it guards: Create passkey and Use passkey open the
-//   browser's own passkey sheet, which carries the browser's protection.
+//   500 ms pause works on every input. It guards the two controls that act with no sheet of the browser's own: Sign
+//   out, and the backup's Saved, which opens the deposit gate of a seed whose 12 words are the only copy (W:888), so a
+//   lined-up click cannot mark words saved that the user never saw. Create passkey and Use passkey open the browser's
+//   own passkey sheet, which carries the browser's protection.
 // - The page shows public values only, but for the backup screen's 12 words: the account's profile key T_0 (wallet.md:68,
 //   a public key, never a NEAR account or money), in data-account, so a check can compare it. The entropy and seed64
 //   are zeroed once used; the 12 words are a JS string, which cannot be zeroed, and reach the DOM only on the backup
@@ -68,7 +70,7 @@ root.id = "signin";
 if (framed) root.dataset.framed = "true";
 document.body.append(root);
 
-// Sign out's activation guard (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
+// The activation guard of Sign out and Saved (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
 // (capture phase), so the gap to the previous input is known when Sign out sees its press.
 const guard = activationGuard(performance.now());
 const reshown = (): void => guard.shown(performance.now());
@@ -87,7 +89,7 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
   b.type = "button";
   b.dataset.action = action;
   b.textContent = label;
-  if (action !== "signout") {
+  if (action !== "signout" && action !== "saved") {
     b.addEventListener("click", onClick);
     return b;
   }
