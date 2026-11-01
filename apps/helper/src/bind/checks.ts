@@ -9,7 +9,7 @@
 // M322 (1), MN:330). Every other kind /v1/bind will take (M:3342) is refused here, by its shape: an id's clean-up (one
 // DeleteAccount) gets not_one_action, a plain move out (ft_transfer) not_ft_transfer_call, an onward delegate
 // (receiver_id intents.near) bad_receiver. A's move back to the vault (WM-11) is this same call from A (M:2822, "in
-// the same shape"; wallet.md WM-11, depositor = A), so no shape check can tell it from U's: decided by the CO 07:16Z, A's
+// the same shape"; wallet.md WM-11, depositor = A), so no shape check can tell it from U's: decided 07:16Z, A's
 // move passes as U's does.
 //
 // Not here (card relayer-prepay): check 8's two-RPC simulation, the prepay and the send; check 9's token hold
@@ -229,7 +229,7 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   if (p >= FIELD_P) return no("bad_msg", "msg.precommitment: not below p");
   if (!isAccountId(depositor)) return no("bad_msg", "msg.depositor: not a NEAR account id");
   if (depositor === cfg.vault) return no("bad_msg", "msg.depositor: the vault");
-  // The depositor is the moving id itself in every flow (kit shapes.ts VaultDepositMessage; wallet.md WM-11; CO round 3).
+  // The depositor is the moving id itself in every flow (kit shapes.ts VaultDepositMessage; wallet.md WM-11; review round 3).
   if (depositor !== u) return no("bad_msg", "msg.depositor: not the sender");
   if (await reads.pUsed(p)) return no("p_used", "P: in the vault's deposits pages");
 

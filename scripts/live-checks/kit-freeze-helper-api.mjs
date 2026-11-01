@@ -4,7 +4,7 @@
 // and parses them with the TypeScript parser, never running them. It checks, against values pinned here from
 // markets.md, wallet.md and vault.md at research main 3dbe87c (the public repo carries no papers):
 //   - the file imports nothing outside the kit (only Chain, OrderRecord and ORDER_RECORD_FIELDS from ../orders/record.ts,
-//     the CO's call at 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
+//     decided 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
 //     TS2308), and index.ts exports it ("export * from ./helper/v1");
 //   - the path list equals H7's table (markets.md:3329-3345) with 7.1's new POST /v1/log (:3277), and the health parts
 //     are {proxy, relay, intents, delegate, orders, log} (:3278, :3331);
@@ -85,7 +85,7 @@ export const CODES = {
 };
 export const STATUS = { token_halted: 503, receiver_is_vault: 403, id_not_ours: 403, sender_struck: 403, prepay_open: 409, not_paid: 409, receiver_not_registered: 409 };
 const DELEGATE_FIELDS = ["sender_id", "receiver_id", "actions", "nonce", "max_block_height", "public_key"];
-// The frozen file, pinned (the CO's review of 01:33Z). SHAPES: each money-path type as the TypeScript printer writes it
+// The frozen file, pinned (review of 01:33Z). SHAPES: each money-path type as the TypeScript printer writes it
 // with no comments, checked by hand against its row: withdraw and withdraw/fee markets.md:3337-3339 and 7.1's rows
 // :3271-3272, the withdrawal vault.md:356-364, bind :3340, intents :3341 and wallet.md:898-901, orders, status, the PUT
 // and DELETE :3342-3345 (the orders row as restated at 3dbe87c), log :3277 and section 2.5. VALUES: the frozen
@@ -163,7 +163,7 @@ export const VALUES = {
   HELPER_BIND_DEPOSIT_CAP: "1000000000n",
 };
 const NEVER_IN_INTENTS = ["msg", "memo", "storage_deposit"];
-// the one import v1.ts makes, and the wallet's exported names it must not declare (CO, 00:35Z)
+// the one import v1.ts makes, and the wallet's exported names it must not declare (decided 00:35Z)
 export const IMPORTS = ['import { ORDER_RECORD_FIELDS, type Chain, type OrderRecord } from "../orders/record.ts";'];
 export const WALLET_NAMES = ["Chain", "CHAINS", "TxRef", "Stage", "ErrorCode", "Operation", "OrderState", "WalletState", "OrderRecord", "SigninWay", "ReturnKey"];
 
