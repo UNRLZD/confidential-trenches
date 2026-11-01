@@ -1,0 +1,90 @@
+{
+ "good": {
+  "note": "apps/helper at cdf50e0 (card/helper-token-watch) run with node src/server.ts on the owner's Mac, no NEAR URL set, so the watch read rpc.mainnet.fastnear.com and near.drpc.org; read 2026-11-01T06:29:11.203Z (api.confidential.unrealized.trade does not run this commit yet)",
+  "base": "http://127.0.0.1:18093",
+  "reads": [
+   {
+    "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "readAt": "2026-11-01T06:29:11.203Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "251",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:29:11 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "cdf50e081843ebd5c32f7ea3710263371329ad20"
+    },
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222531866,\"last_event\":null}"
+   },
+   {
+    "asked": "usdt.tether-token.near",
+    "readAt": "2026-11-01T06:29:11.628Z",
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "38",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:29:11 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "cdf50e081843ebd5c32f7ea3710263371329ad20"
+    },
+    "body": "{\"error\":{\"code\":\"token_not_watched\"}}"
+   }
+  ]
+ },
+ "bad_hash": {
+  "note": "the same build with both NEAR providers set to a planted local provider whose view_account gives USDC another real code hash (GT71B8i4…f21DT, the vault testnet build): a changed hash; read 2026-11-01T06:29:11.706Z",
+  "base": "http://127.0.0.1:18094",
+  "reads": [
+   {
+    "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "readAt": "2026-11-01T06:29:11.706Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "251",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:29:11 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "cdf50e081843ebd5c32f7ea3710263371329ad20"
+    },
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"GT71B8i42Z2xegTKpA6TUJQYghRqZfyJUNJG6rKf21DT\",\"block_height\":222531448,\"last_event\":null}"
+   },
+   {
+    "asked": "usdt.tether-token.near",
+    "readAt": "2026-11-01T06:29:11.745Z",
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "38",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:29:11 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "cdf50e081843ebd5c32f7ea3710263371329ad20"
+    },
+    "body": "{\"error\":{\"code\":\"token_not_watched\"}}"
+   }
+  ]
+ }
+}
