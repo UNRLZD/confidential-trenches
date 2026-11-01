@@ -6,7 +6,8 @@
 //   - every data export equals the values pinned below from the vault paper (research main ffcba5e): the constants
 //     (2.2), the fields, the deposit message and its carrier for U, R and V (2.5.1, 7.1), the ft_withdraw path the kit
 //     never signs, the calls (2.3, 2.5.2-2.5.5), the proof signals, the events and their field lists (7.1; the CO's call:
-//     data is an array) and the six setup-file sha256 values (2.6, vault.md:522-527), since this repo carries no papers;
+//     data is an array), since this repo carries no papers (the setup files' pins are ZK_SETUP_FILES's, checked by
+//     vault-setup-files's own live check);
 //   - every function behaves as the paper says on fixed cases (the depositor in every refused form, upper case
 //     included), the attached NEAR and the backstop computed here from the paper's numbers;
 //   - the 50 vectors recompute with this check's own Borsh and Keccak-256 (read big-endian, mod p) in the paper's 7.1
@@ -89,15 +90,6 @@ export const PINNED = {
     payout: ["nullifier_hash", "delivered", "returned"],
     refund_inserted: ["nullifier_hash", "commitment", "label", "value"],
   },
-  // vault.md 2.6 (l.522-527): Privacy Pools v1.3.0's circuit and key files
-  VAULT_SETUP_FILES: [
-    { path: "build/withdraw/withdraw_js/withdraw.wasm", bytes: 2607967, sha256: "36cda22791def3d520a55c0fc808369cd5849532a75fab65686e666ed3d55c10" },
-    { path: "trusted-setup/final-keys/withdraw.zkey", bytes: 17793015, sha256: "2a893b42174c813566e5c40c715a8b90cd49fc4ecf384e3a6024158c3d6de677" }, // gitleaks:allow (a public sha256 pin)
-    { path: "trusted-setup/final-keys/withdraw.vkey", bytes: 4208, sha256: "666bd0983b20c1611543b04f7712e067fbe8cad69f07ada8a310837ff398d21e" }, // gitleaks:allow (a public sha256 pin)
-    { path: "build/commitment/commitment_js/commitment.wasm", bytes: 2380442, sha256: "254d2130607182fd6fd1aee67971526b13cfe178c88e360da96dce92663828d8" },
-    { path: "trusted-setup/final-keys/commitment.zkey", bytes: 901233, sha256: "494ae92d64098fda2a5649690ddc5821fcd7449ca5fe8ef99ee7447544d7e1f3" }, // gitleaks:allow (a public sha256 pin)
-    { path: "trusted-setup/final-keys/commitment.vkey", bytes: 3477, sha256: "7d48b4eb3dedc12fb774348287b587f0c18c3c7254cd60e9cf0f8b3636a570d8" }, // gitleaks:allow (a public sha256 pin)
-  ],
 };
 
 // ---- this check's own encoders ----

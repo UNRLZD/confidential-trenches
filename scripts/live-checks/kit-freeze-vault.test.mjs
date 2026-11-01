@@ -35,7 +35,7 @@ test("the check's Keccak-256: Keccak's published answers for '' and 'abc', OpenS
 });
 
 test("each bad edit applies to exactly one place in the good answer", () => {
-  assert.equal(A.bad.length, 19);
+  assert.equal(A.bad.length, 18);
   for (const b of A.bad) assert.equal(GOOD[b.file].split(b.from).length - 1, 1, b.name);
 });
 
@@ -43,7 +43,7 @@ test("recorded good answer: PASS, every line ok", async () => {
   const r = await check({ refs: ["main"], files: { main: GOOD } });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(r.lines.map((l) => l.slice(0, 10)), Array(4).fill("main: ok  "));
-  assert.match(r.lines[1], /26 data exports equal the paper's values$/);
+  assert.match(r.lines[1], /25 data exports equal the paper's values$/);
   assert.match(r.lines[2], /every function behaves as the paper says$/);
   assert.match(r.lines[3], /8 scope, 10 label and 32 context vectors recompute/);
 });
@@ -54,7 +54,6 @@ const CASES = [
   ["a third deposit-message field", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
   ["ft_withdraw named as R's carrier", 1, /differ: VAULT_DEPOSIT_SIGNERS/],
   ["ft_withdraw named as V's carrier", 1, /differ: VAULT_DEPOSIT_SIGNERS/],
-  ["a setup-file sha256 changed", 1, /differ: VAULT_SETUP_FILES/],
   ["vaultContextInput reads recipient from fee_recipient", 3, /vaultContextInput reads the request to other bytes/],
   ["vaultFieldOf reads the digest little-endian", 2, /not: vaultFieldOf reads big-endian, mod p/],
   ["MAX_RELAY_FEE_BPS 500", 1, /differ: VAULT_CONSTANTS/],

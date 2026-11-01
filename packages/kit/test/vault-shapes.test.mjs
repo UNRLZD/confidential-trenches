@@ -236,12 +236,10 @@ test("attached NEAR and the fee backstop follow 2.3 and 2.5.2 rows 8 and 14", ()
   assert.equal(S.vaultRelayFeeWithinBackstop(U128 / 2n + 1n, U128), false);
 });
 
-test("events, setup files and constants: the frozen names and values", () => {
+test("events and constants: the frozen names and values", () => {
   assert.equal(S.VAULT_EVENT_STANDARD, "blindfill-vault");
   assert.equal(S.VAULT_EVENT_VERSION, "1.0.0");
   assert.deepEqual(Object.keys(S.VAULT_EVENTS), ["leaf_inserted", "deposited", "storage_prepaid", "withdrawn", "withdrawal_relayed", "ragequit", "payout", "refund_inserted"]);
-  assert.equal(S.VAULT_SETUP_FILES.length, 6);
-  for (const f of S.VAULT_SETUP_FILES) assert.match(f.sha256, /^[0-9a-f]{64}$/, f.path);
   assert.equal(S.VAULT_CONSTANTS.TOKEN, "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"); // gitleaks:allow (a public account id)
   assert.equal(S.VAULT_CONSTANTS.MIN_DEPOSIT, 1_000_000n);
   assert.equal(S.VAULT_CONSTANTS.MAX_RELAY_FEE_BPS, 5_000);

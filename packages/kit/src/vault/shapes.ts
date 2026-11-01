@@ -1,7 +1,8 @@
 // The Blindfill vault's frozen shapes, version blindfill-vault-v1 (the vault paper, section 7.1, frozen Nov 1 06:00Z).
 // Every app and package that talks to the vault builds on these: the note, the deposit message and its one carrier,
 // the deposit preconditions, the withdrawal request and the bytes its `context` hashes, the callback, settle and
-// ragequit, the proof format, the encodings, the events, the setup-file pins and the constants.
+// ragequit, the proof format, the encodings, the events and the constants. The setup files' pins are not here: the
+// kit's one list of them is ZK_SETUP_FILES (zk/setup-files.ts).
 // This file has no imports and only erasable TypeScript, so it runs as is in a browser, in Node and in the live check.
 // The hash is passed in (any keccak256, such as @noble/hashes' keccak_256): the shapes fix bytes, not a library.
 
@@ -364,17 +365,6 @@ export type VaultEvent = {
   event: VaultEventName;
   data: Record<string, string | number>[];
 };
-
-// ---- The setup files (2.6): Privacy Pools v1.3.0's, under packages/circuits/, reused byte for byte ----
-
-export const VAULT_SETUP_FILES = [
-  { path: "build/withdraw/withdraw_js/withdraw.wasm", bytes: 2_607_967, sha256: "36cda22791def3d520a55c0fc808369cd5849532a75fab65686e666ed3d55c10" },
-  { path: "trusted-setup/final-keys/withdraw.zkey", bytes: 17_793_015, sha256: "2a893b42174c813566e5c40c715a8b90cd49fc4ecf384e3a6024158c3d6de677" },
-  { path: "trusted-setup/final-keys/withdraw.vkey", bytes: 4_208, sha256: "666bd0983b20c1611543b04f7712e067fbe8cad69f07ada8a310837ff398d21e" },
-  { path: "build/commitment/commitment_js/commitment.wasm", bytes: 2_380_442, sha256: "254d2130607182fd6fd1aee67971526b13cfe178c88e360da96dce92663828d8" },
-  { path: "trusted-setup/final-keys/commitment.zkey", bytes: 901_233, sha256: "494ae92d64098fda2a5649690ddc5821fcd7449ca5fe8ef99ee7447544d7e1f3" },
-  { path: "trusted-setup/final-keys/commitment.vkey", bytes: 3_477, sha256: "7d48b4eb3dedc12fb774348287b587f0c18c3c7254cd60e9cf0f8b3636a570d8" },
-] as const;
 
 // ---- Encodings (2.2, 2.5.1 row 8, 2.5.2 row 3): keccak256 of these bytes, read big-endian, then mod p ----
 
