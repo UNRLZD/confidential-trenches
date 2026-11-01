@@ -20,11 +20,20 @@
 // - Sign out: broadcast "signout" on BroadcastChannel "ct-wallet", then delete the database (06b:1235, wallet.md:156);
 //   other tabs close their connection on the delete's versionchange, so the delete is not blocked. A store that is
 //   already closed refuses to sign out, so a stale tab never deletes a newer account's database.
+// - The seed lock: sign out (from reading the seed until its delete has succeeded, failed or been reported blocked),
+//   insertSeed and setCodeSaved each run under the store's exclusive Web Lock "ct-wallet/seed". An earlier tab's sign
+//   out holds it until every other store has had its versionchange and closed, so a stale tab's sign out then fails its
+//   liveness check and never deletes; and no seed insert can run between a sign out's check and its delete. A delete
+//   that is blocked (a connection that never closes) gives the lock back: the delete is queued by then, every store has
+//   closed, and any later open waits behind it in IndexedDB's own queue, so holding on would only hang other tabs; the
+//   sign out itself resolves when the delete completes. With no Web Locks (opts.locks null) sign out, insertSeed and
+//   setCodeSaved refuse: they never run unlocked.
 // - restore step 7 (wallet.md:319-322) moves a counter up with raiseDepositIndex, under the same lock and
 //   compare-and-set; nothing ever lowers a counter.
 
 export const WALLET_DB = "ct-wallet"; // 06b:538
 export const WALLET_LOCK = "ct-wallet/counters"; // the store's own; 06b:743 named "ct-wallet"
+export const WALLET_SEED_LOCK = "ct-wallet/seed"; // the store's own: sign out and every seed write
 export const WALLET_CHANNEL = "ct-wallet"; // 06b:746
 export const WALLET_LANES = 8; // wallet.md:247
 // wallet.md:197-204, the note store table.
@@ -196,6 +205,11 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   };
   const locked = <T>(fn: () => Promise<T>): Promise<T> =>
     locks ? (locks.request(WALLET_LOCK, { mode: "exclusive" }, fn) as Promise<T>) : fn();
+  const seedLock = name === WALLET_DB ? WALLET_SEED_LOCK : `${WALLET_SEED_LOCK}/${name}`;
+  const seedLocked = async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (!locks) throw new Error("no Web Locks: the seed is written and signed out only under the seed lock");
+    return locks.request(seedLock, { mode: "exclusive" }, fn) as Promise<T>;
+  };
 
   async function getRaw(store: WalletStoreName, key: string): Promise<unknown> {
     const tx = live().transaction(store, "readonly");
@@ -305,12 +319,15 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       await done(tx);
       notify([store]);
     },
-    async insertSeed(seed) {
-      const inserted = await casPut("meta", "seed", undefined, await wrap("meta", "seed", seed));
-      if (inserted) notify(["meta"]);
-      return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
+    insertSeed(seed) {
+      return seedLocked(async () => {
+        const inserted = await casPut("meta", "seed", undefined, await wrap("meta", "seed", seed));
+        if (inserted) notify(["meta"]);
+        return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
+      });
     },
-    async setCodeSaved() {
+    setCodeSaved() {
+      return seedLocked(async () => {
       for (;;) {
         const before = await getRaw("meta", "seed");
         if (before === undefined) throw new Error("no seed is stored");
@@ -325,6 +342,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           wipe(seed);
         }
       }
+      });
     },
     async delete(store, key) {
       checkCallerKey(store, key);
@@ -358,22 +376,31 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       return next;
     },
     async signOut() {
-      // the backup comes first while the 12 words are the only copy (wallet.md:922)
-      const seed = await unwrap("meta", "seed", await getRaw("meta", "seed"));
-      const refuse = backupFirst(seed);
-      wipe(seed);
-      if (refuse) throw new Error("back up the 12 words before signing out: they are the only copy");
-      // a closed store never deletes the database: it may be a newer account's. Checked here, after the last await and
-      // with none between it and deleteDatabase, so a store closed while the backup check ran refuses too.
-      live();
-      channel.postMessage({ kind: "signout" });
-      shut();
-      channel.close();
-      await new Promise<void>((ok, no) => {
-        const r = idb.deleteDatabase(name);
-        r.onsuccess = () => ok();
-        r.onerror = () => no(r.error);
+      const { deleted } = await seedLocked(async () => {
+        // the backup comes first while the 12 words are the only copy (wallet.md:922)
+        const seed = await unwrap("meta", "seed", await getRaw("meta", "seed"));
+        const refuse = backupFirst(seed);
+        wipe(seed);
+        if (refuse) throw new Error("back up the 12 words before signing out: they are the only copy");
+        // a closed store never deletes the database: it may be a newer account's. Checked here, after the last await and
+        // with none between it and deleteDatabase, so a store closed while the backup check ran refuses too.
+        live();
+        channel.postMessage({ kind: "signout" });
+        shut();
+        channel.close();
+        let isBlocked = (): void => {};
+        const blocked = new Promise<void>((ok) => (isBlocked = ok));
+        const deleted = new Promise<void>((ok, no) => {
+          const r = idb.deleteDatabase(name);
+          r.onsuccess = () => ok();
+          r.onerror = () => no(r.error);
+          r.onblocked = () => isBlocked();
+        });
+        // the lock is held until the delete is done, or queued behind a connection that does not close (see the top)
+        await Promise.race([deleted, blocked]);
+        return { deleted };
       });
+      await deleted;
     },
     close() {
       shut();
