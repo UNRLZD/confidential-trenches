@@ -29,7 +29,8 @@ pub fn to_be(a: &U256) -> [u8; 32] {
     b
 }
 
-fn ge(a: &U256, b: &U256) -> bool {
+/// `a >= b`.
+pub fn ge(a: &U256, b: &U256) -> bool {
     for i in 0..4 {
         if a[i] != b[i] {
             return a[i] > b[i];
@@ -38,7 +39,8 @@ fn ge(a: &U256, b: &U256) -> bool {
     true
 }
 
-fn sub(a: &U256, b: &U256) -> U256 {
+/// `a - b`, for `a >= b`.
+pub fn sub(a: &U256, b: &U256) -> U256 {
     let mut r = [0u64; 4];
     let mut borrow = 0u64;
     for i in (0..4).rev() {
@@ -81,6 +83,12 @@ pub fn to_decimal(a: &U256) -> String {
 /// A canonical field element from its decimal string: digits only, no sign, no leading zero (except "0"), below p.
 /// Anything else is None.
 pub fn from_decimal(s: &str) -> Option<U256> {
+    parse_decimal(s).filter(|n| !ge(n, &P))
+}
+
+/// A canonical decimal string's number: 1 to 78 digits, no sign, no leading zero (except "0"), below 2^256 (vault.md
+/// 2.5.2 row 1, `InvalidNumber` when None). No modulus: the caller compares it with p or q.
+pub fn parse_decimal(s: &str) -> Option<U256> {
     let b = s.as_bytes();
     if b.is_empty() || b.len() > 78 || (b.len() > 1 && b[0] == b'0') {
         return None;
@@ -100,9 +108,6 @@ pub fn from_decimal(s: &str) -> Option<U256> {
         if carry != 0 {
             return None;
         }
-    }
-    if ge(&n, &P) {
-        return None;
     }
     Some(n)
 }
