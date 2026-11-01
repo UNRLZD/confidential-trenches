@@ -150,7 +150,7 @@ fn a_known_root_reads_true_and_the_tree_root_is_the_side_node_at_depth() {
     let mut v = Vault::default();
     let mut r = [0u8; 32];
     r[31] = 9;
-    v.state_roots.insert(&r);
+    v.state_tree.roots.insert(&r);
     v.state_tree.side_nodes.insert(&0, &r);
     assert!(v.is_known_state_root("9".into()));
     assert!(!v.is_known_label_root("9".into()), "the two root sets are apart");
