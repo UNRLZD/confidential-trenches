@@ -34,8 +34,8 @@ const ALLOWED: Record<string, string[]> = {
   "connect-src": ["'self'", ...HELPER, SIGN_HOST, ...RPCS],
   "manifest-src": ["'self'"],
   "worker-src": ["'none'"],
-  "frame-src": [SIGN_HOST],
-  "frame-ancestors": ["'none'"],
+  "frame-src": ["'none'"],
+  "frame-ancestors": [SIGN_HOST],
   "object-src": ["'none'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],
@@ -49,8 +49,9 @@ const EXACT: Record<string, string> = {
   "default-src": "'none'",
   "script-src": "'self'",
   "worker-src": "'none'",
-  "frame-src": SIGN_HOST,
-  "frame-ancestors": "'none'",
+  // the terminal frames nothing and runs only inside SIGN_HOST's shell (src/shell/in-shell.ts)
+  "frame-src": "'none'",
+  "frame-ancestors": SIGN_HOST,
   "object-src": "'none'",
   "base-uri": "'none'",
   "form-action": "'none'",
@@ -66,11 +67,11 @@ const HEADERS: Record<string, string> = {
   "cross-origin-resource-policy": "same-origin",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
-  "x-frame-options": "DENY",
 };
 
-// headers that must not be sent: COEP (the app needs no cross-origin isolation) and a report-only policy
-const ABSENT = ["cross-origin-embedder-policy", "content-security-policy-report-only"];
+// headers that must not be sent: COEP (the app needs no cross-origin isolation), a report-only policy, and
+// X-Frame-Options (no value of it lets SIGN_HOST's shell frame the terminal; frame-ancestors says who may)
+const ABSENT = ["cross-origin-embedder-policy", "content-security-policy-report-only", "x-frame-options"];
 
 // Permissions-Policy: each feature exactly this; a feature not listed may only be ()
 const PERMISSIONS: Record<string, string> = {
