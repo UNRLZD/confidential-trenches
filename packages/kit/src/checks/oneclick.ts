@@ -256,14 +256,16 @@ function checkAppFees(v: unknown, path: OneClickPath, sameAsset: boolean): numbe
   return ONECLICK_FEE_BPS[path];
 }
 
-// A signed `...Formatted` amount must be the base-unit amount at the decimals the caller passed, to its shown digits.
+// A signed `...Formatted` amount must be the base-unit amount at the decimals the caller passed, truncated to its shown
+// digits (how every signed answer read formats it): 0 ≤ amount − shown × 10^(decimals − digits) < 10^(decimals − digits).
+// A tolerance both ways would let a larger decimals value through a one-digit amount ("0.1" at 7 for 100,000).
 const FORMATTED = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
-function checkDecimals(formatted: unknown, amount: bigint, decimals: number, name: string): void {
+export function checkOneClickFormatted(formatted: unknown, amount: bigint, decimals: number, name: string): void {
   if (typeof formatted !== "string" || !FORMATTED.test(formatted)) fail("shape", `${name}=${show(formatted)} is not a decimal`);
   const [i = "", f = ""] = (formatted as string).split(".");
   const digits = BigInt(`${i}${f}`);
   const ok = f.length <= decimals
-    ? (() => { const tol = pow10(decimals - f.length), d = amount - digits * tol; return d > -tol && d < tol; })()
+    ? (() => { const tol = pow10(decimals - f.length), d = amount - digits * tol; return d >= 0n && d < tol; })()
     : amount * pow10(f.length - decimals) === digits;
   if (!ok) fail("request", `${name} ${show(formatted)} is not ${amount} at ${decimals} decimals`);
 }
@@ -317,8 +319,8 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
   // Signed on a live answer only. A dry answer moves no money and shows an estimate under its unsigned figure; its live
   // re-quote is checked again with the signed one.
   const fee = uint(q.withdrawFee ?? "0", "withdrawFee");
-  checkDecimals(q.amountInFormatted, amountIn, opts.decimalsIn, "amountInFormatted");
-  checkDecimals(q.amountOutFormatted, amountOut, opts.decimalsOut, "amountOutFormatted");
+  checkOneClickFormatted(q.amountInFormatted, amountIn, opts.decimalsIn, "amountInFormatted");
+  checkOneClickFormatted(q.amountOutFormatted, amountOut, opts.decimalsOut, "amountOutFormatted");
   if (amountIn !== BigInt(request.amount) || uint(q.minAmountIn, "minAmountIn") !== amountIn)
     fail("amount", `amountIn ${show(q.amountIn)} is not the requested ${show(request.amount)}`);
   if (minAmountOut > amountOut) fail("amount", "minAmountOut is above amountOut");

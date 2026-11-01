@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { base58 } from "@scure/base";
 import {
+  checkOneClickFormatted,
   checkOneClickQuote,
   ONECLICK_SIGNING_KEYS,
   oneClickFloors,
@@ -302,6 +303,17 @@ test("decimals that do not match the signed formatted amounts are refused", () =
   for (const d of [23, 25, 18]) refused("request", () => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), { ...LIVE_OPTS, decimalsIn: d }));
   for (const d of [5, 7]) refused("request", () => checkOneClickQuote(DRY_REQ, clone(fx.dry.answer), { ...DRY_OPTS, decimalsOut: d }));
   refused("request", () => checkOneClickQuote(DRY_REQ, clone(fx.dry.answer), { ...DRY_OPTS, decimalsIn: 5 }));
+});
+
+test("a formatted amount binds the decimals by truncation only: a larger decimals value never passes a short amount", () => {
+  refused("request", () => checkOneClickFormatted("0.1", 100_000n, 7, "amountOutFormatted"));
+  refused("request", () => checkOneClickFormatted("0.1", 100_000n, 12, "amountOutFormatted"));
+  refused("request", () => checkOneClickFormatted("0.1", 10n ** 23n, 30, "amountOutFormatted"));
+  // truncation passes: the right decimals, and digits cut off the end
+  assert.doesNotThrow(() => checkOneClickFormatted("0.1", 100_000n, 6, "amountOutFormatted"));
+  assert.doesNotThrow(() => checkOneClickFormatted("0.1", 199_999n, 6, "amountOutFormatted"));
+  refused("request", () => checkOneClickFormatted("0.1", 99_999n, 6, "amountOutFormatted"));
+  refused("request", () => checkOneClickFormatted("0.1", 200_000n, 6, "amountOutFormatted"));
 });
 
 // Deadlines (wallet.md:410): a request deadline already past, or one without a time zone, is refused.
