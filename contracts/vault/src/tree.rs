@@ -141,7 +141,13 @@ impl Tree {
         let root = insert(h, &mut self.size, &mut self.depth, &mut self.side_nodes, leaf);
         self.leaf_at.insert(&index, leaf);
         self.roots.insert(&root);
-        Event::LeafInserted { tree: name, index, leaf, root: &root }.emit();
+        Event::LeafInserted {
+            tree: name,
+            index,
+            leaf,
+            root: &root,
+        }
+        .emit();
         (index, root)
     }
 }
@@ -175,7 +181,9 @@ mod tests {
     /// A fresh mocked call that keeps the storage written so far: each call has its own gas and log limit, as each NEAR
     /// call has.
     fn call() {
-        testing_env!(VMContextBuilder::new().current_account_id("vault.test.near".parse().unwrap()).build());
+        testing_env!(VMContextBuilder::new()
+            .current_account_id("vault.test.near".parse().unwrap())
+            .build());
     }
 
     fn n(x: u64) -> Bytes32 {
@@ -188,7 +196,10 @@ mod tests {
 
     fn panics_with(f: impl FnOnce() + std::panic::UnwindSafe, want: &str) {
         let err = std::panic::catch_unwind(f).expect_err("must refuse");
-        let msg = err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()));
+        let msg = err
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()));
         assert!(msg.as_deref().unwrap_or("").contains(want), "want {want}, got {msg:?}");
     }
 
@@ -207,7 +218,10 @@ mod tests {
         ];
         for (i, (leaf, (depth, root))) in [l1, l2, l3, l4, l5].iter().zip(want).enumerate() {
             assert_eq!(v.insert_commitment(&mut h, leaf), (i as u64, root));
-            assert_eq!((v.state_tree.size, v.state_tree.depth, v.state_tree.root()), (i as u64 + 1, depth, root));
+            assert_eq!(
+                (v.state_tree.size, v.state_tree.depth, v.state_tree.root()),
+                (i as u64 + 1, depth, root)
+            );
             assert_eq!(v.state_tree.leaf_at(i as u64), Some(*leaf));
             assert_eq!(v.state_leaf_index.get(leaf), Some(i as u64));
         }
@@ -239,14 +253,34 @@ mod tests {
         call();
         // the first root, a root 1,000 inserts old (VT-S06) and the newest are all known, in their own tree only
         for i in [0, 99, 1_099] {
-            assert!(v.state_tree.is_known_root(&state[i]) && v.label_tree.is_known_root(&label[i]), "{i}");
-            assert!(!v.state_tree.is_known_root(&label[i]) && !v.label_tree.is_known_root(&state[i]), "{i}");
+            assert!(
+                v.state_tree.is_known_root(&state[i]) && v.label_tree.is_known_root(&label[i]),
+                "{i}"
+            );
+            assert!(
+                !v.state_tree.is_known_root(&label[i]) && !v.label_tree.is_known_root(&state[i]),
+                "{i}"
+            );
         }
-        assert!(state.iter().all(|r| v.state_tree.is_known_root(r)), "no state root is ever evicted");
-        assert!(label.iter().all(|r| v.label_tree.is_known_root(r)), "no label root is ever evicted");
+        assert!(
+            state.iter().all(|r| v.state_tree.is_known_root(r)),
+            "no state root is ever evicted"
+        );
+        assert!(
+            label.iter().all(|r| v.label_tree.is_known_root(r)),
+            "no label root is ever evicted"
+        );
         assert!(!v.state_tree.is_known_root(&[0; 32]) && !v.label_tree.is_known_root(&[0; 32]));
         assert!(!v.state_tree.is_known_root(&n(5_000_000)), "an unknown root");
-        assert_eq!((v.state_tree.size, v.state_tree.depth, v.label_tree.size, v.label_tree.depth), (1_100, 11, 1_100, 11));
+        assert_eq!(
+            (
+                v.state_tree.size,
+                v.state_tree.depth,
+                v.label_tree.size,
+                v.label_tree.depth
+            ),
+            (1_100, 11, 1_100, 11)
+        );
     }
 
     #[test]
@@ -257,7 +291,14 @@ mod tests {
         v.insert_commitment(&mut h, &n(7));
         let p = field::to_be(&field::P);
         let max = [0xff; 32];
-        let before = |v: &Vault| (v.state_tree.size, v.state_tree.depth, v.state_tree.root(), env::storage_usage());
+        let before = |v: &Vault| {
+            (
+                v.state_tree.size,
+                v.state_tree.depth,
+                v.state_tree.root(),
+                env::storage_usage(),
+            )
+        };
         let start = before(&v);
         for (leaf, want) in [
             (n(7), "LeafAlreadyExists"),
@@ -305,8 +346,8 @@ mod tests {
         assert_eq!((size, depth, side), (1u64 << 32, 32, snapshot));
         // the 2^32-th leaf (index 2^32 - 1) still goes in at depth 32
         let (mut size, mut depth) = ((1u64 << 32) - 1, 32u8);
-        for level in 0..32 {
-            side[level] = n(level as u64 + 100);
+        for (level, node) in side.iter_mut().take(32).enumerate() {
+            *node = n(level as u64 + 100);
         }
         let root = insert(&mut PoseidonT3::new(), &mut size, &mut depth, &mut side, &n(1));
         assert_eq!((size, depth, side[32]), (1u64 << 32, 32, root));

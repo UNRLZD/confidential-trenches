@@ -74,11 +74,18 @@ fn rust_tree_roots_equal_lean_imt_after_every_insert() {
         for n in 1..=count {
             let leaf = rng.leaf();
             if n == 1 {
-                assert_eq!(dec(&leaf), s["first_leaf"].as_str().unwrap(), "seed {seed}: the leaves differ from the script's");
+                assert_eq!(
+                    dec(&leaf),
+                    s["first_leaf"].as_str().unwrap(),
+                    "seed {seed}: the leaves differ from the script's"
+                );
             }
             root = insert(&mut h, &mut size, &mut depth, &mut side, &leaf);
             assert_eq!((size, depth), (n, ceil_log2(n)), "seed {seed} size {n}: size or depth");
-            assert_eq!(side[depth as usize], root, "seed {seed} size {n}: the root is the side node at the depth");
+            assert_eq!(
+                side[depth as usize], root,
+                "seed {seed} size {n}: the root is the side node at the depth"
+            );
             chain = h.hash(&chain, &root);
             if let Some(want) = checkpoints.get(&n.to_string()) {
                 assert_eq!(dec(&root), want.as_str().unwrap(), "seed {seed}: the root at size {n}");
@@ -87,11 +94,25 @@ fn rust_tree_roots_equal_lean_imt_after_every_insert() {
         }
         assert_eq!(seen, checkpoints.len(), "seed {seed}: every checkpoint reached");
         assert_eq!(dec(&root), s["final_root"].as_str().unwrap(), "seed {seed}: final root");
-        assert_eq!(depth as u64, s["final_depth"].as_u64().unwrap(), "seed {seed}: final depth");
-        assert_eq!(dec(&chain), s["chain"].as_str().unwrap(), "seed {seed}: a root after some insert differs");
-        println!("seed {seed}: {count} inserts, depth {depth}, root {}, chain equal", dec(&root));
+        assert_eq!(
+            depth as u64,
+            s["final_depth"].as_u64().unwrap(),
+            "seed {seed}: final depth"
+        );
+        assert_eq!(
+            dec(&chain),
+            s["chain"].as_str().unwrap(),
+            "seed {seed}: a root after some insert differs"
+        );
+        println!(
+            "seed {seed}: {count} inserts, depth {depth}, root {}, chain equal",
+            dec(&root)
+        );
         total += count;
     }
-    assert_eq!(sequences[0]["count"], 100_000, "the longest sequence holds 100,000 leaves");
+    assert_eq!(
+        sequences[0]["count"], 100_000,
+        "the longest sequence holds 100,000 leaves"
+    );
     println!("VT-P01: {total} inserts over 9 sequences, every root equal to @zk-kit/lean-imt and the kit's VaultTree");
 }
