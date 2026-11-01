@@ -3,7 +3,7 @@
 // own build under its own _headers (CSP with Trusted Types, Integrity-Policy): create, reload, sign out, sign in
 // (scripts/live-checks/wallet-passkey-prf.mjs's steps, and its verdict), then the account the page shows is the kit's
 // own derivation (kit-freeze-keys: entropyFromPrf, the 12 words, seed64, T_0) of that passkey's PRF output, and the kit
-// still gives A.8's vectors. A no-PRF authenticator opens the no-PRF path. Run it through scripts/heavy.sh (Playwright).
+// still gives A.8's vectors. A no-PRF authenticator opens the no-PRF path. A Playwright run in headless Chromium.
 // The PRF output stays in this process's memory; nothing secret is printed. exit 0 all as expected, 1 otherwise.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

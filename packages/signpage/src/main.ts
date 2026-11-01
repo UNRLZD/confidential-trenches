@@ -33,7 +33,7 @@ import { activationGuard, type Press } from "./guard.ts";
 type Seed = { v: 1; entropy: Uint8Array; source: "prf" | "random" | "code" | "wallet"; code_saved: boolean; created_ms: number };
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error";
 
-// DRAFT COPY: every visible word below waits for the owner's words pass.
+// DRAFT COPY: the final words are not set yet.
 const WORDS = {
   create: "Create passkey",
   use: "Use passkey",
