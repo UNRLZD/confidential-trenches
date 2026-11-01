@@ -9,7 +9,7 @@
 
 import type { Chain, OrderTrigger } from "../orders/record.ts";
 
-/** The fifteen request kinds, app to page. */
+/** The seventeen request kinds, app to page. The last two, nav and reload, are to SIGN_HOST's shell (card signpage-shell). */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
   "deposit.confirm",
@@ -26,6 +26,8 @@ export const SIGNPAGE_KINDS = [
   "signout",
   "restore",
   "state",
+  "nav",
+  "reload",
 ] as const;
 
 export type SignpageKind = (typeof SIGNPAGE_KINDS)[number];
@@ -95,6 +97,14 @@ export interface SignpageParams {
   restore: Record<never, never>;
   /** Read the state. Signs nothing. */
   state: Record<never, never>;
+  /**
+   * Where the app is now: its path and query on APP_HOST. The shell puts it in the top window's address with
+   * history.replaceState and never navigates, so the address bar, a reload and a shared link follow the app. A path
+   * that is not APP_HOST's own path and query, or over SIGNPAGE_MAX_NAV_BYTES of UTF-8, is refused not_allowed.
+   */
+  nav: { path: string };
+  /** Reload the top window: the shell and the app in it (a reload of the frame alone would keep the old shell). */
+  reload: Record<never, never>;
 }
 
 export interface TxRef {
@@ -133,6 +143,8 @@ export interface SignpageResults {
   signout: OpenResult;
   restore: { stage: "started" };
   state: SignpageState;
+  nav: Record<never, never>;
+  reload: Record<never, never>;
 }
 
 /**

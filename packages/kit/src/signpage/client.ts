@@ -1,6 +1,6 @@
 // The signing-page client (app.md §2.1 items 2-4, row A1.2, app.md:1435): the app's only way to SIGN_HOST. It mounts
 // one hidden iframe of SIGN_HOST's release URL, waits for the page's `ready` and then for that frame's first `state`
-// answer (READY: the state is known, BAR-09, app.md:1107), and then sends the fifteen kinds of messages.ts and reads
+// answer (READY: the state is known, BAR-09, app.md:1107), and then sends the seventeen kinds of messages.ts and reads
 // their answers. Every message from the page is dropped, with no change, unless its `origin` is SIGN_HOST's exactly,
 // its `source` is the current iframe's window, its shape passes the schema of what it claims to be (schema.ts), and an
 // answer's id is one this client is waiting for. The app never re-sends a kind on its own (APU-03, app.md:1328).
@@ -63,6 +63,9 @@ export const SIGNPAGE_TIMEOUT_MS = {
   // restore reports `progress` at least every 10 s; a screen shows it stalled, the client never ends it
   restore: null,
   state: 5_000,
+  // the shell's (card signpage-shell): answered at once
+  nav: 5_000,
+  reload: 5_000,
 } as const satisfies Record<SignpageKind, number | null>;
 
 /** After one of these times out, the client asks `state` again (a new `state` request); the kind itself is never re-sent. */
