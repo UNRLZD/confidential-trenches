@@ -16,7 +16,7 @@
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
     "test:e2e": "node test/store.e2e.mjs",
-    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts src/store/index.ts src/notes/secrets.ts test/derive.test.ts test/store.test.ts test/note-secrets.test.ts"
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts src/store/index.ts src/notes/secrets.ts src/deposit/account.ts test/derive.test.ts test/store.test.ts test/note-secrets.test.ts test/deposit-account.test.ts"
   },
   "dependencies": {
     "@blindfill/kit": "workspace:*",

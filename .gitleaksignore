@@ -1,0 +1,2 @@
+# a public testnet account id (bf-usdc-20261101t022248.testnet, card wallet-deposit-account), before its gitleaks:allow mark
+8b956213a605a8d679e9f1cf18f307ea994fc884:packages/wallet/src/deposit/account.ts:generic-api-key:53
