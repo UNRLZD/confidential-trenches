@@ -523,6 +523,9 @@ test("bind calls: written only on an INCOMING note, a compare-and-set on the cou
   assert.equal(t.puts() - p1, 0);
   assert.equal(stale.calls!.length, 1);
   assert.equal(stale.calls![0]!.max_block_height, 100n);
+  const ahead = await t.ns.addCall(n.id, aCall(5n, 200n), 2); // a count the note does not hold: not written either
+  assert.equal(ahead.calls!.length, 1);
+  assert.equal(t.puts() - p1, 0);
   // a same-nonce re-sign with a new window, then a hash heard for it, once
   await t.ns.addCall(n.id, aCall(5n, 200n), 1);
   await t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 200n }, HASH(1));

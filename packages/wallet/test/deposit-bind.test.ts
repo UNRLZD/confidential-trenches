@@ -1178,6 +1178,7 @@ test("R2-5: txCarriesFinal is true on a valid view and false when any one field 
     ["another window", (v) => (d(v).delegate_action.max_block_height += 1)],
     ["no inner action", (v) => (d(v).delegate_action.actions = [])],
     ["two inner actions", (v) => d(v).delegate_action.actions.push(d(v).delegate_action.actions[0])],
+    ["an inner action with a second key", (v) => (d(v).delegate_action.actions[0].Transfer = { deposit: "1" })],
     ["another method", (v) => (d(v).delegate_action.actions[0].FunctionCall.method_name = "ft_transfer")],
     ["other args", (v) => (d(v).delegate_action.actions[0].FunctionCall.args = "e30=")],
     ["other gas", (v) => (d(v).delegate_action.actions[0].FunctionCall.gas += 1)],
@@ -1406,4 +1407,36 @@ test("X2 (kills Q3): after a reload with [A dead, A2 at the next nonce run but n
   resetBindSession(); // a reload
   await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /caller stopped/);
   assert.deepEqual(t.sent.map((s) => s.nonce - A.call.nonce), [], "a new call on P went out while A2's USDC is on its way to the vault");
+});
+
+// Round 4 (mutate4b Q7d): the other notes are searched for U's own calls only. A call of another id at the same nonce
+// proves nothing about U's key: while U's own call may have run with its USDC on the way, nothing new is signed on P.
+test("Q7d: another id's FINAL call at the refused nonce is not the call that used U's nonce: nothing new on P", async () => {
+  const t = await setup(["lost", "bad_nonce"], () => () => {});
+  const other = await t.store.planDeposit(2n, pc);
+  await t.store.move(other.id, "PLANNED", "INCOMING");
+  const n0 = t.chain.a.nonce;
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => {
+    t.chain.blocks(10n);
+    if (++ticks === 1) {
+      t.chain.a.nonce = t.chain.b.nonce = n0 + 1n; // U's lost call ran: its USDC is on its way to the vault
+      t.chain.balance -= AMOUNT;
+    }
+    if (ticks === 60) ac.abort(new Error("caller stopped"));
+  };
+  const p = bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal });
+  while (t.sent.length === 0) await turn();
+  // another id's call at the same nonce (its bytes U's, as a planted record could hold), FINAL with its Delegate run
+  const A = t.sent[0]!;
+  const id2 = "cd".repeat(32);
+  const h = base58.encode(new Uint8Array(32).fill(0x55));
+  t.chain.txs.set(h, { ...A, sender: id2 });
+  t.chain.finals.add(h);
+  const calls = (await t.store.get(t.note.id))!.calls!;
+  await t.store.addCall(other.id, { ...stored(calls[0]!), sender_id: id2 }, 0);
+  await t.store.addCallTx(other.id, calls[0]!, h);
+  await assert.rejects(p, /caller stopped/);
+  assert.ok(t.sent.every((s) => s.nonce === n0 + 1n), t.sent.map((s) => s.nonce).join(","));
 });
