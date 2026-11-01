@@ -484,17 +484,26 @@ export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string;
   const pages = new Map<string, { depositor: string; value: bigint }>();
   let next = 0;
   const PAGE = 100;
-  const deposit = async (precommitment: bigint) => {
+  // One index read at a time: two at once would each move the cursor past the same page and skip the rows after it
+  // (sandbox case c: a landed deposit read as a failed send).
+  let indexing: Promise<unknown> = Promise.resolve();
+  const catchUp = async () => {
     for (;;) {
-      const page = await both(async (r, h) => view(r, h, cfg.vault, "deposits", { from: next, limit: PAGE }));
+      const from = next;
+      const page = await both(async (r, h) => view(r, h, cfg.vault, "deposits", { from, limit: PAGE }));
       if (!Array.isArray(page) || page.length > PAGE) throw new Error("deposits: not a page");
       for (const x of page) {
         if (!isObj(x) || typeof x.precommitment !== "string" || typeof x.depositor !== "string") throw new Error("deposits: not a deposit");
         pages.set(x.precommitment, { depositor: x.depositor, value: u128(x.value, "deposits.value") });
       }
-      next += page.length;
-      if (page.length < PAGE) break;
+      next = from + page.length;
+      if (page.length < PAGE) return;
     }
+  };
+  const deposit = async (precommitment: bigint) => {
+    const run = indexing.then(catchUp);
+    indexing = run.catch(() => undefined);
+    await run;
     return pages.get(precommitment.toString()) ?? null;
   };
   return {

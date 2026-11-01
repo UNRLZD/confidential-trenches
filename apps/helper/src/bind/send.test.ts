@@ -20,6 +20,7 @@ import {
   base58decode,
   carryDeposit,
   createFileStore,
+  createSendReads,
   encodeAction,
   insertGrows,
   prepayBytes,
@@ -535,4 +536,20 @@ test("(f) USDC paused refuses its views: the hold answers token_halted before ch
   const a = await w.carry(next(w));
   assert.deepEqual([a.status, code(a)], [503, "token_halted"]);
   assert.equal(w.chain.txs.length, 0);
+});
+
+test("createSendReads: the deposits index read twice at once skips no row (sandbox case c: a landed deposit was read as a failed send)", async () => {
+  const rows = [1n, 2n, 3n].map((p, i) => ({ index: i, precommitment: p.toString(), label: "0", value: "5", leaf_index: i, depositor: "a.near" }));
+  const rpc = async (method: string, params: unknown): Promise<unknown> => {
+    if (method === "block") return { header: { height: 50 } };
+    const q = params as { method_name: string; args_base64: string };
+    assert.equal(q.method_name, "deposits");
+    const { from, limit } = JSON.parse(Buffer.from(q.args_base64, "base64").toString()) as { from: number; limit: number };
+    await new Promise((r) => setTimeout(r, 5));
+    return { result: [...Buffer.from(JSON.stringify(rows.slice(from, from + limit)))] };
+  };
+  const reads = createSendReads([rpc, rpc], { vault: VAULT, token: VAULT_TOKEN });
+  assert.deepEqual(await Promise.all([reads.pUsed(9n), reads.pUsed(9n)]), [false, false]);
+  rows.push({ index: 3, precommitment: "9", label: "0", value: "5", leaf_index: 3, depositor: "u.near" });
+  assert.deepEqual(await reads.deposit(9n), { depositor: "u.near", value: 5n });
 });
