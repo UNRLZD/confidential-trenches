@@ -75,6 +75,9 @@ class Chain {
   /** What the next delegate send does, then the ones after; the last repeats. */
   fates: SendFate[] = ["lands"];
   prepayFails = false;
+  /** The next prepay's outcome is not read (a timeout); the chain ran it as prepayFails says. */
+  prepayUnknown = false;
+  outcomes = new Map<string, TxOutcome>();
   statuses: TokenStatus[] = [OPEN];
   statusAsks = 0;
   /** Runs inside a relayer send, before its outcome (a race). */
@@ -97,17 +100,27 @@ class Chain {
     return {
       account: "bind.test.near",
       balance: async () => this.balance,
+      status: async (h) => this.outcomes.get(h) ?? { kind: "unknown", tx_hash: h, why: "not found" },
       send: async (action, before): Promise<TxOutcome> => {
         const hash = base58(createHash("sha256").update(`tx${this.n++}`).digest());
         before(hash);
         await this.during?.();
         if (action.kind === "storage_prepay") {
           this.txs.push({ action, hash, height: ++this.final });
-          if (this.prepayFails) return { kind: "final", tx_hash: hash, receipts: [{ executor: VAULT, ok: false, failure: "InsufficientStorageDeposit" }] };
-          const key = action.precommitment.toString();
-          this.prepaid.set(key, (this.prepaid.get(key) ?? 0n) + action.bytes);
-          this.final += this.prepayAdvance - 1n;
-          return { kind: "final", tx_hash: hash, receipts: [{ executor: VAULT, ok: true, failure: "" }, { executor: "bind.test.near", ok: true, failure: "" }] };
+          let out: TxOutcome;
+          if (this.prepayFails) out = { kind: "final", tx_hash: hash, receipts: [{ executor: VAULT, ok: false, failure: "InsufficientStorageDeposit" }] };
+          else {
+            const key = action.precommitment.toString();
+            this.prepaid.set(key, (this.prepaid.get(key) ?? 0n) + action.bytes);
+            this.final += this.prepayAdvance - 1n;
+            out = { kind: "final", tx_hash: hash, receipts: [{ executor: VAULT, ok: true, failure: "" }, { executor: "bind.test.near", ok: true, failure: "" }] };
+          }
+          this.outcomes.set(hash, out);
+          if (this.prepayUnknown) {
+            this.prepayUnknown = false;
+            return { kind: "unknown", tx_hash: hash, why: "timeout" };
+          }
+          return out;
         }
         const fate = this.fates.length > 1 ? this.fates.shift()! : this.fates[0]!;
         if (fate === "not_included") return { kind: "refused", tx_hash: hash, why: "InvalidNonce" };
@@ -442,4 +455,61 @@ test("base58decode inverts the checks' base58", () => {
   const b = createHash("sha256").update("x").digest();
   assert.deepEqual(Buffer.from(base58decode(base58(b))), b);
   assert.deepEqual(Buffer.from(base58decode("11" + base58(Buffer.from([1, 2])))), Buffer.from([0, 0, 1, 2]));
+});
+
+test("R2: a front-run on U's P (a stranger's deposit names it) frees U for its next P", async () => {
+  const w = world();
+  w.chain.fates = ["refused_by_vault"];
+  ok(await w.carry(next(w)));
+  w.chain.pages.set(P.toString(), { depositor: "stranger.near", value: AMOUNT });
+  ok(await w.carry(signed(w.u, P + 1n, w.chain.nonce.get(w.u.id)! + 1n, w.chain.final + 100n)));
+  assert.equal(w.store.get(w.u.id)!.p, (P + 1n).toString());
+});
+
+test("a prepay whose outcome was not read: its bytes count toward the cap; the next call reads it first and does not prepay again", async () => {
+  const w = world();
+  w.chain.prepayUnknown = true;
+  assert.equal((await w.carry(next(w)).catch((e: Error) => e.message)) as string, "storage_prepay: no FINAL answer: timeout");
+  assert.equal(w.store.get(w.u.id)!.prepaid_bytes, 756);
+  ok(await w.carry(next(w)));
+  assert.equal(w.chain.prepays().length, 1);
+  assert.equal(w.store.get(w.u.id)!.prepays[0]!.ok, true);
+  // one that failed on chain counts and closes P
+  const v = world();
+  v.chain.prepayUnknown = true;
+  v.chain.prepayFails = true;
+  await assert.rejects(v.carry(next(v)));
+  v.chain.prepayFails = false;
+  assert.equal(code(await v.carry(next(v))), "p_used");
+  assert.deepEqual([v.store.get(v.u.id)!.failed, v.store.get(v.u.id)!.prepaid_bytes, v.chain.sends().length], [1, 0, 0]);
+});
+
+test("R1 at once: two senders on one P, each past check 7 before either is bound: one is carried, the other gets p_bound", async () => {
+  const w = world();
+  const x = newKey();
+  w.chain.nonce.set(x.id, 5n);
+  w.chain.usdc.set(x.id, 10n * AMOUNT);
+  const answers = await Promise.all([w.carry(next(w)), w.carry(signed(x, P, 6n, w.chain.final + 100n))]);
+  assert.deepEqual(answers.map(code).sort(), ["ok", "p_bound"]);
+  assert.equal(w.chain.prepays().length, 1);
+});
+
+test("R3 before every send: a third count written before a crash (struck not yet written) still stops the next send", async () => {
+  const w = world();
+  w.chain.fates = ["refused_by_vault"];
+  ok(await w.carry(next(w)));
+  ok(await w.carry(next(w)));
+  w.chain.during = async () => {
+    if (w.chain.txs.length === 0 || w.chain.during === undefined) return;
+    w.chain.during = undefined;
+    throw new Error("crash after the count"); // the third send's count is written, its outcome never read
+  };
+  await assert.rejects(w.carry(next(w)), /crash/);
+  const rec = w.store.get(w.u.id)!;
+  assert.deepEqual([rec.failed, rec.struck], [3, false]);
+  const n = w.chain.sends().length;
+  const a = await w.carry(signed(w.u, P, w.chain.nonce.get(w.u.id)! + 1n, w.chain.final + 101n)); // a re-sign, other bytes
+  assert.deepEqual([a.status, code(a)], [403, "sender_struck"]);
+  assert.equal(w.chain.sends().length, n);
+  assert.equal(w.store.get(w.u.id)!.struck, true);
 });

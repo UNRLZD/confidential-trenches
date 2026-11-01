@@ -79,6 +79,8 @@ export type Relayer = {
   balance(): Promise<bigint>;
   /** Signs one transaction of one action; `before` runs with its hash before it is sent (the carried index). */
   send(action: RelayerAction, before: (txHash: string) => void): Promise<TxOutcome>;
+  /** A transaction of ours read at FINAL by its hash; "unknown" until then. */
+  status(txHash: string): Promise<TxOutcome>;
 };
 
 export type SendDeps = {
@@ -239,7 +241,8 @@ export function ledgerOf(store: DepositStore, reads: SendReads): BindLedger {
     async openP(u) {
       const rec = store.get(u);
       if (rec === null || rec.landed) return null;
-      if ((await reads.deposit(BigInt(rec.p)))?.depositor === u) {
+      // the pages hold U's P, for U or for a stranger who front-ran it: U's next P may open (R2)
+      if ((await reads.deposit(BigInt(rec.p))) !== null) {
         store.put({ ...rec, landed: true });
         return null;
       }
@@ -305,19 +308,34 @@ async function carryChecked(deps: SendDeps, d: Checked, sha: string): Promise<An
   const key: KeyRead = await reads.accessKey(u, d.public_key);
   if (key.kind !== "key" || d.nonce <= key.nonce) return no("bad_nonce");
 
-  // 6. R7's record, durable before any prepay, then R1's binding of P to U.
+  // 6. R1's binding of P to U (create-if-absent on P), then R7's record (create-if-absent on U), both durable before
+  // any prepay. P is bound first, so a record never names a P bound to another U.
+  if (store.bind(p, u) !== u) return no("p_bound");
   const fresh: DepositRecord = { u, p: p.toString(), prepaid_bytes: 0, failed: 0, struck: false, landed: false, p_closed: false, prepays: [], sends: [] };
   let { rec } = store.create(fresh);
   if (rec.struck) return no("sender_struck");
   if (rec.p !== fresh.p) {
-    // R2: U moves to a new P only once the pages hold the old one for U.
-    if (!rec.landed && (await reads.deposit(BigInt(rec.p)))?.depositor !== u) return no("prepay_open");
+    // R2: U moves to a new P only once the pages hold the old one (for U, or for a stranger who front-ran it).
+    if (!rec.landed && (await reads.deposit(BigInt(rec.p))) === null) return no("prepay_open");
     rec = fresh;
     store.put(rec);
   }
-  if (rec.landed) return no("p_used");
-  if (store.bind(p, u) !== u) return no("p_bound");
-  if (rec.p_closed) return no("p_used");
+  if (rec.landed || rec.p_closed) return no("p_used");
+
+  // A prepay of ours on P whose outcome was not read: read it now; until it is known, hold (it may still land, and
+  // its bytes already count toward the 904 B cap).
+  for (const pre of rec.prepays.filter((x) => x.ok === null)) {
+    const out = await relayer.status(pre.tx_hash);
+    if (out.kind !== "final") throw new Error(`storage_prepay ${pre.tx_hash}: outcome not known yet`);
+    const ok = out.receipts.some((r) => r.executor === deps.cfg.vault) && out.receipts.every((r) => r.ok);
+    rec = { ...rec, prepays: rec.prepays.map((x) => (x.tx_hash === pre.tx_hash ? { ...x, ok } : x)) };
+    if (!ok) {
+      const failed = rec.failed + 1;
+      rec = { ...rec, prepaid_bytes: rec.prepaid_bytes - pre.bytes, failed, struck: failed >= MAX_FAILED_SENDS, p_closed: true };
+    }
+    store.put(rec);
+    if (!ok) return no("p_used");
+  }
 
   // 7. (h) the prepay, topped up to 904 B on a retry, never above 904 B on P. prepaid_bytes is written before the
   // prepay goes and taken back only on its FINAL failure, so a prepay whose outcome is unknown still counts toward the
@@ -580,6 +598,14 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], account: string, secret
     async balance() {
       const a = (await rpcs[0]("query", { request_type: "view_account", finality: "final", account_id: account })) as { amount?: unknown };
       return u128(a.amount, "relayer amount");
+    },
+    async status(txHash) {
+      try {
+        const r = await rpcs[0]("tx", { tx_hash: txHash, sender_account_id: account, wait_until: "FINAL" });
+        return { kind: "final", tx_hash: txHash, receipts: receiptsOf(r) };
+      } catch (e) {
+        return { kind: "unknown", tx_hash: txHash, why: e instanceof Error ? e.message : String(e) };
+      }
     },
     send(action, before) {
       const run = queue.then(() => one(action, before));
