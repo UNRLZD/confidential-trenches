@@ -148,6 +148,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: every workspace package's test script
         run: pnpm -r --if-present --no-bail run test
+      - name: every workspace package's typecheck
+        run: pnpm -r --if-present run typecheck
+      - name: the deploy gate's own tests
+        run: node --test apps/terminal/scripts/check-deploy.test.ts
+      - name: every live check replays its recorded answers
+        run: node --test scripts/live-checks/*.test.mjs
       # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins
       # one. rustup is on the ubuntu-24.04 image (actions/runner-images Ubuntu2404-Readme.md, read 2026-10-31 19:32Z).
       - name: the vault's own tests, without the sandbox suite
