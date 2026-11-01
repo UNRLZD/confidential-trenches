@@ -187,14 +187,13 @@ async fn harness_detached_callback_panic_fails_all_ok() -> R<()> {
 /// callback panic.
 #[tokio::test]
 async fn harness_call_fails_closed() -> R<()> {
-    let h = Harness::start().await?;
+    let h = Harness::with_vault_and_mock_token().await?;
     let p = probe(&h, "probe").await?;
-    // the careless test: send, then check a balance only
+    // the careless test: send, then check a token balance only (the probe holds none, before and after)
     async fn careless(h: &Harness, p: &Account) -> R<()> {
-        let before = h.near_balance(p.id()).await?;
         let args = json!({"first_fails": false, "boom": true, "returned": false});
         let _ = h.call(&h.root, p.id(), "probe_chain", args, ZERO, Gas::from_tgas(50)).await?;
-        assert!(h.near_balance(p.id()).await? >= before, "the probe lost NEAR");
+        assert_eq!(h.token_balance(p.id()).await?, 0, "the probe's token balance moved");
         Ok(())
     }
     let r = careless(&h, &p).await;
