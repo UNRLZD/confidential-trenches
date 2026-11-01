@@ -28,6 +28,34 @@ test("recorded bad run (the build before this card): FAIL, no state event after 
     assert.ok(r.lines.some((l) => l.startsWith(`BAD ${s}`)), `${s}\n${r.lines.join("\n")}`);
 });
 
+test("recorded bad run m4 (the frame's main.ts reads the seed): FAIL on the frames' IndexedDB reads only", () => {
+  const r = judge(ANSWERS.m4);
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(bad.length, 1, r.lines.join("\n"));
+  assert.match(bad[0], /^BAD no SIGN_HOST frame reads the seed record .* get meta\/seed/);
+});
+
+test("recorded bad run m10 (no backfill at the top-level load): FAIL on the reload only", () => {
+  const r = judge(ANSWERS.m10);
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(bad.length, 1, r.lines.join("\n"));
+  assert.match(bad[0], /^BAD the top tab's reload brings back way passkey and code_saved true/);
+});
+
+test("a frame that reads the seed record fails, and so does a run whose frames the spy never reached", () => {
+  const a = clone(GOOD);
+  a.frames[1].seedReads.push("get meta/seed");
+  assert.equal(judge(a).ok, false);
+  const b = clone(GOOD);
+  b.frames[0] = { calls: 0, seedReads: null };
+  assert.equal(judge(b).ok, false);
+  const c = clone(GOOD);
+  c.frames = c.frames.slice(0, 1);
+  assert.equal(judge(c).ok, false);
+});
+
 test("a state that carries one more key fails", () => {
   const rec = clone(GOOD);
   for (const e of events(rec)) e.data.state.entropy = "7f".repeat(16);
