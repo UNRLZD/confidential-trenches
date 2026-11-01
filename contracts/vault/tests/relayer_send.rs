@@ -531,11 +531,15 @@ async fn twin(kind: TokenKind) -> R<()> {
         assert!(same || busy, "twin: an answer neither 200 with {send} nor 400 in_flight: {st} {body}");
     }
     let rec = &out["record"];
-    assert_eq!(rec["failed"], 0);
-    assert_eq!(hashes(&rec["sends"]), vec![send.clone()], "twin: sends {}", rec["sends"]);
+    // the chain first, then the record
+    let rows = w.rows_for(p).await?;
+    println!("[c {kind:?}] on chain: P's rows {rows:?}; U's balance {} (was {ub0}); relayer nonce +{}", w.h.token_balance(u.acct.id()).await?, w.relayer_nonce().await? - rn0);
     assert_eq!(w.relayer_nonce().await?, rn0 + 2, "twin: not exactly one prepay and one send");
-    assert_eq!(w.rows_for(p).await?.len(), 1);
+    assert_eq!(rows.len(), 1, "twin: P not in the pages once");
     assert_eq!(w.h.token_balance(u.acct.id()).await?, ub0 - AMOUNT);
+    assert_eq!(hashes(&rec["sends"]), vec![send.clone()], "twin: sends {}", rec["sends"]);
+    assert_eq!(rec["failed"], 0, "twin: a send that landed counted as failed: record {rec}");
+    assert_eq!(rec["landed"], true, "twin: record {rec}");
     let sp = spend(&w, &hashes(&rec["prepays"]), &[send], &u.id, p).await?;
     let rb1 = w.relayer_balance().await?;
     report(&w, "c", rb0, rb1, &sp);
