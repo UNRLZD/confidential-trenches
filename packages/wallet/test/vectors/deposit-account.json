@@ -1,20 +1,18 @@
 {
- "recorded_at": "2026-11-01T07:26:42.357Z",
- "rpcs": {
-  "a": "https://rpc.mainnet.fastnear.com",
-  "b": "https://near.drpc.org"
- },
+ "recorded_at": "2026-11-01T08:03:14.096Z",
  "good": "45d8d8d26a4815e9e7f3b383a123aef5f3839dedc620eae54ba72f34816966ed",
  "test_u": "8b140b3aae7b2bda85315a8752dbff16cb1fce531832ab51a0a9c206b195df33",
  "answers": {
   "keys_good": {
+   "for": "45d8d8d26a4815e9e7f3b383a123aef5f3839dedc620eae54ba72f34816966ed",
    "a": {
+    "url": "https://rpc.mainnet.fastnear.com",
     "status": 200,
     "json": {
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "BbosuvehA5Aus5JgTZLEaprJ8R8oX8r9gb2hH3XzBuon",
-      "block_height": 222537878,
+      "block_hash": "4G1yHbugjptB28DY58JoiWGWESERVrnMBR7FKtaCgjP6",
+      "block_height": 222541714,
       "keys": [
        {
         "access_key": {
@@ -29,13 +27,14 @@
     }
    },
    "b": {
+    "url": "https://near.drpc.org",
     "status": 200,
     "json": {
      "id": "wallet-deposit-account",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
-      "block_height": 222537879,
+      "block_hash": "23qBZSFDa8jBZgNe6caTsxXwby7C1xZ5Gvt9Leoz7psW",
+      "block_height": 222541715,
       "keys": [
        {
         "access_key": {
@@ -50,13 +49,15 @@
    }
   },
   "keys_fa_fc": {
+   "for": "35b4d174e4b3fe6f9dd9b60d0046ccc0a02dadc9981a637f127233da5657cbb7",
    "a": {
+    "url": "https://rpc.mainnet.fastnear.com",
     "status": 200,
     "json": {
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
-      "block_height": 222537879,
+      "block_hash": "23qBZSFDa8jBZgNe6caTsxXwby7C1xZ5Gvt9Leoz7psW",
+      "block_height": 222541715,
       "keys": [
        {
         "access_key": {
@@ -86,13 +87,14 @@
     }
    },
    "b": {
+    "url": "https://near.drpc.org",
     "status": 200,
     "json": {
      "id": "wallet-deposit-account",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
-      "block_height": 222537879,
+      "block_hash": "23qBZSFDa8jBZgNe6caTsxXwby7C1xZ5Gvt9Leoz7psW",
+      "block_height": 222541715,
       "keys": [
        {
         "access_key": {
@@ -122,13 +124,15 @@
    }
   },
   "keys_fa_fa": {
+   "for": "0d04229851cfaececfd8555b8951387197dee82f15d5f22a725e1d14b948c68a",
    "a": {
+    "url": "https://rpc.mainnet.fastnear.com",
     "status": 200,
     "json": {
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
-      "block_height": 222537879,
+      "block_hash": "4ZMG6eQ1YRdekL9u33aDpNhKLp6VTFdzJ5yMDDNBicFf",
+      "block_height": 222541716,
       "keys": [
        {
         "access_key": {
@@ -150,13 +154,14 @@
     }
    },
    "b": {
+    "url": "https://near.drpc.org",
     "status": 200,
     "json": {
      "id": "wallet-deposit-account",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
-      "block_height": 222537879,
+      "block_hash": "4ZMG6eQ1YRdekL9u33aDpNhKLp6VTFdzJ5yMDDNBicFf",
+      "block_height": 222541716,
       "keys": [
        {
         "access_key": {
@@ -178,39 +183,44 @@
    }
   },
   "keys_no_account": {
+   "for": "8b140b3aae7b2bda85315a8752dbff16cb1fce531832ab51a0a9c206b195df33",
    "a": {
+    "url": "https://rpc.mainnet.fastnear.com",
     "status": 200,
     "json": {
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
-      "block_height": 222537879,
+      "block_hash": "4ZMG6eQ1YRdekL9u33aDpNhKLp6VTFdzJ5yMDDNBicFf",
+      "block_height": 222541716,
       "keys": []
      },
      "id": "wallet-deposit-account"
     }
    },
    "b": {
+    "url": "https://near.drpc.org",
     "status": 200,
     "json": {
      "id": "wallet-deposit-account",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
-      "block_height": 222537880,
+      "block_hash": "95WNHWFvH19taedUnzBE7sULCQXrB9a5DgG2YReiEhkf",
+      "block_height": 222541717,
       "keys": []
      }
     }
    }
   },
   "balance_good": {
+   "for": "45d8d8d26a4815e9e7f3b383a123aef5f3839dedc620eae54ba72f34816966ed",
    "a": {
+    "url": "https://rpc.mainnet.fastnear.com",
     "status": 200,
     "json": {
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
-      "block_height": 222537880,
+      "block_hash": "95WNHWFvH19taedUnzBE7sULCQXrB9a5DgG2YReiEhkf",
+      "block_height": 222541717,
       "logs": [],
       "result": [
        34,
@@ -233,13 +243,14 @@
     }
    },
    "b": {
+    "url": "https://near.drpc.org",
     "status": 200,
     "json": {
      "id": "wallet-deposit-account",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
-      "block_height": 222537880,
+      "block_hash": "95WNHWFvH19taedUnzBE7sULCQXrB9a5DgG2YReiEhkf",
+      "block_height": 222541717,
       "logs": [],
       "result": [
        34,
@@ -262,13 +273,15 @@
    }
   },
   "balance_panic": {
+   "for": "45d8d8d26a4815e9e7f3b383a123aef5f3839dedc620eae54ba72f34816966ed",
    "a": {
+    "url": "https://rpc.mainnet.fastnear.com",
     "status": 200,
     "json": {
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
-      "block_height": 222537880,
+      "block_hash": "95WNHWFvH19taedUnzBE7sULCQXrB9a5DgG2YReiEhkf",
+      "block_height": 222541717,
       "error": "wasm execution failed with error: HostError(GuestPanic { panic_msg: \"panicked at 'Failed to deserialize input from JSON.: Error(\\\"missing field `account_id`\\\", line: 1, column: 2)', src/fiat_token.rs:768:1\" })",
       "logs": []
      },
@@ -276,13 +289,14 @@
     }
    },
    "b": {
+    "url": "https://near.drpc.org",
     "status": 200,
     "json": {
      "id": "wallet-deposit-account",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "CrfYpsXSWGdP9dEvDmosZPqt8vs6V5XVEGrtnDwxUpba",
-      "block_height": 222537881,
+      "block_hash": "98MHzck3QJfRdBBHPScyiUGGoutbHdXr2hh3QqeofqV2",
+      "block_height": 222541718,
       "error": "wasm execution failed with error: HostError(GuestPanic { panic_msg: \"panicked at 'Failed to deserialize input from JSON.: Error(\\\"missing field `account_id`\\\", line: 1, column: 2)', src/fiat_token.rs:768:1\" })",
       "logs": []
      }
@@ -290,35 +304,75 @@
    }
   },
   "code": {
+   "for": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
    "a": {
+    "url": "https://rpc.mainnet.fastnear.com",
     "status": 200,
     "json": {
      "jsonrpc": "2.0",
      "result": {
-      "amount": "7288916485544654933186071491",
-      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
-      "block_height": 222537880,
+      "amount": "7288943037742482669686071720",
+      "block_hash": "98MHzck3QJfRdBBHPScyiUGGoutbHdXr2hh3QqeofqV2",
+      "block_height": 222541718,
       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
       "locked": "0",
       "storage_paid_at": 0,
-      "storage_usage": 65927343
+      "storage_usage": 65928218
      },
      "id": "wallet-deposit-account"
     }
    },
    "b": {
+    "url": "https://near.drpc.org",
     "status": 200,
     "json": {
      "id": "wallet-deposit-account",
      "jsonrpc": "2.0",
      "result": {
-      "amount": "7288916513917139766786071491",
-      "block_hash": "J1ZW1cw3CnDFLaUGbBkanhRJUayxxfNKv11NEZQBMoM2",
-      "block_height": 222537882,
+      "amount": "7288943037742482669686071720",
+      "block_hash": "98MHzck3QJfRdBBHPScyiUGGoutbHdXr2hh3QqeofqV2",
+      "block_height": 222541718,
       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
       "locked": "0",
       "storage_paid_at": 0,
-      "storage_usage": 65927343
+      "storage_usage": 65928218
+     }
+    }
+   }
+  },
+  "code_testnet": {
+   "for": "bf-usdc-20261101t022248.testnet",
+   "a": {
+    "url": "https://test.rpc.fastnear.com",
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "amount": "7927077185570583700000000",
+      "block_hash": "BwWzrRH89HJiBz1cXJJsRaV4S66648e2D11aDFTC11Hx",
+      "block_height": 275721311,
+      "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 327630
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "url": "https://near-testnet.drpc.org",
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "amount": "7927077185570583700000000",
+      "block_hash": "92KHNprwhQo5gAgTzeZ5jDvPADFaFKDrhUjKTfX5xm5o",
+      "block_height": 275721312,
+      "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 327630
      }
     }
    }
