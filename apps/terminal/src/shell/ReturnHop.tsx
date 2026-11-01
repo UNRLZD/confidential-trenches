@@ -29,15 +29,13 @@ export interface ReturnHopView {
   hop<K extends OpenKind>(kind: K, params: OpenParams<K>, view: HopStart): Promise<SignpageOutcome<K> | null>;
   /** The control locked now, by its id. */
   locked: string | null;
-  /** Nothing to restore: the app never leaves the page (kept for the screens that read it). */
-  restored: null;
   /** The last open that did not happen, until the next open, a route change, or its control's dismiss. */
   failed: HopFailure | null;
   /** Clears `failed` when it is `control`'s (its sheet or menu closed). */
   dismiss(control: string): void;
 }
 
-const Ctx = createContext<ReturnHopView>({ hop: async () => null, locked: null, restored: null, failed: null, dismiss: () => {} });
+const Ctx = createContext<ReturnHopView>({ hop: async () => null, locked: null, failed: null, dismiss: () => {} });
 
 export const useReturnHop = () => useContext(Ctx);
 
@@ -79,5 +77,5 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
 
   const dismiss = useCallback((control: string) => setFailed((f) => (f?.control === control ? null : f)), []);
 
-  return <Ctx.Provider value={{ hop, locked, restored: null, failed, dismiss }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ hop, locked, failed, dismiss }}>{children}</Ctx.Provider>;
 }
