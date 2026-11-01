@@ -138,7 +138,7 @@ fn add_q(s: &str) -> String {
 }
 
 /// The eight coordinates in a fixed order, by name, for changing one at a time.
-fn coord_mut<'a>(p: &'a mut Proof, i: usize) -> (&'static str, &'a mut String) {
+fn coord_mut(p: &mut Proof, i: usize) -> (&'static str, &mut String) {
     match i {
         0 => ("a.x", &mut p.a[0]),
         1 => ("a.y", &mut p.a[1]),
