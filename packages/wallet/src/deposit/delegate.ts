@@ -2,7 +2,9 @@
 // §2.8 deposit call row, W:416 and W:898; the vault paper's 2.10 (b), V:669-673; the beta cap, OD:262; at research
 // ffcba5e). Once U's reads pass (./account.ts, V 2.10 (a)), U's own key signs one NEP-366 DelegateAction:
 //   sender_id U, receiver_id the network's token, exactly one FunctionCall of ft_transfer_call with args
-//   {receiver_id: vault, amount, msg: {"precommitment": P, "depositor": U}}, 1 yocto, 180 Tgas, built by the kit's
+//   {receiver_id: the network's vault, amount, msg: {"precommitment": P, "depositor": U}}, 1 yocto, 180 Tgas. The
+//   token and the vault are the release's (NEAR_NETWORKS), never an argument: no caller and no helper answer can name
+//   another receiver (wallet.md:898, "the vault id written into the release"). Built by the kit's
 //   vaultDepositCall (the one builder for U, R, V and A; it refuses an amount under MIN_DEPOSIT or over
 //   HELPER_BIND_DEPOSIT_CAP, P not below p, a vault equal to the mover, the token or intents.near), at nonce = U's key
 //   nonce + 1, with max_block_height = the lower block height of U's two-RPC reads + the window W.
@@ -13,13 +15,16 @@
 // signature is ed25519 over sha256(u32le(2^30 + 366) || borsh(DelegateAction)) (NEP-366's signable message). The
 // helper's own checks (apps/helper/src/bind/checks.ts, H4.3 checks 1-7) pass them on test/vectors/deposit-delegate.json,
 // and the borsh of near-api-js 7.3.1 for the helper's fixture equals ours byte for byte (test/deposit-delegate.test.ts).
+// The only way in is depositDelegate: U's reads on two RPCs first, then U's key is derived, signs and is zeroed, so no
+// hand-made read and no read of another network can be signed from.
 // The signed call goes only to the release's relayer, POST RELEASE_BIND_URL (wallet.md:898: "never self-submitted and
-// never another relayer"); the signing page's CSP lets it reach no other helper (packages/signpage/public/_headers).
-// The request carries the signed delegate alone: no key, no words, no other id of the user. Nothing here logs.
+// never another relayer"), with no redirect followed; the signing page's CSP lets it reach no other helper
+// (packages/signpage/public/_headers). The request carries the signed delegate alone: no key, no words, no other id of
+// the user. Its answer is read up to BIND_ANSWER_MAX_BYTES. Nothing here logs.
 //
 // Not here (card wallet-deposit-bind, W2.3): the re-sign at the same nonce once a call lapsed ("Nothing landed"), the
 // answers' waits and retries, the storage_balance_of(vault) read and the deposits-pages read of P.
-import { HELPER_BIND_DEPOSIT_CODES, HELPER_FETCH_INIT, type HelperBindCode, vaultDepositCall } from "@blindfill/kit";
+import { HELPER_BIND_DEPOSIT_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindCode, vaultDepositCall } from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
@@ -39,11 +44,13 @@ export const RELEASE_BIND_URL = "https://api.confidential.unrealized.trade/v1/bi
 /** POST /v1/bind's body limit (HELPER_V1_PATHS), which also caps the decoded SignedDelegateAction. */
 export const BIND_MAX_BYTES = 4_096;
 export const SEND_TIMEOUT_MS = 10_000;
+/** The relayer's answer is {tx_hash} or {error: {code}}: anything longer is not one. */
+export const BIND_ANSWER_MAX_BYTES = 1_024;
 
 const U64_MAX = (1n << 64n) - 1n;
 const U128_MAX = (1n << 128n) - 1n;
 
-export type DelegateRefusalCode = "input" | "window" | "key" | "balance" | "nonce" | "call";
+export type DelegateRefusalCode = "input" | "window" | "no_vault" | "nonce" | "call";
 export class DepositDelegateRefused extends Error {
   readonly code: DelegateRefusalCode;
   constructor(code: DelegateRefusalCode, detail: string) {
@@ -54,7 +61,7 @@ export class DepositDelegateRefused extends Error {
 }
 
 export interface DepositDelegateArgs {
-  vault: string;
+  /** The network names the token and the vault (NEAR_NETWORKS); there is no other way to name either. */
   network: NearNetwork;
   /** In the token's base units: this call's note. */
   amount: bigint;
@@ -115,8 +122,8 @@ export function encodeDelegateAction(d: DelegateFields): Uint8Array {
   return Uint8Array.from(out);
 }
 
-/** borsh(SignedDelegateAction): the delegate, then ed25519's tag and its signature over NEP-366's signable message. */
-export function signDelegateAction(d: DelegateFields, secretKey: Uint8Array): Uint8Array {
+// borsh(SignedDelegateAction): the delegate, then ed25519's tag and its signature over NEP-366's signable message.
+function signDelegateAction(d: DelegateFields, secretKey: Uint8Array): Uint8Array {
   const delegate = encodeDelegateAction(d);
   const prefix = new Uint8Array(4);
   new DataView(prefix.buffer).setUint32(0, NEP366_PREFIX, true);
@@ -131,40 +138,31 @@ export function signDelegateAction(d: DelegateFields, secretKey: Uint8Array): Ui
   return signed;
 }
 
-/**
- * Signs U_{s,i}'s deposit call from `read`, the answer of U's reads (checkDepositAccount) on `args.network`. Refuses,
- * before anything is signed: a window that is not a whole number in 1..600, a read that is not U's own, an amount
- * over what the read found, a nonce + 1 at or above the read height x 1,000,000, and whatever vaultDepositCall refuses
- * (the cap among them). U's secret key is zeroed once the signature is made.
- */
-export function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: DepositDelegateArgs, read: DepositAccount): SignedDepositDelegate {
+// Signs U_{s,i}'s deposit call from `read`, the answer of readDepositAccount on args.network made just before (module
+// private: depositDelegate is its only caller). Refuses, before anything is signed: a network with no vault in the
+// release, a window that is not a whole number in 1..600, a nonce + 1 at or above the read height x 1,000,000, and
+// whatever vaultDepositCall refuses (the cap among them). U's secret key is zeroed on every path once derived.
+function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: DepositDelegateArgs, read: DepositAccount): SignedDepositDelegate {
   const window = args.window ?? DEPOSIT_WINDOW;
   if (!Number.isSafeInteger(window) || window < 1 || window > DEPOSIT_WINDOW_MAX)
     throw new DepositDelegateRefused("window", `the window must be a whole number of blocks in 1..${DEPOSIT_WINDOW_MAX}`);
-  if (typeof args.network !== "string" || !Object.hasOwn(NEAR_NETWORKS, args.network)) throw new DepositDelegateRefused("input", `unknown network ${String(args.network)}`);
-  const token = NEAR_NETWORKS[args.network].token;
-  const { nonce, height, balance } = read;
-  if (!Number.isSafeInteger(nonce) || nonce < 0 || !Number.isSafeInteger(height) || height <= 0 || typeof balance !== "bigint" || read.halted !== false)
-    throw new DepositDelegateRefused("input", "the read is not a passed deposit-account read");
+  const { token, vault } = NEAR_NETWORKS[args.network];
+  if (vault === null) throw new DepositDelegateRefused("no_vault", `the release names no vault on ${args.network}`);
+  const n = BigInt(read.nonce) + 1n;
+  if (n >= BigInt(read.height) * NONCE_RANGE_MULTIPLIER) throw new DepositDelegateRefused("nonce", "nonce + 1 is at or above the read height x 1,000,000");
 
   const u = depositId(seed64, s, i);
   try {
-    const publicKey = `ed25519:${base58.encode(u.publicKey)}`;
-    if (read.account !== u.id || read.publicKey !== publicKey) throw new DepositDelegateRefused("key", "the read is not of U_{s,i}");
-    if (typeof args.amount !== "bigint" || args.amount > balance) throw new DepositDelegateRefused("balance", `the amount is over U's read balance ${balance}`);
-    const n = BigInt(nonce) + 1n;
-    if (n >= BigInt(height) * NONCE_RANGE_MULTIPLIER) throw new DepositDelegateRefused("nonce", "nonce + 1 is at or above the read height x 1,000,000");
-
     let call: ReturnType<typeof vaultDepositCall>;
     try {
-      call = vaultDepositCall({ vault: args.vault, token, mover: u.id, amount: args.amount, precommitment: args.precommitment });
+      call = vaultDepositCall({ vault, token, mover: u.id, amount: args.amount, precommitment: args.precommitment });
     } catch (e) {
       throw new DepositDelegateRefused("call", e instanceof Error ? e.message : String(e));
     }
     const fc = call.actions[0].FunctionCall;
     // The args exactly as the relayer reads them back (checks.ts frozenArgs): receiver_id, amount, msg, in that order.
     const json = JSON.stringify({ receiver_id: fc.args.receiver_id, amount: fc.args.amount, msg: fc.args.msg });
-    const max_block_height = BigInt(height) + BigInt(window);
+    const max_block_height = BigInt(read.height) + BigInt(window);
     const signed = signDelegateAction(
       {
         sender_id: call.sender_id,
@@ -179,14 +177,17 @@ export function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, ar
       },
       u.secretKey,
     );
-    if (signed.length > BIND_MAX_BYTES) throw new DepositDelegateRefused("call", `the signed call is ${signed.length} B, over ${BIND_MAX_BYTES}`);
+    const publicKey = `ed25519:${base58.encode(u.publicKey)}`;
     return { signed_delegate: base64.encode(signed), sender_id: call.sender_id, receiver_id: call.receiver_id, nonce: n, max_block_height, public_key: publicKey };
   } finally {
     u.secretKey.fill(0);
   }
 }
 
-/** Reads U_{s,i} on two RPCs (readDepositAccount) and signs its deposit call only once every read passed. */
+/**
+ * U_{s,i}'s deposit call on the network's token into the network's vault: reads U on two RPCs (readDepositAccount, which
+ * refuses an unknown network) and signs only once every read passed.
+ */
 export async function depositDelegate(
   seed64: Uint8Array, s: bigint, i: number, args: DepositDelegateArgs, rpcs: readonly [NearRpc, NearRpc],
 ): Promise<SignedDepositDelegate> {
@@ -199,35 +200,70 @@ export type BindAnswer = { ok: true; tx_hash: string } | { ok: false; code: Help
 
 /**
  * Hands the signed call to the release's relayer only: POST RELEASE_BIND_URL with {signed_delegate} and nothing else.
- * The answer is hostile input: only a tx hash of 32 bytes in base58 or a code from HELPER_BIND_DEPOSIT_CODES is taken;
+ * The answer is hostile input: only a tx hash of 32 bytes in base58 on 200, or a code from HELPER_BIND_DEPOSIT_CODES
+ * with its own HTTP status, is taken;
  * the deposit itself is confirmed from the vault's deposits pages, never from this answer (W:418).
  */
 export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch): Promise<BindAnswer> {
   const res = await fetchFn(RELEASE_BIND_URL, {
     ...HELPER_FETCH_INIT,
+    redirect: "error",
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ signed_delegate: signed.signed_delegate }),
     signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
   });
+  if (res.redirected || res.type === "opaqueredirect") throw new Error("relayer: redirected");
   let body: unknown;
   try {
-    body = await res.json();
-  } catch {
-    throw new Error(`relayer: HTTP ${res.status}, not JSON`);
+    body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await readCapped(res, BIND_ANSWER_MAX_BYTES)));
+  } catch (e) {
+    throw new Error(`relayer: HTTP ${res.status}, ${e instanceof Error && e.message.startsWith("relayer:") ? e.message.slice(9) : "not JSON"}`);
   }
-  const b = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
-  if (res.status === 200 && typeof b.tx_hash === "string") {
+  const own = (o: unknown, k: string): unknown =>
+    typeof o === "object" && o !== null && !Array.isArray(o) && Object.hasOwn(o, k) ? (o as Record<string, unknown>)[k] : undefined;
+  const txHash = own(body, "tx_hash");
+  if (res.status === 200 && typeof txHash === "string" && own(body, "error") === undefined) {
     let raw: Uint8Array | undefined;
     try {
-      raw = base58.decode(b.tx_hash);
+      raw = base58.decode(txHash);
     } catch {
       raw = undefined;
     }
-    if (raw?.length === 32) return { ok: true, tx_hash: b.tx_hash };
+    if (raw?.length === 32) return { ok: true, tx_hash: txHash };
   }
-  const err = b.error;
-  const code = typeof err === "object" && err !== null ? (err as Record<string, unknown>).code : undefined;
-  if (res.status !== 200 && typeof code === "string" && (HELPER_BIND_DEPOSIT_CODES as readonly string[]).includes(code)) return { ok: false, code: code as HelperBindCode };
+  const code = own(own(body, "error"), "code");
+  // A code counts only with its own status (HELPER_CODE_STATUS, 400 for a code not listed there).
+  if (txHash === undefined && typeof code === "string" && (HELPER_BIND_DEPOSIT_CODES as readonly string[]).includes(code)) {
+    const status = Object.hasOwn(HELPER_CODE_STATUS, code) ? HELPER_CODE_STATUS[code as keyof typeof HELPER_CODE_STATUS] : 400;
+    if (res.status === status) return { ok: false, code: code as HelperBindCode };
+  }
   throw new Error(`relayer: HTTP ${res.status}, not a bind answer`);
+}
+
+/** The body's bytes, refused once they pass `max` (a declared or a streamed length), without reading the rest. */
+async function readCapped(res: Response, max: number): Promise<Uint8Array> {
+  const declared = Number(res.headers.get("content-length") ?? "0");
+  if (declared > max) throw new Error(`relayer: an answer over ${max} B`);
+  if (res.body === null) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) {
+      await reader.cancel();
+      throw new Error(`relayer: an answer over ${max} B`);
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
 }

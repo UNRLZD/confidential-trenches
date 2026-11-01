@@ -176,11 +176,13 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
 }
 
 // The account's public id from its entropy: entropy -> 12 words -> seed64 -> T_0 (wallet.md:47, :54, :68). seed64 is
-// zeroed here; the caller zeroes the entropy.
+// zeroed here, and so is T_0's secret key, which only its id is wanted from; the caller zeroes the entropy.
 function accountOf(entropy: Uint8Array): string {
   const seed64 = wordsToSeed64(entropyToWords(entropy));
   try {
-    return profileKey(seed64, 0).id;
+    const t = profileKey(seed64, 0);
+    t.secretKey.fill(0);
+    return t.id;
   } finally {
     seed64.fill(0);
   }

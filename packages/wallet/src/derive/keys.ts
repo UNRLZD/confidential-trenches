@@ -123,15 +123,23 @@ export const profileKey = (seed64: Uint8Array, k: number) => oneTime(seed64, inf
 
 // ---------- SLIP-10 ed25519, hardened steps only ----------
 const HARDENED = 0x80000000;
+// Every intermediate buffer (each step's I, its data and the parent's key and chain code) is zeroed once used.
 export function slip10Ed25519(seed: Uint8Array, path: number[]): { key: Uint8Array; chainCode: Uint8Array } {
-  let I = hmac(sha512, ascii("ed25519 seed"), seed);
-  let key = I.slice(0, 32), chainCode = I.slice(32);
-  for (const step of path) {
+  for (const step of path)
     if (!Number.isSafeInteger(step) || step < HARDENED || step > 0xffffffff)
       throw new Error("SLIP-10 ed25519 takes hardened steps only");
-    I = hmac(sha512, chainCode, concat(Uint8Array.of(0), key, u32(step)));
+  let I = hmac(sha512, ascii("ed25519 seed"), seed);
+  let key = I.slice(0, 32), chainCode = I.slice(32);
+  I.fill(0);
+  for (const step of path) {
+    const data = concat(Uint8Array.of(0), key, u32(step));
+    I = hmac(sha512, chainCode, data);
+    data.fill(0);
+    key.fill(0);
+    chainCode.fill(0);
     key = I.slice(0, 32);
     chainCode = I.slice(32);
+    I.fill(0);
   }
   return { key, chainCode };
 }
@@ -150,6 +158,7 @@ export function walletPath(seed64: Uint8Array, c: Chain, l: bigint, j: number): 
   const ab = hkdfSeed(seed64, info.wallet(c, l, j), 8);
   const v = new DataView(ab.buffer, ab.byteOffset, 8);
   const a = v.getUint32(0) & 0x7fffffff, b = v.getUint32(4) & 0x7fffffff;
+  ab.fill(0);
   return { a, b, path: `m/44'/${CHAINS[c].coin}'/${a}'/${b}'` };
 }
 export function freshWallet(seed64: Uint8Array, c: Chain, l: bigint, j: number): FreshWallet {
@@ -157,14 +166,23 @@ export function freshWallet(seed64: Uint8Array, c: Chain, l: bigint, j: number):
   const inf = hex(info.wallet(c, l, j));
   const steps = [44, CHAINS[c].coin, a, b].map((x) => x + HARDENED);
   if (CHAINS[c].curve === "ed25519") {
-    const { key } = slip10Ed25519(seed64, steps);
+    const { key, chainCode } = slip10Ed25519(seed64, steps);
+    chainCode.fill(0);
     const publicKey = ed25519.getPublicKey(key);
     const address = c === "sol" || c === "hop-sol" ? base58.encode(publicKey) : hex(publicKey);
     return { chain: c, info: inf, path, address, publicKey, secretKey: key };
   }
-  const node = HDKey.fromMasterSeed(seed64).derive(path);
-  if (!node.privateKey || !node.publicKey) throw new Error("BIP-32 derivation gave no key");
-  return { chain: c, info: inf, path, address: evmAddress(node.publicKey), publicKey: node.publicKey, secretKey: node.privateKey };
+  // Step by step, so each parent's private key is wiped once its child is made (HDKey.derive drops them unwiped).
+  let node = HDKey.fromMasterSeed(seed64);
+  for (const step of steps) {
+    const child = node.deriveChild(step);
+    node.wipePrivateData();
+    node = child;
+  }
+  const secretKey = node.privateKey, publicKey = node.publicKey; // copies (the getters copy)
+  node.wipePrivateData();
+  if (!secretKey || !publicKey) throw new Error("BIP-32 derivation gave no key");
+  return { chain: c, info: inf, path, address: evmAddress(publicKey), publicKey, secretKey };
 }
 
 // ---------- EVM address ----------
