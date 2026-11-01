@@ -5,7 +5,11 @@
 //   (wallet.md:155); with none it offers the passkey ways in.
 // - Sign-in and sign-out run top-level only (wallet.md:921-922). In a frame (APP_HOST may frame this page) it shows
 //   neither control and both steps refuse, so a framing page cannot get a click on them. In the frame the page speaks
-//   the postMessage API (src/api.ts, card signpage-postmessage), started below.
+//   the postMessage API (src/api.ts, card signpage-postmessage), started below, with the state the store holds
+//   (src/state.ts, card signpage-frame-state): signed in, words saved, the way in and the ops, posted again on each change.
+//   The frame never opens the seed record and opens the store read-only: it reads the seed's key and the status record
+//   meta/"status" { v, source, code_saved }, which the store writes in the seed's own transaction. A database from
+//   before the status record gets it on the next top-level load (syncStatus, below).
 // - Create passkey / Use passkey run the ceremony (@blindfill/wallet/signin/passkey). A PRF result becomes the seed's
 //   entropy, written by the store's insertSeed only if no seed is stored (two tabs never write one over the other); the
 //   record is 06b:459's { v, entropy, source: "prf", code_saved: false, created_ms } (ses.2, ses.7, 06b:776, :781), so
@@ -38,10 +42,11 @@
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, openWalletStoreReader, WALLET_CHANNEL, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
-import { signedOutState, startApi } from "./api.ts";
+import { startApi } from "./api.ts";
+import { frameState } from "./state.ts";
 
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code";
 
@@ -201,6 +206,8 @@ const open = async (): Promise<WalletStore> =>
   (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
+      // a delete or upgrade closed our connection: the next step opens the store again
+      if (e.kind === "closed") store = null;
       if (e.kind !== "signout") return;
       store = null;
       show("signed-out");
@@ -215,7 +222,7 @@ const topLevelOnly = (): void => {
 
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
 // stored, which may be another tab's (never its words then).
-function landed(l: Landing): void {
+async function landed(l: Landing): Promise<void> {
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }
@@ -224,21 +231,21 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   topLevelOnly();
   // never replace a seed already stored here, and run no ceremony: sign out first (wallet.md:919)
   const had = await readSeed();
-  if (had) return show("signed-in", shown(had));
+  if (had) return landed({ screen: "signed-in", seed: had });
   const r = await ceremony();
   // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
   if (r.kind === "no-prf" && create) return landed(await signInNoPrf(open));
   if (r.kind !== "prf") return show(r.kind);
   // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
   // zeroed on every path, an open that fails included (words.ts storeSeed)
-  landed(await signInPrf(open, r.entropy));
+  await landed(await signInPrf(open, r.entropy));
 }
 
 // ses.10-12: the typed 12 words, checked on the device before anything else; a failure stores nothing
 async function signInWords(typed: string): Promise<void> {
   topLevelOnly();
   const had = await readSeed();
-  if (had) return show("signed-in", shown(had));
+  if (had) return landed({ screen: "signed-in", seed: had });
   let l: Landing;
   try {
     l = await signInTyped(open, typed);
@@ -246,7 +253,7 @@ async function signInWords(typed: string): Promise<void> {
     if (e instanceof WordsRefused) return show("invalid-code");
     throw e;
   }
-  landed(l);
+  await landed(l);
 }
 
 // The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.
@@ -296,10 +303,26 @@ async function run(step: () => Promise<void>): Promise<void> {
 }
 
 show("loading");
-void run(async () => {
-  const s = await readSeed();
-  if (s) show("signed-in", shown(s));
-  else show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
-});
+// top-level only: the frame never opens the seed record (src/state.ts reads the status instead); it draws nothing
+if (framed) root.dataset.signin = "framed";
+else
+  void run(async () => {
+    // one backfill: a database from before the status record gets it from the seed (the store writes it itself since);
+    // a failed one leaves the frame reading the seed's key alone (signed in, the Backup dot) until the next load
+    await open()
+      .then((st) => st.syncStatus())
+      .catch(() => {});
+    const s = await readSeed();
+    if (s) await landed({ screen: "signed-in", seed: s });
+    else show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
+  });
 
-if (framed) startApi({ parent: window.parent, listen: (fn) => window.addEventListener("message", fn), state: signedOutState });
+if (framed) {
+  // the frame's own channel: it hears another tab's sign-in even when no database exists yet to open
+  const channel = new BroadcastChannel(WALLET_CHANNEL);
+  const fs = frameState(
+    (onEvent) => openWalletStoreReader({ onEvent }),
+    (fn) => channel.addEventListener("message", (m) => fn(m.data)),
+  );
+  startApi({ parent: window.parent, listen: (fn) => window.addEventListener("message", fn), state: fs.state, watch: fs.watch });
+}
