@@ -56,6 +56,8 @@ export function mountShell(doc: Document, loc: { pathname: string; search: strin
   layer.hidden = true;
   Object.assign(layer.style, { position: "fixed", inset: "0", zIndex: "1", overflow: "auto", background: "Canvas", color: "CanvasText" });
   Object.assign(doc.body.style, { margin: "0", background: "Canvas" });
+  // the src before the frame is in the document: it never loads about:blank first, so its one load is APP_HOST's
+  frame.src = appSrc(loc);
   doc.body.append(frame, layer);
   // contentWindow exists once the frame is in the document, and stays the same object across its loads
   const win = frame.contentWindow;
@@ -64,6 +66,5 @@ export function mountShell(doc: Document, loc: { pathname: string; search: strin
     { window: win, onLoad: (fn) => frame.addEventListener("load", fn) },
     { ...host, listen: (fn) => doc.defaultView!.addEventListener("message", fn) },
   );
-  frame.src = appSrc(loc);
   return layer;
 }
