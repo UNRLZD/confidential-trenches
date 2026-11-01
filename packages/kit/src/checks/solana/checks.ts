@@ -6,6 +6,10 @@
 // The two-provider reads themselves (who asks which provider, the re-read, the session cache of agreed table entries,
 // the reference pool finder) are the buy flow's; these checks take their answers and refuse when the answers disagree
 // or are missing.
+//
+// The floor rule for the buy flow: set minOut_k = floor(E × (1 − s)) from the device's own reference E, never from the
+// API's otherAmountThreshold (which rounds up: on the real buy 2btTg7… it is 1 above the floor S7 decodes, so S7 would
+// refuse it).
 import { base58 } from "@scure/base";
 import {
   SOLANA_ALT_PROGRAM,
@@ -59,6 +63,9 @@ export const SOLANA_JITO_TIP = 10_000n;
 export const SOLANA_CU_PRICE_MAX = 1_000_000n;
 export const SOLANA_CU_LIMIT = { pumpBuy: 200_000, pumpSell: 150_000, other: 600_000 } as const;
 export const SOLANA_LAMPORTS_PER_SIGNATURE = 5_000n;
+// S12's tolerance between the simulated out and E: the paper's band, POOL_READ_TOL_BPS = 200 (§2.0 LD1; the G1 proof saw
+// about 1.1 % per reserve between a processed and a confirmed read).
+export const SOLANA_SIM_TOL_BPS = 200;
 
 // Jupiter v6 route_v2 (the on-chain IDL of JUP6…TaV4, account C88XWfp26heEmDkmfSzeXP7Fd7GQJ2j9dDTUsyiZbUTa, read
 // 2026-10-25 22:06:06Z slot 461420570; research proofs/g1-phone-trade/src/checks.js:7-15): discriminator, in_amount u64,
@@ -90,17 +97,19 @@ export type SolanaSimulation = {
   err: unknown; // null when the simulation ran clean
   walletLamports: { pre: bigint; post: bigint };
   tokenAccount: { pre: bigint; post: bigint }; // W_k's account of the token: the output on a buy, the input on a sell
+  tokenAccountLamports: { pre: bigint; post: bigint }; // the same account's lamports: 0 before means the tx creates it
   pumpVolumeAccumulator: { pre: bigint; post: bigint }; // W_k's own pump PDA, which a pump buy may fund
   otherWallets: { pre: bigint; post: bigint }[]; // every other wallet of this user, lamports
 };
 export type SolanaQuoteReads = {
   tables: Readonly<Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]>>; // provider A, B
   mint: readonly [SolanaAccountRead | null, SolanaAccountRead | null];
-  // Rent-exempt minimums read from RPC for the sizes in play: the output token account and the pump volume accumulator.
-  rent: { tokenAccount: bigint; pumpVolumeAccumulator: bigint };
+  // Rent-exempt minimums for the sizes in play (the output token account, the pump volume account), read on provider A
+  // and B. Rent is fixed cluster state, so S11 refuses unless both providers give the same value.
+  rent: { tokenAccount: readonly [bigint, bigint]; pumpVolumeAccumulator: readonly [bigint, bigint] };
   simulations: readonly [SolanaSimulation | null, SolanaSimulation | null];
   // E for this wallet's exact input from the reference pool (S12), its tolerance and the user's slippage s.
-  reference: { expectedOut: bigint; tolBps: number; slippageBps: number } | null;
+  reference: { expectedOut: bigint; slippageBps: number } | null;
 };
 export type SolanaQuoteCheckId = "S1" | "S2" | "S3" | "S4" | "S5" | "S6" | "S7" | "S8" | "S9" | "S10" | "S11" | "S12" | "S13" | "DECODE";
 export type SolanaQuoteResult = { id: SolanaQuoteCheckId; ok: boolean; detail: string };
@@ -403,7 +412,8 @@ function s10(c: Ctx): SolanaQuoteResult {
 }
 
 // S11: the simulation on both providers. A buy's native out stays within a_k + fees + tips + the output account's rent
-// (+ the wallet's own pump volume account, if the route funds it, up to its rent), and its token in reaches minOut_k.
+// when the simulation shows that account new (anyone can create W_k's account first, and then the create is a no-op)
+// + the wallet's own pump volume account, if the route funds it, up to its rent; and its token in reaches minOut_k.
 // A sell's token out is exactly a_k and its native in, before fees and tips, reaches minOut_k. No other wallet of this
 // user changes.
 function s11(c: Ctx): SolanaQuoteResult {
@@ -412,6 +422,9 @@ function s11(c: Ctx): SolanaQuoteResult {
   const fees = SOLANA_LAMPORTS_PER_SIGNATURE * BigInt(c.tx.signatures) + (b.price * BigInt(b.limit) + 999_999n) / 1_000_000n;
   const tips = SOLANA_SENDER_TIP + SOLANA_JITO_TIP;
   const wrong: string[] = [];
+  const [rentTa, rentTb] = c.reads.rent.tokenAccount;
+  const [rentPa, rentPb] = c.reads.rent.pumpVolumeAccumulator;
+  if (rentTa !== rentTb || rentPa !== rentPb || rentTa < 0n || rentPa < 0n) return fail("S11", `the providers disagree on rent: token account ${rentTa}/${rentTb}, pump volume account ${rentPa}/${rentPb}`);
   for (const [p, sim] of c.reads.simulations.entries()) {
     const at = p === 0 ? "A" : "B";
     if (!sim) { wrong.push(`no simulation on provider ${at}`); continue; }
@@ -419,10 +432,12 @@ function s11(c: Ctx): SolanaQuoteResult {
     const nativeOut = sim.walletLamports.pre - sim.walletLamports.post;
     const tokenDelta = sim.tokenAccount.post - sim.tokenAccount.pre;
     const pva = sim.pumpVolumeAccumulator.post - sim.pumpVolumeAccumulator.pre;
-    if (pva < 0n || pva > c.reads.rent.pumpVolumeAccumulator) wrong.push(`provider ${at}: the pump volume account moves by ${pva}`);
+    if (pva < 0n || pva > rentPa) wrong.push(`provider ${at}: the pump volume account moves by ${pva}`);
     if (sim.otherWallets.some((x) => x.pre !== x.post)) wrong.push(`provider ${at}: another wallet of this user changes`);
     if (c.req.side === "buy") {
-      const bound = c.req.amount + fees + tips + c.reads.rent.tokenAccount + (pva > 0n ? pva : 0n);
+      const tal = sim.tokenAccountLamports;
+      const newAccount = tal.pre === 0n ? (tal.post - tal.pre < rentTa ? tal.post - tal.pre : rentTa) : 0n;
+      const bound = c.req.amount + fees + tips + (newAccount > 0n ? newAccount : 0n) + (pva > 0n ? pva : 0n);
       if (nativeOut > bound) wrong.push(`provider ${at}: native out ${nativeOut} > ${bound}`);
       if (tokenDelta < c.req.minOut) wrong.push(`provider ${at}: token in ${tokenDelta} < minOut ${c.req.minOut}`);
     } else {
@@ -446,18 +461,19 @@ function simulatedOut(c: Ctx): bigint | null {
   return (outs as bigint[]).reduce((m, x) => (x < m ? x : m));
 }
 
-// S12: against the token's reference pool on chain: simulated out ≥ E × (1 − tol) and minOut_k ≥ E × (1 − s). No
-// reference, no signature.
+// S12: against the token's reference pool on chain: simulated out ≥ E × (1 − SOLANA_SIM_TOL_BPS / 10,000), the bar
+// rounded up (toward refusal), and minOut_k ≥ floor(E × (1 − s)). No reference, no signature.
 function s12(c: Ctx): SolanaQuoteResult {
   const ref = c.reads.reference;
   if (!ref) return fail("S12", "no on-chain reference pool");
-  const { expectedOut: e, tolBps, slippageBps } = ref;
-  if (e <= 0n || !Number.isInteger(tolBps) || tolBps < 0 || tolBps > 10_000 || !Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
-    return fail("S12", `reference out of range: E ${e}, tol ${tolBps}, s ${slippageBps}`);
+  const { expectedOut: e, slippageBps } = ref;
+  const tolBps = SOLANA_SIM_TOL_BPS;
+  if (e <= 0n || !Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
+    return fail("S12", `reference out of range: E ${e}, s ${slippageBps}`);
   }
   const out = simulatedOut(c);
   if (out === null) return fail("S12", "no clean simulation to compare");
-  const barOut = (e * BigInt(10_000 - tolBps)) / 10_000n;
+  const barOut = (e * BigInt(10_000 - tolBps) + 9_999n) / 10_000n;
   const barMin = (e * BigInt(10_000 - slippageBps)) / 10_000n;
   const wrong: string[] = [];
   if (out < barOut) wrong.push(`simulated out ${out} < E ${e} less ${tolBps} bps (${barOut})`);
