@@ -98,13 +98,14 @@ jobs:
           git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
           node "$RUNNER_TEMP/base/scripts/ci/verify-gate.mjs" "$BASE" "$HEAD"
 
-  # The gate waits out a 429 (scripts/ci/money-gate.mjs rpc()), and an old NEAR tx reads only on FastNEAR's and
-  # near.org's archival RPCs, near.org at 4 a minute (10 per 10 min, near.org's deprecation post; read 2026-10-31).
-  # The push that opens main runs --all and reads 0 records (scripts/live-checks/ holds no record yet), so its worst
-  # time is the two test steps, 11 s on a Mac. Later, each old NEAR tx costs 2 near.org reads: 30 s at 4 a minute,
-  # 2 min at 10 per 10 min. 30 minutes covers the tests and 40 old NEAR txs at 4 a minute (20 min), or 12 at 10 per
-  # 10 min (24 min), or one old tx whose two near.org reads each meet a 600 s Retry-After (20 min), 6 min or more spare.
-  # A read that meets 600 s on all 5 of its waits outlasts the 30 minutes: the check fails closed and is run again.
+  # Each NEAR tx is read on FastNEAR's archive, dRPC and near.org's archive, which FastNEAR also runs
+  # (scripts/ci/near-rpc-operators.mjs). near.org's host answers 429 with a Retry-After of 43 to 600 s (4 a minute,
+  # 10 per 10 min, near.org's deprecation post; read 2026-10-31); the gate waits it out while fewer than two operators
+  # read the tx ok (FastNEAR and dRPC both ok: asked once, unwaited). A tx older than dRPC keeps (about 29 h on
+  # mainnet, read 2026-11-01) adds two dRPC reads (status and its earliest block) and a waited near.org read. --all
+  # read 26 testnet txs in 4 min (2026-11-01), so 30 minutes covers the tests and about 150 txs, or one wait chain of
+  # up to 5 waits of 600 s; more old txs than near.org's rate allows outlast the 30 minutes: the check fails closed
+  # and is run again.
   money-gate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -73,7 +73,7 @@ Plain reads from two public NEAR RPCs. No account, no key, no install beyond `cu
 ```sh
 VAULT=<vault account>
 USDC=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1
-for RPC in https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org; do
+for RPC in https://rpc.mainnet.fastnear.com https://near.drpc.org; do
   q() { curl -s "$RPC" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":$1}"; }
   # 1. the vault has no access key
   q "{\"request_type\":\"view_access_key_list\",\"finality\":\"final\",\"account_id\":\"$VAULT\"}" | jq -c .result.keys
