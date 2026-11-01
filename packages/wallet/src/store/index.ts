@@ -165,6 +165,12 @@ export function backupFirst(seed: unknown): boolean {
   return s?.source !== "prf" && s?.code_saved !== true;
 }
 
+// zeroes a decrypted seed's entropy once it has been read (the store's own copy; a caller's copy is the caller's)
+function wipe(seed: unknown): void {
+  const e = (seed as { entropy?: unknown } | undefined)?.entropy;
+  if (e instanceof Uint8Array) e.fill(0);
+}
+
 function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
   const r = idb.open(name, 1);
   r.onupgradeneeded = () => {
@@ -309,10 +315,14 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         const before = await getRaw("meta", "seed");
         if (before === undefined) throw new Error("no seed is stored");
         const seed = (await unwrap("meta", "seed", before)) as Record<string, unknown>;
-        if (seed.code_saved === true) return;
-        if (await casPut("meta", "seed", before, await wrap("meta", "seed", { ...seed, code_saved: true }))) {
-          notify(["meta"]);
-          return;
+        try {
+          if (seed.code_saved === true) return;
+          if (await casPut("meta", "seed", before, await wrap("meta", "seed", { ...seed, code_saved: true }))) {
+            notify(["meta"]);
+            return;
+          }
+        } finally {
+          wipe(seed);
         }
       }
     },
@@ -348,10 +358,14 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       return next;
     },
     async signOut() {
-      live(); // a closed store never deletes the database: it may be a newer account's
       // the backup comes first while the 12 words are the only copy (wallet.md:922)
-      if (backupFirst(await unwrap("meta", "seed", await getRaw("meta", "seed"))))
-        throw new Error("back up the 12 words before signing out: they are the only copy");
+      const seed = await unwrap("meta", "seed", await getRaw("meta", "seed"));
+      const refuse = backupFirst(seed);
+      wipe(seed);
+      if (refuse) throw new Error("back up the 12 words before signing out: they are the only copy");
+      // a closed store never deletes the database: it may be a newer account's. Checked here, after the last await and
+      // with none between it and deleteDatabase, so a store closed while the backup check ran refuses too.
+      live();
       channel.postMessage({ kind: "signout" });
       shut();
       channel.close();
