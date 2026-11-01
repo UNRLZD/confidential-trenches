@@ -3,8 +3,10 @@
 # The vault's near-sandbox suite (vault.md 5, V3.1): builds the vault (the mainnet build, as it ships), the mock token
 # and the harness's probe contract with cargo-near, then runs every `required-features = ["sandbox"]` test against
 # them in near-sandbox 2.13.4.
-# A heavy job: run it from the repo root through the heavy gate, never as a plain command:
-#   scripts/heavy.sh vault-sandbox -- contracts/vault/tests/harness/run.sh [cargo test args, e.g. --test smoke]
+# Run it from the repo root:
+#   contracts/vault/tests/harness/run.sh [cargo test args, e.g. --test smoke]
+# It needs Linux or macOS, Rust 1.96.0 (rustup toolchain 1.96.0), cargo-near and network access the first time, when
+# near-workspaces downloads near-sandbox 2.13.4.
 # With no args it runs every test target with the sandbox feature on. Output: the wasm sizes and sha256, then the
 # tests with --nocapture (the harness prints each wasm's size and sha256 as it loads it; each test its gas table).
 # A NEAR_SANDBOX_BIN_PATH is refused by the harness unless HARNESS_SANDBOX_BIN names the same path.

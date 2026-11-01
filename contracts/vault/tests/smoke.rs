@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The harness's smoke test and its own planted cases, in near-sandbox 2.13.4 (vault.md 5, V3.1). Runs only with
-//! `--features sandbox`, through tests/harness/run.sh on scripts/heavy.sh.
+//! `--features sandbox`, through tests/harness/run.sh.
 //!
 //! 1. `deploy_recipe_is_keyless`: the skeleton deployed by the 2.8 recipe ([CreateAccount, Transfer, DeployContract,
 //!    FunctionCall(config)], no AddKey) lands, `view_access_key_list` reads `keys: []` at optimistic and at final, and

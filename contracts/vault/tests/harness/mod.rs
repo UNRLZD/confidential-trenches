@@ -4,8 +4,8 @@
 //! account the build names, sends calls with a chosen deposit and gas, reads every receipt's outcome, and records the
 //! gas burnt per receipt.
 //!
-//! The wasm files come from `tests/harness/run.sh`, which builds them with cargo-near and runs the sandbox tests
-//! through `scripts/heavy.sh`: `VAULT_WASM`, `MOCK_TOKEN_WASM` and `PROBE_WASM` (tests/harness/probe) name them, and
+//! The wasm files come from `tests/harness/run.sh`, which builds them with cargo-near, and the sandbox tests run
+//! through tests/harness/run.sh: `VAULT_WASM`, `MOCK_TOKEN_WASM` and `PROBE_WASM` (tests/harness/probe) name them, and
 //! the harness prints each file's size and sha256 as it loads it. A plain `cargo test` never builds this: every test
 //! that uses it is a `[[test]]` with `required-features = ["sandbox"]`.
 //!
@@ -49,8 +49,9 @@
 //! Those edges (a halted token between a deposit's move and its resolve, deposit gas at 180 Tgas) are owed by card
 //! vault-sandbox-usdc on the real USDC wasm. There is no NEP-366 `DelegateAction` sender here: VT-S02 needs one, and
 //! VT-S02's card, vault-deposit-insert, brings it (its proof: U's call as a `DelegateAction` sent by a relayer
-//! account, in its tests/s02.rs). Gas and code figures hold for one machine: the PC box and the Mac
-//! build different vault bytes (at 65f3bb7: bc948c2b, 128767 B on the box; 91a23f6f, 129937 B on the Mac).
+//! account, in its tests/s02.rs). Gas and code figures hold for one machine: a Linux x86_64 build and a
+//! macOS arm64 build give different vault bytes (at 65f3bb7: bc948c2b, 128767 B on Linux x86_64; 91a23f6f,
+//! 129937 B on macOS arm64).
 #![allow(dead_code)] // shared by every sandbox test; each uses a part
 
 use near_sdk::serde_json::{self, json, Value};
