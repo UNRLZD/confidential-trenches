@@ -28,9 +28,11 @@ cleanup() {
 }
 trap cleanup EXIT
 cd "$ROOT/apps/helper"
+# every image is built as compose builds it: the repository root as the context, apps/helper/Dockerfile as the file
+DF="$ROOT/apps/helper/Dockerfile"
 echo "== docker $(docker version --format '{{.Server.Version}} {{.Server.Arch}}'), commit $C, other $OTHER, out $OUT"
 echo "== the build refuses a commit that is not 40 hex"
-docker build -q --build-arg HELPER_COMMIT=main -t ct-helper:refused . >/dev/null 2>"$OUT/refused.log"
+docker build -q -f "$DF" --build-arg HELPER_COMMIT=main -t ct-helper:refused "$ROOT" >/dev/null 2>"$OUT/refused.log"
 echo "build rc=$? (want non-zero)"; grep -o "HELPER_COMMIT must be a full 40-hex commit" "$OUT/refused.log" | head -1
 echo "== stack: helper + caddy, plain http on 127.0.0.1:18080 (HELPER_SITE), the real Caddyfile otherwise"
 cd deploy
@@ -70,15 +72,17 @@ echo "== container settings"
 docker inspect -f '{{.Name}} ro={{.HostConfig.ReadonlyRootfs}} capdrop={{.HostConfig.CapDrop}} user={{.Config.User}}' $(docker compose -p $P ps -q)
 echo "== the image built at $OTHER, read directly: the bad-commit answer"
 cd ..
-docker build -q --build-arg HELPER_COMMIT="$OTHER" -t "ct-helper:$OTHER" . >/dev/null
+docker build -q -f "$DF" --build-arg HELPER_COMMIT="$OTHER" -t "ct-helper:$OTHER" "$ROOT" >/dev/null
 docker run -d --rm --name ct-helper-proof-other -p 127.0.0.1:18081:8080 "ct-helper:$OTHER" >/dev/null
 for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:18081/v1/health 2>/dev/null && break; sleep 0.5; done
 node "$CHECK" --base http://127.0.0.1:18081 --commit "$C" --record "$OUT/bad-commit.json" | tail -1; echo "rc=${PIPESTATUS[0]} (want 1)"
 echo "== a wrong build that echoes the 1Click key in a header, read directly: the proxy's bad answer"
-rm -rf "$OUT/echo-src" && mkdir -p "$OUT/echo-src" && cp -R package.json Dockerfile .dockerignore src "$OUT/echo-src/"
-perl -0pi -e 's/\.\.\.a\.headers, /...a.headers, "X-Debug-Upstream-Auth": `Bearer \$\{process.env.ONECLICK_JWT\}`, /' "$OUT/echo-src/src/server.ts"
-grep -c 'X-Debug-Upstream-Auth' "$OUT/echo-src/src/server.ts" | sed 's/^/echo lines planted: /'
-docker build -q --build-arg HELPER_COMMIT="$C" -t ct-helper:echo "$OUT/echo-src" >/dev/null
+# a copy of the build context (the root's files that .dockerignore lets in), with one line planted in server.ts
+rm -rf "$OUT/echo-src" && mkdir -p "$OUT/echo-src"
+(cd "$ROOT" && tar -cf - .dockerignore package.json pnpm-lock.yaml pnpm-workspace.yaml apps/helper/Dockerfile apps/helper/package.json apps/helper/src packages/kit/package.json packages/kit/src) | tar -xf - -C "$OUT/echo-src"
+perl -0pi -e 's/\.\.\.a\.headers, /...a.headers, "X-Debug-Upstream-Auth": `Bearer \$\{process.env.ONECLICK_JWT\}`, /' "$OUT/echo-src/apps/helper/src/server.ts"
+grep -c 'X-Debug-Upstream-Auth' "$OUT/echo-src/apps/helper/src/server.ts" | sed 's/^/echo lines planted: /'
+docker build -q -f "$OUT/echo-src/apps/helper/Dockerfile" --build-arg HELPER_COMMIT="$C" -t ct-helper:echo "$OUT/echo-src" >/dev/null
 docker run -d --rm --name ct-helper-proof-echo -e ONECLICK_JWT -e JUPITER_API_KEY -e RELAY_API_KEY -e LIFI_API_KEY -p 127.0.0.1:18082:8080 ct-helper:echo >/dev/null
 for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:18082/v1/health 2>/dev/null && break; sleep 0.5; done
 node "$PCHECK" --base http://127.0.0.1:18082 --record "$OUT/proxy-bad-echo.json" --planted | grep -E '^BAD|live-check'; echo "rc=${PIPESTATUS[0]} (want 1)"

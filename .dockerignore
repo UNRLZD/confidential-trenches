@@ -1,0 +1,16 @@
+# The build context of the helper image (apps/helper/Dockerfile, built from the repository root): only the files its
+# COPY lines read. Everything else, .git, node_modules, every other package and every test, stays out.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/helper/package.json
+!apps/helper/src
+!packages/kit/package.json
+!packages/kit/src
+**/node_modules
+**/*.test.ts
+**/*.test.mjs
+**/fixtures
+**/.env*
+**/*.pem
