@@ -1,0 +1,236 @@
+#!/usr/bin/env node
+// Live check of card wallet-passkey-prf: a user signs in with a passkey whose PRF output unlocks the seed on SIGN_HOST
+// (docs/plan1/wallet.md §2.2 :47-56 at research ffcba5e). Headless Chromium with a CDP virtual authenticator (app.md
+// 5.0, A:1312) opens SIGN_HOST top-level, twice, each in its own browser (one internal authenticator at a time, P-B):
+//   prf run (hasPrf true): the page opens signed out; Create passkey signs in as account A (the profile key T_0 the page
+//     shows in data-account); a reload is still A with no sheet (wallet.md:155); Sign out deletes the store
+//     (wallet.md:156) and the page is signed out; Use passkey signs in as A again. The one credential's rp.id is
+//     SIGN_HOST. Then the check asks the same authenticator for the PRF output itself and derives T_0 with code of its
+//     own that shares none with the kit (node:crypto; the BIP-39 list read from bitcoin/bips and pinned by sha256):
+//     HKDF-SHA256 to the entropy (wallet.md:47), the 12 words, PBKDF2 to seed64 (:54), HKDF-SHA512 info "profile" ‖ 0
+//     to the ed25519 key (:68, :70-88). It must equal A.
+//   no-prf run (hasPrf false): Create passkey opens the no-PRF state (data-signin="no-prf"), shows no account and
+//     stores no seed: never a silent fallback to another seed.
+//   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
+//   node scripts/live-checks/wallet-passkey-prf.mjs --harness [--site <dir>] ...   the same steps on the app's browser
+//     harness (apps/terminal/test/harness) with SIGN_HOST's real name mapped to it, serving SIGN_HOST's build
+//     (index.html and public/, as the deploy copies them) or <dir>, under that build's own _headers
+//   PASS exit 0, FAIL exit 1, error exit 2
+// Records hold public values only (states, the public account ids, rp ids): never the PRF output, the entropy, the
+// words or a key. Every seed is a throwaway virtual authenticator's, never funded and never printed.
+import { createHash, createPrivateKey, createPublicKey, hkdfSync, pbkdf2Sync } from "node:crypto";
+import { realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const KEY = "wallet-passkey-prf";
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+export const SIGN_HOST = "sign.confidential.unrealized.trade";
+export const PRF_INPUT = "confidential-trenches/v1/seed";
+export const WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt";
+export const WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"; // BIP-39's own pin
+const WAIT_MS = 15_000;
+
+// ------------------------------------------------------------------------------------------------ the verdict
+const HEX64 = /^[0-9a-f]{64}$/;
+export function judge(rec) {
+  const lines = [];
+  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  const p = rec.prf ?? {};
+  const s = p.steps ?? {};
+  const A = s.create?.account;
+  say(s.open?.state === "signed-out" && !s.open?.account, `prf: opens signed out (${s.open?.state})`);
+  say(s.create?.state === "signed-in" && HEX64.test(A ?? ""), `prf: Create passkey signs in (${s.create?.state}, account ${A ? "shown" : "none"})`);
+  say(s.reload?.state === "signed-in" && s.reload?.account === A, `prf: a reload is the same account with no sheet (${s.reload?.state})`);
+  say(s.signout?.state === "signed-out" && !s.signout?.account && s.signout?.db === false, `prf: Sign out deletes the store (${s.signout?.state}, store ${s.signout?.db ? "kept" : "gone"})`);
+  say(s.signin?.state === "signed-in" && s.signin?.account === A && HEX64.test(A ?? ""), `prf: Use passkey signs in as the same account (${s.signin?.state}, ${s.signin?.account === A ? "same" : "other"})`);
+  const rps = p.credentials ?? [];
+  say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
+  say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
+  const n = rec.noPrf ?? {};
+  say(n.create?.state === "no-prf" && !n.create?.account && n.create?.seed === false,
+    `no-prf: Create passkey opens the no-PRF path (${n.create?.state}, account ${n.create?.account ? "shown" : "none"}, seed ${n.create?.seed ? "stored" : "none"})`);
+  say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})`);
+  return { pass: lines.every((l) => l.startsWith("ok ")), lines };
+}
+
+// ------------------------------------------------------------------------------------------------ the derivation
+let words = null;
+export async function wordlist(fetchFn = fetch) {
+  if (words) return words;
+  const res = await fetchFn(WORDLIST_URL);
+  if (!res.ok) throw new Error(`${WORDLIST_URL} answered ${res.status}`);
+  const text = await res.text();
+  if (createHash("sha256").update(text).digest("hex") !== WORDLIST_SHA256) throw new Error("the BIP-39 list's sha256 is not BIP-39's");
+  words = text.trim().split("\n");
+  return words;
+}
+const ED_PKCS8 = Buffer.from("302e020100300506032b657004220420", "hex");
+const edPub = (seed32) =>
+  createPublicKey(createPrivateKey({ key: Buffer.concat([ED_PKCS8, seed32]), format: "der", type: "pkcs8" }))
+    .export({ format: "der", type: "spki" })
+    .subarray(-32);
+/** The 16 bytes of entropy from a 32-byte PRF output (wallet.md:47). */
+export const entropyOfPrf = (prf) => Buffer.from(hkdfSync("sha256", prf, "confidential-trenches/v1", "wallet/entropy", 16));
+/** T_0's id from 16 bytes of entropy (wallet.md:54, :68, :70-88), with node:crypto only. */
+export function accountOfEntropy(entropy, list) {
+  const bits = [...entropy].map((b) => b.toString(2).padStart(8, "0")).join("") + createHash("sha256").update(entropy).digest()[0].toString(2).padStart(8, "0").slice(0, 4);
+  const mnemonic = Array.from({ length: 12 }, (_, i) => list[parseInt(bits.slice(i * 11, i * 11 + 11), 2)]).join(" ");
+  const seed64 = pbkdf2Sync(mnemonic.normalize("NFKD"), "mnemonic", 2048, 64, "sha512");
+  const t0 = Buffer.from(hkdfSync("sha512", seed64, "blindfill/v1", Buffer.concat([Buffer.from("profile"), Buffer.alloc(4)]), 32));
+  return edPub(t0).toString("hex");
+}
+export const accountOfPrf = (prf, list) => accountOfEntropy(entropyOfPrf(prf), list);
+
+// ------------------------------------------------------------------------------------------------ the probe
+const harnessDir = path.join(REPO, "apps/terminal/test/harness");
+const playwright = () => createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
+
+async function launch({ harness, site }) {
+  const { chromium } = playwright();
+  if (!harness) return { browser: await chromium.launch(), close: async () => {} };
+  const { makeCert } = await import(path.join(harnessDir, "certs.mjs"));
+  const { startServer } = await import(path.join(harnessDir, "server.mjs"));
+  const { buildSignpage } = await import(path.join(harnessDir, "harness.mjs"));
+  const root = site ?? buildSignpage();
+  const cert = makeCert([SIGN_HOST]);
+  const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root } } });
+  const browser = await chromium.launch({
+    args: [`--host-resolver-rules=MAP ${SIGN_HOST} 127.0.0.1:${server.port}, MAP * ~NOTFOUND`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
+  });
+  return {
+    browser,
+    close: async () => {
+      await browser.close();
+      await server.close();
+      cert.remove();
+      if (!site) rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+async function authenticator(page, hasPrf) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: { protocol: "ctap2", ctap2Version: "ctap2_1", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, hasPrf, automaticPresenceSimulation: true },
+  });
+  return async () => (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials.map((c) => ({ rpId: c.rpId }));
+}
+
+// the page's state once it settles: data-signin and data-account, and whether the store and its seed record exist
+async function settled(page) {
+  await page.waitForFunction(() => {
+    const s = document.getElementById("signin")?.dataset.signin;
+    return s && s !== "loading";
+  }, null, { timeout: WAIT_MS });
+  return page.evaluate(async () => {
+    const m = document.getElementById("signin");
+    const db = (await indexedDB.databases()).some((d) => d.name === "ct-wallet");
+    let seed = false;
+    if (db) {
+      seed = await new Promise((ok) => {
+        const r = indexedDB.open("ct-wallet");
+        r.onsuccess = () => {
+          const d = r.result;
+          if (!d.objectStoreNames.contains("meta")) return (d.close(), ok(false));
+          const g = d.transaction("meta").objectStore("meta").getKey("seed");
+          g.onsuccess = () => (d.close(), ok(g.result !== undefined));
+          g.onerror = () => (d.close(), ok(false));
+        };
+        r.onerror = () => ok(false);
+      });
+    }
+    return { state: m.dataset.signin, account: m.dataset.account ?? null, db, seed };
+  });
+}
+async function click(page, action) {
+  const before = await page.evaluate(() => document.getElementById("signin").dataset.signin);
+  await page.click(`[data-action="${action}"]`, { timeout: WAIT_MS });
+  await page.waitForFunction((b) => {
+    const s = document.getElementById("signin")?.dataset.signin;
+    return s && s !== b && s !== "loading";
+  }, before, { timeout: WAIT_MS }).catch(() => {});
+  return settled(page);
+}
+function watch(page, errors) {
+  page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push(`console: ${m.text()}`);
+  });
+}
+
+/** One full probe. Returns { record, prf } where prf (hex, in memory only) is for the caller's own parity check. */
+export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, site, fetchFn = fetch } = {}) {
+  const errors = [];
+  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, noPrf: {}, errors };
+  let prfHex = null;
+  // prf run
+  {
+    const h = await launch({ harness, site });
+    try {
+      const page = await (await h.browser.newContext()).newPage();
+      watch(page, errors);
+      const creds = await authenticator(page, true);
+      await page.goto(url);
+      const steps = {};
+      steps.open = await settled(page);
+      steps.create = await click(page, "create");
+      await page.reload();
+      steps.reload = await settled(page);
+      steps.signout = await click(page, "signout");
+      steps.signin = await click(page, "use");
+      record.prf.steps = steps;
+      record.prf.credentials = await creds();
+      const out = await page.evaluate(async (input) => {
+        const c = await navigator.credentials.get({
+          publicKey: { rpId: location.hostname, challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [], userVerification: "required", extensions: { prf: { eval: { first: new TextEncoder().encode(input) } } } },
+        });
+        const f = c.getClientExtensionResults().prf?.results?.first;
+        return f ? Array.from(new Uint8Array(f), (x) => x.toString(16).padStart(2, "0")).join("") : null;
+      }, PRF_INPUT).catch(() => null);
+      record.prf.prfOk = typeof out === "string" && out.length === 64;
+      if (record.prf.prfOk) {
+        prfHex = out;
+        record.prf.expected = accountOfPrf(Buffer.from(out, "hex"), await wordlist(fetchFn));
+      }
+    } finally {
+      await h.close();
+    }
+  }
+  // no-prf run
+  {
+    const h = await launch({ harness, site });
+    try {
+      const page = await (await h.browser.newContext()).newPage();
+      watch(page, errors);
+      await authenticator(page, false);
+      await page.goto(url);
+      record.noPrf.open = await settled(page);
+      record.noPrf.create = await click(page, "create");
+    } finally {
+      await h.close();
+    }
+  }
+  return { record, prf: prfHex };
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
+  try {
+    const harness = args.includes("--harness");
+    const origin = opt("--url");
+    const { record } = await probe({ harness, site: opt("--site"), url: origin ? `${origin.replace(/\/$/, "")}/` : undefined });
+    if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(record, null, 1) + "\n");
+    const { pass, lines } = judge(record);
+    for (const l of lines) console.log(l);
+    for (const e of record.errors) console.log(`    ${e}`);
+    console.log(`${KEY}: ${pass ? "PASS" : "FAIL"}`);
+    process.exit(pass ? 0 : 1);
+  } catch (e) {
+    console.error(`${KEY}: error: ${e?.message ?? e}`);
+    process.exit(2);
+  }
+}
