@@ -3,7 +3,7 @@
 // then the Nov 1 06:00Z tag when given) it reads packages/kit/src/vault/shapes.ts and
 // packages/kit/test/vectors/vault-v1.json from GitHub and checks:
 //   - shapes.ts loads as one module with no imports (its types stripped by Node);
-//   - the deposit message has exactly two fields, precommitment then depositor, and depositMessage() writes only them;
+//   - the deposit message has exactly two fields, precommitment then depositor, and vaultDepositMessage() writes only them;
 //   - U, R and V each move money in by their own ft_transfer_call on TOKEN, and no shape signs an ft_withdraw;
 //   - the six setup-file sha256 values equal the vault paper's 2.6 (vault.md:522-527, pinned below, since this repo
 //     carries no papers);
@@ -113,16 +113,16 @@ export async function checkFiles({ shapes, vectors }) {
   // the deposit message
   let msgKeys = [];
   try {
-    msgKeys = Object.keys(JSON.parse(S.depositMessage(1n, "ab.near")));
+    msgKeys = Object.keys(JSON.parse(S.vaultDepositMessage(1n, "ab.near")));
   } catch (e) {
     msgKeys = [`error: ${e.message}`];
   }
-  const fields = JSON.stringify(S.DEPOSIT_MESSAGE_FIELDS);
+  const fields = JSON.stringify(S.VAULT_DEPOSIT_MESSAGE_FIELDS);
   results.push(say(fields === '["precommitment","depositor"]' && JSON.stringify(msgKeys) === fields,
-    `the deposit message has exactly two fields: DEPOSIT_MESSAGE_FIELDS ${fields}, depositMessage() writes ${JSON.stringify(msgKeys)}`));
+    `the deposit message has exactly two fields: VAULT_DEPOSIT_MESSAGE_FIELDS ${fields}, vaultDepositMessage() writes ${JSON.stringify(msgKeys)}`));
 
   // the carrier
-  const signers = S.DEPOSIT_SIGNERS ?? {};
+  const signers = S.VAULT_DEPOSIT_SIGNERS ?? {};
   const ids = Object.keys(signers);
   const carriers = ids.map((id) => `${id} ${signers[id]?.method} on ${signers[id]?.receiver_id}${signers[id]?.signed_by_kit === true ? "" : " (not signed by the kit)"}`);
   const okIds = JSON.stringify(ids) === '["U","R","V"]' && ids.every((id) => signers[id]?.method === "ft_transfer_call" && signers[id]?.receiver_id === "TOKEN" && signers[id]?.signed_by_kit === true);
@@ -132,7 +132,7 @@ export async function checkFiles({ shapes, vectors }) {
     `the carrier: ${carriers.join("; ")}; shapes that sign an ft_withdraw: ${signedWithdraws.length ? [...new Set(signedWithdraws)].join(", ") : "none"}`));
 
   // the setup files
-  const got = (S.SETUP_FILES ?? []).map((f) => [f.path, f.sha256]);
+  const got = (S.VAULT_SETUP_FILES ?? []).map((f) => [f.path, f.sha256]);
   const diff = SETUP_SHA256.filter(([p, h], i) => got[i]?.[0] !== p || got[i]?.[1] !== h).map(([p]) => p);
   results.push(say(got.length === 6 && diff.length === 0, `the six setup-file sha256 values equal vault.md 2.6${diff.length ? `; differ: ${diff.join(", ")}` : got.length !== 6 ? `; ${got.length} listed` : ""}`));
 
@@ -144,7 +144,7 @@ export async function checkFiles({ shapes, vectors }) {
     results.push(say(false, `vault-v1.json parses: ${e.message}`));
     return { ok: false, lines };
   }
-  const order = JSON.stringify((S.CONTEXT_FIELDS ?? []).map(([n]) => n));
+  const order = JSON.stringify((S.VAULT_CONTEXT_FIELDS ?? []).map(([n]) => n));
   results.push(say(order === JSON.stringify(CONTEXT_ORDER), `the context order in shapes.ts: ${order}`));
   const bad = [];
   const one = (kind, i, v, own, theirs, value) => {
@@ -157,9 +157,9 @@ export async function checkFiles({ shapes, vectors }) {
     if (!okOwn) bad.push(`${kind} ${i + 1} does not recompute`);
     if (!okTheirs) bad.push(`${kind} ${i + 1}: shapes.ts makes other bytes`);
   };
-  (V.scope ?? []).forEach((v, i) => one("scope", i, v, scopeBytes(v), () => S.scopePreimage(v.vault, v.asset), "scope"));
-  (V.label ?? []).forEach((v, i) => one("label", i, v, labelBytes(v), () => S.labelPreimage(BigInt(v.scope), BigInt(v.nonce)), "label"));
-  (V.context ?? []).forEach((v, i) => one("context", i, v, contextBytes(v), () => S.contextPreimage(asNumbers(v.input), BigInt(v.scope)), "context"));
+  (V.scope ?? []).forEach((v, i) => one("scope", i, v, scopeBytes(v), () => S.vaultScopePreimage(v.vault, v.asset), "scope"));
+  (V.label ?? []).forEach((v, i) => one("label", i, v, labelBytes(v), () => S.vaultLabelPreimage(BigInt(v.scope), BigInt(v.nonce)), "label"));
+  (V.context ?? []).forEach((v, i) => one("context", i, v, contextBytes(v), () => S.vaultContextPreimage(asNumbers(v.input), BigInt(v.scope)), "context"));
   const n = [V.scope?.length ?? 0, V.label?.length ?? 0, V.context?.length ?? 0];
   results.push(say(bad.length === 0 && n[0] + n[1] + n[2] === 50,
     `${n[0]} scope, ${n[1]} label and ${n[2]} context vectors recompute (own Borsh and Keccak-256, big-endian mod p), shapes.ts making the same bytes${bad.length ? `; ${bad.slice(0, 4).join("; ")}${bad.length > 4 ? `; and ${bad.length - 4} more` : ""}` : ""}`));

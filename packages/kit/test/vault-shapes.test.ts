@@ -41,7 +41,7 @@ const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 const U128 = (1n << 128n) - 1n;
 const U64 = (1n << 64n) - 1n;
 type Input = Record<string, string>;
-const numbers = (i: Input): S.ContextInput => ({
+const numbers = (i: Input): S.VaultContextInput => ({
   processor: i.processor,
   recipient: i.recipient,
   register_deposit: BigInt(i.register_deposit),
@@ -66,34 +66,34 @@ test("50 vectors: 8 scope, 10 label, 32 context", () => {
 
 test("every scope vector recomputes: preimage, keccak, value", () => {
   for (const v of V.scope) {
-    const pre = S.scopePreimage(v.vault, v.asset);
+    const pre = S.vaultScopePreimage(v.vault, v.asset);
     assert.equal(hex(pre), v.preimage_hex, v.vault);
     assert.equal(hex(keccak(pre)), v.keccak_hex, v.vault);
-    assert.equal(S.scopeOf(keccak, v.vault, v.asset).toString(), v.scope, v.vault);
+    assert.equal(S.vaultScopeOf(keccak, v.vault, v.asset).toString(), v.scope, v.vault);
   }
 });
 
 test("every label vector recomputes: preimage, keccak, value", () => {
   for (const v of V.label) {
-    const pre = S.labelPreimage(BigInt(v.scope), BigInt(v.nonce));
+    const pre = S.vaultLabelPreimage(BigInt(v.scope), BigInt(v.nonce));
     assert.equal(hex(pre), v.preimage_hex, v.nonce);
     assert.equal(hex(keccak(pre)), v.keccak_hex, v.nonce);
-    assert.equal(S.labelOf(keccak, BigInt(v.scope), BigInt(v.nonce)).toString(), v.label, v.nonce);
+    assert.equal(S.vaultLabelOf(keccak, BigInt(v.scope), BigInt(v.nonce)).toString(), v.label, v.nonce);
   }
 });
 
 test("every context vector recomputes: preimage, keccak, value; the JSON request path gives the same bytes", () => {
   for (const v of V.context) {
     const c = numbers(v.input);
-    const pre = S.contextPreimage(c, BigInt(v.scope));
+    const pre = S.vaultContextPreimage(c, BigInt(v.scope));
     assert.equal(hex(pre), v.preimage_hex, v.name);
     assert.equal(pre.length, 100 + c.processor.length + c.recipient.length + c.fee_recipient.length + 32, v.name);
     assert.equal(hex(keccak(pre)), v.keccak_hex, v.name);
-    assert.equal(S.contextOf(keccak, c, BigInt(v.scope)).toString(), v.context, v.name);
+    assert.equal(S.vaultContextOf(keccak, c, BigInt(v.scope)).toString(), v.context, v.name);
     if (c.deadline_ms <= BigInt(Number.MAX_SAFE_INTEGER)) {
       const { processor, deadline_ms, ...rest } = v.input;
-      const w: S.Withdrawal = { ...(rest as Omit<S.Withdrawal, "deadline_ms">), deadline_ms: Number(deadline_ms) };
-      assert.equal(hex(S.contextPreimage(S.contextInput(processor, w), BigInt(v.scope))), v.preimage_hex, v.name);
+      const w: S.VaultWithdrawal = { ...(rest as Omit<S.VaultWithdrawal, "deadline_ms">), deadline_ms: Number(deadline_ms) };
+      assert.equal(hex(S.vaultContextPreimage(S.vaultContextInput(processor, w), BigInt(v.scope))), v.preimage_hex, v.name);
     }
   }
 });
@@ -156,27 +156,27 @@ test("swapping recipient and fee_recipient changes the context (the order is par
   const v = V.context[0];
   const c = numbers(v.input);
   const swapped = { ...c, recipient: c.fee_recipient, fee_recipient: c.recipient };
-  assert.notEqual(S.contextOf(keccak, swapped, BigInt(v.scope)).toString(), v.context);
-  assert.deepEqual(S.CONTEXT_FIELDS.map(([n]) => n), ["processor", "recipient", "register_deposit", "fee_recipient", "relay_fee", "refund_precommitment", "deadline_ms", "salt"]);
+  assert.notEqual(S.vaultContextOf(keccak, swapped, BigInt(v.scope)).toString(), v.context);
+  assert.deepEqual(S.VAULT_CONTEXT_FIELDS.map(([n]) => n), ["processor", "recipient", "register_deposit", "fee_recipient", "relay_fee", "refund_precommitment", "deadline_ms", "salt"]);
 });
 
 test("the deposit message: exactly precommitment and depositor, in that order, as the vault parses it", () => {
-  assert.deepEqual([...S.DEPOSIT_MESSAGE_FIELDS], ["precommitment", "depositor"]);
+  assert.deepEqual([...S.VAULT_DEPOSIT_MESSAGE_FIELDS], ["precommitment", "depositor"]);
   const u = "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de";
-  const m = S.depositMessage(S.P - 1n, u);
-  assert.equal(m, `{"precommitment":"${S.P - 1n}","depositor":"${u}"}`);
+  const m = S.vaultDepositMessage(S.VAULT_FIELD_P - 1n, u);
+  assert.equal(m, `{"precommitment":"${S.VAULT_FIELD_P - 1n}","depositor":"${u}"}`);
   assert.deepEqual(Object.keys(JSON.parse(m)), ["precommitment", "depositor"]);
-  assert.ok(Buffer.byteLength(m) <= S.DEPOSIT_MESSAGE_MAX_BYTES);
-  assert.throws(() => S.depositMessage(S.P, u), /precommitment/);
-  assert.throws(() => S.depositMessage(-1n, u), /precommitment/);
+  assert.ok(Buffer.byteLength(m) <= S.VAULT_DEPOSIT_MESSAGE_MAX_BYTES);
+  assert.throws(() => S.vaultDepositMessage(S.VAULT_FIELD_P, u), /precommitment/);
+  assert.throws(() => S.vaultDepositMessage(-1n, u), /precommitment/);
   for (const bad of ["", "a", "Alice.near", "a..near", "a".repeat(65), "-a.near", "a b.near"]) {
-    assert.throws(() => S.depositMessage(1n, bad), /depositor/, bad);
+    assert.throws(() => S.vaultDepositMessage(1n, bad), /depositor/, bad);
   }
 });
 
 test("every move into the vault is the moving account's own ft_transfer_call; no shape signs an ft_withdraw", () => {
   for (const id of ["U", "R", "V"] as const) {
-    const c = S.DEPOSIT_SIGNERS[id];
+    const c = S.VAULT_DEPOSIT_SIGNERS[id];
     assert.equal(c.method, "ft_transfer_call", id);
     assert.equal(c.receiver_id, "TOKEN", id);
     assert.equal(c.signed_as, "NEP-366 DelegateAction", id);
@@ -184,7 +184,7 @@ test("every move into the vault is the moving account's own ft_transfer_call; no
     assert.equal(c.gas_tgas, 180, id);
     assert.equal(c.signed_by_kit, true, id);
   }
-  assert.deepEqual(Object.keys(S.DEPOSIT_SIGNERS), ["U", "R", "V"]);
+  assert.deepEqual(Object.keys(S.VAULT_DEPOSIT_SIGNERS), ["U", "R", "V"]);
   assert.deepEqual(S.VAULT_ALSO_ACCEPTS.map((a) => [a.method, a.signed_by_kit]), [["ft_withdraw", false]]);
 });
 
@@ -192,60 +192,60 @@ test("salt, numbers and ids are refused in every form the vault refuses", () => 
   const c = numbers(V.context[0].input);
   const scope = BigInt(V.context[0].scope);
   for (const salt of ["F".repeat(32), "0x" + "0".repeat(30), "0".repeat(31), "0".repeat(33), "g".repeat(32)]) {
-    assert.throws(() => S.contextPreimage({ ...c, salt }, scope), /salt/, salt);
+    assert.throws(() => S.vaultContextPreimage({ ...c, salt }, scope), /salt/, salt);
   }
-  assert.throws(() => S.contextPreimage({ ...c, refund_precommitment: 0n }, scope), /refund_precommitment/);
-  assert.throws(() => S.contextPreimage({ ...c, refund_precommitment: S.P }, scope), /refund_precommitment/);
-  assert.throws(() => S.contextPreimage({ ...c, register_deposit: 1n << 128n }, scope), /register_deposit/);
-  assert.throws(() => S.contextPreimage({ ...c, relay_fee: -1n }, scope), /relay_fee/);
-  assert.throws(() => S.contextPreimage({ ...c, deadline_ms: 1n << 64n }, scope), /deadline_ms/);
-  assert.throws(() => S.contextPreimage({ ...c, recipient: "Bob.near" }, scope), /recipient/);
-  assert.throws(() => S.contextPreimage(c, S.P), /scope/);
-  assert.throws(() => S.labelPreimage(1n, 1n << 64n), /nonce/);
+  assert.throws(() => S.vaultContextPreimage({ ...c, refund_precommitment: 0n }, scope), /refund_precommitment/);
+  assert.throws(() => S.vaultContextPreimage({ ...c, refund_precommitment: S.VAULT_FIELD_P }, scope), /refund_precommitment/);
+  assert.throws(() => S.vaultContextPreimage({ ...c, register_deposit: 1n << 128n }, scope), /register_deposit/);
+  assert.throws(() => S.vaultContextPreimage({ ...c, relay_fee: -1n }, scope), /relay_fee/);
+  assert.throws(() => S.vaultContextPreimage({ ...c, deadline_ms: 1n << 64n }, scope), /deadline_ms/);
+  assert.throws(() => S.vaultContextPreimage({ ...c, recipient: "Bob.near" }, scope), /recipient/);
+  assert.throws(() => S.vaultContextPreimage(c, S.VAULT_FIELD_P), /scope/);
+  assert.throws(() => S.vaultLabelPreimage(1n, 1n << 64n), /nonce/);
   for (const d of ["", "01", "+1", "-1", "1e3", " 1", "1".repeat(79), (1n << 256n).toString()]) {
-    assert.throws(() => S.decimal(d, "n"), /n: not/, d);
+    assert.throws(() => S.vaultDecimal(d, "n"), /n: not/, d);
   }
-  assert.equal(S.decimal("0", "n"), 0n);
-  const w: S.Withdrawal = { recipient: "a.near", register_deposit: "0", fee_recipient: "b.near", relay_fee: "1", refund_precommitment: "7", deadline_ms: 1, salt: "0".repeat(32) };
-  assert.throws(() => S.contextInput("v.near", { ...w, relay_fee: "01" }), /relay_fee/);
-  assert.throws(() => S.contextInput("v.near", { ...w, deadline_ms: -1 }), /deadline_ms/);
-  assert.throws(() => S.contextInput("v.near", { ...w, deadline_ms: 2 ** 53 }), /deadline_ms/);
+  assert.equal(S.vaultDecimal("0", "n"), 0n);
+  const w: S.VaultWithdrawal = { recipient: "a.near", register_deposit: "0", fee_recipient: "b.near", relay_fee: "1", refund_precommitment: "7", deadline_ms: 1, salt: "0".repeat(32) };
+  assert.throws(() => S.vaultContextInput("v.near", { ...w, relay_fee: "01" }), /relay_fee/);
+  assert.throws(() => S.vaultContextInput("v.near", { ...w, deadline_ms: -1 }), /deadline_ms/);
+  assert.throws(() => S.vaultContextInput("v.near", { ...w, deadline_ms: 2 ** 53 }), /deadline_ms/);
 });
 
 test("snarkjs's proof becomes the vault's argument as written; a coordinate at q or a projective point is refused", () => {
-  const p: S.SnarkjsProof = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"], protocol: "groth16", curve: "bn128" };
+  const p: S.VaultSnarkjsProof = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"], protocol: "groth16", curve: "bn128" };
   assert.deepEqual(S.vaultProof(p), { a: ["1", "2"], b: [["3", "4"], ["5", "6"]], c: ["7", "8"] });
-  assert.throws(() => S.vaultProof({ ...p, pi_a: [S.Q.toString(), "2", "1"] }), /below q/);
+  assert.throws(() => S.vaultProof({ ...p, pi_a: [S.VAULT_FIELD_Q.toString(), "2", "1"] }), /below q/);
   assert.throws(() => S.vaultProof({ ...p, pi_a: ["01", "2", "1"] }), /canonical/);
   assert.throws(() => S.vaultProof({ ...p, pi_c: ["7", "8", "2"] }), /affine/);
-  assert.equal(S.WITHDRAW_SIGNALS.length, 8);
-  assert.equal(S.WITHDRAW_SIGNALS[7], "context");
-  assert.deepEqual([...S.RAGEQUIT_SIGNALS], ["commitment", "nullifierHash", "value", "label"]);
+  assert.equal(S.VAULT_WITHDRAW_SIGNALS.length, 8);
+  assert.equal(S.VAULT_WITHDRAW_SIGNALS[7], "context");
+  assert.deepEqual([...S.VAULT_RAGEQUIT_SIGNALS], ["commitment", "nullifierHash", "value", "label"]);
 });
 
 test("attached NEAR and the fee backstop follow 2.3 and 2.5.2 rows 8 and 14", () => {
   const e19 = 10n ** 19n;
-  assert.equal(S.prepayYocto(false), 756n * e19);
-  assert.equal(S.prepayYocto(true), 904n * e19);
-  assert.equal(S.withdrawYocto(0n, 0n, false), 1099n * e19 + 1n);
-  assert.equal(S.withdrawYocto(5n, 1n, true), 1247n * e19 + 5n + 2n);
-  assert.equal(S.ragequitYocto(3n), 864n * e19 + 3n + 1n);
-  assert.equal(S.relayFeeWithinBackstop(50n, 100n), true);
-  assert.equal(S.relayFeeWithinBackstop(51n, 100n), false);
-  assert.equal(S.relayFeeWithinBackstop(U128 / 2n, U128), true);
-  assert.equal(S.relayFeeWithinBackstop(U128 / 2n + 1n, U128), false);
+  assert.equal(S.vaultPrepayYocto(false), 756n * e19);
+  assert.equal(S.vaultPrepayYocto(true), 904n * e19);
+  assert.equal(S.vaultWithdrawYocto(0n, 0n, false), 1099n * e19 + 1n);
+  assert.equal(S.vaultWithdrawYocto(5n, 1n, true), 1247n * e19 + 5n + 2n);
+  assert.equal(S.vaultRagequitYocto(3n), 864n * e19 + 3n + 1n);
+  assert.equal(S.vaultRelayFeeWithinBackstop(50n, 100n), true);
+  assert.equal(S.vaultRelayFeeWithinBackstop(51n, 100n), false);
+  assert.equal(S.vaultRelayFeeWithinBackstop(U128 / 2n, U128), true);
+  assert.equal(S.vaultRelayFeeWithinBackstop(U128 / 2n + 1n, U128), false);
 });
 
 test("events, setup files and constants: the frozen names and values", () => {
-  assert.equal(S.EVENT_STANDARD, "blindfill-vault");
-  assert.equal(S.EVENT_VERSION, "1.0.0");
-  assert.deepEqual(Object.keys(S.EVENTS), ["leaf_inserted", "deposited", "storage_prepaid", "withdrawn", "withdrawal_relayed", "ragequit", "payout", "refund_inserted"]);
-  assert.equal(S.SETUP_FILES.length, 6);
-  for (const f of S.SETUP_FILES) assert.match(f.sha256, /^[0-9a-f]{64}$/, f.path);
-  assert.equal(S.CONSTANTS.TOKEN, "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"); // gitleaks:allow (a public account id)
-  assert.equal(S.CONSTANTS.MIN_DEPOSIT, 1_000_000n);
-  assert.equal(S.CONSTANTS.MAX_RELAY_FEE_BPS, 5_000);
-  assert.equal(S.CONSTANTS.DEPOSIT_STORAGE_BYTES, 756);
-  assert.equal(S.CONSTANTS.REFUND_RESERVE_BYTES, 389);
-  assert.equal(S.P % 2n ** 28n, 1n); // p - 1 is divisible by 2^28, BN254's scalar field
+  assert.equal(S.VAULT_EVENT_STANDARD, "blindfill-vault");
+  assert.equal(S.VAULT_EVENT_VERSION, "1.0.0");
+  assert.deepEqual(Object.keys(S.VAULT_EVENTS), ["leaf_inserted", "deposited", "storage_prepaid", "withdrawn", "withdrawal_relayed", "ragequit", "payout", "refund_inserted"]);
+  assert.equal(S.VAULT_SETUP_FILES.length, 6);
+  for (const f of S.VAULT_SETUP_FILES) assert.match(f.sha256, /^[0-9a-f]{64}$/, f.path);
+  assert.equal(S.VAULT_CONSTANTS.TOKEN, "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"); // gitleaks:allow (a public account id)
+  assert.equal(S.VAULT_CONSTANTS.MIN_DEPOSIT, 1_000_000n);
+  assert.equal(S.VAULT_CONSTANTS.MAX_RELAY_FEE_BPS, 5_000);
+  assert.equal(S.VAULT_CONSTANTS.DEPOSIT_STORAGE_BYTES, 756);
+  assert.equal(S.VAULT_CONSTANTS.REFUND_RESERVE_BYTES, 389);
+  assert.equal(S.VAULT_FIELD_P % 2n ** 28n, 1n); // p - 1 is divisible by 2^28, BN254's scalar field
 });

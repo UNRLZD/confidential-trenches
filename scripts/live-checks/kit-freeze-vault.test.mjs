@@ -36,7 +36,7 @@ test("recorded good answer: PASS, every line ok", async () => {
   const r = await check({ refs: ["main"], files: { main: GOOD } });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(r.lines.map((l) => l.slice(0, 10)), Array(6).fill("main: ok  "));
-  assert.match(r.lines[1], /exactly two fields: DEPOSIT_MESSAGE_FIELDS \["precommitment","depositor"\], depositMessage\(\) writes \["precommitment","depositor"\]$/);
+  assert.match(r.lines[1], /exactly two fields: VAULT_DEPOSIT_MESSAGE_FIELDS \["precommitment","depositor"\], vaultDepositMessage\(\) writes \["precommitment","depositor"\]$/);
   assert.match(r.lines[2], /U ft_transfer_call on TOKEN; R ft_transfer_call on TOKEN; V ft_transfer_call on TOKEN; shapes that sign an ft_withdraw: none$/);
   assert.match(r.lines[5], /8 scope, 10 label and 32 context vectors recompute/);
 });
@@ -55,10 +55,10 @@ test("bad answer, the swapped order with vectors the swapped code made itself: F
   const V = JSON.parse(files.vectors);
   for (const v of V.context) {
     const n = Object.fromEntries(Object.entries(v.input).map(([k, x]) => [k, /^(register_deposit|relay_fee|refund_precommitment|deadline_ms)$/.test(k) ? BigInt(x) : x]));
-    const pre = S.contextPreimage(n, BigInt(v.scope));
+    const pre = S.vaultContextPreimage(n, BigInt(v.scope));
     v.preimage_hex = Buffer.from(pre).toString("hex");
     v.keccak_hex = keccak(pre).toString("hex");
-    v.context = S.fieldOf(keccak(pre)).toString();
+    v.context = S.vaultFieldOf(keccak(pre)).toString();
   }
   const r = await checkFiles({ ...files, vectors: JSON.stringify(V) });
   assert.equal(r.ok, false);
@@ -68,14 +68,14 @@ test("bad answer, the swapped order with vectors the swapped code made itself: F
 test("recorded bad answer, a third deposit-message field: FAIL", async () => {
   const r = await checkFiles(edited(bad("a third deposit-message field")));
   assert.equal(r.ok, false);
-  assert.match(r.lines[1], /^BAD the deposit message has exactly two fields: DEPOSIT_MESSAGE_FIELDS \["precommitment","depositor","refund_to"\]/);
+  assert.match(r.lines[1], /^BAD the deposit message has exactly two fields: VAULT_DEPOSIT_MESSAGE_FIELDS \["precommitment","depositor","refund_to"\]/);
 });
 
 test("recorded bad answers, ft_withdraw named as R's or V's carrier: FAIL", async () => {
   for (const [name, id] of [["ft_withdraw named as R's carrier", "R"], ["ft_withdraw named as V's carrier", "V"]]) {
     const r = await checkFiles(edited(bad(name)));
     assert.equal(r.ok, false, name);
-    assert.match(r.lines[2], new RegExp(`^BAD the carrier: .*${id} ft_withdraw on intents\\.near; .*shapes that sign an ft_withdraw: DEPOSIT_SIGNERS$`), name);
+    assert.match(r.lines[2], new RegExp(`^BAD the carrier: .*${id} ft_withdraw on intents\\.near; .*shapes that sign an ft_withdraw: VAULT_DEPOSIT_SIGNERS$`), name);
   }
 });
 
