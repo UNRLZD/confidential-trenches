@@ -691,8 +691,7 @@ test("dRPC answers 429 before ok: the gate waits out each Retry-After and passes
   const s = rateLimited((n) => (n < 3 ? { "retry-after": ["43", "600", "5"][n] } : null));
   const r = await nearTx(s.fetchFn, s.sleep);
   assert.deepEqual(r.refusals, []);
-  // near.org, FastNEAR's second door, is not asked once FastNEAR's archive read it ok
-  assert.deepEqual(r.read.map((x) => x.split(" ok on ")[1]), REAL_RPCS.near.slice(0, 2));
+  assert.deepEqual(r.read.map((x) => x.split(" ok on ")[1]), REAL_RPCS.near);
   const d = s.log.filter((l) => l.includes(DRPC) || /^sleep (43000|600000|5000)$/.test(l));
   assert.deepEqual(d.slice(0, 7), [`ask ${DRPC} EXPERIMENTAL_tx_status`, "sleep 43000", `ask ${DRPC} EXPERIMENTAL_tx_status`, "sleep 600000", `ask ${DRPC} EXPERIMENTAL_tx_status`, "sleep 5000", `ask ${DRPC} EXPERIMENTAL_tx_status`]);
   // each host at most once a second: the block read right after the tx read on the same host waits up to 1 s before it
@@ -776,8 +775,8 @@ test("light proof: the recorded real testnet tx, read on FastNEAR alone, is prov
   assert.deepEqual(r.refusals, []);
   assert.equal(r.proven.length, 1);
   assert.match(r.proven[0], new RegExp(`^PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash}: 3 outcome\\(s\\) proven by archival-rpc\\.testnet\\.fastnear\\.com's light-client proof against final block ${LP.head.height} ${LP.head.hash}; in block \\d+, 2026-11-01T02:2\\d:\\d\\d\\.\\d+Z \\(testnet, not real-money proof\\)$`));
-  // the proof needs no second read on FastNEAR's other host: near.org is never asked
-  assert.equal(r.log.filter((l) => l.startsWith(`ask ${T_ORG} `)).length, 0);
+  // the proof needs no second read on FastNEAR's other host: near.org is asked once, never waited
+  assert.equal(r.log.filter((l) => l === `ask ${T_ORG} EXPERIMENTAL_tx_status`).length, 1);
   assert.deepEqual(r.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), []);
 });
 
@@ -946,7 +945,7 @@ function threeHosts(answer) {
 }
 const T3 = { "near-testnet": ["t1", "t2", "t3"] };
 const testnetRec = rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`);
-const NOT_WAITED = `near-testnet ${NEAR_TX} on t3: rate limited, not waited: two operators read it ok`;
+const NOT_WAITED = `near-testnet ${NEAR_TX} on t3: rate limited, not waited: its read could add no second operator`;
 
 test("two hosts read ok and the third answers 429 with Retry-After 279: passes, never sleeps, names the skip", async () => {
   const s = threeHosts((url) => (url === "t3" ? 429 : null));
