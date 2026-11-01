@@ -5,11 +5,12 @@
 //! - NEAR's own alt_bn128 code reads every point: near-sdk's mocked blockchain runs near-vm-runner 0.37.4
 //!   (src/logic/alt_bn128.rs), the decoder nearcore's host functions use. A G1 constant comes back byte for byte from
 //!   `alt_bn128_g1_sum`; a G2 constant must pass a pairing, which an Fq2 swap breaks (the point leaves the curve).
-//! - A real proof of each circuit verifies against the constants through the same host functions, and the same proof
-//!   with one public signal changed does not. Only a real proof shows the whole encoding is right (VT-U03).
+//! - A real proof of each circuit verifies against the constants through the vault's own src/verifier.rs, and the same
+//!   proof with one public signal changed does not. Only a real proof shows the whole encoding is right (VT-U03).
 //! - The generator, run again with --check, finds no difference; and it refuses a .vkey that is not the pinned one.
 
-use blindfill_vault::field;
+use blindfill_vault::field::{self, U256};
+use blindfill_vault::verifier;
 use blindfill_vault::verifier_keys::{
     VerifyingKey, COMMITMENT, COMMITMENT_VKEY_SHA256, WITHDRAW, WITHDRAW_VKEY_SHA256,
 };
@@ -39,26 +40,6 @@ fn dec(le: &[u8]) -> String {
         be[31 - i] = *b;
     }
     field::to_decimal(&field::from_be(&be))
-}
-
-/// A decimal string below 2^256 as 32 little-endian bytes.
-fn le(s: &str) -> [u8; 32] {
-    let mut limbs = [0u64; 4]; // least significant first
-    for c in s.bytes() {
-        assert!(c.is_ascii_digit());
-        let mut carry = (c - b'0') as u128;
-        for l in limbs.iter_mut() {
-            let cur = (*l as u128) * 10 + carry;
-            *l = cur as u64;
-            carry = cur >> 64;
-        }
-        assert_eq!(carry, 0);
-    }
-    let mut out = [0u8; 32];
-    for (i, l) in limbs.iter().enumerate() {
-        out[8 * i..8 * i + 8].copy_from_slice(&l.to_le_bytes());
-    }
-    out
 }
 
 /// A G1 constant decoded as snarkjs writes it: [x, y, "1"].
@@ -154,36 +135,12 @@ struct Proof {
     c: [&'static str; 2],
 }
 
-/// snarkjs's check through NEAR's host functions: e(-A, B) e(alpha, beta) e(vk_x, gamma) e(C, delta) = 1, with
-/// vk_x = IC[0] + sum(signal_i * IC[i + 1]).
+/// The vault's own check (src/verifier.rs `verify`) on a proof and its decimal signals.
 fn verify<const N: usize>(k: &VerifyingKey<N>, p: &Proof, signals: &[&str]) -> bool {
-    assert_eq!(signals.len(), N - 1);
-    let mut me = vec![];
-    for (i, s) in signals.iter().enumerate() {
-        me.extend_from_slice(&k.ic[i + 1]);
-        me.extend_from_slice(&le(s));
-    }
-    let m = env::alt_bn128_g1_multiexp(&me);
-    let mut su = vec![0u8];
-    su.extend_from_slice(&k.ic[0]);
-    su.push(0);
-    su.extend_from_slice(&m);
-    let vk_x = env::alt_bn128_g1_sum(&su);
-    let mut a = [0u8; 64];
-    a[..32].copy_from_slice(&le(p.a[0]));
-    a[32..].copy_from_slice(&le(p.a[1]));
-    let mut pi = neg(&a);
-    for s in [p.b[0][0], p.b[0][1], p.b[1][0], p.b[1][1]] {
-        pi.extend_from_slice(&le(s));
-    }
-    pi.extend_from_slice(&k.alpha_g1);
-    pi.extend_from_slice(&k.beta_g2);
-    pi.extend_from_slice(&vk_x);
-    pi.extend_from_slice(&k.gamma_g2);
-    pi.extend_from_slice(&le(p.c[0]));
-    pi.extend_from_slice(&le(p.c[1]));
-    pi.extend_from_slice(&k.delta_g2);
-    env::alt_bn128_pairing_check(&pi)
+    let st = |x: &str| x.to_string();
+    let proof = verifier::Proof { a: p.a.map(st), b: p.b.map(|r| r.map(st)), c: p.c.map(st) };
+    let signals: Vec<U256> = signals.iter().map(|x| field::from_decimal(x).unwrap()).collect();
+    verifier::verify(k, &proof.encode(), &signals)
 }
 
 // A real Privacy Pools v1.3.0 withdraw proof made with the pinned withdraw.zkey (test notes only): the research repo's

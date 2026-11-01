@@ -16,6 +16,10 @@
 //!
 //! A point off the curve or outside its subgroup makes the host function itself fail the call. A proof that does not
 //! verify returns false; the caller refuses it (`InvalidProof`, row 10).
+//!
+//! A Groth16 proof can be re-randomised: (-A, -B, C) is r = -1 and verifies for the same signals (tests/groth16.rs
+//! pins it), and anyone holding a proof can make others. So a spend is keyed on its nullifier hash, never on the
+//! proof's bytes; the withdraw (V1.4) must keep it that way.
 
 use crate::field::{self, U256};
 use crate::verifier_keys::{VerifyingKey, WITHDRAW};

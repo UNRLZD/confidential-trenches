@@ -69,7 +69,14 @@ impl Probe {
         let g0 = env::used_gas().as_gas();
         let s: Vec<field::U256> = public_signals
             .iter()
-            .map(|x| field::from_decimal(x).unwrap_or_else(|| env::panic_str("FieldOverflow")))
+            .map(|x| {
+                let n = field::parse_decimal(x)
+                    .unwrap_or_else(|| env::panic_str("InvalidNumber: a public signal is not a canonical decimal"));
+                if field::ge(&n, &field::P) {
+                    env::panic_str("FieldOverflow: a public signal is not below p");
+                }
+                n
+            })
             .collect();
         let s: [field::U256; 8] = s.try_into().unwrap_or_else(|_| env::panic_str("want 8 public signals"));
         let e = proof.encode();

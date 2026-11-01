@@ -5,10 +5,12 @@
 //! The proof is tests/fixtures/withdraw-proof.json: snarkjs 0.7.5 made it with the pinned packages/kit/zk/withdraw.zkey,
 //! and snarkjs's own verify passes it against withdraw.vkey. Unit tests run in near-sdk's mocked blockchain, whose
 //! alt_bn128 calls are nearcore's own code (near-vm-runner); a changed proof must return false or fail the call,
-//! never pass:
+//! never pass (any single changed bit is refused):
 //! - one flipped bit in each coordinate of a, b and c, at five bit positions;
 //! - one flipped bit in each public signal;
 //! - a, b or c negated (each still a point on its curve, so the pairing itself refuses it); b's Fq2 halves swapped;
+//!   (-a, -b, c) together, Groth16's re-randomisation with r = -1, does verify, and the test pins that (a spend is
+//!   keyed on the nullifier hash, never on the proof's bytes);
 //! - a signal = p, refused before any host call (`FieldOverflow`); a coordinate + q (`InvalidProofEncoding`); a
 //!   coordinate that is not a canonical decimal (`InvalidNumber`).
 //!
@@ -204,6 +206,12 @@ fn a_changed_point_still_on_its_curve_fails_the_pairing() {
     let mut p = proof.clone();
     p.c[1] = neg(&p.c[1]);
     assert_eq!(run(&p, &signals), Got::Fail, "-c");
+    // Groth16's known re-randomisation with r = -1: (-A, -B, C) is another valid proof of the same signals. Pinned
+    // here so it is never mistaken for a refusal: the vault keys a spend on the nullifier hash, never the proof bytes.
+    let mut p = proof.clone();
+    p.a[1] = neg(&p.a[1]);
+    p.b[1] = [neg(&p.b[1][0]), neg(&p.b[1][1])];
+    assert_eq!(run(&p, &signals), Got::Pass, "(-a, -b, c)");
     // b's Fq2 halves in the other order (the Solidity verifiers' order): not this point, never a pass
     let mut p = proof.clone();
     p.b[0].swap(0, 1);
@@ -300,6 +308,16 @@ async fn sandbox_gas_of_one_verify() -> harness::R<()> {
     off.c[0] = flip(&off.c[0], 0);
     let o = call(off).await?;
     assert!(!o.all_ok(), "c.x bit 0 flipped: the call did not fail");
+    // row 1's two signal refusals keep their own names: a malformed decimal, and a value not below p
+    for (bad, want) in [(format!("0{}", signals[2]), "InvalidNumber"), (dec(&P), "FieldOverflow")] {
+        let mut s = signals.clone();
+        s[2] = bad.clone();
+        let args = json!({"proof": proof, "public_signals": s});
+        let o = h.call_outcome(&h.root, probe.id(), "probe_verify_withdraw", args, NearToken::from_yoctonear(0), Gas::from_tgas(300)).await?;
+        let f = o.failure().unwrap_or_default().to_string();
+        println!("signal {bad:?}: {f}");
+        assert!(f.contains(want), "signal {bad:?}: want {want}, got {f}");
+    }
     println!("{}", h.gas_table());
     Ok(())
 }
