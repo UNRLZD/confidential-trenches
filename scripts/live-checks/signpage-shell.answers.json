@@ -1,0 +1,1177 @@
+{
+ "good": {
+  "webkit": {
+   "engine": "webkit",
+   "source": "harness, SIGN_HOST from packages/signpage's committed build",
+   "at": "2026-11-01T14:00:08.979Z",
+   "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
+   "topology": "shell",
+   "steps": {
+    "open": {
+     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     }
+    },
+    "first": {
+     "id": "dab6fc5a-e805-487b-b145-f784d0b2ea72"
+    },
+    "words": {
+     "t": 1793541610289,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true
+     },
+     "layerHidden": true
+    },
+    "wordsOut": {
+     "t": 1793541614205,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "last": {
+     "id": "c9fd697a-2e20-40ef-953f-c3f28a606807"
+    },
+    "stranger": {
+     "t": 1793541617505,
+     "done": true
+    }
+   },
+   "messages": [
+    {
+     "t": 1793541609220,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793541609278,
+     "data": {
+      "v": 1,
+      "id": "dab6fc5a-e805-487b-b145-f784d0b2ea72",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541610315,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541614209,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541617404,
+     "data": {
+      "v": 1,
+      "id": "c9fd697a-2e20-40ef-953f-c3f28a606807",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541617506,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  },
+  "chromium": {
+   "engine": "chromium",
+   "source": "harness, SIGN_HOST from packages/signpage's committed build",
+   "at": "2026-11-01T14:00:20.007Z",
+   "browser": "chromium 153.0.8010.12 (Playwright)",
+   "topology": "shell",
+   "steps": {
+    "open": {
+     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     }
+    },
+    "first": {
+     "id": "e40f9d82-eed5-4927-8c30-91441f17bb12"
+    },
+    "created": {
+     "t": 1793541621051,
+     "top": {
+      "state": "backup",
+      "codeSaved": "false",
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "saved": {
+     "t": 1793541625027,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true
+     },
+     "layerHidden": true
+    },
+    "passkeyOut": {
+     "t": 1793541628969,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "words": {
+     "t": 1793541632916,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true
+     },
+     "layerHidden": true
+    },
+    "wordsOut": {
+     "t": 1793541636837,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "last": {
+     "id": "dd911bfa-f3ae-4ba7-9e40-57fb058df3de"
+    },
+    "stranger": {
+     "t": 1793541640053,
+     "done": true
+    }
+   },
+   "messages": [
+    {
+     "t": 1793541620143,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793541620147,
+     "data": {
+      "v": 1,
+      "id": "e40f9d82-eed5-4927-8c30-91441f17bb12",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541621223,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "passkey",
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541625086,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "passkey",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541628996,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541632953,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541636863,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541639951,
+     "data": {
+      "v": 1,
+      "id": "dd911bfa-f3ae-4ba7-9e40-57fb058df3de",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  },
+  "firefox": {
+   "engine": "firefox",
+   "source": "harness, SIGN_HOST from packages/signpage's committed build",
+   "at": "2026-11-01T14:00:43.030Z",
+   "browser": "firefox 155.0 (Playwright)",
+   "topology": "shell",
+   "steps": {
+    "open": {
+     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     }
+    },
+    "first": {
+     "id": "c37c1adf-76a6-4bca-9e6e-88310158a38a"
+    },
+    "words": {
+     "t": 1793541644121,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true
+     },
+     "layerHidden": true
+    },
+    "wordsOut": {
+     "t": 1793541648052,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "last": {
+     "id": "e1aecd3f-debe-4351-9438-5e42ee53ed55"
+    },
+    "stranger": {
+     "t": 1793541651322,
+     "done": true
+    }
+   },
+   "messages": [
+    {
+     "t": 1793541643172,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793541643180,
+     "data": {
+      "v": 1,
+      "id": "c37c1adf-76a6-4bca-9e6e-88310158a38a",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541644172,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541648080,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541651203,
+     "data": {
+      "v": 1,
+      "id": "e1aecd3f-debe-4351-9438-5e42ee53ed55",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  }
+ },
+ "bad": {
+  "webkit": {
+   "engine": "webkit",
+   "source": "harness, SIGN_HOST from card/signpage-shell base dd3fcac packages/signpage (index.html, public/app.js, public/_headers): main's build with signpage-frame-state, APP_HOST framing SIGN_HOST",
+   "at": "2026-11-01T14:00:55.494Z",
+   "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
+   "topology": "none",
+   "steps": {
+    "open": {
+     "frameHref": null,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": null
+     }
+    },
+    "legacy": {
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": null
+     },
+     "id": "b0072ce4-f283-470f-93c7-95b32f14a84e",
+     "answer": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": false,
+      "code_saved": false,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   "messages": [
+    {
+     "t": 1793541661935,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793541662002,
+     "data": {
+      "v": 1,
+      "id": "b0072ce4-f283-470f-93c7-95b32f14a84e",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  },
+  "chromium": {
+   "engine": "chromium",
+   "source": "harness, SIGN_HOST from card/signpage-shell base dd3fcac packages/signpage (index.html, public/app.js, public/_headers): main's build with signpage-frame-state, APP_HOST framing SIGN_HOST",
+   "at": "2026-11-01T14:01:14.348Z",
+   "browser": "chromium 153.0.8010.12 (Playwright)",
+   "topology": "none",
+   "steps": {
+    "open": {
+     "frameHref": null,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": null
+     }
+    },
+    "legacy": {
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": null
+     },
+     "id": "698a61f5-321c-41ae-8045-3f2cc6ac0d8c",
+     "answer": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": true,
+      "way": "words",
+      "code_saved": true,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   "messages": [
+    {
+     "t": 1793541680525,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793541680630,
+     "data": {
+      "v": 1,
+      "id": "698a61f5-321c-41ae-8045-3f2cc6ac0d8c",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  }
+ },
+ "fstar": {
+  "webkit": {
+   "engine": "webkit",
+   "source": "harness, SIGN_HOST from this card at 5d762cf with one change: _headers frame-src * instead of APP_HOST",
+   "at": "2026-11-01T14:01:03.555Z",
+   "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
+   "topology": "shell",
+   "steps": {
+    "open": {
+     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     }
+    },
+    "first": {
+     "id": "7b48ad7d-aeb9-4535-9136-c7df00cfb8bc"
+    },
+    "words": {
+     "t": 1793541664839,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true
+     },
+     "layerHidden": true
+    },
+    "wordsOut": {
+     "t": 1793541668757,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "last": {
+     "id": "7d76b23e-c34b-470b-803c-d59bc430f09e"
+    },
+    "stranger": {
+     "t": 1793541672042,
+     "done": true
+    }
+   },
+   "messages": [
+    {
+     "t": 1793541663763,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793541663828,
+     "data": {
+      "v": 1,
+      "id": "7b48ad7d-aeb9-4535-9136-c7df00cfb8bc",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541664865,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541668761,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541671941,
+     "data": {
+      "v": 1,
+      "id": "7d76b23e-c34b-470b-803c-d59bc430f09e",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "example.com",
+     "path": null,
+     "method": "connect",
+     "refused": true
+    },
+    {
+     "host": "example.com",
+     "path": null,
+     "method": "connect",
+     "refused": true
+    },
+    {
+     "host": "example.com",
+     "path": null,
+     "method": "connect",
+     "refused": true
+    },
+    {
+     "host": "example.com",
+     "path": null,
+     "method": "connect",
+     "refused": true
+    }
+   ],
+   "errors": []
+  },
+  "chromium": {
+   "engine": "chromium",
+   "source": "harness, SIGN_HOST from this card at 5d762cf with one change: _headers frame-src * instead of APP_HOST",
+   "at": "2026-11-01T14:01:21.086Z",
+   "browser": "chromium 153.0.8010.12 (Playwright)",
+   "topology": "shell",
+   "steps": {
+    "open": {
+     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     }
+    },
+    "first": {
+     "id": "4c8c49d8-94aa-45d1-b5cd-2d3356b25021"
+    },
+    "created": {
+     "t": 1793541682110,
+     "top": {
+      "state": "backup",
+      "codeSaved": "false",
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "saved": {
+     "t": 1793541686176,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true
+     },
+     "layerHidden": true
+    },
+    "passkeyOut": {
+     "t": 1793541690113,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "words": {
+     "t": 1793541694055,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true
+     },
+     "layerHidden": true
+    },
+    "wordsOut": {
+     "t": 1793541697974,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false
+     },
+     "layerHidden": false
+    },
+    "last": {
+     "id": "9cbe4177-e8dc-4780-ab19-81020410c357"
+    },
+    "stranger": {
+     "t": 1793541701225,
+     "done": true
+    }
+   },
+   "messages": [
+    {
+     "t": 1793541681200,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793541681206,
+     "data": {
+      "v": 1,
+      "id": "4c8c49d8-94aa-45d1-b5cd-2d3356b25021",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541682294,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "passkey",
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541686226,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "passkey",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541690152,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541694093,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541698035,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793541701124,
+     "data": {
+      "v": 1,
+      "id": "9cbe4177-e8dc-4780-ab19-81020410c357",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "example.com",
+     "path": "/",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  }
+ }
+}
