@@ -9,6 +9,10 @@
 //! the harness prints each file's size and sha256 as it loads it. A plain `cargo test` never builds this: every test
 //! that uses it is a `[[test]]` with `required-features = ["sandbox"]`.
 //!
+//! Sending fails closed: `call()`, `deploy_vault()` and every helper that sends return an error unless `all_ok()`, so a
+//! money test that checks only balances still fails on a detached `on_payout` panic. A failure-path test asks for the
+//! raw result by name with `call_outcome()`; `Outcome` is `#[must_use]`.
+//!
 //! Reading a transaction (`Outcome`):
 //! - every call waits for `EXPERIMENTAL_tx_status` at `FINAL`, so every receipt, the signer's gas refunds included,
 //!   has run before the call returns and before any balance is read;
@@ -19,7 +23,10 @@
 //!   with its receiver and actions;
 //! - `calls_exactly(executor, method, n)` counts first: a predicate over no receipts never passes;
 //! - the transaction's first receipt is read from the transaction itself when RPC lists no receipt for it (a signer
-//!   calling its own account: the receipt is local).
+//!   calling its own account: the receipt is local); a receipt in no list at all makes the read an error;
+//! - a failed receipt without a function call (a Transfer to a missing account) counts in `all_ok()` and `failures()`
+//!   but in neither gas table, which holds function-call receipts only;
+//! - a NEP-366 `Delegate` envelope is read as its outer action (`Delegate`) only: the inner actions are not recorded.
 //!
 //! Gas: every receipt holding a function call is filed under `<role>::<its whole action list>` (role: `vault`,
 //! `token` or the account id; actions joined by `+`, a function call by its method, any other action by its RPC kind),
@@ -28,7 +35,10 @@
 //! filed apart (`gas_failed()`).
 //!
 //! The sandbox: `start()` refuses unless RPC `status` reports near-sandbox 2.13.4 at protocol 86 (mainnet's,
-//! R 2026-10-25), and refuses a `NEAR_SANDBOX_BIN_PATH` the run does not name in `HARNESS_SANDBOX_BIN`.
+//! R 2026-10-25), and refuses a `NEAR_SANDBOX_BIN_PATH` the run does not name in `HARNESS_SANDBOX_BIN`. Both variables
+//! are read once, at the test binary's first `start()`, before any sandbox runs: near-sandbox 0.3.16 downloads its
+//! binary on first use and then sets `NEAR_SANDBOX_BIN_PATH` to it inside this process (src/runner/mod.rs l.272-277),
+//! which a later read would take for a foreign binary.
 //!
 //! The mock token is not NEP-141 as near-contract-standards 5.29.1 builds it (USDC's code), and these gaps stay:
 //! - `ft_resolve_transfer` reads up to 64 bytes of the receiver's result; NCS reads 42 and refunds all on a longer one;
@@ -50,7 +60,7 @@ use near_workspaces::result::ExecutionFinalResult;
 use near_workspaces::types::{AccountDetailsPatch, Gas, NearToken};
 use near_workspaces::{Account, AccountId, Worker};
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 pub type R<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -137,6 +147,7 @@ impl Receipt {
 }
 
 /// A transaction's result: its final status and every receipt, read at `FINAL`.
+#[must_use]
 pub struct Outcome {
     result: ExecutionFinalResult,
     pub tx_hash: String,
@@ -202,6 +213,12 @@ pub fn check_sandbox(version: &str, protocol: u64, bin: Option<&str>, named: Opt
     Ok(())
 }
 
+/// (`NEAR_SANDBOX_BIN_PATH`, `HARNESS_SANDBOX_BIN`) as the run set them, read once before the first sandbox starts.
+fn sandbox_env() -> &'static (Option<String>, Option<String>) {
+    static ENV: OnceLock<(Option<String>, Option<String>)> = OnceLock::new();
+    ENV.get_or_init(|| (std::env::var("NEAR_SANDBOX_BIN_PATH").ok(), std::env::var("HARNESS_SANDBOX_BIN").ok()))
+}
+
 pub struct Harness {
     pub worker: Worker<Sandbox>,
     pub root: Account,
@@ -241,8 +258,7 @@ fn action_name(a: &Value) -> String {
 impl Harness {
     /// A fresh near-sandbox 2.13.4 with nothing deployed, its version and protocol checked. Reads `VAULT_WASM`.
     pub async fn start() -> R<Self> {
-        let bin = std::env::var("NEAR_SANDBOX_BIN_PATH").ok();
-        let named = std::env::var("HARNESS_SANDBOX_BIN").ok();
+        let (bin, named) = sandbox_env();
         check_sandbox(SANDBOX_VERSION, SANDBOX_PROTOCOL, bin.as_deref(), named.as_deref())?;
         let worker = near_workspaces::sandbox_with_version(SANDBOX_VERSION).await?;
         let root = worker.root_account()?;
@@ -276,14 +292,15 @@ impl Harness {
     /// money test begins from.
     pub async fn with_vault_and_mock_token() -> R<Self> {
         let h = Self::start().await?;
-        h.deploy_vault().await?.expect_all_ok("the 2.8 recipe")?;
+        let _ = h.deploy_vault().await?;
         h.deploy_mock_token().await?;
-        h.storage_deposit(&h.root, &h.vault).await?.expect_all_ok("registering the vault on the token")?;
+        let _ = h.storage_deposit(&h.root, &h.vault).await?;
         Ok(h)
     }
 
     /// The deploy recipe of vault.md 2.8: the parent signs one transaction to `vault.<parent>` with [CreateAccount,
-    /// Transfer(code storage + 0.01 N), DeployContract(wasm), FunctionCall(config, 0 deposit)] and no AddKey.
+    /// Transfer(code storage + 0.01 N), DeployContract(wasm), FunctionCall(config, 0 deposit)] and no AddKey. An error
+    /// unless `all_ok()`.
     pub async fn deploy_vault(&self) -> R<Outcome> {
         let transfer = (self.vault_wasm.len() as u128 + 100) * YOCTO_PER_BYTE + NearToken::from_millinear(10).as_yoctonear();
         let tx = self
@@ -294,7 +311,9 @@ impl Harness {
             .deploy(&self.vault_wasm)
             .call(Function::new("config").args(vec![]).gas(CONFIG_GAS).deposit(NearToken::from_yoctonear(0)));
         let result = tx.transact().await?;
-        self.outcome(self.root.id(), result).await
+        let o = self.outcome(self.root.id(), result).await?;
+        o.expect_all_ok("the 2.8 recipe")?;
+        Ok(o)
     }
 
     /// The mock token's code at the token account the build names (a 64-hex id no one holds a key to, so the
@@ -315,9 +334,25 @@ impl Harness {
         Ok(self.root.create_subaccount(name).initial_balance(NearToken::from_near(near)).transact().await?.into_result()?)
     }
 
-    /// One function call from `signer` to `contract`, with `deposit` and `gas`; every receipt read back at `FINAL` and
-    /// its gas recorded.
+    /// One function call from `signer` to `contract`, with `deposit` and `gas`, read as `call_outcome` reads it: an
+    /// error unless `all_ok()`, naming the final status and every failed receipt.
     pub async fn call(
+        &self,
+        signer: &Account,
+        contract: &AccountId,
+        method: &str,
+        args: Value,
+        deposit: NearToken,
+        gas: Gas,
+    ) -> R<Outcome> {
+        let o = self.call_outcome(signer, contract, method, args, deposit, gas).await?;
+        o.expect_all_ok(&format!("{}::{method} by {}", contract, signer.id()))?;
+        Ok(o)
+    }
+
+    /// The failure path's call: one function call, every receipt read back at `FINAL` and its gas recorded, and the raw
+    /// `Outcome` whatever happened. A test that uses it checks the outcome itself.
+    pub async fn call_outcome(
         &self,
         signer: &Account,
         contract: &AccountId,
@@ -373,7 +408,7 @@ impl Harness {
 
     // ---- the mock token ----
 
-    /// `storage_deposit(account_id)` on the token by `payer`, with USDC's 0.00125 N.
+    /// `storage_deposit(account_id)` on the token by `payer`, with USDC's 0.00125 N; an error unless `all_ok()`.
     pub async fn storage_deposit(&self, payer: &Account, account: &AccountId) -> R<Outcome> {
         let args = json!({"account_id": account, "registration_only": true});
         self.call(payer, &self.token, "storage_deposit", args, TOKEN_STORAGE, Gas::from_tgas(10)).await
@@ -383,14 +418,14 @@ impl Harness {
     /// "storage_deposit"), for calls touching `account` only, or for every call with `None`.
     pub async fn mock_fail(&self, method: &str, account: Option<&AccountId>, fail: bool) -> R<()> {
         let args = json!({"method": method, "account_id": account, "fail": fail});
-        let o = self.call(&self.root, &self.token, "set_fail", args, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
-        o.expect_all_ok(&format!("set_fail({method}, {account:?}, {fail})"))
+        let _ = self.call(&self.root, &self.token, "set_fail", args, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
+        Ok(())
     }
 
     pub async fn mint(&self, account: &AccountId, amount: u128) -> R<()> {
         let args = json!({"account_id": account, "amount": amount.to_string()});
-        let o = self.call(&self.root, &self.token, "mint", args, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
-        o.expect_all_ok(&format!("mint({account}, {amount})"))
+        let _ = self.call(&self.root, &self.token, "mint", args, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
+        Ok(())
     }
 
     pub async fn token_balance(&self, account: &AccountId) -> R<u128> {

@@ -12,6 +12,7 @@
 //! The `harness_*` tests plant each case the review of 1 Nov found the harness reading wrong at 65f3bb7 (probes
 //! P1-P8), with the probe contract (tests/harness/probe) making the vault's receipt shapes:
 //! - `harness_detached_callback_panic_fails_all_ok` (P1): a callback panic off the returned chain;
+//! - `harness_call_fails_closed` (round 3): `call()` errs on it, so a test that checks only a balance fails;
 //! - `harness_gas_key_is_the_whole_action_list` (P3, P3b): a [storage_deposit, ft_transfer] receipt; the recipe's
 //!   receipt against a plain config();
 //! - `harness_reads_every_receipt_before_returning` (P6b): the signer's gas refund, and its NEAR balance after a call;
@@ -39,7 +40,6 @@ async fn deploy_recipe_is_keyless() -> R<()> {
     for r in &d.receipts {
         println!("recipe receipt {}", r.line());
     }
-    d.expect_all_ok("the 2.8 recipe")?;
     let from_recipe = d.json().expect("config() returned no JSON in the recipe's receipt");
     d.calls_exactly(&h.vault, "config", 1)?;
 
@@ -77,46 +77,46 @@ async fn mock_token_fails_on_demand() -> R<()> {
     let alice = h.account("alice", 20).await?;
     let bob = h.account("bob", 20).await?;
     h.mint(alice.id(), 5_000_000).await?;
-    h.storage_deposit(&h.root, bob.id()).await?.expect_all_ok("registering bob")?;
+    let _ = h.storage_deposit(&h.root, bob.id()).await?;
     let transfer = |to: &AccountId| json!({"receiver_id": to, "amount": "1000000"});
     let g30 = Gas::from_tgas(30);
 
     // ft_transfer to bob: fails while the rule names bob, passes once cleared
     h.mock_fail("ft_transfer", Some(bob.id()), true).await?;
-    let o = h.call(&alice, &h.token, "ft_transfer", transfer(bob.id()), ONE_YOCTO, g30).await?;
+    let o = h.call_outcome(&alice, &h.token, "ft_transfer", transfer(bob.id()), ONE_YOCTO, g30).await?;
     println!("ft_transfer with the rule: {:?}", o.failure());
     assert!(failed_with(&o, "MockTokenFail: ft_transfer"), "ft_transfer did not fail on demand");
     assert_eq!((h.token_balance(alice.id()).await?, h.token_balance(bob.id()).await?), (5_000_000, 0), "a failed transfer moved money");
     h.mock_fail("ft_transfer", Some(bob.id()), false).await?;
-    let o = h.call(&alice, &h.token, "ft_transfer", transfer(bob.id()), ONE_YOCTO, g30).await?;
-    o.expect_all_ok("ft_transfer with no rule")?;
+    let _ = h.call(&alice, &h.token, "ft_transfer", transfer(bob.id()), ONE_YOCTO, g30).await?;
     assert_eq!((h.token_balance(alice.id()).await?, h.token_balance(bob.id()).await?), (4_000_000, 1_000_000));
 
     // a rule without an account fails every ft_transfer
     h.mock_fail("ft_transfer", None, true).await?;
-    let o = h.call(&bob, &h.token, "ft_transfer", transfer(alice.id()), ONE_YOCTO, g30).await?;
+    let o = h.call_outcome(&bob, &h.token, "ft_transfer", transfer(alice.id()), ONE_YOCTO, g30).await?;
     assert!(failed_with(&o, "MockTokenFail: ft_transfer"), "a rule for every receiver did not fail the call");
     h.mock_fail("ft_transfer", None, false).await?;
 
     // storage_deposit
     let carol: AccountId = format!("carol.{}", h.root.id()).parse()?;
     h.mock_fail("storage_deposit", Some(&carol), true).await?;
-    let o = h.storage_deposit(&h.root, &carol).await?;
+    let reg = json!({"account_id": carol, "registration_only": true});
+    let o = h.call_outcome(&h.root, &h.token, "storage_deposit", reg, TOKEN_STORAGE, Gas::from_tgas(10)).await?;
     println!("storage_deposit with the rule: {:?}", o.failure());
     assert!(failed_with(&o, "MockTokenFail: storage_deposit"), "storage_deposit did not fail on demand");
     assert!(h.view(&h.token, "storage_balance_of", json!({"account_id": carol})).await?.is_null());
     h.mock_fail("storage_deposit", Some(&carol), false).await?;
-    h.storage_deposit(&h.root, &carol).await?.expect_all_ok("registering carol")?;
+    let _ = h.storage_deposit(&h.root, &carol).await?;
     assert!(!h.view(&h.token, "storage_balance_of", json!({"account_id": carol})).await?.is_null());
 
     // ft_transfer_call to the vault: refused on demand at the token; without the rule, the skeleton's missing
     // ft_on_transfer fails and ft_resolve_transfer gives alice everything back
     let call = json!({"receiver_id": h.vault, "amount": "1000000", "msg": "{}"});
     h.mock_fail("ft_transfer_call", Some(&h.vault), true).await?;
-    let o = h.call(&alice, &h.token, "ft_transfer_call", call.clone(), ONE_YOCTO, Gas::from_tgas(100)).await?;
+    let o = h.call_outcome(&alice, &h.token, "ft_transfer_call", call.clone(), ONE_YOCTO, Gas::from_tgas(100)).await?;
     assert!(failed_with(&o, "MockTokenFail: ft_transfer_call"), "ft_transfer_call did not fail on demand");
     h.mock_fail("ft_transfer_call", Some(&h.vault), false).await?;
-    let o = h.call(&alice, &h.token, "ft_transfer_call", call, ONE_YOCTO, Gas::from_tgas(100)).await?;
+    let o = h.call_outcome(&alice, &h.token, "ft_transfer_call", call, ONE_YOCTO, Gas::from_tgas(100)).await?;
     for r in &o.receipts {
         println!("ft_transfer_call receipt {}", r.line());
     }
@@ -150,7 +150,7 @@ async fn probe(h: &Harness, name: &str) -> R<Account> {
 
 async fn probe_chain(h: &Harness, p: &Account, first_fails: bool, boom: bool, returned: bool) -> R<Outcome> {
     let args = json!({"first_fails": first_fails, "boom": boom, "returned": returned});
-    h.call(&h.root, p.id(), "probe_chain", args, ZERO, Gas::from_tgas(50)).await
+    h.call_outcome(&h.root, p.id(), "probe_chain", args, ZERO, Gas::from_tgas(50)).await
 }
 
 fn dump(tag: &str, o: &Outcome) {
@@ -183,6 +183,29 @@ async fn harness_detached_callback_panic_fails_all_ok() -> R<()> {
     Ok(())
 }
 
+/// Round 3 (fail closed): a money test that sends with `call()` and checks only a balance still fails on a detached
+/// callback panic.
+#[tokio::test]
+async fn harness_call_fails_closed() -> R<()> {
+    let h = Harness::start().await?;
+    let p = probe(&h, "probe").await?;
+    // the careless test: send, then check a balance only
+    async fn careless(h: &Harness, p: &Account) -> R<()> {
+        let before = h.near_balance(p.id()).await?;
+        let args = json!({"first_fails": false, "boom": true, "returned": false});
+        let _ = h.call(&h.root, p.id(), "probe_chain", args, ZERO, Gas::from_tgas(50)).await?;
+        assert!(h.near_balance(p.id()).await? >= before, "the probe lost NEAR");
+        Ok(())
+    }
+    let r = careless(&h, &p).await;
+    println!("fail closed: careless test -> {:?}", r.as_ref().map_err(|e| e.to_string().chars().take(300).collect::<String>()));
+    let e = r.err().ok_or("call() returned Ok on a detached callback panic")?.to_string();
+    assert!(e.contains("ProbeCallbackPanic"), "the error does not name the panic: {e}");
+    let args = json!({"first_fails": false, "boom": false, "returned": false});
+    let _ = h.call(&h.root, p.id(), "probe_chain", args, ZERO, Gas::from_tgas(50)).await?; // and passes when nothing failed
+    Ok(())
+}
+
 /// Finding 2 (P3, P3b): a receipt's gas is filed under its whole action list.
 #[tokio::test]
 async fn harness_gas_key_is_the_whole_action_list() -> R<()> {
@@ -195,7 +218,6 @@ async fn harness_gas_key_is_the_whole_action_list() -> R<()> {
     let args = json!({"token": h.token, "account": dave, "amount": "1000", "register_deposit": TOKEN_STORAGE.as_yoctonear().to_string()});
     let o = h.call(&h.root, p.id(), "probe_part", args, ZERO, Gas::from_tgas(100)).await?;
     dump("P3", &o);
-    o.expect_all_ok("probe_part")?;
     assert_eq!(h.token_balance(&dave).await?, 1000, "the batch's ft_transfer ran");
     println!("P3 gas keys {:?}", h.gas().keys().collect::<Vec<_>>());
     assert_eq!(count("token::storage_deposit+ft_transfer"), 1, "the batch receipt is filed under both its calls");
@@ -203,7 +225,7 @@ async fn harness_gas_key_is_the_whole_action_list() -> R<()> {
 
     let recipe = "vault::CreateAccount+Transfer+DeployContract+config";
     assert_eq!((count(recipe), count("vault::config")), (1, 0), "the recipe's receipt is filed apart");
-    h.call(&h.root, &h.vault, "config", json!({}), ZERO, Gas::from_tgas(30)).await?.expect_all_ok("config()")?;
+    let _ = h.call(&h.root, &h.vault, "config", json!({}), ZERO, Gas::from_tgas(30)).await?;
     assert_eq!((count(recipe), count("vault::config")), (1, 1), "a plain config() is filed apart from the recipe");
     println!("\ngas table\n{}", h.gas_table());
     Ok(())
@@ -218,7 +240,7 @@ async fn harness_reads_every_receipt_before_returning() -> R<()> {
     h.mint(alice.id(), 5_000_000).await?;
     for i in 0..3 {
         let call = json!({"receiver_id": h.vault, "amount": "1000000", "msg": "{}"});
-        let o = h.call(&alice, &h.token, "ft_transfer_call", call, ONE_YOCTO, Gas::from_tgas(100)).await?;
+        let o = h.call_outcome(&alice, &h.token, "ft_transfer_call", call, ONE_YOCTO, Gas::from_tgas(100)).await?;
         let right_after = h.account_view(alice.id(), "optimistic").await?["amount"].clone();
         let fin = h
             .rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": o.tx_hash, "sender_account_id": alice.id(), "wait_until": "FINAL"}))
@@ -261,16 +283,15 @@ async fn harness_counts_calls_first_and_reads_local_receipts() -> R<()> {
     let alice = h.account("alice", 20).await?;
     let bob = h.account("bob", 20).await?;
     h.mint(alice.id(), 5_000_000).await?;
-    h.storage_deposit(&h.root, bob.id()).await?.expect_all_ok("registering bob")?;
+    let _ = h.storage_deposit(&h.root, bob.id()).await?;
     // no ft_on_transfer ever runs in an ft_transfer
     let o = h.call(&alice, &h.token, "ft_transfer", json!({"receiver_id": bob.id(), "amount": "10"}), ONE_YOCTO, Gas::from_tgas(30)).await?;
-    o.expect_all_ok("ft_transfer")?;
     assert!(o.calls_exactly(&h.vault, "ft_on_transfer", 1).is_err(), "a check over a call that never ran passed");
     assert_eq!(o.calls_exactly(&h.vault, "ft_on_transfer", 0)?.len(), 0);
 
     // a signer calling its own contract: the first receipt is local
     let selfie = probe(&h, "selfie").await?;
-    let o = h.call(&selfie, selfie.id(), "probe_first", json!({"fail": true}), ZERO, Gas::from_tgas(10)).await?;
+    let o = h.call_outcome(&selfie, selfie.id(), "probe_first", json!({"fail": true}), ZERO, Gas::from_tgas(10)).await?;
     dump("P4", &o);
     let calls = o.calls_exactly(selfie.id(), "probe_first", 1)?;
     assert_eq!(calls.len(), 1, "the local receipt is not read");
@@ -295,7 +316,7 @@ async fn harness_access_keys_of_a_missing_account_is_an_error() -> R<()> {
         assert!(k.is_err(), "a missing account read as {k:?} at {f}");
         assert!(h.access_keys(&h.vault, f).await.is_err(), "the vault before its deploy read as an account at {f}");
     }
-    h.deploy_vault().await?.expect_all_ok("the 2.8 recipe")?;
+    let _ = h.deploy_vault().await?;
     h.wait_final(&h.vault).await?;
     assert!(h.access_keys(&h.vault, "final").await?.is_empty());
     Ok(())
