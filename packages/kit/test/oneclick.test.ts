@@ -232,6 +232,11 @@ test("a quote into the vault never floors under MIN_DEPOSIT (1 USDC)", () => {
   const g = oneClickFloors({ amountIn: 500_000n, withdrawFee: 5_538n, slippageBps: 100, path: "keyless", pricing: "usdc", decimalsIn: 6, decimalsOut: 6, intoVault: false });
   assert.ok(g.minAmountOut < 1_000_000n);
 });
+test("a quote whose fees take the whole amount is refused, whatever it signs", () => {
+  // the real dry answer under a 2,000,000-unit withdrawFee floor: the device's floor is at or under zero
+  assert.ok(oneClickFloors({ amountIn: 2_000_000n, withdrawFee: 2_000_000n, slippageBps: 100, path: "keyless", pricing: "usdc", decimalsIn: 6, decimalsOut: 6, intoVault: false }).minAmountOut <= 0n);
+  refused("floor", () => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), { ...LIVE_OPTS, pricing: { in: ["0.000001", "0.000001"], out: ["1", "1"] } }));
+});
 test("a request that is not EXACT_INPUT, or has no dry flag, is refused", () => {
   refused("request", () => checkOneClickQuote({ ...DRY_REQ, swapType: "EXACT_OUTPUT" } as unknown as OneClickRequest, clone(fx.dry.answer), DRY_OPTS));
   const { dry: _, ...noDry } = DRY_REQ;

@@ -283,6 +283,7 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
 
   const floor = oneClickFloors({ amountIn, withdrawFee, slippageBps: request.slippageTolerance, path: opts.path,
     pricing: opts.pricing, decimalsIn: opts.decimalsIn, decimalsOut: opts.decimalsOut, intoVault: opts.intoVault });
+  if (floor.minAmountOut <= 0n) fail("floor", "the fees take the whole amount: nothing would arrive");
   if (amountOut < floor.amountOut) fail("floor", `amountOut ${amountOut} is below the device's floor ${floor.amountOut}`);
   if (minAmountOut < floor.minAmountOut) fail("floor", `minAmountOut ${minAmountOut} is below the device's floor ${floor.minAmountOut}`);
   return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee, deadline, timestamp: a.timestamp as string };
