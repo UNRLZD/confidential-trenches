@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { ZK_SETUP_FILES } from "../src/zk/setup-files.ts";
+import { ZK_SETUP_FILES, ZK_SETUP_SOURCE } from "../src/zk/setup-files.ts";
 
 const ZK = new URL("../zk/", import.meta.url);
 
@@ -18,4 +18,15 @@ test("the six setup files on disk equal the kit's constants", () => {
   }
   const onDisk = readdirSync(ZK).filter((f) => /\.(wasm|zkey|vkey)$/.test(f)).sort();
   assert.deepEqual(onDisk, [...names].sort());
+});
+
+test("the pins are frozen: no code at run time can swap a hash", () => {
+  assert.ok(Object.isFrozen(ZK_SETUP_FILES) && Object.isFrozen(ZK_SETUP_SOURCE));
+  for (const pin of Object.values(ZK_SETUP_FILES)) assert.ok(Object.isFrozen(pin));
+  assert.throws(() => {
+    ZK_SETUP_FILES["withdraw.zkey"].sha256 = "0".repeat(64);
+  }, TypeError);
+  assert.throws(() => {
+    ZK_SETUP_FILES["other.zkey"] = ZK_SETUP_FILES["withdraw.zkey"];
+  }, TypeError);
 });

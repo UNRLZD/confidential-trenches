@@ -41,8 +41,8 @@ export const LICENCES = [
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 
 // ---------- the verdict ----------
-// One line per kit entry: "withdraw.wasm": { bytes: 2607967, sha256: "<64 hex>", ...
-const ENTRY = /"([\w-]+\.(?:wasm|zkey|vkey))":\s*\{\s*bytes:\s*(\d+),\s*sha256:\s*"([0-9a-f]{64})"/g;
+// One line per kit entry: "withdraw.wasm": Object.freeze({ bytes: 2607967, sha256: "<64 hex>", ...
+const ENTRY = /"([\w-]+\.(?:wasm|zkey|vkey))":\s*(?:Object\.freeze\()?\{\s*bytes:\s*(\d+),\s*sha256:\s*"([0-9a-f]{64})"/g;
 
 export function judge(rec) {
   const lines = [];

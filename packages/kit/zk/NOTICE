@@ -1,8 +1,8 @@
 The six setup files in this folder
 
 These are the circuit files and setup keys of Privacy Pools v1, copied byte for byte and never edited. The device
-proves with them and the vault checks proofs against the two .vkey files. Every reader checks each file's sha256
-against packages/kit/src/zk/setup-files.ts before it uses the bytes.
+makes proofs with them, and the vault's verifying keys come from the two .vkey files. Anything that reads them must
+first check each file's sha256 against packages/kit/src/zk/setup-files.ts.
 
 Source: https://github.com/0xbow-io/privacy-pools-core, tag v1.3.0, commit c312dcd58f6ad085204be61923c49f8065e4e9ae,
 under packages/circuits/. Fetched from raw.githubusercontent.com at that commit on 2026-11-01 01:02Z.
