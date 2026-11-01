@@ -11,16 +11,20 @@
 //   - no hop: the top window navigated exactly twice (APP_HOST, then SIGN_HOST), and the terminal frames nothing;
 //   - READY within 5,000 ms of the terminal's start (BAR-09);
 //   - no CSP violation and no console error in the terminal's frame; a screenshot of each run is kept.
-// On the harness two more runs per engine and width, each with its own stand-in shell:
-//   - late: the shell holds its ready for 7 s; within 5,000 ms plus 1,500 ms of slack the terminal is down with its
-//     toast on screen, and once the ready comes it is READY again with no reload (AE-08);
+// On the harness three more runs per engine and width, each with its own stand-in shell:
+//   - late: the shell answers at once but holds its ready for 7 s after the frame's load (a slow load, or a client made
+//     after it): the terminal is READY within 5,000 ms, never down, and still READY with no reload after the late ready;
+//   - silent: the shell answers nothing until its ready 7 s after the frame's load: within 5,000 ms plus 1,500 ms of
+//     slack the terminal is down with its toast on screen, and once the ready comes it is READY again with no reload
+//     (AE-08);
 //   - tap: the shell sends a signed-out state and refuses every open (not_allowed); Sign in, then Use passkey, shows the
 //     line in place of the tap (refused, no Retry, in the sheet) within the kit's 5,000 ms for an open plus 1,500 ms,
 //     the top window stays on SIGN_HOST, and no pop-up opens (card app-hop-refused's rule: a tap never ends in nothing).
 //   node scripts/live-checks/app-in-shell.mjs [--engines chromium,firefox,webkit] [--shots <dir>] [--record <file>]
 //     [--expect in|out]   the live hosts; a fresh browser is signed out, so live runs read --expect out (default)
+//   --engines: the engines run and judged, each in full (default all three; CI's browser job runs Chromium only)
 //   node scripts/live-checks/app-in-shell.mjs --harness [--build <dir>] ...   the hosts' real names answered by
-//     Playwright's route from local files, in all three engines: APP_HOST serves the terminal's build (apps/terminal/dist,
+//     Playwright's route from local files: APP_HOST serves the terminal's build (apps/terminal/dist,
 //     or --build <dir>) under its own _headers; SIGN_HOST serves a stand-in shell (below) that frames APP_HOST and speaks
 //     the signing page's messages from the top window, signed in. --build <today's build> records the bad answer.
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -53,10 +57,10 @@ export const HANDSHAKE_MS = 5_000;
 export const SLACK_MS = 1_500;
 /** The kit's window for an open kind (SIGNPAGE_TIMEOUT_MS["signin.open"]). */
 export const OPEN_WINDOW_MS = 5_000;
-/** How long the late run's shell holds its ready after the frame's load. */
+/** How long the late and silent runs' shells hold their ready after the frame's load. */
 export const LATE_READY_MS = 7_000;
 /** The run kinds: live runs read `signed` only (the real shell cannot be told to hold its ready or refuse). */
-export const KINDS = ["signed", "late", "tap"];
+export const KINDS = ["signed", "late", "silent", "tap"];
 export const CONTROL = "signin-passkey";
 /** After READY, how long the check keeps watching for a further top-level navigation (a hop). */
 const SETTLE_MS = 1_500;
@@ -68,7 +72,11 @@ export function judge(rec) {
   const want = HEADER[rec.expect];
   if (!want) say(false, `expect ${rec.expect}: not in or out`);
   const kinds = rec.source === "live" ? ["signed"] : KINDS;
-  for (const engine of ENGINES) {
+  // the engines the run was asked for: each one judged in full; a record with none is no proof
+  const engines = rec.engines ?? ENGINES;
+  const known = Array.isArray(engines) && engines.length > 0 && new Set(engines).size === engines.length && engines.every((e) => ENGINES.includes(e));
+  if (!known) say(false, `engines ${JSON.stringify(engines)}: not a non-empty list of ${ENGINES.join(", ")}`);
+  for (const engine of known ? engines : ENGINES) {
     for (const w of WIDTHS) {
       for (const kind of kinds.slice(1)) judgeMore(say, `${engine} ${w.name} ${kind}`, (rec.runs ?? []).find((x) => x.engine === engine && x.width === w.name && x.kind === kind), kind);
       const n = `${engine} ${w.name}`;
@@ -103,13 +111,21 @@ export function judge(rec) {
 
 const firstAt = (timeline, st) => (timeline ?? []).find((e) => e.s === st)?.t ?? null;
 
-/** The late and tap runs' lines. */
+/** The late, silent and tap runs' lines. */
 function judgeMore(say, n, r, kind) {
   if (!r) return say(false, `${n}: no run`);
   if (r.error) return say(false, `${n}: ${r.error}`);
   if (!r.app) return say(false, `${n}: no APP_HOST frame in the top window (top at ${r.top})`);
   if (!r.shot) say(false, `${n}: no screenshot`);
   if (kind === "late") {
+    const tr = firstAt(r.app.timeline, "ready");
+    const td = firstAt(r.app.timeline, "down");
+    say(tr !== null && tr <= HANDSHAKE_MS && td === null, `${n}: READY ${tr === null ? "never" : `at ${Math.round(tr)} ms`}${td === null ? ", never down" : `, down at ${Math.round(td)} ms`}, with the shell's ready held ${LATE_READY_MS} ms, limit ${HANDSHAKE_MS} ms`);
+    const after = r.lateReady === true && r.app.signpage === "ready" && r.reloaded === false;
+    say(after, `${n}: after the shell's late ready ${r.lateReady === true ? "came" : "never came"}, signing page ${r.app.signpage ?? "none"}${r.reloaded ? ", after a reload" : ", no reload"}`);
+    return;
+  }
+  if (kind === "silent") {
     const td = firstAt(r.app.timeline, "down");
     const tr = (r.app.timeline ?? []).find((e) => e.s === "ready" && td !== null && e.t > td)?.t ?? null;
     const early = (r.app.timeline ?? []).some((e) => e.s === "ready" && (td === null || e.t < td));
@@ -247,10 +263,17 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
     }
     if (f && kind === "signed") await waitState(page, f, ["ready", "down", "update"], READY_MS);
     if (f && kind === "late") {
+      await waitState(page, f, ["ready", "down"], HANDSHAKE_MS + SLACK_MS);
+      run.docAt = await f.evaluate(() => window.__ctDoc ?? null);
+      const until = Date.now() + LATE_READY_MS + SLACK_MS + 1_000;
+      while (Date.now() < until && !(await page.evaluate(() => window.__ctShellReady === true).catch(() => false))) await page.waitForTimeout(100);
+      run.lateReady = await page.evaluate(() => window.__ctShellReady === true).catch(() => false);
+    }
+    if (f && kind === "silent") {
       await waitState(page, f, ["down"], HANDSHAKE_MS + SLACK_MS + 1_000);
       run.toast = await f.evaluate(READ_TOAST);
-      run.docAtDown = await f.evaluate(() => window.__ctDoc ?? null);
-      await page.screenshot({ path: path.join(shots, `${engine}-${w.name}-late-down.png`) });
+      run.docAt = await f.evaluate(() => window.__ctDoc ?? null);
+      await page.screenshot({ path: path.join(shots, `${engine}-${w.name}-silent-down.png`) });
       await waitState(page, f, ["ready"], LATE_READY_MS + HANDSHAKE_MS);
     }
     if (f && kind === "tap") {
@@ -272,7 +295,7 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
     f = await appFrame();
     if (f) {
       run.app = await f.evaluate(READ_APP);
-      if (kind === "late") run.reloaded = run.app.doc === null || run.app.doc !== run.docAtDown;
+      if (kind === "late" || kind === "silent") run.reloaded = run.app.doc === null || run.app.doc !== run.docAt;
       run.app.errors = errors.filter((e) => originOf(e.url) !== SIGN_HOST).map((e) => e.text);
     } else if (originOf(page.url()) === APP_HOST) {
       // today's layout: the terminal top-level; read it the same way, so the record shows what it drew
@@ -292,7 +315,7 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
 /** `routes`: a route per run kind (the harness), or null (the live hosts: the signed run only). */
 export async function collect({ launchers, shots, source, expect, routes }) {
   mkdirSync(shots, { recursive: true });
-  const rec = { source, expect, path: PATH, at: new Date().toISOString(), browsers: {}, runs: [] };
+  const rec = { source, expect, path: PATH, at: new Date().toISOString(), engines: launchers.map(([e]) => e), browsers: {}, runs: [] };
   for (const [engine, launch] of launchers) {
     const browser = await launch();
     rec.browsers[engine] = browser.version();
@@ -310,20 +333,27 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // ------------------------------------------------------------------------------------------------ the harness
 // A SIGN_HOST stand-in shell, as card signpage-shell's end state says (webkit-frame-storage.md section 4): it frames
 // APP_HOST at its own path and query, full size; posts `ready` to the frame on each of its loads; answers `state` from
-// that frame's window only, with targetOrigin APP_HOST, signed in; refuses every other kind (not_allowed). Its headers
+// that frame's window only, with targetOrigin APP_HOST, signed in, at any time (the silent run's shell: only from its
+// ready on); refuses every other kind (not_allowed). The late and silent shells post their ready 7 s after the load
+// and tell the check through window.__ctShellReady. Its headers
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const shellJs = (kind) => `const APP = ${JSON.stringify(APP_HOST)};
 const STATE = ${JSON.stringify(kind === "tap" ? SIGNED_OUT : SIGNED_IN)};
-const HOLD = ${kind === "late" ? LATE_READY_MS : 0};
+const HOLD = ${kind === "late" || kind === "silent" ? LATE_READY_MS : 0};
+let answering = ${kind !== "silent"};
 const f = document.createElement("iframe");
 f.src = APP + location.pathname + location.search;
 f.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");
 f.setAttribute("allow", "clipboard-write");
-f.addEventListener("load", () => setTimeout(() => f.contentWindow.postMessage({ v: 1, type: "ready", release: "harness-shell", api: 1 }, APP), HOLD));
+f.addEventListener("load", () => setTimeout(() => {
+  answering = true;
+  f.contentWindow.postMessage({ v: 1, type: "ready", release: "harness-shell", api: 1 }, APP);
+  window.__ctShellReady = true;
+}, HOLD));
 addEventListener("message", (e) => {
-  if (e.origin !== APP || e.source !== f.contentWindow || !e.data || typeof e.data.id !== "string") return;
+  if (!answering || e.origin !== APP || e.source !== f.contentWindow || !e.data || typeof e.data.id !== "string") return;
   const answer = e.data.type === "state" ? { v: 1, id: e.data.id, ok: true, result: STATE } : { v: 1, id: e.data.id, ok: false, error: { code: "not_allowed" } };
   f.contentWindow.postMessage(answer, APP);
 });
