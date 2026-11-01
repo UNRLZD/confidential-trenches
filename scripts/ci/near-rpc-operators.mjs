@@ -79,9 +79,13 @@ export function isNearRpc(url) {
 //    near.org's or dRPC's domains whose name says rpc (dRPC's: near);
 //  - a NEAR RPC host built from a template (`https://rpc.${net}.near.org`) is refused: the scan cannot read it;
 //  - two or more map hosts that are all one operator's, in one unit, are refused. A unit is a line, a bracket group
-//    ([...], {...} or (...), across lines) and, in a code file, a statement (up to a ";" outside brackets). A unit
-//    that lists one operator's alternatives on purpose (the wallet's FastNEAR URLs) passes only with the marker
-//    ALLOW on a line that names one of its hosts.
+//    ([...], {...} or (...), across lines), a run of lines joined by a trailing "\" (a shell or README command), a
+//    "- " list (YAML, one item per line, with its items' nested lines) and, in a code file, a statement (up to a ";"
+//    outside brackets). A unit that lists one operator's alternatives on purpose (the wallet's FastNEAR URLs) passes
+//    only when every line in it that names one of its hosts carries the marker ALLOW.
+// Out of reach of a text scan: a pair built from separate statements (`const A = "<FastNEAR>"; const B = "<near.org>";
+// read([A, B])`), where no one unit holds both hosts. The places that pair reads are few and named above; the money
+// gate counts operators from the map itself.
 export const ALLOW = "near-rpc-operators: one operator";
 const SCHEME_URL = /\b[a-z][a-z0-9+.-]*:\/\/([^\s/"'`<>()[\]{},;|\\]+)(\/[^\s"'`<>()[\]{},;|\\]*)?/gi;
 const BARE = /(?<![A-Za-z0-9.$}-])((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?::(\d+))?(?![A-Za-z0-9-]|\.[A-Za-z0-9])/g;
@@ -136,6 +140,30 @@ function units(text, code) {
     }
   }
   if (code) spans.push([stmt, text.length]);
+  // line-based units: a run joined by trailing backslashes, and a "- " list at one indent with its nested lines
+  const lines = [];
+  for (let at = 0, i = 0, parts = text.split("\n"); i < parts.length; at += parts[i].length + 1, i++) lines.push([at, parts[i]]);
+  const end = (i) => lines[i][0] + lines[i][1].length;
+  for (let i = 0; i < lines.length; i++) {
+    let j = i;
+    while (j + 1 < lines.length && /\\\s*$/.test(lines[j][1])) j++;
+    if (j > i) spans.push([lines[i][0], end(j)]);
+    i = j;
+  }
+  const indent = (l) => l.match(/^\s*/)[0].length;
+  for (let i = 0; i < lines.length; i++) {
+    const item = lines[i][1].match(/^(\s*)- /);
+    if (!item || (i > 0 && /^\s*- /.test(lines[i - 1][1]) && indent(lines[i - 1][1]) === item[1].length)) continue; // not a list's first item
+    const d = item[1].length;
+    let j = i;
+    for (let k = i + 1; k < lines.length; k++) {
+      const l = lines[k][1];
+      if (!l.trim()) continue; // a blank line inside the list
+      if (indent(l) > d || (indent(l) === d && /^\s*- /.test(l))) j = k;
+      else break;
+    }
+    if (j > i) spans.push([lines[i][0], end(j)]);
+  }
   return spans;
 }
 
@@ -164,7 +192,7 @@ export function lineProblems(raw, file) {
       const names = [...new Set(inside.map((h) => h.host))];
       const ops = new Set(inside.map((h) => h.op));
       if (names.length < 2 || ops.size !== 1) continue;
-      if (inside.some((h) => lines[lineAt(h.at) - 1].includes(ALLOW))) continue;
+      if (inside.every((h) => lines[lineAt(h.at) - 1].includes(ALLOW))) continue; // every host's line is marked
       const key = inside.map((h) => h.at).join(",");
       if (seen.has(key)) continue;
       seen.add(key);

@@ -190,12 +190,13 @@ export function parseLive(text, key) {
 // RATE_TRIES waits in a row; a Retry-After past RATE_CAP seconds is no answer at once. Other trouble (no reply, a
 // reply that is not JSON, an HTTP error with no RPC error) is asked 3 times, 2 s and 4 s apart. Each host is asked
 // at most once a second.
-// Once two operators have read a tx ok, or the host's own operator has, a remaining host is still asked once, but with
-// rateWait off: its 429 is no answer at once (NOT_WAITED), never waited and never decisive. A failed or old answer from
-// it still refuses.
+// Once two operators have read a tx ok, a remaining host is still asked once, but with rateWait off: its 429 is no
+// answer at once (NOT_WAITED), never waited and never decisive. A failed or old answer from it still refuses. While
+// fewer than two operators have read it ok, a 429 from any host is waited, a second host of one operator included:
+// its "missing" refuses a one-operator pass (oneOperator), so it must be heard.
 const RATE_TRIES = 5;
 const RATE_CAP = 600;
-const NOT_WAITED = "rate limited, not waited: its read could add no second operator";
+const NOT_WAITED = "rate limited, not waited: two operators read it ok";
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const lastAsked = new Map();
 const hostOf = (url) => {
@@ -340,8 +341,8 @@ export const operatorOf = (chain, url) =>
 export const okOperators = (chain, reads) => new Set(reads.filter((a) => a.r === "ok").map((a) => operatorOf(chain, a.url)));
 
 // The one case a tx passes on one operator: a NEAR tx no second operator can hold. Refused (null) unless
-//  - one operator read it ok and every host of that operator read it ok (a 429 not waited aside): a "missing" from
-//    any of them refuses, as it would with two operators;
+//  - one operator read it ok and every host of that operator read it ok: a "missing", or no answer (a 429 past the
+//    cap), from any of them refuses, as it would with two operators;
 //  - every other operator's host answered UNKNOWN_TRANSACTION ("missing"; any other reply is no answer);
 //  - each such host's status names the tx's network, and an earliest block whose height is above the tx's block and
 //    whose time, read from that host by that height, is after the tx's block time (the one height and time the ok
@@ -353,7 +354,7 @@ export async function oneOperator(fetchFn, tx, answers, sleep) {
   const ok = answers.filter((a) => a.r === "ok");
   const [op, ...more] = new Set(ok.map((a) => operatorOf(tx.chain, a.url)));
   if (!op || more.length) return null;
-  if (answers.some((a) => operatorOf(tx.chain, a.url) === op && a.r !== "ok" && a.r !== NOT_WAITED)) return null;
+  if (answers.some((a) => operatorOf(tx.chain, a.url) === op && a.r !== "ok")) return null;
   const heights = new Set(ok.map((a) => a.height));
   const times = new Set(ok.map((a) => a.time));
   const [h] = heights;
@@ -385,7 +386,7 @@ export async function oneOperator(fetchFn, tx, answers, sleep) {
 export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
   const refusals = [];
   const read = [];
-  const notes = []; // a host's 429 not waited because its read could add no second operator
+  const notes = []; // a host's 429 not waited because two operators read it ok
   const single = []; // a tx read ok on one operator only, where no second one can hold it (oneOperator)
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
   const byCard = new Map();
@@ -424,10 +425,10 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
       const answers = [];
-      // in the listed order; a 429 is waited out only while it could add a second operator
+      // in the listed order; a 429 is waited out while fewer than two operators read it ok
       const okOps = () => okOperators(tx.chain, answers);
       for (const url of rpcs[tx.chain]) {
-        const rateWait = okOps().size < 2 && !okOps().has(operatorOf(tx.chain, url));
+        const rateWait = okOps().size < 2;
         const out = {};
         const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, out);
         answers.push({ url, r, height: out.height, time: out.time });

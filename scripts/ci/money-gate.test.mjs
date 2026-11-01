@@ -719,7 +719,9 @@ const FN_ARCH = "https://archival-rpc.mainnet.fastnear.com";
 const ORG_ARCH = "https://archival-rpc.mainnet.near.org";
 const H = 222400000;
 // dRPC's earliest block is an hour after the tx's block (NOV2) unless earliestAt says otherwise; chain: its status's
-// chain_id (default: the host's own network); fn: FastNEAR's archive's own tx answer ("ok" or a reply body)
+// chain_id (default: the host's own network); fn: FastNEAR's archive's own tx answer ("ok" or a reply body); org:
+// near.org's archive: "ok", 429 (Retry-After 600 on every ask), { after } (429 with that Retry-After on every ask),
+// "missing", or "429 then missing" (one 429 with Retry-After 60, then UNKNOWN_TRANSACTION)
 function operators({ drpc = "missing", earliest = H - 100, org = "ok", drpcStatus = true, chain, earliestAt = NOV2 + 3600, fn = "ok", height = H } = {}) {
   const log = [];
   const fetchFn = async (url, init) => {
@@ -734,7 +736,14 @@ function operators({ drpc = "missing", earliest = H - 100, org = "ok", drpcStatu
     if (isDrpc && drpc === "missing") return json(200, { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } });
     if (isDrpc && drpc !== "ok") return json(200, { jsonrpc: "2.0", id: 1, ...drpc });
     if (host === new URL(FN_ARCH).host && fn !== "ok" && method === "EXPERIMENTAL_tx_status") return json(200, { jsonrpc: "2.0", id: 1, ...fn });
-    if (host === new URL(ORG_ARCH).host && org === 429) return json(429, { error: { code: -429, message: "rate limited" } }, { "retry-after": "600" });
+    if (host === new URL(ORG_ARCH).host) {
+      const limited = (after) => json(429, { error: { code: -429, message: "rate limited" } }, { "retry-after": String(after) });
+      if (org === 429) return limited(600);
+      if (org?.after) return limited(org.after);
+      if (org === "429 then missing" && !log.slice(0, -1).some((l) => l.startsWith(`ask ${host} `))) return limited(60);
+      if ((org === "missing" || org === "429 then missing") && method === "EXPERIMENTAL_tx_status")
+        return json(200, { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } });
+    }
     const a = chainAnswers(NOV2)(url, method);
     if (method === "block") a.result.header.height = height;
     return json(200, { jsonrpc: "2.0", id: 1, ...a });
@@ -781,12 +790,30 @@ test("a list of FastNEAR hosts alone never passes, however many read ok", async 
   assert.deepEqual(r.single, []);
 });
 
-test("regression: near.org's 429 after FastNEAR read ok is not waited, since it could add no second operator", async () => {
+test("near.org's 429 after FastNEAR and dRPC read ok is not waited: two operators read it", async () => {
   const s = operators({ drpc: "ok", org: 429 });
-  const r = await moneyGate(rec(`Money path: yes\nTx: near ${NEAR_TX} intents.near\n`), s.fetchFn, { near: [FN_ARCH, ORG_ARCH, "https://near.drpc.org"] }, { sleep: s.sleep });
+  const r = await moneyGate(rec(`Money path: yes\nTx: near ${NEAR_TX} intents.near\n`), s.fetchFn, { near: REAL_RPCS.near }, { sleep: s.sleep });
   assert.deepEqual(r.refusals, []);
   assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), []);
-  assert.deepEqual(r.notes, [`near ${NEAR_TX} on ${ORG_ARCH}: rate limited, not waited: its read could add no second operator`]);
+  assert.deepEqual(r.notes, [`near ${NEAR_TX} on ${ORG_ARCH}: rate limited, not waited: two operators read it ok`]);
+});
+
+// Card near-rpc-operators, review round 2: while fewer than two operators read a tx ok, a 429 from any host is waited,
+// one of the read operator's own hosts included (dc14699 skipped it, so its "missing" was never heard).
+test("regression: an old tx, FastNEAR ok, dRPC missing, near.org 429 with Retry-After 900: refused, as on main", async () => {
+  const s = operators({ earliest: H + 1, org: { after: 900 } });
+  const r = await moneyGate(rec(`Money path: yes\nTx: near ${NEAR_TX} intents.near\n`), s.fetchFn, { near: REAL_RPCS.near }, { sleep: s.sleep });
+  assert.match(r.refusals.join("\n"), /no answer \(rate limited, Retry-After 900 s is past the 600 s cap\) on https:\/\/archival-rpc\.mainnet\.near\.org/);
+  assert.deepEqual(r.single, []);
+});
+
+test("regression: near.org's 429 is waited while one operator read ok, so its later missing refuses", async () => {
+  const s = operators({ earliest: H + 1, org: "429 then missing" });
+  const r = await moneyGate(rec(`Money path: yes\nTx: near ${NEAR_TX} intents.near\n`), s.fetchFn, { near: REAL_RPCS.near }, { sleep: s.sleep });
+  assert.ok(s.log.includes("sleep 60000"), s.log.join("\n"));
+  assert.match(r.refusals.join("\n"), /missing on https:\/\/archival-rpc\.mainnet\.near\.org/);
+  assert.deepEqual(r.single, []);
+  assert.deepEqual(r.notes, []);
 });
 
 // Card near-rpc-operators, review round 1 (each refused here; the one-operator rule passed each at 4c1eeb2).
@@ -850,7 +877,7 @@ function threeHosts(answer) {
 }
 const T3 = { "near-testnet": ["t1", "t2", "t3"] };
 const testnetRec = rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`);
-const NOT_WAITED = `near-testnet ${NEAR_TX} on t3: rate limited, not waited: its read could add no second operator`;
+const NOT_WAITED = `near-testnet ${NEAR_TX} on t3: rate limited, not waited: two operators read it ok`;
 
 test("two hosts read ok and the third answers 429 with Retry-After 279: passes, never sleeps, names the skip", async () => {
   const s = threeHosts((url) => (url === "t3" ? 429 : null));

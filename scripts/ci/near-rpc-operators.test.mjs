@@ -77,6 +77,30 @@ test("the allow marker on a host's line passes one operator's alternatives; on a
   assert.equal(lineProblems('const P = ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"]; // one operator', "a.ts").length, 1);
 });
 
+// Review round 2: each of these passed the scan at dc14699.
+test("planted: the marker clears a unit only when every host line in it is marked; a marked line hides no pair next to it", () => {
+  const M = `// ${ALLOW}`;
+  const sibling = ["const cfg = {", `  fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], ${M}`, '  readA: "https://archival-rpc.testnet.fastnear.com",', '  readB: "https://archival-rpc.testnet.near.org",', "};"].join("\n");
+  assert.match(lineProblems(sibling, "x.ts").join("\n"), /are one operator \(fastnear\)/);
+  const noSemicolons = [`export const N = { fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"] } ${M}`, 'const A = "https://archival-rpc.testnet.fastnear.com"', 'const B = "https://archival-rpc.testnet.near.org"'].join("\n");
+  assert.match(lineProblems(noSemicolons, "x.ts").join("\n"), /are one operator \(fastnear\)/);
+  const allMarked = ["const P = [", `  "https://test.rpc.fastnear.com", ${M}`, `  "https://rpc.testnet.near.org", ${M}`, "];"].join("\n");
+  assert.deepEqual(lineProblems(allMarked, "x.ts"), []);
+});
+
+test("planted: a YAML list with one URL per item, and a command split with a trailing backslash, are units: refused", () => {
+  const yaml = ["rpcs:", "  - https://rpc.mainnet.fastnear.com", "  - https://rpc.mainnet.near.org"].join("\n");
+  assert.match(lineProblems(yaml, "x.yml").join("\n"), /are one operator \(fastnear\)/);
+  const nested = ["rpcs:", "  - name: a", "    url: https://archival-rpc.testnet.fastnear.com", "", "  - name: b", "    url: https://archival-rpc.testnet.near.org", "other: 1"].join("\n");
+  assert.match(lineProblems(nested, "x.yaml").join("\n"), /are one operator \(fastnear\)/);
+  const sh = ["for RPC in \\", "  https://rpc.mainnet.fastnear.com \\", "  https://rpc.mainnet.near.org; do"].join("\n");
+  for (const f of ["x.sh", "README.md"]) assert.match(lineProblems(sh, f).join("\n"), /are one operator \(fastnear\)/, f);
+  // two operators, or two lists, pass
+  assert.deepEqual(lineProblems(["rpcs:", "  - https://rpc.mainnet.fastnear.com", "  - https://near.drpc.org"].join("\n"), "x.yml"), []);
+  assert.deepEqual(lineProblems(["a:", "  - https://rpc.mainnet.fastnear.com", "  - https://near.drpc.org", "b:", "  - https://rpc.mainnet.near.org", "  - https://near.drpc.org"].join("\n"), "x.yml"), []);
+  assert.deepEqual(lineProblems(["curl https://rpc.mainnet.fastnear.com \\", "  -d '{}'", "curl https://rpc.mainnet.near.org"].join("\n"), "x.sh"), []);
+});
+
 test("a mainnet host and a testnet host of one operator are no pair; a unit with both operators passes", () => {
   assert.deepEqual(lineProblems('const D = ["https://near.drpc.org", "https://near-testnet.drpc.org"];', "a.mjs"), []);
   assert.deepEqual(lineProblems('const R = {\n  a: "https://rpc.mainnet.fastnear.com",\n  b: "https://rpc.mainnet.near.org",\n  c: "https://near.drpc.org",\n};', "a.mjs"), []);
