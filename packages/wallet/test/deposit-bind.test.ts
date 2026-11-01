@@ -25,6 +25,7 @@ import {
   DepositsWatch,
   findDeadCall,
   LAPSE_MARGIN,
+  readU,
   resetBindSession,
   resignDeposit,
   txCarriesFinal,
@@ -199,8 +200,8 @@ const lands = (chain: Chain) => (s: Sent) => {
 const opened: WalletStore[] = [];
 const stores: NoteStore[] = [];
 after(() => (opened.forEach((s) => s.close()), stores.forEach((n) => n.close())));
-async function noteStore(): Promise<NoteStore> {
-  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+async function noteStore(idb = new IDBFactory()): Promise<NoteStore> {
+  const w = await openWalletStore({ indexedDB: idb });
   opened.push(w);
   const ns = await openNoteStore(w);
   stores.push(ns);
@@ -1052,10 +1053,25 @@ test("R2-2 (expect FAIL on a1012e1): after a reload with every call dead, Delete
   assert.equal(await allowed(checkCleanup("DeleteAccount", t.u, t.deps.rpcs, t.store)), "allowed");
 });
 
-test("R2-2 (expect FAIL on a1012e1): two binds of one note at once send one call", async () => {
+test("R2-2 (expect FAIL on a1012e1): two binds of one note at once, in one tab or two, send one call", async () => {
   const t = await setup(["tx", "tx"]);
   const outs = await Promise.allSettled([bindDeposit(SEED, t.args, t.deps), bindDeposit(SEED, t.args, t.deps)]);
   assert.equal(t.sent.length, 1, t.sent.map((s) => s.nonce).join(","));
+  for (const o of outs) landed(o.status === "fulfilled" ? o.value : (assert.fail(String(o.reason)) as never));
+});
+
+test("R2-2: two tabs (two note stores on one database, one notes lock) binding one note send one call", async () => {
+  const idb = new IDBFactory();
+  const tab1 = await noteStore(idb);
+  const note = await tab1.planDeposit(1n, pc);
+  const tab2 = await noteStore(idb);
+  const i = (note.ref as { i: number }).i;
+  const chain = new Chain(depositAccount(SEED, 1n, i).account);
+  const r = relayer(chain, ["tx", "tx"], lands(chain));
+  const args: BindDepositArgs = { network: "testnet", s: 1n, i, noteId: note.id, amount: AMOUNT };
+  const deps = (store: NoteStore) => ({ store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER });
+  const outs = await Promise.allSettled([bindDeposit(SEED, args, deps(tab1)), bindDeposit(SEED, args, deps(tab2))]);
+  assert.equal(r.sent.length, 1, r.sent.map((s) => s.nonce).join(","));
   for (const o of outs) landed(o.status === "fulfilled" ? o.value : (assert.fail(String(o.reason)) as never));
 });
 
@@ -1216,4 +1232,95 @@ test("R2-6 (expect FAIL on a1012e1): the pages are read again after the dead cal
   t.chain.onTxRead = () => t.chain.a.rows.length === 0 && t.chain.addRow(t.note.precommitment); // e.g. both RPCs caught up
   landed(await bindDeposit(SEED, t.args, t.deps));
   assert.equal(t.sent.length, 1, `a new call at nonce ${t.sent[1]?.nonce} while the pages held P`);
+});
+
+// N13 (mutate2's N-i): the pages' cursor stays while U's previous P reads unsure, so a row both RPCs hold with different
+// fields is found once they agree.
+test("N13: the cursor does not move past a previous P that reads unsure; it is held once both RPCs agree", async () => {
+  const t = await setup();
+  const prev = 777n;
+  const w = new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs, prev);
+  t.chain.addRow(prev, { side: "a" });
+  t.chain.addRow(prev, { side: "b", value: AMOUNT + 1n }); // another row at index 0 on b: unsure
+  assert.deepEqual(await w.read(), { state: "absent" });
+  assert.deepEqual(w.alsoState, { state: "unsure" });
+  t.chain.b.rows[0]!.value = AMOUNT.toString();
+  assert.deepEqual(await w.read(), { state: "absent" });
+  assert.equal(w.alsoState.state, "held");
+});
+
+// mutate2's survivors M13, M19, M20.
+test("M13: storage_unregister is refused by its own rule, not only as an unknown clean-up", async () => {
+  const t = await setup();
+  await assert.rejects(checkCleanup("storage_unregister", t.u, t.deps.rpcs, t.store), /never storage_unregister/);
+});
+
+test("M19: U's key nonce read as two values on the two RPCs is no read", async () => {
+  const t = await setup();
+  assert.ok((await readU(t.u, t.deps.rpcs)) !== null);
+  t.chain.b.nonce += 1n;
+  assert.equal(await readU(t.u, t.deps.rpcs), null);
+});
+
+test("M20: a refused call is not judged dead while one RPC's final height is still inside its window and margin", async () => {
+  const t = await setup(["tx"], (c) => (s) => ((c.a.nonce = c.b.nonce = s.nonce), c.finals.add(s.hash)));
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n, "a"), ++ticks === 30 && ac.abort(new Error("caller stopped"))); // RPC b stays behind
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /caller stopped/);
+  assert.ok(t.chain.a.height > t.sent[0]!.mbh + LAPSE_MARGIN && t.chain.b.height <= t.sent[0]!.mbh + LAPSE_MARGIN);
+  assert.equal(t.chain.txReads, 0, "the dead call's tx was read while RPC b is inside the window");
+  assert.equal(t.sent.length, 1);
+});
+
+// The adapted runner's survivors R2, R8, R9 (scratchpad tools/mutate3.mjs).
+const stored = (c: Awaited<ReturnType<typeof depositDelegate>>) => ({ signed_delegate: c.signed_delegate, sender_id: c.sender_id, receiver_id: c.receiver_id, nonce: c.nonce, max_block_height: c.max_block_height, public_key: c.public_key, balance: c.balance });
+
+test("R2 (mutate3): a call that loses the compare-and-set to another tab's is never sent; that call is followed", async () => {
+  const t = await setup(["tx"]);
+  let other = null as Awaited<ReturnType<typeof depositDelegate>> | null;
+  const store = Object.assign(Object.create(t.store) as NoteStore, {
+    addCall: async (id: string, c: Parameters<NoteStore["addCall"]>[1], seen: number) => {
+      if (other === null) {
+        // another tab signs and writes its call (a shorter window, so other bytes) a moment before ours, then dies
+        other = await depositDelegate(SEED, 1n, t.i, { network: "testnet", amount: AMOUNT, precommitment: t.note.precommitment, window: 60 }, t.deps.rpcs);
+        await t.store.addCall(id, stored(other), seen);
+      }
+      return t.store.addCall(id, c, seen);
+    },
+  });
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, store }));
+  const calls = (await t.store.get(t.note.id))!.calls!;
+  for (const s of t.sent) assert.ok(calls.some((c) => c.signed_delegate === s.bytes), "a call was sent that is not in the store");
+  assert.equal(calls[0]!.signed_delegate, other!.signed_delegate);
+  assert.ok(t.sent[0]!.low > other!.max_block_height + LAPSE_MARGIN, "the first call sent is the lapse re-sign of the other tab's");
+  assert.equal(t.sent[0]!.nonce, other!.nonce);
+});
+
+test("R8 (mutate3): a tx hash another tab heard for the call is read before the dead bytes go again", async () => {
+  const t = await setup(["tx"]);
+  await t.store.move(t.note.id, "PLANNED", "INCOMING");
+  const { call: A, view } = await signedCall(t);
+  await t.store.addCall(t.note.id, stored(A), 0); // another tab sent A; its answer is not written yet
+  const h = base58.encode(new Uint8Array(32).fill(0x44));
+  t.chain.txs.set(h, view as unknown as Sent);
+  t.chain.finals.add(h); // A ran and the vault refused it: the USDC is back in U
+  t.chain.a.nonce = t.chain.b.nonce = A.nonce;
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 1 && void t.store.addCallTx(t.note.id, A, h)); // the other tab writes A's hash
+  t.chain.blocks(A.max_block_height + LAPSE_MARGIN - t.chain.low()); // one poll short of past the margin
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.deepEqual(t.sent.map((s) => s.nonce), [A.nonce + 1n], "the dead bytes went again although the store held their hash");
+});
+
+test("R9 (mutate3): another one-time id's live call does not hold U's DeleteAccount", async () => {
+  const t = await setup();
+  await t.store.move(t.note.id, "PLANNED", "INCOMING");
+  const { call: A } = await signedCall(t);
+  await t.store.addCall(t.note.id, stored(A), 0);
+  const other = await t.store.planDeposit(2n, pc);
+  await t.store.move(other.id, "PLANNED", "INCOMING");
+  await t.store.addCall(other.id, { ...stored(A), sender_id: "cd".repeat(32), max_block_height: A.max_block_height + 10_000n }, 0);
+  t.chain.blocks(A.max_block_height + LAPSE_MARGIN + 1n - t.chain.low());
+  assert.equal(await allowed(checkCleanup("DeleteAccount", t.u, t.deps.rpcs, t.store)), "allowed");
 });

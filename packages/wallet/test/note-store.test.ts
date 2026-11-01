@@ -561,3 +561,10 @@ test("bind calls: another shape, another sender, a nonce going back or a call wr
   assert.equal(t.puts() - p0, 0);
   assert.equal((await t.ns.get(n.id))!.calls!.length, 1);
 });
+
+test("bind calls: a planted record with calls on a PLANNED note is refused when read", async () => {
+  const t = await tab();
+  const n = await t.ns.planDeposit(scopes++, pc);
+  await t.w.put("notes", n.id, { ...n, calls: [{ ...aCall(5n, 100n), tx_hashes: [] }] });
+  await assert.rejects(t.ns.get(n.id), /calls from INCOMING on/);
+});
