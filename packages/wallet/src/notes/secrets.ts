@@ -12,7 +12,9 @@
 //   never computes; the HKDF bytes of a master are the one value the paper reduces, and ../derive does that.
 // Nothing here logs; the words, seed64, masters, nullifiers and secrets never leave the device (wallet.md:162-164).
 import { VAULT_FIELD_P, VAULT_NOTE_HASHES, type VaultNote, type VaultNoteSecrets } from "@blindfill/kit";
-import { poseidon1, poseidon2, poseidon3 } from "poseidon-lite";
+import { poseidon1 } from "poseidon-lite/poseidon1";
+import { poseidon2 } from "poseidon-lite/poseidon2";
+import { poseidon3 } from "poseidon-lite/poseidon3";
 import {
   type Chain,
   changeNote,

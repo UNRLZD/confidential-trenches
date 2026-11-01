@@ -13,6 +13,7 @@
 
 pub mod constants;
 pub mod context;
+pub mod deposit;
 pub mod events;
 pub mod field;
 pub mod poseidon;
@@ -21,6 +22,7 @@ pub mod promise;
 pub mod tree;
 pub mod verifier;
 pub mod verifier_keys;
+pub mod withdraw;
 
 use constants::*;
 use near_sdk::collections::{LookupMap, Vector};

@@ -46,11 +46,12 @@ function rawNote(idb: IDBFactory, key: string): Promise<{ iv: Uint8Array; ct: Ar
 const contains = (hay: Uint8Array, needle: Uint8Array): boolean => hay.some((_, i) => needle.every((b, j) => hay[i + j] === b));
 
 let scopes = 100n;
+let contexts = 1; // each attempt's own context (a decimal below p), as a withdrawal's
 const fieldsFor = (from: NoteState, to: NoteState, n: NoteRecord) =>
   from === "INCOMING" && to === "UNSPENT"
     ? { leaf: leafOf(n.precommitment) }
     : to === "HELD"
-      ? { deadlineMs: 1_800_000_000_000n }
+      ? { deadlineMs: 1_800_000_000_000n, context: String(contexts++) }
       : from === "HELD"
         ? { attempt: n.attempt }
         : from === "RESERVED" && to === "UNSPENT"
@@ -134,7 +135,7 @@ test("fields: a leaf only when it lands and only one that hashes to its commitme
   await assert.rejects(t.ns.move(un.id, "UNSPENT", "HELD"), /deadlineMs/);
   await assert.rejects(t.ns.move(un.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_000_000 as unknown as bigint }), /deadlineMs/);
   await assert.rejects(t.ns.move(un.id, "UNSPENT", "HELD", { deadlineMs: 1n, leaf: good }), /leaf is set once/);
-  const held = await t.ns.move(un.id, "UNSPENT", "HELD", { deadlineMs: 77n });
+  const held = await t.ns.move(un.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "77" });
   const res = await t.ns.move(held.id, "HELD", "RESERVED", { attempt: held.attempt });
   assert.equal(res.deadlineMs, 77n, "RESERVED keeps the attempt's deadline");
   assert.equal(res.attempt, held.attempt, "and its attempt");
@@ -239,7 +240,7 @@ test("nothing is stored unwrapped, and a note holds no nullifier or secret", asy
   for (const s of [n.precommitment.toString(), BIG.toString(), "HELD", "deposit", n.id]) assert.ok(!contains(ct, new TextEncoder().encode(s)), `${s} in clear`);
   const { nullifier, secret } = noteSecrets(SEED, n.ref);
   const back = (await t.w.get("notes", n.id)) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(back).sort(), ["attempt", "deadlineMs", "id", "leaf", "precommitment", "ref", "scope", "state", "tab"]);
+  assert.deepEqual(Object.keys(back).sort(), ["attempt", "contexts", "deadlineMs", "id", "leaf", "precommitment", "ref", "scope", "state", "tab"]);
   const text = JSON.stringify(back, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
   assert.ok(!text.includes(nullifier.toString()) && !text.includes(secret.toString()), "a secret in the record");
 });
@@ -249,7 +250,7 @@ test("two tabs holding one note at once: exactly one holds it", async () => {
   const a = await tab(idb);
   const b = await tab(idb);
   const n = await noteIn(a.ns, "UNSPENT");
-  const r = await Promise.allSettled([a.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1n }), b.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 2n })]);
+  const r = await Promise.allSettled([a.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "1" }), b.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 2n, context: "2" })]);
   assert.equal(r.filter((x) => x.status === "fulfilled").length, 1);
   assert.match(String((r.find((x) => x.status === "rejected") as PromiseRejectedResult).reason), /is HELD, not UNSPENT/);
 });
@@ -263,7 +264,7 @@ test("a write that fails part way leaves the note as it was", async () => {
     return put.apply(this, args);
   };
   try {
-    await assert.rejects(t.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1n }));
+    await assert.rejects(t.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "1" }));
   } finally {
     IDBObjectStore.prototype.put = put;
   }
@@ -290,7 +291,7 @@ test("a HELD note from a dead tab is UNSPENT on the next open", async () => {
   const back = await b.ns.get(n.id);
   assert.equal(back?.state, "UNSPENT", "a dead tab's note waits for nothing");
   assert.equal(back?.deadlineMs, undefined);
-  await assert.rejects(a.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1n }), /closed/, "a dead tab holds nothing");
+  await assert.rejects(a.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "1" }), /closed/, "a dead tab holds nothing");
 });
 
 test("a HELD note from a live tab stays HELD, on open and on list, until that tab dies", async () => {
@@ -326,7 +327,7 @@ async function landed(ns: NoteStore, scope: bigint, label: bigint, value: bigint
   return ns.move(n.id, "INCOMING", "UNSPENT", { leaf: leafOf(n.precommitment, value, label) });
 }
 async function reserved(ns: NoteStore, n: NoteRecord, deadlineMs: bigint): Promise<NoteRecord> {
-  const h = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs });
+  const h = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs, context: String(contexts++) });
   return ns.move(n.id, "HELD", "RESERVED", { attempt: h.attempt });
 }
 
@@ -356,7 +357,7 @@ test("F2: the parent comes from the child's (l, j): a wrong parent, j, label or 
   const t = await tab();
   const X = await landed(t.ns, 911n, 9101n, 100n);
   const Y = await landed(t.ns, 911n, 9102n, 50n);
-  await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 9n }).then((h) => t.ns.move(X.id, "HELD", "RESERVED", { attempt: h.attempt }));
+  await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 9n, context: String(contexts++) }).then((h) => t.ns.move(X.id, "HELD", "RESERVED", { attempt: h.attempt }));
   const ch0: NoteRef = { kind: "change", l: 9101n, j: 0 };
   const puts = t.puts();
   await assert.rejects(t.ns.add({ ref: ch0, scope: 911n, precommitment: pc(ch0), state: "UNSPENT", leaf: leafOf(pc(ch0), 60n, 9101n, 9n), parent: Y.id }), /is not the note/, "X's change naming Y");
@@ -371,7 +372,7 @@ test("F2: the parent comes from the child's (l, j): a wrong parent, j, label or 
   assert.equal((await t.ns.get(X.id))?.state, "SPENT");
   assert.equal((await t.ns.get(Y.id))?.state, "UNSPENT", "Y untouched");
   // change note 1 comes from change note 0
-  await t.ns.move(c.id, "UNSPENT", "HELD", { deadlineMs: 9n }).then((h) => t.ns.move(c.id, "HELD", "RESERVED", { attempt: h.attempt }));
+  await t.ns.move(c.id, "UNSPENT", "HELD", { deadlineMs: 9n, context: String(contexts++) }).then((h) => t.ns.move(c.id, "HELD", "RESERVED", { attempt: h.attempt }));
   const c1 = await t.ns.add({ ref: ch1, scope: 911n, precommitment: pc(ch1), state: "UNSPENT", leaf: leafOf(pc(ch1), 10n, 9101n, 10n), parent: c.id });
   assert.equal(c1.parent, c.id);
 });
@@ -382,9 +383,9 @@ test("F3: only the attempt that holds a note sends or drops it; another tab free
   const b = await tab(idb);
   const X = await landed(a.ns, 921n, 9201n, 100n);
   // same tab: P1 dropped, P2 holds, P1's late finish is refused
-  const p1 = await a.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 1_000_000n });
+  const p1 = await a.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 1_000_000n, context: String(contexts++) });
   await a.ns.move(X.id, "HELD", "UNSPENT", { attempt: p1.attempt });
-  const p2 = await a.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 2_000_000n });
+  const p2 = await a.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 2_000_000n, context: String(contexts++) });
   assert.notEqual(p2.attempt, p1.attempt);
   await assert.rejects(a.ns.move(X.id, "HELD", "RESERVED", { attempt: p1.attempt }), /another attempt/);
   await assert.rejects(a.ns.move(X.id, "HELD", "RESERVED"), /another attempt/);
@@ -449,7 +450,7 @@ test("T3/F6: tab A killed between the child and the parent write: already-open t
       assert.equal((await b.get(X.id))?.state, "SPENT", at);
     } else {
       // an edge that would be legal for the stale state
-      const stale = parentState === "RESERVED" ? b.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 8n }) : b.move(X.id, "UNSPENT", "HELD", { deadlineMs: 1n });
+      const stale = parentState === "RESERVED" ? b.move(X.id, "RESERVED", "UNSPENT", { blockTimeMs: 8n }) : b.move(X.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: String(contexts++) });
       await assert.rejects(stale, /is SPENT/, at);
     }
     const all = await b.list();
@@ -478,7 +479,7 @@ test("F6: a move of a parent that is not yet SPENT is finished first: only the m
 test("a closed store writes nothing, also for a move already in flight", async () => {
   const t = await tab();
   const X = await landed(t.ns, 971n, 9701n, 100n);
-  const h = await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 5_000n });
+  const h = await t.ns.move(X.id, "UNSPENT", "HELD", { deadlineMs: 5_000n, context: String(contexts++) });
   const p = t.ns.move(X.id, "HELD", "RESERVED", { attempt: h.attempt });
   t.ns.close();
   await assert.rejects(p, /closed/);
@@ -497,4 +498,77 @@ test("N1: a change note keeps its label: one whose leaf label is not its l is re
   const b = await t.ns.add({ ref: c1, scope: 3n, precommitment: pc(c1), state: "UNSPENT", leaf: leafOf(pc(c1), 60n, 5n, 4n) });
   assert.equal(b.parent, a.id);
   assert.equal((await t.ns.list()).filter((n) => n.state === "UNSPENT").reduce((s, n) => s + n.leaf!.value, 0n), 60n);
+});
+
+// ---------- bind calls (card wallet-deposit-bind, R2-2) ----------
+const U_ID = "ab".repeat(32);
+const aCall = (nonce: bigint, mbh: bigint) => ({
+  signed_delegate: Buffer.from(`call ${nonce} ${mbh}`).toString("base64"), sender_id: U_ID, receiver_id: "usdc.fakes.testnet",
+  nonce, max_block_height: mbh, public_key: "ed25519:" + "1".repeat(32) + "AbCd", balance: 100_000_000n,
+});
+const HASH = (k: number) => "H".repeat(43) + String(k % 10).replace("0", "a");
+
+test("bind calls: written only on an INCOMING note, a compare-and-set on the count, one put each, kept once the note lands", async () => {
+  const t = await tab();
+  const planned = await t.ns.planDeposit(scopes++, pc);
+  await assert.rejects(t.ns.addCall(planned.id, aCall(5n, 100n), 0), /INCOMING/);
+  const n = await t.ns.move(planned.id, "PLANNED", "INCOMING");
+  const p0 = t.puts();
+  const one = await t.ns.addCall(n.id, aCall(5n, 100n), 0);
+  assert.equal(t.puts() - p0, 1);
+  assert.equal(one.calls!.length, 1);
+  assert.deepEqual(one.calls![0]!.tx_hashes, []);
+  // another bind read no call: its call is not written
+  const p1 = t.puts();
+  const stale = await t.ns.addCall(n.id, aCall(5n, 200n), 0);
+  assert.equal(t.puts() - p1, 0);
+  assert.equal(stale.calls!.length, 1);
+  assert.equal(stale.calls![0]!.max_block_height, 100n);
+  const ahead = await t.ns.addCall(n.id, aCall(5n, 200n), 2); // a count the note does not hold: not written either
+  assert.equal(ahead.calls!.length, 1);
+  assert.equal(t.puts() - p1, 0);
+  // a same-nonce re-sign with a new window, then a hash heard for it, once
+  await t.ns.addCall(n.id, aCall(5n, 200n), 1);
+  await t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 200n }, HASH(1));
+  const p2 = t.puts();
+  await t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 200n }, HASH(1));
+  assert.equal(t.puts() - p2, 0);
+  await assert.rejects(t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 300n }, HASH(2)), /no such call/);
+  const landed = await t.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: leafOf(n.precommitment) });
+  assert.deepEqual(landed.calls!.map((c) => [c.nonce, c.max_block_height, c.tx_hashes]), [[5n, 100n, []], [5n, 200n, [HASH(1)]]]);
+  await assert.rejects(t.ns.addCall(n.id, aCall(6n, 300n), 2), /UNSPENT/); // a landed note gets no new call
+  // read back by a new tab on the same database
+  const t2 = await tab(t.idb);
+  assert.deepEqual((await t2.ns.get(n.id))!.calls, landed.calls);
+});
+
+test("bind calls: another shape, another sender, a nonce going back or a call written twice is refused with no write", async () => {
+  const t = await tab();
+  const n = await t.ns.move((await t.ns.planDeposit(scopes++, pc)).id, "PLANNED", "INCOMING");
+  await t.ns.addCall(n.id, aCall(5n, 100n), 0);
+  const p0 = t.puts();
+  const bad: [string, Record<string, unknown>][] = [
+    ["an extra field", { ...aCall(6n, 1n), secret: "x" }],
+    ["a tx_hashes field", { ...aCall(6n, 1n), tx_hashes: [] }],
+    ["not base64", { ...aCall(6n, 1n), signed_delegate: "not base64!" }],
+    ["U not an implicit id", { ...aCall(6n, 1n), sender_id: "u.testnet" }],
+    ["a number nonce", { ...aCall(6n, 1n), nonce: 6 }],
+    ["a zero window", { ...aCall(6n, 1n), max_block_height: 0n }],
+    ["a negative balance", { ...aCall(6n, 1n), balance: -1n }],
+    ["another key type", { ...aCall(6n, 1n), public_key: "secp256k1:abc" }],
+    ["another sender", { ...aCall(6n, 1n), sender_id: "cd".repeat(32) }],
+    ["a nonce going back", aCall(4n, 300n)],
+    ["the same call twice", aCall(5n, 100n)],
+  ];
+  for (const [what, c] of bad) await assert.rejects(t.ns.addCall(n.id, c as never, 1), Error, what);
+  await assert.rejects(t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 100n }, "0OIl"), /base58/);
+  assert.equal(t.puts() - p0, 0);
+  assert.equal((await t.ns.get(n.id))!.calls!.length, 1);
+});
+
+test("bind calls: a planted record with calls on a PLANNED note is refused when read", async () => {
+  const t = await tab();
+  const n = await t.ns.planDeposit(scopes++, pc);
+  await t.w.put("notes", n.id, { ...n, calls: [{ ...aCall(5n, 100n), tx_hashes: [] }] });
+  await assert.rejects(t.ns.get(n.id), /calls from INCOMING on/);
 });

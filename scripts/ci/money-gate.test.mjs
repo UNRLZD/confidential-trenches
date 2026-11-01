@@ -1,7 +1,7 @@
 // The money gate with a stubbed network: the record rules and each chain's read. Run: node --test scripts/ci/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { base58, checkProof, liteHash, moneyGate, proveNearTx, txBytesFacts, outcomeLeaf, parseLive, recordsFrom, RPCS as REAL_RPCS } from "./money-gate.mjs";
+import { base58, checkProof, exactJson, findTxBytes, liteHash, moneyGate, proveNearTx, rebuildTx, txBytesFacts, outcomeLeaf, parseLive, readTx, recordsFrom, RPCS as REAL_RPCS } from "./money-gate.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, symlinkSync, readFileSync } from "node:fs";
@@ -88,7 +88,7 @@ test("an EVM RPC on the wrong chain is refused", async () => {
 
 test("a record that is not a money path reads nothing", async () => {
   const r = await moneyGate(rec("Money path: no\n"), good, RPCS);
-  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [] });
+  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [], gone: [] });
 });
 
 test("a tx from before the build is refused on every chain", async () => {
@@ -703,10 +703,11 @@ test("a 429 with no Retry-After waits 2 s, doubling, and is still no answer afte
   const s = rateLimited(() => ({}));
   const r = await nearTx(s.fetchFn, s.sleep);
   assert.match(r.refusals.join("\n"), /no answer \(rate limited \d+ times in a row\) on https:\/\/near\.drpc\.org/);
-  // the tx read is waited out; the record has no signed tx bytes, so no proof is asked for and nothing more is waited
+  // the tx read is waited out; the stub's tx answer has no tx JSON to rebuild its bytes from, so no proof is asked for
+  // and nothing more is waited
   const waits = ["sleep 2000", "sleep 4000", "sleep 8000", "sleep 16000", "sleep 32000"];
   assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), waits);
-  assert.match(r.refusals.join("\n"), /not proven: no signed tx bytes for it/);
+  assert.match(r.refusals.join("\n"), new RegExp(`not proven: its tx JSON names hash undefined, not ${NEAR_TX}`));
 });
 
 test("a 429 whose Retry-After is past the 600 s cap is no answer at once: refused, never waited", async () => {
@@ -755,6 +756,8 @@ function proofHosts(fx = LP) {
       if (method === "block") return json(params.block_id === fx.head.hash && !fx.headUnknown ? { result: { header: fx.head } } : UNKNOWN_BLOCK);
     } else {
       if (method === "EXPERIMENTAL_tx_status") return json({ result: fx.known });
+      // a block the recorded walk holds answers with its prev_hash (tx-rebuild), any other with the tx's block
+      if (method === "block" && Object.hasOwn(fx.walk ?? {}, params.block_id)) return json({ result: { header: { ...fx.txBlock, hash: params.block_id, prev_hash: fx.walk[params.block_id] } } });
       if (method === "block") return json({ result: { header: fx.txBlock } });
       if (method === "EXPERIMENTAL_light_client_proof") {
         const p = fx.proofs[params.transaction_hash ?? params.receipt_id];
@@ -775,7 +778,7 @@ test("light proof: the recorded real testnet tx, read on FastNEAR alone, is prov
   const r = await gateOn(LP);
   assert.deepEqual(r.refusals, []);
   assert.equal(r.proven.length, 1);
-  assert.match(r.proven[0], new RegExp(`^PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash} \\(V0, ${LP.tx.signer} to ${LP.tx.signer}\\): 3 outcome\\(s\\) proven by archival-rpc\\.testnet\\.fastnear\\.com's light-client proof against final block ${LP.head.height} ${LP.head.hash}; confirmed in block \\d+, 2026-11-01T\\d\\d:\\d\\d:\\d\\d\\.\\d+Z \\(testnet, not real-money proof\\)$`));
+  assert.match(r.proven[0], new RegExp(`^PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash} \\(V0, ${LP.tx.signer} to ${LP.tx.signer}\\): 3 outcome\\(s\\) proven by archival-rpc\\.testnet\\.fastnear\\.com's light-client proof against final block ${LP.head.height} ${LP.head.hash}; confirmed in block \\d+, 2026-11-01T\\d\\d:\\d\\d:\\d\\d\\.\\d+Z; tx bytes its tx-bytes file \\(scripts/live-checks/<card>\\.tx-bytes\\.json\\) \\(testnet, not real-money proof\\)$`));
   // the proof needs no second read on FastNEAR's other host: near.org is asked once, never waited
   assert.equal(r.log.filter((l) => l === `ask ${T_ORG} EXPERIMENTAL_tx_status`).length, 1);
   assert.deepEqual(r.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), []);
@@ -936,7 +939,8 @@ test("light proof planted (probe 1): a receipt id written as a Tx, with its real
   const fx = { ...clone(nb), tx: { ...nb.tx, hash: receipt } };
   const r = await gateOn(fx);
   assert.deepEqual(r.proven, []);
-  assert.match(r.refusals.join("\n"), new RegExp(`${receipt}: .*not proven: no signed tx bytes for it`));
+  // with no bytes, the tx JSON FastNEAR serves for the receipt id names the tx's own hash, so no bytes are rebuilt
+  assert.match(r.refusals.join("\n"), new RegExp(`${receipt}: .*not proven: its tx JSON names hash ${nb.tx.hash}, not ${receipt}`));
   // with bytes of a real tx, which hash to that tx, not to the receipt
   const withBytes = await gateOn({ ...fx, tx_bytes: LP.tx_bytes });
   assert.match(withBytes.refusals.join("\n"), new RegExp(`not proven: ${receipt}: its tx bytes do not hash to it`));
@@ -945,8 +949,9 @@ test("light proof planted (probe 1): a receipt id written as a Tx, with its real
 });
 
 test("light proof planted: a record tx with no bytes, or bytes that hash to another tx or name another signer, is refused", async () => {
+  // no bytes and no block that makes its tx JSON hash to it (tx-rebuild: the stub knows no walk)
   const none = await gateOn({ ...clone(LP), tx_bytes: undefined });
-  assert.match(none.refusals.join("\n"), /not proven: no signed tx bytes for it/);
+  assert.match(none.refusals.join("\n"), /not proven: no block 1 back from its own/);
   const other = await gateOn({ ...clone(LP), tx_bytes: LP.v1.tx_bytes });
   assert.match(other.refusals.join("\n"), new RegExp(`not proven: ${LP.tx.hash}: its tx bytes do not hash to it`));
   const flipped = Buffer.from(LP.tx_bytes, "base64");
@@ -1164,136 +1169,388 @@ test("one host read ok and the second answers 429 then ok: the gate waits out it
   assert.deepEqual(s.log.slice(s.log.indexOf("ask t2 EXPERIMENTAL_tx_status"), s.log.indexOf("ask t2 EXPERIMENTAL_tx_status") + 3), ["ask t2 EXPERIMENTAL_tx_status", "sleep 279000", "ask t2 EXPERIMENTAL_tx_status"]);
 });
 
-// Card delete-refund-readback: a one-use account that deletes itself into its funder. The fixture is the real
-// EXPERIMENTAL_tx_status answer for mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM (rpc.mainnet.near.org,
-// wait_until NONE, 2026-11-01; its one signature replaced, as the live checks' recordings do): FINAL, SuccessValue, the
-// beneficiary Transfer 9wEBNxb1a7 ok, NEAR's gas refund GBkJTsykxG from system to the deleted signer failed
-// AccountDoesNotExist. That refund is the one failed receipt the gate passes; every variant below is refused.
+// Card money-gate-delete-sweep: a one-use account is swept in two txs, never one. Its money moves in a plain Transfer to
+// the beneficiary, a Tx line like any other, whose every receipt succeeds, so it passes on two operators' reads or on
+// its light-client proof alone. The account's DeleteAccount is a separate tx the record does not list (NEAR's gas
+// refund to the deleted signer fails by design); a "Deleted: <chain> <account>" line names the account instead, and
+// the gate reads it gone from current state: view_account answers UNKNOWN_ACCOUNT, naming it, on two operators.
+// The old style, one DeleteAccount tx carrying the money, is refused: the fixture is the real EXPERIMENTAL_tx_status
+// answer for mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM (rpc.mainnet.near.org, wait_until NONE, 2026-11-01;
+// its one signature replaced): FINAL, SuccessValue, the beneficiary Transfer 9wEBNxb1a7 ok, NEAR's gas refund
+// GBkJTsykxG from system to the deleted signer failed AccountDoesNotExist.
 const DEL = JSON.parse(readFileSync(new URL("./fixtures/near-delete-refund.json", import.meta.url), "utf8"));
 const DEL_TX = DEL.result.transaction.hash;
 const DEL_A = DEL.result.transaction.signer_id;
-const DEL_F = DEL.result.transaction.actions[0].DeleteAccount.beneficiary_id;
 const REFUND = "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB";
-const PAYOUT = "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL";
-const delRec = rec(`Money path: yes\nTx: near ${DEL_TX} ${DEL_A}\n`);
-// the fixture, changed by `edit`, for every way the tx is asked; `asked` keeps each method and its params
-function delStub(edit = () => {}) {
-  const asked = [];
-  const answer = structuredClone(DEL);
-  edit(answer.result);
-  const fetchFn = stub((url, method) => (method === "tx" || method === "EXPERIMENTAL_tx_status" ? answer : chainAnswers(NOV2)(url, method)));
-  const wrapped = async (url, init) => {
+const delRec = rec(`Money path: yes\nTx: near ${DEL_TX} ${DEL_A}\nDeleted: near ${DEL_A}\n`);
+// n1 answers the fixture; n2 the fixture too, or UNKNOWN_TRANSACTION when it is dRPC past its window (`n2Missing`)
+const delStub = (n2Missing = false) =>
+  stub((url, method) => {
+    if (method === "EXPERIMENTAL_tx_status") return url === "n2" && n2Missing ? { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } } : structuredClone(DEL);
+    if (method === "query") return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: { requested_account_id: DEL_A } }, code: -32000 } };
+    return chainAnswers(NOV2)(url, method);
+  });
+
+test("delete sweep: the old style, one DeleteAccount tx whose gas refund to the deleted signer failed, is refused on two reads and on one", async () => {
+  assert.deepEqual(DEL.result.receipts_outcome.find((o) => o.id === REFUND).outcome.status, { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_A } } } } });
+  const both = await moneyGate(delRec, delStub(), RPCS);
+  assert.deepEqual(both.read, []);
+  assert.match(both.refusals.join("\n"), new RegExp(`near ${DEL_TX}: failed \\(a receipt failed\\) on n1, failed \\(a receipt failed\\) on n2`));
+  const one = await moneyGate(delRec, delStub(true), RPCS);
+  assert.deepEqual([one.read, one.proven], [[], []]);
+  assert.match(one.refusals.join("\n"), new RegExp(`near ${DEL_TX}: failed \\(a receipt failed\\) on n1, missing on n2`));
+});
+
+test("delete sweep: the gate has no delete-refund exception left", async () => {
+  const gate = await import("./money-gate.mjs");
+  assert.equal("isDeleteRefund" in gate, false);
+  assert.doesNotMatch(readFileSync(new URL("./money-gate.mjs", import.meta.url), "utf8"), /isDeleteRefund|delete refund/i);
+});
+
+// The new style on the light-proof recording's real testnet Transfer (a throwaway faucet account's), dRPC past its
+// window: the Transfer passes on its proof alone, and the Deleted line on view_account.
+const LP_A = () => LP.tx.signer;
+const sweepRec = (body = `Deleted: near-testnet ${LP_A()}\n`) => [{ ...rec(`Money path: yes\nTx: near-testnet ${LP.tx.hash} ${LP.tx.signer}\n${body}`)[0], bytes: { [LP.tx.hash]: LP.tx_bytes } }];
+const UNKNOWN_ACCOUNT = (id) => ({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: { requested_account_id: id } }, code: -32000, data: `account ${id} does not exist while viewing` } });
+const PRESENT = { result: { amount: "1820000000000000000000", locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, block_height: 1, block_hash: "h" } };
+// the proof hosts, with view_account answered per host by `views(url, account_id)`
+function sweepHosts(views) {
+  const s = proofHosts(LP);
+  const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
-    asked.push({ method, params });
-    return fetchFn(url, init);
+    if (method !== "query") return s.fetchFn(url, init);
+    s.log.push(`ask ${url} view_account ${params.account_id} ${params.finality}`);
+    assert.equal(params.request_type, "view_account");
+    return { ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", id: 1, ...views(url, params.account_id) }) };
   };
-  return { fetchFn: wrapped, asked };
+  return { ...s, fetchFn };
 }
-const receipt = (r, id) => r.receipts.find((x) => x.receipt_id === id);
-const outcome = (r, id) => r.receipts_outcome.find((x) => x.id === id);
+const sweepGate = async (views, record = sweepRec()) => {
+  const s = sweepHosts(views);
+  return { ...(await moneyGate(record, s.fetchFn, T_RPCS, { sleep: s.sleep })), log: s.log };
+};
 
-test("delete refund: the real answer for Dw1nb reads ok on two RPCs, asked by EXPERIMENTAL_tx_status with wait_until NONE", async () => {
-  assert.equal(DEL.result.final_execution_status, "FINAL");
-  assert.deepEqual(outcome(DEL.result, REFUND).outcome.status, { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_A } } } } });
-  const s = delStub();
-  const r = await moneyGate(delRec, s.fetchFn, RPCS);
+test("delete sweep: the Transfer passes on its proof alone and the account reads gone on dRPC and FastNEAR: PASS", async () => {
+  const r = await sweepGate((url, id) => UNKNOWN_ACCOUNT(id));
   assert.deepEqual(r.refusals, []);
-  assert.deepEqual(r.read, [`near ${DEL_TX} ok on n1`, `near ${DEL_TX} ok on n2`]);
-  const reads = s.asked.filter((a) => a.method !== "block");
-  assert.deepEqual(reads.map((a) => a.method), ["EXPERIMENTAL_tx_status", "EXPERIMENTAL_tx_status"]);
-  for (const a of reads) assert.deepEqual(a.params, { tx_hash: DEL_TX, sender_account_id: DEL_A, wait_until: "NONE" });
+  assert.equal(r.proven.length, 1);
+  assert.match(r.proven[0], new RegExp(`^PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash} `));
+  assert.deepEqual(r.gone, [`near-testnet ${LP_A()} gone (UNKNOWN_ACCOUNT) on ${T_FN}, ${T_DR}, ${T_ORG} (testnet, not real-money proof)`]);
+  // read at the final block, at most once per host once two operators have read it gone
+  assert.deepEqual(r.log.filter((l) => / view_account /.test(l)), [`ask ${T_FN} view_account ${LP_A()} final`, `ask ${T_DR} view_account ${LP_A()} final`, `ask ${T_ORG} view_account ${LP_A()} final`]);
 });
 
-const refused = async (edit, why) => {
-  const r = await moneyGate(delRec, delStub(edit).fetchFn, RPCS);
-  assert.deepEqual(r.read, []);
-  assert.match(r.refusals.join("\n"), why);
+test("delete sweep: an account still present on any one host FAILs, the Transfer proven or not", async () => {
+  for (const host of [T_FN, T_DR, T_ORG]) {
+    const r = await sweepGate((url, id) => (url === host ? PRESENT : UNKNOWN_ACCOUNT(id)));
+    assert.match(r.refusals.join("\n"), new RegExp(`near-testnet ${LP_A()} is not gone: .*present \\(holds 1820000000000000000000 yocto\\) on ${host.replace(/\./g, "\\.")}`), host);
+  }
+  const all = await sweepGate(() => PRESENT);
+  assert.equal(all.proven.length, 1);
+  assert.match(all.refusals.join("\n"), /is not gone: present .* on https:\/\/archival-rpc\.testnet\.fastnear\.com, present .* on https:\/\/near-testnet\.drpc\.org, present/);
+});
+
+test("delete sweep: gone on one operator only (FastNEAR's two hosts are one), an error, or UNKNOWN_ACCOUNT naming another account FAILs", async () => {
+  const cases = [
+    [(url, id) => (url === T_DR ? { error: { code: -32000, name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } } : UNKNOWN_ACCOUNT(id)), /error .*UNKNOWN_BLOCK.* on https:\/\/near-testnet\.drpc\.org/],
+    [(url, id) => (url === T_DR ? {} : UNKNOWN_ACCOUNT(id)), /no answer \(a reply with no account and no error\) on https:\/\/near-testnet\.drpc\.org/],
+    [(url, id) => (url === T_FN || url === T_ORG ? { result: null } : UNKNOWN_ACCOUNT(id)), /no answer .* on https:\/\/archival-rpc\.testnet\.fastnear\.com, gone on https:\/\/near-testnet\.drpc\.org, no answer/],
+    [(url) => UNKNOWN_ACCOUNT(url === T_DR ? "other.testnet" : LP_A()), /error .*other\.testnet.* on https:\/\/near-testnet\.drpc\.org/],
+    [(url, id) => (url === T_DR ? { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} }, code: -32000 } } : UNKNOWN_ACCOUNT(id)), /error .* on https:\/\/near-testnet\.drpc\.org/],
+  ];
+  for (const [views, why] of cases) {
+    const r = await sweepGate(views);
+    assert.match(r.refusals.join("\n"), new RegExp(`near-testnet ${LP_A()} is not gone: `));
+    assert.match(r.refusals.join("\n"), why);
+    assert.deepEqual(r.gone, []);
+  }
+});
+
+test("delete sweep: a Deleted line must name a listed Tx's signer on its chain, a NEAR chain, in a live section, in its one shape", () => {
+  const live = (body) => parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: near-testnet ${LP.tx.hash} ${LP.tx.signer}\n${body}`, "demo");
+  const ok = live(`Deleted: near-testnet ${LP_A()}\n`);
+  assert.deepEqual([ok.problems, ok.deleted], [[], [{ chain: "near-testnet", account: LP_A() }]]);
+  for (const [body, why] of [
+    [`Deleted: near-testnet other.testnet\n`, /Deleted near-testnet other\.testnet names no listed Tx's signer on near-testnet/],
+    [`Deleted: near ${LP_A()}\n`, /Deleted near .* names no listed Tx's signer on near/],
+    [`Deleted: solana ${LP_A()}\n`, /bad Deleted line/],
+    [`Deleted: near-testnet ${LP_A()} extra\n`, /bad Deleted line/],
+    [`Deleted: near-testnet Not_An_Account\n`, /bad Deleted line/],
+    [`- **Deleted:** near-testnet ${LP_A()}\n`, /bad Deleted line/],
+  ])
+    assert.match(live(body).problems.join("\n"), why, body);
+  assert.match(parseLive(`CARD demo / merge: PASS\nDeleted: near-testnet ${LP_A()}\n`, "demo").problems.join("\n"), /outside a live record/);
+});
+
+test("delete sweep: a planted bad Deleted line is refused by the gate before any view_account read", async () => {
+  const r = await sweepGate((url, id) => UNKNOWN_ACCOUNT(id), sweepRec(`Deleted: near-testnet someone-else.testnet\n`));
+  assert.match(r.refusals.join("\n"), /names no listed Tx's signer/);
+  assert.deepEqual(r.log.filter((l) => / view_account /.test(l)), []);
+});
+
+// Card money-gate-tx-rebuild: a NEAR tx one operator reads is proven from its id alone: its signed bytes are rebuilt
+// from FastNEAR's own tx JSON and must hash to the id. The recording (money-gate.tx-rebuild.json) holds real txs read
+// 2026-11-01 on FastNEAR archival: every vault-testnet-usdc record tx (the faucet's included), the mainnet delete sweep
+// Dw1nb, the light-proof recording's V0 and V1 transfers, a testnet DeleteKey, a mainnet AddKey with a FunctionCall
+// permission (openrail D2zix) and two mainnet SWEAT relayer meta txs
+// (Delegate holding AddKey, and holding FunctionCall); for each, its tx status as served (read with exactJson: one
+// Delegate's max_block_height is u64::MAX),
+// the blocks walked back from its own (hash -> prev_hash) and, for the one DeployContract, its view_code answer.
+// A Delegate's signature (hashed in the tx) is kept as ed25519-hex:<hex>, since the secret-key scan reads any
+// ed25519:<64 bytes base58> as a secret key; the top-level signature (not hashed) is not kept.
+const TR = exactJson(readFileSync(new URL("./money-gate.tx-rebuild.json", import.meta.url), "utf8"));
+for (const t of TR.txs) for (const a of t.known.transaction.actions) if (a.Delegate) a.Delegate.signature = `ed25519:${enc58(Buffer.from(a.Delegate.signature.replace(/^ed25519-hex:/, ""), "hex"))}`;
+const trTx = (id) => TR.txs.find((t) => t.id === id);
+// FastNEAR answers from the recording: a block it walked, and the deployed code at the block its receipt ran in
+function walkHost(t) {
+  const log = [];
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    log.push(`${method} ${params.block_id ?? ""}`);
+    const json = (body) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", id: 1, ...body }) });
+    if (method === "block" && Object.hasOwn(t.blocks, params.block_id)) return json({ result: { header: { hash: params.block_id, prev_hash: t.blocks[params.block_id] } } });
+    const ran = t.known.receipts_outcome.find((o) => o.id === t.known.transaction_outcome.outcome.receipt_ids[0]);
+    if (method === "query" && t.code && params.request_type === "view_code" && params.account_id === t.known.transaction.receiver_id && params.block_id === ran?.block_hash)
+      return json({ result: { code_base64: t.code } });
+    return json(UNKNOWN_BLOCK);
+  };
+  return { fetchFn, log, sleep: async () => {} };
+}
+const rebuilt = (t, known = t.known) => {
+  const s = walkHost(t);
+  return findTxBytes(s.fetchFn, t.host, t.id, known, s.sleep);
 };
-const FAILED = new RegExp(`near ${DEL_TX}: failed \\(a receipt failed\\) on n1, failed \\(a receipt failed\\) on n2`);
+const kindsOf = (t) => t.known.transaction.actions.map((a) => (typeof a === "string" ? a : Object.keys(a)[0]));
 
-test("delete refund: the refund sent by any account other than system is refused", async () => {
-  for (const by of [DEL_A, DEL_F, "intents.near", "System", ""]) await refused((r) => void (receipt(r, REFUND).predecessor_id = by), FAILED);
-  await refused((r) => void delete receipt(r, REFUND).predecessor_id, FAILED);
+test("tx rebuild: every recorded real tx rebuilds from its own tx JSON to its id; every rebuilt kind and both versions are pinned", async () => {
+  const kinds = new Set();
+  const versions = new Set();
+  for (const t of TR.txs) {
+    const { bytes, back } = await rebuilt(t);
+    const f = txBytesFacts(bytes, t.id);
+    assert.equal(f.signer, t.signer, t.id);
+    assert.equal(f.receiver, t.known.transaction.receiver_id, t.id);
+    assert.ok(back >= 1 && back <= 10, `${t.id} ${back}`);
+    for (const k of kindsOf(t)) kinds.add(k);
+    for (const a of t.known.transaction.actions) {
+      if (a.AddKey) kinds.add(`AddKey ${Object.keys(a.AddKey.access_key.permission === "FullAccess" ? { FullAccess: 1 } : a.AddKey.access_key.permission)[0]}`);
+      for (const x of a.Delegate?.delegate_action.actions ?? []) kinds.add(`Delegate ${Object.keys(x)[0]}`);
+    }
+    versions.add(f.version);
+  }
+  assert.deepEqual([...kinds].sort(), ["AddKey", "AddKey FullAccess", "AddKey FunctionCall", "CreateAccount", "Delegate", "Delegate AddKey", "Delegate FunctionCall", "DeleteAccount", "DeleteKey", "DeployContract", "FunctionCall", "Transfer"]);
+  assert.equal(trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn").known.transaction.actions[0].Delegate.delegate_action.max_block_height, "18446744073709551615");
+  assert.deepEqual([...versions].sort(), [0, 1]);
+  // every tx of the testnet USDC record, the faucet's (signer testnet) included, and the mainnet delete sweep
+  const record = readFileSync(new URL("../live-checks/vault-testnet-usdc.md", import.meta.url), "utf8");
+  const ids = [...record.matchAll(/^Tx: near-testnet (\S+) (\S+)$/gm)].map((m) => m[1]);
+  assert.equal(ids.length, 26);
+  for (const id of [...ids, "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM"]) assert.ok(trTx(id), id);
+  assert.equal(trTx("4Twid1qBm8SxHNFR3s7mvmGTS39rUwZRKMw8iG3oAyYx").signer, "testnet");
+  assert.equal(trTx("GRLgfCnH5or6pC2VVykbD6aTwDdtNXKmXbbKMuP9YExp").known.transaction.nonce_index, undefined, "a V1 tx with a plain nonce has a V0-shaped view");
 });
 
-test("delete refund: the refund to any other receiver is refused, even when the failure names that receiver", async () => {
-  await refused((r) => void (receipt(r, REFUND).receiver_id = DEL_F), FAILED);
-  await refused((r) => {
-    receipt(r, REFUND).receiver_id = DEL_F;
-    outcome(r, REFUND).outcome.status.Failure.ActionError.kind.AccountDoesNotExist.account_id = DEL_F;
-  }, FAILED);
+// every value of a tx JSON changed: a number one more, a digit string one more, base64 or a key with one bit flipped,
+// any other string one letter longer. The signature is not part of the signed bytes' hash (transaction.rs:144-146 hashes
+// the Transaction alone), so it is never read: changing it changes nothing.
+function mutate(path, v) {
+  if (typeof v === "number") return v + 1;
+  if (/^\d+$/.test(v)) return v === "18446744073709551615" ? "18446744073709551614" : String(BigInt(v) + 1n);
+  const key = /^(ed25519|secp256k1):(.+)$/.exec(v);
+  if (key) {
+    const b = base58(key[2], 100);
+    b[b.length - 1] ^= 1;
+    return `${key[1]}:${enc58(b)}`;
+  }
+  if (["args", "code"].includes(path.at(-1))) {
+    const b = Buffer.from(v, "base64");
+    b[b.length - 1] ^= 1;
+    return b.toString("base64");
+  }
+  return `${v}x`;
+}
+test("tx rebuild planted: one changed value anywhere in any recorded tx's JSON is refused (nonce, receiver, an arg byte, a deposit, a key, a code hash)", async () => {
+  const fields = new Set();
+  let n = 0;
+  // one tx per shape of actions (a Delegate by the kinds it holds) per network, and the V1 tx
+  const shape = (x) => `${x.network} ${JSON.stringify(x.known.transaction.actions.map((a) => (typeof a === "string" ? a : a.Delegate ? a.Delegate.delegate_action.actions.map((d) => Object.keys(d)[0]) : Object.keys(a)[0])))}`;
+  for (const t of TR.txs.filter((x, i, all) => all.findIndex((y) => shape(y) === shape(x)) === i || x.id === "GRLgfCnH5or6pC2VVykbD6aTwDdtNXKmXbbKMuP9YExp"))
+    for (const [path, v] of leaves(t.known.transaction)) {
+      if (path.length === 1 && path[0] === "signature") continue;
+      const known = clone(t.known);
+      let o = known.transaction;
+      for (const k of path.slice(0, -1)) o = o[k];
+      o[path.at(-1)] = mutate(path, v);
+      await assert.rejects(rebuilt(t, known), /names hash|no block \d+ back|UNKNOWN_BLOCK|priority_fee 1, not 0|does not rebuild|no code read back|not an account id|is not base64|not a u|that is not ed25519|not \d+ bytes|not a base58|code hash is not 32 bytes/, `${t.id} ${path.join(".")}`);
+      fields.add(path.filter((k) => typeof k === "string" && !/^\d+$/.test(k)).join("."));
+      n++;
+    }
+  for (const f of ["nonce", "receiver_id", "signer_id", "public_key", "hash", "actions.FunctionCall.args", "actions.FunctionCall.deposit", "actions.FunctionCall.gas", "actions.FunctionCall.method_name", "actions.Transfer.deposit", "actions.AddKey.public_key", "actions.AddKey.access_key.nonce", "actions.DeployContract.code", "actions.DeleteKey.public_key", "actions.DeleteAccount.beneficiary_id", "actions.AddKey.access_key.permission.FunctionCall.allowance", "actions.AddKey.access_key.permission.FunctionCall.receiver_id", "actions.AddKey.access_key.permission.FunctionCall.method_names", "actions.Delegate.signature", "actions.Delegate.delegate_action.max_block_height", "actions.Delegate.delegate_action.nonce", "actions.Delegate.delegate_action.public_key", "actions.Delegate.delegate_action.sender_id", "actions.Delegate.delegate_action.receiver_id", "actions.Delegate.delegate_action.actions.AddKey.public_key", "actions.Delegate.delegate_action.actions.FunctionCall.args"])
+    assert.ok(fields.has(f), f);
+  assert.ok(n > 40, `${n} changes`);
+  // the signature is not hashed: a changed one still rebuilds the same bytes
+  const t = TR.txs[0];
+  const sig = clone(t.known);
+  const v = sig.transaction.signature;
+  sig.transaction.signature = `${v.slice(0, -1)}${v.at(-1) === "2" ? "3" : "2"}`;
+  assert.equal((await rebuilt(t, sig)).bytes, (await rebuilt(t)).bytes);
 });
 
-test("delete refund: a refund with two actions, or with one action that is not a lone Transfer, is refused", async () => {
-  await refused((r) => void receipt(r, REFUND).receipt.Action.actions.push({ Transfer: { deposit: "1" } }), FAILED);
-  await refused((r) => void (receipt(r, REFUND).receipt.Action.actions = []), FAILED);
-  await refused((r) => void (receipt(r, REFUND).receipt.Action.actions = [{ FunctionCall: { method_name: "x", args: "", gas: 1, deposit: "0" } }]), FAILED);
-  await refused((r) => void (receipt(r, REFUND).receipt.Action.actions = [{ Transfer: { deposit: "1" }, DeleteAccount: { beneficiary_id: DEL_F } }]), FAILED);
+test("tx rebuild planted: a changed block on the walk, its own block hash, or one byte of the deployed code is refused", async () => {
+  const t = trTx("6oFdTV6xQ5gMnDyf4jd2TJDL1qgyn2CeS583aGdyRQgf");
+  const { back } = await rebuilt(t);
+  // the block the bytes hash with, read back with another prev_hash on the way: the walk never reaches it
+  const walk = clone(t);
+  const first = t.known.transaction_outcome.block_hash;
+  walk.blocks[first] = changed(walk.blocks[first]);
+  await assert.rejects(rebuilt(walk), /no block|UNKNOWN_BLOCK/);
+  // its own block named as another: the walk starts elsewhere
+  const own = clone(t.known);
+  own.transaction_outcome.block_hash = changed(first);
+  await assert.rejects(rebuilt(t, own), /UNKNOWN_BLOCK/);
+  // a walk cut short of the right block: refused at the cap
+  const s = walkHost(t);
+  await assert.rejects(findTxBytes(s.fetchFn, t.host, t.id, t.known, s.sleep, back - 1), new RegExp(`no block from its own back ${back - 1} makes its tx JSON hash to it: .*keep its tx-bytes file`));
+  // a cap of exactly its depth reaches it
+  assert.equal((await findTxBytes(s.fetchFn, t.host, t.id, t.known, s.sleep, back)).back, back);
+  // the deployed code, read back with one byte changed: its hash is no longer the view's
+  const d = clone(trTx("HVkQ7DY9pYjCiuKeXdCPencjHyzwzs3NBUVzSHgHEK7m"));
+  const c = Buffer.from(d.code, "base64");
+  c[100] ^= 1;
+  d.code = c.toString("base64");
+  await assert.rejects(rebuilt(d), /a DeployContract action: no code read back that hashes to/);
 });
 
-test("delete refund: another failure kind, or AccountDoesNotExist naming another account, is refused", async () => {
-  const kind = (k) => (r) => void (outcome(r, REFUND).outcome.status.Failure.ActionError.kind = k);
-  await refused(kind({ LackBalanceForState: { account_id: DEL_A, amount: "1" } }), FAILED);
-  await refused(kind({ AccountDoesNotExist: { account_id: DEL_F } }), FAILED);
-  await refused(kind({ AccountDoesNotExist: {} }), FAILED);
-  await refused((r) => void (outcome(r, REFUND).outcome.status = { Failure: { InvalidTxError: { InvalidSignerId: { signer_id: DEL_A } } } }), FAILED);
+test("tx rebuild planted: an unknown or unpinned action kind, an unknown field, a permission or a key type no tx pins is refused before any block is read", async () => {
+  const t = trTx("4Twid1qBm8SxHNFR3s7mvmGTS39rUwZRKMw8iG3oAyYx"); // CreateAccount, Transfer, AddKey
+  const pk = t.known.transaction.public_key;
+  const cases = [
+    ["an unknown kind", (x) => x.actions.push({ NoSuchAction: {} }), /an action kind this check does not rebuild: NoSuchAction/],
+    ["Stake (no pin)", (x) => x.actions.push({ Stake: { stake: "1", public_key: pk } }), /an action kind this check does not rebuild: Stake/],
+    ["a Delegate holding a kind not pinned there", (x) => x.actions.push({ Delegate: { ...clone(trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn").known.transaction.actions[0].Delegate), delegate_action: { ...trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn").known.transaction.actions[0].Delegate.delegate_action, actions: [{ Transfer: { deposit: "1" } }] } } }), /an action inside a Delegate this check does not rebuild: \{"Transfer"/],
+    ["a Delegate inside a Delegate", (x) => x.actions.push({ Delegate: { ...clone(trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn").known.transaction.actions[0].Delegate), delegate_action: { ...trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn").known.transaction.actions[0].Delegate.delegate_action, actions: [clone(trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn").known.transaction.actions[0])] } } }), /an action inside a Delegate this check does not rebuild: \{"Delegate"/],
+    ["a secp256k1 key (no pin)", (x) => (x.public_key = `secp256k1:${enc58(Buffer.alloc(64, 7))}`), /a public key secp256k1:\S+ that is not ed25519/],
+    ["UseGlobalContract (no pin)", (x) => x.actions.push({ UseGlobalContract: { code_hash: t.id } }), /does not rebuild: UseGlobalContract/],
+    ["DeployGlobalContract (no pin)", (x) => x.actions.push({ DeployGlobalContract: { code: "AA==" } }), /does not rebuild: DeployGlobalContract/],
+    ["TransferToGasKey (no pin)", (x) => x.actions.push({ TransferToGasKey: { public_key: pk, deposit: "1" } }), /does not rebuild: TransferToGasKey/],
+    ["DelegateV2 (no pin)", (x) => x.actions.push({ DelegateV2: {} }), /does not rebuild: DelegateV2/],
+    ["CreateAccount as an object", (x) => (x.actions[0] = { CreateAccount: {} }), /does not rebuild: CreateAccount/],
+    ["two kinds in one action", (x) => (x.actions[1] = { Transfer: { deposit: "1" }, DeleteKey: { public_key: pk } }), /an action this check does not rebuild/],
+    ["a FunctionCall permission with no allowance (no pin)", (x) => (x.actions[2].AddKey.access_key.permission = { FunctionCall: { allowance: null, receiver_id: "a.testnet", method_names: [] } }), /with a permission this check does not rebuild/],
+    ["a gas-key permission", (x) => (x.actions[2].AddKey.access_key.permission = { GasKeyFullAccess: { balance: "0", num_nonces: 1 } }), /with a permission this check does not rebuild/],
+    ["an extra field in an action", (x) => (x.actions[1].Transfer.memo = "x"), /a Transfer action has fields deposit,memo, not deposit/],
+    ["a missing field in an action", (x) => delete x.actions[2].AddKey.access_key.nonce, /access_key has fields permission, not nonce,permission/],
+    ["an unknown tx field", (x) => (x.block_hash = t.known.transaction_outcome.block_hash), /a field this check does not rebuild: block_hash/],
+    ["a missing tx field", (x) => delete x.receiver_id, /its tx JSON has no receiver_id/],
+    ["a priority fee", (x) => (x.priority_fee = 1), /priority_fee 1, not 0/],
+    ["an ML-DSA key", (x) => (x.public_key = `mldsa65:${x.public_key.split(":")[1]}`), /a public key mldsa65:\S+ that is not ed25519/],
+    ["a nonce past 2^53", (x) => (x.nonce = 2 ** 53 + 2), /not a u64/],
+  ];
+  for (const [what, edit, why] of cases) {
+    const known = clone(t.known);
+    edit(known.transaction);
+    const s = walkHost(t);
+    await assert.rejects(findTxBytes(s.fetchFn, t.host, t.id, known, s.sleep), why, what);
+    assert.deepEqual(s.log, [], what);
+  }
 });
 
-test("delete refund: in a tx with no DeleteAccount, or whose signer is not its receiver, the same refund is refused", async () => {
-  await refused((r) => void (r.transaction.actions = [{ Transfer: { deposit: "1" } }]), FAILED);
-  await refused((r) => void (r.transaction.receiver_id = DEL_F), FAILED);
-  await refused((r) => void delete r.transaction, FAILED);
+test("tx rebuild: a V1 tx with a plain nonce, whose view is V0-shaped, rebuilds as V1; a view with nonce_index or nonce_mode (a gas-key tx, no pin) is refused", async () => {
+  const v0 = trTx("5JBe7TqfYjEb4FbKHRx2QuE2fnVYcWCoQ12SW9TeLrN6");
+  const v1 = trTx("GRLgfCnH5or6pC2VVykbD6aTwDdtNXKmXbbKMuP9YExp");
+  assert.equal(txBytesFacts((await rebuilt(v0)).bytes, v0.id).version, 0);
+  assert.equal(txBytesFacts((await rebuilt(v1)).bytes, v1.id).version, 1);
+  assert.equal(rebuildTx(v0.known.transaction, v0.known.transaction_outcome.block_hash).length, 2, "a plain view: V0 and V1 tried");
+  for (const extra of [{ nonce_index: 0 }, { nonce_mode: "strict" }]) {
+    const known = clone(v1.known);
+    Object.assign(known.transaction, extra);
+    const s = walkHost(v1);
+    await assert.rejects(findTxBytes(s.fetchFn, v1.host, v1.id, known, s.sleep), new RegExp(`its tx JSON has ${Object.keys(extra)[0]} \\(a gas-key nonce or nonce mode\\), which no recorded tx pins`), JSON.stringify(extra));
+    assert.deepEqual(s.log, []);
+  }
 });
 
-test("delete refund: a failed beneficiary Transfer is refused", async () => {
-  await refused((r) => void (outcome(r, PAYOUT).outcome.status = { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_F } } } } }), FAILED);
+test("tx rebuild in the gate: the light-proof txs with no tx-bytes file pass by their rebuilt bytes and proof; a changed nonce or signer is refused", async () => {
+  for (const [fx, v] of [[LP, 0], [LP.v1, 1]]) {
+    const ok = { ...clone(fx), tx_bytes: undefined, walk: trTx(fx.tx.hash).blocks };
+    const r = await gateOn(ok);
+    assert.deepEqual(r.refusals, [], fx.tx.hash);
+    assert.match(r.proven[0], new RegExp(`near-testnet ${fx.tx.hash} \\(V${v}, ${fx.tx.signer} to ${fx.tx.signer}\\): 3 outcome\\(s\\) proven .*; tx bytes rebuilt from archival-rpc\\.testnet\\.fastnear\\.com's tx JSON, block hash 5 block\\(s\\) back \\(testnet, not real-money proof\\)$`));
+    const nonce = clone(ok);
+    nonce.known.transaction.nonce += 1;
+    const bad = await gateOn(nonce);
+    assert.deepEqual(bad.proven, []);
+    assert.match(bad.refusals.join("\n"), /not proven: no block \d+ back from its own/);
+    // the record's signer is not the one the rebuilt bytes name
+    const signer = clone(ok);
+    signer.tx.signer = "someone.testnet";
+    assert.match((await gateOn(signer)).refusals.join("\n"), new RegExp(`not proven: its tx bytes name signer ${fx.tx.signer}, not someone\\.testnet`));
+  }
+  // a tx-bytes file, when present, still serves first: one that hashes to another tx is refused, never rebuilt around
+  const other = await gateOn({ ...clone(LP), tx_bytes: LP.v1.tx_bytes, walk: trTx(LP.tx.hash).blocks });
+  assert.match(other.refusals.join("\n"), new RegExp(`not proven: ${LP.tx.hash}: its tx bytes do not hash to it`));
 });
 
-test("delete refund: a second refund-shaped failure is refused (one is passed, never two)", async () => {
-  await refused((r) => {
-    r.receipts.push({ ...structuredClone(receipt(r, REFUND)), receipt_id: "Extra1111111111111111111111111111111111111" });
-    r.receipts_outcome.push({ ...structuredClone(outcome(r, REFUND)), id: "Extra1111111111111111111111111111111111111" });
-  }, FAILED);
-  // two receipts listed under the refund's id: not that refund
-  await refused((r) => void r.receipts.push(structuredClone(receipt(r, REFUND))), FAILED);
+test("tx rebuild: a NEAR answer is read with every integer past 2^53 kept exact, so a Delegate's u64::MAX rebuilds", async () => {
+  const t = trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn");
+  const text = JSON.stringify({ jsonrpc: "2.0", id: 1, result: t.known }).replace('"max_block_height":"18446744073709551615"', '"max_block_height":18446744073709551615');
+  assert.match(text, /"max_block_height":18446744073709551615[,}]/);
+  // JSON.parse alone rounds it, and the bytes no longer hash to the id
+  const lossy = JSON.parse(text).result;
+  assert.equal(lossy.transaction.actions[0].Delegate.delegate_action.max_block_height, 18446744073709552000);
+  await assert.rejects(rebuilt(t, lossy), /not a u64/);
+  // the gate's own read (rpc) of a real fetch Response, which offers both json() and text(), keeps it
+  const out = {};
+  const known = { ...t.known, status: { SuccessValue: "" }, final_execution_status: "FINAL", receipts: [], receipts_outcome: [] };
+  const served = JSON.stringify({ jsonrpc: "2.0", id: 1, result: known }).replace('"max_block_height":"18446744073709551615"', '"max_block_height":18446744073709551615');
+  const block = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { header: { timestamp_nanosec: "1790000000000000000" } } });
+  const f2 = async (url, init) => new Response(JSON.parse(init.body).method === "block" ? block : served, { status: 200, headers: { "content-type": "application/json" } });
+  assert.equal(await readTx(f2, "stub", { chain: "near", hash: t.id, signer: t.signer }, 0, async () => {}, true, out), "ok");
+  assert.equal(out.result.transaction.actions[0].Delegate.delegate_action.max_block_height, "18446744073709551615");
+  assert.equal(txBytesFacts((await rebuilt(t, out.result)).bytes, t.id).signer, "sweat-relayer.near");
 });
 
-// P10: NEAR's DeleteAccount pays the balance out as a receipt from system with one Transfer, the same shape as the gas
-// refund; nothing stops beneficiary = the account itself, so that payout fails AccountDoesNotExist naming the signer and
-// the balance burns. A gas refund carries the tx's signer in receipt.Action.signer_id; a balance payout carries system
-// (the fixture: GBkJTsykxG signer_id = the account, 9wEBNxb1a7 signer_id = system).
-const selfPayout = (r) => {
-  r.transaction.actions[0].DeleteAccount.beneficiary_id = DEL_A;
-  receipt(r, PAYOUT).receiver_id = DEL_A;
-  outcome(r, PAYOUT).outcome.status = { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_A } } } } };
-};
-const noGasRefund = (r) => {
-  r.receipts = r.receipts.filter((x) => x.receipt_id !== REFUND);
-  r.receipts_outcome = r.receipts_outcome.filter((x) => x.id !== REFUND);
-  for (const o of r.receipts_outcome) o.outcome.receipt_ids = o.outcome.receipt_ids.filter((id) => id !== REFUND);
-};
-
-test("delete refund P10b: a DeleteAccount whose beneficiary is the account itself, its balance payout failed and no gas refund, is refused", async () => {
-  assert.equal(receipt(DEL.result, REFUND).receipt.Action.signer_id, DEL_A);
-  assert.equal(receipt(DEL.result, PAYOUT).receipt.Action.signer_id, "system");
-  await refused((r) => {
-    selfPayout(r);
-    noGasRefund(r);
-  }, FAILED);
+test("tx rebuild: the gate walks back 64 blocks, no more: a tx whose block hash is 64 blocks before its own rebuilds, 65 is refused", async () => {
+  const t = trTx("6oFdTV6xQ5gMnDyf4jd2TJDL1qgyn2CeS583aGdyRQgf");
+  const { back } = await rebuilt(t);
+  // the recorded walk put `extra` stand-in blocks further from the tx: its block hash is then back + extra blocks back
+  const deeper = (extra) => {
+    const x = clone(t);
+    const real = x.known.transaction_outcome.block_hash;
+    const fake = Array.from({ length: extra }, (_, i) => enc58(createHash("sha256").update(`stand-in ${i}`).digest()));
+    fake.forEach((h, i) => (x.blocks[h] = fake[i + 1] ?? real));
+    x.known.transaction_outcome.block_hash = fake[0];
+    return x;
+  };
+  assert.equal((await rebuilt(deeper(64 - back))).back, 64);
+  await assert.rejects(rebuilt(deeper(65 - back)), /no block from its own back 64 makes its tx JSON hash to it: .*keep its tx-bytes file/);
 });
 
-test("delete refund P10a: beneficiary = the account itself with the gas refund present (two failures) is refused", async () => {
-  await refused(selfPayout, FAILED);
+test("tx rebuild: a deploy from a parent to a new sub-account (the testnet vault skeleton's own, 7sbN) reads its code at the block its receipt ran in, a block after the tx's", async () => {
+  const t = trTx("7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML");
+  const ran = t.known.receipts_outcome.find((o) => o.id === t.known.transaction_outcome.outcome.receipt_ids[0]);
+  assert.notEqual(t.known.transaction.signer_id, t.known.transaction.receiver_id);
+  assert.notEqual(ran.block_hash, t.known.transaction_outcome.block_hash);
+  assert.deepEqual(kindsOf(t), ["CreateAccount", "Transfer", "DeployContract", "FunctionCall"]);
+  const s = walkHost(t);
+  const { bytes } = await findTxBytes(s.fetchFn, t.host, t.id, t.known, s.sleep);
+  assert.equal(txBytesFacts(bytes, t.id).receiver, "vault.bf-vs-20261101t012200.testnet");
+  assert.deepEqual(s.log.filter((l) => l.startsWith("query")), [`query ${ran.block_hash}`]);
+  // the vault's code hash on record (contracts/vault/deployments/testnet-skeleton.json) is the code rebuilt into it
+  assert.equal(enc58(createHash("sha256").update(Buffer.from(t.code, "base64")).digest()), "GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn");
 });
 
-test("delete refund: the refund whose receipt signer is system or missing, not the deleted account, is refused", async () => {
-  for (const by of ["system", DEL_F, ""]) await refused((r) => void (receipt(r, REFUND).receipt.Action.signer_id = by), FAILED);
-  await refused((r) => void delete receipt(r, REFUND).receipt.Action.signer_id, FAILED);
-});
-
-test("delete refund: an answer with no receipts list, no receipts_outcome, or no receipt for the failed outcome is not ok", async () => {
-  const INCOMPLETE = new RegExp(`near ${DEL_TX}: incomplete \\(no receipts or receipts_outcome list\\) on n1, incomplete \\(no receipts or receipts_outcome list\\) on n2`);
-  await refused((r) => void delete r.receipts, INCOMPLETE);
-  await refused((r) => void delete r.receipts_outcome, INCOMPLETE);
-  await refused((r) => void (r.receipts = r.receipts.filter((x) => x.receipt_id !== REFUND)), FAILED);
+test("tx rebuild planted: a DeployContract tx with a field it does not rebuild is refused before its code is read", async () => {
+  const t = trTx("HVkQ7DY9pYjCiuKeXdCPencjHyzwzs3NBUVzSHgHEK7m");
+  for (const [what, edit] of [
+    ["an extra tx field", (x) => (x.memo = "x")],
+    ["an unknown kind beside it", (x) => x.actions.push({ NoSuchAction: {} })],
+    ["a code hash of 31 bytes", (x) => (x.actions[0].DeployContract.code = Buffer.alloc(31).toString("base64"))],
+  ]) {
+    const known = clone(t.known);
+    edit(known.transaction);
+    const s = walkHost(t);
+    await assert.rejects(findTxBytes(s.fetchFn, t.host, t.id, known, s.sleep), /does not rebuild|not 32 bytes/, what);
+    assert.deepEqual(s.log, [], what);
+  }
 });

@@ -8,7 +8,7 @@
 // What the libraries keep inside (noble's HKDF PRK and HMAC state, scure's BIP-32 steps and PBKDF2) is theirs, not ours.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
-import { test } from "node:test";
+import { after, test } from "node:test";
 
 const seen: Uint8Array[] = [];
 const inputs: { fn: string; args: unknown[] }[] = [];
@@ -142,4 +142,41 @@ test("a fresh secp256k1 wallet wipes every BIP-32 node it made, the master and t
   for (const [k, n] of nodes.entries()) assert.equal(n.privateKey, null, `node ${k} keeps its private key`);
   assert.ok(!zero(w!.secretKey)); // the copy handed back
   w!.secretKey.fill(0);
+});
+
+test("REVIEW M31: bindDeposit zeroes its own copy of the seed", async () => {
+  const { bindDeposit } = await import("../src/deposit/bind.ts");
+  const { openWalletStore } = await import("../src/store/index.ts");
+  const { openNoteStore } = await import("../src/notes/store.ts");
+  const { IDBFactory } = await import("fake-indexeddb");
+  const ws = await openWalletStore({ indexedDB: new IDBFactory() });
+  const store = await openNoteStore(ws);
+  const pub = depositAccount(SEED, 1n, 0).publicKey;
+  const rpcs = replayDepositReads("testnet", pub).map((r) => ({ ...r, tx: async () => ({}) }));
+  await onlyAsync(() => bindDeposit(SEED, { network: "testnet", s: 1n, i: 0, noteId: "f".repeat(32), amount: 25_000_000n }, { store, rpcs: rpcs as never }).catch(() => {}));
+  const ikm = bytesIn("hkdf").map((a) => a[0]!).filter((k) => k !== SEED && k.length === 64);
+  assert.ok(ikm.length >= 1, "the bind derived U from its copy");
+  for (const k of ikm) assert.ok(zero(k), "bindDeposit's copy of the seed was left");
+  store.close();
+  ws.close();
+});
+
+test("withdrawRequest zeroes its own copy of the seed, handed back or refused after the proof", async () => {
+  const { withdrawRequest } = await import("../src/withdraw/request.ts");
+  const fx = await import("./withdraw-fixture.ts");
+  after(fx.closeVaults);
+  for (const fail of [false, true]) {
+    const v = await fx.vaultWith();
+    if (fail) v.failPut.on = (rec) => (rec as { state?: string }).state === "RESERVED";
+    const got = await onlyAsync(() => withdrawRequest(fx.argsFor(v, fx.signalsProver())).catch((e: Error) => assert.match(e.message, /refused the write/)));
+    // the spent note's, the change note's and the refund note's secrets: each master's HKDF ran on the request's copy
+    const ikm = bytesIn("hkdf").map((a) => a[0]!);
+    assert.ok(ikm.length >= 3, "the request derived its notes' secrets");
+    for (const k of ikm) {
+      assert.notEqual(k, fx.SEED);
+      assert.ok(zero(k), `withdrawRequest's copy of the seed was left (${fail ? "refused" : "handed back"})`);
+    }
+    for (const b of got) assert.ok(zero(b), `a ${b.length}-byte derive was left`);
+    assert.ok(!zero(fx.SEED));
+  }
 });

@@ -6,6 +6,7 @@
 // (v1.20): amber at the line, coral at 1.5 x, a null field grey and never a pass.
 import type { MarketRow, MarketSnapshot } from "./fields.ts";
 import { age, change, count, DASH, price, usd } from "./format.ts";
+import { onCurve } from "../market/curve.ts";
 
 export type ColumnKey = "new" | "trending" | "hot" | "graduating";
 export type Win = "5m" | "1h";
@@ -18,7 +19,6 @@ export const COLUMNS: readonly { key: ColumnKey; win: Win }[] = [
 ];
 
 const num = (v: string | null | undefined) => (typeof v === "string" && /^\d+(\.\d+)?$/.test(v) ? Number(v) : 0);
-const onCurve = (r: MarketRow) => typeof r.curve_bps === "number" && r.curve_bps >= 0 && r.curve_bps < 10000;
 
 /** One row per token, the first seen kept. */
 function unique(rows: readonly MarketRow[]): MarketRow[] {
@@ -76,11 +76,11 @@ export interface RowView {
   launchpad: string | null;
 }
 
-/** A row's drawn values for a window. Row carries buys and sells for 5m only, so the 1h window draws them as the dash. */
+/** A row's drawn values for a window: its change, volume, and buys and sells. */
 export function rowView(r: MarketRow, win: Win, nowMs: number): RowView {
   const c = win === "1h" ? r.chg_1h_bps : r.chg_5m_bps;
-  const b = win === "5m" ? r.buys_5m : null;
-  const s = win === "5m" ? r.sells_5m : null;
+  const b = win === "5m" ? r.buys_5m : r.buys_1h;
+  const s = win === "5m" ? r.sells_5m : r.sells_1h;
   const known = typeof b === "number" && typeof s === "number";
   const created = typeof r.created_s === "number" ? Math.floor(nowMs / 1000) - r.created_s : null;
   const stage = onCurve(r)
