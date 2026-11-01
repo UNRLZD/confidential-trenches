@@ -1,0 +1,269 @@
+// SIGN_HOST's postMessage API (src/api.ts), card signpage-postmessage.
+//   node --test test/api.test.ts      (from packages/signpage)
+// The page posts `ready` to APP_HOST only, answers `state` with exactly {v, id, type}, refuses every other kind as
+// "not_allowed", answers a repeated request with its first answer and a reused id with another body with "id_reused",
+// and drops a wrong origin, a wrong source, a request over the UTF-8 size cap, a forbidden key or a malformed envelope
+// with no answer and no change. public/app.js being this source's build is scripts/build-app.test.mjs's.
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { test } from "node:test";
+import { APP_ORIGIN, REMEMBERED_IDS, RELEASE, SIGNPAGE_MAX_REQUEST_BYTES, signedOutState, startApi } from "../src/api.ts";
+import type { IncomingMessage } from "../src/api.ts";
+
+const KINDS = [
+  "deposit.quote", "deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return",
+  "withdraw.open", "signin.open", "backup.open", "export.open", "signout", "restore",
+];
+
+/** A page started on a fake parent: what it posted, a way to send it a message, and a wait for it to finish. */
+function page() {
+  let reads = 0;
+  const posted: { msg: unknown; to: string }[] = [];
+  const parent = { postMessage: (msg: unknown, to: string) => void posted.push({ msg, to }) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const api = startApi({ parent, listen: (fn) => (listener = fn), state: () => (reads++, signedOutState()) });
+  const send = (data: unknown, from: { origin?: string; source?: unknown } = {}) =>
+    listener!({ origin: from.origin ?? APP_ORIGIN, source: "source" in from ? from.source : parent, data });
+  return { posted, send, parent, idle: () => api.idle(), reads: () => reads, msgs: () => posted.map((p) => p.msg) };
+}
+
+const uuid = () => crypto.randomUUID();
+const state = (id = uuid()) => ({ v: 1, id, type: "state" });
+const notAllowed = (id: string) => ({ v: 1, id, ok: false, error: { code: "not_allowed" } });
+const idReused = (id: string) => ({ v: 1, id, ok: false, error: { code: "id_reused" } });
+const stateAnswer = (id: string) => ({ v: 1, id, ok: true, result: signedOutState() });
+
+test("ready: posted once at start, to the parent, with targetOrigin APP_HOST, in the frozen shape", () => {
+  const p = page();
+  assert.deepEqual(p.posted, [{ msg: { v: 1, type: "ready", release: RELEASE, api: 1 }, to: APP_ORIGIN }]);
+});
+
+test("state from APP_HOST's parent: answered with the state, to APP_HOST only", async () => {
+  const p = page();
+  const id = uuid();
+  p.send(state(id));
+  await p.idle();
+  assert.deepEqual(p.posted, [p.posted[0], { msg: stateAnswer(id), to: APP_ORIGIN }]);
+  const s = signedOutState();
+  assert.deepEqual(Object.keys(s).sort(), ["api", "code_saved", "held", "ops", "orders", "positions", "release", "signed_in", "vault_balance", "wallets"]);
+  assert.equal(s.signed_in, false);
+});
+
+test("a wrong origin is dropped: no answer, no change", async () => {
+  const p = page();
+  const id = uuid();
+  for (const origin of ["https://evil.ct.test", "https://app.other.test", "https://example.com", "https://confidential.unrealized.trade.evil.com", "http://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade", "null", ""]) {
+    p.send({ v: 1, id, type: "buy" }, { origin });
+  }
+  await p.idle();
+  assert.equal(p.posted.length, 1, "only ready");
+  p.send(state(id));
+  await p.idle();
+  assert.deepEqual(p.msgs()[1], stateAnswer(id), "the dropped messages left no id behind");
+});
+
+test("a wrong source from APP_HOST's origin is dropped: no answer, no change", async () => {
+  const p = page();
+  const id = uuid();
+  for (const source of [null, undefined, {}, { postMessage() {} }]) p.send({ v: 1, id, type: "buy" }, { source });
+  await p.idle();
+  assert.equal(p.posted.length, 1, "only ready");
+  p.send(state(id));
+  await p.idle();
+  assert.deepEqual(p.msgs()[1], stateAnswer(id));
+});
+
+test("a malformed envelope is dropped: not an object, no UUID id, a class instance", async () => {
+  const p = page();
+  const id = uuid();
+  const bad: unknown[] = [
+    null, undefined, "state", 1, [], [state(id)], new Map([["v", 1]]), new Date(),
+    { v: 1, type: "state" }, { v: 1, id: 7, type: "state" }, { v: 1, id: "", type: "state" },
+    { v: 1, id: "not-a-uuid", type: "state" }, { v: 1, id: id.toUpperCase(), type: "state" }, { v: 1, id: `${id} `, type: "state" },
+    Object.assign(Object.create({ v: 1, id }), { type: "state" }),
+    Object.assign(Object.create({ x: 1 }), { v: 1, id, type: "state" }),
+    Object.assign(new Date(), { v: 1, id, type: "state" }),
+  ];
+  for (const d of bad) p.send(d);
+  await p.idle();
+  assert.equal(p.posted.length, 1, "only ready");
+});
+
+test("every other kind, an unknown kind, a wrong v and an extra field: not_allowed", async () => {
+  const p = page();
+  const cases: Record<string, unknown>[] = [
+    ...KINDS.map((type) => ({ v: 1, id: uuid(), type })),
+    { v: 1, id: uuid(), type: "buy", chain: "solana", token: "So11111111111111111111111111111111111111112", side: "buy", amount: "1", slippage_bps: 50 },
+    { v: 1, id: uuid(), type: "sign" },
+    { v: 1, id: uuid(), type: "eth_signTypedData_v4" },
+    { v: 1, id: uuid() },
+    { v: 1, id: uuid(), type: 5 },
+    { v: 1, id: uuid(), type: "State" },
+    { v: 1, id: uuid(), type: "state", extra: true },
+    { v: 2, id: uuid(), type: "state" },
+    { v: "1", id: uuid(), type: "state" },
+    { id: uuid(), type: "state" },
+  ];
+  for (const c of cases) p.send(c);
+  await p.idle();
+  assert.equal(p.posted.length, 1 + cases.length);
+  cases.forEach((c, i) => assert.deepEqual(p.posted[1 + i], { msg: notAllowed(c.id as string), to: APP_ORIGIN }, JSON.stringify(c)));
+});
+
+test("a __proto__, constructor or prototype key at any depth is dropped (the kit's FORBIDDEN_KEYS)", async () => {
+  const p = page();
+  const id = uuid();
+  const bad: unknown[] = [
+    { v: 1, id, type: "state", ["__proto__"]: { polluted: true } },
+    JSON.parse(`{"v":1,"id":"${id}","type":"state","__proto__":{"polluted":true}}`),
+    { v: 1, id, type: "buy", constructor: 1 },
+    { v: 1, id, type: "buy", prototype: 1 },
+    { v: 1, id, type: "orders.set", tp: { constructor: { prototype: 1 } } },
+    { v: 1, id, type: "buy", list: [{ a: [{ ["__proto__"]: null }] }] },
+    JSON.parse(`{"v":1,"id":"${id}","type":"buy","x":{"y":{"__proto__":{"polluted":true}}}}`),
+  ];
+  for (const d of bad) p.send(d);
+  await p.idle();
+  assert.equal(p.posted.length, 1, "only ready");
+  assert.equal(({} as Record<string, unknown>).polluted, undefined);
+  p.send({ v: 1, id, type: "buy", note: "constructor" });
+  await p.idle();
+  assert.deepEqual(p.msgs()[1], notAllowed(id), "the word as a value is read, and refused as any buy is");
+});
+
+test("a return_key is never looked up: constructor, __proto__, toString and an unknown name are refused", async () => {
+  const p = page();
+  const cases: Record<string, unknown>[] = [];
+  for (const key of ["constructor", "__proto__", "toString", "hasOwnProperty", "no_such_screen", "deposit"]) {
+    cases.push({ v: 1, id: uuid(), type: "signin.open", return_key: key, way: "passkey" });
+    cases.push({ v: 1, id: uuid(), type: "backup.open", return_key: key });
+    cases.push({ v: 1, id: uuid(), type: "withdraw.open", return_key: key });
+  }
+  for (const c of cases) assert.doesNotThrow(() => p.send(c));
+  await p.idle();
+  assert.equal(p.posted.length, 1 + cases.length);
+  cases.forEach((c, i) => assert.deepEqual(p.posted[1 + i], { msg: notAllowed(c.id as string), to: APP_ORIGIN }, JSON.stringify(c)));
+});
+
+test("every message posted is at most 4 MiB of JSON, with plain arrays of at most 10,000 items, index keys only", async () => {
+  const p = page();
+  p.send(state());
+  p.send({ v: 1, id: uuid(), type: "buy" });
+  await p.idle();
+  const walk = (x: unknown): void => {
+    if (Array.isArray(x)) {
+      assert.equal(Object.getPrototypeOf(x), Array.prototype);
+      assert.ok(x.length <= 10_000);
+      assert.deepEqual(Reflect.ownKeys(x), [...x.keys()].map(String).concat("length"));
+      x.forEach(walk);
+    } else if (typeof x === "object" && x !== null) Object.values(x).forEach(walk);
+  };
+  for (const { msg } of p.posted) {
+    assert.ok(new TextEncoder().encode(JSON.stringify(msg)).length <= 4 * 1024 * 1024);
+    walk(msg);
+  }
+  assert.equal(p.posted.length, 3);
+});
+
+test("the same request again gets its first answer; the same id with another body is refused id_reused", async () => {
+  const p = page();
+  const x = uuid();
+  const buy = { v: 1, id: x, type: "buy", chain: "solana", token: "t", side: "buy", amount: "1", slippage_bps: 50 };
+  p.send(buy);
+  p.send({ ...buy });
+  p.send({ ...buy, amount: "1000" });
+  p.send(state(x));
+  await p.idle();
+  assert.deepEqual(p.msgs().slice(1), [notAllowed(x), notAllowed(x), idReused(x), idReused(x)]);
+  assert.equal(p.reads(), 0, "a state on a used id reads nothing");
+});
+
+test("state is never kept: read fresh each time, and its id stays free (state X then buy X is the buy's answer)", async () => {
+  const p = page();
+  const x = uuid();
+  p.send(state(x));
+  p.send(state(x));
+  p.send({ v: 1, id: x, type: "buy" });
+  await p.idle();
+  assert.equal(p.reads(), 2);
+  assert.deepEqual(p.msgs().slice(1), [stateAnswer(x), stateAnswer(x), notAllowed(x)]);
+});
+
+test("state polls push out no other id; answered ids are kept up to REMEMBERED_IDS, the oldest first", async () => {
+  const p = page();
+  const ids = Array.from({ length: REMEMBERED_IDS + 1 }, uuid);
+  for (const id of ids) p.send({ v: 1, id, type: "buy" });
+  for (let i = 0; i < 2 * REMEMBERED_IDS; i++) p.send(state());
+  p.send({ v: 1, id: ids[1], type: "buy", amount: "2" });
+  p.send({ v: 1, id: ids[0], type: "buy", amount: "2" });
+  await p.idle();
+  const last = p.msgs().slice(-2);
+  assert.deepEqual(last[0], idReused(ids[1]!), "ids[1] is still kept after 2,048 state polls");
+  assert.deepEqual(last[1], notAllowed(ids[0]!), "ids[0] was the oldest and went: a new run");
+});
+
+test("the request cap is UTF-8 bytes of the JSON, 64 KiB, checked before any field is read (A:116-117)", async () => {
+  const p = page();
+  const id = uuid();
+  const euro = { v: 1, id, type: "buy", pad: "€".repeat(65_209) };
+  const json = JSON.stringify(euro);
+  assert.ok(json.length <= SIGNPAGE_MAX_REQUEST_BYTES && new TextEncoder().encode(json).length > SIGNPAGE_MAX_REQUEST_BYTES, "under the cap in UTF-16 units, over it in UTF-8 bytes");
+  const extraKey = Object.assign([1, 2], { evil: true });
+  let deep: unknown = 1;
+  for (let i = 0; i < 20; i++) deep = { d: deep };
+  let node: unknown = "x";
+  for (let i = 0; i < 12; i++) node = Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`k${k}`, node]));
+  const bad: unknown[] = [
+    euro,
+    { v: 1, id, type: "buy", pad: "x".repeat(SIGNPAGE_MAX_REQUEST_BYTES) },
+    { v: 1, id, type: "buy", list: extraKey },
+    { v: 1, id, type: "buy", list: new Array(5) },
+    { v: 1, id, type: "buy", deep },
+    { v: 1, id, type: "buy", n: Number.NaN },
+    { v: 1, id, type: "buy", when: new Date() },
+    { v: 1, id, type: "buy", list: Array.from({ length: SIGNPAGE_MAX_REQUEST_BYTES + 1 }, () => 0) },
+    { v: 1, id, type: "buy", node },
+  ];
+  const t0 = performance.now();
+  for (const d of bad) p.send(d);
+  await p.idle();
+  assert.ok(performance.now() - t0 < 1_000, "the shared-object request is refused fast");
+  assert.equal(p.posted.length, 1, "only ready");
+  const under = { v: 1, id, type: "buy", pad: "" };
+  under.pad = "x".repeat(SIGNPAGE_MAX_REQUEST_BYTES - JSON.stringify(under).length);
+  assert.equal(new TextEncoder().encode(JSON.stringify(under)).length, SIGNPAGE_MAX_REQUEST_BYTES);
+  p.send(under);
+  await p.idle();
+  assert.deepEqual(p.msgs()[1], notAllowed(id), "exactly at the cap is read");
+});
+
+test("a shared-reference bomb of nulls and numbers is refused fast: every value visited spends the budget", async () => {
+  const p = page();
+  const id = uuid();
+  const nulls = Array.from({ length: 10_000 }, () => null);
+  const nums = Array.from({ length: 10_000 }, () => 0);
+  const depth1 = Array.from({ length: 10_000 }, () => nulls);
+  const depth2 = Array.from({ length: 10_000 }, () => Array.from({ length: 10 }, () => nums));
+  const wide = Object.fromEntries(Array.from({ length: 10_000 }, (_, i) => [`k${i}`, nulls]));
+  const bad: unknown[] = [
+    { v: 1, id, type: "buy", list: depth1 },
+    { v: 1, id, type: "buy", list: depth2 },
+    { v: 1, id, type: "buy", wide },
+  ];
+  for (const d of bad) {
+    const t0 = performance.now();
+    p.send(d);
+    await p.idle();
+    assert.ok(performance.now() - t0 < 1_000, `refused in ${Math.round(performance.now() - t0)} ms`);
+  }
+  assert.equal(p.posted.length, 1, "only ready");
+});
+
+test("SIGNPAGE_MAX_REQUEST_BYTES equals the kit's (app-signpage-client 6db85d4), 65,536 until that card merges", async () => {
+  const schema = new URL("../../kit/src/signpage/schema.ts", import.meta.url);
+  if (existsSync(schema)) {
+    const kit = (await import(schema.href)) as { SIGNPAGE_MAX_REQUEST_BYTES?: number };
+    assert.equal(SIGNPAGE_MAX_REQUEST_BYTES, kit.SIGNPAGE_MAX_REQUEST_BYTES);
+  }
+  assert.equal(SIGNPAGE_MAX_REQUEST_BYTES, 65_536);
+});
