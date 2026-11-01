@@ -1,0 +1,45 @@
+{
+ "good": {
+  "note": "apps/terminal/public at e61012e served by wrangler 4.151.1 pages dev (the Pages runtime on this Mac), read 2026-11-01 00:10:29Z",
+  "url": "http://127.0.0.1:8788/",
+  "status": 200,
+  "headers": {
+   "access-control-allow-origin": "*",
+   "cache-control": "public, max-age=0, must-revalidate",
+   "content-encoding": "gzip",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-type": "text/html; charset=utf-8",
+   "cross-origin-opener-policy": "same-origin",
+   "cross-origin-resource-policy": "same-origin",
+   "date": "Sun, 01 Nov 2026 00:10:29 GMT",
+   "etag": "\"35d8b4530bae4efb67933d85c14e45fe\"",
+   "integrity-policy": "blocked-destinations=(script)",
+   "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+   "referrer-policy": "no-referrer",
+   "strict-transport-security": "max-age=63072000; includeSubDomains",
+   "transfer-encoding": "chunked",
+   "x-content-type-options": "nosniff",
+   "x-frame-options": "DENY",
+   "x-server-env": "dev"
+  }
+ },
+ "predeploy": {
+  "note": "APP_HOST before its first deploy (522 from Cloudflare), read 2026-11-01 00:10:29Z",
+  "url": "https://confidential.unrealized.trade/",
+  "status": 522,
+  "headers": {
+   "alt-svc": "h3=\":443\"; ma=86400",
+   "cache-control": "private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0",
+   "cf-ray": "a536ad3e2c139b42-HKG",
+   "connection": "keep-alive",
+   "content-length": "7336",
+   "content-type": "text/html; charset=UTF-8",
+   "date": "Sun, 01 Nov 2026 00:10:29 GMT",
+   "expires": "Thu, 01 Jan 1970 00:00:01 GMT",
+   "referrer-policy": "same-origin",
+   "retry-after": "120",
+   "server": "cloudflare",
+   "x-frame-options": "SAMEORIGIN"
+  }
+ }
+}

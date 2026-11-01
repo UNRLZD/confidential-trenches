@@ -1,0 +1,12 @@
+# APP_HOST's header policy (Cloudflare Pages _headers, one rule for every path). The gate
+# (apps/terminal/scripts/check-deploy.ts) refuses a deploy whose copy of this file breaks the policy.
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests
+  Integrity-Policy: blocked-destinations=(script)
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Permissions-Policy: accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()
