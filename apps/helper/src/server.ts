@@ -13,6 +13,7 @@
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { HELPER_COMMIT_HEADER, HELPER_CORS } from "@blindfill/kit";
 import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
@@ -30,12 +31,10 @@ const [PROXY_PREFIX, RPC_PREFIX] = MOUNTED.proxy;
 const [TOKEN_STATUS] = MOUNTED.relay;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
-export const ORIGINS: ReadonlySet<string> = new Set([
-  "https://confidential.unrealized.trade",
-  "https://sign.confidential.unrealized.trade",
-]);
-const EXPOSE = "X-Helper-Commit, X-Helper-Source, X-Fetched-At";
-const METHODS = ["GET", "POST", "PUT", "DELETE"];
+// The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
+export const ORIGINS: ReadonlySet<string> = new Set(HELPER_CORS.origins);
+const EXPOSE = HELPER_CORS.exposeHeaders.join(", ");
+const METHODS: readonly string[] = HELPER_CORS.allowMethods;
 const SHA = /^[0-9a-f]{40}$/;
 
 type Headers = Record<string, string>;
@@ -65,12 +64,12 @@ function preflight(req: IncomingMessage): Headers {
     ORIGINS.has(origin) &&
     typeof method === "string" &&
     METHODS.includes(method) &&
-    asked.every((a) => a === "content-type")
+    asked.every((a) => (HELPER_CORS.allowHeaders as readonly string[]).includes(a))
   ) {
     h["Access-Control-Allow-Origin"] = origin;
     h["Access-Control-Allow-Methods"] = METHODS.join(", ");
-    h["Access-Control-Allow-Headers"] = "content-type";
-    h["Access-Control-Max-Age"] = "600";
+    h["Access-Control-Allow-Headers"] = HELPER_CORS.allowHeaders.join(", ");
+    h["Access-Control-Max-Age"] = String(HELPER_CORS.maxAgeSeconds);
   }
   return h;
 }
@@ -104,7 +103,7 @@ export function handler(
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
-      "X-Helper-Commit": commit,
+      [HELPER_COMMIT_HEADER]: commit,
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     };

@@ -1,0 +1,54 @@
+{
+  "notes": [
+    "A real Privacy Pools v1.3.0 withdraw proof for the relayer's checks 1-4 (card relayer-withdraw-checks). Test notes only, never money.",
+    "Made 2026-11-01 by snarkjs 0.7.5 groth16.fullProve over packages/kit/zk/withdraw.wasm (sha256 36cda227...5c10) and withdraw.zkey (sha256 2a893b42...e677), each checked against the kit's ZK_SETUP_FILES pin before use.",
+    "The withdrawal is the kit's vaultWithdrawRequest (its salt fresh from crypto.getRandomValues) and the circuit inputs the kit's vaultWithdrawInput, after four test deposits into vault.confidential.unrlzd.near on the mainnet token; the proof spends note 2 (5 USDC), withdrawing 3 USDC.",
+    "snarkjs 0.7.5 groth16.verify against packages/kit/zk/withdraw.vkey (sha256 666bd098...d21e) passes it; public_signals[7] equals the kit's context for this withdrawal.",
+    "The token is the kit's VAULT_CONSTANTS.TOKEN (mainnet USDC), the vault's and the request's: the test fills both in, so no 64-hex token id sits in this file for the secret scan to read as a key."
+  ],
+  "vault": "vault.confidential.unrlzd.near",
+  "scope": "2696045386038969515385069783440640732471742599039067451316404212202914210601",
+  "fee_recipient": "relayer.confidential.unrlzd.near",
+  "request": {
+    "withdrawal": {
+      "recipient": "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de",
+      "register_deposit": "1250000000000000000000",
+      "fee_recipient": "relayer.confidential.unrlzd.near",
+      "relay_fee": "30000",
+      "refund_precommitment": "15055119204803360537805001507375092547765017355835770767623525263663616285469",
+      "deadline_ms": 1793750600000,
+      "salt": "581a220af1e53278e701a34b3bb6b038"
+    },
+    "proof": {
+      "a": [
+        "1062323933101447637751573141607149279767767012139027541516610802404600431958",
+        "7202846198416008928392737048373838306922640982805090943905276851998713159104"
+      ],
+      "b": [
+        [
+          "3819534042728385647650555994132507946954032468025294133476731864725525920185",
+          "6118381321534974875070819403646580058116909262067951704433540450548457769620"
+        ],
+        [
+          "11962623543585625680805447205481505996461193599514913452113240255249619139646",
+          "2980072213333835202676049264545696047670124351884432761893512188457503465987"
+        ]
+      ],
+      "c": [
+        "17955416238930149484571766324745103056536122131042315073824041133763264288858",
+        "12957155409779483083864358113814996977476207598265426170588049308755133997839"
+      ]
+    },
+    "public_signals": [
+      "3885522359870523360146847692991110193219175136218805252518212197294461265841",
+      "15889904770677364204422799229668356470591647857892273094007247935520819333375",
+      "3000000",
+      "18916596978519045583865162862830454325534471271542773587705819886469900077178",
+      "2",
+      "2656599011135822754076105988494487238168467386466179063772786851643052099517",
+      "2",
+      "18278814135868492199129590440630161464512400010183400919990378021804162832152"
+    ],
+    "fund_recipient": true
+  }
+}

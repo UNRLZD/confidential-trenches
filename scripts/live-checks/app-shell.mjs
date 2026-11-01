@@ -4,7 +4,7 @@
 //   - the page is served under a CSP and an Integrity-Policy (app-host-gate's headers, app.md 2.3);
 //   - no CSP violation and no console error on any load;
 //   - every script tag carries an integrity equal to the sha384 of the bytes served, no script is inline, and every
-//     script the page loaded is one of those tags;
+//     script the page's top frame loaded is one of those tags (the hidden signing-page frame is SIGN_HOST's to check);
 //   - each route draws its own screen (main[data-route]), not the fallback;
 //   - CLS at most 0.1 per load and 0 inside the shell (clicking through the navigation), every shift counted, the
 //     hadRecentInput exclusion not applied (BAR-04, app.md:1102);
@@ -61,7 +61,10 @@ export function judge(rec) {
     else say(tokens.includes(s.served), `${s.src} integrity ${tokens.includes(s.served) ? "equals" : "differs from"} the sha384 of the bytes served`);
   }
   const tagged = new Set(scripts.map((s) => s.src));
-  const untagged = [...new Set(rec.loadedScripts ?? [])].filter((u) => !tagged.has(u));
+  // only the top frame's scripts count: the signing page's hidden frame is judged by SIGN_HOST's own checks (signpage-*);
+  // a script not marked as another frame's (a bare address, or no top mark) counts as the top frame's
+  const loaded = (rec.loadedScripts ?? []).map((l) => (typeof l === "string" ? { url: l, top: true } : l));
+  const untagged = [...new Set(loaded.filter((l) => l.top !== false).map((l) => l.url))].filter((u) => !tagged.has(u));
   say(untagged.length === 0, `every script loaded is a tag with its integrity${untagged.length ? `: not a tag: ${untagged.join(", ")}` : ""}`);
 
   const loads = rec.loads ?? [];
@@ -157,7 +160,12 @@ function watch(page) {
   const loadedScripts = [];
   page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
-  page.on("response", (r) => r.request().resourceType() === "script" && loadedScripts.push(r.url()));
+  // every frame's script is recorded with its frame's address and whether that frame is the page's top frame
+  page.on("response", (r) => {
+    if (r.request().resourceType() !== "script") return;
+    const f = r.frame();
+    loadedScripts.push({ url: r.url(), frame: f.url(), top: f === page.mainFrame() });
+  });
   return { consoleErrors, loadedScripts };
 }
 
@@ -220,7 +228,7 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
     if (s.src) served = sha384(Buffer.from(await (await fetchFn(s.src)).arrayBuffer()));
     rec.scripts.push({ ...s, served });
   }
-  rec.loadedScripts = [...new Set(rec.loadedScripts)];
+  rec.loadedScripts = [...new Map(rec.loadedScripts.map((l) => [`${l.top} ${l.frame} ${l.url}`, l])).values()];
   rec.shots = shots;
   return rec;
 }
