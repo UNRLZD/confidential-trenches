@@ -55,45 +55,138 @@ export const operatorOf = (url) => NEAR_RPC_OPERATORS[hostOf(url)]?.operator ?? 
 /** The network of a NEAR RPC URL, or null. */
 export const networkOf = (url) => NEAR_RPC_OPERATORS[hostOf(url)]?.network ?? null;
 
-// A URL is a NEAR RPC when its host and path say both "near" and "rpc" (near.drpc.org, rpc.mainnet.near.org,
-// 1rpc.io/near), or the map holds it. nearblocks.io, near.org/<page> and base.drpc.org are not.
+// A URL is a NEAR RPC when the map holds its host, its host and path say both "near" and "rpc" (rpc.ankr.com/near,
+// 1rpc.io/near), or a label of its host is "near" or starts or ends with "near-"/"-near" (near.lava.build,
+// near-rpc.publicnode.com). near.org's own pages (near.org/<page>, docs.near.org) and nearblocks.io are not.
 export function isNearRpc(url) {
-  const host = hostOf(url);
-  if (!host) return false;
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = u.host.toLowerCase();
   if (Object.hasOwn(NEAR_RPC_OPERATORS, host)) return true;
-  const s = (host + new URL(url).pathname).toLowerCase();
-  return s.includes("near") && s.includes("rpc");
+  const s = (host + u.pathname).toLowerCase();
+  if (s.includes("near") && s.includes("rpc")) return true;
+  if (/(^|\.)near\.org$/.test(u.hostname.toLowerCase())) return false;
+  return u.hostname.toLowerCase().split(".").some((l) => l === "near" || l.startsWith("near-") || l.endsWith("-near"));
 }
 
-const URL_RE = /https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[^\s"'`<>()[\]{},;|\\]*)?/g;
-const clean = (u) => u.replace(/[.:]+$/, "").replace(/\/$/, "");
+// The scan. Every place in a file that names a NEAR RPC host is found, in any case and with any scheme or none
+// (https://, HTTPS://, wss://, a bare host), and a port other than 443 makes it another endpoint, not the map's:
+//  - a host the map does not hold is refused: a URL that isNearRpc() says is one, or a bare host of FastNEAR's,
+//    near.org's or dRPC's domains whose name says rpc (dRPC's: near);
+//  - a NEAR RPC host built from a template (`https://rpc.${net}.near.org`) is refused: the scan cannot read it;
+//  - two or more map hosts that are all one operator's, in one unit, are refused. A unit is a line, a bracket group
+//    ([...], {...} or (...), across lines) and, in a code file, a statement (up to a ";" outside brackets). A unit
+//    that lists one operator's alternatives on purpose (the wallet's FastNEAR URLs) passes only with the marker
+//    ALLOW on a line that names one of its hosts.
+export const ALLOW = "near-rpc-operators: one operator";
+const SCHEME_URL = /\b[a-z][a-z0-9+.-]*:\/\/([^\s/"'`<>()[\]{},;|\\]+)(\/[^\s"'`<>()[\]{},;|\\]*)?/gi;
+const BARE = /(?<![A-Za-z0-9.$}-])((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?::(\d+))?(?![A-Za-z0-9-]|\.[A-Za-z0-9])/g;
+const TEMPLATE = /[A-Za-z0-9.-]*\$\{[^}]*\}[A-Za-z0-9.${}-]*\.(?:near\.org|fastnear\.com|drpc\.org)(?![A-Za-z0-9-])/gi;
+const OPERATOR_DOMAIN = /(^|\.)(fastnear\.com|near\.org|drpc\.org)$/;
+const CODE = /\.(m?[jt]sx?|cjs|cts|mts|rs)$/;
 
-// The problems of one file's text: a NEAR RPC URL the map does not hold, and a line naming two or more NEAR RPC URLs
-// that are all one operator's. A line that keys its list by that operator's name (`fastnear: [a, b]`) lists one
-// operator's alternatives on purpose, not a pair, and passes.
-export function lineProblems(text, file) {
+// [{ at: index, host, op | null, why }] of a text
+function hostsIn(text) {
+  const found = new Map(); // index -> entry
+  for (const m of text.matchAll(BARE)) {
+    const host = m[1].toLowerCase();
+    const port = m[2] && !["443", "80"].includes(m[2]) ? `:${m[2]}` : "";
+    const entry = NEAR_RPC_OPERATORS[host];
+    if (entry && !port) found.set(m.index, { at: m.index, host, op: entry.operator });
+    else if (entry || (OPERATOR_DOMAIN.test(host) && /rpc/.test(host) && (!host.endsWith("drpc.org") || host.includes("near"))))
+      found.set(m.index, { at: m.index, host: host + port, op: null, why: "is a NEAR RPC host the operator map does not hold" });
+  }
+  for (const m of text.matchAll(SCHEME_URL)) {
+    if (m[1].includes("${")) continue; // TEMPLATE reads these
+    const url = m[0].replace(/[.:]+$/, "");
+    if (!isNearRpc(url)) continue;
+    const at = m.index + m[0].indexOf(m[1]);
+    if (found.has(at)) continue;
+    let host;
+    try {
+      host = new URL(url).host.toLowerCase();
+    } catch {
+      continue;
+    }
+    if (!Object.hasOwn(NEAR_RPC_OPERATORS, host)) found.set(at, { at, host: url, op: null, why: "is a NEAR RPC the operator map does not hold" });
+  }
+  for (const m of text.matchAll(TEMPLATE)) found.set(m.index, { at: m.index, host: m[0], op: null, why: "is a NEAR RPC host built from a template, which the scan cannot read" });
+  return [...found.values()].sort((a, b) => a.at - b.at);
+}
+
+// [start, end) spans of the text's bracket groups and, in a code file, its statements
+function units(text, code) {
+  const spans = [];
+  const stack = [];
+  const open = { "]": "[", "}": "{", ")": "(" };
+  let stmt = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "[" || c === "{" || c === "(") stack.push([c, i]);
+    else if (open[c]) {
+      while (stack.length && stack[stack.length - 1][0] !== open[c]) stack.pop(); // an unmatched opener in prose
+      if (stack.length) spans.push([stack.pop()[1], i + 1]);
+    } else if (c === ";" && code && stack.length === 0) {
+      spans.push([stmt, i + 1]);
+      stmt = i + 1;
+    }
+  }
+  if (code) spans.push([stmt, text.length]);
+  return spans;
+}
+
+/** The problems of one file's text (named lineProblems: each names the line of its first host). */
+export function lineProblems(raw, file) {
+  // an escaped dot (a host in a regex, "near\\.drpc\\.org") is read as a dot; no newline moves, so line numbers hold
+  const text = raw.replace(/\\+\./g, ".");
   const problems = [];
-  text.split(/\r?\n/).forEach((line, i) => {
-    const urls = [...new Set((line.match(URL_RE) ?? []).map(clean).filter(isNearRpc))];
-    const at = `${file}:${i + 1}`;
-    for (const u of urls) if (!operatorOf(u)) problems.push(`${at}: ${u} is a NEAR RPC the operator map does not hold (scripts/ci/near-rpc-operators.mjs)`);
-    const ops = new Set(urls.map(operatorOf).filter(Boolean));
-    if (urls.length < 2 || ops.size !== 1 || urls.some((u) => !operatorOf(u))) return;
-    const [op] = ops;
-    if (new RegExp(`(^|[\\s{,(])["']?${op}["']?\\s*:`, "i").test(line)) return;
-    problems.push(`${at}: ${urls.join(", ")} are one operator (${op}): two reads there are one read`);
-  });
+  const lineAt = (i) => text.slice(0, i).split("\n").length;
+  const lines = text.split("\n");
+  const hosts = hostsIn(text);
+  for (const h of hosts) if (!h.op) problems.push(`${file}:${lineAt(h.at)}: ${h.host} ${h.why} (scripts/ci/near-rpc-operators.mjs)`);
+  const known = hosts.filter((h) => h.op);
+  if (known.length < 2) return problems;
+  const lineSpans = [];
+  let at = 0;
+  for (const l of lines) {
+    lineSpans.push([at, at + l.length]);
+    at += l.length + 1;
+  }
+  const seen = new Set();
+  for (const [a, b] of [...lineSpans, ...units(text, CODE.test(file))]) {
+    // per network: a mainnet host and a testnet host never read the same tx, so they are no pair
+    for (const network of ["mainnet", "testnet"]) {
+      const inside = known.filter((h) => h.at >= a && h.at < b && NEAR_RPC_OPERATORS[h.host].network === network);
+      const names = [...new Set(inside.map((h) => h.host))];
+      const ops = new Set(inside.map((h) => h.op));
+      if (names.length < 2 || ops.size !== 1) continue;
+      if (inside.some((h) => lines[lineAt(h.at) - 1].includes(ALLOW))) continue;
+      const key = inside.map((h) => h.at).join(",");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      problems.push(`${file}:${lineAt(inside[0].at)}: ${names.join(", ")} are one operator (${[...ops][0]}): two reads there are one read`);
+    }
+  }
   return problems;
 }
 
-// Every file git lists (tracked, and untracked but not ignored), but the lockfile, binary files and this scan's own
-// test, which holds the planted cases.
-const PLANTED = "scripts/ci/near-rpc-operators.test.mjs";
+// Every file git lists (tracked, and untracked but not ignored), but the lockfile, binary files and these, each with
+// its reason. A file here is never read, so the list stays short.
+export const SKIP = {
+  "pnpm-lock.yaml": "the lockfile",
+  "scripts/ci/near-rpc-operators.mjs": "the map itself: its notes name one operator's hosts side by side",
+  "scripts/ci/near-rpc-operators.test.mjs": "the planted cases",
+  "contracts/vault/deployments/testnet-usdc.json": "a run's record: its notes say which host answered 429 and which one was read, no list",
+};
 export function scanTree(cwd) {
   const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { cwd, encoding: "utf8" }).split("\n").filter(Boolean);
   const problems = [];
   for (const f of files) {
-    if (f === "pnpm-lock.yaml" || f === PLANTED) continue;
+    if (Object.hasOwn(SKIP, f)) continue;
     let text;
     try {
       text = readFileSync(`${cwd}/${f}`, "utf8");
@@ -110,5 +203,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const problems = scanTree(process.cwd());
   for (const p of problems) console.error(`near-rpc-operators: REFUSED: ${p}`);
   if (problems.length) process.exit(1);
-  console.log("near-rpc-operators: PASS (every NEAR RPC URL is in the map; no line pairs one operator)");
+  console.log("near-rpc-operators: PASS (every NEAR RPC host is in the map; no unit pairs one operator)");
 }

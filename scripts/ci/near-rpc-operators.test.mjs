@@ -4,8 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { NEAR_RPC_OPERATORS, isNearRpc, lineProblems, networkOf, operatorOf, scanTree } from "./near-rpc-operators.mjs";
-import { RPCS } from "./money-gate.mjs";
+import { ALLOW, NEAR_RPC_OPERATORS, SKIP, isNearRpc, lineProblems, networkOf, operatorOf, scanTree } from "./near-rpc-operators.mjs";
+import { RPCS, operatorOf as gateOperatorOf } from "./money-gate.mjs";
+import { RPC_OPERATORS } from "./rpc-operators.mjs";
 import { WATCH_RPCS } from "../../apps/helper/src/token-status/status.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -24,13 +25,13 @@ test("near.org's hosts are FastNEAR's; dRPC's are dRPC's; scheme, case and a tra
 });
 
 test("a NEAR RPC is a URL whose host and path say near and rpc, or one the map holds; nothing else is read", () => {
-  for (const u of ["https://near.drpc.org", "https://1rpc.io/near", "https://rpc.ankr.com/near", "https://free.rpc.fastnear.com"]) assert.ok(isNearRpc(u), u);
+  for (const u of ["https://near.drpc.org", "https://1rpc.io/near", "https://rpc.ankr.com/near", "https://free.rpc.fastnear.com", "https://near.lava.build", "https://near-rpc.publicnode.com"]) assert.ok(isNearRpc(u), u);
   for (const u of ["https://near.org/packages", "https://nearblocks.io/txns/abc", "https://base.drpc.org", "https://mainnet.base.org", "nope"]) assert.ok(!isNearRpc(u), u);
 });
 
 test("planted: the README's loop over FastNEAR and near.org is one operator: refused", () => {
   const p = lineProblems("x\nfor RPC in https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org; do\n", "README.md");
-  assert.deepEqual(p, ["README.md:2: https://rpc.mainnet.fastnear.com, https://rpc.mainnet.near.org are one operator (fastnear): two reads there are one read"]);
+  assert.deepEqual(p, ["README.md:2: rpc.mainnet.fastnear.com, rpc.mainnet.near.org are one operator (fastnear): two reads there are one read"]);
 });
 
 test("planted: a two-URL list of FastNEAR's and near.org's archival hosts is refused, on either network", () => {
@@ -45,11 +46,45 @@ test("FastNEAR with dRPC is two operators: passes", () => {
   assert.deepEqual(lineProblems('["https://archival-rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://archival-rpc.mainnet.near.org"]', "a.mjs"), []);
 });
 
-test("a list keyed by its own operator's name is that operator's alternatives, not a pair: passes; keyed otherwise, refused", () => {
-  assert.deepEqual(lineProblems('    fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],', "a.ts"), []);
-  assert.deepEqual(lineProblems('  "fastnear": ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],', "a.json"), []);
-  assert.equal(lineProblems('    pair: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],', "a.ts").length, 1);
-  assert.equal(lineProblems('    drpc: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],', "a.ts").length, 1);
+// Review round 1: each of these passed the line scan at 4c1eeb2.
+test("planted: one operator's pair in every shape is refused: across lines, any case or scheme, bare, keyed, commented, with a port", () => {
+  const cases = {
+    multiline: 'const RPCS = [\n  "https://rpc.mainnet.fastnear.com",\n  "https://rpc.mainnet.near.org",\n];',
+    multilineObject: "const R = {\n  a: 'https://archival-rpc.testnet.fastnear.com',\n  b: 'https://archival-rpc.testnet.near.org',\n};",
+    statement: "const A =\n  pick('https://rpc.mainnet.fastnear.com') ||\n  pick('https://rpc.mainnet.near.org');",
+    upperScheme: 'const A = ["HTTPS://rpc.mainnet.fastnear.com", "HTTPS://RPC.MAINNET.NEAR.ORG"];',
+    bareHosts: 'const HOSTS = ["rpc.mainnet.fastnear.com", "rpc.mainnet.near.org"].map((h) => "https://" + h);',
+    wss: 'const A = ["wss://rpc.mainnet.fastnear.com", "wss://rpc.mainnet.near.org"];',
+    keyedOtherwise: 'const R = { fastnear: "https://rpc.mainnet.fastnear.com", backup: "https://rpc.mainnet.near.org" };',
+    keyedByOperator: '    fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],',
+    commentLabel: 'const pair = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"]; // fastnear: two reads',
+    port: 'const A = ["https://rpc.mainnet.fastnear.com:443", "https://rpc.mainnet.near.org:443"];',
+    escaped: "new RegExp(`ok on https://archival-rpc\\\\.mainnet\\\\.fastnear\\\\.com, ok on https://archival-rpc\\\\.mainnet\\\\.near\\\\.org`)",
+  };
+  for (const [k, v] of Object.entries(cases)) assert.match(lineProblems(v, "x.mjs").join("\n"), /are one operator \(fastnear\)/, k);
+});
+
+test("planted: a NEAR RPC host built from a template, or on another port, is refused", () => {
+  assert.equal(lineProblems("const urls = [`https://rpc.${net}.fastnear.com`, `https://rpc.${net}.near.org`];", "x.mjs").length, 2);
+  assert.match(lineProblems("const u = `archival-rpc.${n}.near.org`;", "x.mjs").join(), /built from a template/);
+  assert.match(lineProblems('const A = "https://rpc.mainnet.near.org:8443";', "x.mjs").join(), /rpc\.mainnet\.near\.org:8443 is a NEAR RPC host the operator map does not hold/);
+  assert.deepEqual(lineProblems("const u = `https://${host}`;", "x.mjs"), [], "a host from a variable is the map's own loop, not a template host");
+});
+
+test("the allow marker on a host's line passes one operator's alternatives; on another line, or another word, it does not", () => {
+  assert.deepEqual(lineProblems(`    fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], // ${ALLOW} (alternatives)`, "a.ts"), []);
+  assert.equal(lineProblems(`// ${ALLOW}\nconst P = ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"];`, "a.ts").length, 1);
+  assert.equal(lineProblems('const P = ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"]; // one operator', "a.ts").length, 1);
+});
+
+test("a mainnet host and a testnet host of one operator are no pair; a unit with both operators passes", () => {
+  assert.deepEqual(lineProblems('const D = ["https://near.drpc.org", "https://near-testnet.drpc.org"];', "a.mjs"), []);
+  assert.deepEqual(lineProblems('const R = {\n  a: "https://rpc.mainnet.fastnear.com",\n  b: "https://rpc.mainnet.near.org",\n  c: "https://near.drpc.org",\n};', "a.mjs"), []);
+  assert.deepEqual(lineProblems("near.org's pages (https://near.org/blog, https://docs.near.org) and intents.near are not RPCs", "a.md"), []);
+});
+
+test("every file the scan skips says why", () => {
+  for (const [f, why] of Object.entries(SKIP)) assert.ok(typeof why === "string" && why.length > 10, f);
 });
 
 test("planted: a NEAR RPC the map does not hold is refused, alone or in a list", () => {
@@ -66,12 +101,24 @@ test("the money gate's NEAR lists each name two operators of their own network, 
   }
 });
 
+test("every host in the money gate's RPCS is in an operator map, and each chain lists two operators", () => {
+  for (const [chain, urls] of Object.entries(RPCS)) {
+    for (const u of urls) {
+      const host = new URL(u).host;
+      const mapped = chain.startsWith("near") ? Object.hasOwn(NEAR_RPC_OPERATORS, host) : Object.hasOwn(RPC_OPERATORS[chain] ?? {}, host);
+      assert.ok(mapped, `${chain}: ${u}`);
+      assert.notEqual(gateOperatorOf(chain, u), u, `${chain}: ${u} is its own operator`);
+    }
+    assert.ok(new Set(urls.map((u) => gateOperatorOf(chain, u))).size >= 2, chain);
+  }
+});
+
 test("the helper's two token-status defaults are two operators, mainnet both", () => {
   const urls = WATCH_RPCS.map((r) => r.fallback);
   assert.equal(new Set(urls.map(operatorOf)).size, 2, urls.join(", "));
   for (const u of urls) assert.equal(networkOf(u), "mainnet", u);
 });
 
-test("the real tree: every NEAR RPC URL is in the map and no line pairs one operator", () => {
+test("the real tree: every NEAR RPC host is in the map and no unit pairs one operator", () => {
   assert.deepEqual(scanTree(ROOT), []);
 });
