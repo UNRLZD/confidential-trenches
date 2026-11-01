@@ -17,7 +17,7 @@ import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS as GATE_RPCS, okOperators, oneOperator, readTx } from "../ci/money-gate.mjs";
+import { RPCS as GATE_RPCS, okOperators, operatorOf, proveRead, readTx } from "../ci/money-gate.mjs";
 
 const KEY = "vault-testnet-usdc";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -85,23 +85,31 @@ export async function check({ deployment, account = deployment.account_id, fetch
   const txs = Array.isArray(deployment.txs) ? deployment.txs : [];
   say(txs.length > 0, `the record lists ${txs.length} tx(s)`);
   for (const t of txs) {
-    // in order until two operators read ok: the third host (rate-limited, FastNEAR's again) is asked only when one of
-    // the first two cannot; two hosts of one operator are one read. A tx older than dRPC keeps passes on one operator
-    // by the money gate's own rule (oneOperator), said so.
+    // in order until two operators read ok: the third host (rate-limited, FastNEAR's again) is asked only when FastNEAR
+    // has not read it ok yet; two hosts of one operator are one read. A tx only one operator reads (older than dRPC
+    // keeps) passes only by its light-client proof, by the money gate's own rule (proveRead).
     const tx = { chain: "near-testnet", hash: t.hash, signer: t.signer };
     const reads = [];
     for (const url of rpcs) {
       const ops = okOperators("near-testnet", reads);
       if (ops.size >= 2) break;
+      if (ops.has(operatorOf("near-testnet", url))) continue; // its read could add no second operator
       const out = {};
-      // a 429 is waited out while fewer than two operators read it ok, as in the gate
       const r = await readTx(fetchFn, url, tx, undefined, sleep, true, out);
-      reads.push({ url, r, height: out.height, time: out.time });
+      reads.push({ url, r, result: out.result });
     }
     const decisive = reads.some((x) => /^(failed|old)/.test(x.r));
     const ops = okOperators("near-testnet", reads).size;
-    const one = !decisive && ops === 1 ? await oneOperator(fetchFn, tx, reads, sleep) : null;
-    say(!decisive && (ops >= 2 || one !== null), `tx ${t.hash} (${t.what}) ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}${one ? `; ${one}` : ""}`);
+    let proof = "";
+    let proven = false;
+    if (!decisive && ops === 1)
+      try {
+        proof = `; ${await proveRead(fetchFn, tx, reads, rpcs, undefined, sleep)}`;
+        proven = true;
+      } catch (e) {
+        proof = `; not proven: ${String(e?.message ?? e).slice(0, 300)}`;
+      }
+    say(!decisive && (ops >= 2 || proven), `tx ${t.hash} (${t.what}) ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}${proof}`);
   }
   return { ok, lines };
 }
