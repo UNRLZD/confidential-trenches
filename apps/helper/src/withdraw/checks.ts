@@ -19,6 +19,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { bn254 } from "@noble/curves/bn254.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
   VAULT_FIELD_P,
   VAULT_FIELD_Q,
@@ -102,13 +103,9 @@ export async function checkWithdraw(request: unknown, cfg: WithdrawConfig, reads
   const w = shaped;
 
   // 2. Context: the vault's row 3, from the withdrawal, with the vault as processor and its scope.
-  let context: bigint;
-  try {
-    context = withdrawContext(cfg.vault, w.withdrawal, cfg.scope);
-  } catch (e) {
-    return no("bad_shape", `withdrawal: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (context !== w.context) return no("bad_proof", "context: not the withdrawal's");
+  // Check 1 refused every form the kit's builder refuses, so a throw here is the relayer's own fault: it propagates and
+  // the caller holds the call, never answering the client bad_shape for it.
+  if (withdrawContext(cfg.vault, w.withdrawal, cfg.scope) !== w.context) return no("bad_proof", "context: not the withdrawal's");
 
   // 3. The fee: ours, at least fee_min, within the vault's backstop.
   if (w.fee_recipient !== cfg.feeRecipient) return no("bad_fee_recipient", "fee_recipient: not this relayer's");
@@ -228,9 +225,13 @@ export function isAccountId(s: unknown): s is string {
   return typeof s === "string" && s.length >= 2 && s.length <= 64 && /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(s);
 }
 
-/** keccak256 (Keccak's padding, not SHA3's), from Node's OpenSSL. */
+/**
+ * keccak256 (Keccak's padding, not SHA3's): @noble/hashes' keccak_256, the one the kit proves with. Never node:crypto's
+ * "keccak-256", which some Node builds lack (24.12.0 with OpenSSL 3.5.4: "Digest method not supported"), so every
+ * honest withdrawal would be refused there.
+ */
 export function keccak256(b: Uint8Array): Uint8Array {
-  return new Uint8Array(createHash("keccak-256").update(b).digest());
+  return keccak_256(b);
 }
 
 /** The vault's row 3: the kit's context of `withdrawal` with `vault` as processor, under `scope`. Throws on a bad form. */
