@@ -15,6 +15,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ABSENT, HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
 
+/** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "app-signpage-client", "signpage-frame-state"];
 export const PROJECT = "confidential-trenches-sign";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves SIGN_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
@@ -93,7 +95,7 @@ export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
     stdio: "inherit",
   });
   if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run scripts/live-checks/signpage-skeleton.mjs next`] };
+  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map((k) => `scripts/live-checks/${k}.mjs`).join(", ")} next`] };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

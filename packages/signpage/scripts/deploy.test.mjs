@@ -1,12 +1,12 @@
 // node --test packages/signpage/scripts/deploy.test.mjs: the deploy refuses a build whose headers break SIGN_HOST's
 // policy before anything is uploaded, and uploads the real build with wrangler at its pinned version.
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BRANCH, PROJECT, WRANGLER, checkDir, checkHeadersFile, deploy } from "./deploy.mjs";
+import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, checkDir, checkHeadersFile, deploy } from "./deploy.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REAL = readFileSync(join(PKG, "public", "_headers"), "utf8");
@@ -111,4 +111,18 @@ test("the upload is wrangler pages deploy at its pinned version, to the sign pro
 
 test("an unknown argument is a usage error", () => {
   assert.equal(deploy(["dist"], ENV, recorder().run).code, 2);
+});
+
+test("a deploy names every live check that reads SIGN_HOST in its success line", () => {
+  const r = deploy([], ENV, recorder().run);
+  assert.equal(r.code, 0, (r.err ?? []).join("\n"));
+  const out = r.out.join("\n");
+  // every signpage-* live check is named, and every named check exists and holds SIGN_HOST's own name
+  const dir = join(PKG, "..", "..", "scripts", "live-checks");
+  const own = readdirSync(dir).filter((f) => /^signpage-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs")).map((f) => f.replace(/\.mjs$/, ""));
+  assert.ok(own.length >= 3, own.join(" "));
+  for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
+  for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
+  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-signpage-client", "signpage-frame-state", "signpage-postmessage", "signpage-skeleton", "wallet-passkey-prf"]);
+  for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
 });

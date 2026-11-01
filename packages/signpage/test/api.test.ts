@@ -267,3 +267,68 @@ test("SIGNPAGE_MAX_REQUEST_BYTES equals the kit's (app-signpage-client 6db85d4),
   }
   assert.equal(SIGNPAGE_MAX_REQUEST_BYTES, 65_536);
 });
+
+// card signpage-frame-state: the host's state may be a promise, and a change the host reports posts a `state` event
+/** A page whose state the test sets, and whose watcher the test calls. */
+function watched(first: Partial<ReturnType<typeof signedOutState>> = {}) {
+  let now = { ...signedOutState(), ...first };
+  let change: (() => void) | null = null;
+  const posted: { msg: unknown; to: string }[] = [];
+  const parent = { postMessage: (msg: unknown, to: string) => void posted.push({ msg, to }) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: () => new Promise((ok) => setTimeout(() => ok(structuredClone(now)), 1)),
+    watch: (fn) => (change = fn),
+  });
+  return {
+    posted,
+    set: (s: Partial<ReturnType<typeof signedOutState>>) => (now = { ...now, ...s }),
+    change: () => change!(),
+    ask: (id = uuid()) => listener!({ origin: APP_ORIGIN, source: parent, data: state(id) }),
+    idle: () => api.idle(),
+    events: () => posted.filter((p) => (p.msg as { type?: string }).type === "state"),
+  };
+}
+
+test("a promised state is answered once it resolves", async () => {
+  const p = watched({ signed_in: true, way: "words", code_saved: true });
+  const id = uuid();
+  p.ask(id);
+  await p.idle();
+  assert.deepEqual(p.posted[1], { msg: { v: 1, id, ok: true, result: { ...signedOutState(), signed_in: true, way: "words", code_saved: true } }, to: APP_ORIGIN });
+});
+
+test("a change posts a state event, to APP_HOST only, when the state differs from the last one sent", async () => {
+  const p = watched();
+  p.ask();
+  await p.idle();
+  p.set({ signed_in: true, way: "passkey" });
+  p.change();
+  await p.idle();
+  assert.deepEqual(p.events(), [{ msg: { v: 1, type: "state", state: { ...signedOutState(), signed_in: true, way: "passkey" } }, to: APP_ORIGIN }]);
+  // the same state again: no event
+  p.change();
+  await p.idle();
+  assert.equal(p.events().length, 1);
+  p.set({ code_saved: true });
+  p.change();
+  await p.idle();
+  assert.equal(p.events().length, 2);
+  assert.equal((p.events()[1]!.msg as { state: { code_saved: boolean } }).state.code_saved, true);
+});
+
+test("no state event before the first state answer; a burst of changes makes one read, one event", async () => {
+  const p = watched();
+  p.set({ signed_in: true });
+  p.change();
+  await p.idle();
+  assert.equal(p.events().length, 0, "the app is not READY before its first answer");
+  p.ask();
+  await p.idle();
+  p.set({ code_saved: true });
+  for (let i = 0; i < 50; i++) p.change();
+  await p.idle();
+  assert.equal(p.events().length, 1);
+});
