@@ -509,19 +509,20 @@ export function txBytesFacts(b64, id) {
 //  - Action is a borsh tag then its payload (core/primitives/src/action/mod.rs:375-397, payloads mod.rs:46-75, :94-112,
 //    :249-268, :301-315); the view of each (views.rs:1487-1569, built by views.rs:1571-1645). DeployContract's view
 //    holds sha256 of the code, not the code (views.rs:1575-1577): the code is read back and kept only when it hashes so.
-//  - AddKey is a PublicKey then an AccessKey: nonce u64 then its permission, FullAccess = 1 (mod.rs:39-44;
-//    core/primitives-core/src/account.rs:801-809, :909-920; view: views.rs:165-211).
+//  - AddKey is a PublicKey then an AccessKey: nonce u64 then its permission, FunctionCall = 0 (allowance
+//    Option<u128>, receiver_id String, method_names Vec<String>), FullAccess = 1 (mod.rs:39-44;
+//    core/primitives-core/src/account.rs:801-809, :909-920, :959-972; view: views.rs:165-211).
 //  - Delegate is a SignedDelegateAction: sender_id, receiver_id, actions, nonce u64, max_block_height u64, public_key,
 //    then a Signature (action/delegate.rs:34-41, :55-58; its view: views.rs:1520-1523, :1597-1600); its actions are
 //    NonDelegateAction, an Action with Action's own serde and borsh (delegate.rs:370-371).
 //  - a PublicKey is tag 0 then 32 bytes for ed25519, a Signature 0 then 64 bytes (core/crypto/src/signature.rs:39-43,
 //    :398-404, :1129-1135). Balance is u128 (near-token), Gas u64.
 // The kinds rebuilt are the ones a real recorded tx pins (money-gate.tx-rebuild.json): CreateAccount, DeployContract,
-// FunctionCall, Transfer, AddKey with FullAccess, DeleteKey, DeleteAccount and Delegate (holding AddKey with FullAccess
-// or FunctionCall), with ed25519 keys, in V0 and V1. Every other kind nearcore has (Stake, a FunctionCall or gas-key
-// permission, DelegateV2, the global-contract kinds, DeterministicStateInit, UniversalStateInit, the gas-key transfers),
-// any other field and a secp256k1 or ML-DSA key are refused, never guessed: such a tx passes on two operators' reads or
-// by its tx-bytes file, as before.
+// FunctionCall, Transfer, AddKey with FullAccess or a FunctionCall permission with an allowance, DeleteKey,
+// DeleteAccount and Delegate (holding AddKey with FullAccess or FunctionCall), with ed25519 keys, in V0 and V1. Every
+// other kind nearcore has (Stake, a permission with no allowance or a gas-key one, DelegateV2, the global-contract
+// kinds, DeterministicStateInit, UniversalStateInit, the gas-key transfers), any other field and a secp256k1 or ML-DSA
+// key are refused, never guessed: such a tx passes on two operators' reads or by its tx-bytes file, as before.
 const TX_FIELDS = ["signer_id", "public_key", "nonce", "receiver_id", "actions", "priority_fee", "signature", "hash", "nonce_index", "nonce_mode"];
 const exact = (o, keys, what) => {
   if (o === null || typeof o !== "object" || Array.isArray(o)) throw new Error(`${what} is not an object`);
@@ -546,6 +547,16 @@ const b64 = (s, what) => {
   return Buffer.from(s, "base64");
 };
 const bytesVec = (b) => Buffer.concat([u32(b.length), b]);
+// FullAccess 1; FunctionCall 0 then allowance (Some: 1 then u128), receiver_id, method_names. An allowance of null
+// (None) has no pin, nor have the gas-key permissions: refused.
+function permission(p, w) {
+  if (p === "FullAccess") return Buffer.from([1]);
+  const f = one(p, "FunctionCall") ? p.FunctionCall : null;
+  if (!f || f.allowance === null) throw new Error(`${w} with a permission this check does not rebuild: ${JSON.stringify(p)?.slice(0, 60)}`);
+  exact(f, ["allowance", "receiver_id", "method_names"], `${w}'s FunctionCall permission`);
+  if (!Array.isArray(f.method_names)) throw new Error(`${w}'s method_names is not a list`);
+  return Buffer.concat([Buffer.from([0, 1]), uint(f.allowance, 16), str(f.receiver_id), u32(f.method_names.length), ...f.method_names.map(str)]);
+}
 // one action of the view; `code(sha256)` gives a deployed contract's bytes by their hash, or null. Inside a Delegate an
 // action has Action's own serde (delegate.rs:370-371), the view's shape for the two kinds pinned there.
 const IN_DELEGATE = ["AddKey", "FunctionCall"];
@@ -575,8 +586,7 @@ function action(a, code, inDelegate = false) {
     case "AddKey":
       exact(v, ["public_key", "access_key"], w);
       exact(v.access_key, ["nonce", "permission"], `${w}'s access_key`);
-      if (v.access_key.permission !== "FullAccess") throw new Error(`${w} with a permission this check does not rebuild: ${JSON.stringify(v.access_key.permission)?.slice(0, 60)}`);
-      return Buffer.concat([Buffer.from([5]), pubKey(v.public_key), uint(v.access_key.nonce, 8), Buffer.from([1])]);
+      return Buffer.concat([Buffer.from([5]), pubKey(v.public_key), uint(v.access_key.nonce, 8), permission(v.access_key.permission, w)]);
     case "DeleteKey":
       exact(v, ["public_key"], w);
       return Buffer.concat([Buffer.from([6]), pubKey(v.public_key)]);

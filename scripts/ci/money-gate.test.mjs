@@ -1306,7 +1306,8 @@ test("delete refund: an answer with no receipts list, no receipts_outcome, or no
 // Card money-gate-tx-rebuild: a NEAR tx one operator reads is proven from its id alone: its signed bytes are rebuilt
 // from FastNEAR's own tx JSON and must hash to the id. The recording (money-gate.tx-rebuild.json) holds real txs read
 // 2026-11-01 on FastNEAR archival: every vault-testnet-usdc record tx (the faucet's included), the mainnet delete sweep
-// Dw1nb, the light-proof recording's V0 and V1 transfers, a testnet DeleteKey and two mainnet SWEAT relayer meta txs
+// Dw1nb, the light-proof recording's V0 and V1 transfers, a testnet DeleteKey, a mainnet AddKey with a FunctionCall
+// permission (openrail D2zix) and two mainnet SWEAT relayer meta txs
 // (Delegate holding AddKey, and holding FunctionCall); for each, its tx status as served (read with exactJson: one
 // Delegate's max_block_height is u64::MAX),
 // the blocks walked back from its own (hash -> prev_hash) and, for the one DeployContract, its view_code answer.
@@ -1347,12 +1348,12 @@ test("tx rebuild: every recorded real tx rebuilds from its own tx JSON to its id
     assert.ok(back >= 1 && back <= 10, `${t.id} ${back}`);
     for (const k of kindsOf(t)) kinds.add(k);
     for (const a of t.known.transaction.actions) {
-      if (a.AddKey) kinds.add(`AddKey ${a.AddKey.access_key.permission}`);
+      if (a.AddKey) kinds.add(`AddKey ${Object.keys(a.AddKey.access_key.permission === "FullAccess" ? { FullAccess: 1 } : a.AddKey.access_key.permission)[0]}`);
       for (const x of a.Delegate?.delegate_action.actions ?? []) kinds.add(`Delegate ${Object.keys(x)[0]}`);
     }
     versions.add(f.version);
   }
-  assert.deepEqual([...kinds].sort(), ["AddKey", "AddKey FullAccess", "CreateAccount", "Delegate", "Delegate AddKey", "Delegate FunctionCall", "DeleteAccount", "DeleteKey", "DeployContract", "FunctionCall", "Transfer"]);
+  assert.deepEqual([...kinds].sort(), ["AddKey", "AddKey FullAccess", "AddKey FunctionCall", "CreateAccount", "Delegate", "Delegate AddKey", "Delegate FunctionCall", "DeleteAccount", "DeleteKey", "DeployContract", "FunctionCall", "Transfer"]);
   assert.equal(trTx("Gusir2ySar6hLo5BQ3iRkYfMwwdPyDqsuc7t3RDaazgn").known.transaction.actions[0].Delegate.delegate_action.max_block_height, "18446744073709551615");
   assert.deepEqual([...versions].sort(), [0, 1]);
   // every tx of the testnet USDC record, the faucet's (signer testnet) included, and the mainnet delete sweep
@@ -1399,7 +1400,7 @@ test("tx rebuild planted: one changed value anywhere in any recorded tx's JSON i
       fields.add(path.filter((k) => typeof k === "string" && !/^\d+$/.test(k)).join("."));
       n++;
     }
-  for (const f of ["nonce", "receiver_id", "signer_id", "public_key", "hash", "actions.FunctionCall.args", "actions.FunctionCall.deposit", "actions.FunctionCall.gas", "actions.FunctionCall.method_name", "actions.Transfer.deposit", "actions.AddKey.public_key", "actions.AddKey.access_key.nonce", "actions.DeployContract.code", "actions.DeleteKey.public_key", "actions.DeleteAccount.beneficiary_id", "actions.Delegate.signature", "actions.Delegate.delegate_action.max_block_height", "actions.Delegate.delegate_action.nonce", "actions.Delegate.delegate_action.public_key", "actions.Delegate.delegate_action.sender_id", "actions.Delegate.delegate_action.receiver_id", "actions.Delegate.delegate_action.actions.AddKey.public_key", "actions.Delegate.delegate_action.actions.FunctionCall.args"])
+  for (const f of ["nonce", "receiver_id", "signer_id", "public_key", "hash", "actions.FunctionCall.args", "actions.FunctionCall.deposit", "actions.FunctionCall.gas", "actions.FunctionCall.method_name", "actions.Transfer.deposit", "actions.AddKey.public_key", "actions.AddKey.access_key.nonce", "actions.DeployContract.code", "actions.DeleteKey.public_key", "actions.DeleteAccount.beneficiary_id", "actions.AddKey.access_key.permission.FunctionCall.allowance", "actions.AddKey.access_key.permission.FunctionCall.receiver_id", "actions.AddKey.access_key.permission.FunctionCall.method_names", "actions.Delegate.signature", "actions.Delegate.delegate_action.max_block_height", "actions.Delegate.delegate_action.nonce", "actions.Delegate.delegate_action.public_key", "actions.Delegate.delegate_action.sender_id", "actions.Delegate.delegate_action.receiver_id", "actions.Delegate.delegate_action.actions.AddKey.public_key", "actions.Delegate.delegate_action.actions.FunctionCall.args"])
     assert.ok(fields.has(f), f);
   assert.ok(n > 40, `${n} changes`);
   // the signature is not hashed: a changed one still rebuilds the same bytes
@@ -1448,7 +1449,7 @@ test("tx rebuild planted: an unknown or unpinned action kind, an unknown field, 
     ["DelegateV2 (no pin)", (x) => x.actions.push({ DelegateV2: {} }), /does not rebuild: DelegateV2/],
     ["CreateAccount as an object", (x) => (x.actions[0] = { CreateAccount: {} }), /does not rebuild: CreateAccount/],
     ["two kinds in one action", (x) => (x.actions[1] = { Transfer: { deposit: "1" }, DeleteKey: { public_key: pk } }), /an action this check does not rebuild/],
-    ["a FunctionCall permission", (x) => (x.actions[2].AddKey.access_key.permission = { FunctionCall: { allowance: null, receiver_id: "a.testnet", method_names: [] } }), /with a permission this check does not rebuild/],
+    ["a FunctionCall permission with no allowance (no pin)", (x) => (x.actions[2].AddKey.access_key.permission = { FunctionCall: { allowance: null, receiver_id: "a.testnet", method_names: [] } }), /with a permission this check does not rebuild/],
     ["a gas-key permission", (x) => (x.actions[2].AddKey.access_key.permission = { GasKeyFullAccess: { balance: "0", num_nonces: 1 } }), /with a permission this check does not rebuild/],
     ["an extra field in an action", (x) => (x.actions[1].Transfer.memo = "x"), /a Transfer action has fields deposit,memo, not deposit/],
     ["a missing field in an action", (x) => delete x.actions[2].AddKey.access_key.nonce, /access_key has fields permission, not nonce,permission/],
