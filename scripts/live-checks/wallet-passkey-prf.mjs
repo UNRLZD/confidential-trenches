@@ -14,8 +14,11 @@
 //     in the second; the page framed by APP_HOST (a parent served at APP_HOST's address by this check) shows no sign-in
 //     or sign-out control; each signed-in step says code_saved false (data-code-saved, the Backup dot).
 //   race run: two tabs, each with its own passkey, press Create at once; both end on one account, the one stored.
-//   Sign out after a reload: a press with no pointer move or key press since the load does nothing (disabled), a
-//     pointer move arms it.
+//   Sign out's activation guard (Chromium's InputEventActivationProtector, 500 ms): after a reload, a mouse press (the
+//     pointer moved onto Sign out and pressed) and Tab then Enter, each within 500 ms of Sign out being drawn on the
+//     shown page, do nothing; a press after that signs out.
+//   phone run (hasTouch, isMobile): a tap within 500 ms of the page shown does nothing; a still tap (touchstart,
+//     touchend, no move) after it signs out.
 //   Backup gate: a seed record source "random", code_saved false, written under the page's own K_wrap, shows no Sign
 //     out (wallet.md:922).
 //   In each signed-in step the store is read raw (card wallet-store): K_wrap a non-extractable AES-GCM CryptoKey, the
@@ -45,6 +48,21 @@ export const PRF_INPUT = "confidential-trenches/v1/seed";
 export const WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt";
 export const WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"; // BIP-39's own pin
 const WAIT_MS = 15_000;
+export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector default, the page's guard
+// Sign out's draw time on the page's own clock: performance.now() when a Sign out button is inserted. Run before the
+// page's scripts; a press's distance from it bounds the press's distance from the page's own guard time from above.
+// Also the data-action of the last press's target (pointerdown, keydown), so a step shows its press reached Sign out.
+const DRAWN = () => {
+  for (const t of ["pointerdown", "keydown"])
+    addEventListener(t, (e) => (globalThis.__ctPressOn = e.target?.dataset?.action ?? e.target?.nodeName ?? null), true);
+  new MutationObserver(() => {
+    const b = document.querySelector('[data-action="signout"]');
+    if (b && b !== globalThis.__ctSignout) {
+      globalThis.__ctSignout = b;
+      globalThis.__ctDrawn = performance.now();
+    }
+  }).observe(document, { childList: true, subtree: true });
+};
 
 // ------------------------------------------------------------------------------------------------ the verdict
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -79,9 +97,18 @@ export function judge(rec) {
   const rps = p.credentials ?? [];
   say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
   say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
-  const u = p.unarmed ?? {};
-  say(u.disabled === true && u.after?.state === "signed-in" && u.after?.account === A && u.disabledAfterMove === false,
-    `prf: Sign out ignores a press before any real input, and arms on a pointer move (disabled ${u.disabled}, ${u.after?.state}, then disabled ${u.disabledAfterMove})`);
+  const ignored = (t, who) => t?.pressed === true && t?.pressOn === "signout" && t?.withinMs < PROTECT_MS && t?.after?.state === "signed-in" && t?.after?.account === who && HEX64.test(who ?? "");
+  const ms = (t) => (typeof t?.withinMs === "number" ? `${Math.round(t.withinMs)} ms` : "no press");
+  const pr = p.protect ?? {};
+  say(ignored(pr.mouse, A), `prf: a mouse press within 500 ms of Sign out shown does nothing (${ms(pr.mouse)}, ${pr.mouse?.after?.state})`);
+  say(ignored(pr.enter, A), `prf: Tab then Enter within 500 ms of Sign out shown does nothing (${ms(pr.enter)}, ${pr.enter?.after?.state})`);
+  const ph = rec.phone ?? {};
+  const P = ph.create?.account;
+  say(ph.create?.state === "signed-in" && HEX64.test(P ?? "") && ph.reload?.account === P, `phone: Create passkey signs in by a tap (${ph.create?.state})`);
+  say(ignored(ph.tap, P), `phone: a tap within 500 ms of Sign out shown does nothing (${ms(ph.tap)}, ${ph.tap?.after?.state})`);
+  const st = ph.still ?? {};
+  say(st.pressed === true && st.pressOn === "signout" && st.withinMs >= PROTECT_MS && st.after?.state === "signed-out" && !st.after?.account && st.after?.db === false,
+    `phone: a still tap after 500 ms signs out (${ms(st)}, ${st.after?.state}, store ${st.after?.db ? "kept" : "gone"})`);
   const n = rec.noPrf ?? {};
   const bg = n.backupGate ?? {};
   say(bg.state === "signed-in" && HEX64.test(bg.account ?? "") && bg.signoutButtons === 0 && bg.codeSaved === "false",
@@ -222,16 +249,37 @@ function watch(page, errors) {
   });
 }
 
+// Reloads until Sign out is drawn, runs press(at) at once and reads how long after the draw it ended (an upper bound of
+// the press's distance from the page's guard time); a run that ended past 400 ms is tried again, three times at most.
+// A page that signed out is signed in again with the same passkey, so the next step starts signed in.
+async function early(page, press) {
+  let t = {};
+  for (let i = 0; i < 3; i++) {
+    await page.reload();
+    const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
+    if (!b) return { pressed: false, after: await settled(page) };
+    const box = await b.boundingBox();
+    await press({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    const { withinMs, pressOn } = await page.evaluate(() => ({ withinMs: performance.now() - globalThis.__ctDrawn, pressOn: globalThis.__ctPressOn ?? null }));
+    await page.waitForTimeout(1_000);
+    t = { pressed: true, withinMs, pressOn, after: await settled(page) };
+    if (t.after.state === "signed-out") await click(page, "use");
+    if (withinMs < 400) break;
+  }
+  return t;
+}
+
 /** One full probe. Returns { record, prf } where prf (hex, in memory only) is for the caller's own parity check. */
 export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, site, fetchFn = fetch } = {}) {
   const errors = [];
-  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, noPrf: {}, errors };
+  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, phone: {}, noPrf: {}, errors };
   let prfHex = null;
   // prf run
   {
     const h = await launch({ harness, site });
     try {
       const ctx = await h.browser.newContext();
+      await ctx.addInitScript(DRAWN);
       const page = await ctx.newPage();
       watch(page, errors);
       const creds = await authenticator(page, true);
@@ -253,22 +301,21 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       record.prf.guard = guard;
       await page.reload();
       steps.reload = await settled(page);
-      // a press on Sign out with no pointer move or key press since the load (a click lined up by another page) does
-      // nothing: the button is disabled until this page sees real input
-      const so = page.locator('[data-action="signout"]');
-      const unarmed = { disabled: await so.isDisabled().catch(() => null) };
-      const box = await so.boundingBox().catch(() => null);
-      if (box) {
-        const at = { x: box.x + box.width / 2, y: box.y + box.height / 2, button: "left", clickCount: 1 };
-        await creds.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...at });
-        await creds.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...at });
-        await page.waitForTimeout(1_000);
-      }
-      unarmed.after = await settled(page);
-      await page.mouse.move(3, 3);
-      await page.mouse.move(40, 30, { steps: 5 });
-      unarmed.disabledAfterMove = await so.isDisabled().catch(() => null);
-      record.prf.unarmed = unarmed;
+      // within 500 ms of Sign out drawn on the shown page (a reload), a press does nothing: the pointer moved onto it and
+      // pressed (a hand already moving as a lined-up double click lands), and Tab then Enter
+      record.prf.protect = {
+        mouse: await early(page, async (at) => {
+          await page.mouse.move(at.x - 30, at.y - 20);
+          await page.mouse.move(at.x, at.y, { steps: 4 });
+          await page.mouse.down();
+          await page.mouse.up();
+        }),
+        enter: await early(page, async () => {
+          await page.keyboard.press("Tab");
+          await page.keyboard.press("Enter");
+        }),
+      };
+      await page.waitForTimeout(PROTECT_MS + 200);
       steps.signout = await click(page, "signout");
       // the other tab hears the sign out
       await tab2.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signed-out", null, { timeout: WAIT_MS }).catch(() => {});
@@ -323,6 +370,54 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const [ra, rb] = await Promise.all([click(a, "create"), click(b, "create")]);
       await a.reload();
       record.prf.race = { a: ra, b: rb, reload: await settled(a) };
+    } finally {
+      await h.close();
+    }
+  }
+  // phone run: a touch screen (hasTouch, isMobile). A tap within 500 ms of Sign out shown does nothing; a still tap
+  // (touchstart, touchend, no move) after it signs out.
+  {
+    const h = await launch({ harness, site });
+    try {
+      const ctx = await h.browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+      await ctx.addInitScript(DRAWN);
+      const page = await ctx.newPage();
+      watch(page, errors);
+      const creds = await authenticator(page, true);
+      const touch = (type, points) => creds.cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+      await page.goto(url);
+      await settled(page);
+      const phone = {};
+      const tap = async () => {
+        const before = await page.evaluate(() => document.getElementById("signin").dataset.signin);
+        await page.tap('[data-action="create"]', { timeout: WAIT_MS }).catch(() => {});
+        await page.waitForFunction((b) => document.getElementById("signin")?.dataset.signin !== b, before, { timeout: WAIT_MS }).catch(() => {});
+        return settled(page);
+      };
+      phone.create = await tap();
+      await page.reload();
+      phone.reload = await settled(page);
+      // a finger's tap, 2 px of drift, within 500 ms of Sign out drawn on the shown page
+      phone.tap = await early(page, async (at) => {
+        await touch("touchStart", [at]);
+        await touch("touchMove", [{ x: at.x + 2, y: at.y + 1 }]);
+        await touch("touchEnd", []);
+      });
+      // a still tap once 500 ms have passed
+      await page.reload();
+      const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
+      if (b) {
+        const box = await b.boundingBox();
+        const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        await page.waitForTimeout(PROTECT_MS + 300);
+        const withinMs = await page.evaluate(() => performance.now() - globalThis.__ctDrawn);
+        await touch("touchStart", [at]);
+        await touch("touchEnd", []);
+        const pressOn = await page.evaluate(() => globalThis.__ctPressOn ?? null);
+        await page.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signed-out", null, { timeout: 3_000 }).catch(() => {});
+        phone.still = { pressed: true, withinMs, pressOn, after: await settled(page) };
+      } else phone.still = { pressed: false, after: await settled(page) };
+      record.phone = phone;
     } finally {
       await h.close();
     }

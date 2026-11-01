@@ -5,7 +5,10 @@
 // at c6a2fbe (Sign out shown in a frame, two tabs writing two seeds, no cross-tab sign out, no code_saved false), and
 // badNoGuard, a planted page without the "seed already stored" guard (a second tab runs a ceremony). Round 3's: badC46a6fc,
 // the page at c46a6fc (Sign out taken by a press with no real input; Sign out drawn for a seed whose 12 words are the only
-// copy and not saved).
+// copy and not saved). Round 4's: bad23f373f, the page at 23f373f (Sign out armed by a pointer move: a moving press and
+// Tab then Enter within 500 ms of the page shown sign out, a finger's tap with drift signs out in the same tap, a still
+// tap never signs out). Records made before round 4 hold no guard or phone steps (prf.protect, phone): those steps' lines
+// are BAD on them for that reason, checked as such below.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -25,36 +28,65 @@ test("the recorded good answer passes", () => {
   assert.equal(answers.good.prf.credentials[0].rpId, SIGN_HOST);
 });
 
-test("the recorded bad answer (no PRF falls back to a random seed without notice) fails on that line only", () => {
+const BAD = (rec) => bad(rec).map((l) => l.split(" (")[0]);
+// round 4's steps, which records made before round 4 do not hold
+const R4 = [
+  "BAD prf: a mouse press within 500 ms of Sign out shown does nothing",
+  "BAD prf: Tab then Enter within 500 ms of Sign out shown does nothing",
+  "BAD phone: Create passkey signs in by a tap",
+  "BAD phone: a tap within 500 ms of Sign out shown does nothing",
+  "BAD phone: a still tap after 500 ms signs out",
+];
+// an old record's own lines: its round 4 lines are all BAD (not recorded), and the rest is returned
+function beforeR4(rec) {
+  assert.equal(rec.prf.protect, undefined);
+  assert.equal(rec.phone, undefined);
+  const lines = BAD(rec);
+  for (const l of R4) assert.ok(lines.includes(l), l);
+  return lines.filter((l) => !R4.includes(l));
+}
+
+test("the recorded bad answer (no PRF falls back to a random seed without notice) fails on that line", () => {
   const r = judge(answers.bad);
   assert.equal(r.pass, false);
-  assert.deepEqual(bad(answers.bad).map((l) => l.split(" (")[0]), ["BAD no-prf: Create passkey opens the no-PRF path"]);
+  assert.deepEqual(beforeR4(answers.bad), ["BAD no-prf: Create passkey opens the no-PRF path"]);
 });
 
-const BAD = (rec) => bad(rec).map((l) => l.split(" (")[0]);
-
 test("round 2's recorded reds fail on their own lines", () => {
-  assert.deepEqual(BAD(answers.badC6a2fbe), [
+  assert.deepEqual(beforeR4(answers.badC6a2fbe), [
     "BAD prf create: the seed record says code_saved false, the Backup dot shows",
     "BAD prf reload: the seed record says code_saved false, the Backup dot shows",
     "BAD prf signin: the seed record says code_saved false, the Backup dot shows",
     "BAD prf: Sign out in one tab shows signed out in the other",
     "BAD prf: framed by APP_HOST the page shows no sign-in or sign-out control",
     "BAD prf: two tabs that create at once end on one account, the one stored",
-    "BAD prf: Sign out ignores a press before any real input, and arms on a pointer move",
     "BAD no-prf: a seed whose 12 words are the only copy and not saved shows no Sign out",
   ]);
   assert.equal(answers.badC6a2fbe.prf.framed.buttons, 1, "c6a2fbe showed Sign out inside APP_HOST's frame");
   // round 3: c46a6fc's Sign out took a press with no real input (and signed out), and was drawn for a seed whose 12
   // words are the only copy
-  assert.deepEqual(BAD(answers.badC46a6fc), [
-    "BAD prf: Sign out ignores a press before any real input, and arms on a pointer move",
-    "BAD no-prf: a seed whose 12 words are the only copy and not saved shows no Sign out",
-  ]);
+  assert.deepEqual(beforeR4(answers.badC46a6fc), ["BAD no-prf: a seed whose 12 words are the only copy and not saved shows no Sign out"]);
   assert.equal(answers.badC46a6fc.prf.unarmed.after.state, "signed-out", "c46a6fc signed out on a press with no prior input");
   assert.equal(answers.badC46a6fc.noPrf.backupGate.signoutButtons, 1);
-  assert.deepEqual(BAD(answers.badNoGuard), ["BAD prf: Create in a second tab with a seed already stored runs no ceremony and keeps the seed"]);
+  assert.deepEqual(beforeR4(answers.badNoGuard), ["BAD prf: Create in a second tab with a seed already stored runs no ceremony and keeps the seed"]);
   assert.equal(answers.badNoGuard.prf.guard.credentials, 1, "the guardless page ran a ceremony in the second tab");
+});
+
+test("round 4's recorded red (the page at 23f373f) fails on each guard step and on the still tap", () => {
+  const r = answers.bad23f373f;
+  assert.deepEqual(BAD(r), [
+    "BAD prf: a mouse press within 500 ms of Sign out shown does nothing",
+    "BAD prf: Tab then Enter within 500 ms of Sign out shown does nothing",
+    "BAD phone: a tap within 500 ms of Sign out shown does nothing",
+    "BAD phone: a still tap after 500 ms signs out",
+  ]);
+  // each early press landed inside the window and signed out; the still tap after it did nothing
+  for (const t of [r.prf.protect.mouse, r.prf.protect.enter, r.phone.tap]) {
+    assert.ok(t.withinMs < 500, `${t.withinMs}`);
+    assert.equal(t.after.state, "signed-out");
+  }
+  assert.ok(r.phone.still.withinMs >= 500);
+  assert.equal(r.phone.still.after.state, "signed-in");
 });
 
 test("each broken step fails the check", () => {
@@ -81,9 +113,21 @@ test("each broken step fails the check", () => {
     ["two tabs on two accounts", (r) => (r.prf.race.b.account = "22".repeat(32))],
     ["the other tab still signed in after sign out", (r) => (r.prf.crossTab = { state: "signed-in", account: A })],
     ["code_saved true on a new PRF seed", (r) => (r.prf.steps.create.codeSaved = "true")],
-    ["Sign out enabled before any real input", (r) => (r.prf.unarmed.disabled = false)],
-    ["Sign out taken by a press before any real input", (r) => (r.prf.unarmed.after = { state: "signed-out", account: null })],
-    ["Sign out still disabled after a pointer move", (r) => (r.prf.unarmed.disabledAfterMove = true)],
+    ["a mouse press in the window that signs out", (r) => (r.prf.protect.mouse.after = { state: "signed-out", account: null })],
+    ["a mouse press that came after the window", (r) => (r.prf.protect.mouse.withinMs = 500)],
+    ["no mouse press made", (r) => (r.prf.protect.mouse.pressed = false)],
+    ["Enter in the window that signs out", (r) => (r.prf.protect.enter.after = { state: "signed-out", account: null })],
+    ["Enter that came after the window", (r) => (r.prf.protect.enter.withinMs = 650)],
+    ["a tap in the window that signs out", (r) => (r.phone.tap.after = { state: "signed-out", account: null })],
+    ["a tap that came after the window", (r) => (r.phone.tap.withinMs = 501)],
+    ["a still tap that does nothing", (r) => (r.phone.still.after = { ...r.phone.still.after, state: "signed-in" })],
+    ["a still tap that keeps the store", (r) => (r.phone.still.after.db = true)],
+    ["a still tap made inside the window", (r) => (r.phone.still.withinMs = 300)],
+    ["a mouse press that missed Sign out", (r) => (r.prf.protect.mouse.pressOn = "BODY")],
+    ["Enter that never reached Sign out", (r) => (r.prf.protect.enter.pressOn = "BODY")],
+    ["a tap that missed Sign out", (r) => (r.phone.tap.pressOn = null)],
+    ["a still tap that missed Sign out", (r) => (r.phone.still.pressOn = "MAIN")],
+    ["no phone sign-in", (r) => (r.phone.create = { state: "error", account: null })],
     ["Sign out drawn for a seed whose 12 words are the only copy", (r) => (r.noPrf.backupGate.signoutButtons = 1)],
     ["the planted no-backup seed not shown", (r) => (r.noPrf.backupGate.state = "error")],
     ["a CSP violation", (r) => r.errors.push("console: Refused to load the script")],

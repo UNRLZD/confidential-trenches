@@ -14,8 +14,11 @@
 //   (card wallet-typed-words); never a silent fallback to another seed.
 // - Sign out deletes the store (wallet.md:156); another tab's sign out shows signed-out here too. It is not drawn, and the
 //   store refuses it, while the 12 words are the only copy and not saved (backupFirst: source not "prf" and code_saved
-//   false; wallet.md:922). It stays disabled until this page has seen a real pointer move or key press, so a click
-//   that a cross-site page lined up before sending this window here (a double-click trick) lands on nothing.
+//   false; wallet.md:922). A press on it is ignored when it comes within 500 ms of Sign out being drawn, of the page
+//   becoming visible (visibilitychange, pageshow) or of the window gaining focus: Chromium's own rule for its permission
+//   and payment sheets (InputEventActivationProtector; 500 ms is the default double-click interval on Windows and in
+//   Chromium), the same for mouse, touch, pen and keyboard. A click that a cross-site page lined up before sending this
+//   window here (a double-click trick) lands inside that window and does nothing; a later press works on every input.
 // - The page shows public values only: the account's profile key T_0 (wallet.md:68, a public key, never a NEAR account
 //   or money), in data-account, so a check can compare it. The entropy and seed64 are zeroed once used; the 12 words
 //   are a JS string, which cannot be zeroed, and never reach the DOM.
@@ -45,24 +48,44 @@ root.id = "signin";
 if (framed) root.dataset.framed = "true";
 document.body.append(root);
 
-// armed by the first trusted pointer move that moves (a stationary cursor's synthetic move does not) or key press
-let armed = false;
-function arm(e: Event): void {
-  if (armed || !e.isTrusted) return;
-  if (e instanceof PointerEvent && e.movementX === 0 && e.movementY === 0) return;
-  armed = true;
-  for (const b of root.querySelectorAll<HTMLButtonElement>('[data-action="signout"]')) b.disabled = false;
-}
-addEventListener("pointermove", arm, true);
-addEventListener("keydown", arm, true);
+// Sign out's activation guard (Chromium's InputEventActivationProtector): a press within PROTECT_MS of the latest of
+// Sign out drawn, the page shown or the window focused is ignored. Times are event.timeStamp / performance.now(), one
+// clock.
+const PROTECT_MS = 500;
+let shownAt = performance.now();
+const reshown = (): void => {
+  shownAt = performance.now();
+};
+addEventListener("pageshow", reshown);
+addEventListener("focus", (e) => e.target === window && reshown());
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && reshown());
 
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
-  if (action === "signout") b.disabled = !armed;
   b.dataset.action = action;
   b.textContent = label;
-  b.addEventListener("click", onClick);
+  if (action !== "signout") {
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  // drawn now, and on screen by the next frame
+  reshown();
+  requestAnimationFrame(reshown);
+  // the press is the pointerdown or key press that starts the click; a click with none seen (an assistive tool's click)
+  // is its own press
+  let pressAt: number | null = null;
+  const press = (e: Event): void => {
+    if (e.isTrusted) pressAt = e.timeStamp;
+  };
+  b.addEventListener("pointerdown", press);
+  b.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && press(e));
+  b.addEventListener("click", (e) => {
+    const at = pressAt ?? e.timeStamp;
+    pressAt = null;
+    if (!e.isTrusted || at - shownAt < PROTECT_MS || e.timeStamp - shownAt < PROTECT_MS) return;
+    onClick();
+  });
   return b;
 }
 
@@ -85,7 +108,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     const p = document.createElement("p");
     p.textContent = WORDS["signed-in"];
     parts.push(p);
-    if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void (armed && run(signOut))));
+    if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
   } else if (!framed && state !== "loading" && state !== "unsupported") {
     parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey))));
     parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey))));
@@ -157,8 +180,9 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>): Promise<void> {
 async function signOut(): Promise<void> {
   topLevelOnly();
   const s = await open();
-  store = null;
+  // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
+  store = null;
   show("signed-out");
 }
 
