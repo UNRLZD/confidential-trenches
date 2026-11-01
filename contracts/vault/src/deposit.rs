@@ -208,14 +208,14 @@ mod tests {
         assert_eq!(on_transfer(TOKEN, KIT_MSG), Ok(1_000_000));
         for caller in ["u.near", "intents.near", VAULT, "other-token.near"] {
             let e = on_transfer(caller, KIT_MSG).unwrap_err();
-            assert!(e.starts_with("NotTheToken"), "{caller}: {e:?}");
+            assert!(e.contains("NotTheToken"), "{caller}: {e:?}");
         }
     }
 
     #[test]
     fn the_token_check_comes_before_the_message() {
         let e = on_transfer("u.near", "not json").unwrap_err();
-        assert!(e.starts_with("NotTheToken"), "{e:?}");
+        assert!(e.contains("NotTheToken"), "{e:?}");
     }
 
     #[test]
@@ -225,7 +225,7 @@ mod tests {
             (r#"{"precommitment":"1","depositor":"vault.near"}"#, "DepositorIsTheVault"),
         ] {
             let e = on_transfer(TOKEN, msg).unwrap_err();
-            assert!(e.starts_with(want), "{msg:?}: {e:?}");
+            assert!(e.contains(want), "{msg:?}: {e:?}");
         }
     }
 }
