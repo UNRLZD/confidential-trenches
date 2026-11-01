@@ -24,7 +24,7 @@ import { base58, readGone, readTx, RPCS } from "../ci/money-gate.mjs";
 
 export const NET = {
   testnet: { chain: "near-testnet", send: "https://test.rpc.fastnear.com", fund: 10n ** 24n },
-  // 0.01 NEAR: all of it comes back to F (the Transfer and the DeleteAccount's payout); the run costs only gas
+  // 0.01 NEAR: all of A's balance comes back to F (the Transfer and the DeleteAccount's payout); the run costs only gas
   mainnet: { chain: "near", send: "https://rpc.mainnet.fastnear.com", fund: 10n ** 22n },
 };
 export const FUNDER = "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33"; // g1-money-loop's mainnet funder
@@ -145,7 +145,7 @@ export async function run({ network, live, funder = FUNDER, funderKey, a: resume
     const have = await view(fetchFn, url, funder);
     log(`F ${funder} holds ${NEAR(BigInt(have.amount))} NEAR on ${new URL(url).host}`);
     if (!live) {
-      log(`DRY: F would send ${NEAR(n.fund)} NEAR to a fresh implicit A; A sends it back in a Transfer (all but its storage and 0.001 NEAR), then deletes itself into F, which gets the rest. Cost: the gas of three small txs, under 0.0002 NEAR. Nothing signed, nothing sent.`);
+      log(`DRY: F would send ${NEAR(n.fund)} NEAR to a fresh implicit A; A sends it back in a Transfer (all but its storage and 0.001 NEAR), then deletes itself into F, which gets the rest. Cost: the gas of three txs, about 0.0072 NEAR (the testnet run of 2026-11-01 burnt 0.00721, 0.00711 of it the Transfer that creates A). Nothing signed, nothing sent.`);
       return lines;
     }
     if (!funderKey) throw new Error("--live needs --funder-key <file>");
