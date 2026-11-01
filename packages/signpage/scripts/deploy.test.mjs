@@ -1,0 +1,112 @@
+// node --test packages/signpage/scripts/deploy.test.mjs: the deploy refuses a build whose headers break SIGN_HOST's
+// policy before anything is uploaded, and uploads the real build with wrangler at its pinned version.
+import assert from "node:assert/strict";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { BRANCH, PROJECT, WRANGLER, checkDir, checkHeadersFile, deploy } from "./deploy.mjs";
+
+const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const REAL = readFileSync(join(PKG, "public", "_headers"), "utf8");
+const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
+
+// a copy of the package whose _headers is `headers`, plus extra files
+function pkgWith(headers, extra = {}) {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-test-"));
+  cpSync(join(PKG, "index.html"), join(d, "index.html"));
+  mkdirSync(join(d, "public"));
+  writeFileSync(join(d, "public", "_headers"), headers);
+  for (const [f, body] of Object.entries(extra)) {
+    mkdirSync(dirname(join(d, "public", f)), { recursive: true });
+    writeFileSync(join(d, "public", f), body);
+  }
+  return d;
+}
+
+// a spawnSync stand-in that records every call
+function recorder() {
+  const calls = [];
+  const run = (cmd, args, opts) => (calls.push({ cmd, args, opts }), { status: 0, stdout: cmd === "git" ? "abc\n" : "" });
+  return { calls, run };
+}
+
+const swap = (from, to) => {
+  assert.ok(REAL.includes(from), from);
+  return REAL.replace(from, to);
+};
+
+test("the real _headers passes the gate", () => {
+  assert.deepEqual(checkHeadersFile(REAL), []);
+});
+
+test("a CSP with no frame-ancestors is refused, and nothing is uploaded", () => {
+  const { calls, run } = recorder();
+  const r = deploy([], ENV, run, pkgWith(swap(" frame-ancestors https://confidential.unrealized.trade;", "")));
+  assert.equal(r.code, 1);
+  assert.ok(r.err.includes('REFUSED _headers: CSP frame-ancestors: none, want "https://confidential.unrealized.trade"'), r.err.join("\n"));
+  assert.ok(r.err.includes("REFUSED _headers: framed from https://example.com: allowed (no frame-ancestors)"), r.err.join("\n"));
+  assert.equal(r.err.at(-1), "nothing was uploaded");
+  assert.equal(calls.length, 0);
+});
+
+test("other policy breaks are refused", () => {
+  const bad = {
+    "frame-ancestors *": swap("frame-ancestors https://confidential.unrealized.trade", "frame-ancestors *"),
+    "X-Frame-Options sent": `${REAL}  X-Frame-Options: DENY\n`,
+    "Integrity-Policy gone": swap("  Integrity-Policy: blocked-destinations=(script)\n", ""),
+    "a second CSP line": `${REAL}  Content-Security-Policy: default-src *\n`,
+    "another rule removes the CSP": `${REAL}/x\n  ! Content-Security-Policy\n`,
+    "another rule sets the CSP": `${REAL}/x\n  Content-Security-Policy: default-src *\n`,
+    "no /* rule": REAL.replace("/*\n", "/index.html\n"),
+    "unsafe-inline": swap("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'"),
+    "a connect-src host added": swap("https://near.drpc.org", "https://near.drpc.org https://evil.ct.test"),
+  };
+  for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
+});
+
+test("a build carrying _worker.js or .well-known/webauthn is refused", () => {
+  const { calls, run } = recorder();
+  for (const f of ["_worker.js", ".well-known/webauthn"]) {
+    const r = deploy([], ENV, run, pkgWith(REAL, { [f]: "x" }));
+    assert.equal(r.code, 1, f);
+    assert.ok(r.err.some((e) => e.includes(f)), r.err.join("\n"));
+  }
+  assert.equal(calls.length, 0);
+});
+
+test("--dry-run stops after the gate; the build holds the page and _headers only", () => {
+  const { calls, run } = recorder();
+  const r = deploy(["--dry-run"], {}, run);
+  assert.equal(r.code, 0, (r.err ?? []).join("\n"));
+  const dir = /gate ok on (\S+);/.exec(r.out[0])[1];
+  assert.deepEqual(checkDir(dir), []);
+  assert.equal(readFileSync(join(dir, "_headers"), "utf8"), REAL);
+  assert.equal(calls.length, 0);
+});
+
+test("with the gate passed and no token, nothing is uploaded", () => {
+  const { calls, run } = recorder();
+  const r = deploy([], {}, run);
+  assert.equal(r.code, 2);
+  assert.match(r.err[0], /CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set/);
+  assert.equal(calls.length, 0);
+});
+
+test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder", () => {
+  const { calls, run } = recorder();
+  const r = deploy([], ENV, run);
+  assert.equal(r.code, 0, (r.err ?? []).join("\n"));
+  const up = calls.find((c) => c.cmd === "pnpm");
+  assert.deepEqual(up.args.slice(0, 4), ["dlx", WRANGLER, "pages", "deploy"]);
+  assert.equal(WRANGLER, "wrangler@4.151.1");
+  assert.deepEqual(up.args.slice(5, 9), ["--project-name", PROJECT, "--branch", BRANCH]);
+  assert.equal(PROJECT, "confidential-trenches-sign");
+  assert.notEqual(up.opts.cwd, up.args[4]);
+  assert.equal(up.opts.env.WRANGLER_SEND_METRICS, "false");
+});
+
+test("an unknown argument is a usage error", () => {
+  assert.equal(deploy(["dist"], ENV, recorder().run).code, 2);
+});

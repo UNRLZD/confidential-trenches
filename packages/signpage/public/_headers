@@ -1,0 +1,13 @@
+# SIGN_HOST's header policy (Cloudflare Pages _headers, one rule for every path). The CSP and Integrity-Policy are
+# the wallet paper's block (2.7) with HELPER_HOST and RPC_A, RPC_B, RPC_C put in; the other headers are the app
+# paper's SIGN_HOST column (2.3). No X-Frame-Options (APP_HOST must frame this page) and no COEP. The deploy script
+# (packages/signpage/scripts/deploy.mjs) refuses an upload whose copy of this file breaks the policy.
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker
+  Integrity-Policy: blocked-destinations=(script)
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()
