@@ -1,0 +1,276 @@
+// node --test apps/helper/src/data/solana/lists.test.ts: Discover's Solana lists on recorded vendor answers. Jupiter's
+// recent and top-trending 5m and 1h lists as read on 2026-11-01 15:16Z (api.jup.ag, limit=100; 12 rows of each kept,
+// picked to cover a row with no price, no 5m stats, a graduated and an on-curve pump.fun token, a token with no
+// launchpad, another launchpad, and mint or freeze authority still set), and the pump.fun curve accounts of the
+// on-curve rows as api.mainnet-beta.solana.com answered getMultipleAccounts at the same minute. The rows hold exactly
+// the terminal's field list (apps/terminal/src/screens/discover/fields.ts) plus buys_1h and sells_1h, in their wire
+// forms, and pass the terminal's one curve rule (apps/terminal/src/screens/market/curve.ts).
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { gunzipSync } from "node:zlib";
+import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
+import { onCurve } from "../../../../terminal/src/screens/market/curve.ts";
+import {
+  address, b58decode, b58encode, createSolanaLists, dec, FRESH_MS, LIST_MAX, pumpCandidates, pumpCurveAddress, pumpCurveBps, PUMP_PROGRAM,
+  readPumpCurves, READS, ROW_FIELDS, snapshot, STALE_MS, text, toRow, toRows, type Row,
+} from "./lists.ts";
+
+const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
+const RAW = { new: JSON.parse(fx("jupiter-recent.json")), trending_5m: JSON.parse(fx("jupiter-toptrending-5m.json")), trending_1h: JSON.parse(fx("jupiter-toptrending-1h.json")) };
+const CURVES = JSON.parse(fx("solana-pump-curves.json")) as { request_mints: string[]; answer: { result: { value: unknown[] } } };
+const AS_OF = Date.parse("2026-11-01T15:16:30Z");
+const rowsOf = (k: keyof typeof RAW) => toRows(RAW[k], AS_OF)!;
+const raw = (k: keyof typeof RAW, symbol: string) => (RAW[k] as Record<string, unknown>[]).find((r) => r.symbol === symbol)!;
+const row = (k: keyof typeof RAW, symbol: string) => rowsOf(k).find((r) => r.symbol === symbol)!;
+const recordedRpc = { handle: async () => ({ status: 200, body: JSON.stringify(CURVES.answer) }) };
+
+test("the field list is the terminal's ROW_FIELDS in its order, then buys_1h and sells_1h (the CO's Trending ask)", () => {
+  assert.deepEqual(ROW_FIELDS, [...TERMINAL_FIELDS, "buys_1h", "sells_1h"]);
+});
+
+test("recorded Jupiter answers: every row holds exactly the field list, every required field, in its wire form", () => {
+  for (const k of ["new", "trending_5m", "trending_1h"] as const) {
+    const rows = rowsOf(k);
+    assert.equal(rows.length, RAW[k].length, `${k}: no recorded row is dropped`);
+    for (const r of rows) {
+      assert.deepEqual(Object.keys(r), [...ROW_FIELDS], `${r.symbol}: keys`);
+      for (const f of ROW_REQUIRED) assert.notEqual(r[f], undefined, `${r.symbol}: ${f}`);
+      assert.equal(r.chain, "solana");
+      assert.equal(r.src, "jupiter");
+      assert.equal(r.as_of_ms, AS_OF);
+      assert.equal(typeof r.symbol, "string");
+      assert.equal(typeof r.name, "string");
+      assert.equal(typeof r.icon, "boolean");
+      for (const f of ROW_FIELDS.filter((x) => x.endsWith("_usd"))) {
+        const v = r[f];
+        assert.ok(v === null || (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v)), `${r.symbol}: ${f}=${String(v)}`);
+      }
+      for (const f of ROW_FIELDS.filter((x) => x.endsWith("_bps") || x === "holders" || x === "created_s" || x.startsWith("buys_") || x.startsWith("sells_"))) {
+        const v = r[f];
+        assert.ok(v === null || Number.isSafeInteger(v), `${r.symbol}: ${f}=${String(v)}`);
+      }
+      for (const f of ["mint_auth", "freeze_auth"] as const) assert.ok(r[f] === null || typeof r[f] === "boolean");
+    }
+  }
+});
+
+test("one row field by field against its recorded Jupiter row (TRUMP, top trending 5m)", () => {
+  const j = raw("trending_5m", "TRUMP") as any;
+  const r = row("trending_5m", "TRUMP");
+  assert.equal(r.token, j.id);
+  assert.equal(r.price_usd, "1.74634421892");
+  assert.equal(r.mc_usd, "492238441.033");
+  assert.equal(r.liq_usd, dec(j.liquidity));
+  assert.equal(r.holders, j.holderCount);
+  assert.equal(r.chg_5m_bps, Math.round(j.stats5m.priceChange * 100));
+  assert.equal(r.chg_1h_bps, Math.round(j.stats1h.priceChange * 100));
+  assert.equal(r.chg_24h_bps, Math.round(j.stats24h.priceChange * 100));
+  assert.equal(r.top10_bps, 8070);
+  assert.equal(r.vol_5m_usd, dec(j.stats5m.buyVolume + j.stats5m.sellVolume));
+  assert.equal(r.net_5m_usd, dec(j.stats5m.buyVolume - j.stats5m.sellVolume, true));
+  assert.equal(r.vol_1h_usd, dec(j.stats1h.buyVolume + j.stats1h.sellVolume));
+  assert.equal(r.vol_24h_usd, dec(j.stats24h.buyVolume + j.stats24h.sellVolume));
+  assert.deepEqual([r.buys_5m, r.sells_5m, r.buys_1h, r.sells_1h, r.buys_24h, r.sells_24h], [1428, 1344, 11403, 11015, 31123, 30485]);
+  assert.equal(r.created_s, Date.parse(j.firstPool.createdAt) / 1000);
+  assert.equal(r.creator, j.dev);
+  assert.deepEqual([r.mint_auth, r.freeze_auth], [false, false]);
+  assert.equal(r.launchpad, null, "a token with no launchpad is listed, tagged null (D-S4)");
+  assert.equal(r.curve_bps, null, "no launchpad and no graduated pool: unknown");
+  assert.deepEqual([r.icon, r.venue, r.label, r.dev_bps, r.snipers_bps, r.creator_sold_bps, r.chg_4h_bps], [false, null, null, null, null, null, null]);
+});
+
+test("the CO's asks: price null with no usdPrice, launchpad null with none, curve 10,000 once graduated, buys and sells for 1h", () => {
+  const noPrice = rowsOf("new").filter((r) => r.price_usd === null);
+  assert.ok(noPrice.length >= 1);
+  for (const r of noPrice) assert.equal((RAW.new as any[]).find((j) => j.id === r.token).usdPrice, undefined);
+  const all = [...rowsOf("new"), ...rowsOf("trending_5m"), ...rowsOf("trending_1h")];
+  const graduated = all.filter((r) => typeof (RAW.new.concat(RAW.trending_5m, RAW.trending_1h) as any[]).find((j) => j.id === r.token).graduatedPool === "string");
+  assert.ok(graduated.length >= 3);
+  for (const r of graduated) {
+    assert.equal(r.curve_bps, 10_000, `${r.symbol}`);
+    assert.equal(onCurve(r as any), false, `${r.symbol}: listed, off the curve`);
+  }
+  assert.ok(graduated.some((r) => r.launchpad === "pump.fun"), "a graduated launchpad token keeps its launchpad");
+  assert.ok(all.some((r) => r.launchpad === null) && all.some((r) => r.launchpad === "pump.fun") && all.some((r) => r.launchpad === "stonkfun"));
+  for (const r of rowsOf("trending_1h")) assert.ok(Number.isSafeInteger(r.buys_1h) && Number.isSafeInteger(r.sells_1h), `${r.symbol}`);
+});
+
+test("pump.fun curves: the program address of each mint is the recorded request's, and the recorded accounts read 0-9,999", async () => {
+  const mints = pumpCandidates([...rowsOf("new"), ...rowsOf("trending_5m"), ...rowsOf("trending_1h")]);
+  assert.deepEqual(mints, CURVES.request_mints);
+  // a known address: a curve account the recorded answer shows owned by the pump.fun program
+  assert.equal(pumpCurveAddress("ETHgDzFEG9gqBrjpPyiLvi12LSN9m7aPSdvWWjyZpump"), "oPYZyVGxKR6QqWpkaBRGxRn8PdfoRCgMWCJJCgpQmxC");
+  const seen: unknown[] = [];
+  const curves = await readPumpCurves({ handle: async (chain, type, body) => (seen.push({ chain, type, body: JSON.parse(body) }), recordedRpc.handle()) }, mints);
+  assert.equal(seen.length, 1, "one getMultipleAccounts for up to 100");
+  assert.deepEqual((seen[0] as any).body.params[0], mints.map(pumpCurveAddress));
+  assert.equal((seen[0] as any).body.method, "getMultipleAccounts");
+  assert.equal(curves.get("ETHgDzFEG9gqBrjpPyiLvi12LSN9m7aPSdvWWjyZpump"), 9089);
+  assert.equal(curves.get("7UF3egEva3jHDZqfM6eCzEq5n5kdZ3Jxk18A5D3ypump"), 0, "untouched curve: 793.1 M left");
+  // a curve whose reserves exceed the standard 793.1 M is another configuration: unknown, never a guess
+  assert.equal(curves.has("6xASXp7JqKnzWTsC8kXcDjSkAVyv2qQRiE2Lgnv9pump"), false);
+  for (const v of curves.values()) assert.ok(Number.isInteger(v) && v >= 0 && v < 10_000);
+});
+
+test("pump.fun curve account checks: complete reads 10,000; wrong owner, discriminator, size or flag reads null", () => {
+  const acct = CURVES.answer.result.value[CURVES.request_mints.indexOf("ETHgDzFEG9gqBrjpPyiLvi12LSN9m7aPSdvWWjyZpump")] as any;
+  const data = Buffer.from(acct.data[0], "base64");
+  const with_ = (d: Buffer, owner = PUMP_PROGRAM) => ({ ...acct, owner, data: [d.toString("base64"), "base64"] });
+  assert.equal(pumpCurveBps(acct), 9089);
+  const done = Buffer.from(data);
+  done[48] = 1;
+  assert.equal(pumpCurveBps(with_(done)), 10_000);
+  const flag = Buffer.from(data);
+  flag[48] = 2;
+  assert.equal(pumpCurveBps(with_(flag)), null);
+  assert.equal(pumpCurveBps(with_(data, "11111111111111111111111111111111")), null);
+  const disc = Buffer.from(data);
+  disc[0] = disc[0]! ^ 1;
+  assert.equal(pumpCurveBps(with_(disc)), null);
+  assert.equal(pumpCurveBps(with_(data.subarray(0, 48))), null);
+  assert.equal(pumpCurveBps({ ...acct, data: [acct.data[0], "base58"] }), null);
+  for (const bad of [null, undefined, 7, "x", [], { owner: PUMP_PROGRAM }]) assert.equal(pumpCurveBps(bad), null);
+});
+
+test("a failed or malformed RPC answer leaves every curve unknown", async () => {
+  const mints = CURVES.request_mints;
+  for (const answer of [{ status: 503, body: "{}" }, { status: 200, body: "not json" }, { status: 200, body: JSON.stringify({ result: { value: [] } }) }, { status: 200, body: JSON.stringify({ error: { code: -32005 } }) }]) {
+    assert.equal((await readPumpCurves({ handle: async () => answer }, mints)).size, 0);
+  }
+  assert.equal((await readPumpCurves({ handle: async () => { throw new Error("down"); } }, mints)).size, 0);
+});
+
+test("the snapshot: trending is trending_1h; graduating holds each on-curve token once, highest first, every one on the terminal's curve", async () => {
+  const read = { new: rowsOf("new"), trending_5m: rowsOf("trending_5m"), trending_1h: rowsOf("trending_1h") };
+  const curves = await readPumpCurves(recordedRpc, pumpCandidates([...read.new, ...read.trending_5m, ...read.trending_1h]));
+  const s = snapshot(read, curves, AS_OF);
+  assert.deepEqual(Object.keys(s), ["chain", "lists", "as_of_ms"]);
+  assert.deepEqual(Object.keys(s.lists), ["new", "trending", "trending_5m", "trending_1h", "graduating"]);
+  assert.equal(s.chain, "solana");
+  assert.deepEqual(s.lists.trending, s.lists.trending_1h);
+  const g = s.lists.graduating;
+  assert.equal(g.length, curves.size);
+  assert.equal(new Set(g.map((r) => r.token)).size, g.length);
+  for (const r of g) assert.ok(onCurve(r as any) && r.launchpad === "pump.fun", `${r.symbol}`);
+  for (let i = 1; i < g.length; i++) assert.ok((g[i - 1]!.curve_bps as number) >= (g[i]!.curve_bps as number));
+  assert.equal(g[0]!.curve_bps, 9089);
+  // the curve fills the row in every list it appears in
+  const filled = s.lists.new.filter((r) => curves.has(r.token as string));
+  for (const r of filled) assert.equal(r.curve_bps, curves.get(r.token as string));
+});
+
+test("hostile rows: no valid mint, symbol or name drops the row; numbers out of range, bad text, tags and times read null or are cut", () => {
+  const good = raw("trending_5m", "TRUMP") as any;
+  assert.equal(toRow({ ...good, id: "0OIl" + good.id.slice(4) }, AS_OF), null);
+  assert.equal(toRow({ ...good, id: good.id + "1" }, AS_OF), null);
+  assert.equal(toRow({ ...good, id: 7 }, AS_OF), null);
+  assert.equal(toRow({ ...good, symbol: undefined }, AS_OF), null);
+  assert.equal(toRow({ ...good, symbol: "‮\u0000  " }, AS_OF), null);
+  assert.equal(toRow({ ...good, name: undefined }, AS_OF)!.name, "TRUMP", "no name: the symbol");
+  for (const bad of [null, 7, "x", [], { id: good.id }]) assert.equal(toRow(bad, AS_OF), null);
+  const r = toRow({
+    ...good,
+    symbol: "‮SOL\u0007" + "X".repeat(100),
+    name: "<img src=x onerror=alert(1)>\n",
+    usdPrice: -1, mcap: Infinity, liquidity: 1e300, holderCount: 1.5,
+    stats5m: { ...good.stats5m, priceChange: NaN, buyVolume: -5, numBuys: -1, numSells: "7" },
+    stats1h: { ...good.stats1h, priceChange: -150, numBuys: 2 ** 60 },
+    stats24h: "x",
+    audit: { topHoldersPercentage: 120, mintAuthorityDisabled: "true", freezeAuthorityDisabled: false },
+    launchpad: "<script>", dev: "not-an-address", graduatedPool: "nope",
+    firstPool: { createdAt: "yesterday" }, createdAt: "2999-01-01T00:00:00Z",
+  }, AS_OF)!;
+  assert.equal(r.symbol, "SOL" + "X".repeat(29), "controls and direction marks stripped, 32 code points");
+  assert.equal(r.name, "<img src=x onerror=alert(1)>", "text is data: kept as text, the app escapes it");
+  assert.deepEqual(
+    [r.price_usd, r.mc_usd, r.liq_usd, r.holders, r.chg_5m_bps, r.vol_5m_usd, r.net_5m_usd, r.buys_5m, r.sells_5m, r.chg_1h_bps, r.buys_1h, r.vol_24h_usd, r.buys_24h, r.top10_bps, r.mint_auth, r.freeze_auth, r.launchpad, r.creator, r.curve_bps, r.created_s],
+    [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, true, null, null, null, null],
+  );
+  assert.deepEqual(Object.keys(r), [...ROW_FIELDS]);
+});
+
+test("a list answer: not a list is null; at most 100 rows; a mint listed twice is kept once", () => {
+  for (const bad of [null, {}, "[]", { data: [] }]) assert.equal(toRows(bad, AS_OF), null);
+  const one = RAW.trending_5m[0];
+  const many = Array.from({ length: 150 }, (_, i) => ({ ...one, id: b58encode(Uint8Array.from({ length: 32 }, (_, k) => (k === 0 ? 1 + (i % 200) : k === 1 ? i : 7))) }));
+  assert.equal(toRows(many, AS_OF)!.length, LIST_MAX);
+  assert.equal(toRows([one, one, { ...one }], AS_OF)!.length, 1);
+});
+
+test("decimal strings: 12 significant digits, never an exponent; signed only where asked", () => {
+  assert.equal(dec(1.234e-11), "0.00000000001234");
+  assert.equal(dec(2212999703.19402), "2212999703.19");
+  assert.equal(dec(0.004791481863661449), "0.00479148186366");
+  assert.equal(dec(1e17), "100000000000000000");
+  assert.equal(dec(0.1 + 0.2), "0.3");
+  assert.equal(dec(5), "5");
+  assert.equal(dec(0), "0");
+  assert.equal(dec(-78746.0687921, true), "-78746.0687921");
+  assert.equal(dec(-1), null);
+  assert.equal(dec(1e19), null);
+  assert.equal(dec("5"), null);
+  assert.equal(text("a⁦b⁩c", 32), "abc");
+  assert.equal(address("So11111111111111111111111111111111111111112"), "So11111111111111111111111111111111111111112");
+  assert.equal(address("11111111111111111111111111111111"), "11111111111111111111111111111111");
+  assert.equal(b58decode("0"), null);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// The served answer
+// ---------------------------------------------------------------------------------------------------------------
+
+function fakes(opts: { fail?: () => boolean } = {}) {
+  let t = AS_OF;
+  const calls: string[] = [];
+  const proxy = {
+    handle: async (vendor: string, path: string, query: string): Promise<{ status: number; headers: Record<string, string>; body: string }> => {
+      calls.push(`${vendor} ${path}?${query}`);
+      if (opts.fail?.()) return { status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' };
+      const k = path === READS.new ? "new" : path === READS.trending_5m ? "trending_5m" : "trending_1h";
+      return { status: 200, headers: { "X-Fetched-At": new Date(t).toISOString() }, body: JSON.stringify(RAW[k]) };
+    },
+  };
+  return { proxy, calls, now: () => t, step: (ms: number) => (t += ms) };
+}
+
+test("the lists: one read of the three Jupiter lists through the proxy, shared until FRESH_MS; gzip of the same body", async () => {
+  const f = fakes();
+  const lists = createSolanaLists(f.proxy, recordedRpc, { now: f.now });
+  const [a, b] = await Promise.all([lists.get(), lists.get()]);
+  assert.equal(a.status, 200);
+  assert.equal(a, b);
+  assert.deepEqual(f.calls.sort(), ["jupiter /tokens/v2/recent?limit=100", "jupiter /tokens/v2/toptrending/1h?limit=100", "jupiter /tokens/v2/toptrending/5m?limit=100"]);
+  assert.equal(gunzipSync(a.gzip!).toString("utf8"), a.body);
+  const s = JSON.parse(a.body);
+  assert.equal(s.as_of_ms, AS_OF);
+  for (const k of ["new", "trending", "trending_5m", "trending_1h", "graduating"]) for (const r of s.lists[k] as Row[]) assert.deepEqual(Object.keys(r), [...ROW_FIELDS]);
+  f.step(FRESH_MS - 1);
+  await lists.get();
+  assert.equal(f.calls.length, 3);
+});
+
+test("the lists: past FRESH_MS the last answer serves while one refresh runs; with the vendor down it serves up to STALE_MS, then 503", async () => {
+  let down = false;
+  const f = fakes({ fail: () => down });
+  const lists = createSolanaLists(f.proxy, recordedRpc, { now: f.now });
+  const first = await lists.get();
+  f.step(FRESH_MS);
+  assert.equal(await lists.get(), first, "the last answer, at once");
+  await new Promise((ok) => setImmediate(ok));
+  assert.equal(f.calls.length, 6, "one refresh behind it");
+  down = true;
+  // the refresh read at AS_OF + FRESH_MS: its data is STALE_MS old here
+  f.step(STALE_MS);
+  const held = await lists.get();
+  assert.equal(held.status, 200);
+  f.step(1);
+  const gone = await lists.get();
+  assert.equal(gone.status, 503);
+  assert.deepEqual(JSON.parse(gone.body), { error: { code: "upstream" } });
+});
+
+test("the lists: one list down or not a list answers 503 when there is no last answer", async () => {
+  const lists = createSolanaLists({ handle: async (_v: string, p: string) => ({ status: 200, headers: {}, body: p === READS.new ? '{"oops":1}' : JSON.stringify(RAW.trending_5m) }) }, recordedRpc);
+  assert.equal((await lists.get()).status, 503);
+});
