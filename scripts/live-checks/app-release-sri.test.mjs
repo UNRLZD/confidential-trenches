@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/app-release-sri.test.mjs: the live check replays recorded answers
-// (app-release-sri.answers.json). live: APP_HOST as deployed, read by this check: PASS. good: the terminal's build served
-// as APP_HOST by the app harness: PASS. bad: that build with one byte appended to its script after the build: FAIL.
-// The other bad answers are the good one with one thing broken each: FAIL.
+// (app-release-sri.answers.json), each read on 2026-11-01. good: card app-in-shell's build served as APP_HOST by the app
+// harness: PASS. liveBefore: APP_HOST as deployed before app-in-shell (frame-ancestors 'none'): FAIL. bad: the good
+// build with one byte appended to its script after the build: FAIL. The other bad answers are the good one with one
+// thing broken each: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -37,16 +38,18 @@ const replay = (a) => async (u) => {
   return new Response(`bytes of ${u}`, { status: 200 });
 };
 
-test("recorded answers: APP_HOST as deployed and the harness build PASS; the build with one byte changed FAILs", () => {
-  for (const k of ["live", "good"]) {
+test("recorded answers: the harness build PASSes; APP_HOST before app-in-shell and the build with one byte changed FAIL", () => {
+  for (const k of ["good"]) {
     const r = judge(ANSWERS[k]);
     assert.equal(r.ok, true, `${k}:\n${r.lines.join("\n")}`);
-    assert.ok(r.lines.includes(`ok  CSP frame-src is exactly ${SIGN} (got "${SIGN}")`));
+    assert.ok(r.lines.includes(`ok  CSP frame-ancestors is exactly ${SIGN} (got "${SIGN}")`));
     assert.ok(r.lines.includes("ok  no header holds 'wasm-unsafe-eval'"));
     assert.ok(r.lines.includes('ok  Integrity-Policy: "blocked-destinations=(script)"'));
     assert.ok(r.lines.some((l) => /^ok {2}script \/assets\/index-\S+\.js: integrity sha384-\S+ equals the sha384 of the bytes served$/.test(l)));
   }
   bad(ANSWERS.bad, /^BAD script \/assets\/index-\S+\.js: integrity sha384-\S+ but the bytes served are sha384-/);
+  const before = judge(ANSWERS.liveBefore);
+  assert.deepEqual(before.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP frame-ancestors is exactly ${SIGN} (got "'none'")`]);
 });
 
 test("read() fetches the page and every file it loads, and judge() compares the served bytes", async () => {
@@ -56,10 +59,10 @@ test("read() fetches the page and every file it loads, and judge() compares the 
   bad(a, /^BAD script .*but the bytes served are sha384-/); // the replayed bytes are not the build's
 });
 
-test("bad answers: frame-src * or a second host, frame-src missing, 'wasm-unsafe-eval' in script-src: FAIL", () => {
-  bad(withCsp(`frame-src ${SIGN};`, "frame-src *;"), `BAD CSP frame-src is exactly ${SIGN} (got "*")`);
-  bad(withCsp(`frame-src ${SIGN};`, `frame-src ${SIGN} https://evil.ct.test;`), /^BAD CSP frame-src is exactly/);
-  bad(withCsp(`frame-src ${SIGN};`, ""), /^BAD CSP frame-src is exactly .* \(0 frame-src directives\)$/);
+test("bad answers: frame-ancestors * or a second host, frame-ancestors missing, 'wasm-unsafe-eval' in script-src: FAIL", () => {
+  bad(withCsp(`frame-ancestors ${SIGN};`, "frame-ancestors *;"), `BAD CSP frame-ancestors is exactly ${SIGN} (got "*")`);
+  bad(withCsp(`frame-ancestors ${SIGN};`, `frame-ancestors ${SIGN} https://evil.ct.test;`), /^BAD CSP frame-ancestors is exactly/);
+  bad(withCsp(`frame-ancestors ${SIGN};`, ""), /^BAD CSP frame-ancestors is exactly .* \(0 frame-ancestors directives\)$/);
   bad(withCsp("script-src 'self';", "script-src 'self' 'wasm-unsafe-eval';"), "BAD no header holds 'wasm-unsafe-eval': content-security-policy");
   bad({ ...GOOD, headers: { ...GOOD.headers, "content-security-policy": undefined } }, "BAD Content-Security-Policy: none sent");
 });
