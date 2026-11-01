@@ -20,14 +20,17 @@
 // - Sign out: broadcast "signout" on BroadcastChannel "ct-wallet", then delete the database (06b:1235, wallet.md:156);
 //   other tabs close their connection on the delete's versionchange, so the delete is not blocked. A store that is
 //   already closed refuses to sign out, so a stale tab never deletes a newer account's database.
-// - The seed lock: sign out (from reading the seed until its delete has succeeded, failed or been reported blocked),
-//   insertSeed and setCodeSaved each run under the store's exclusive Web Lock "ct-wallet/seed". An earlier tab's sign
-//   out holds it until every other store has had its versionchange and closed, so a stale tab's sign out then fails its
-//   liveness check and never deletes; and no seed insert can run between a sign out's check and its delete. A delete
-//   that is blocked (a connection that never closes) gives the lock back: the delete is queued by then, every store has
-//   closed, and any later open waits behind it in IndexedDB's own queue, so holding on would only hang other tabs; the
-//   sign out itself resolves when the delete completes. With no Web Locks (opts.locks null) sign out, insertSeed and
-//   setCodeSaved refuse: they never run unlocked.
+// - The seed lock: sign out (from reading the seed until its delete has succeeded or failed), insertSeed and
+//   setCodeSaved each run under the store's exclusive Web Lock "ct-wallet/seed". An earlier tab's sign out holds it until
+//   its database is gone, so a stale tab's sign out then fails its liveness check and never deletes, and no seed insert
+//   can run between a sign out's check and its delete. The lock is not given back when the delete reports blocked:
+//   Chromium fires blocked as soon as one connection reports it ignored the versionchange
+//   (connection_coordinator.cc:102-105, :700-705), which a tab our own "signout" broadcast closed mid-transaction reports
+//   at once (idb_database.cc:301-305), so blocked does not mean every other tab has closed; the spec, Firefox and WebKit
+//   fire it later (IDB 3.0 §5.3 steps 6-8), and the lock may not rest on either order. Holding it through a blocked
+//   delete blocks nothing IndexedDB does not already block: every seed operation needs an open store, and every open
+//   waits behind the queued delete. With no Web Locks (opts.locks null) sign out, insertSeed and setCodeSaved refuse:
+//   they never run unlocked.
 // - restore step 7 (wallet.md:319-322) moves a counter up with raiseDepositIndex, under the same lock and
 //   compare-and-set; nothing ever lowers a counter.
 
@@ -249,18 +252,29 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   }
   const kWrap = await loadKey().catch(fail);
 
+  // The plaintext bytes (a seed record's are its entropy as hex) are zeroed once used, on every path. What stays is in JS
+  // strings, which cannot be zeroed: encode's JSON text and hex() of each byte field, and decode's JSON text and the hex
+  // strings it parses back; they are left to the garbage collector.
   async function wrap(store: WalletStoreName, key: string, value: unknown): Promise<Wrapped> {
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
     const plain = encode(value);
-    const ct = await subtle.encrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, plain);
-    return { iv, ct };
+    try {
+      const ct = await subtle.encrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, plain);
+      return { iv, ct };
+    } finally {
+      plain.fill(0);
+    }
   }
   async function unwrap(store: WalletStoreName, key: string, raw: unknown): Promise<unknown> {
     if (raw === undefined) return undefined;
     const { iv, ct } = raw as Wrapped;
     if (!(iv instanceof Uint8Array) || !(ct instanceof ArrayBuffer)) throw new Error(`${store}/${key} is not wrapped`);
     const plain = await subtle.decrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, ct);
-    return decode(plain);
+    try {
+      return decode(plain);
+    } finally {
+      new Uint8Array(plain).fill(0);
+    }
   }
   const notify = (stores: WalletStoreName[]): void => channel.postMessage({ kind: "changed", stores });
 
@@ -376,7 +390,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       return next;
     },
     async signOut() {
-      const { deleted } = await seedLocked(async () => {
+      await seedLocked(async () => {
         // the backup comes first while the 12 words are the only copy (wallet.md:922)
         const seed = await unwrap("meta", "seed", await getRaw("meta", "seed"));
         const refuse = backupFirst(seed);
@@ -388,19 +402,13 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         channel.postMessage({ kind: "signout" });
         shut();
         channel.close();
-        let isBlocked = (): void => {};
-        const blocked = new Promise<void>((ok) => (isBlocked = ok));
-        const deleted = new Promise<void>((ok, no) => {
+        // held until the delete succeeds or fails, through any blocked (see the top)
+        await new Promise<void>((ok, no) => {
           const r = idb.deleteDatabase(name);
           r.onsuccess = () => ok();
           r.onerror = () => no(r.error);
-          r.onblocked = () => isBlocked();
         });
-        // the lock is held until the delete is done, or queued behind a connection that does not close (see the top)
-        await Promise.race([deleted, blocked]);
-        return { deleted };
       });
-      await deleted;
     },
     close() {
       shut();

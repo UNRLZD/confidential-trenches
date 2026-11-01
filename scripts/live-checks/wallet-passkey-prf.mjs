@@ -21,7 +21,15 @@
 //     visibilitychange to visible, after a pageshow and after the window gains focus does nothing. visibilitychange and
 //     pageshow are dispatched on the page (the listeners read document.visibilityState, which is "visible"); focus is
 //     the real one when a second tab brought to the front and back gives it, else dispatched (the record says which).
-//     A press after the window then signs out (the Sign out step).
+//     A press after the window then signs out (the Sign out step). These triggers are synthetic: visibilitychange and
+//     pageshow always, and focus whenever the record says "dispatched", are untrusted events the check dispatches. They
+//     show the page's listeners act on the event; they do not show that the browser fires it on a real tab switch or
+//     back-forward restore.
+//   The guard's input rules (round 5), each with Sign out drawn more than 500 ms before the press that matters: a burst
+//     (a click 300 ms after Sign out drawn, then a second click 560 ms after the draw and so within 500 ms of the first,
+//     as a page that opens SIGN_HOST under the pointer gets at about 550 ms) does nothing; a repeated Enter
+//     (CDP keyDown autoRepeat, e.repeat true) on a focused Sign out, with no other input in the 500 ms before it, does
+//     nothing.
 //   phone run (hasTouch, isMobile): a tap within 500 ms of the page shown does nothing; a still tap (touchstart,
 //     touchend, no move) after it signs out.
 //   Backup gate: a seed record source "random", code_saved false, written under the page's own K_wrap, shows no Sign
@@ -56,10 +64,15 @@ const WAIT_MS = 15_000;
 export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector default, the page's guard
 // Sign out's draw time on the page's own clock: performance.now() when a Sign out button is inserted. Run before the
 // page's scripts; a press's distance from it bounds the press's distance from the page's own guard time from above.
-// Also the data-action of the last press's target (pointerdown, keydown), so a step shows its press reached Sign out.
+// Also the data-action of the last press's target (pointerdown, keydown), so a step shows its press reached Sign out,
+// and every press's time and repeat flag (__ctPresses), so a step shows its gap to the press before.
 const DRAWN = () => {
+  globalThis.__ctPresses = [];
   for (const t of ["pointerdown", "keydown"])
-    addEventListener(t, (e) => (globalThis.__ctPressOn = e.target?.dataset?.action ?? e.target?.nodeName ?? null), true);
+    addEventListener(t, (e) => {
+      globalThis.__ctPressOn = e.target?.dataset?.action ?? e.target?.nodeName ?? null;
+      globalThis.__ctPresses.push({ at: e.timeStamp, repeat: e.repeat === true });
+    }, true);
   addEventListener("focus", (e) => e.target === window && (globalThis.__ctFocusAt = performance.now()));
   new MutationObserver(() => {
     const b = document.querySelector('[data-action="signout"]');
@@ -114,6 +127,14 @@ export function judge(rec) {
     say(ignored(t, A) && t?.sinceDrawMs >= PROTECT_MS,
       `prf: a press within 500 ms after ${k} does nothing (${ms(t)}${t?.kind ? `, ${t.kind}` : ""}, drawn ${typeof t?.sinceDrawMs === "number" ? Math.round(t.sinceDrawMs) : "?"} ms before, ${t?.after?.state})`);
   }
+  // a press on Sign out that left the same account signed in
+  const kept = (t, who) => t?.pressed === true && t?.pressOn === "signout" && t?.after?.state === "signed-in" && t?.after?.account === who && HEX64.test(who ?? "");
+  const bu = p.burst ?? {};
+  say(kept(bu, A) && bu.firstMs < PROTECT_MS && bu.secondMs >= PROTECT_MS && bu.gapMs < PROTECT_MS && bu.presses === 2,
+    `prf: a burst's second click, past 500 ms from Sign out drawn and within 500 ms of the first, does nothing (${typeof bu.secondMs === "number" ? `${Math.round(bu.firstMs)} ms, ${Math.round(bu.secondMs)} ms` : "no press"}, ${bu.after?.state})`);
+  const rp = p.repeat ?? {};
+  say(kept(rp, A) && rp.presses === 1 && rp.repeat === true && rp.sinceDrawMs >= PROTECT_MS && (rp.sincePrevMs === null || rp.sincePrevMs >= PROTECT_MS),
+    `prf: a repeated Enter on a focused Sign out does nothing (repeat ${rp.repeat}, ${typeof rp.sincePrevMs === "number" ? `${Math.round(rp.sincePrevMs)} ms after the input before` : "no input before"}, ${rp.after?.state})`);
   const ph = rec.phone ?? {};
   const P = ph.create?.account;
   say(ph.create?.state === "signed-in" && HEX64.test(P ?? "") && ph.reload?.account === P, `phone: Create passkey signs in by a tap (${ph.create?.state})`);
@@ -298,6 +319,63 @@ async function afterTrigger(page, trigger) {
   return t;
 }
 
+// A burst: reload, a click on Sign out 300 ms after the draw (inside the drawn window), then a second once 560 ms have
+// passed since the draw, about 260 ms after the first; tried again (three times at most) when the first landed past
+// 450 ms or the gap reached 400 ms. A page that signed out is signed in again with the same passkey.
+async function burst(page) {
+  let t = {};
+  for (let i = 0; i < 3; i++) {
+    await page.reload();
+    const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
+    if (!b) return { pressed: false, after: await settled(page) };
+    const box = await b.boundingBox();
+    const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await page.evaluate(() => (globalThis.__ctPresses = []));
+    await page.waitForFunction(() => performance.now() - globalThis.__ctDrawn >= 300, null, { timeout: WAIT_MS, polling: 5 });
+    await page.mouse.click(at.x, at.y);
+    await page.waitForFunction(() => performance.now() - globalThis.__ctDrawn >= 560, null, { timeout: WAIT_MS, polling: 5 });
+    await page.mouse.click(at.x, at.y);
+    const m = await page.evaluate(() => {
+      const p = globalThis.__ctPresses;
+      const d = globalThis.__ctDrawn;
+      return { presses: p.length, firstMs: p[0]?.at - d, secondMs: p[p.length - 1]?.at - d, gapMs: p[p.length - 1]?.at - p[p.length - 2]?.at, pressOn: globalThis.__ctPressOn ?? null };
+    });
+    await page.waitForTimeout(1_000);
+    t = { pressed: true, ...m, after: await settled(page) };
+    if (t.after.state === "signed-out") await click(page, "use");
+    if (m.firstMs < 450 && m.gapMs < 400) break;
+  }
+  return t;
+}
+
+// A repeated Enter: Sign out focused by script (no input event), drawn and with no input for more than 600 ms, then one
+// CDP keyDown Enter with autoRepeat (the page sees e.repeat true) and its keyUp. A page that signed out is signed in again.
+async function repeatEnter(page, cdp) {
+  await page.reload();
+  const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
+  if (!b) return { pressed: false, after: await settled(page) };
+  await page.focus('[data-action="signout"]');
+  await page.waitForFunction(() => {
+    const now = performance.now();
+    const p = globalThis.__ctPresses;
+    return now - globalThis.__ctDrawn > 600 && (p.length === 0 || now - p[p.length - 1].at > 600);
+  }, null, { timeout: WAIT_MS });
+  const before = await page.evaluate(() => globalThis.__ctPresses.length);
+  const key = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", ...key, autoRepeat: true, text: "\r", unmodifiedText: "\r" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+  const m = await page.evaluate((n) => {
+    const p = globalThis.__ctPresses;
+    const e = p[n];
+    // sincePrevMs null: no input on this page before it
+    return { presses: p.length - n, repeat: e?.repeat ?? null, sinceDrawMs: e ? e.at - globalThis.__ctDrawn : null, sincePrevMs: e && n > 0 ? e.at - p[n - 1].at : null, pressOn: globalThis.__ctPressOn ?? null };
+  }, before);
+  await page.waitForTimeout(1_000);
+  const t = { pressed: m.presses >= 1, ...m, after: await settled(page) };
+  if (t.after.state === "signed-out") await click(page, "use");
+  return t;
+}
+
 /** One full probe. Returns { record, prf } where prf (hex, in memory only) is for the caller's own parity check. */
 export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, site, fetchFn = fetch } = {}) {
   const errors = [];
@@ -378,6 +456,9 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
           }, before);
         }),
       };
+      // the guard's input rules
+      record.prf.burst = await burst(page);
+      record.prf.repeat = await repeatEnter(page, creds.cdp);
       await page.waitForTimeout(PROTECT_MS + 200);
       steps.signout = await click(page, "signout");
       // the other tab hears the sign out

@@ -154,7 +154,11 @@ test("A's delete queued, B past its liveness check, C's open queued before B's d
   assert.equal(seed?.source, "random", "C's seed is gone");
 });
 
-test("a delete blocked by a connection that never closes gives the seed lock back; sign out resolves once it closes", async () => {
+// the seed lock's state now: "held" or "free", without waiting for it
+const seedLock = (name: string): Promise<string> =>
+  navigator.locks.request(`${WALLET_SEED_LOCK}/${name}`, { ifAvailable: true }, async (l) => (l ? "free" : "held")) as Promise<string>;
+
+test("a delete blocked by a connection that never closes holds the seed lock until the delete completes", async () => {
   const name = "race-blocked";
   const idb = new IDBFactory();
   const s = await openWalletStore({ indexedDB: idb, name });
@@ -165,15 +169,101 @@ test("a delete blocked by a connection that never closes gives the seed lock bac
     r.onsuccess = () => ok(r.result);
     r.onerror = () => no(r.error);
   });
+  let blocked = false;
+  const real = idb.deleteDatabase.bind(idb);
+  idb.deleteDatabase = (n: string) => {
+    const r = real(n);
+    r.addEventListener("blocked", () => (blocked = true));
+    return r;
+  };
   let done = false;
   const out = s.signOut().then(() => (done = true));
-  const lock = await Promise.race([navigator.locks.request(`${WALLET_SEED_LOCK}/${name}`, async () => "free"), sleep(2_000)]);
-  assert.equal(lock, "free", "the seed lock is held while the delete is blocked");
+  for (let i = 0; i < 100 && !blocked; i++) await sleep(10);
+  assert.equal(blocked, true, "the delete reported blocked");
+  await sleep(200);
+  assert.equal(await seedLock(name), "held", "the seed lock was given back while the delete was blocked");
   assert.equal(done, false, "sign out resolved before its delete");
   x.close();
   await out;
+  assert.equal(await seedLock(name), "free", "the seed lock is freed once the delete completes");
   const dbs = await idb.databases();
   assert.equal(dbs.some((d) => d.name === name), false, "the database is deleted once the blocker closes");
+});
+
+// Chromium fires blocked at a delete as soon as one connection reports it ignored the versionchange
+// (connection_coordinator.cc:102-105, :700-705), which a connection closed mid-transaction does at once
+// (idb_database.cc:301-305), so blocked can come before another tab has had its versionchange. The model: stale tab D
+// hears A's sign out late (its versionchange and the "signout" message reach it LATE ms after they are sent), so A's
+// delete reports blocked while D is still open; D's sign out is waiting on the seed lock; C's open is queued behind A's
+// delete. D must refuse, one delete is sent, and C's seed stays. (The reviewer's model, round 4.)
+const LATE = 200;
+test("blocked before stale tab D has heard the sign out (Chromium): D refuses, one delete, C's seed stays", async () => {
+  const name = "race-early-blocked";
+  let cOpen: Promise<WalletStore> | null = null;
+  let blocked = 0;
+  const { idb, deletes } = counted(new IDBFactory(), () => {
+    cOpen = openWalletStore({ indexedDB: idb, name });
+    cOpen.catch(() => {});
+  });
+  const realDelete = idb.deleteDatabase.bind(idb);
+  idb.deleteDatabase = (n: string) => {
+    const r = realDelete(n);
+    r.addEventListener("blocked", () => blocked++);
+    return r;
+  };
+  const a = await openWalletStore({ indexedDB: idb, name });
+  await a.insertSeed(PRF);
+  // D's connection and channel deliver late
+  const realOpen = idb.open.bind(idb);
+  const RealChannel = globalThis.BroadcastChannel;
+  idb.open = (n: string, v?: number) => {
+    const r = realOpen(n, v);
+    r.addEventListener("success", () => {
+      const c = r.result;
+      const send = c.dispatchEvent.bind(c);
+      c.dispatchEvent = (e: Event) => (e.type === "versionchange" ? (setTimeout(() => send(e), LATE), true) : send(e));
+    });
+    return r;
+  };
+  globalThis.BroadcastChannel = class extends RealChannel {
+    set onmessage(fn: ((m: MessageEvent) => void) | null) {
+      super.onmessage = fn && ((m: MessageEvent) => void setTimeout(() => fn.call(this, m), LATE));
+    }
+  };
+  let d: WalletStore;
+  try {
+    d = await openWalletStore({ indexedDB: idb, name });
+  } finally {
+    idb.open = realOpen;
+    globalThis.BroadcastChannel = RealChannel;
+  }
+  const aOut = outcome(a.signOut());
+  const dOut = outcome(d.signOut());
+  const outs = [await aOut, await dOut];
+  let c = "not opened";
+  if (cOpen) {
+    try {
+      const cs = await (cOpen as Promise<WalletStore>);
+      try {
+        await cs.insertSeed(RANDOM);
+        c = "stored";
+      } finally {
+        cs.close();
+      }
+    } catch (e) {
+      c = `failed: ${(e as Error).message}`;
+    }
+  }
+  await sleep(2 * LATE);
+  a.close();
+  d.close();
+  const seed = await seedAtEnd(idb, name);
+  assert.ok(blocked >= 1, "A's delete never reported blocked: the model did not run");
+  assert.equal(outs[0], "deleted", `A: ${outs[0]}`);
+  assert.match(outs[1] as string, /^refused: .*wallet store is closed/, `D: ${outs[1]}`);
+  assert.equal(deletes(), 1, `deletes sent: ${deletes()} (A, D: ${outs.join(" | ")}; C: ${c})`);
+  assert.equal(c, "stored", `C: ${c}`);
+  assert.equal(seed?.source, "random", "C's seed, the only copy of its 12 words, was deleted by a stale sign out");
 });
 
 test("with no Web Locks, sign out, insertSeed and setCodeSaved refuse: never unlocked", async () => {

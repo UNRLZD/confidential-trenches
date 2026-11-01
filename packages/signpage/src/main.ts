@@ -14,11 +14,13 @@
 //   (card wallet-typed-words); never a silent fallback to another seed.
 // - Sign out deletes the store (wallet.md:156); another tab's sign out shows signed-out here too. It is not drawn, and the
 //   store refuses it, while the 12 words are the only copy and not saved (backupFirst: source not "prf" and code_saved
-//   false; wallet.md:922). A press on it is ignored when it comes within 500 ms of Sign out being drawn, of the page
-//   becoming visible (visibilitychange, pageshow) or of the window gaining focus: Chromium's own rule for its permission
-//   and payment sheets (InputEventActivationProtector; 500 ms is the default double-click interval on Windows and in
-//   Chromium), the same for mouse, touch, pen and keyboard. A click that a cross-site page lined up before sending this
-//   window here (a double-click trick) lands inside that window and does nothing; a later press works on every input.
+//   false; wallet.md:922). Its activation guard is Chromium's own rule for its permission and payment sheets (./guard.ts):
+//   a press is ignored when it is a repeated key, when it comes within 500 ms of the window's previous pointerdown or
+//   keydown, or within 500 ms of Sign out being drawn, the page becoming visible (visibilitychange, pageshow) or the
+//   window gaining focus; the same for mouse, touch, pen and keyboard. A click that a cross-site page lined up before
+//   sending this window here (a double-click trick, a burst of clicks, a held Enter) does nothing; a press after a
+//   500 ms pause works on every input. Sign out is the one control it guards: Create passkey and Use passkey open the
+//   browser's own passkey sheet, which carries the browser's protection.
 // - The page shows public values only: the account's profile key T_0 (wallet.md:68, a public key, never a NEAR account
 //   or money), in data-account, so a check can compare it. The entropy and seed64 are zeroed once used; the 12 words
 //   are a JS string, which cannot be zeroed, and never reach the DOM.
@@ -26,6 +28,7 @@
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
 import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { activationGuard, type Press } from "./guard.ts";
 
 type Seed = { v: 1; entropy: Uint8Array; source: "prf" | "random" | "code" | "wallet"; code_saved: boolean; created_ms: number };
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error";
@@ -48,17 +51,19 @@ root.id = "signin";
 if (framed) root.dataset.framed = "true";
 document.body.append(root);
 
-// Sign out's activation guard (Chromium's InputEventActivationProtector): a press within PROTECT_MS of the latest of
-// Sign out drawn, the page shown or the window focused is ignored. Times are event.timeStamp / performance.now(), one
-// clock.
-const PROTECT_MS = 500;
-let shownAt = performance.now();
-const reshown = (): void => {
-  shownAt = performance.now();
-};
+// Sign out's activation guard (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
+// (capture phase), so the gap to the previous input is known when Sign out sees its press.
+const guard = activationGuard(performance.now());
+const reshown = (): void => guard.shown(performance.now());
 addEventListener("pageshow", reshown);
 addEventListener("focus", (e) => e.target === window && reshown());
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && reshown());
+let last: { e: Event; press: Press } | null = null;
+const input = (e: Event): void => {
+  if (e.isTrusted) last = { e, press: guard.input(e.timeStamp, e instanceof KeyboardEvent && e.repeat) };
+};
+addEventListener("pointerdown", input, true);
+addEventListener("keydown", input, true);
 
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
@@ -72,18 +77,18 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
   // drawn now, and on screen by the next frame
   reshown();
   requestAnimationFrame(reshown);
-  // the press is the pointerdown or key press that starts the click; a click with none seen (an assistive tool's click)
-  // is its own press
-  let pressAt: number | null = null;
-  const press = (e: Event): void => {
-    if (e.isTrusted) pressAt = e.timeStamp;
+  // the press is the pointerdown or Enter or Space keydown that starts the click, with the verdict the window's capture
+  // listener just gave it; a click with none seen (an assistive tool's click) is its own press
+  let press: Press | null = null;
+  const pressed = (e: Event): void => {
+    if (e.isTrusted && last?.e === e) press = last.press;
   };
-  b.addEventListener("pointerdown", press);
-  b.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && press(e));
+  b.addEventListener("pointerdown", pressed);
+  b.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && pressed(e));
   b.addEventListener("click", (e) => {
-    const at = pressAt ?? e.timeStamp;
-    pressAt = null;
-    if (!e.isTrusted || at - shownAt < PROTECT_MS || e.timeStamp - shownAt < PROTECT_MS) return;
+    const p = press;
+    press = null;
+    if (!e.isTrusted || !guard.allows(p, e.timeStamp)) return;
     onClick();
   });
   return b;

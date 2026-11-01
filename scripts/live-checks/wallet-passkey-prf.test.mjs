@@ -8,9 +8,11 @@
 // copy and not saved). Round 4's: bad23f373f, the page at 23f373f (Sign out armed by a pointer move: a moving press and
 // Tab then Enter within 500 ms of the page shown sign out, a finger's tap with drift signs out in the same tap, a still
 // tap never signs out), and badNoListeners, a planted page without the guard's pageshow, focus and visibilitychange
-// listeners (a press right after each signs out). Records made before round 4 hold no guard or phone steps (prf.protect,
-// phone), and records made before the trigger steps (bad23f373f and older) hold no prf.triggers: those steps' lines are
-// BAD on them for that reason, checked as such below.
+// listeners (a press right after each signs out). Round 5's: bad265ad22, the page at 265ad22 (a burst's second click
+// within 500 ms of the first and a repeated Enter sign out). Records made before round 4 hold no guard or phone steps
+// (prf.protect, phone), records made before the trigger steps (bad23f373f and older) hold no prf.triggers, and records
+// made before round 5 hold no prf.burst or prf.repeat: those steps' lines are BAD on them for that reason, checked as
+// such below.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -31,12 +33,25 @@ test("the recorded good answer passes", () => {
 });
 
 const BAD = (rec) => bad(rec).map((l) => l.split(" (")[0]);
+// round 5's steps, which records made before round 5 do not hold
+const R5 = [
+  "BAD prf: a burst's second click, past 500 ms from Sign out drawn and within 500 ms of the first, does nothing",
+  "BAD prf: a repeated Enter on a focused Sign out does nothing",
+];
+// a record made before round 5: its round 5 lines are both BAD (not recorded), and the rest is returned
+function beforeR5(rec) {
+  assert.equal(rec.prf.burst, undefined);
+  assert.equal(rec.prf.repeat, undefined);
+  const lines = BAD(rec);
+  for (const l of R5) assert.ok(lines.includes(l), l);
+  return lines.filter((l) => !R5.includes(l));
+}
 // round 4's steps, which records made before round 4 do not hold
 const TRIGGERS = ["visibilitychange", "pageshow", "focus"].map((k) => `BAD prf: a press within 500 ms after ${k} does nothing`);
 // a record made before the trigger steps: their lines are all BAD (not recorded), and the rest is returned
 function beforeTriggers(rec) {
   assert.equal(rec.prf.triggers, undefined);
-  const lines = BAD(rec);
+  const lines = beforeR5(rec);
   for (const l of TRIGGERS) assert.ok(lines.includes(l), l);
   return lines.filter((l) => !TRIGGERS.includes(l));
 }
@@ -101,12 +116,24 @@ test("round 4's recorded red (the page at 23f373f) fails on each guard step and 
 
 test("the planted page without the guard's pageshow, focus and visibilitychange listeners fails on each trigger only", () => {
   const r = answers.badNoListeners;
-  assert.deepEqual(BAD(r), TRIGGERS);
+  assert.deepEqual(beforeR5(r), TRIGGERS);
   for (const k of ["visibilitychange", "pageshow", "focus"]) {
     const t = r.prf.triggers[k];
     assert.ok(t.withinMs < 500 && t.sinceDrawMs >= 500 && t.pressOn === "signout", k);
     assert.equal(t.after.state, "signed-out", k);
   }
+});
+
+test("round 5's recorded red (the page at 265ad22) fails on the burst and the repeated Enter only", () => {
+  const r = answers.bad265ad22;
+  assert.deepEqual(BAD(r), R5);
+  // the burst's second click came past 500 ms from the draw and within 500 ms of the first, and signed out
+  assert.ok(r.prf.burst.firstMs < 500 && r.prf.burst.secondMs >= 500 && r.prf.burst.gapMs < 500, JSON.stringify(r.prf.burst));
+  assert.equal(r.prf.burst.after.state, "signed-out");
+  // the repeated Enter came with no other input in the 500 ms before it, past the draw window, and signed out
+  assert.equal(r.prf.repeat.repeat, true);
+  assert.ok(r.prf.repeat.sinceDrawMs >= 500 && (r.prf.repeat.sincePrevMs === null || r.prf.repeat.sincePrevMs >= 500));
+  assert.equal(r.prf.repeat.after.state, "signed-out");
 });
 
 test("each broken step fails the check", () => {
@@ -154,6 +181,19 @@ test("each broken step fails the check", () => {
     ["a trigger with Sign out drawn inside the window", (r) => (r.prf.triggers.pageshow.sinceDrawMs = 120)],
     ["a press after a trigger that missed Sign out", (r) => (r.prf.triggers.visibilitychange.pressOn = "BODY")],
     ["no trigger steps", (r) => delete r.prf.triggers],
+    ["a burst's second click that signs out", (r) => (r.prf.burst.after = { state: "signed-out", account: null })],
+    ["a burst whose second click came 500 ms or more after the first", (r) => (r.prf.burst.gapMs = 500)],
+    ["a burst whose second click came inside the drawn window", (r) => (r.prf.burst.secondMs = 499)],
+    ["a burst whose first click came past the drawn window", (r) => (r.prf.burst.firstMs = 500)],
+    ["a burst of one click", (r) => (r.prf.burst.presses = 1)],
+    ["a burst that missed Sign out", (r) => (r.prf.burst.pressOn = "BODY")],
+    ["no burst step", (r) => delete r.prf.burst],
+    ["a repeated Enter that signs out", (r) => (r.prf.repeat.after = { state: "signed-out", account: null })],
+    ["an Enter that was not a repeat", (r) => (r.prf.repeat.repeat = false)],
+    ["a repeated Enter within 500 ms of the input before", (r) => (r.prf.repeat.sincePrevMs = 300)],
+    ["a repeated Enter inside the drawn window", (r) => (r.prf.repeat.sinceDrawMs = 200)],
+    ["a repeated Enter that missed Sign out", (r) => (r.prf.repeat.pressOn = "BODY")],
+    ["no repeated Enter step", (r) => delete r.prf.repeat],
     ["no phone sign-in", (r) => (r.phone.create = { state: "error", account: null })],
     ["Sign out drawn for a seed whose 12 words are the only copy", (r) => (r.noPrf.backupGate.signoutButtons = 1)],
     ["the planted no-backup seed not shown", (r) => (r.noPrf.backupGate.state = "error")],

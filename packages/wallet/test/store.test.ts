@@ -431,3 +431,60 @@ test("sign out refuses while a no-PRF seed's 12 words are the only copy and not 
 async function rawKeys(idb: IDBFactory): Promise<boolean> {
   return (await idb.databases()).some((d) => d.name === "ct-wallet");
 }
+
+// The plaintext buffers (a seed record's hold its entropy as hex) are zeroed once used, also when a step fails
+// (round 4's review, P3): the bytes wrap hands to encrypt, and the bytes decrypt hands back to unwrap.
+test("wrap's encoded plaintext and unwrap's decrypted buffer are zeroed after use, on error paths too", async () => {
+  const subtle = globalThis.crypto.subtle;
+  const realEncrypt = subtle.encrypt;
+  const realDecrypt = subtle.decrypt;
+  const given: Uint8Array[] = [];
+  const got: ArrayBuffer[] = [];
+  let failEncrypt = false;
+  let garble = false;
+  subtle.encrypt = (async (alg: AlgorithmIdentifier, key: CryptoKey, data: BufferSource) => {
+    given.push(data as Uint8Array);
+    if (failEncrypt) throw new Error("planted encrypt failure");
+    return realEncrypt.call(subtle, alg, key, data);
+  }) as SubtleCrypto["encrypt"];
+  subtle.decrypt = (async (alg: AlgorithmIdentifier, key: CryptoKey, data: BufferSource) => {
+    const out = await realDecrypt.call(subtle, alg, key, data);
+    if (garble) new Uint8Array(out).set(new TextEncoder().encode("{not json"));
+    got.push(out);
+    return out;
+  }) as SubtleCrypto["decrypt"];
+  const zero = (b: ArrayBuffer | Uint8Array): boolean => (b instanceof Uint8Array ? b : new Uint8Array(b)).every((x) => x === 0);
+  try {
+    const s = await openWalletStore({ indexedDB: new IDBFactory() });
+    given.length = 0;
+    got.length = 0;
+    const entropy = new Uint8Array(16).fill(0xab);
+    await s.insertSeed({ v: 1, entropy, source: "prf", code_saved: false });
+    assert.ok(given.length >= 1 && got.length >= 1, "insertSeed wrapped and read back");
+    // the seed's plaintext held its entropy as hex until it was wiped
+    for (const b of given) assert.ok(zero(b), "wrap's plaintext not zeroed");
+    for (const b of got) assert.ok(zero(b), "unwrap's plaintext not zeroed");
+    await s.setCodeSaved();
+    await s.get("meta", "seed");
+    await s.put("notes", "n1", { precommitment: new Uint8Array(32).fill(7) });
+    await s.get("notes", "n1");
+    for (const b of given) assert.ok(zero(b), "wrap's plaintext not zeroed");
+    for (const b of got) assert.ok(zero(b), "unwrap's plaintext not zeroed");
+    // error paths: encrypt fails, decode fails
+    given.length = 0;
+    failEncrypt = true;
+    await assert.rejects(s.put("notes", "n2", { secret: new Uint8Array(16).fill(9) }), /planted encrypt failure/);
+    failEncrypt = false;
+    assert.equal(given.length, 1);
+    assert.ok(zero(given[0] as Uint8Array), "wrap's plaintext not zeroed when encrypt failed");
+    got.length = 0;
+    garble = true;
+    await assert.rejects(s.get("meta", "seed"));
+    garble = false;
+    assert.equal(got.length, 1);
+    assert.ok(zero(got[0] as ArrayBuffer), "unwrap's plaintext not zeroed when decode failed");
+  } finally {
+    subtle.encrypt = realEncrypt;
+    subtle.decrypt = realDecrypt;
+  }
+});
