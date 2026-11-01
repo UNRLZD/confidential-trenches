@@ -3,7 +3,8 @@
 //   - view_access_key_list of the vault: keys [] (vault.md 2.8, "Read back after every deploy");
 //   - view_code: its sha256 equals contracts/vault/deployments/testnet-skeleton.json's wasm_sha256;
 //   - the wasm's imports: none of vault.md 2.8's banned actions, and its promise imports a subset of the seven allowed;
-//   - the wasm's function exports: nothing outside vault.md 2.5.7's list (no init, no setter, no __contract_abi);
+//   - the wasm's function exports: nothing outside vault.md 2.5.7's list (no init, no setter, no __contract_abi), and
+//     never withdraw without on_payout (a build that spends a note but cannot pay it out);
 //   - config(): it answers, naming Circle's testnet USDC as its asset and a testnet version. Both are pinned here, never
 //     taken from the deployment record (which the deploy script writes from config() itself);
 //   - storage_balance_of(vault) on that USDC: the vault is registered on its token, so a deposit's ft_transfer_call and a
@@ -147,14 +148,18 @@ export function networkProblems(buf) {
   return problems;
 }
 
-// What a wasm breaks of vault.md 2.8 and 2.5.7: { banned, promises, exports } (each the names out of line)
+// What a wasm breaks of vault.md 2.8 and 2.5.7: { banned, promises, exports, withdrawWithoutPayout } (each the names
+// out of line). withdrawWithoutPayout names `withdraw` when the wasm exports it without `on_payout`: a build that spends
+// a note but cannot pay it out (2.5.2 rows 13-15, 2.5.4), which must never be deployed.
 export function wasmProblems(buf) {
   const { imports, exports } = wasmLists(buf);
   const names = imports.filter((i) => i.kind === 0).map((i) => i.name);
+  const fns = exports.filter((e) => e.kind === 0).map((e) => e.name);
   return {
     banned: names.filter(banned),
     promises: names.filter((n) => n.startsWith("promise_") && !PROMISE_ALLOWED.has(n)),
     exports: exports.filter((e) => e.kind === 0 && !EXPORTS_ALLOWED.has(e.name)).map((e) => e.name),
+    withdrawWithoutPayout: fns.includes("withdraw") && !fns.includes("on_payout") ? ["withdraw"] : [],
     functionExports: exports.filter((e) => e.kind === 0).map((e) => e.name),
     promiseImports: names.filter((n) => n.startsWith("promise_")),
   };
@@ -199,6 +204,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
       say(w.banned.length === 0, `no banned import ${at}: ${w.banned.length ? w.banned.join(", ") : "none"}`);
       say(w.promises.length === 0, `promise imports are a subset of the seven ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
       say(w.exports.length === 0, `function exports are inside vault.md 2.5.7's list ${at}: [${w.functionExports.join(", ")}]${w.exports.length ? `, not allowed: ${w.exports.join(", ")}` : ""}`);
+      say(w.withdrawWithoutPayout.length === 0, `withdraw is exported only with on_payout ${at}: ${w.withdrawWithoutPayout.length ? "withdraw without on_payout" : "yes"}`);
     } catch (e) {
       say(false, `code ${at}: ${e.message}`);
     }
