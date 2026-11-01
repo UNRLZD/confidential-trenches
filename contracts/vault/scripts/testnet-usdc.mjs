@@ -31,7 +31,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { b58encode, b58decode } from "./deploy-testnet.mjs";
-import { RPCS as GATE_RPCS, readTx } from "../../../scripts/ci/money-gate.mjs";
+import { RPCS as GATE_RPCS, okOperators, readTx } from "../../../scripts/ci/money-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const MAINNET_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
@@ -277,23 +277,23 @@ async function main() {
   writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
   console.log(`wrote ${out}`);
 
-  // 7. every tx read back by the money gate's readTx, in the money gate's RPC order until two read ok (the third,
-  // archival-rpc.testnet.near.org, answers 429 with a Retry-After of minutes, so it is asked only when needed); none
-  // may read failed or old. The live check reads them again by the same rule.
+  // 7. every tx read back by the money gate's readTx, in the money gate's RPC order until two operators read ok (the
+  // third host, archival-rpc.testnet.near.org, is FastNEAR's again and answers 429 with a Retry-After of minutes, so
+  // it is asked only when needed); none may read failed or old. The live check reads them again by the same rule.
   for (const t of txs) {
     let reads = [];
     for (let i = 0; i < 6; i++) {
       reads = [];
       for (const url of TESTNET_RPCS) {
-        if (reads.filter((x) => x.r === "ok").length >= 2) break;
+        if (okOperators("near-testnet", reads).size >= 2) break;
         reads.push({ url, r: await readTx(fetch, url, { chain: "near-testnet", hash: t.hash, signer: t.signer }) });
       }
-      if (reads.filter((x) => x.r === "ok").length >= 2) break;
+      if (okOperators("near-testnet", reads).size >= 2) break;
       await sleep(5000);
     }
-    if (reads.filter((x) => x.r === "ok").length < 2 || reads.some((x) => /^(failed|old)/.test(x.r))) throw new Error(`${t.hash} (${t.what}) reads ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}`);
+    if (okOperators("near-testnet", reads).size < 2 || reads.some((x) => /^(failed|old)/.test(x.r))) throw new Error(`${t.hash} (${t.what}) reads ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}`);
   }
-  console.log(`every tx (${txs.length}) reads ok on two testnet RPCs; next: node scripts/live-checks/vault-testnet-usdc.mjs`);
+  console.log(`every tx (${txs.length}) reads ok on two testnet operators; next: node scripts/live-checks/vault-testnet-usdc.mjs`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

@@ -15,12 +15,16 @@
       "types": "./src/signin/passkey.ts",
       "default": "./src/signin/passkey.ts"
     },
+    "./signin/words": {
+      "types": "./src/signin/words.ts",
+      "default": "./src/signin/words.ts"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
     "test:e2e": "node test/store.e2e.mjs && node test/passkey.e2e.mjs",
-    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts src/store/index.ts src/notes/secrets.ts src/signin/passkey.ts src/deposit/account.ts src/deposit/delegate.ts test/derive.test.ts test/store.test.ts test/store-race.test.ts test/note-secrets.test.ts test/passkey.test.ts test/deposit-account.test.ts test/deposit-delegate.test.ts"
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts src/store/index.ts src/notes/secrets.ts src/signin/passkey.ts src/signin/words.ts src/deposit/account.ts src/deposit/delegate.ts test/derive.test.ts test/store.test.ts test/store-race.test.ts test/note-secrets.test.ts test/passkey.test.ts test/words.test.ts test/deposit-account.test.ts test/deposit-delegate.test.ts"
   },
   "dependencies": {
     "@blindfill/kit": "workspace:*",
