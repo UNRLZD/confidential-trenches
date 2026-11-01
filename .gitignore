@@ -1,0 +1,18 @@
+# private to the maintainers' machines
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+
+# secrets
+.env
+.env.*
+!.env.example
+.keys/
+*.pem
+
+# build output
+node_modules/
+dist/
+target/
+coverage/
+.DS_Store

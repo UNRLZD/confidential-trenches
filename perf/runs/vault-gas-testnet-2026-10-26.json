@@ -1,0 +1,142 @@
+{
+ "schema": "perf-run/1",
+ "id": "vault-gas-testnet-2026-10-26",
+ "chain": "near",
+ "network": "testnet",
+ "signer": "script",
+ "date": "2026-10-26",
+ "source": "proofs/g1-vault-gas/testnet/results/runs/20261026T034502Z-testnet/txs.json",
+ "note": "The vault's test build: a real withdraw proof checked at tree depths 3, 16 and 32, and five deposits' tree work (no token call). Value is the vault receipt's gas; fee is the NEAR all receipts burnt.",
+ "series": [
+  {
+   "step": "vault-withdraw-gas",
+   "samples": [
+    {
+     "ok": true,
+     "value": 40.583566230428,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "E3D2t9QABxYJF9KhQbqi23QE7JcdaxRHjH9L4iTqEjdk"
+      }
+     ],
+     "fee": {
+      "amount": "4095695241997800000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 49.918144488466,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "J3BR5BGV5Q87ovArpxCxPrjEMVoRvaAYisUZoXe7zSM1"
+      }
+     ],
+     "fee": {
+      "amount": "5029133994315600000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 82.420441979409,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "4RQcq1sbB9GLA6SunWzWkbPigRVhr5qLnq74ndEaxZfj"
+      }
+     ],
+     "fee": {
+      "amount": "8279373280152900000000",
+      "unit": "yocto"
+     }
+    }
+   ]
+  },
+  {
+   "step": "vault-deposit-gas",
+   "samples": [
+    {
+     "ok": true,
+     "value": 6.166994672629,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "EioYwuXPgpEkar6uPohK6bNnQPg54n2Ud5r2kBPkRkou"
+      }
+     ],
+     "fee": {
+      "amount": "648106232071900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 9.064505428396,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "8DB3hVfwxRbLVyoFMgUMBrTuyQVEDidc3AqFRV4uXn8s"
+      }
+     ],
+     "fee": {
+      "amount": "937857307648600000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 9.405004766308,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "2xRK7hnH41ydRLVD23DG5XrvdSWomh9oztKFePLzoWb3"
+      }
+     ],
+     "fee": {
+      "amount": "971907241439800000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 11.899895903835,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "6uF3mDkczfMeqNeumFWF1q4qFMBYjikiqiSV54DUz5uY"
+      }
+     ],
+     "fee": {
+      "amount": "1221391586821000000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 9.755441523189,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "testnet",
+       "id": "4UJNnhT9ktb1pzYknhVsMsoqw2EPfhpzHUrFEifXo8K5"
+      }
+     ],
+     "fee": {
+      "amount": "1006946148756400000000",
+      "unit": "yocto"
+     }
+    }
+   ]
+  }
+ ]
+}

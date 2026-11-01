@@ -1,0 +1,622 @@
+{
+ "schema": "perf-run/1",
+ "id": "robinhood-script-2026-10-20",
+ "chain": "robinhood",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-20",
+ "source": "proofs/p4-speed/hood/results/2026-10-20T17-13-35-480Z-live.json",
+ "note": "Keys held by the test script, quote held before the tap. Filled is the first receipt with status 1. Fee is gas used x price.",
+ "series": [
+  {
+   "step": "buy",
+   "samples": [
+    {
+     "ok": true,
+     "value": 1773.981667,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x500108c909d6cbe145fae5555c991bb9a33152957096860faf961555b23c6293"
+      }
+     ],
+     "fee": {
+      "amount": "7813435440000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2201.561207999999,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x6985cae19af0bc87c90e266e4d6e57e495da48537482d818ddf0944670471350"
+      }
+     ],
+     "fee": {
+      "amount": "8003546800000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2220.0053749999934,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x9ea4096c7564c3babd376f1576b7f5c677d6b1875c57cffb6b6c8ab368d5a504"
+      }
+     ],
+     "fee": {
+      "amount": "7908503856000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3953.0368339999986,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x2f7832f87d53856e325d5e2eaa577c363a0e3fc36c7be3f9e528ac6c69c7c967"
+      }
+     ],
+     "fee": {
+      "amount": "7866406824000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2196.374874999994,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x8c613fc45cd47c96c18374608a37a31add25e93592849fe5380aa272ea49cedc"
+      }
+     ],
+     "fee": {
+      "amount": "7786215458000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2148.0785409999953,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x9a69076bc83989d9c5cea78bef70970a4d9921431c761bbcec82291c39239298"
+      }
+     ],
+     "fee": {
+      "amount": "7805755980000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2214.727917000011,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xe1df11af76cf1a7011453012b77139bb056d7e6aa5165a4ee1ca4182f0088126"
+      }
+     ],
+     "fee": {
+      "amount": "7898570136000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1748.5963749999937,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xab77655622d5a5888ad25f270b88e166cd3f2099c37712cff70aa70d4cc91116"
+      }
+     ],
+     "fee": {
+      "amount": "7812692718000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1974.6613329999964,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x18f8570b675a88728c748949a1f9306ddb6da3288dc93160ed2e88dc7cf40a2f"
+      }
+     ],
+     "fee": {
+      "amount": "7887707640000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1772.526957999973,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x988af135a10e274a8bdf7be229bd34ca9b6d245664d5163ca883f6832d921773"
+      }
+     ],
+     "fee": {
+      "amount": "7774551594000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1807.2697499999776,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xacaeec9c2be5d28f9a731bfd6f8804476cb75dab2b25ad6bc6bbbfc4ceb442b8"
+      }
+     ],
+     "fee": {
+      "amount": "7771631624000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1824.0729999999749,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x3df02d63294b7fd1f624021f77f4862ef609df2e2637c58e06d09c6ae360d62c"
+      }
+     ],
+     "fee": {
+      "amount": "7799339220000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1767.9609169999603,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x5f98c80cf31caab9b228dd64d86ba703856994aa5fdd91760e40607bb7dea07b"
+      }
+     ],
+     "fee": {
+      "amount": "7825085720000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2219.4893340000417,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x360afd89ea69a0a644c119672470107560df369c13337c5f3826bb4aac11ba36"
+      }
+     ],
+     "fee": {
+      "amount": "7783726560000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1748.4111250000424,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xa5c1759b7658c7ff322c78a002327a615e97e3dfac4cb0440877189d42f23b53"
+      }
+     ],
+     "fee": {
+      "amount": "7794646582000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2199.5446660000016,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x743216238a59c5ebde09bb753df32d147c90f5f7be44e68b9d8cbaca9bdf5c99"
+      }
+     ],
+     "fee": {
+      "amount": "7807731762000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1713.8251670000027,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x927bf2e10d1ee08911bdbf8a8a6830e4bed61b3612053d78f3bc3780245c901c"
+      }
+     ],
+     "fee": {
+      "amount": "7870095996000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1706.9212079999852,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xd1611cfb48ff1cffce76bd8e023516872a2ddce779a9808e00de11cc4319bbc8"
+      }
+     ],
+     "fee": {
+      "amount": "7796100906000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4059.6855000000214,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xb742895276038bc09c95354ad5187fa84970b2f756e51b4b15a64c0e38793144"
+      }
+     ],
+     "fee": {
+      "amount": "7770357564000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1871.5044580000103,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x155f78f47c3e6b4d964bc388deccc6d0f1e75f26890812d43538a1b0527e9bc4"
+      }
+     ],
+     "fee": {
+      "amount": "7813435440000",
+      "unit": "wei"
+     }
+    }
+   ]
+  },
+  {
+   "step": "sell",
+   "samples": [
+    {
+     "ok": true,
+     "value": 1762.5134169999983,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xe7a67f54554470501730a1834da0726dad85801736dd42922729d9409d249fa4"
+      }
+     ],
+     "fee": {
+      "amount": "6634142538000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2515.823166000002,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xc20045bb8172776849ad9df43555626c5ab64a4a9ad9b83caad76a069f68c580"
+      }
+     ],
+     "fee": {
+      "amount": "9315551448000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1879.801707999999,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x5213d6c8a6646ca86dd4cb5608b0044f7ab662df6ba96dd7f08d5a72d955a85c"
+      }
+     ],
+     "fee": {
+      "amount": "10175579478000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2489.6620410000032,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x96f10acb9058f9f720cfeaea1024f5fb907e50952fb06c7e1d07990c76d219cf"
+      }
+     ],
+     "fee": {
+      "amount": "8736277680000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2193.573208000016,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x839d8ebe208ec1029edf5d2b62dcac814bd4f354fc0cefe792806c2d2eaf8677"
+      }
+     ],
+     "fee": {
+      "amount": "6236643400000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1766.5452499999956,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xccc5be7b595cf483e40cc0fa2f0ddd8d66ad69519a0d72c1b7382a488ee72728"
+      }
+     ],
+     "fee": {
+      "amount": "6298253038000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1679.6983750000072,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xe922e33d007502ce391f8cc69eeeb68189c0dcb61028bca207ac1acab6e4d531"
+      }
+     ],
+     "fee": {
+      "amount": "6633657492000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2244.643374999985,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xe78aea63d1c73183e2dd2b0bc181aaf1e329ee59e0840e0e663cf88a26349603"
+      }
+     ],
+     "fee": {
+      "amount": "7218060714000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2294.1492500000168,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xefc6ae9eaf7e05f2c408b8646b2fa6273218a914c9a1bfb48fd2222dcff7ded3"
+      }
+     ],
+     "fee": {
+      "amount": "6437313168000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1845.6147499999497,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x350e9bebc9e3405f938a0bbc9afa8b551f8c2af1266d77cea79f586a14911e82"
+      }
+     ],
+     "fee": {
+      "amount": "6619641840000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1786.919292000006,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xb2b8a5abb038848e622cab1d3891ff5eb717cdc8e3f2a2f4b8b1277e30ca2b58"
+      }
+     ],
+     "fee": {
+      "amount": "8529208628000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1774.257500000007,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xd7dfd2cc49753ba7c3af3f1cc1563520f9bc552f6a795c2b0f760ca5e504d9db"
+      }
+     ],
+     "fee": {
+      "amount": "5772699186000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2213.532750000013,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x5247ed00092b1ce78bc9aa4e4e5a5e427ea1d35680524a6cab47f8af3c6f251d"
+      }
+     ],
+     "fee": {
+      "amount": "5794458448000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2289.6479999999865,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0xa05a6e5f14f5bf53975d0f5f9fc2ab39351ad1f97fddd868c57db8b3a977ca3d"
+      }
+     ],
+     "fee": {
+      "amount": "6679933434000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1614.9701249999925,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x0cea685defe92a3d171a81af510f68b143fef5ca27a60c53d0a47f7ddf8c5c3a"
+      }
+     ],
+     "fee": {
+      "amount": "5776334910000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2548.560750000004,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x9f0d45cf1799fe47f20a9dfceb1833220164ba5b9dd480579531371da67f4d6c"
+      }
+     ],
+     "fee": {
+      "amount": "6309476238000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2081.476250000007,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x6818a486af13850e92c6ec3a0549af79663fc450982132fafdd06748bac7d832"
+      }
+     ],
+     "fee": {
+      "amount": "7252748368000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2013.8044160000281,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x96a4a9a7518eaacc594c7c9cff9dbd802b90b72695b4e5dcb0eef6c636eac153"
+      }
+     ],
+     "fee": {
+      "amount": "6177083056000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1863.4938749999856,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x453841c1f903bd036cfc2e974ad625acf289c7dde9b7f413962b8f2ac7bf980c"
+      }
+     ],
+     "fee": {
+      "amount": "6179827584000",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 2189.8939580000006,
+     "txs": [
+      {
+       "chain": "robinhood",
+       "network": "mainnet",
+       "id": "0x6cf55cd5ca7d18b6fc230d2baddcf668678f50bc9ca80b941cdc04e8ec1cf72b"
+      }
+     ],
+     "fee": {
+      "amount": "6670738440000",
+      "unit": "wei"
+     }
+    }
+   ]
+  }
+ ]
+}

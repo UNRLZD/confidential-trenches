@@ -1,0 +1,57 @@
+{
+ "schema": "perf-run/1",
+ "id": "base-hop-2026-10-26",
+ "chain": "base",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-26",
+ "source": "proofs/g1-money-loop/runs",
+ "note": "SOL on Solana to ETH on a fresh Base wallet through Relay, request to arrival read on two RPCs per chain. Fee is Relay's quoted fee in USD.",
+ "series": [
+  {
+   "step": "hop",
+   "samples": [
+    {
+     "ok": true,
+     "value": 5795.123416000002,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "q3zqNKebFSXZMrFeDCUYzG8UK9RdAkULWbbXoshWY2VfYFN2Kb4kZQFi4vrpYzPm6RDX8LRK2PPq9CfP8FqpdYa"
+      },
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x732f0e461ac76c3596d3d3f170e15f1c29ab525c17c97626eb244c8d483f1dda"
+      }
+     ],
+     "fee": {
+      "amount": "0.037819",
+      "unit": "usd"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4920.855333999993,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3dcGVem1VepmpxZ9FjHpNDJbaH8x8gjbw56C3exdLF5Vfm94fzEHvUAEJe9h6yEGod5rxShfhLxipdSX8MUBN3ip"
+      },
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x8f82661c6d256f985b03bb1c4209554177c6177d50273909bc333fd3e77d730e"
+      }
+     ],
+     "fee": {
+      "amount": "0.038748",
+      "unit": "usd"
+     }
+    }
+   ]
+  }
+ ]
+}

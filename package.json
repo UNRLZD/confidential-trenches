@@ -1,0 +1,16 @@
+{
+  "name": "confidential-trenches",
+  "private": true,
+  "packageManager": "pnpm@10.33.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "check:imports": "depcruise --config .dependency-cruiser.cjs --output-type err . && node scripts/ci/kit-reach.mjs",
+    "test:gates": "node --test scripts/ci/*.test.mjs"
+  },
+  "devDependencies": {
+    "dependency-cruiser": "18.5.0",
+    "typescript": "6.0.3"
+  }
+}

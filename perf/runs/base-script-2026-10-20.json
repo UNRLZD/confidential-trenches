@@ -1,0 +1,622 @@
+{
+ "schema": "perf-run/1",
+ "id": "base-script-2026-10-20",
+ "chain": "base",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-20",
+ "source": "proofs/p4-speed/base/results/2026-10-20T00-51-59-782Z-live.json",
+ "note": "Keys held by the test script, quote held before the tap. Filled is the first receipt with status 1. Fee is gas used x price + the L1 data fee.",
+ "series": [
+  {
+   "step": "buy",
+   "samples": [
+    {
+     "ok": true,
+     "value": 925.0735840000007,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x8fc972d01e09fe754764d8c50dd08ada3b7a11a8793f62d7e13d7931eaa91937"
+      }
+     ],
+     "fee": {
+      "amount": "3293632446952",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 858.6190420000021,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x1735fca74c2d63650751346cafb40e49048003762af2741388bf501c5b20c737"
+      }
+     ],
+     "fee": {
+      "amount": "3293652940478",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 883.8153329999986,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x6a0fe5406630715038ac3ee2a84a2e19002e1836729d8b9f37503a5df5393574"
+      }
+     ],
+     "fee": {
+      "amount": "3293190737147",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1293.8453750000044,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x3f82948be9d5d4fe3ed1572ee255b734771bee77f778d19eb2dea855f75c86a7"
+      }
+     ],
+     "fee": {
+      "amount": "3293460822585",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1278.8844170000084,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x77514b8c1c6b15ef70a8345a6b68d3f60994fc3076edbe51622e733cd6fcba4f"
+      }
+     ],
+     "fee": {
+      "amount": "3992318259375",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1260.9602079999895,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x73d80814427b62f932e12fd0201584fd4847b2a3990a8ca9232514ee64e2cf0b"
+      }
+     ],
+     "fee": {
+      "amount": "3293532053157",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 850.1990419999929,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x7e385af2fbbf2303991414e925c4d9489eef0a2dcc865f77103edb6be260726f"
+      }
+     ],
+     "fee": {
+      "amount": "3992386227891",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 850.0920000000042,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x2d3bed38a2dcabfd31300914b89aebfb34eaa8aeeda603f555c0db5ba0e23e5d"
+      }
+     ],
+     "fee": {
+      "amount": "3293252945327",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 942.9921659999818,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x87acbcc52a8f566ddc976b9332adb7679aeb61e6a13bbb0a8de79a32fc79ad4c"
+      }
+     ],
+     "fee": {
+      "amount": "3293636175597",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 885.8120840000047,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0xaed72ff0bfb26d05ae14f624a059a94fee618555c9fbf8b17a1e1c85fd89a3e5"
+      }
+     ],
+     "fee": {
+      "amount": "3992291001944",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 885.2625830000034,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x37dd9c49b2d67ebb8e7f3facf556181173e40f1e19a0d2bd03c14a0bbea28945"
+      }
+     ],
+     "fee": {
+      "amount": "3992158812321",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 892.6823329999752,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x3058d7e245b261a72da26c64f2441a915dbfb6b86d2ca3a9b8de916203681e1d"
+      }
+     ],
+     "fee": {
+      "amount": "3992282218180",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1350.2022920000018,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x29b576993d0746b559d5a1c978c8e545925df2b3df65220a95f8a35f074f6e25"
+      }
+     ],
+     "fee": {
+      "amount": "3293416178918",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 950.0977089999942,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0xd8a43e2cca5f201bbee49d35618b9f94e3ebc11df2126295090ebade6e96e298"
+      }
+     ],
+     "fee": {
+      "amount": "3251982692102",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 857.373666999978,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x4a228e640c63488dc83144c6cc6340a1146ab382aec0e89c5ef9e945d0a099dd"
+      }
+     ],
+     "fee": {
+      "amount": "3293823645440",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 943.6454580000136,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x4bebe36515f2ef7ac227350d2f5558eee0d09606bebaea5918c25350db4c2e13"
+      }
+     ],
+     "fee": {
+      "amount": "3992854580166",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 851.0700829999987,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x8a8b897bf12991c95b7822627daac4a474e3be55e1a0e32b41c3840721344022"
+      }
+     ],
+     "fee": {
+      "amount": "3294433122046",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 990.5789579999982,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x61e479fdb2c1f356cd08ac7a9ed19c1bb166e6be0295055b0167a951b8f1ea09"
+      }
+     ],
+     "fee": {
+      "amount": "3294490453746",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 882.2852499999572,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x8a74a6532a37d3af986375ee75307f5ae8ee851c959569fc43f83eaf927ebc6c"
+      }
+     ],
+     "fee": {
+      "amount": "3992744668993",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 879.6561250000377,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x995ad00d2e9232ffc5cadadaff603cd8730f596e1625398470acf53fb6f0f091"
+      }
+     ],
+     "fee": {
+      "amount": "3303080075832",
+      "unit": "wei"
+     }
+    }
+   ]
+  },
+  {
+   "step": "sell",
+   "samples": [
+    {
+     "ok": true,
+     "value": 1123.6280000000006,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x55df7e39f60913a83d32269b69ac0ff83796f3b400ac5d059412f3692abc5e4a"
+      }
+     ],
+     "fee": {
+      "amount": "4007732715258",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1242.1499590000021,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x063cae84e9f7af491099f3706203de1931aebdfa7bc2e090446737031e1b9966"
+      }
+     ],
+     "fee": {
+      "amount": "4000279208556",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1207.3323339999915,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x85b82524b450940f6c738aec1f5c69ddada03ba07ee373523cf8b6a5ddcf921d"
+      }
+     ],
+     "fee": {
+      "amount": "3311391503224",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1224.28624999999,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x6be5bac9ef378249f9bfd720b6aa3cc8c0f5cd31360b7cd8a0e8abeb8df93104"
+      }
+     ],
+     "fee": {
+      "amount": "4000555455937",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1284.5355839999975,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0xe26a7fd5154a20e9f4d48c4bee3166bd471cf99d2e79c3b9255d5e9e910221e6"
+      }
+     ],
+     "fee": {
+      "amount": "4004478627480",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1183.2450420000241,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x25b8587922c7deca0c85cb0e8cd92e017ff2e88e89433b9fe7b571b5e0c2d04e"
+      }
+     ],
+     "fee": {
+      "amount": "3314573044106",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1189.232457999984,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x7be78b4fff4ac10557acd9cd80efa8e7aeac57327ed2b92b160663b6f690ea53"
+      }
+     ],
+     "fee": {
+      "amount": "3310849394388",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1204.1882080000069,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x45e30cbb8eb06b12d8c99310be54d9f7d5cd49be9180433db748b3adbe14ab06"
+      }
+     ],
+     "fee": {
+      "amount": "3310571353304",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1151.066124999983,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x5c54cc310995bbed60b36cfd0fde4a897fcfad1aa8baf6e7b86b97aafef290d0"
+      }
+     ],
+     "fee": {
+      "amount": "4000405975051",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1170.1127500000002,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0xb12758e1d03870fbd2d7b0b218e42f6614cd242aebe3b7d8e94fc93a8cf6658d"
+      }
+     ],
+     "fee": {
+      "amount": "3311541214129",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1142.3030410000065,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x4d65bc2d0ae623fcd1e6488130d720b1a5b2beefbab3ae2e27148c11308bee1e"
+      }
+     ],
+     "fee": {
+      "amount": "3311261857462",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1214.5478749999893,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x1b396a8f6889c857038e26ab691c80a5bd6a5c42680aaff1a5e9468ae076b09a"
+      }
+     ],
+     "fee": {
+      "amount": "3315395522985",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1213.314167000004,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x0b08470c39953080e9f1c6bd98c5864697f7ef1197df149855de9782313dbea6"
+      }
+     ],
+     "fee": {
+      "amount": "3310804178918",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1249.616708000016,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0xbae7ad3d7183af060c3519cbf04645f857f8bacf228df691f94db55e43bc17e7"
+      }
+     ],
+     "fee": {
+      "amount": "3311117774708",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1192.5147920000018,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x5613a79de8ad4973972d9aca6e0fe6da3df3bed7b6554c51e95f2feb079e66e2"
+      }
+     ],
+     "fee": {
+      "amount": "3310896902607",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1231.2732909999904,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x609f1b428ca0cb6224da097ae7b25d8f4a3f255b6418da409de9c376ce9b8092"
+      }
+     ],
+     "fee": {
+      "amount": "4000562650765",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1174.3115000000107,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x14f4069a0e54a0d0b5d05ab72ef3ab0b4c83e43edbd4fbd2e30440841397acf7"
+      }
+     ],
+     "fee": {
+      "amount": "3311005429422",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1186.846291999973,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0xddc13422c20b1199339d2699c326115dde4719d0d4cb3fa100e9d770cd0e88fc"
+      }
+     ],
+     "fee": {
+      "amount": "3999927507916",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1129.3556250000256,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x184517c69f69e1ec21e246aa1e2cac40debab1a45bf48ca68b08de6837b3b662"
+      }
+     ],
+     "fee": {
+      "amount": "3310931627156",
+      "unit": "wei"
+     }
+    },
+    {
+     "ok": true,
+     "value": 831.1532500000321,
+     "txs": [
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x7a96401b8bde102883106849119a2f7ef2682c351c7ff63ee6f574d0f8312fdb"
+      }
+     ],
+     "fee": {
+      "amount": "3315353325729",
+      "unit": "wei"
+     }
+    }
+   ]
+  }
+ ]
+}

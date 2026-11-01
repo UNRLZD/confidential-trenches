@@ -1,0 +1,5 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+# a package version must be a week old before it installs (minutes)
+minimumReleaseAge: 10080

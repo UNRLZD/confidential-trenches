@@ -1,0 +1,722 @@
+{
+ "schema": "perf-run/1",
+ "id": "near-script-2026-10-20",
+ "chain": "near",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-20",
+ "source": "proofs/p4-speed/near/results/2026-10-20T01-27-04-776Z-live.json",
+ "note": "Keys held by the test script. Filled is the wallet's balance seen at optimistic, polled every 200 ms. Fee is the NEAR the trade's transactions burnt.",
+ "series": [
+  {
+   "step": "buy",
+   "samples": [
+    {
+     "ok": true,
+     "value": 4087.8652919999986,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "Grg2QcPqzQEh3XsVvEC9EP625MJJCjgJ28zTD2WGxcXH"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "GRGzwbpNGwFkBSVDT6apuSAZKv4wYPSBsNX6PbHCG1QC"
+      }
+     ],
+     "fee": {
+      "amount": "2362433815594300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4191.751084000003,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "8e9zjyHMnUHaUG2cLdBS2PpwgsTtZwJWKgfMUdHjfGrW"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "HFebw8FEPrucKsUCrrefUQpVJw7gd5sZk4jjWeoSKzyt"
+      }
+     ],
+     "fee": {
+      "amount": "2355025741914700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4295.060792000004,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "8JxF4UHWfZHz77mohH6cGtisvtWmrww8cNUepT15aPuu"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "Fzd5n4ZqD9LXBbmuqwr79nwabBj4CsFhtZU6f5vZ7ky9"
+      }
+     ],
+     "fee": {
+      "amount": "2358148630410700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3678.657374999995,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CYRbTr9XDToSN9AMVmwpiwCVVCoVXZNZnpYs1p7xkmYv"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "jeuSSoFRTDBxyrUy2rXpo67YquNzwbY22SBiVpMZfAX"
+      }
+     ],
+     "fee": {
+      "amount": "2362578126996700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3667.9877080000006,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "C1sraoq4PJu1qAaRqdZcy7iyPWWTCamzrRoacir6rQtz"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "4sQwetyAXMEvcoUJc2mkiz3snQyeoWV1LG2LAZkLxjf4"
+      }
+     ],
+     "fee": {
+      "amount": "2343123270513100000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3596.6510830000043,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "EjoXXoxF19S4cc8AUj3uEzh6qUTN1cyayHXaH7hvpbZ8"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "Anq8ym7WnL5AjRdvkqJMb7S7FCPexcfgF358tdKWpnBj"
+      }
+     ],
+     "fee": {
+      "amount": "2354981148539500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3998.1351250000007,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CJRnDXfwHZCtNiR9sd36YGPJAn8dCHriHKyRR34CWFza"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CLQGruhvwDrizrbmRJ4YTYtE6Z3FDXeQ1Cuwoy7Ne4eg"
+      }
+     ],
+     "fee": {
+      "amount": "2358887111170300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3869.702290999994,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "BizraxzpD7fZiQHtestLD5GLmBse1jJFfSaiwA99wL6s"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "5u7aWAmpLyN73tdNHcYjMr5WCWY18H3VcxfZpBGUd6QB"
+      }
+     ],
+     "fee": {
+      "amount": "2361744453367900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3734.681082999974,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CAgtYYnNgh9ixxsfo3MmxFgdj5DfRNMx3WiTcpdzhH8"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "6jZzwzmvmQmA3sWyjYDUiF9hsRp1eeXNchRcQfiYozmL"
+      }
+     ],
+     "fee": {
+      "amount": "2362739716275100000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3371.6311250000144,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "BhorVtLkqGtiinPPaA7MgxnkimoRznuRj5AfYKCcEVpy"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "3shkzxpPA3RYUDoTVSMeRqJDHT9Smu3HU1nPqLUfVDkx"
+      }
+     ],
+     "fee": {
+      "amount": "2359597918703500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4178.45529199997,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "9fXzURRaP3ubYHTgYigudzgLomNzeKYq8APvN4SmyEHp"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "37j18DwFYuguLtuSB24Q7jERb33AGVDKuj9MQ5coZ1dn"
+      }
+     ],
+     "fee": {
+      "amount": "2362808663227900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3639.4347089999937,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "3fH1saJGVmqhHXacuoSA83dPtmadWrBmEfVvru7zW3aL"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "BZPmXoa7u1xGqSfez5fZT7i4ygbhjGoko522HLU4ifo7"
+      }
+     ],
+     "fee": {
+      "amount": "2362166090791900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3937.7693750000326,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "MqKmHhD7PQEd5Jw8uHePwF7jco8HAyyHrGkcmeLD33P"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "7LscnncGVXU7jDMNfn7JGb5Nq733XHjYrDQsMYmUDixV"
+      }
+     ],
+     "fee": {
+      "amount": "2362268688465100000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3670.900416999997,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "AmMMNMLzbDLM1MXtqNcuSxWxQ7WksuzNvBSzEJrUT2q7"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "DPm5RytDABLcro2xCtTAWig6g1aaZVb4tHZa1oJWLGzd"
+      }
+     ],
+     "fee": {
+      "amount": "2358602999211100000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3352.7359590000124,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "8cEGFr7Va9zqk2HtMxVEhLwyqu1FvU5bs5ZWLmj4qSip"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CLThHC5Ex68mSE5dX1nYfgU5xXjixMUFY9t44e32G8fH"
+      }
+     ],
+     "fee": {
+      "amount": "2362350141309100000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3956.149875000003,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "Gfupn2EBUjsDfyJMgWuzGPdMUpSJryyCs1MEaGuAiwcM"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "8oEswn3mAxE7PTFDXdjUdZspSXT4SYeSj53v3CSswYqE"
+      }
+     ],
+     "fee": {
+      "amount": "2362491819892300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4327.657041999977,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "FGogfkdfxEViaLPpQdWGR2AKHiAg8DbwZ7HHoyJuMo3J"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "HfDuHxGsNZHuVkaVHhLFCH5sBdcuHL2M6xMDMeUukMLt"
+      }
+     ],
+     "fee": {
+      "amount": "2362602906264700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4086.7288749999134,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "7biQaQaivRVSzHXeCW8vAxz3G7bs3uDjVX19PbqAVD5J"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "hYUczxEbXeyZjSK7gPaqPSrJWANuKmixDYSYRAXv7m3"
+      }
+     ],
+     "fee": {
+      "amount": "2363439362951500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3391.0848750000587,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "C18xnpTYMKjznEzBCqQSRhJLfR43nXHG3urmRaDoB6Nm"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "J3EzF9Rpukcq8Fjf5fydUyRgSBiDjQT4fLWMRn7fZT6m"
+      }
+     ],
+     "fee": {
+      "amount": "2362465244873500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3895.452707999968,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "23dWboKBmhKmTaeZeR5ZLFpNttd7dNTjf8ZHCtM1oXTT"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "4ZvjGn9pM2zjVLSQH6DYkHmK6FXUDDwBAxt3YRyz9v7h"
+      }
+     ],
+     "fee": {
+      "amount": "2361800676227500000000",
+      "unit": "yocto"
+     }
+    }
+   ]
+  },
+  {
+   "step": "sell",
+   "samples": [
+    {
+     "ok": true,
+     "value": 3675.2630000000026,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "BYAPatr2xets6tw2wNBK1JCVzEbrVdyQMRYUMeJGiqPx"
+      }
+     ],
+     "fee": {
+      "amount": "1845826018524700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3371.851208,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "BMSbQHdCEBUNevj5q77mH88CScVevw7ksNkipHdZZTdo"
+      }
+     ],
+     "fee": {
+      "amount": "1845997234048300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3768.9373329999944,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "2yfn43843DCsy2CAzm4GAjMHXv1bd1VPjGGq3j2GdAur"
+      }
+     ],
+     "fee": {
+      "amount": "1845689508991900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3226.7746250000055,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "DD3eVo2foQhzXKZ9bXHoCcRv18QWguCzZDbu27ttAXc1"
+      }
+     ],
+     "fee": {
+      "amount": "1842315254225500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3805.4222909999953,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "EThatdDUtPB42hbpxvetajSjWSfV1YZb2e3y4W1QieZd"
+      }
+     ],
+     "fee": {
+      "amount": "1841445132505900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3618.2740420000046,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CMctX5ExZGDAKdCyqA7MDdXigqvNRkmER1dNR7iKmnHN"
+      }
+     ],
+     "fee": {
+      "amount": "1842363482039500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4110.366957999999,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "FUWkubxnmMqJJsm279U8P97GxBWdmvohkmj2ti4XiEf7"
+      }
+     ],
+     "fee": {
+      "amount": "1846195861659100000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3832.9735419999924,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "2x9KqyX8ew41egz3n8iPeWbsdneSbr39jfSMApjRLFHJ"
+      }
+     ],
+     "fee": {
+      "amount": "1841805349395100000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3955.37612500001,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CBe3u7PdrpWR6cYgL7Ebj8naed3LY1J9UF1AVJRwyHG5"
+      }
+     ],
+     "fee": {
+      "amount": "1846121470204300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3419.5712079999503,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "G9hoYqa7ZnsVhNdKemjx1eA4Gg1t8qJBNRp5qbditQzU"
+      }
+     ],
+     "fee": {
+      "amount": "1846783434655900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3744.5644590000156,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "Etj813NCeheCaSgVtri9VEzeYo55Xk4vR1vRDfGk9iAk"
+      }
+     ],
+     "fee": {
+      "amount": "1846204157182300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3635.601958000043,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "7xFJBTSA5oog9xjTTNuA5GZGL1UyMp8hJkVU13DcrMnb"
+      }
+     ],
+     "fee": {
+      "amount": "1845641968007500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3640.304541999998,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "BzHJod96iYs7Q9F1u8ZgCbLp6VeamtPr6LH55q4WZMwp"
+      }
+     ],
+     "fee": {
+      "amount": "1842074186717500000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4165.658707999974,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "FVCyBRT4UZsypVw59rTmq46KQzJShr2Nr6e4bGMpRySA"
+      }
+     ],
+     "fee": {
+      "amount": "1846215457564300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3701.397875000024,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "8PixsfNaW8TrQpNvQxyvFmFbzRBTRkZQqUKUbYJ9pqgY"
+      }
+     ],
+     "fee": {
+      "amount": "1842764013972700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3948.106000000029,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "CdzU6vWqw66eKeWBBzQGHLybu5mHLWQhQNqHhzmvk6XX"
+      }
+     ],
+     "fee": {
+      "amount": "1842196119156700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4177.217667000019,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "HMUg2g2V6Akx8J3rNzQkTxGHWCsva2rFfb7h8HwvqFH3"
+      }
+     ],
+     "fee": {
+      "amount": "1846446734275900000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3672.0095420000143,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "BwkKBwEBeJM7veBJrz5F66Vp7crFsoRZkS78gWGTeuM7"
+      }
+     ],
+     "fee": {
+      "amount": "1846575509902300000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 4384.5337500000605,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "DhzQHqi1kqwBPQg3d8SeHst1y9zgck24duEUX96t6o9b"
+      }
+     ],
+     "fee": {
+      "amount": "1845808740648700000000",
+      "unit": "yocto"
+     }
+    },
+    {
+     "ok": true,
+     "value": 3812.81716700003,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "2rSegsU17zaJzbkrejFsyNXua3HGwukB56NTHxU9PJQd"
+      }
+     ],
+     "fee": {
+      "amount": "1845547994959900000000",
+      "unit": "yocto"
+     }
+    }
+   ]
+  }
+ ]
+}

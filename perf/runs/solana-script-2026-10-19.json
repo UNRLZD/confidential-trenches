@@ -1,0 +1,637 @@
+{
+ "schema": "perf-run/1",
+ "id": "solana-script-2026-10-19",
+ "chain": "solana",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-19",
+ "source": "proofs/p4-speed/solana/results",
+ "note": "Keys held by the test script, self mode, records live-2026-10-19T23-32-14-314Z.json, live-2026-10-19T23-33-50-203Z.json, live-2026-10-20T00-02-08-517Z.json. Fee is meta.fee plus the send tips, read on two RPCs.",
+ "series": [
+  {
+   "step": "buy",
+   "samples": [
+    {
+     "ok": true,
+     "value": 947,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "51XuU6yEWnFjmsfmNUNW4XGYziTQWksHJa6sqkTe4YqQEV45AdQdLYsThyNALhAiMSwkuLJ9QRURKcXJB8rdm6ND"
+      }
+     ],
+     "fee": {
+      "amount": "50000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 798,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2TxXJ4AbZ2Zs52QyYnxWq7XvC822smbRwhCHbGVV5R6fKcdXJXoAd3pFxVU24QMKvKZvxNUQGNXnx48kAVidtwme"
+      }
+     ],
+     "fee": {
+      "amount": "50000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 981,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "38TfdSZnJLZRVQBNet9hUudFZTPrET4qSXwBzqyRQ9ij8okhcSq8b3Uz4VN97SvHSVbj2rSzyQ9QsBjW12wWSPdQ"
+      }
+     ],
+     "fee": {
+      "amount": "50000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 632,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2sWEEHZJv2jzbamCUGYW1gW2hRxo4rXc6NiAjHUysM7ACVYVGGQBQxEXP69UE4yfvR1Q9hWktKx2PFJP5tvMwurB"
+      }
+     ],
+     "fee": {
+      "amount": "69028",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": false,
+     "value": null,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "5jiZJU23yu67WeS5Ho36hSJAYXAiuM2JLrihC7YdoMLQXxZbnMZjHSJovxKzFJ2HPhEzHXUV6hoEhyeqXRzxx2Ay"
+      }
+     ],
+     "fee": {
+      "amount": "50000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 728,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4hCbP16JCxNUzfVM5nFuV8UXW6cLCZbLZRR5AASZzwU21uAEPhFjLyfxNwimXm9P6o8gtUwYH5dikBvFXCGbZQCM"
+      }
+     ],
+     "fee": {
+      "amount": "30000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 876,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3Nq1SDuQYJ3pd9JNHnMQicQQZpwBAbWPPESFen6rrwfCDTEtMbeAm8jaDKAyBLWBPbarL5ztJsrvFJuyxGZZoMbT"
+      }
+     ],
+     "fee": {
+      "amount": "69028",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 926,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4Bys7FfwaceSCHzzU8FkBbqokTchCZCLYZU1FwfweAuiLoDkix6T25Sbs766oxh5wZT7BJavTkUwHVnNSacsfVeD"
+      }
+     ],
+     "fee": {
+      "amount": "32645",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1051,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3Bwv6MSnJX5Pr6zgAtiS7v1ctbKGrf2APZe1Ex3qjGLkBRVJ9BuqQBVPNgKu95H7tUakaSdkqM6JQp9zfprmmkuy"
+      }
+     ],
+     "fee": {
+      "amount": "31402",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 778,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "5J91FxKAk6cWTf5Ntofxy1aRDHa2SXD4ASbu7RkH3X5PK2soX54KuJDmV5ns1nkRA192thNinsnpG5h3TfBRpocD"
+      }
+     ],
+     "fee": {
+      "amount": "28450",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1148,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3UafLrrVjq1GPoD9PYQD3Aj2WbkB89j5tXNgbRko7yP9ML5j83vyoZPX98jm5N8yHd2vgc8XaFYKXuMjpNobvheY"
+      }
+     ],
+     "fee": {
+      "amount": "24000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 955,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "hzXdCFxmc2UL7s6nor2yPg39fLQis7pUiUVnjvNm5FxNRMBqSYMSTDa9ZcCg1B1URFfUm2p3nmGjBwaXMSxHjRa"
+      }
+     ],
+     "fee": {
+      "amount": "30000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 736,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2nWwoZ8L6dpbmXANAkae929xahAMrCRyw7MX6sRFtwQh8SrzpGG4TAXXLwfskwNd6aAtcAUEnHCFPAjkwWApS49R"
+      }
+     ],
+     "fee": {
+      "amount": "27599",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 911,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2MdPaQ6F8nBk12zKRdW3N6CqBGMHd1yX5BUS1PgitCVxLZTJFdTCu8URq3HmoYy6R5WaYJ1Qe3epHheksi6FeD6s"
+      }
+     ],
+     "fee": {
+      "amount": "30000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 854,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "5meavLiB7umL5mbXeBASUBCfjeKRJqazHraodNzN5Dp5VorK8ckua9un3homegCzXNK3xw93kHaguJN7vg9ELAHZ"
+      }
+     ],
+     "fee": {
+      "amount": "28333",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 844,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "26F5V6eW6Ev1oB4MeRmL4uQ1WXDKoBZmwb44j6V8EqfzY5ckuw4cp7iFBHr4KdA2ynfV5mqmo1p7eZcXU3ZsBjBp"
+      }
+     ],
+     "fee": {
+      "amount": "33092",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1011,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2uqDWmfjSXGcmBD93yzz82nbwFTTc6yzt14QmUJqFsdbbF4pWVDLqkG3amJXh9Y1nvyym9NJpU1j5UAMHcegbFGH"
+      }
+     ],
+     "fee": {
+      "amount": "32602",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 967,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4wDaVEJaW9DsaGALos4WCH95fa8V5GKJU8hbi8fNiRgbbBdQpekSR9sj7NJvAJRxX3bMnSoqdUYqvBtdQcZh86GF"
+      }
+     ],
+     "fee": {
+      "amount": "35002",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 693,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2F7A8fRrtWKEhWvEgwMbJhbetGMBdYHQhvAhLSLcsgxSRS2s1qFR452H14p985MRFDd2QzxS6iX1bnv6Zjn5K1L7"
+      }
+     ],
+     "fee": {
+      "amount": "41215",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 906,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "46r9NaNB3SpnKWjja5Z4jGpRxMgj1fXTVhM2qLRypGpXb6sNAHj4zjmS6YjgR7Pi5WvGxatzbaGcXW8ToEvEupYV"
+      }
+     ],
+     "fee": {
+      "amount": "58850",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1069,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "q5LGCdA9r2W4A6bnp2Ypz6ZzZaWXzoXLji5zESAUXN33xgF3HBp5RAu5f8bDvjSteVrwi1e3NKDe4ASaCyx3Ksm"
+      }
+     ],
+     "fee": {
+      "amount": "46584",
+      "unit": "lamports"
+     }
+    }
+   ]
+  },
+  {
+   "step": "sell",
+   "samples": [
+    {
+     "ok": true,
+     "value": 728,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "jvgD25xyGnvFQQzYjQHE6pbumvrBk87f6nNG1hooyNF17M3Q6w5GPDFLDtVcVfgNHeQJ8U27kyD8wi1dZ1Zg2u4"
+      }
+     ],
+     "fee": {
+      "amount": "50000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 581,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "5tCnuK8RdhhXfysPR5cmDXojfeKWF7iAVMyck8mLMf7gZEGghGBi9boB3FrD1cCT7pJ4VoWgMPspVTz5ALDYcVL"
+      }
+     ],
+     "fee": {
+      "amount": "50000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 959,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "28khwLTxcjYF4daFaK2vK8x8Bz3mPZvppcKsQwT3B9heRBbAbXBMa8Synyfgw7HL9uuVXHcrMh48ktDTowMjenQV"
+      }
+     ],
+     "fee": {
+      "amount": "50000",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 818,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3ZKx9ta6tgbnLSjPStkK95JCWpY9CjHqi8JEq4qAqUZVJC5vRti7xhTu2iQXxveMWr2NLTeiiVfn1mw6iLtpoWfW"
+      }
+     ],
+     "fee": {
+      "amount": "69028",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 587,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "5EwukhgDb8yrkzjcTGsaisN7XNn2tWbqfQdqfRuhzEurUJKEZgGxSP31YJ9jwbmeruiQMdsbBJULnkdqYb9d1oUo"
+      }
+     ],
+     "fee": {
+      "amount": "27500",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 937,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "5ZhWLeiHY5DWNYKvLAxomtNya3d3Pv6FakWm1i1aef7Z1EC5rzB1yz1uG5t1BH8eKtawbM43z5Q3R6osuoHBDs5X"
+      }
+     ],
+     "fee": {
+      "amount": "69028",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 773,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2xASKDYxSLwELJ1LBeFCdeaSQFt1xpPbFkVdnE7nThTomuwimw2JbmaU9MKhbyZNWbXM7K8hACarjSGzvxcwyXRf"
+      }
+     ],
+     "fee": {
+      "amount": "46783",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 774,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "414g8m1ur7xZf49cQPukuQkCmJLJ3WkN3EwZMVoNJzV9UKW4X2wUV3dQWosHQN3Y8xdy71kYzMdfHUJRkQ4bjYJ5"
+      }
+     ],
+     "fee": {
+      "amount": "31402",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 663,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3fRMJVmwRkfrw9Zku3v6RdCeu3vRPuyiZ6rhukSQfHyadKACcgg6bnr33s8gmNQ7w2TcGaBTJ3MsGEvy6BLijccu"
+      }
+     ],
+     "fee": {
+      "amount": "28450",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 560,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2DCpmDXcqTPhCuXL4qTsVFDSzon9eR2nkF3CX9ADmCWCf72hbSnAjW3MdEeiwtPB6bZt5dMzjVNxqpnvXxsMi6HD"
+      }
+     ],
+     "fee": {
+      "amount": "22408",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 735,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "A1GaWsx6zwBcrT44zUM6hDoXFsUXvaKxm6NqnYQcv8bHUNvLS8sFRCaJenJQ1C4CJoGKsjGcX9aX67zdzxXDaED"
+      }
+     ],
+     "fee": {
+      "amount": "27500",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 827,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "39TnCyQAYajinWiXvXj2HG2qggYA2SpPUtfhuRkYchveHXRujELZq5C4Bp5snX6SQKELpFUEVwwNYUrH9zmrTZL"
+      }
+     ],
+     "fee": {
+      "amount": "25699",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 624,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4UMcyxdJjjqd2T8M1eLQm7qBLuXPJkZYeeAuqNMdNsJTS8QhCiYQv8WveoL439ZtpPpaQt2MVRrZ3zWn5JWajxB6"
+      }
+     ],
+     "fee": {
+      "amount": "27500",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 911,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "ctUZvqZUJ8X6TKFiMnvNf46ejPJJbSPZ9LyuNG1bkmMWmvuyA7aP9VhSKgRqKyoAMgeJYXeawUE7zAE1qbr3uEn"
+      }
+     ],
+     "fee": {
+      "amount": "33146",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 684,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "Wka5oc5vXiEmuKHaDCJaYKPzhJK4nq1SiRPRnM5XfsYsJURTAV81qhPMaimYTCbvXBppwxkCpVDFECXrrRyUhbv"
+      }
+     ],
+     "fee": {
+      "amount": "35106",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 889,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2qWoWi8gh1Ufr9D5vcKAFYr1XRLYsgCbxUGUDEjuBxA15CWe6LY2xYxo5iaMjpSUFUk6dbdkHVaJUV4qHC5H8Mq5"
+      }
+     ],
+     "fee": {
+      "amount": "35359",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 736,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4xGumVovrSScubfC9brpvP7uN32Sr7QpYKU2pNYQcTbiTKtzX5fDRzfdJszjRXUsJ9AnncvcecfENHmdummcd5Ab"
+      }
+     ],
+     "fee": {
+      "amount": "33046",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 861,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "kNRiwKxVb6mBJ53bt176dBT6wQ6rJBsLB4pnaWVVqVgjwkwA1LuTwrDRrNz9vVCzrYThcuhSJsAKnwyproZY74f"
+      }
+     ],
+     "fee": {
+      "amount": "43051",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 823,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4ynW3A2ECJ7n8g3ThkrPGU8Tk8ic8aRcGpiMvX9FsHfwauUq3GgjB8yHbtuDs4wHeep7VPRRVVm4mk4uGQQYX7zB"
+      }
+     ],
+     "fee": {
+      "amount": "58850",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 914,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4i5eBCS5tiJDvMvc4upph3UJncJ92oSMENXMoWeDU33RTMeJoskH18J38x3UVPEaWGieN6zcJVYZ5dKw3xBmwJy"
+      }
+     ],
+     "fee": {
+      "amount": "58000",
+      "unit": "lamports"
+     }
+    }
+   ]
+  }
+ ]
+}

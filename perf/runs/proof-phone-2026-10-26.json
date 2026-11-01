@@ -1,0 +1,72 @@
+{
+ "schema": "perf-run/1",
+ "id": "proof-phone-2026-10-26",
+ "chain": "near",
+ "network": "device",
+ "signer": "phone",
+ "date": "2026-10-26",
+ "source": "proofs/g1-phone-prover/results/phone",
+ "note": "snarkjs 0.7.5 in one worker, single thread, in a phone browser; the first run of each page load is cold. Every proof re-verified on a second machine.",
+ "series": [
+  {
+   "step": "proof-withdraw",
+   "samples": [
+    {
+     "ok": true,
+     "value": 8492,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 8348,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 8324,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 8344,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 8426,
+     "txs": []
+    }
+   ]
+  },
+  {
+   "step": "proof-commitment",
+   "samples": [
+    {
+     "ok": true,
+     "value": 609,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 616,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 600,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 600,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 599,
+     "txs": []
+    }
+   ]
+  }
+ ]
+}

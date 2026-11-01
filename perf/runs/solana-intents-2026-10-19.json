@@ -1,0 +1,97 @@
+{
+ "schema": "perf-run/1",
+ "id": "solana-intents-2026-10-19",
+ "chain": "solana",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-19",
+ "source": "proofs/p1-private-balance/runs/2026-10-19T22-53-44-913Z-live.json",
+ "note": "One leg of the P1 live run through NEAR Intents (1Click): request to the balance visible. Fee is 1Click's quoted fee in USD.",
+ "series": [
+  {
+   "step": "intents-in",
+   "samples": [
+    {
+     "ok": true,
+     "value": 41835.440291000006,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3ZDDh9uCsob3Ti5VSgscTShnyGdZBh7XVoahGB4x97b4CS8LxAFHBbtbfJw4MnXTGnQwZpBSwkBS812xfcitaL8E"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "FJjdHWBub7EbR325NrM1a2BpUptU5LWfbFDZDNwUEeps"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "GTYXNPCXFhbLbx7JhyJqgUbTRhJf2YTsPPLubVTDGoVx"
+      }
+     ],
+     "fee": {
+      "amount": "0.000000",
+      "unit": "usd"
+     }
+    }
+   ]
+  },
+  {
+   "step": "intents-out",
+   "samples": [
+    {
+     "ok": true,
+     "value": 21052.448541000005,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "A4YU9mQELTdHdA2SJjKzmjZqXvtgDCLwqoaGv4MFUBWS"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "RcBwpfSQy6XLirvuUteqUFxo6cK2zufdgLjk8dhReW1"
+      },
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2c48hnCtQ5QVGk5ACYExm4y91pbExezUU3Nx3uTzQ287uHMS9jtdHNgidMu2EW9BAufhw5ius1meyJ9TeyCfWmMA"
+      }
+     ],
+     "fee": {
+      "amount": "0.010020",
+      "unit": "usd"
+     }
+    },
+    {
+     "ok": true,
+     "value": 22605.62950000001,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "7LLTRZJsjWLzfZ41N3vc4b7Mb3KnXutTdXenrMUdWsdE"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "9Pt7HK5JQN1nRxu3SoDDedtA45xUJYkLrKv4SwozptZS"
+      },
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4hubwZPvftt6BKzGXNC4WuQCPo8nSHgxCRnAKceJYM4UEhxryt97iDENd61zxzQ5nweuLhjsySRgZdjAjCSDBhte"
+      }
+     ],
+     "fee": {
+      "amount": "0.010020",
+      "unit": "usd"
+     }
+    }
+   ]
+  }
+ ]
+}

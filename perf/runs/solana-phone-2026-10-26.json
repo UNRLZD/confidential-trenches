@@ -1,0 +1,172 @@
+{
+ "schema": "perf-run/1",
+ "id": "solana-phone-2026-10-26",
+ "chain": "solana",
+ "network": "mainnet",
+ "signer": "phone",
+ "date": "2026-10-26",
+ "source": "proofs/g1-phone-trade/results/live-2026-10-26T11-29-51-268Z.json",
+ "note": "Signed in a phone browser with the device's checks. Fee is meta.fee plus the send tips, read on two RPCs.",
+ "series": [
+  {
+   "step": "buy",
+   "samples": [
+    {
+     "ok": true,
+     "value": 3225,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2btTg7crbv6EL6DJtpNo67Vv9J2vioFHz4uMTuHR2hrWnJMumu7PQb9gYQwToV3ac55LGw418hL28JvChi8oc4Rv"
+      }
+     ],
+     "fee": {
+      "amount": "28001",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 963,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3hnP9BcaVbemuUDkDw3TvrEEc9mHEsvTq6iQLKQvG46RxiySt6S1XxcKX4r5DdFhKC5Hbh4K1AK6mPQ3x1rk4xzV"
+      }
+     ],
+     "fee": {
+      "amount": "30038",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1275,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3iGWDcecxY14rC6jmpbK5vxoiBVekLtNCx4sxMjCWr3FRdeEkbp3PYLkhXv9RUPv8SdsgEhoS28PAi14iDR4Qrg8"
+      }
+     ],
+     "fee": {
+      "amount": "25954",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1200,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "HnV2vwsVERfQGEWwGiRPzR5AEs2WiZnumj5V5MXJHsWGY7Bg5FGknDotnt9KcczhjDMXAZRhzkXUcoN2rPtW8bf"
+      }
+     ],
+     "fee": {
+      "amount": "37017",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1025,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "3AAEyMeKPiXngz7D1tRgtvZn5gMTaWqRyJaKgs5MAhCdHb6Cbet7Gn453pFWacJF5c9sZYAE3R4R7PLdrkVTF7WL"
+      }
+     ],
+     "fee": {
+      "amount": "37006",
+      "unit": "lamports"
+     }
+    }
+   ]
+  },
+  {
+   "step": "sell",
+   "samples": [
+    {
+     "ok": true,
+     "value": 1490,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4hN9gQ1PQPSDUJrHAXLHDaYd6mK2C6V3a3KtSoMoUb3nC2X1MEiKswTo6XzGfuoQ7Fb1Le7x3JU648dMwcdrLDA8"
+      }
+     ],
+     "fee": {
+      "amount": "28320",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1376,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "2NuYJ48bPEmDnuKChHdN71NCyJZbBPwaD8sdUnnLc6VcEHtmxjCHiDQKoVdiyehCSy8AV49PLdAFkXxSaVK7iNw"
+      }
+     ],
+     "fee": {
+      "amount": "27531",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1354,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4bjHZTSuTTzqCoUzdRm9Y6rbDaQKHFARJxQCd3HkLpLEVZ2ZbG9bJFtDYJdV5jDxJ4ZWDziBGKVeuNhZ16hP84bi"
+      }
+     ],
+     "fee": {
+      "amount": "30693",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 1158,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4mA466e9fsXE2bJRWbDkJmY8Hyj84EgeXzehemyqNdEEVsXMLjmv8YXm1ZGTejjkgxLtfCbhcJ7aVurz1465o14G"
+      }
+     ],
+     "fee": {
+      "amount": "32756",
+      "unit": "lamports"
+     }
+    },
+    {
+     "ok": true,
+     "value": 936,
+     "txs": [
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "554UVzq82cixvoqoHsH5gWBQnuVAxq2sCxeHZdDXErnASWy17GHZksJCaTBqUgZVmTXDoSbFeSyUpcvzYkth15pq"
+      }
+     ],
+     "fee": {
+      "amount": "32774",
+      "unit": "lamports"
+     }
+    }
+   ]
+  }
+ ]
+}

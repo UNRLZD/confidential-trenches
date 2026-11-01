@@ -1,0 +1,21 @@
+# gitleaks: the default rules, plus the money keys this repo's chains use that the defaults do not name.
+title = "confidential-trenches"
+
+[extend]
+useDefault = true
+
+# A NEAR secret key: "ed25519:" and the base58 of 64 bytes (86-88 chars). A public key is 32 bytes (43-44 chars),
+# so public keys never match.
+[[rules]]
+id = "near-ed25519-secret-key"
+description = "NEAR ed25519 secret key"
+regex = '''ed25519:[1-9A-HJ-NP-Za-km-z]{86,88}\b'''
+keywords = ["ed25519:"]
+
+# A machine's name on a tailnet (Tailscale MagicDNS): labels, then the tailnet suffix, in any case. No such name is ever
+# committed here, made-up ones included (card host-name-out in the research repo).
+[[rules]]
+id = "tailnet-host"
+description = "Tailscale machine or tailnet name"
+regex = '''(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net\b'''
+keywords = [".ts.net"]

@@ -1,0 +1,42 @@
+{
+ "schema": "perf-run/1",
+ "id": "base-intents-2026-10-19",
+ "chain": "base",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-19",
+ "source": "proofs/p1-private-balance/runs/2026-10-19T22-53-44-913Z-live.json",
+ "note": "One leg of the P1 live run through NEAR Intents (1Click): request to the balance visible. Fee is 1Click's quoted fee in USD.",
+ "series": [
+  {
+   "step": "intents-out",
+   "samples": [
+    {
+     "ok": true,
+     "value": 21156.849959000014,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "HJdGaYSqpunEVNYj4bjjntbSCt1fUEwVQoH5mwXoM9T4"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "EtAWUauyXdUxBpzTjSSR2T6w2tqM7gB7M4SDe2M8dMmH"
+      },
+      {
+       "chain": "base",
+       "network": "mainnet",
+       "id": "0x37a15d422ffa8e1af7f3131de782510d61598b2a95a341c38c7a06351142f9ba"
+      }
+     ],
+     "fee": {
+      "amount": "0.033464",
+      "unit": "usd"
+     }
+    }
+   ]
+  }
+ ]
+}

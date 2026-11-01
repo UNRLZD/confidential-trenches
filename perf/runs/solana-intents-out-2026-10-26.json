@@ -1,0 +1,77 @@
+{
+ "schema": "perf-run/1",
+ "id": "solana-intents-out-2026-10-26",
+ "chain": "solana",
+ "network": "mainnet",
+ "signer": "script",
+ "date": "2026-10-26",
+ "source": "proofs/g1-money-loop/runs",
+ "note": "NEAR to SOL on a fresh Solana wallet through NEAR Intents (1Click), request to arrival read on two RPCs. Fee is 1Click's quoted fee in USD.",
+ "series": [
+  {
+   "step": "intents-out",
+   "samples": [
+    {
+     "ok": true,
+     "value": 38862.94854099999,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "5Bw6uJ61SRBpo1guNiVqvQTR5yyD1Ewf9c6Z1gYRkne9"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "HWxwgnibsk3ToyQyKvkaexXomvMwq7hTyNveUkdnpADZ"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "yVESkJ7fkg1vgfUyeDpTyBbZmkZphC68VoguoJ3QB47"
+      },
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "4qpENZRqjZyW37QF8zrhD38v2CFFnLPGn4h8DxNna4gMzaxEZA6B92ifjgGnCtkeLT6u8AdYzdRb9g5Eta9M8hZH"
+      }
+     ],
+     "fee": {
+      "amount": "0.045252",
+      "unit": "usd"
+     }
+    },
+    {
+     "ok": true,
+     "value": 38911.016166,
+     "txs": [
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "Aurjx7AvMRw5kC85yEynSNf6QF5a7nLVmRtpUob6t3WG"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "9zQ8ZqKfeDzzEaG4Zd7gmh8UChwVznwNwgcCSRGpz1YC"
+      },
+      {
+       "chain": "near",
+       "network": "mainnet",
+       "id": "6VLo3Y8KJeH2SL83MkScNdivVjC6y2rBprSqKD9eKRR7"
+      },
+      {
+       "chain": "solana",
+       "network": "mainnet",
+       "id": "5XCMCotZRPu6D4CwfGsjHtDJ3N2Cye8Nh9RTiB22wNRtL4jB12rDgU7eZ6TU4vmzLNJ75L85h7wHej6vqxD6FQ5e"
+      }
+     ],
+     "fee": {
+      "amount": "0.049051",
+      "unit": "usd"
+     }
+    }
+   ]
+  }
+ ]
+}
