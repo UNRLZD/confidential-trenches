@@ -34,6 +34,20 @@ export const HOSTS = {
 // the domains the certificate covers and the browser maps to the harness; any other name is not found
 export const MAPPED = ["*.ct.test", "*.other.test"];
 
+// The real names. The shipped _headers name them (APP_HOST's frame-src, SIGN_HOST's frame-ancestors), so a test of the
+// iframe or of passkey scope runs on them with startHarness({ realNames: true }): they map to this harness too, the
+// builds and headers stay byte-exact, and the same-site layout is the real one (CO 01:50Z Nov 1).
+export const REAL = {
+  app: "confidential.unrealized.trade",
+  sign: "sign.confidential.unrealized.trade",
+  api: "api.confidential.unrealized.trade",
+};
+
+/** The real names' sites: APP_HOST's and SIGN_HOST's builds as the harness names serve them; the API has none yet. */
+export function realSites(sites) {
+  return { [REAL.app]: sites[HOSTS.app], [REAL.sign]: sites[HOSTS.sign] };
+}
+
 /**
  * SIGN_HOST's build as its deploy makes it (packages/signpage/scripts/deploy.mjs build(): index.html and public/
  * copied into a fresh folder), read as files, not imported: the terminal's code never imports a Blindfill package
@@ -66,15 +80,17 @@ const hostOf = (u) => {
 
 /**
  * Starts the server and Chromium. Close with close(); it deletes the certificate and the signing page's build.
- * @param {{ edit?: (sites: Record<string, { root: string, spa?: boolean }>) => void, headless?: boolean }} [opts]
- *   edit changes the default sites before the server starts
+ * @param {{ edit?: (sites: Record<string, { root: string, spa?: boolean }>) => void, headless?: boolean, realNames?: boolean }} [opts]
+ *   edit changes the default sites before the server starts; realNames maps REAL's names too, served after edit
  */
 export async function startHarness(opts = {}) {
   const { chromium } = createRequire(path.join(TERMINAL, "package.json"))("playwright");
-  const cert = makeCert(MAPPED);
+  const mapped = opts.realNames ? [...MAPPED, ...Object.values(REAL)] : MAPPED;
+  const cert = makeCert(mapped);
   const signRoot = buildSignpage();
   const sites = defaultSites(signRoot);
   opts.edit?.(sites);
+  if (opts.realNames) Object.assign(sites, realSites(sites));
   const cleanup = () => {
     cert.remove();
     rmSync(signRoot, { recursive: true, force: true });
@@ -83,7 +99,7 @@ export async function startHarness(opts = {}) {
   let browser;
   try {
     server = await startServer({ cert: cert.cert, key: cert.key, sites });
-    const rules = [...MAPPED.map((d) => `MAP ${d} 127.0.0.1:${server.port}`), "MAP * ~NOTFOUND"].join(", ");
+    const rules = [...mapped.map((d) => `MAP ${d} 127.0.0.1:${server.port}`), "MAP * ~NOTFOUND"].join(", ");
     browser = await chromium.launch({
       headless: opts.headless ?? true,
       args: [`--host-resolver-rules=${rules}`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
