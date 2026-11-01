@@ -324,16 +324,7 @@ async function driverFor(engine, serve, live, size) {
     if (live) throw new Error("--live runs on chromium or firefox; WebKit runs on the harness");
     const { launchWebKit } = await import("../webkit-harness/index.mjs");
     const d = await launchWebKit({ serve: (host, pq, method) => serve(host, pq, method), width: size.width, height: size.height });
-    // Typing on WebKit: each character inserted, 30 ms apart, into whatever holds the top document's focus (a frame
-    // that took the focus holds it, and the character never reaches the shell's field). The harness's driver sends no
-    // native keys.
-    // The 30 ms wait runs here, not in the page: the harness's window is not on screen, so WebKit slows its timers.
-    d.type = async (text) => {
-      for (const ch of text) {
-        await d.evaluate(`document.execCommand("insertText", false, ${JSON.stringify(ch)}); return true;`);
-        await new Promise((ok) => setTimeout(ok, 30));
-      }
-    };
+    // typing: the driver's native keyDown/keyUp per character, 30 ms apart, to whatever holds the page's focus
     return d;
   }
   return playwrightDriver(engine, serve, live, size);

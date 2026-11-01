@@ -86,6 +86,10 @@ final class Driver: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     view.navigationDelegate = self
     window.contentView = view
     window.orderFront(nil)
+    // key events go to the first responder of the key window: the view, which hands them to whichever frame holds
+    // the page's focus (as Safari does)
+    window.makeKey()
+    window.makeFirstResponder(view)
   }
 
   // MARK: WebCrypto master key (WKNavigationDelegatePrivate; both the current and the older form)
@@ -179,6 +183,32 @@ final class Driver: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     }
   }
 
+  // Trusted typing: one native keyDown and keyUp per character into the WKWebView, `delayMs` apart. WebKit delivers
+  // each to whatever holds the page's focus, a frame's field included, so a frame that took the focus gets the keys.
+  func type(_ id: Int, _ text: String, delayMs: Int) {
+    let chars = text.map { String($0) }
+    let wn = window.windowNumber
+    func key(_ i: Int) {
+      guard i < chars.count else {
+        self.view.callAsyncJavaScript("return 1", arguments: [:], in: nil, in: .page) { _ in emit(["id": id, "ok": true, "value": "null"]) }
+        return
+      }
+      let ch = chars[i]
+      let code: UInt16 = ch == " " ? 49 : 0
+      let t = ProcessInfo.processInfo.systemUptime
+      guard let down = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: t, windowNumber: wn, context: nil,
+                                        characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code),
+            let up = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: [], timestamp: t + 0.01, windowNumber: wn, context: nil,
+                                      characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else {
+        emit(["id": id, "ok": false, "error": "NSEvent.keyEvent returned nil"]); return
+      }
+      self.view.keyDown(with: down)
+      self.view.keyUp(with: up)
+      DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs)) { key(i + 1) }
+    }
+    key(0)
+  }
+
   func handle(_ line: String) {
     guard let d = line.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
           let id = o["id"] as? Int, let cmd = o["cmd"] as? String else {
@@ -200,6 +230,8 @@ final class Driver: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
       evaluate(id, (o["js"] as? String) ?? "", frame: f)
     case "click":
       click(id, (o["selector"] as? String) ?? "")
+    case "type":
+      type(id, (o["text"] as? String) ?? "", delayMs: (o["delayMs"] as? Int) ?? 30)
     case "close":
       emit(["id": id, "ok": true, "value": "null"])
       exit(0)

@@ -7,7 +7,7 @@
 // fstar.<engine>: this card's build with frame-src * in its _headers, on WebKit and Chromium: FAIL on the stranger
 // alone, its frame sent to example.com. prefix.<engine>: this card's build at ea785a4, before the review's fixes (the
 // layer over the terminal while signed out, the frame left under it, no signin.open, nav or reload): FAIL, and on
-// Chromium the app takes the typed words. fstar and prefix run at phone width. bad.* were recorded before the check
+// every engine the app takes the typed words. fstar and prefix run at phone width. bad.* were recorded before the check
 // named its width, so their first line is the width's BAD and the tests read the lines after it. The rest are a good run with one thing changed each, among them the lines that
 // signpage-frame-state judged (retired with this card): a reload while signed in, the status deleted raw, its backfill.
 import assert from "node:assert/strict";
@@ -211,7 +211,7 @@ test("the review's fixes, each undone in the good run: FAIL", () => {
   }
 });
 
-for (const engine of ["webkit", "chromium"]) {
+for (const engine of ["webkit", "chromium", "firefox"]) {
   test(`recorded bad run: this card's build before the review's fixes (ea785a4) on ${engine}: FAIL, the layer over the terminal signed out and signin.open, nav and reload refused`, () => {
     const r = judge(ANSWERS.prefix[engine]);
     assert.equal(r.ok, false);
@@ -223,8 +223,13 @@ for (const engine of ["webkit", "chromium"]) {
   });
 }
 
-test("recorded bad run: ea785a4 on Chromium: the app takes the typed words", () => {
-  const r = judge(ANSWERS.prefix.chromium);
-  assert.ok(ANSWERS.prefix.chromium.steps.wordsIn.typed.appChars > 0);
-  assert.ok(bad(r).some((l) => /^BAD the 12 words typed while the app calls focus\(\) every 20 ms: the shell holds all of them, the app none \(shell not all, app [1-9]\d* characters\)$/.test(l)), r.lines.join("\n"));
-});
+for (const engine of ["webkit", "chromium", "firefox"]) {
+  test(`recorded bad run: ea785a4 on ${engine}: the app takes the typed words`, () => {
+    const rec = ANSWERS.prefix[engine];
+    assert.equal(rec.engine, engine);
+    const r = judge(rec);
+    assert.equal(r.ok, false);
+    assert.ok(rec.steps.wordsIn.typed.appChars > 0, JSON.stringify(rec.steps.wordsIn.typed));
+    assert.ok(bad(r).some((l) => /^BAD the 12 words typed while the app calls focus\(\) every 20 ms: the shell holds all of them, the app none \(shell not all, app [1-9]\d* characters\)$/.test(l)), r.lines.join("\n"));
+  });
+}

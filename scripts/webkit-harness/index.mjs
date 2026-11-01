@@ -145,10 +145,10 @@ export async function launchWebKit({ serve, width = 800, height = 600 }) {
       for (const p of pending.values()) { clearTimeout(p.timer); p.no(new Error(exited)); }
       pending.clear();
     });
-    const send = (cmd, fields = {}) => new Promise((ok, no) => {
+    const send = (cmd, fields = {}, timeoutMs = CMD_TIMEOUT_MS) => new Promise((ok, no) => {
       if (exited) { no(new Error(exited)); return; }
       const id = nextId++;
-      const timer = setTimeout(() => { pending.delete(id); no(new Error(`${cmd} timed out after ${CMD_TIMEOUT_MS} ms`)); }, CMD_TIMEOUT_MS);
+      const timer = setTimeout(() => { pending.delete(id); no(new Error(`${cmd} timed out after ${timeoutMs} ms`)); }, timeoutMs);
       pending.set(id, { ok, no, timer });
       child.stdin.write(JSON.stringify({ id, cmd, ...fields }) + '\n');
     });
@@ -162,6 +162,8 @@ export async function launchWebKit({ serve, width = 800, height = 600 }) {
       evaluate: (js) => send('evaluate', { js: String(js) }),
       evaluateFrame: (host, js) => send('evaluateFrame', { host: String(host), js: String(js) }),
       click: (selector) => send('click', { selector: String(selector) }),
+      // native keyDown/keyUp per character, delayMs apart, to whatever holds the page's focus
+      type: (text, delayMs = 30) => send('type', { text: String(text), delayMs: Number(delayMs) }, 30_000 + String(text).length * (Number(delayMs) + 50)),
       messages: () => messages.slice(),
       requests: () => requests.slice(),
       refused: () => refused.slice(),

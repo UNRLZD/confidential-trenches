@@ -7,7 +7,7 @@ non-persistent data store), with SIGN_HOST and APP_HOST served by your `serve` f
 - Run the self-test on the Mac queue:
   `HEAVY_REMOTE=0 scripts/heavy.sh wk-harness -- node scripts/webkit-harness/self-test.mjs`
 - Use it from a live check: `const d = await launchWebKit({ serve, width, height })` (the view in CSS px, 800 x 600
-  when not given), then `d.goto`, `d.evaluate`, `d.click`,
+  when not given), then `d.goto`, `d.evaluate`, `d.click`, `d.type` (native keys, to whatever holds the page's focus),
   `d.messages`, `d.evaluateFrame`, `d.close` (see the top of `index.mjs`).
 - Pages report with `window.webkit.messageHandlers.harness.postMessage(JSON.stringify(...))`.
 - Each run makes a certificate for the two hosts in a fresh temp dir and deletes it on close. A CONNECT proxy on
