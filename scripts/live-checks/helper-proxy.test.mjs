@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/helper-proxy.test.mjs: the live check replays recorded answers
-// (helper-proxy.answers.json; the keys in it were planted for that run, never real ones). good: apps/helper at 3c28211
+// (helper-proxy.answers.json; the keys in it were planted for that run, never real ones). good: apps/helper at ccab198
 // in its image behind deploy/Caddyfile, run by deploy/compose.yaml on a Mac (HELPER_HOST has no server yet): PASS.
 // bad_echo: a real answer from a wrong build of the same source that echoes the 1Click key in a header: FAIL. Made
 // from the good answer: the key in the body in base64, an answer that is not a token list, a missing source header,
