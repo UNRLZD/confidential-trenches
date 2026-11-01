@@ -4,7 +4,7 @@
 // and parses them with the TypeScript parser, never running them. It checks, against values pinned here from
 // markets.md, wallet.md and vault.md at research main 3dbe87c (the public repo carries no papers):
 //   - the file imports nothing outside the kit (only Chain, OrderRecord and ORDER_RECORD_FIELDS from ../orders/record.ts,
-//     the CO's call at 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
+//     decided 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
 //     TS2308), and index.ts exports it ("export * from ./helper/v1");
 //   - the path list equals H7's table (markets.md:3329-3345) with 7.1's new POST /v1/log (:3277), and the health parts
 //     are {proxy, relay, intents, delegate, orders, log} (:3278, :3331);
@@ -19,6 +19,8 @@
 //   - every money-path shape (withdraw, withdraw/fee, bind, intents, orders, the PUT, status, log) prints exactly as
 //     pinned in SHAPES, and every frozen value (CORS, paths with their limits, the RPC allowlist, the HTTP statuses,
 //     the patterns and limits, the order's wire fields with orders/record.ts's ORDER_RECORD_FIELDS) equals VALUES;
+//   - after kit-v1, the additions only: the beta cap per deposit HELPER_BIND_DEPOSIT_CAP (1,000 USDC in base units,
+//     OD:262) and its code amount_above_cap right after amount_too_low (card kit-deposit-cap);
 //   - after 06:00Z, main's v1.ts equals the tag's byte for byte.
 // Once the helper answers (card helper-host-health), it also reads https://api.confidential.unrealized.trade/v1/health
 // from APP_HOST's Origin and from a stranger's, and compares its parts, X-Helper-Commit and CORS headers with the file.
@@ -71,7 +73,7 @@ export const CODES = {
   // :3338, H3.4's order
   HELPER_WITHDRAW_CODES: ["bad_shape", "bad_proof", "bad_fee_recipient", "fee_too_low", "fee_above_cap", "spent", "unknown_root", "index_behind", "in_flight", "withdraw_failed", "recipient_refused", "register_deposit_wrong", "bad_recipient", "deadline_too_close", "token_halted", "fund_recipient_wrong", "relayer_low"],
   // :3340, H4.3's order
-  HELPER_BIND_DEPOSIT_CODES: ["bad_shape", "bad_signature", "no_account", "bad_key", "bad_nonce", "sender_struck", "expired", "resign_needed", "not_one_action", "not_ft_transfer_call", "token_not_accepted", "deposit_not_1_yocto", "gas_too_low", "gas_too_high", "bad_receiver", "amount_too_low", "amount_above_balance", "bad_msg", "p_used", "p_bound", "prepay_open", "in_flight", "token_halted", "relayer_low"],
+  HELPER_BIND_DEPOSIT_CODES: ["bad_shape", "bad_signature", "no_account", "bad_key", "bad_nonce", "sender_struck", "expired", "resign_needed", "not_one_action", "not_ft_transfer_call", "token_not_accepted", "deposit_not_1_yocto", "gas_too_low", "gas_too_high", "bad_receiver", "amount_too_low", "amount_above_cap", "amount_above_balance", "bad_msg", "p_used", "p_bound", "prepay_open", "in_flight", "token_halted", "relayer_low"],
   // :3340, checks 1-4, then the clean-up's own (:1871-1880)
   HELPER_BIND_CLEANUP_CODES: ["bad_shape", "bad_signature", "no_account", "bad_key", "bad_nonce", "expired", "resign_needed", "id_not_ours", "bad_shape", "not_deposited", "not_settled"],
   // :3340, H3.7 item 2's order
@@ -83,7 +85,7 @@ export const CODES = {
 };
 export const STATUS = { token_halted: 503, receiver_is_vault: 403, id_not_ours: 403, sender_struck: 403, prepay_open: 409, not_paid: 409, receiver_not_registered: 409 };
 const DELEGATE_FIELDS = ["sender_id", "receiver_id", "actions", "nonce", "max_block_height", "public_key"];
-// The frozen file, pinned (the CO's review of 01:33Z). SHAPES: each money-path type as the TypeScript printer writes it
+// The frozen file, pinned (review of 01:33Z). SHAPES: each money-path type as the TypeScript printer writes it
 // with no comments, checked by hand against its row: withdraw and withdraw/fee markets.md:3337-3339 and 7.1's rows
 // :3271-3272, the withdrawal vault.md:356-364, bind :3340, intents :3341 and wallet.md:898-901, orders, status, the PUT
 // and DELETE :3342-3345 (the orders row as restated at 3dbe87c), log :3277 and section 2.5. VALUES: the frozen
@@ -158,9 +160,10 @@ export const VALUES = {
   HELPER_LOGO_MAX_BYTES: 262144,
   HELPER_LOGO_TYPES: ["image/png","image/jpeg","image/webp","image/gif"],
   HELPER_PROXY_VENDORS: ["jupiter","relay","lifi","oneclick"],
+  HELPER_BIND_DEPOSIT_CAP: "1000000000n",
 };
 const NEVER_IN_INTENTS = ["msg", "memo", "storage_deposit"];
-// the one import v1.ts makes, and the wallet's exported names it must not declare (CO, 00:35Z)
+// the one import v1.ts makes, and the wallet's exported names it must not declare (decided 00:35Z)
 export const IMPORTS = ['import { ORDER_RECORD_FIELDS, type Chain, type OrderRecord } from "../orders/record.ts";'];
 export const WALLET_NAMES = ["Chain", "CHAINS", "TxRef", "Stage", "ErrorCode", "Operation", "OrderState", "WalletState", "OrderRecord", "SigninWay", "ReturnKey"];
 
@@ -181,11 +184,13 @@ export function parse(text) {
 }
 
 // a literal value (string, number, boolean, null, array, object) behind `as const` and `satisfies`; anything else refused
-// env: identifiers a spread may name (ORDER_RECORD_FIELDS, read from record.ts); Object.freeze(x) is x; a regex is its text
+// env: identifiers a spread may name (ORDER_RECORD_FIELDS, read from record.ts); Object.freeze(x) is x; a regex is its text;
+// a bigint is its decimal text with "n" (1_000n and 0x3e8n both read "1000n")
 export function literal(node, env = {}) {
   while (ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isParenthesizedExpression(node)) node = node.expression;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (ts.isBigIntLiteral(node)) return `${BigInt(node.text.slice(0, -1))}n`;
   if (ts.isRegularExpressionLiteral(node)) return node.text;
   if (ts.isCallExpression(node) && node.expression.getText() === "Object.freeze" && node.arguments.length === 1) return literal(node.arguments[0], env);
   if (node.kind === ts.SyntaxKind.TrueKeyword) return true;

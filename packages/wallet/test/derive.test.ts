@@ -266,7 +266,7 @@ test("the wallet sign-in bytes: EIP-4361 and Sign In With Solana, frozen but for
   assert.doesNotMatch(d.SIGNIN_STATEMENT, /\n/);
 });
 
-// ---------- round 2 (CO review of 89a2c68) ----------
+// ---------- round 2 (review of 89a2c68) ----------
 test("restore takes the 12 words with a trailing newline or a double space, to the same seed", () => {
   const words = d.entropyToWords(fromHex(A8.inputs.entropy));
   const clean = hex(d.wordsToSeed64(words));
