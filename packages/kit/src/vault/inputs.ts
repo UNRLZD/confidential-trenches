@@ -23,7 +23,8 @@
 // Nothing here logs: the note's secrets never leave the device.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { LeanIMT } from "@zk-kit/lean-imt";
-import { poseidon2, poseidon3 } from "poseidon-lite";
+import { poseidon2 } from "poseidon-lite/poseidon2";
+import { poseidon3 } from "poseidon-lite/poseidon3";
 import {
   VAULT_CONSTANTS,
   VAULT_FIELD_P,

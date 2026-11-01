@@ -17,9 +17,9 @@
 //!    message over 1,024 B, a precommitment as a JSON number, a non-canonical precommitment, p, an invalid account id
 //!    and `depositor` = the vault.
 //! 4. `the_kits_message_passes_the_message_checks_{mock,usdc}`: the kit's own bytes (packages/kit/src/vault/shapes.ts
-//!    `vaultDepositMessage`), and the same message padded to exactly 1,024 B, pass rows 1-2. Until card
-//!    vault-deposit-insert adds rows 3-12, `ft_on_transfer` then returns the whole amount as unused, so the token gives
-//!    it back and the vault keeps no USDC without a note.
+//!    `vaultDepositMessage`), and the same message padded to exactly 1,024 B, pass rows 1-2 and, with no prepay on
+//!    their precommitment, stop at row 6 (`NoPrepay`): refused like every case above. A deposit that lands is
+//!    tests/s02.rs's.
 //!
 //! Each case runs on both tokens (vault.md 5): the mock token (`_mock`) and the real USDC wasm (`_usdc`, card
 //! vault-sandbox-usdc); on USDC, case 2's other token is the same real USDC code at another account. Each prints its
@@ -29,8 +29,7 @@
 mod harness;
 
 use harness::{wasm_from_env, Harness, Outcome, Receipt, TokenKind, R, ONE_YOCTO, TOKEN_STORAGE};
-use near_sdk::json_types::Base64VecU8;
-use near_sdk::serde_json::{self, json};
+use near_sdk::serde_json::json;
 use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::{Account, AccountId};
 
@@ -228,18 +227,8 @@ async fn the_kits_message_passes_the_message_checks(kind: TokenKind) -> R<()> {
     for (name, msg) in [("the kit's message", KIT_MSG.to_string()), ("exactly 1,024 B", padded)] {
         let before = snapshot(&h, &token, u.id()).await?;
         let o = transfer_call(&h, &u, &token, &msg).await?;
-        o.expect_all_ok(name)?;
-        let r = on_transfer(&h, &o)?;
-        // ft_on_transfer returned the whole amount as unused (a JSON U128 string), until rows 3-12 land
-        let value = match &r.status {
-            harness::Status::Success(v) => v.get("SuccessValue").cloned(),
-            _ => None,
-        }
-        .ok_or_else(|| format!("{name}: ft_on_transfer gave no value: {}", r.line()))?;
-        let raw: Base64VecU8 = serde_json::from_value(value)?;
-        assert_eq!(String::from_utf8(raw.0)?, format!("\"{AMOUNT}\""), "{name}: not the whole amount back as unused");
-        assert_eq!(snapshot(&h, &token, u.id()).await?, before, "{name}: a balance or a state byte changed");
-        println!("{name}: passed rows 1-2, {} Tgas in ft_on_transfer, the amount returned unused", r.gas_burnt as f64 / 1e12);
+        // rows 1-2 passed: the first refusal is row 6's, as no one prepaid the precommitment
+        refused(&h, &o, &token, u.id(), &before, "NoPrepay").await.map_err(|e| format!("{name}: {e}"))?;
     }
     println!("{}", h.gas_table());
     Ok(())

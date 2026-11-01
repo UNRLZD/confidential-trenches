@@ -8,7 +8,7 @@
 // What the libraries keep inside (noble's HKDF PRK and HMAC state, scure's BIP-32 steps and PBKDF2) is theirs, not ours.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
-import { test } from "node:test";
+import { after, test } from "node:test";
 
 const seen: Uint8Array[] = [];
 const inputs: { fn: string; args: unknown[] }[] = [];
@@ -159,4 +159,24 @@ test("REVIEW M31: bindDeposit zeroes its own copy of the seed", async () => {
   for (const k of ikm) assert.ok(zero(k), "bindDeposit's copy of the seed was left");
   store.close();
   ws.close();
+});
+
+test("withdrawRequest zeroes its own copy of the seed, handed back or refused after the proof", async () => {
+  const { withdrawRequest } = await import("../src/withdraw/request.ts");
+  const fx = await import("./withdraw-fixture.ts");
+  after(fx.closeVaults);
+  for (const fail of [false, true]) {
+    const v = await fx.vaultWith();
+    if (fail) v.failPut.on = (rec) => (rec as { state?: string }).state === "RESERVED";
+    const got = await onlyAsync(() => withdrawRequest(fx.argsFor(v, fx.signalsProver())).catch((e: Error) => assert.match(e.message, /refused the write/)));
+    // the spent note's, the change note's and the refund note's secrets: each master's HKDF ran on the request's copy
+    const ikm = bytesIn("hkdf").map((a) => a[0]!);
+    assert.ok(ikm.length >= 3, "the request derived its notes' secrets");
+    for (const k of ikm) {
+      assert.notEqual(k, fx.SEED);
+      assert.ok(zero(k), `withdrawRequest's copy of the seed was left (${fail ? "refused" : "handed back"})`);
+    }
+    for (const b of got) assert.ok(zero(b), `a ${b.length}-byte derive was left`);
+    assert.ok(!zero(fx.SEED));
+  }
 });

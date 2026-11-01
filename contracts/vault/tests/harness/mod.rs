@@ -59,9 +59,8 @@
 //! - an `ft_transfer` from an unregistered sender panics where USDC burns nothing; no events; no
 //!   `storage_unregister`; `mint` registers the account; `ft_resolve_transfer` cannot be made to fail.
 //! Those edges (a halted token between a deposit's move and its resolve, deposit gas at 180 Tgas) are the real USDC
-//! wasm's to drive: run the case with `TokenKind::Usdc`. There is no NEP-366 `DelegateAction` sender here: VT-S02 needs one, and
-//! VT-S02's card, vault-deposit-insert, brings it (its proof: U's call as a `DelegateAction` sent by a relayer
-//! account, in its tests/s02.rs). Gas and code figures hold for one machine: a Linux x86_64 build and a
+//! wasm's to drive: run the case with `TokenKind::Usdc`. A NEP-366 `DelegateAction` is sent by `delegate_call` (U's own call, carried
+//! and paid for by a relayer account: VT-S02, tests/s02.rs), and U is made by `implicit_account`. Gas and code figures hold for one machine: a Linux x86_64 build and a
 //! macOS arm64 build give different vault bytes (at 65f3bb7: bc948c2b, 128767 B on Linux x86_64; 91a23f6f,
 //! 129937 B on macOS arm64).
 #![allow(dead_code)] // shared by every sandbox test; each uses a part
@@ -73,6 +72,7 @@ use near_workspaces::result::ExecutionFinalResult;
 use near_workspaces::types::{AccessKey, AccountDetailsPatch, CryptoHash, Gas, KeyType, NearToken, SecretKey};
 use near_workspaces::{Account, AccountId, Worker};
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 
 pub type R<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -172,7 +172,8 @@ impl Receipt {
 /// A transaction's result: its final status and every receipt, read at `FINAL`.
 #[must_use]
 pub struct Outcome {
-    result: ExecutionFinalResult,
+    /// near-workspaces' own result; `None` for a transaction the harness signed and sent itself (`delegate_call`).
+    result: Option<ExecutionFinalResult>,
     pub tx_hash: String,
     /// The transaction's own final status.
     pub status: Status,
@@ -205,7 +206,7 @@ impl Outcome {
     }
     /// The returned value as JSON (`None` on a failed final status or an empty value). A value, never a success check.
     pub fn json(&self) -> Option<Value> {
-        self.result.clone().into_result().ok().and_then(|s| s.json::<Value>().ok())
+        self.result.clone()?.into_result().ok().and_then(|s| s.json::<Value>().ok())
     }
     /// The receipts on `executor` holding a call to `method`: exactly `n` of them, or an error naming every receipt.
     pub fn calls_exactly(&self, executor: &AccountId, method: &str, n: usize) -> R<Vec<&Receipt>> {
@@ -705,6 +706,90 @@ impl Harness {
         Ok(v.as_str().ok_or("ft_balance_of: not a string")?.parse()?)
     }
 
+    // ---- NEP-366: a call signed by one account, sent and paid for by another ----
+
+    /// The NEAR-implicit account (64 hex, its ed25519 public key) of a fresh random key, made as the kit's U is: by a
+    /// plain Transfer of `millinear` from root, which gives it that one full-access key and no other (NC
+    /// `runtime/src/lib.rs` l.549-550). Its key signs its `DelegateAction`s.
+    pub async fn implicit_account(&self, millinear: u128) -> R<Account> {
+        let sk = SecretKey::from_random(KeyType::ED25519);
+        let pk = near_crypto::SecretKey::from_str(&sk.to_string()).map_err(|e| format!("key: {e}"))?.public_key();
+        let id: AccountId = hex(pk.key_data()).parse()?;
+        let r = self.root.transfer_near(&id, NearToken::from_millinear(millinear)).await?;
+        if !r.is_success() {
+            return Err(format!("the Transfer creating {id}: {r:?}").into());
+        }
+        let keys = self.access_keys(&id, "optimistic").await?;
+        if keys.len() != 1 || keys[0]["public_key"] != json!(pk.to_string()) {
+            return Err(format!("{id}: keys {keys:?}, want only {pk}").into());
+        }
+        Ok(Account::from_secret_key(id, sk, &self.worker))
+    }
+
+    /// The nonce of `id`'s access key `pk`, at optimistic.
+    async fn key_nonce(&self, id: &AccountId, pk: &near_crypto::PublicKey) -> R<u64> {
+        let q = json!({"request_type": "view_access_key", "finality": "optimistic", "account_id": id, "public_key": pk.to_string()});
+        let v = self.rpc("query", q).await?;
+        Ok(v["result"]["nonce"].as_u64().ok_or_else(|| format!("view_access_key {id}: {v}"))?)
+    }
+
+    /// `signer`'s own call `receiver.method(args)` with `deposit` yocto and `gas`, signed by `signer`'s key as a
+    /// NEP-366 `DelegateAction` (valid for 100 blocks past the final head) and sent by `relayer` in its own
+    /// transaction [Delegate] to `signer`, which the relayer pays for and cannot change (NEPs `nep-0366.md` l.35-90).
+    /// Read as `call_outcome` reads a transaction: the raw `Outcome`, every receipt at `FINAL`, its gas recorded.
+    pub async fn delegate_call(
+        &self,
+        relayer: &Account,
+        signer: &Account,
+        receiver: &AccountId,
+        method: &str,
+        args: Value,
+        deposit: u128,
+        gas: Gas,
+    ) -> R<Outcome> {
+        use near_primitives::action::delegate::{DelegateAction, NonDelegateAction, SignedDelegateAction};
+        use near_primitives::action::{Action, FunctionCallAction};
+        use near_primitives::transaction::{SignedTransaction, Transaction, TransactionV0};
+        let key = |a: &Account| near_crypto::SecretKey::from_str(&a.secret_key().to_string()).map_err(|e| format!("key: {e}"));
+        let (u_sk, r_sk) = (key(signer)?, key(relayer)?);
+        let block = self.rpc("block", json!({"finality": "final"})).await?;
+        let height = block["result"]["header"]["height"].as_u64().ok_or_else(|| format!("block: {block}"))?;
+        let block_hash: near_primitives::hash::CryptoHash =
+            block["result"]["header"]["hash"].as_str().ok_or_else(|| format!("block: {block}"))?.parse().map_err(|e| format!("block hash: {e}"))?;
+        let call = Action::FunctionCall(Box::new(FunctionCallAction {
+            method_name: method.into(),
+            args: args.to_string().into_bytes(),
+            gas: near_primitives::gas::Gas::from_gas(gas.as_gas()),
+            deposit: near_primitives::types::Balance::from_yoctonear(deposit),
+        }));
+        let da = DelegateAction {
+            sender_id: signer.id().clone(),
+            receiver_id: receiver.clone(),
+            actions: vec![NonDelegateAction::try_from(call).map_err(|e| format!("{e}"))?],
+            nonce: self.key_nonce(signer.id(), &u_sk.public_key()).await? + 1,
+            max_block_height: height + 100,
+            public_key: u_sk.public_key(),
+        };
+        let sda = SignedDelegateAction::sign(&near_crypto::InMemorySigner::from_secret_key(signer.id().clone(), u_sk), da);
+        let tx = Transaction::V0(TransactionV0 {
+            signer_id: relayer.id().clone(),
+            public_key: r_sk.public_key(),
+            nonce: self.key_nonce(relayer.id(), &r_sk.public_key()).await? + 1,
+            receiver_id: signer.id().clone(),
+            block_hash,
+            actions: vec![Action::Delegate(Box::new(sda))],
+        });
+        let (hash, _) = tx.get_hash_and_size();
+        let r_signer = near_crypto::InMemorySigner::from_secret_key(relayer.id().clone(), r_sk);
+        let signed = SignedTransaction::new(r_signer.sign(hash.as_ref()), tx);
+        let b64 = serde_json::to_value(near_sdk::json_types::Base64VecU8(near_primitives::borsh::to_vec(&signed)?))?;
+        let sent = self.rpc("send_tx", json!({"signed_tx_base64": b64, "wait_until": "FINAL"})).await?;
+        if sent.get("error").is_some() {
+            return Err(format!("send_tx (relayer {} carrying {}'s {method}): {sent}", relayer.id(), signer.id()).into());
+        }
+        self.outcome_of(relayer.id(), hash.to_string(), None).await
+    }
+
     // ---- receipts and gas ----
 
     /// One JSON-RPC call to the sandbox; the whole response (`result` or `error`).
@@ -718,6 +803,11 @@ impl Harness {
     /// each function-call receipt's gas.
     async fn outcome(&self, signer: &AccountId, result: ExecutionFinalResult) -> R<Outcome> {
         let tx_hash = result.outcome().transaction_hash.to_string();
+        self.outcome_of(signer, tx_hash, Some(result)).await
+    }
+
+    /// `outcome` for the transaction `tx_hash` signed by `signer`.
+    async fn outcome_of(&self, signer: &AccountId, tx_hash: String, result: Option<ExecutionFinalResult>) -> R<Outcome> {
         let v = self
             .rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": tx_hash, "sender_account_id": signer, "wait_until": "FINAL"}))
             .await?;

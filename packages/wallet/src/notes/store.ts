@@ -49,6 +49,13 @@
 //   note holds its calls from INCOMING on (a call is signed only for an INCOMING note) and keeps them once landed, so
 //   the clean-up gate reads every call U signed after a reload. Nothing in a call is secret: its signed bytes go to
 //   the relayer and the rest is on chain.
+// - Attempt contexts (card wallet-withdraw-request; wallet.md l.214-217): the move UNSPENT -> HELD takes the attempt's
+//   withdrawal context (a decimal below p) and appends { context, deadlineMs } to the note's contexts in the same
+//   compare-and-set, so the context is stored before its proof starts. No move removes an entry: an earlier attempt
+//   can still land before its own deadline, and the device may read its spend only later. A spends record whose
+//   context is in the list is this device's own (the check itself is the sync and arming cards'). The list stays
+//   small, as each new attempt needs the note freed or expired first. Nothing in it is secret: the context goes on
+//   chain with the proof, and the ops records, which the frame reads, never hold it.
 import { VAULT_FIELD_P } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
 import type { WalletStore } from "../store/index.ts";
@@ -94,7 +101,11 @@ export type NoteRecord = {
   attempt?: string; // HELD and RESERVED: the attempt whose proof holds it (not a secret)
   tab?: string; // HELD: the id of the tab whose proof holds it (not a secret)
   calls?: BindCall[]; // from INCOMING on: the deposit calls U signed for it, in the order written
+  contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
 };
+
+/** A withdrawal attempt's context (a canonical decimal below p) and its deadline_ms, written with the move to HELD. */
+export type AttemptContext = { context: string; deadlineMs: bigint };
 
 /** A deposit call U signed for a note (../deposit/delegate.ts SignedDepositDelegate), and the tx hashes heard for it. */
 export type BindCall = {
@@ -119,9 +130,10 @@ export type NewNote = {
   leaf?: Leaf;
 };
 
-// leaf: INCOMING -> UNSPENT. deadlineMs: UNSPENT -> HELD. attempt: the holder's HELD -> RESERVED or HELD -> UNSPENT.
-// blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past deadline_ms - margin).
-export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; attempt?: string; blockTimeMs?: bigint };
+// leaf: INCOMING -> UNSPENT. deadlineMs and context: UNSPENT -> HELD. attempt: the holder's HELD -> RESERVED or
+// HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
+// deadline_ms - margin).
+export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint };
 
 export interface NoteStore {
   get(id: string): Promise<NoteRecord | undefined>;
@@ -232,6 +244,23 @@ function u64(d: unknown, what: string): bigint {
   if (typeof d !== "bigint" || d <= 0n || d >= 1n << 64n) throw new Error(`${what} is a u64 bigint above 0`);
   return d;
 }
+// A context as the vault and the relayer read it: one canonical decimal below p.
+function context(c: unknown, what: string): string {
+  if (typeof c !== "string" || !/^(0|[1-9][0-9]{0,77})$/.test(c) || BigInt(c) >= VAULT_FIELD_P) throw new Error(`${what}: a context is a canonical decimal below p`);
+  return c;
+}
+// The attempt contexts of a note: at least one, each its own context with a deadline, none written twice.
+function checkContexts(cs: unknown, id: string): AttemptContext[] {
+  if (!Array.isArray(cs) || cs.length === 0) throw new Error(`note ${id}: contexts is a list of attempts`);
+  cs.forEach((c, k) => {
+    if (c === null || typeof c !== "object" || Array.isArray(c)) throw new Error(`note ${id}: contexts[${k}] is not an attempt`);
+    onlyKeys(c, ["context", "deadlineMs"], `note ${id}: contexts[${k}]`);
+    context(c.context, `note ${id}: contexts[${k}]`);
+    u64(c.deadlineMs, `note ${id}: contexts[${k}].deadlineMs`);
+    if (cs.some((d: AttemptContext, j) => j < k && d.context === c.context)) throw new Error(`note ${id}: context ${k} is written twice`);
+  });
+  return cs;
+}
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
 const U_ID = /^[0-9a-f]{64}$/;
@@ -271,7 +300,7 @@ function checkCalls(calls: unknown, id: string): BindCall[] {
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "contexts"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -292,6 +321,13 @@ function checkRecord(id: string, r: unknown): NoteRecord {
     if (n.state === "PLANNED" || n.state === "TAKEN") throw new Error(`note ${id}: calls from INCOMING on`);
     checkCalls(n.calls, id);
   }
+  // contexts: only on a note that has been HELD (a landed note), always while HELD or RESERVED, the last one this attempt's
+  if (n.contexts !== undefined) {
+    if (!LANDED.includes(n.state)) throw new Error(`note ${id}: contexts only on a note that has been HELD`);
+    checkContexts(n.contexts, id);
+  }
+  if (proving && (n.contexts === undefined || n.contexts[n.contexts.length - 1]!.deadlineMs !== n.deadlineMs))
+    throw new Error(`note ${id}: HELD and RESERVED hold their attempt's contexts entry last`);
   return n;
 }
 
@@ -304,6 +340,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.attempt !== undefined) out.attempt = n.attempt;
   if (n.tab !== undefined) out.tab = n.tab;
   if (n.calls !== undefined) out.calls = n.calls;
+  if (n.contexts !== undefined) out.contexts = n.contexts;
   return out;
 }
 
@@ -365,10 +402,13 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     else if (fields.leaf !== undefined) throw new Error("a leaf is set once, when the note lands");
     if (to === "HELD") {
       next.deadlineMs = u64(fields.deadlineMs, "deadlineMs");
+      const c = context(fields.context, "context");
+      next.contexts = checkContexts([...(cur.contexts ?? []), { context: c, deadlineMs: next.deadlineMs }], cur.id);
       next.attempt = newId();
       next.tab = tab;
     } else {
       if (fields.deadlineMs !== undefined) throw new Error("deadlineMs is set when the proof starts (HELD)");
+      if (fields.context !== undefined) throw new Error("a context is written when the proof starts (HELD)");
       delete next.tab;
       if (to !== "RESERVED") {
         delete next.deadlineMs;
@@ -397,7 +437,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   async function moveLocked(id: string, from: NoteState, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
     if (!NOTE_STATES.includes(from) || !NOTE_STATES.includes(to)) throw new Error("unknown note state");
     if (fields === null || typeof fields !== "object") throw new Error("fields is an object");
-    onlyKeys(fields, ["leaf", "deadlineMs", "attempt", "blockTimeMs"], "a move");
+    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs"], "a move");
     const all = await settle();
     const cur = all.find((n) => n.id === id);
     if (cur === undefined) throw new Error(`no note ${id}`);
@@ -413,7 +453,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       throw new Error(`note ${id} is held by another attempt: freed only by that attempt, or once block time is past deadline_ms - ${SEND_MARGIN_MS} ms`);
     if (from === "RESERVED" && to === "UNSPENT" && !(time !== undefined && time > cur.deadlineMs!))
       throw new Error(`note ${id} is RESERVED until block time is past its deadline_ms: its proof can still land`);
-    return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs });
+    return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context });
   }
 
   async function addLocked(note: NewNote): Promise<NoteRecord> {
