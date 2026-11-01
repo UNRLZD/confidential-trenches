@@ -12,8 +12,10 @@
 //! (the vault fills its own label tree), NEAR storage, and the relayer fee as an absolute amount.
 
 pub mod constants;
+pub mod events;
 pub mod field;
 pub mod poseidon;
+pub mod promise;
 
 use constants::*;
 use near_sdk::collections::{LookupMap, LookupSet, Vector};
