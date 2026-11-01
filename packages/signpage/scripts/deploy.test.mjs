@@ -43,9 +43,10 @@ test("the real _headers passes the gate", () => {
 
 test("a CSP with no frame-ancestors is refused, and nothing is uploaded", () => {
   const { calls, run } = recorder();
-  const r = deploy([], ENV, run, pkgWith(swap(" frame-ancestors https://confidential.unrealized.trade;", "")));
+  const r = deploy([], ENV, run, pkgWith(swap(" frame-ancestors 'none';", "")));
   assert.equal(r.code, 1);
-  assert.ok(r.err.includes('REFUSED _headers: CSP frame-ancestors: none, want "https://confidential.unrealized.trade"'), r.err.join("\n"));
+  assert.ok(r.err.includes(`REFUSED _headers: CSP frame-ancestors: none, want "'none'"`), r.err.join("\n"));
+  assert.ok(r.err.includes("REFUSED _headers: framed from https://confidential.unrealized.trade: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.ok(r.err.includes("REFUSED _headers: framed from https://example.com: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.equal(r.err.at(-1), "nothing was uploaded");
   assert.equal(calls.length, 0);
@@ -53,7 +54,12 @@ test("a CSP with no frame-ancestors is refused, and nothing is uploaded", () => 
 
 test("other policy breaks are refused", () => {
   const bad = {
-    "frame-ancestors *": swap("frame-ancestors https://confidential.unrealized.trade", "frame-ancestors *"),
+    "frame-ancestors *": swap("frame-ancestors 'none'", "frame-ancestors *"),
+    "frame-ancestors APP_HOST (the framed page's policy)": swap("frame-ancestors 'none'", "frame-ancestors https://confidential.unrealized.trade"),
+    "frame-src gone": swap(" frame-src https://confidential.unrealized.trade;", ""),
+    "frame-src *": swap("frame-src https://confidential.unrealized.trade", "frame-src *"),
+    "frame-src a second host": swap("frame-src https://confidential.unrealized.trade", "frame-src https://confidential.unrealized.trade https://example.com"),
+    "Origin-Agent-Cluster gone": swap("  Origin-Agent-Cluster: ?1\n", ""),
     "X-Frame-Options sent": `${REAL}  X-Frame-Options: DENY\n`,
     "Integrity-Policy gone": swap("  Integrity-Policy: blocked-destinations=(script)\n", ""),
     "a second CSP line": `${REAL}  Content-Security-Policy: default-src *\n`,
