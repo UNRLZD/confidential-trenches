@@ -607,7 +607,7 @@
     "errors": []
    }
   ],
-  "note": "packages/signpage at cb43ec4 (merge of wallet-passkey-prf c6a2fbe: the API in the one Vite bundle), --local on the PC box: SIGN_HOST answered in the browser from the build under its own _headers"
+  "note": "packages/signpage at cb43ec4 (merge of wallet-passkey-prf c6a2fbe: the API in the one Vite bundle), --local on Linux x86_64: SIGN_HOST answered in the browser from the build under its own _headers"
  },
  "emptypage": {
   "url": "https://sign.confidential.unrealized.trade/",
@@ -1070,7 +1070,7 @@
     "errors": []
    }
   ],
-  "note": "SIGN_HOST live as deployed before this card (signpage-skeleton: empty body, no script), read from the PC box"
+  "note": "SIGN_HOST live as deployed before this card (signpage-skeleton: empty body, no script), read from Linux x86_64"
  },
  "planted": {
   "url": "https://sign.confidential.unrealized.trade/",
