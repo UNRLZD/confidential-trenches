@@ -9,7 +9,8 @@
 // M322 (1), MN:330). Every other kind /v1/bind will take (M:3342) is refused here, by its shape: an id's clean-up (one
 // DeleteAccount) gets not_one_action, a plain move out (ft_transfer) not_ft_transfer_call, an onward delegate
 // (receiver_id intents.near) bad_receiver. A's move back to the vault (WM-11) is this same call from A (M:2822, "in
-// the same shape"; wallet.md WM-11, depositor = A), so no shape check can tell it from U's: see the card's report.
+// the same shape"; wallet.md WM-11, depositor = A), so no shape check can tell it from U's: decided by the CO 07:16Z, A's
+// move passes as U's does.
 //
 // Not here (card relayer-prepay): check 8's two-RPC simulation, the prepay and the send; check 9's token hold
 // (token-status/status.ts tokenHeld); R4's margin again after the prepay; R5-R7, R7's atomic create-if-absent write
@@ -71,7 +72,7 @@ export const EXPIRY_MAX_BLOCKS = 600n;
 export const G_BIND_CAP = 203_126_000_000_000n;
 /** The beta cap per deposit, $1,000 (OD:262 "cap": in the kit and the relayer, never the vault), in USDC base units. */
 export const BETA_CAP = 1_000_000_000n;
-/** The cap's refusal. The frozen kit has no code for it (HELPER_BIND_DEPOSIT_CODES): see the card's report. */
+/** The cap's refusal, the one code outside the frozen kit's list (CO 07:16Z); card kit-deposit-cap adds it to the kit. */
 export const CAP_CODE = "amount_above_cap";
 /** NEP-366's signable prefix: 2^30 + 366, a little-endian u32 before the borsh DelegateAction it signs. */
 export const NEP366_PREFIX = 2 ** 30 + 366;
@@ -268,7 +269,9 @@ export function decodeSignedDelegate(b: Uint8Array): Decoded {
     return v;
   };
   const u32 = (): number => Number(uint(4));
-  const str = (): string => new TextDecoder("utf-8", { fatal: true }).decode(take(u32()));
+  // ignoreBOM: a leading U+FEFF stays in the string, as nearcore reads the bytes; dropping it would pass a receiver,
+  // sender or method that the chain then refuses after the prepay and the send.
+  const str = (): string => new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(take(u32()));
   const ed25519 = (len: number, what: string): Uint8Array => {
     if (take(1)[0] !== 0) throw new Error(`${what}: not ed25519`);
     return take(len);
@@ -307,7 +310,7 @@ function signatureOk(d: Decoded): boolean {
 /** The args as the kit's carrier writes them: JSON.stringify({receiver_id, amount, msg}), three strings, in that order. */
 function frozenArgs(raw: Uint8Array): { receiver_id: string; amount: string; msg: string } | null {
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw); // a BOM is kept, as for str()
     // The text equals the three strings written back in the carrier's order, so no other key, order, space or
     // repeated key passes; a null body throws at the destructuring and is caught below.
     const { receiver_id, amount, msg } = JSON.parse(text) as Record<string, unknown>;

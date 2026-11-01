@@ -173,6 +173,8 @@ test("the codes this file answers are the kit's, in the kit's order, with the ca
   assert.ok(pos.every((p) => p >= 0), used.join());
   const firsts = [...new Set(used)].filter((c) => c !== "bad_shape").map((c) => order.indexOf(c as (typeof order)[number]));
   assert.deepEqual(firsts, [...firsts].sort((a, b) => a - b));
+  // CAP_CODE is the one code outside the kit's frozen list (card kit-deposit-cap adds it to the kit).
+  assert.deepEqual([...new Set(used)].filter((c) => !(HELPER_BIND_DEPOSIT_CODES as readonly string[]).includes(c)), [CAP_CODE]);
 });
 
 // ---- The good call, ours and an outside encoder's ----
@@ -399,4 +401,22 @@ test("check 7: R1 p_bound, R2 prepay_open, R7 in_flight; the same U on its own o
 test("the first failing check answers: an expired call with too little gas and a bad msg is expired", async () => {
   await refused(body(spec({ mbh: FINAL, actions: [fc({ gas: 1n, args: args({ msg: "x" }) })] })), "expired", "max_block_height: not ahead of the final height");
   await refused(body(spec({ actions: [fc({ gas: 1n, args: args({ receiver_id: "intents.near" }) })] })), "gas_too_low", "gas: under 180 Tgas");
+});
+
+// ---- A byte-order mark is read as nearcore reads it, never dropped ----
+
+const BOM = "\uFEFF";
+test("a leading U+FEFF in sender_id is kept and refused", async () => {
+  const sender = spec({ sender: BOM + U.id });
+  assert.equal(encode(sender, U).subarray(4, 7).toString("hex"), "efbbbf"); // the BOM's bytes are in the signed delegate
+  await refused(body(sender), "no_account", "sender_id: not a 64-hex implicit account");
+});
+test("a leading U+FEFF in receiver_id is kept and refused", async () => {
+  await refused(body(spec({ receiver: BOM + VAULT_TOKEN })), "token_not_accepted", "receiver_id: not the vault's token");
+});
+test("a leading U+FEFF in method_name is kept and refused", async () => {
+  await refused(body(spec({ actions: [fc({ method: BOM + "ft_transfer_call" })] })), "not_ft_transfer_call", "method_name: not ft_transfer_call");
+});
+test("a leading U+FEFF in args is kept and refused", async () => {
+  await refused(body(spec({ actions: [fc({ args: BOM + args() })] })), "bad_shape", "args: not the frozen {receiver_id, amount, msg}");
 });
