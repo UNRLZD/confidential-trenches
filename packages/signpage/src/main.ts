@@ -5,7 +5,8 @@
 //   (wallet.md:155); with none it offers the passkey ways in.
 // - Sign-in and sign-out run top-level only (wallet.md:921-922). In a frame (APP_HOST may frame this page) it shows
 //   neither control and both steps refuse, so a framing page cannot get a click on them. In the frame the page speaks
-//   the postMessage API (src/api.ts, card signpage-postmessage), started below.
+//   the postMessage API (src/api.ts, card signpage-postmessage), started below, with the state the store holds
+//   (src/state.ts, card signpage-frame-state): signed in, words saved, the way in and the ops, posted again on each change.
 // - Create passkey / Use passkey run the ceremony (@blindfill/wallet/signin/passkey). A PRF result becomes the seed's
 //   entropy, written by the store's insertSeed only if no seed is stored (two tabs never write one over the other); the
 //   record is 06b:459's { v, entropy, source: "prf", code_saved: false, created_ms } (ses.2, ses.7, 06b:776, :781), so
@@ -41,7 +42,8 @@ import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/walle
 import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
-import { signedOutState, startApi } from "./api.ts";
+import { startApi } from "./api.ts";
+import { frameState } from "./state.ts";
 
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code";
 
@@ -302,4 +304,7 @@ void run(async () => {
   else show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
 });
 
-if (framed) startApi({ parent: window.parent, listen: (fn) => window.addEventListener("message", fn), state: signedOutState });
+if (framed) {
+  const fs = frameState((onEvent) => openWalletStore({ onEvent }));
+  startApi({ parent: window.parent, listen: (fn) => window.addEventListener("message", fn), state: fs.state, watch: fs.watch });
+}
