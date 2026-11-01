@@ -1,0 +1,155 @@
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { Link, useLocation } from "react-router";
+import type { RouteId } from "../../routes/routes.ts";
+import { ROUTES } from "../../routes/routes.ts";
+import { Icon } from "./Icon.tsx";
+import { headerModel, usd } from "./model.ts";
+import type { HeaderModel } from "./model.ts";
+import { useSigninSheet, useSigninSource } from "./source.tsx";
+import type { SigninSource } from "./source.tsx";
+import { text, W } from "./Word.tsx";
+import "./signin.css";
+
+// The header's account states (S1.1-S1.4) and the account menu (S1.16), R5's top bar right cluster and phone header
+// (design/proto/assets/app.js:349-362 and :393-396 at design-lock-r5; proto.css:110-116, :239-242). The Deposit button
+// and the phone's green + are the deposit card's entry; they are on only while the signing page is READY.
+
+const routeOf = (pathname: string): RouteId => ROUTES.find((r) => r.path === pathname)?.id ?? "discover";
+
+function Balance({ m }: { m: HeaderModel }) {
+  return m.kind === "loading" ? <span className="sk" data-balance="loading" /> : <span className="v" data-balance={usd(m.cents)}>{usd(m.cents)}</span>;
+}
+
+/** The desktop top bar's right cluster. */
+export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean }) {
+  const src = useSigninSource();
+  const { setOpen } = useSigninSheet();
+  const m = headerModel(src.snapshot);
+  const [menu, setMenu] = useState(initialMenu);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const away = (e: PointerEvent) => box.current && !box.current.contains(e.target as Node) && setMenu(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    window.addEventListener("pointerdown", away);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("pointerdown", away);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
+  // signed out closes the menu
+  useEffect(() => {
+    if (m.kind === "out") setMenu(false);
+  }, [m.kind]);
+
+  if (m.kind === "out")
+    return (
+      <div className="tbr" data-header="S1.1">
+        <button type="button" className="btn-signin" onClick={() => setOpen(true)}>
+          <W id="signIn" />
+        </button>
+      </div>
+    );
+  return (
+    <div className="tbr" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} ref={box}>
+      <div className="balblock">
+        <Balance m={m} />
+      </div>
+      <button type="button" className="btn-dep" disabled={!src.moneyOn || m.kind === "loading"} data-action="deposit">
+        <W id="deposit" />
+      </button>
+      <button type="button" className={menu ? "acct open" : "acct"} aria-label={text("account")} aria-expanded={menu} disabled={m.kind === "loading"} onClick={() => setMenu(!menu)}>
+        <span className="av">
+          <Icon name="user" size={15} />
+          {m.backupDot && <span className="dot" data-backup-dot />}
+        </span>
+        <Icon name="chevDown" size={12} />
+      </button>
+      {menu && <AccountMenu src={src} m={m} onDone={() => setMenu(false)} />}
+    </div>
+  );
+}
+
+/**
+ * S1.16: the wallet label (CN-79) for a wallet account, Backup with its dot, Withdraw, Sync, Privacy and Sign out. Backup,
+ * Withdraw and Sign out run on SIGN_HOST's top-level pages through the hop; Sync starts `restore` again (S19.6).
+ */
+export function AccountMenu({ src, m, onDone, phone = false }: { src: SigninSource; m: HeaderModel; onDone?: () => void; phone?: boolean }) {
+  const { pathname } = useLocation();
+  const route = routeOf(pathname);
+  const off = !src.moneyOn;
+  const go = (run: () => Promise<unknown>) => async () => {
+    await run();
+    onDone?.();
+  };
+  const view = (control: string) => ({ route, sheet: null, control, fields: {} });
+  const row = (control: string, children: ReactNode, onClick: () => void, extra?: ReactNode) => (
+    <button type="button" className="mrow" data-control={control} disabled={off || src.locked === control} onClick={onClick}>
+      <span className="ml">{children}</span>
+      {extra}
+    </button>
+  );
+  return (
+    <div className={phone ? "amenu ph" : "amenu"} role="menu" data-state="S1.16">
+      {m.way === "wallet" && (
+        <div className="mwho" data-wallet-label>
+          <Icon name="wallet" size={15} />
+          <W id="wallet" />
+        </div>
+      )}
+      {row("acct-backup", <W id="backup" />, go(() => src.hop("backup.open", {}, view("acct-backup"))), m.backupDot ? <span className="mdot" data-backup-dot /> : null)}
+      {row("acct-withdraw", <W id="withdraw" />, go(() => src.hop("withdraw.open", {}, view("acct-withdraw"))))}
+      {row("acct-sync", <W id="sync" />, () => {
+        src.restore();
+        onDone?.();
+      })}
+      <Link className="mrow" to="/privacy" onClick={() => onDone?.()}>
+        <span className="ml">
+          <W id="privacy" />
+        </span>
+      </Link>
+      <div className="mrule" />
+      {row("acct-signout", <W id="signOut" />, go(() => src.hop("signout", {}, view("acct-signout"))))}
+    </div>
+  );
+}
+
+/** The phone header's right side: Sign in, or the balance pill with its green + (S4). */
+export function PhoneAccount() {
+  const src = useSigninSource();
+  const { setOpen } = useSigninSheet();
+  const m = headerModel(src.snapshot);
+  if (m.kind === "out")
+    return (
+      <div className="tbr-ph">
+        <button type="button" className="hit44" data-header="S1.1" onClick={() => setOpen(true)}>
+          <span className="signin">
+            <W id="signIn" />
+          </span>
+        </button>
+      </div>
+    );
+  return (
+    <div className="tbr-ph">
+      <button type="button" className="hit44" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} data-action="deposit" disabled={!src.moneyOn || m.kind === "loading"}>
+        <span className="balp">
+          <Balance m={m} />
+          <span className="plus">
+            <Icon name="plus" size={16} stroke={1.7} />
+          </span>
+        </span>
+      </button>
+    </div>
+  );
+}
+
+/** The phone's account rows (S1.16 at 390), for the Account tab. */
+export function PhoneAccountMenu() {
+  const src = useSigninSource();
+  const m = headerModel(src.snapshot);
+  if (m.kind === "out" || m.kind === "loading") return null;
+  return <AccountMenu src={src} m={m} phone />;
+}
