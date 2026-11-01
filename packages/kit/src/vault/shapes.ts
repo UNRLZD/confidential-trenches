@@ -225,13 +225,20 @@ export function vaultRelayFeeWithinBackstop(relayFee: bigint, withdrawn: bigint)
   return relayFee * 10_000n <= withdrawn * BigInt(VAULT_CONSTANTS.MAX_RELAY_FEE_BPS);
 }
 
+/** VaultWithdrawal's seven fields (7.1): the vault refuses a withdrawal with any other key when it reads the call. */
+const VAULT_WITHDRAWAL_KEYS: readonly string[] = ["recipient", "register_deposit", "fee_recipient", "relay_fee", "refund_precommitment", "deadline_ms", "salt"];
+
 /**
  * What the vault would refuse in this withdrawal, read before the device spends a proof on it (2.5.2 rows 1, 2, 7
- * and 8): the form of every field, recipient or fee_recipient equal to the vault or intents.near, a deadline already
- * passed at nowMs, withdrawn 0 or over a u128, and relay_fee over the backstop. Empty when none.
+ * and 8): a key outside VaultWithdrawal's seven, the form of every field, recipient or fee_recipient equal to the vault
+ * or intents.near, a deadline already passed at nowMs, withdrawn 0 or over a u128, and relay_fee over the backstop.
+ * Empty when none.
  */
 export function vaultWithdrawalProblems(w: VaultWithdrawal, withdrawn: bigint, vaultId: string, nowMs: number): string[] {
   const out: string[] = [];
+  for (const k of Object.keys(w)) {
+    if (!VAULT_WITHDRAWAL_KEYS.includes(k)) out.push(`${k}: not a field of the withdrawal`);
+  }
   const at = (f: () => unknown): void => {
     try {
       f();
