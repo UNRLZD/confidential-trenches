@@ -446,7 +446,9 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       const msg = signpageBuildRequest(kind, params, id);
       const outcome = (async () => {
         if (snap.status === "connecting" && !destroyed) await new Promise<void>((r) => waiters.push(r));
-        if (destroyed || snap.status !== "ready") return DOWN;
+        // parent mode's update state: the shell still answers `reload` (it reloads the top window, shell and app)
+        const reloadInUpdate = shell !== null && kind === "reload" && snap.status === "update";
+        if (destroyed || (snap.status !== "ready" && !reloadInUpdate)) return DOWN;
         return post(msg, SIGNPAGE_TIMEOUT_MS[kind], () => onTimeout(kind));
       })();
       return { id, outcome };

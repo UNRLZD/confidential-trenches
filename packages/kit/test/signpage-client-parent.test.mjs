@@ -332,3 +332,29 @@ test("parent mode: a ready with another api is the update state, as in the ifram
   noFrame(shelled.h);
   assert.deepEqual(shelled.snaps, framed.snaps);
 });
+
+// ------------------------------------------------------------------------------------------------ g. reload in update
+test("parent mode: in the update state `reload` still goes to the shell (it reloads the top window), every other kind is DOWN; the iframe mode posts nothing", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, mode: "parent" });
+  h.post({ ...READY, api: 2 });
+  await flush();
+  assert.equal(c.snapshot().status, "update");
+  const n = h.shell.sent.length;
+  assert.deepEqual(await c.request("buy", FIXTURES.buy.params).outcome, DOWN);
+  assert.deepEqual(await c.request("nav", FIXTURES.nav.params).outcome, DOWN);
+  const r = c.request("reload", {});
+  await flush();
+  assert.deepEqual(h.shell.sent.slice(n), [{ msg: { v: 1, id: r.id, type: "reload" }, origin: ORIGIN }], "only reload is posted, to the shell");
+  h.post(answer(r.id, {}));
+  assert.deepEqual(await r.outcome, { ok: true, result: {} });
+  assert.equal(c.snapshot().status, "update", "the update state stays until the reload");
+  noFrame(h);
+
+  const f = makeHost("iframe");
+  const ci = C.createSignpageClient({ url: URL_, host: f.host });
+  f.post({ ...READY, api: 2 });
+  await flush();
+  assert.deepEqual(await ci.request("reload", {}).outcome, DOWN, "iframe mode: unchanged");
+  assert.equal(f.sent().length, 0);
+});
