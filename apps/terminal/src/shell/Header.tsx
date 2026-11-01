@@ -1,4 +1,5 @@
 import { Link, NavLink } from "react-router";
+import { AccountCluster, PhoneAccount } from "../screens/signin/Account.tsx";
 import { Logo } from "./Logo.tsx";
 
 // The desktop top bar's pages, R5's labels (design/proto/assets/app.js:349 at design-lock-r5), each to its route.
@@ -25,17 +26,20 @@ export function Header() {
           </NavLink>
         ))}
       </nav>
+      <AccountCluster />
     </header>
   );
 }
 
-// The phone header (R5 P.phHeader, app.js:393-399): the compact logo; its controls join with their screens.
+// The phone header (R5 P.phHeader, app.js:393-399): the compact logo and the account side (Sign in or the balance pill);
+// its other controls join with their screens.
 export function PhoneHeader() {
   return (
     <header className="phh">
       <Link to="/" className="hit44 logo-link">
         <Logo phone />
       </Link>
+      <PhoneAccount />
     </header>
   );
 }

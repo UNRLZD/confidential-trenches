@@ -2,20 +2,40 @@
 // each planted break of the header policy (the app paper's APU-10), one case each.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkCsp, checkDir, checkHeadersFile, checkPermissions } from "./check-deploy.ts";
+import { checkCsp, checkDir, checkHeadersFile, checkPages, checkPermissions } from "./check-deploy.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, "..", "public");
 const FILE = readFileSync(join(PUBLIC, "_headers"), "utf8");
-// a build as Vite writes it: public/ (the _headers) copied beside the built index.html
+// a build as Vite and build/sri.mjs write it: public/ (the _headers) copied beside the built index.html, whose one
+// script and one stylesheet carry the sha384 of their files (computed here, not by sri.mjs)
+const sha384 = (b: string | Buffer) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
+const JS = "console.log('app')\n";
+const CSS = "body{margin:0}\n";
+const PAGE = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Confidential Trenches</title>
+    <link rel="preload" href="/assets/f.woff2" as="font" type="font/woff2" crossorigin>
+    <script type="module" crossorigin src="/assets/index-a1.js" integrity="${sha384(JS)}"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-b2.css" integrity="${sha384(CSS)}">
+  </head>
+  <body><div id="root"></div></body>
+</html>
+`;
 const BUILD = mkdtempSync(join(tmpdir(), "check-deploy-build-"));
 cpSync(PUBLIC, BUILD, { recursive: true });
-writeFileSync(join(BUILD, "index.html"), "<!doctype html>\n");
+mkdirSync(join(BUILD, "assets"));
+writeFileSync(join(BUILD, "assets/index-a1.js"), JS);
+writeFileSync(join(BUILD, "assets/index-b2.css"), CSS);
+writeFileSync(join(BUILD, "assets/f.woff2"), "font");
+writeFileSync(join(BUILD, "index.html"), PAGE);
 const CSP = /Content-Security-Policy: (.*)/.exec(FILE)![1]!;
 const PP = /Permissions-Policy: (.*)/.exec(FILE)![1]!;
 const SIGN = "https://sign.confidential.unrealized.trade";
@@ -31,6 +51,7 @@ test("the committed _headers and a build that carries them pass", () => {
   assert.deepEqual(checkCsp(CSP), []);
   assert.deepEqual(checkPermissions(PP), []);
   assert.deepEqual(checkHeadersFile(FILE), []);
+  assert.deepEqual(checkPages(BUILD), []);
   assert.deepEqual(checkDir(BUILD), []);
 });
 
@@ -112,7 +133,8 @@ test("a build with _worker.js or without _headers is refused; the CLI exits 1 on
   writeFileSync(join(dir, "_worker.js"), "export default {}\n");
   refused(checkDir(dir), /carries _worker\.js/);
   const empty = mkdtempSync(join(tmpdir(), "check-deploy-"));
-  writeFileSync(join(empty, "index.html"), "<!doctype html>\n");
+  cpSync(BUILD, empty, { recursive: true });
+  rmSync(join(empty, "_headers"));
   refused(checkDir(empty), /has no _headers file/);
   const cli = (d: string) => spawnSync(process.execPath, [join(HERE, "check-deploy.ts"), d], { encoding: "utf8" });
   const bad = cli(dir);
@@ -148,4 +170,63 @@ test("deploy.mjs runs the gate first: a refused build reaches no upload; a passi
   assert.ok(up.args.includes("abc123"));
   assert.match(up.cwd!, /ct-deploy-/);
   assert.equal(PROJECT, "confidential-trenches-app");
+});
+
+// A build like BUILD with `edit` applied to a fresh copy; its problems from checkDir.
+const planted = (edit: (dir: string, page: string) => string | void) => {
+  const dir = mkdtempSync(join(tmpdir(), "check-deploy-sri-"));
+  cpSync(BUILD, dir, { recursive: true });
+  const html = edit(dir, PAGE);
+  if (typeof html === "string") writeFileSync(join(dir, "index.html"), html);
+  return checkDir(dir);
+};
+const swap = (from: string, to: string) => (_: string, page: string) => {
+  assert.ok(page.includes(from), from);
+  return page.replace(from, to);
+};
+const SCRIPT_TAG = /<script type="module"[^>]*><\/script>/.exec(PAGE)![0];
+
+test("SRI: one byte changed in the script, or a stylesheet, after its sha384 was written is refused", () => {
+  refused(planted((d) => writeFileSync(join(d, "assets/index-a1.js"), JS.replace("app", "apq"))), /index\.html: script \/assets\/index-a1\.js: integrity sha384-\S+ is not the sha384 of its file \(sha384-/);
+  refused(planted((d) => writeFileSync(join(d, "assets/index-b2.css"), `${CSS} `)), /index\.html: stylesheet \/assets\/index-b2\.css: integrity .* is not the sha384 of its file/);
+});
+
+test("SRI: a script with no integrity, an inline script, or a script whose file is not in the build is refused", () => {
+  const bare = planted(swap(` integrity="${sha384(JS)}"`, ""));
+  assert.deepEqual(bare, ["index.html: script /assets/index-a1.js has no integrity (Integrity-Policy blocks it)"]);
+  refused(planted(swap("/assets/index-a1.js", "http://[x")), /index\.html: script http:\/\/\[x: not a URL/);
+  refused(planted(swap("</title>", "</title><script>window.x=1</script>")), /index\.html: an inline script/);
+  refused(planted(swap("/assets/index-a1.js", "/assets/gone.js")), /index\.html: script \/assets\/gone\.js: no such file in the build/);
+  refused(planted(swap("/assets/index-a1.js", "https://evil.ct.test/a.js")), /index\.html: script https:\/\/evil\.ct\.test\/a\.js is not a file of this build/);
+  refused(planted(swap("/assets/index-a1.js", "//evil.ct.test/a.js")), /is not a file of this build/);
+  refused(planted(swap(SCRIPT_TAG, SCRIPT_TAG.replace("<script ", "<SCRIPT ").replace(` integrity="${sha384(JS)}"`, ""))), /script \/assets\/index-a1\.js has no integrity/);
+});
+
+test("SRI: an integrity must be exactly one sha384", () => {
+  const sha256 = `sha256-${createHash("sha256").update(JS).digest("base64")}`;
+  refused(planted(swap(sha384(JS), sha256)), /script \/assets\/index-a1\.js: integrity must be exactly one sha384 \(got sha256-/);
+  refused(planted(swap(sha384(JS), `${sha384(JS)} ${sha384("x")}`)), /integrity must be exactly one sha384/);
+  refused(planted(swap(`integrity="${sha384(JS)}"`, "integrity")), /integrity must be exactly one sha384 \(got nothing\)/);
+});
+
+test("SRI: a modulepreload without integrity, a script no page loads, a CSP meta, a page with no script, another page's bare script", () => {
+  refused(planted(swap("</title>", '</title><link rel="modulepreload" href="/assets/index-a1.js">')), /index\.html: modulepreload \/assets\/index-a1\.js has no integrity/);
+  refused(planted((d) => void writeFileSync(join(d, "assets/chunk-c3.js"), "export {}\n")), /assets\/chunk-c3\.js is in the build but no page loads it with its integrity/);
+  refused(planted(swap("</title>", `</title><meta http-equiv="Content-Security-Policy" content="script-src 'self' 'wasm-unsafe-eval'">`)), /index\.html: a CSP meta tag/);
+  refused(planted(swap(SCRIPT_TAG, "")), /index\.html loads no script/);
+  refused(planted((d) => void writeFileSync(join(d, "404.html"), '<script src="/assets/index-a1.js"></script>')), /404\.html: script \/assets\/index-a1\.js has no integrity/);
+  assert.deepEqual(planted((d) => void writeFileSync(join(d, "404.html"), "<!doctype html><p>Not found</p>")), []);
+});
+
+test("deploy.mjs refuses a build whose script bytes differ from their integrity: nothing is uploaded", async () => {
+  const { deploy } = await import("./deploy.mjs");
+  const calls: string[] = [];
+  const run = (cmd: string) => (calls.push(cmd), { status: 0, stdout: "" });
+  const dir = mkdtempSync(join(tmpdir(), "deploy-sri-"));
+  cpSync(BUILD, dir, { recursive: true });
+  writeFileSync(join(dir, "assets/index-a1.js"), `${JS};`);
+  const r = deploy([dir], { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" }, run);
+  assert.equal(r.code, 1);
+  assert.match(r.err.join("\n"), /REFUSED index\.html: script \/assets\/index-a1\.js: integrity [\s\S]*nothing was uploaded/);
+  assert.deepEqual(calls, []);
 });

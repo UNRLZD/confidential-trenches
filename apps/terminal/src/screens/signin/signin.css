@@ -1,0 +1,91 @@
+/* The sign-in screens' styles. Every value is R5's (design/proto/assets/proto.css at design-lock-r5, which carries the
+   live UNRLZD terminal's tokens): the top bar's right cluster :105-116, the skeleton :210, the phone header :239-242,
+   the phone sheet :258-261. The desktop modal follows the brief's S2 (09-design-brief: #151515, r16-22, a scrim; option
+   rows h64 r12 #181818 with a 15/600 title). Desktop sizes are layout px on the 1920 design, drawn at --fit-zoom. */
+:root {
+  --bg-panel: #111111; --border-panel: #1f1f1f; --border-active: #383838;
+  --paper: #f4f4f2; --on-paper: #0a0a0a; --acc: #50e397; --on-acc: #0a0a0a; --blue: #5b8cff; --warn: #f2b543;
+  --m-ink-panel: #111111; --m-ink-field: #141414; --m-line: #1f1f1f;
+}
+:where(.tbr, .tbr-ph, .sgn, .amenu) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+:where(.tbr, .tbr-ph, .sgn, .amenu) button:disabled { cursor: default; }
+
+/* desktop: the right cluster */
+.tbr { margin-left: auto; display: flex; align-items: center; gap: 10px; position: relative; flex: none; }
+.btn-signin { height: 42px; padding: 0 18px; border-radius: 11px; background: var(--paper); color: var(--on-paper); font: 600 15px var(--font-ui); }
+.balblock { display: flex; flex-direction: column; align-items: flex-end; min-width: 64px; }
+.balblock .v { font: 400 14px var(--font-num); color: var(--paper); letter-spacing: -0.02em; }
+.sk { display: block; width: 64px; height: 16px; background: #181818; border-radius: 6px; animation: sgn-skp 1.2s linear infinite; }
+@keyframes sgn-skp { 50% { opacity: .55; } }
+.btn-dep { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--acc); color: var(--on-acc); font: 600 14px var(--font-ui); display: flex; align-items: center; }
+.btn-dep:disabled { background: var(--bg-raised); color: var(--text-3); }
+.acct { height: 42px; padding: 0 8px 0 6px; display: flex; align-items: center; gap: 8px; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 11px; color: var(--text-1); position: relative; }
+.acct .av { width: 30px; height: 30px; border-radius: 8px; background: var(--bg-raised); display: flex; align-items: center; justify-content: center; color: var(--text-2); position: relative; }
+.acct .dot { position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 2px var(--bg-panel); }
+.acct.open { background: var(--bg-raised); border-color: var(--border-active); }
+.acct:disabled { opacity: .5; }
+
+/* S1.16: the account menu, a 360 panel under the chip (desktop); the Account tab's rows (phone) */
+.amenu { position: absolute; top: calc(100% + 8px); right: 0; width: 360px; z-index: 70; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px; padding: 6px; box-shadow: 0 16px 40px rgba(0,0,0,.6); display: flex; flex-direction: column; }
+.amenu .mwho { height: 44px; padding: 0 12px; display: flex; align-items: center; gap: 10px; color: var(--text-2); font: 500 14px var(--font-ui); border-bottom: 1px solid var(--border-panel); margin-bottom: 4px; }
+.amenu .mrow { height: 44px; padding: 0 12px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; font: 500 15px var(--font-ui); color: var(--text-1); text-align: left; }
+.amenu .mrow:hover:not(:disabled) { background: var(--bg-raised); }
+.amenu .mrow:disabled { color: var(--text-3); }
+.amenu .mdot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
+.amenu .mrule { height: 1px; background: var(--border-panel); margin: 4px 6px; }
+.amenu.ph { position: static; width: auto; margin: 12px 16px; border-radius: 18px; box-shadow: none; }
+.amenu.ph .mrow { height: 52px; font-size: 16px; }
+
+/* phone header */
+.tbr-ph { margin-left: auto; display: flex; align-items: center; }
+.phh .signin { height: 40px; padding: 0 16px; border-radius: 12px; background: var(--m-ink-field); box-shadow: inset 0 0 0 1px var(--m-line); font: 600 15px var(--font-ui); display: flex; align-items: center; }
+.phh .balp { height: 40px; border-radius: 12px; background: var(--m-ink-field); box-shadow: inset 0 0 0 1px var(--m-line); padding: 0 4px 0 12px; display: flex; align-items: center; gap: 9px; flex: none; }
+.phh .balp .v { font: 500 14px var(--font-num); letter-spacing: -0.02em; }
+.phh .balp .sk { width: 56px; height: 14px; }
+.phh .balp .plus { width: 32px; height: 32px; border-radius: 9px; background: var(--acc); color: #04150c; display: flex; align-items: center; justify-content: center; }
+.phh button:disabled .plus { background: var(--bg-raised); color: var(--text-3); }
+
+/* S2.1 and S19: the sheet. Desktop a centred modal; phone a bottom sheet (min-width 768 matches the shell's split) */
+.sgn { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; }
+.sgn-scrim { position: absolute; inset: 0; background: rgba(5,5,5,.6); }
+.sgn-box { position: relative; width: 440px; background: #151515; border-radius: 20px; padding: 18px 20px 20px; box-shadow: inset 0 0 0 1px var(--border-panel), 0 30px 80px rgba(0,0,0,.6); }
+.sgn .grab { display: none; }
+.sgn-hd { height: 40px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.sgn-hd h2 { margin: 0; font: 600 20px var(--font-ui); color: var(--text-1); display: flex; align-items: center; }
+.sgn-hd h2 svg { color: var(--acc); }
+.sgn-x { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-2); background: var(--bg-raised); }
+.sgn-ways { display: flex; flex-direction: column; gap: 8px; }
+.sgn-opt { height: 64px; border-radius: 12px; background: var(--bg-raised); display: flex; align-items: center; gap: 14px; padding: 0 16px; text-align: left; color: var(--text-1); }
+.sgn-opt .ic { width: 36px; height: 36px; border-radius: 10px; background: #222; color: var(--text-2); display: flex; align-items: center; justify-content: center; flex: none; }
+.sgn-opt .tt { font: 600 15px var(--font-ui); }
+.sgn-opt.primary { background: var(--paper); color: var(--on-paper); }
+.sgn-opt.primary .ic { background: rgba(10,10,10,.08); color: var(--on-paper); }
+.sgn-opt:hover:not(:disabled) { filter: brightness(1.08); }
+.sgn-opt:disabled { opacity: .45; }
+.sgn-opt[aria-busy="true"] { opacity: .7; }
+.sgn-restore { display: flex; flex-direction: column; gap: 14px; padding: 6px 0 4px; }
+.rbal { font: 400 24px var(--font-num); color: var(--paper); letter-spacing: -0.02em; }
+.rbal.dim { color: var(--text-3); }
+.rbar { height: 3px; border-radius: 2px; background: var(--bg-raised); overflow: hidden; }
+.rbar i { display: block; width: 30%; height: 100%; border-radius: 2px; background: var(--blue); animation: sgn-bar 1.4s ease-in-out infinite; }
+@keyframes sgn-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .rbar i, .sk { animation: none; } }
+.rline { display: flex; align-items: center; gap: 12px; font: 500 14px var(--font-ui); color: var(--text-2); }
+.rline.row { justify-content: space-between; }
+.rline .warn { color: var(--warn); font-weight: 600; }
+.rline .retry { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 14px var(--font-ui); }
+
+@media (max-width: 767.98px) {
+  .sgn { align-items: flex-end; z-index: 110; }
+  .sgn-scrim { background: rgba(0,0,0,.6); }
+  .sgn-box { width: 100%; border-radius: 26px 26px 0 0; background: var(--m-ink-panel); padding: 0 16px calc(16px + env(safe-area-inset-bottom)); box-shadow: inset 0 1px 0 rgba(255,255,255,.07); }
+  .sgn .grab { display: flex; justify-content: center; height: 21px; padding-top: 8px; }
+  .sgn .grab i { width: 38px; height: 5px; border-radius: 3px; background: #333; }
+  .sgn-hd { height: 48px; margin-bottom: 10px; }
+  .sgn-x { width: 44px; height: 44px; border-radius: 14px; }
+  .sgn-opt { height: 64px; border-radius: 16px; }
+  .sgn-opt.primary { height: 56px; }
+  .rbal { font-size: 34px; }
+  .rline .retry { height: 44px; border-radius: 14px; }
+}
+@media (min-width: 768px) { .amenu.ph { display: none; } }
