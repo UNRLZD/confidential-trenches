@@ -3,3 +3,6 @@ export * from "./signpage/messages.ts";
 export * from "./orders/record.ts";
 export * from "./helper/v1.ts";
 export * from "./zk/setup-files.ts";
+export * from "./checks/solana/index.ts";
+export * from "./vault/shapes.ts";
+export * from "./checks/oneclick.ts";
