@@ -3,11 +3,11 @@
  * line it writes holds a client IP, a path or a header.
  *
  *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
- *     [SOLANA_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] node src/server.ts
+ *     [SOLANA_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..] node src/server.ts
  *
  * The vendor keys come from the host's environment only (src/proxy/vendors.ts); a vendor with no key is called
  * without one. So do the RPC providers' URLs (src/rpc/rpc.ts), where a keyed provider holds its key; a chain with none
- * set uses its public endpoint.
+ * set uses its public endpoint, and the second NEAR provider USDC's watch reads (NEAR_RPC_URL_B; src/token-status/).
  *
  * Every answer carries X-Helper-Commit and Vary: Origin. Cross-origin reads are allowed for exactly APP_HOST and
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
@@ -17,14 +17,17 @@ import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
+import { createTokenWatch, USDC } from "./token-status/status.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
-// The route prefixes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health
-// reads its "up" parts from these keys and the dispatch below reads each prefix from here, so a part is up exactly
-// when its routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+type Watch = ReturnType<typeof createTokenWatch>;
+// The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
+// "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
+// routes are mounted.
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/"], relay: ["/v1/token-status"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX] = MOUNTED.proxy;
+const [TOKEN_STATUS] = MOUNTED.relay;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 export const ORIGINS: ReadonlySet<string> = new Set([
@@ -92,7 +95,12 @@ function readBody(req: IncomingMessage, max: number): Promise<string | undefined
   });
 }
 
-export function handler(commit: string, proxy: Proxy = createProxy(process.env), rpc: Rpc = createRpc(process.env)) {
+export function handler(
+  commit: string,
+  proxy: Proxy = createProxy(process.env),
+  rpc: Rpc = createRpc(process.env),
+  watch: Watch = createTokenWatch(process.env),
+) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
@@ -127,6 +135,17 @@ export function handler(commit: string, proxy: Proxy = createProxy(process.env),
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         return send(200, health(commit, SERVED), cors(req));
+      }
+      if (path === TOKEN_STATUS) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // exactly one token, the release's USDC (H7: any other answers 404 token_not_watched)
+        const tokens = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("token");
+        if (tokens.length !== 1 || tokens[0] !== USDC) return send(404, { error: { code: "token_not_watched" } }, cors(req));
+        void watch
+          .status()
+          .then((s) => send(200, s, cors(req)))
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
       }
       if (path.startsWith(PROXY_PREFIX)) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
@@ -171,12 +190,12 @@ export function handler(commit: string, proxy: Proxy = createProxy(process.env),
   };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc),
+    handler(commit, proxy, rpc, watch),
   );
   server.listen(port);
   return server;

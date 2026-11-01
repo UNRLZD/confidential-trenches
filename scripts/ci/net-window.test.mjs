@@ -23,6 +23,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-host-health.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
+  "scripts/live-checks/helper-token-watch.mjs",
   "scripts/live-checks/kit-entry-signpage-api.mjs",
   "scripts/live-checks/kit-freeze-helper-api.mjs",
   "scripts/live-checks/kit-freeze-keys.mjs",
