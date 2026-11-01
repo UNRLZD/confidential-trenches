@@ -13,8 +13,8 @@
 //   vault's own scope, the context the vault recomputes (vaultContextOf over vaultContextInput, the vault as processor).
 //   The proof is the kit's vaultProveWithdraw, through the prover worker the caller passes; it refuses a worker answer
 //   whose 8 public signals are not this input's. The proof's context is checked again against the request's here.
-// - WU-06, nothing leaves before the store has it: the spent note goes UNSPENT -> HELD (its deadline_ms and this
-//   attempt) before the proof starts, and HELD -> RESERVED once the proof is made, before the request is handed back.
+// - WU-06, nothing leaves before the store has it: the spent note goes UNSPENT -> HELD (its deadline_ms, this attempt
+//   and its context, kept on the note for good) before the proof starts, and HELD -> RESERVED once the proof is made, before the request is handed back.
 //   The change note's index needs no counter: j is a function of the spent note's ref, which that record holds, so the
 //   RESERVED record is the stored index (keys.ts changeIndex, store.ts parentOf). Each write is the note store's
 //   compare-and-set: a failed write, or another tab that took the note first, stops the request, and nothing is
@@ -31,8 +31,9 @@
 // Nothing here logs: the seed, the note's secrets and the circuit input never leave the device.
 //
 // Not here: the reads (the trees' leaves, the newest roots and the block time on two RPCs, register_deposit, the
-// relayer's fee_min), the send to the relayer and its answers, recording the attempt's context for "own" (l.214,
-// l.224-227), and a withdrawal across several notes (WM-06, l.716-760).
+// relayer's fee_min), the send to the relayer and its answers, the "own" check itself (a spends record whose context
+// is in the note's contexts is this device's, l.224-227: the sync and arming cards), and a withdrawal across several
+// notes (WM-06, l.716-760).
 import {
   type HelperWithdrawRequest,
   vaultProof,
@@ -153,7 +154,8 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     });
 
     // WU-06: the note is HELD by this attempt before the proof starts; a failed write stops here.
-    const held = await notes.move(note.id, "UNSPENT", "HELD", { deadlineMs: BigInt(deadlineMs) });
+    // The attempt's context goes on the note in the same write (wallet.md l.214-217), so it is stored before its proof.
+    const held = await notes.move(note.id, "UNSPENT", "HELD", { deadlineMs: BigInt(deadlineMs), context: req.context });
     const attempt = held.attempt!;
     const free = (): Promise<unknown> => notes.move(note.id, "HELD", "UNSPENT", { attempt }).catch(() => undefined);
     let body: HelperWithdrawRequest;

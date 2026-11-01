@@ -168,3 +168,74 @@ test("the request's deadline from withdrawDeadlineMs passes, and is the one in i
   assert.equal(r.body.withdrawal.deadline_ms, deadlineMs);
   assert.equal((await v.ns.get(r.noteId))?.deadlineMs, BigInt(deadlineMs));
 });
+
+// The attempt's context on the note (wallet.md l.214-217: recorded before its proof, so "own" can be read from the
+// vault's spends record later; an earlier attempt may land until its own deadline, so no entry is ever removed).
+test("HELD writes the attempt's context on the note before the proof starts", async () => {
+  const v = await vaultWith();
+  let seen: unknown;
+  const p = signalsProver();
+  const prove = p.prove.bind(p);
+  p.prove = async (c, input) => {
+    seen = (await v.ns.get(v.notes[1]!.id))?.contexts;
+    return prove(c, input);
+  };
+  const r = await withdrawRequest(argsFor(v, p));
+  const want = [{ context: r.body.public_signals[7], deadlineMs: BigInt(r.body.withdrawal.deadline_ms) }];
+  assert.deepEqual(seen, want, "the context was not stored before the proof");
+  assert.deepEqual((await v.ns.get(r.noteId))?.contexts, want);
+});
+
+test("a second attempt after a free keeps both contexts, through RESERVED and back to UNSPENT", async () => {
+  const v = await vaultWith();
+  const broken: VaultProver = { load: async () => {}, prove: async () => Promise.reject(new Error("the prover died")) };
+  await assert.rejects(withdrawRequest(argsFor(v, broken)), /the prover died/);
+  const first = (await v.ns.get(v.notes[1]!.id))!;
+  assert.equal(first.state, "UNSPENT");
+  assert.equal(first.contexts?.length, 1, "a freed note keeps its attempt's context");
+  const r = await withdrawRequest(argsFor(v, signalsProver()));
+  assert.equal(r.noteId, v.notes[1]!.id);
+  const n = (await v.ns.get(r.noteId))!;
+  assert.deepEqual(n.contexts?.map((c) => c.context), [first.contexts![0]!.context, r.body.public_signals[7]]);
+  const back = await v.ns.move(r.noteId, "RESERVED", "UNSPENT", { blockTimeMs: BigInt(r.body.withdrawal.deadline_ms) + 1n });
+  assert.equal(back.contexts?.length, 2);
+  const spent = await v.ns.move(r.noteId, "UNSPENT", "SPENT");
+  assert.equal(spent.contexts?.length, 2, "nothing removes an entry");
+});
+
+test("a move to HELD without a context, or with a bad or repeated one, is refused with nothing written", async () => {
+  const v = await vaultWith();
+  const id = v.notes[0]!.id;
+  const deadlineMs = BigInt(BLOCK_MS + 590_000);
+  await assert.rejects(v.ns.move(id, "UNSPENT", "HELD", { deadlineMs }), /context/);
+  for (const bad of ["", "01", "-1", "0x1", 5n as unknown as string, String(21888242871839275222246405745257275088548364400416034343698204186575808495617n)])
+    await assert.rejects(v.ns.move(id, "UNSPENT", "HELD", { deadlineMs, context: bad }), /context/, String(bad));
+  assert.equal((await v.ns.get(id))?.state, "UNSPENT");
+  assert.equal((await v.ns.get(id))?.contexts, undefined);
+  const h = await v.ns.move(id, "UNSPENT", "HELD", { deadlineMs, context: "42" });
+  await assert.rejects(v.ns.move(id, "HELD", "RESERVED", { attempt: h.attempt, context: "43" } as never), /context/);
+  await v.ns.move(id, "HELD", "UNSPENT", { attempt: h.attempt });
+  await assert.rejects(v.ns.move(id, "UNSPENT", "HELD", { deadlineMs, context: "42" }), /written twice/);
+});
+
+test("a stored note with a bad context list is refused on read", async () => {
+  const cases: [string, (n: Record<string, unknown>) => void, RegExp][] = [
+    ["a context not below p", (n) => ((n.contexts as { context: string }[])[0]!.context = String(1n << 254n)), /context/],
+    ["a context not canonical", (n) => ((n.contexts as { context: string }[])[0]!.context = "042"), /context/],
+    ["a context written twice", (n) => (n.contexts = [...(n.contexts as unknown[]), ...(n.contexts as unknown[])]), /written twice/],
+    ["an empty list", (n) => (n.contexts = []), /contexts/],
+    ["a list on a note never HELD", (n) => ((n.state = "INCOMING"), delete n.leaf, delete n.deadlineMs, delete n.attempt, delete n.tab), /contexts/],
+    ["a HELD note with no list", (n) => delete n.contexts, /contexts/],
+    ["a HELD note whose last entry is another deadline", (n) => ((n.contexts as { deadlineMs: bigint }[])[0]!.deadlineMs = 1n), /contexts/],
+    ["an entry with another field", (n) => ((n.contexts as Record<string, unknown>[])[0]!.salt = "00"), /may not hold salt/],
+  ];
+  for (const [what, spoil, why] of cases) {
+    const v = await vaultWith();
+    const id = v.notes[0]!.id;
+    await v.ns.move(id, "UNSPENT", "HELD", { deadlineMs: BigInt(BLOCK_MS + 590_000), context: "7" });
+    const rec = structuredClone((await v.w.get("notes", id)) as Record<string, unknown>);
+    spoil(rec);
+    await v.w.put("notes", id, rec);
+    await assert.rejects(v.ns.get(id), why, what);
+  }
+});
