@@ -1,10 +1,11 @@
 // node --test scripts/live-checks/app-signpage-client.test.mjs: the live check's verdict replays recorded runs
 // (app-signpage-client.answers.json), each read on 2026-11-01 by app-signpage-client.mjs --record in headless
 // Chromium 153 on the owner's PC box (scripts/heavy.sh):
-//   good:      --harness: the terminal's build at APP_HOST and a test frame that speaks the frozen ready and state
-//              shapes at SIGN_HOST, the real names mapped to the app's browser harness, each under its own _headers:
-//              PASS (READY in about 100 ms; down at about 5,070 ms when blocked; READY again with no reload);
-//   badSilent: --harness --silent: the same, with SIGN_HOST's real page (no script yet, so no ready): FAIL on READY;
+//   good:      --harness, the review round 2 build (ef8d248): the terminal's build at APP_HOST and a test frame that
+//              speaks the frozen ready and state shapes at SIGN_HOST, the real names mapped to the app's browser
+//              harness, each under its own _headers: PASS (READY in about 105 ms; down at about 5,090 ms when blocked;
+//              READY again about 9,700 ms after SIGN_HOST is let through, with no reload);
+//   badSilent: --harness --silent, the same build with SIGN_HOST's real page (no script yet, so no ready): FAIL on READY;
 //   badLive:   the live APP_HOST before this card's deploy (no iframe at all): FAIL on the iframe, READY and down.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
