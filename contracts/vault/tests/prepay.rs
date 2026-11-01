@@ -36,7 +36,8 @@ const MAX_256: &str = "115792089237316195423570985008687907853269984665640564039
 const PREPAID_RECORD_BYTES: u64 = 1 + 32 + 16 + 40;
 /// `Key::Prepaid`'s Borsh byte: the 13th variant of `Key` in src/lib.rs
 const PREPAID_PREFIX: u8 = 12;
-const MIN: u128 = blindfill_vault::constants::DEPOSIT_STORAGE_BYTES as u128 * YOCTO_PER_BYTE;
+const DEPOSIT_STORAGE_BYTES: u64 = blindfill_vault::constants::DEPOSIT_STORAGE_BYTES;
+const MIN: u128 = DEPOSIT_STORAGE_BYTES as u128 * YOCTO_PER_BYTE;
 const GAS: Gas = Gas::from_tgas(30);
 /// a failed call's gas costs its payer far less than this; the attachment is 7.56 milli-NEAR
 const GAS_COST_BOUND: u128 = 1_000_000_000_000_000_000_000;
@@ -115,6 +116,8 @@ async fn a_prepay_record_is_89_bytes() -> R<()> {
     let first = usage(&h).await? - u0;
     println!("the vault's first write (a prepay): {first} B = {PREPAID_RECORD_BYTES} B record + {} B state record", first - PREPAID_RECORD_BYTES);
     assert!(first > PREPAID_RECORD_BYTES, "the first write did not add the state record");
+    // the minimum prepay pays the first write whole, so a grown state record never draws on the deploy's spare NEAR
+    assert!(first <= DEPOSIT_STORAGE_BYTES, "the first write, {first} B, is over the {DEPOSIT_STORAGE_BYTES} B a prepay must bring");
 
     let u1 = usage(&h).await?;
     prepay(&h, &relayer, "2", MIN).await?.expect_all_ok("a second prepay")?;
@@ -154,6 +157,8 @@ async fn exact_short_and_topped_up() -> R<()> {
     let o = prepay(&h, &stranger, p, 148 * YOCTO_PER_BYTE).await?;
     o.expect_all_ok("the top-up to 904 B")?;
     assert_eq!(event(&o).unwrap()["data"][0]["payer"], stranger.id().as_str());
+    // this call's attachment, never the record's running total (904 B)
+    assert_eq!(event(&o).unwrap()["data"][0]["amount"], (148 * YOCTO_PER_BYTE).to_string());
     assert_eq!(record(&h, p).await?, Some(904 * YOCTO_PER_BYTE), "756 B + 148 B");
     println!("prepaid[{p}] = 904 B x 1e19 after 756 B by the relayer and 148 B by a stranger\n\ngas table\n{}", h.gas_table());
     Ok(())

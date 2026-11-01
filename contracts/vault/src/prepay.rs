@@ -106,9 +106,21 @@ mod tests {
         as_payer("stranger.testnet", 148 * BYTE);
         v.storage_prepay("7".into());
         assert_eq!(v.prepaid.get(&be("7")), Some(904 * BYTE));
+        // the event names this call's attachment, never the record's running total
+        assert_eq!(logged_amount(), (148 * BYTE).to_string());
         as_payer("stranger.testnet", 1);
         v.storage_prepay("7".into());
         assert_eq!(v.prepaid.get(&be("7")), Some(904 * BYTE + 1));
+        assert_eq!(logged_amount(), "1");
+    }
+
+    /// The `amount` of the one `storage_prepaid` line the last call logged.
+    fn logged_amount() -> String {
+        let logs = get_logs();
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        let v: near_sdk::serde_json::Value = near_sdk::serde_json::from_str(&logs[0]["EVENT_JSON:".len()..]).unwrap();
+        assert_eq!(v["event"], "storage_prepaid");
+        v["data"][0]["amount"].as_str().unwrap().to_string()
     }
 
     #[test]
