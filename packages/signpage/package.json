@@ -3,10 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test scripts/deploy.test.mjs",
-    "test:e2e": "node scripts/frame.e2e.mjs"
+    "build": "node scripts/build-app.mjs",
+    "test": "node --test scripts/deploy.test.mjs scripts/build-app.test.mjs test/guard.test.ts",
+    "test:e2e": "node scripts/frame.e2e.mjs",
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --lib es2023,dom,dom.iterable --types node src/main.ts src/guard.ts test/guard.test.ts"
   },
   "devDependencies": {
-    "playwright": "1.63.0"
+    "@types/node": "24.10.1",
+    "playwright": "1.63.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  },
+  "dependencies": {
+    "@blindfill/wallet": "workspace:*"
   }
 }
