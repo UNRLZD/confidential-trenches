@@ -498,3 +498,66 @@ test("N1: a change note keeps its label: one whose leaf label is not its l is re
   assert.equal(b.parent, a.id);
   assert.equal((await t.ns.list()).filter((n) => n.state === "UNSPENT").reduce((s, n) => s + n.leaf!.value, 0n), 60n);
 });
+
+// ---------- bind calls (card wallet-deposit-bind, R2-2) ----------
+const U_ID = "ab".repeat(32);
+const aCall = (nonce: bigint, mbh: bigint) => ({
+  signed_delegate: Buffer.from(`call ${nonce} ${mbh}`).toString("base64"), sender_id: U_ID, receiver_id: "usdc.fakes.testnet",
+  nonce, max_block_height: mbh, public_key: "ed25519:" + "1".repeat(32) + "AbCd", balance: 100_000_000n,
+});
+const HASH = (k: number) => "H".repeat(43) + String(k % 10).replace("0", "a");
+
+test("bind calls: written only on an INCOMING note, a compare-and-set on the count, one put each, kept once the note lands", async () => {
+  const t = await tab();
+  const planned = await t.ns.planDeposit(scopes++, pc);
+  await assert.rejects(t.ns.addCall(planned.id, aCall(5n, 100n), 0), /INCOMING/);
+  const n = await t.ns.move(planned.id, "PLANNED", "INCOMING");
+  const p0 = t.puts();
+  const one = await t.ns.addCall(n.id, aCall(5n, 100n), 0);
+  assert.equal(t.puts() - p0, 1);
+  assert.equal(one.calls!.length, 1);
+  assert.deepEqual(one.calls![0]!.tx_hashes, []);
+  // another bind read no call: its call is not written
+  const p1 = t.puts();
+  const stale = await t.ns.addCall(n.id, aCall(5n, 200n), 0);
+  assert.equal(t.puts() - p1, 0);
+  assert.equal(stale.calls!.length, 1);
+  assert.equal(stale.calls![0]!.max_block_height, 100n);
+  // a same-nonce re-sign with a new window, then a hash heard for it, once
+  await t.ns.addCall(n.id, aCall(5n, 200n), 1);
+  await t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 200n }, HASH(1));
+  const p2 = t.puts();
+  await t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 200n }, HASH(1));
+  assert.equal(t.puts() - p2, 0);
+  await assert.rejects(t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 300n }, HASH(2)), /no such call/);
+  const landed = await t.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: leafOf(n.precommitment) });
+  assert.deepEqual(landed.calls!.map((c) => [c.nonce, c.max_block_height, c.tx_hashes]), [[5n, 100n, []], [5n, 200n, [HASH(1)]]]);
+  await assert.rejects(t.ns.addCall(n.id, aCall(6n, 300n), 2), /UNSPENT/); // a landed note gets no new call
+  // read back by a new tab on the same database
+  const t2 = await tab(t.idb);
+  assert.deepEqual((await t2.ns.get(n.id))!.calls, landed.calls);
+});
+
+test("bind calls: another shape, another sender, a nonce going back or a call written twice is refused with no write", async () => {
+  const t = await tab();
+  const n = await t.ns.move((await t.ns.planDeposit(scopes++, pc)).id, "PLANNED", "INCOMING");
+  await t.ns.addCall(n.id, aCall(5n, 100n), 0);
+  const p0 = t.puts();
+  const bad: [string, Record<string, unknown>][] = [
+    ["an extra field", { ...aCall(6n, 1n), secret: "x" }],
+    ["a tx_hashes field", { ...aCall(6n, 1n), tx_hashes: [] }],
+    ["not base64", { ...aCall(6n, 1n), signed_delegate: "not base64!" }],
+    ["U not an implicit id", { ...aCall(6n, 1n), sender_id: "u.testnet" }],
+    ["a number nonce", { ...aCall(6n, 1n), nonce: 6 }],
+    ["a zero window", { ...aCall(6n, 1n), max_block_height: 0n }],
+    ["a negative balance", { ...aCall(6n, 1n), balance: -1n }],
+    ["another key type", { ...aCall(6n, 1n), public_key: "secp256k1:abc" }],
+    ["another sender", { ...aCall(6n, 1n), sender_id: "cd".repeat(32) }],
+    ["a nonce going back", aCall(4n, 300n)],
+    ["the same call twice", aCall(5n, 100n)],
+  ];
+  for (const [what, c] of bad) await assert.rejects(t.ns.addCall(n.id, c as never, 1), Error, what);
+  await assert.rejects(t.ns.addCallTx(n.id, { nonce: 5n, max_block_height: 100n }, "0OIl"), /base58/);
+  assert.equal(t.puts() - p0, 0);
+  assert.equal((await t.ns.get(n.id))!.calls!.length, 1);
+});
