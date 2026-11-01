@@ -1434,7 +1434,7 @@ test("tx rebuild planted: a changed block on the walk, its own block hash, or on
   await assert.rejects(rebuilt(d), /a DeployContract action: no code read back that hashes to/);
 });
 
-test("tx rebuild planted: an unknown or unpinned action kind, an unknown field, a non-FullAccess permission or a key type it does not read is refused before any block is read", async () => {
+test("tx rebuild planted: an unknown or unpinned action kind, an unknown field, a permission or a key type no tx pins is refused before any block is read", async () => {
   const t = trTx("4Twid1qBm8SxHNFR3s7mvmGTS39rUwZRKMw8iG3oAyYx"); // CreateAccount, Transfer, AddKey
   const pk = t.known.transaction.public_key;
   const cases = [
