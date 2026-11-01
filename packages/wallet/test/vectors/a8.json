@@ -1,0 +1,419 @@
+{
+ "set": "wallet.md §A.8 at research ffcba5e, transcribed line by line; frozen with the kit at Nov 1 06:00Z",
+ "note": "A public test seed: never fund any address below. Hex is lowercase with no 0x except EVM addresses.",
+ "inputs": {
+  "entropy": "00000000000000000000000000000000",
+  "passphrase": "",
+  "scope": "blindfill/v1/test-scope",
+  "labelNonce": 1
+ },
+ "p": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+ "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+ "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+ "bitlenL": 254,
+ "ids": [
+  {
+   "name": "U_{0,0}",
+   "kind": "in",
+   "s": "0000000000000000000000000000000000000000000000000000000000000000",
+   "i": 0,
+   "info": "6f6e6574696d652f696e000000000000000000000000000000000000000000000000000000000000000000000000",
+   "id": "4894a2c02a6134842f04706db3ccaf7edd8878c39bde322570fe5427ed874f14"
+  },
+  {
+   "name": "U_{0,1}",
+   "kind": "in",
+   "s": "0000000000000000000000000000000000000000000000000000000000000000",
+   "i": 1,
+   "id": "5479e97c367d1c54715b5f19e2d52f200c5e104943b8cc5fb9a6a6de0cbb63b8"
+  },
+  {
+   "name": "U_{s,0}",
+   "kind": "in",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 0,
+   "id": "11a8cd0e0841a3274b8ad0cb2f47577b961f3c0a30ad565dac3daaffee381434"
+  },
+  {
+   "name": "U_{s,1}",
+   "kind": "in",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 1,
+   "id": "2e969538bdce27f71dba9f4653da40cd9ddfb5143380580d66c5c387ebdd90c7"
+  },
+  {
+   "name": "V_{l,0}",
+   "kind": "refund",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "f805de910e3edce183c856461e5ee5f03b50489f2dc9832f37821f21c01ca747"
+  },
+  {
+   "name": "A_{l,0}",
+   "kind": "arm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "info": "6f6e6574696d652f61726d223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b3200000000",
+   "id": "a8294c86a52be31b2e6d2a784bb35ed437997a924691ccdddc61b94b779cb417"
+  },
+  {
+   "name": "V_{l,1}",
+   "kind": "refund",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "1d8737c9344986736e7054e1289802ec2fc4dca0d850862cae58fdbaff03313a"
+  },
+  {
+   "name": "A_{l,1}",
+   "kind": "arm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "1aba0a79d8469693c585c1293d7be213e3258b53364b7411f7cc0d13ab7f1477"
+  },
+  {
+   "name": "R_{sol,l,0}",
+   "kind": "return",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "info": "6f6e6574696d652f72657475726e01223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b3200000000",
+   "id": "68c58e6ce09fa87c8991a03ad9bc70bad0ca45841ac387e8f0918badb62c050a"
+  },
+  {
+   "name": "R_{evm,l,0}",
+   "kind": "return",
+   "c": "evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "38a4d4013791932bb87fa6bb5760a516c901174cb252d69d78802a73913e2f11"
+  },
+  {
+   "name": "R_{near,l,0}",
+   "kind": "return",
+   "c": "near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "7af7e399adae3596d383e9490205025855ac49e975805275ec10e63e2567735f"
+  },
+  {
+   "name": "R_{hop-sol,l,0}",
+   "kind": "return",
+   "c": "hop-sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "540799ecc25e46fe4720f61672aa743a4868c0751b32827e84453f1eed3f3cba"
+  },
+  {
+   "name": "R_{hop-evm,l,0}",
+   "kind": "return",
+   "c": "hop-evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "3ff1f032ca19c8490e636af053f5d4717c23c8959d1c1ae392ad3cf5180688e2"
+  },
+  {
+   "name": "R_{hop-near,l,0}",
+   "kind": "return",
+   "c": "hop-near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "43ded32197aeb451ffa9635276520cbca5f6e85ecdab904224613b4641c9cb71"
+  },
+  {
+   "name": "R_{sol,l,1}",
+   "kind": "return",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "58c04f23539af6eb52a145f216c6f231f86e874c2e4b68b66d8830fe0a104704"
+  },
+  {
+   "name": "R_{evm,l,1}",
+   "kind": "return",
+   "c": "evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "dd5ba89100a45d16b72dbe8815f83f0bca65ee4d6bbd9f0f610a3e2b1e068c46"
+  },
+  {
+   "name": "R_{near,l,1}",
+   "kind": "return",
+   "c": "near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "d1e1fbe1d2d22f518cc94c8019a9e4b14195d92e0cb9f9ac5cc937f3a27018ff"
+  },
+  {
+   "name": "R_{hop-sol,l,1}",
+   "kind": "return",
+   "c": "hop-sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "dd7a07ae59017d961c5a1539ef31cbda6ad70e4d5d1e43ad368e2e8d5104adc4"
+  },
+  {
+   "name": "R_{hop-evm,l,1}",
+   "kind": "return",
+   "c": "hop-evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "fb6299b3e53d392b71ef14da85fd3b697e94ee46ceaba6cf2de5df638a10917c"
+  },
+  {
+   "name": "R_{hop-near,l,1}",
+   "kind": "return",
+   "c": "hop-near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "c4ac248f5350c933e71fad6adfbf33bc8249ddf7ce81a47554857fe43820be5b"
+  },
+  {
+   "name": "T_0",
+   "kind": "profile",
+   "k": 0,
+   "info": "70726f66696c6500000000",
+   "id": "3bef95c040a66b8c675fad34c26dc958c0aa63f4ca027ada3e6946ac61e5c65d"
+  },
+  {
+   "name": "T_1",
+   "kind": "profile",
+   "k": 1,
+   "id": "934307718d8bb6c51243827208008988efc720aba00c26834d8499760db214e1"
+  }
+ ],
+ "wallets": [
+  {
+   "name": "W_{sol,l,0}",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "info": "77616c6c657401223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b3200000000",
+   "path": "m/44'/501'/596533955'/1406555199'",
+   "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq"
+  },
+  {
+   "name": "W_{evm,l,0}",
+   "c": "evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "path": "m/44'/60'/511322703'/752971108'",
+   "address": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35"
+  },
+  {
+   "name": "W_{near,l,0}",
+   "c": "near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "path": "m/44'/397'/1636883381'/2074791655'",
+   "address": "5ce28178d096ab1896ae591a8c8b29a4acadc727488c382d3223a038cfd0cbf0"
+  },
+  {
+   "name": "W_{hop-sol,l,0}",
+   "c": "hop-sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "path": "m/44'/501'/2120843287'/673420692'",
+   "address": "23hsfR5HPFtwRH9pNTtkawPvdKtpyLcCimHdZ2bmhmKm"
+  },
+  {
+   "name": "W_{hop-evm,l,0}",
+   "c": "hop-evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "path": "m/44'/60'/2076434177'/2009954125'",
+   "address": "0x4e2dcf7909d0bee66401615fa57d1e438ba7c847"
+  },
+  {
+   "name": "W_{hop-near,l,0}",
+   "c": "hop-near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "path": "m/44'/397'/253120011'/104228514'",
+   "address": "f0ab04d1932d183c26acdc21250da7e42a3013a78e30cb5a5b747f694902e2bc"
+  },
+  {
+   "name": "W_{sol,l,1}",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "path": "m/44'/501'/1981006591'/2013436102'",
+   "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH"
+  },
+  {
+   "name": "W_{evm,l,1}",
+   "c": "evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "path": "m/44'/60'/750692906'/1843628729'",
+   "address": "0x47c3232ccad267f349230a38764f9d5566096c9d"
+  },
+  {
+   "name": "W_{near,l,1}",
+   "c": "near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "path": "m/44'/397'/1703302473'/312066885'",
+   "address": "602eb923c71eef03b08b6f57351e6d3c898e8401bdf571d17c1da7da1bf51f91"
+  },
+  {
+   "name": "W_{hop-sol,l,1}",
+   "c": "hop-sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "path": "m/44'/501'/72688747'/1387917543'",
+   "address": "DCpZ9gZQ3BbTeTCa4mXyU3hCd5QBzwkXjec9btepiPxo"
+  },
+  {
+   "name": "W_{hop-evm,l,1}",
+   "c": "hop-evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "path": "m/44'/60'/828855409'/1889315262'",
+   "address": "0xcafa62d87c7566325bb317d6b6c945c9b5385049"
+  },
+  {
+   "name": "W_{hop-near,l,1}",
+   "c": "hop-near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "path": "m/44'/397'/412614822'/379086040'",
+   "address": "1607df91083e24902cec9a2c9c1abbd81523b87c14fd31b78fc34a862bd2c1bc"
+  }
+ ],
+ "notes": [
+  {
+   "name": "deposit (s,0)",
+   "note": "deposit",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 0,
+   "precommitment": "00ee724b51268528f8d977c8c81fe086263e6764a589c853f9afdafd8b726e08",
+   "nullifierHash": "02a426222bb13e986970f4f2481d49b1685151c34682bcd8a7ff4e393cabd3db",
+   "value": "1000000",
+   "label": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "commitment": "0d9741d4f084a796aaeb421ce13701b99b3847430961e46b32925a2b27f894f7"
+  },
+  {
+   "name": "change (l,0)",
+   "note": "change",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "precommitment": "2b5f31883da2b9543d7ab1805dddb2078a8cf01c40dfc83e99d591de1a73a6af",
+   "nullifierHash": "19afcf6447cc37aa89918c4839b579c74e18d0f6eec44c0381f599fd3e78b6f7"
+  },
+  {
+   "name": "change (l,1)",
+   "note": "change",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "precommitment": "1590e70855a91f1338eb25454d904837dbbbe7527b8b374f665c8f13de663c00",
+   "nullifierHash": "12f72ecca93b172e882a3a801a064435dc485e6c3e7b1df787ee7d452ac8c6fe"
+  },
+  {
+   "name": "return (sol=1,l,0)",
+   "note": "return",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "precommitment": "07ff48b3904dfed213a6dbc4a0228ec4a578689866bd555abddfdc3e36b3caf5",
+   "nullifierHash": "081ce17e612e845fb0622c233dd42a7339714438fcb04b7133e384c1516c1031"
+  },
+  {
+   "name": "move (l,0)",
+   "note": "move",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "precommitment": "18294cb6c709ab9930e5520351334a4a14a54bb2ce9b32e390c33cb9dc44643e",
+   "nullifierHash": "14e3c1006d2c5f5e55fab47fe6cb90c56c0e1fb57423067fce00cad9289bdf6e"
+  },
+  {
+   "name": "refund (l,0)",
+   "note": "refund",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "precommitment": "1795d1f4f8665d90b5d8c1ed79fdfe13f09cac76adcf9d214a8d384a3902aeb8",
+   "nullifierHash": "1bcf1e207709f6c4d7458095c0efedd0a5cc32d1bf8a117f68ae7ab1f64ddd4a"
+  },
+  {
+   "name": "second U_{s,0} n=0 (kind 0x01)",
+   "note": "second",
+   "id": "U",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 0,
+   "n": 0,
+   "precommitment": "033f53902eed1a32fc4d56e32e204498604090d4a9a6c17e1eb31669d0517068",
+   "nullifierHash": "2c40847a3e5f2dbbebe4f2924eeb02642b9dd46632f8174c9ee924417b3a7669"
+  },
+  {
+   "name": "second U_{s,0} n=1 (kind 0x01)",
+   "note": "second",
+   "id": "U",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 0,
+   "n": 1,
+   "precommitment": "1f2ac9b606d07d090c316b9938e4b3635532664b5dab398e6c35f9853934fc90",
+   "nullifierHash": "16b2c2620a0acffd00de5cef9357b0328158e68d881333186468729f803f6dcf"
+  },
+  {
+   "name": "second V_{l,0} n=0 (kind 0x02)",
+   "note": "second",
+   "id": "V",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "n": 0,
+   "precommitment": "2e3d59fc4f6ec58d7447ceab380973e30dcc3ec2299925ae0e7a49b37f826594",
+   "nullifierHash": "0a4f1c91f51cbf2b004a4a8c53229a94d37d5906510017c15866c2bbc467e94e"
+  },
+  {
+   "name": "second V_{l,0} n=1 (kind 0x02)",
+   "note": "second",
+   "id": "V",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "n": 1,
+   "precommitment": "1e0fd5abe131556293ad46edd7a1f95b9e4be676f9e30dd20a7543a7b57bb59d",
+   "nullifierHash": "2dc51a421c38d37dd5644bf8ff0e1b3d1dad5a82d3376b17de64c9efd248ab49"
+  },
+  {
+   "name": "second A_{l,0} n=0 (kind 0x03)",
+   "note": "second",
+   "id": "A",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "n": 0,
+   "precommitment": "244250577ae5bb63a2f86fd40a396d964d4e63aff05477fcafe63ce56e579bb8",
+   "nullifierHash": "1b3891c5575856e42d664a646bfffb9240f5fb938eebdbd3f3e7d57f09b0597e"
+  },
+  {
+   "name": "second A_{l,0} n=1 (kind 0x03)",
+   "note": "second",
+   "id": "A",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "n": 1,
+   "precommitment": "13a1d787690693cdc3ab390bec78caa9b4f5101028ab22610d2e0e63dc8c9d97",
+   "nullifierHash": "30575678706c714420a8dbc8165e03acef45705b5a7b9a7cbb8019123b257c1a"
+  },
+  {
+   "name": "second R_{sol,l,0} n=0 (kind 0x11)",
+   "note": "second",
+   "id": "R",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "n": 0,
+   "precommitment": "0783e728363b04ac90d4d20e9ff52452b9b3e256420e56240682a38dfb1ed637",
+   "nullifierHash": "2e92d052b1e102f47f0f6115937b9dbc75a1051bfbf6869710144b5a3ea8b821"
+  },
+  {
+   "name": "second R_{sol,l,0} n=1 (kind 0x11)",
+   "note": "second",
+   "id": "R",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "n": 1,
+   "precommitment": "005b1ff4190917de6dbf7daa7e75057e1d682a55bdd799368833f7496480513f",
+   "nullifierHash": "108859f80f4c141af10fca63713ef17df405bbeb8f5d5efb591d61d94b0f582f"
+  }
+ ]
+}
