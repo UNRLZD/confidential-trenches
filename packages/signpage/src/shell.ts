@@ -41,24 +41,47 @@ export function appSrc(loc: { pathname: string; search: string }): string {
 
 /**
  * How long the frame stays after the layer opens: the answer to the kind that opened it (posted just before) is
- * delivered to the frame as a task of its own, and a frame taken out first never gets it. The frame is inert from the
- * first moment, so it holds no focus in the meantime, and the layer covers it.
+ * delivered to the frame as a task of its own, and a frame taken out first never gets it. Taking the frame out is what
+ * stops a frame from taking the keyboard's focus; it is inert meanwhile, which narrows this window but does not close
+ * it (an APP_HOST page calling focus() every few ms still took keys from an inert frame on two engines, the review
+ * measured). So this stays as short as the answer's delivery allows, 100 ms at most (test/shell.test.ts pins it).
  */
 export const FRAME_LEAVE_MS = 100;
+
+/**
+ * Every path SIGN_HOST's build serves as a file, not as the shell: nav may not put one in the top window's address,
+ * where a reload would show that file instead of the shell. The deploy's build output (scripts/deploy.mjs build(),
+ * index.html and public/) is the source: test/shell.test.ts fails when a file in it is missing here. A directory in
+ * it is listed with a trailing slash and covers every path under it.
+ */
+export const SERVED_FILES: readonly string[] = ["/_headers", "/app.js", "/index.html"];
+
+/** True when `pathname` (as the URL parser gives it) names a file the build serves, in any spelling a server reads as it. */
+function servedFile(pathname: string): boolean {
+  let p: string;
+  try {
+    p = decodeURIComponent(pathname);
+  } catch {
+    return true;
+  }
+  p = p.toLowerCase().replace(/\/+$/, "");
+  return SERVED_FILES.some((f) => (f.endsWith("/") ? `${p}/`.startsWith(f) : p === f));
+}
 
 /** No frame: a post goes nowhere, and no message's source is ever this object. */
 const NO_FRAME: PostTarget = { postMessage() {} };
 
 /**
  * nav's target in the top window: `path` as APP_HOST's own path and query (appSrc's rule: joined to the origin, then
- * parsed; any other origin is refused, never its root), on `origin`, as an absolute URL; null when refused.
+ * parsed; any other origin is refused, never its root), on `origin`, as an absolute URL; null when refused, and when
+ * the path names a file SIGN_HOST's build serves (SERVED_FILES).
  */
 export function navUrl(origin: string, path: string): string | null {
   if (typeof path !== "string" || !path.startsWith("/") || path[1] === "/" || path[1] === "\\") return null;
   if (new TextEncoder().encode(path).length > SIGNPAGE_MAX_NAV_BYTES) return null;
   try {
     const app = new URL(`${APP_ORIGIN}${path}`);
-    if (app.origin !== APP_ORIGIN) return null;
+    if (app.origin !== APP_ORIGIN || servedFile(app.pathname)) return null;
     const top = new URL(`${origin}${app.pathname}${app.search}`);
     return top.origin === origin ? top.href : null;
   } catch {
@@ -89,11 +112,11 @@ export interface Shell {
   /** The screens' layer, over the frame. */
   layer: HTMLElement;
   /**
-   * Shows the layer and makes the frame inert in the same task, then FRAME_LEAVE_MS later takes it out of the document
-   * (inert alone lets a focus thief through on one engine, the review measured). A frame under the layer could
-   * still take the keyboard's focus back (an APP_HOST page that calls focus() every few ms gets every key typed after
-   * the first, the 12 words included, on every engine; inert, visibility and display each let it through on one), so
-   * none is left.
+   * Shows the layer and FRAME_LEAVE_MS later takes the frame out of the document: the removal is what keeps the keys
+   * from it. A frame left under the layer takes the keyboard's focus back (an APP_HOST page that calls focus() every
+   * few ms gets every key typed after the first, the 12 words included, on every engine; inert, visibility and display
+   * each let it through on some engine, the reviews measured), so none is left. The frame is also made inert in the
+   * same task the layer shows, which only narrows the FRAME_LEAVE_MS window; it never replaces the removal.
    */
   open(): void;
   /** Hides the layer and puts a new frame in at the top window's address now (which nav keeps as the app's). */
@@ -158,8 +181,8 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     open() {
       layer.hidden = false;
       if (!frame) return;
-      // in the same task the layer shows: an inert frame takes no focus, click or key (its focus is dropped at once),
-      // and a posted message still reaches it
+      // inert in the same task the layer shows narrows the window until the removal below, which is what stops a focus
+      // thief (inert alone does not, on two engines); a posted message still reaches an inert frame
       frame.inert = true;
       if (leaving !== null) return;
       leaving = setTimeout(() => {

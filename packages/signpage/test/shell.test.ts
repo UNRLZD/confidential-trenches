@@ -5,9 +5,13 @@
 // `ready` goes out again on each load of the frame. The browser half (frame-src, sandbox, a real APP_HOST page) is the
 // live check's (scripts/live-checks/signpage-shell.mjs).
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { readdirSync, rmSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { mock, test } from "node:test";
 import { APP_ORIGIN, RELEASE, signedOutState, type IncomingMessage } from "../src/api.ts";
-import { appSrc, FRAME_LEAVE_MS, FRAME_SANDBOX, mountShell, navUrl, wireShell } from "../src/shell.ts";
+import { appSrc, FRAME_LEAVE_MS, FRAME_SANDBOX, mountShell, navUrl, SERVED_FILES, wireShell } from "../src/shell.ts";
+// @ts-expect-error: the deploy script is plain JavaScript, with no types
+import { build } from "../scripts/deploy.mjs";
 
 test("appSrc: APP_HOST with this page's path and query; never another origin", () => {
   assert.equal(appSrc({ pathname: "/", search: "" }), `${APP_ORIGIN}/`);
@@ -216,6 +220,40 @@ test("nav: the top window's address becomes APP_HOST's path and query, by replac
   assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: extra.id, ok: false, error: { code: "not_allowed" } });
   assert.equal(d.calls.replace.length, 1);
   assert.equal(d.calls.assign + d.calls.reload, 0, "never a navigation");
+});
+
+test("open: the frame is out of the document within 100 ms, whatever FRAME_LEAVE_MS says, since inert alone keeps no focus thief out", () => {
+  assert.ok(FRAME_LEAVE_MS > 0 && FRAME_LEAVE_MS <= 100, `FRAME_LEAVE_MS ${FRAME_LEAVE_MS}`);
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const d = fakeDom();
+    const sh = mountShell(d.doc, { state: () => signedOutState() });
+    sh.open();
+    assert.equal(d.frames().length, 1);
+    mock.timers.tick(100);
+    assert.equal(d.frames().length, 0, "the frame is gone 100 ms after open");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("nav refuses every file SIGN_HOST's build serves, in any spelling, and the list is the deploy build's own output", () => {
+  const out: string = build();
+  try {
+    const served = readdirSync(out).map((n) => (statSync(join(out, n)).isDirectory() ? `/${n}/` : `/${n}`)).sort();
+    assert.deepEqual([...SERVED_FILES].sort(), served, "SERVED_FILES is exactly the deploy build's top level");
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+  for (const f of SERVED_FILES) {
+    const variants = [f, `${f}?x=1`, `${f}/`, f.toUpperCase(), f.replace(/[a-z]/, (c) => `%${c.charCodeAt(0).toString(16)}`), `/x/..${f}`, `/.${f}`];
+    for (const v of variants) assert.equal(navUrl(SIGN_ORIGIN, v), null, v);
+  }
+  assert.equal(navUrl(SIGN_ORIGIN, "/%E0%A4%A"), null, "a path that does not decode");
+  // the app's own paths stay allowed, a NEAR account with dots in it included
+  assert.equal(navUrl(SIGN_ORIGIN, "/token/near/usdt.tether-token.near?tab=holders"), `${SIGN_ORIGIN}/token/near/usdt.tether-token.near?tab=holders`);
+  assert.equal(navUrl(SIGN_ORIGIN, "/"), `${SIGN_ORIGIN}/`);
+  assert.equal(navUrl(SIGN_ORIGIN, "/token/app.js.near"), `${SIGN_ORIGIN}/token/app.js.near`);
 });
 
 test("navUrl: APP_HOST's own path and query on the top origin, or null", () => {
