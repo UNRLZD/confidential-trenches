@@ -236,6 +236,42 @@ async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) 
   throw last;
 }
 
+// The one failed receipt a read passes: NEAR's gas refund to an account its own tx deleted. A tx that holds
+// DeleteAccount (signer = receiver: a one-use account closing itself into its beneficiary) succeeds, then NEAR sends
+// the unused gas back from "system" to the signer, which no longer exists, so that refund fails AccountDoesNotExist
+// (mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM, read 2026-11-01: receipt GBkJTsykxG, system to the signer, one
+// Transfer of 229993650000000000000 yocto, receipt signer_id the account, failed; the beneficiary's Transfer 9wEBNxb1a7,
+// receipt signer_id system, succeeded). It needs EXPERIMENTAL_tx_status: only its `receipts` list names each receipt's
+// predecessor_id, signer_id and actions. `r` is that answer, `o` one failed entry of its receipts_outcome; anything
+// missing is not that refund.
+export function isDeleteRefund(r, o) {
+  const tx = r?.transaction;
+  const a = tx?.signer_id;
+  if (typeof a !== "string" || tx.receiver_id !== a || !Array.isArray(tx.actions)) return false;
+  if (!tx.actions.some((x) => x !== null && typeof x === "object" && "DeleteAccount" in x)) return false;
+  const same = Array.isArray(r.receipts) ? r.receipts.filter((x) => x?.receipt_id === o?.id) : [];
+  if (typeof o?.id !== "string" || same.length !== 1) return false;
+  const [rc] = same;
+  if (rc.predecessor_id !== "system" || rc.receiver_id !== a) return false;
+  // A gas refund carries the tx's signer; DeleteAccount's balance payout has the same shape but carries system, and
+  // with beneficiary = the account itself it fails the same way while the balance burns (P10b).
+  if (rc.receipt?.Action?.signer_id !== a) return false;
+  const acts = rc.receipt?.Action?.actions;
+  if (!Array.isArray(acts) || acts.length !== 1 || acts[0] === null || typeof acts[0] !== "object") return false;
+  if (Object.keys(acts[0]).length !== 1 || !("Transfer" in acts[0])) return false;
+  const kind = o.outcome?.status?.Failure?.ActionError?.kind;
+  return kind !== null && typeof kind === "object" && kind.AccountDoesNotExist?.account_id === a;
+}
+
+// How many receipts of an EXPERIMENTAL_tx_status answer failed, the one delete refund above not counted (at most one
+// is passed: a second counts as failed). A receipt whose status is not an object counts as failed. null: the answer
+// has no receipts_outcome or no receipts list, so it cannot be read.
+export function failedReceipts(r) {
+  if (!Array.isArray(r?.receipts_outcome) || !Array.isArray(r.receipts)) return null;
+  const failed = r.receipts_outcome.filter((o) => typeof o?.outcome?.status !== "object" || o.outcome.status === null || "Failure" in o.outcome.status);
+  return failed.length - Math.min(1, failed.filter((o) => isDeleteRefund(r, o)).length);
+}
+
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
 
 // One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read. rateWait off: a 429 is
@@ -244,15 +280,18 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
   let j;
   try {
     if (NEAR.has(chain)) {
-      // NONE answers at once: the outcome when the tx is known, UNKNOWN_TRANSACTION when it is not
-      j = await rpc(fetchFn, url, "tx", { tx_hash: hash, sender_account_id: signer, wait_until: "NONE" }, sleep, rateWait);
+      // NONE answers at once: the outcome when the tx is known, UNKNOWN_TRANSACTION when it is not. EXPERIMENTAL_tx_status,
+      // not tx: its receipts list is what failedReceipts reads.
+      j = await rpc(fetchFn, url, "EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: signer, wait_until: "NONE" }, sleep, rateWait);
       if (j.error) return j.error.cause?.name === "UNKNOWN_TRANSACTION" ? "missing" : `error ${JSON.stringify(j.error).slice(0, 120)}`;
       const r = j.result;
       if (!r?.status) return "missing";
       if (r.status.Failure) return "failed";
       if (r.final_execution_status !== "FINAL") return `not final (${r.final_execution_status})`;
       if (!("SuccessValue" in r.status || "SuccessReceiptId" in r.status)) return `not final (${Object.keys(r.status)[0]})`;
-      if ((r.receipts_outcome ?? []).some((o) => o.outcome?.status?.Failure)) return "failed (a receipt failed)";
+      const failed = failedReceipts(r);
+      if (failed === null) return "incomplete (no receipts or receipts_outcome list)";
+      if (failed > 0) return "failed (a receipt failed)";
       const b = await rpc(fetchFn, url, "block", { block_id: r.transaction_outcome?.block_hash }, sleep, rateWait);
       const ns = b.result?.header?.timestamp_nanosec;
       if (!ns) return "no block time";
