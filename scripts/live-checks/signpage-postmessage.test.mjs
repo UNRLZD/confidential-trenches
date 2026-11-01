@@ -1,8 +1,9 @@
 // node --test scripts/live-checks/signpage-postmessage.test.mjs: the live check replays recorded runs
 // (signpage-postmessage.answers.json). good: packages/signpage's build at this card, answered by `--local` (no
 // network): PASS. emptypage: SIGN_HOST as it was served before this card (the skeleton's empty body, no script): FAIL.
-// planted: the same build with the page's origin check taken out and its answers posted to "*": FAIL. The rest are the
-// good run with one thing changed each.
+// planted: this card's earlier build with the page's origin check taken out and its answers posted to "*": FAIL.
+// passkeyframed: wallet-passkey-prf's page before this card, framed by APP_HOST (sign-in controls, no API): FAIL. The
+// rest are the good run with one thing changed each.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -38,6 +39,13 @@ test("recorded bad run: a page that answers every origin: FAIL on every stranger
   for (const s of ["https://example.com", "https://evil.ct.test", "https://app.other.test"]) {
     assert.ok(r.lines.some((l) => l.startsWith(`BAD from ${s} with frame-ancestors lifted: `) && /message\(s\) reached the parent/.test(l)), `${s}\n${r.lines.join("\n")}`);
   }
+});
+
+test("recorded bad run: the passkey page before this card, framed: FAIL, it renders its sign-in controls and speaks no API", () => {
+  const r = judge(ANSWERS.passkeyframed);
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => l.startsWith("BAD from APP_HOST: the framed page renders 3 element(s), controls ")), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("BAD from APP_HOST: no ready")), r.lines.join("\n"));
 });
 
 test("the good run with one change each: FAIL", () => {
