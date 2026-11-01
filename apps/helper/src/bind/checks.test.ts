@@ -7,6 +7,7 @@ import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:cryp
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  HELPER_BIND_DEPOSIT_CAP,
   HELPER_BIND_DEPOSIT_CODES,
   HELPER_V1_PATHS,
   VAULT_CONSTANTS,
@@ -19,10 +20,9 @@ import {
   vaultDepositMessage,
 } from "../../../../packages/kit/src/index.ts";
 import {
-  BETA_CAP,
+  BIND_DEPOSIT_CAP,
   BIND_DEPOSIT_CODES,
   BIND_MAX_BYTES,
-  CAP_CODE,
   CARRIER,
   DEPOSIT_MESSAGE_FIELDS,
   DEPOSIT_MESSAGE_MAX_BYTES,
@@ -143,6 +143,7 @@ async function passes(req: unknown, w: World = {}): Promise<void> {
 
 test("every value copied from the kit equals the kit's public entry", () => {
   assert.deepEqual([...BIND_DEPOSIT_CODES], [...HELPER_BIND_DEPOSIT_CODES]);
+  assert.equal(BIND_DEPOSIT_CAP, HELPER_BIND_DEPOSIT_CAP);
   assert.equal(BIND_MAX_BYTES, HELPER_V1_PATHS.find((p) => p.path === "/v1/bind")!.limitBytes);
   assert.equal(VAULT_TOKEN, VAULT_CONSTANTS.TOKEN);
   assert.equal(MIN_DEPOSIT, VAULT_CONSTANTS.MIN_DEPOSIT);
@@ -167,14 +168,18 @@ test("every value copied from the kit equals the kit's public entry", () => {
 
 test("the codes this file answers are the kit's, in the kit's order, with the cap after amount_too_low", () => {
   const src = readFileSync(new URL("./checks.ts", import.meta.url), "utf8");
-  const used = [...src.matchAll(/no\("([a-z_0-9]+)"|no\(CAP_CODE/g)].map((m) => m[1] ?? CAP_CODE);
-  const order = [...BIND_DEPOSIT_CODES.slice(0, 16), CAP_CODE, ...BIND_DEPOSIT_CODES.slice(16)];
+  // Every refusal names its code as a literal, so none escapes this list (the helper `no` itself takes `code: BindCode`).
+  const args = [...src.matchAll(/\bno\(([^,]*),/g)].map((m) => m[1]!).filter((a) => a !== "code: BindCode");
+  assert.ok(args.every((a) => /^"[a-z_0-9]+"$/.test(a)), args.join());
+  const used = args.map((a) => JSON.parse(a) as string);
+  const order = BIND_DEPOSIT_CODES;
   const pos = used.map((c) => order.indexOf(c as (typeof order)[number]));
   assert.ok(pos.every((p) => p >= 0), used.join());
   const firsts = [...new Set(used)].filter((c) => c !== "bad_shape").map((c) => order.indexOf(c as (typeof order)[number]));
   assert.deepEqual(firsts, [...firsts].sort((a, b) => a - b));
-  // CAP_CODE is the one code outside the kit's frozen list (card kit-deposit-cap adds it to the kit).
-  assert.deepEqual([...new Set(used)].filter((c) => !(HELPER_BIND_DEPOSIT_CODES as readonly string[]).includes(c)), [CAP_CODE]);
+  // Every code answered is in the kit's list, the cap's included.
+  assert.deepEqual([...new Set(used)].filter((c) => !(HELPER_BIND_DEPOSIT_CODES as readonly string[]).includes(c)), []);
+  assert.ok(used.includes("amount_above_cap"));
 });
 
 // ---- The good call, ours and an outside encoder's ----
@@ -351,9 +356,9 @@ test("check 6: the amount: a u128 decimal, at least MIN_DEPOSIT, at most the $1,
   for (const a of ["01", "-1", "1e6", "340282366920938463463374607431768211456"]) await refused(amt(a), "bad_shape", "args.amount: not a u128 decimal");
   await refused(amt("999999"), "amount_too_low", "amount: under MIN_DEPOSIT");
   await passes(amt("1000000"));
-  await passes(amt(String(BETA_CAP)));
-  assert.equal(BETA_CAP, 1_000n * MIN_DEPOSIT);
-  await refused(amt(String(BETA_CAP + 1n)), CAP_CODE, "amount: over the $1,000 beta cap");
+  await passes(amt(String(BIND_DEPOSIT_CAP)));
+  assert.equal(BIND_DEPOSIT_CAP, 1_000n * MIN_DEPOSIT);
+  await refused(amt(String(BIND_DEPOSIT_CAP + 1n)), "amount_above_cap", "amount: over the $1,000 beta cap");
   await refused(amt("25000000"), "amount_above_balance", "amount: over the sender's balance", { balance: 24_999_999n });
   await passes(amt("25000000"), { balance: 25_000_000n });
 });

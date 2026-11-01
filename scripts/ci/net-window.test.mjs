@@ -1,5 +1,5 @@
-// scripts/net-window.mjs: every Node tool here that opens a network connection on the owner's Mac sets Node's
-// per-address connect window to 2000 ms before its first connection (Node's own 250 ms cancelled the Mac's slow IPv4
+// scripts/net-window.mjs: every Node tool here that opens a network connection sets Node's
+// per-address connect window to 2000 ms before its first connection (Node's own 250 ms cancelled a Mac's slow IPv4
 // connect to api.hetzner.cloud: "fetch failed", 1 Nov 04:37Z).
 //   node --test scripts/ci/net-window.test.mjs
 import assert from "node:assert/strict";
@@ -30,10 +30,12 @@ export const CHANGED = [
   "scripts/live-checks/kit-freeze-keys.mjs",
   "scripts/live-checks/kit-freeze-vault.mjs",
   "scripts/live-checks/money-gate-testnet.mjs",
+  "scripts/live-checks/signpage-postmessage.mjs",
   "scripts/live-checks/signpage-skeleton.mjs",
   "scripts/live-checks/vault-setup-files.mjs",
   "scripts/live-checks/vault-skeleton.mjs",
   "scripts/live-checks/vault-testnet-usdc.mjs",
+  "scripts/live-checks/wallet-passkey-prf.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

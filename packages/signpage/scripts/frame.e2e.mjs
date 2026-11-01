@@ -2,7 +2,7 @@
 // (scripts/live-checks/signpage-skeleton.answers.json, good) loads in a frame on APP_HOST and is blocked in a frame on
 // https://example.com; under the same headers with frame-ancestors taken out it loads on example.com too, so the
 // probe can fail. No network: Playwright answers every request from the recorded headers and packages/signpage.
-// Run it through scripts/heavy.sh (Playwright is a heavy job). exit 0 all as expected, 1 otherwise.
+// A Playwright run in headless Chromium. exit 0 all as expected, 1 otherwise.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
 const GOOD = JSON.parse(readFileSync(join(REPO, "scripts/live-checks/signpage-skeleton.answers.json"), "utf8")).good;
 const PAGE = readFileSync(join(PKG, "index.html"), "utf8");
+const APP_JS = readFileSync(join(PKG, "public/app.js"), "utf8");
 const SIGN = "https://sign.confidential.unrealized.trade/";
 const APP = "https://confidential.unrealized.trade/";
 const STRANGER = "https://example.com/";
@@ -23,6 +24,7 @@ async function framed(browser, parent, signHeaders) {
   const ctx = await browser.newContext();
   const refused = [];
   await ctx.route(SIGN, (r) => r.fulfill({ status: 200, headers: signHeaders, body: PAGE }));
+  await ctx.route(`${SIGN}app.js`, (r) => r.fulfill({ status: 200, headers: { ...signHeaders, "content-type": "text/javascript" }, body: APP_JS }));
   await ctx.route(parent, (r) =>
     r.fulfill({ status: 200, contentType: "text/html", body: `<!doctype html><iframe src="${SIGN}"></iframe>` }),
   );

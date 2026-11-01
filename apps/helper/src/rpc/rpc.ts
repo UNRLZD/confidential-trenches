@@ -29,7 +29,7 @@ const ID_MAX = 128;
 /**
  * Each chain's provider: the URL in the host's environment (a keyed provider puts its key in the URL, markets paper
  * H2.1), else a public endpoint, so a helper anyone runs works with no key. Each default answered a read from the
- * owner's Mac on 2026-11-01 06:24Z (getBlockHeight, eth_blockNumber, block).
+ * Mac on 2026-11-01 06:24Z (getBlockHeight, eth_blockNumber, block).
  */
 export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string }>> = {
   solana: { env: "SOLANA_RPC_URL", fallback: "https://api.mainnet-beta.solana.com" },

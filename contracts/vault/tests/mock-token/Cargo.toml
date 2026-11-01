@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# A test-only NEP-141 token for the vault's near-sandbox suite (vault.md 5: "a mock token that fails on demand").
+# It is deployed only into a local near-sandbox, at the token account the vault build names; never on a network.
+[package]
+name = "blindfill-mock-token"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The vault's own near-sdk, the same features (no wee_alloc; `legacy` for the plain collections).
+near-sdk = { version = "=5.29.1", default-features = false, features = ["legacy"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
+strip = true
+
+# its own workspace: built alone by tests/harness/run.sh
+[workspace]

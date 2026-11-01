@@ -13,10 +13,10 @@ import "./signpage-frame.css";
 /** SIGN_HOST's release URL: the iframe's src, exactly (AX-06). */
 export const SIGN_HOST_URL = "https://sign.confidential.unrealized.trade/";
 
-// Draft words for the owner (the live UNRLZD terminal's signerDown and retry lines, auth/copy.ts:190-191).
+// Draft words (the live UNRLZD terminal's signerDown and retry lines, auth/copy.ts:190-191).
 const DOWN = "Couldn't load. Your funds are safe.";
 const RETRY = "Retry";
-// Draft words for the owner: CH-146's update state (app.md:1070 has no words yet).
+// Draft words: CH-146's update state (app.md:1070 has no words yet).
 const UPDATE = "New version";
 const RELOAD = "Reload";
 

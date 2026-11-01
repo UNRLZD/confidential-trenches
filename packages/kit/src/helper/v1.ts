@@ -449,8 +449,15 @@ export type HelperBindCleanup = HelperDelegateAction<{ DeleteAccount: { benefici
 export type HelperBindDelegate = HelperBindDeposit | HelperBindOnward | HelperBindPlain | HelperBindCleanup;
 
 /**
+ * The beta cap per deposit, $1,000 in USDC base units (6 decimals): the device does not sign a deposit above it and the
+ * relayer answers amount_above_cap. It is kept in the kit and the relayer only; the vault takes any amount.
+ */
+export const HELPER_BIND_DEPOSIT_CAP = 1_000_000_000n;
+
+/**
  * A deposit delegate's codes, in H4.3's order. Not failures: prepay_open (the device waits until the deposits pages
  * hold the previous P) and resign_needed (the device signs again). sender_struck is final for that id.
+ * amount_above_cap: the amount is over HELPER_BIND_DEPOSIT_CAP.
  */
 export const HELPER_BIND_DEPOSIT_CODES = [
   "bad_shape",
@@ -469,6 +476,7 @@ export const HELPER_BIND_DEPOSIT_CODES = [
   "gas_too_high",
   "bad_receiver",
   "amount_too_low",
+  "amount_above_cap",
   "amount_above_balance",
   "bad_msg",
   "p_used",
