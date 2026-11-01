@@ -5,9 +5,19 @@
 // IndexedDB here is fake-indexeddb (one in-memory IDBFactory per test); WebCrypto, Web Locks and BroadcastChannel are
 // Node's own. The same store in real Chromium on SIGN_HOST's origin: test/store.e2e.mjs.
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
-import { openWalletStore, WALLET_LANES, type WalletEvent, type WalletStore } from "../src/store/index.ts";
+import { openWalletStore as openStore, WALLET_LANES, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
+
+// every store a test opens is closed at the end, so a failing assertion fails the run instead of leaving it hanging on
+// an open BroadcastChannel
+const opened: WalletStore[] = [];
+after(() => opened.forEach((s) => s.close()));
+async function openWalletStore(o: WalletStoreOptions): Promise<WalletStore> {
+  const s = await openStore(o);
+  opened.push(s);
+  return s;
+}
 
 const SCOPE = 0x2a5f0e3c1d9b7a6e4c3b2a1908f7e6d5c4b3a2918f7e6d5c4b3a291807060504n;
 const SCOPE2 = 7n;
