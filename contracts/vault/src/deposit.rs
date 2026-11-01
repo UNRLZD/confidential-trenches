@@ -18,12 +18,31 @@
 //! writes nothing, and the token's `ft_resolve_transfer` reads the failed promise as nothing used and gives the sender
 //! the whole amount back (NCS4 `core_impl.rs` l.178-235).
 //!
-//! Rows 3 to 12 (the precommitment unused, the amount bounds, the prepay, the label, the commitment and its insert) are
-//! card vault-deposit-insert's. Until they land, a message that passes rows 1 and 2 is answered with the whole amount
-//! as unused, so the token gives it back and the vault never keeps USDC without a note.
+//! Rows 3 to 12, the deposit itself (`Vault::deposit`), ported from Privacy Pools v1.3.0's deposit at the lines vault.md
+//! 2.5.1's table cites (`Entrypoint.sol:324-329`, `PrivacyPool.sol:90-106`), Copyright 2025 0XBOW LTD, Apache-2.0:
+//! - Row 3: the precommitment unused (`PrecommitmentAlreadyUsed`, `Entrypoint.sol:324`).
+//! - Row 4: `amount >= MIN_DEPOSIT` (`MinimumDepositAmount`, `Entrypoint.sol:329`, a constant here).
+//! - Row 5: `amount < u128::MAX` (`InvalidDepositValue`, `PrivacyPool.sol:90`).
+//! - Row 6: a `prepaid[precommitment]` record (`NoPrepay`), deleted; its whole amount stays with the vault (Dev 3).
+//! - Row 8: `nonce += 1`, `label = keccak256(scope_be32 ‖ nonce_be32) mod p` (`PrivacyPool.sol:93`; src/context.rs).
+//! - Row 9: `commitment = Poseidon(amount, label, precommitment)` (`PrivacyPool.sol:98`).
+//! - Row 10: the commitment into the state tree and the label into the label tree, which approves it (src/tree.rs;
+//!   Dev 2: the vault fills its own label tree, no ASP postman).
+//! - Row 11: `deposits`, `precommitments`, `label_index` and `totals.deposited`; the two new roots are row 10's.
+//! - Row 7, checked last: the prepaid amount covers every byte the deposit wrote, at `env::storage_byte_cost()`, else
+//!   `InsufficientStorageDeposit`. The usage is read after row 6 deletes the record, so the end less that start is
+//!   the paper's "usage at the end − usage at the start + 89" (the freed record is 1 + 32 + 16 + 40 = 89 B).
+//! - Row 12: `ft_on_transfer` returns `"0"`, all used.
+//!
+//! Events, in PP's order (`State.sol:151` then `PrivacyPool.sol:106`): `leaf_inserted` state, `leaf_inserted` label,
+//! `deposited`, all three logged after row 7 passes, so a refused deposit logs none (NEAR keeps a failed receipt's
+//! logs). `ft_on_transfer` makes no promise.
 
-use crate::constants::TOKEN;
-use crate::{field, Bytes32, Vault, VaultExt};
+use crate::constants::{MIN_DEPOSIT, TOKEN};
+use crate::context::label_of;
+use crate::events::Event;
+use crate::poseidon::{PoseidonT3, PoseidonT4};
+use crate::{field, scope, Bytes32, Deposit, Vault, VaultExt};
 use near_sdk::json_types::U128;
 use near_sdk::serde::Deserialize;
 use near_sdk::{env, near, AccountId};
@@ -69,21 +88,97 @@ pub fn deposit_message(msg: &str, vault: &AccountId) -> Result<DepositMessage, S
     Ok(DepositMessage { precommitment: field::to_be(&n), depositor: m.depositor })
 }
 
+/// An amount as a field element's 32 big-endian bytes (a u128 is always below p).
+fn amount_be(amount: u128) -> Bytes32 {
+    let mut b = [0u8; 32];
+    b[16..].copy_from_slice(&amount.to_be_bytes());
+    b
+}
+
+impl Vault {
+    /// Rows 3 to 11 and row 7 for a message that passed row 2 and `amount` of the token: the commitment and its label
+    /// inserted, the records and totals written, the events logged. Returns the deposit's index. Panics (so the token
+    /// refunds all) on any refusal, with nothing written.
+    pub(crate) fn deposit(&mut self, m: &DepositMessage, amount: u128) -> u64 {
+        // row 3
+        if self.precommitments.contains_key(&m.precommitment) {
+            env::panic_str("PrecommitmentAlreadyUsed");
+        }
+        // row 4
+        if amount < MIN_DEPOSIT {
+            env::panic_str("MinimumDepositAmount: the amount is below MIN_DEPOSIT");
+        }
+        // row 5
+        if amount == u128::MAX {
+            env::panic_str("InvalidDepositValue: the amount is u128::MAX");
+        }
+        // row 6: the record goes; its whole amount stays with the vault
+        let prepaid = self
+            .prepaid
+            .remove(&m.precommitment)
+            .unwrap_or_else(|| env::panic_str("NoPrepay: no storage_prepay for this precommitment"));
+        let start = env::storage_usage();
+        // row 8
+        self.nonce += 1;
+        let label = field::to_be(&label_of(&scope(), self.nonce));
+        // row 9
+        let commitment = PoseidonT4::new().hash(&amount_be(amount), &label, &m.precommitment);
+        // row 10: the commitment first, then its label (PP's order of the two inserts' events)
+        let mut h = PoseidonT3::new();
+        let state = self.insert_commitment(&mut h, &commitment);
+        let labelled = self.insert_label(&mut h, &label);
+        // row 11
+        let index = self.deposits.len();
+        self.deposits.push(&Deposit {
+            precommitment: m.precommitment,
+            label,
+            value: amount,
+            leaf_index: state.index,
+            depositor: m.depositor.clone(),
+        });
+        self.precommitments.insert(&m.precommitment, &index);
+        self.label_index.insert(&label, &index);
+        let deposited = self.totals.deposited.0.checked_add(amount);
+        self.totals.deposited = U128(deposited.unwrap_or_else(|| env::panic_str("TotalsOverflow: deposited")));
+        // row 7: every byte written since the record went, paid by the record
+        let wrote = env::storage_usage().saturating_sub(start);
+        if prepaid < wrote as u128 * env::storage_byte_cost().as_yoctonear() {
+            env::panic_str(&format!(
+                "InsufficientStorageDeposit: the deposit wrote {wrote} B; the prepay covers {} B",
+                prepaid / env::storage_byte_cost().as_yoctonear()
+            ));
+        }
+        // every check passed: the events
+        state.event().emit();
+        labelled.event().emit();
+        Event::Deposited {
+            depositor: &m.depositor,
+            commitment: &commitment,
+            label: &label,
+            value: amount,
+            precommitment: &m.precommitment,
+        }
+        .emit();
+        index
+    }
+}
+
 #[near]
 impl Vault {
     /// NEP-141's receiver call, made by the token during `ft_transfer_call(vault, amount, msg)`. Refused (a panic, so
-    /// the token gives the sender the whole amount back): any caller but `TOKEN` (`NotTheToken`), and a message that
-    /// fails row 2 (`MessageTooLong`, `InvalidMessage`, `InvalidNumber`, `FieldOverflow`, `DepositorIsTheVault`).
-    /// Returns the amount unused: all of it until rows 3-12 land.
-    pub fn ft_on_transfer(&self, sender_id: AccountId, amount: U128, msg: String) -> U128 {
+    /// the token gives the sender the whole amount back): any caller but `TOKEN` (`NotTheToken`); a message that fails
+    /// row 2 (`MessageTooLong`, `InvalidMessage`, `InvalidNumber`, `FieldOverflow`, `DepositorIsTheVault`); and rows
+    /// 3-7 (`PrecommitmentAlreadyUsed`, `MinimumDepositAmount`, `InvalidDepositValue`, `NoPrepay`,
+    /// `InsufficientStorageDeposit`) and the tree's own checks (src/tree.rs). Otherwise the deposit lands and the
+    /// whole amount is used: returns `"0"`.
+    pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> U128 {
         let _ = sender_id;
         if env::predecessor_account_id().as_str() != TOKEN {
             env::panic_str("NotTheToken: only the vault's token calls ft_on_transfer");
         }
-        if let Err(e) = deposit_message(&msg, &env::current_account_id()) {
-            env::panic_str(&e);
-        }
-        amount
+        let m = deposit_message(&msg, &env::current_account_id()).unwrap_or_else(|e| env::panic_str(&e));
+        self.deposit(&m, amount.0);
+        U128(0)
     }
 }
 
@@ -125,7 +220,7 @@ mod tests {
             .build());
     }
 
-    /// `ft_on_transfer` as `caller`, its panic text or its return.
+    /// `ft_on_transfer` as `caller` on a fresh vault with no prepay, its panic text or its return.
     fn on_transfer(caller: &str, msg: &str) -> Result<u128, String> {
         let msg = msg.to_string();
         let caller = caller.to_string();
@@ -209,7 +304,8 @@ mod tests {
 
     #[test]
     fn only_the_token_calls_it() {
-        assert_eq!(on_transfer(TOKEN, KIT_MSG), Ok(1_000_000));
+        // the token's call passes rows 1-2 and stops at row 6: no prepay
+        assert!(on_transfer(TOKEN, KIT_MSG).unwrap_err().contains("NoPrepay"));
         for caller in ["u.near", "intents.near", VAULT, "other-token.near"] {
             let e = on_transfer(caller, KIT_MSG).unwrap_err();
             assert!(e.contains("NotTheToken"), "{caller}: {e:?}");
@@ -231,5 +327,268 @@ mod tests {
             let e = on_transfer(TOKEN, msg).unwrap_err();
             assert!(e.contains(want), "{msg:?}: {e:?}");
         }
+    }
+
+    // ---- rows 3-12: the deposit ----
+
+    const BYTE: u128 = 10_000_000_000_000_000_000;
+    const AMOUNT: u128 = 1_000_000;
+
+    fn msg(p: &str) -> String {
+        format!(r#"{{"precommitment":"{p}","depositor":"{HEX64}"}}"#)
+    }
+
+    /// A call by `caller` with `attached` yocto; the storage written so far stays.
+    fn call_by(caller: &str, attached: u128) {
+        testing_env!(VMContextBuilder::new()
+            .current_account_id(vault())
+            .predecessor_account_id(caller.parse().unwrap())
+            .attached_deposit(near_sdk::NearToken::from_yoctonear(attached))
+            .build());
+    }
+
+    fn prepay(v: &mut Vault, p: &str, yocto: u128) {
+        call_by("relayer.near", yocto);
+        v.storage_prepay(p.into());
+    }
+
+    /// The token's `ft_on_transfer` of `amount` on `p`: (its return, the bytes the call added to the usage), or the
+    /// panic's text.
+    fn deposit(v: &mut Vault, p: &str, amount: u128) -> Result<(u128, i64), String> {
+        call_by(TOKEN, 0);
+        let m = msg(p);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let before = env::storage_usage();
+            let r = v.ft_on_transfer(HEX64.parse().unwrap(), U128(amount), m).0;
+            (r, env::storage_usage() as i64 - before as i64)
+        }))
+        .map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
+    }
+
+    /// The label of the `nonce`th deposit into the vault `VAULT`.
+    fn label(nonce: u64) -> Bytes32 {
+        field::to_be(&label_of(&crate::context::scope_for(VAULT, TOKEN), nonce))
+    }
+
+    fn dec(b: &Bytes32) -> String {
+        field::to_decimal(&field::from_be(b))
+    }
+
+    /// The gross bytes the `n`th deposit (1-based) writes with a 64-byte depositor: 756, and 74 more per tree whose
+    /// insert writes a new side node (the first insert, and each time the size passes a power of two).
+    fn gross(n: u64) -> u128 {
+        let grows = n == 1 || (n - 1).is_power_of_two();
+        if grows { 904 } else { 756 }
+    }
+
+    #[test]
+    fn a_prepaid_deposit_lands_returns_0_and_writes_every_record() {
+        let mut v = Vault::default();
+        let p = "12345";
+        prepay(&mut v, p, 904 * BYTE);
+        assert_eq!(deposit(&mut v, p, AMOUNT).unwrap().0, 0, "all used");
+        let l = label(1);
+        let c = PoseidonT4::new().hash(&amount_be(AMOUNT), &l, &be(p));
+        // row 10: one leaf in each tree; a one-leaf LeanIMT's root is the leaf
+        assert_eq!((v.state_tree.size, v.state_tree.leaf_at(0), v.state_tree.root()), (1, Some(c), c));
+        assert_eq!((v.label_tree.size, v.label_tree.leaf_at(0), v.label_tree.root()), (1, Some(l), l));
+        assert!(v.is_known_state_root(dec(&c)) && v.is_known_label_root(dec(&l)));
+        assert_eq!(v.state_leaf_index.get(&c), Some(0));
+        // row 11
+        assert_eq!(v.nonce, 1);
+        assert_eq!(v.precommitments.get(&be(p)), Some(0));
+        assert_eq!(v.label_index.get(&l), Some(0));
+        assert_eq!(v.prepaid.get(&be(p)), None, "row 6 deletes the record");
+        assert_eq!(v.totals(), crate::Totals { deposited: U128(AMOUNT), spent: U128(0), returned: U128(0) });
+        // the row the kit's vaultSync parses: these bytes, in this field order
+        assert_eq!(
+            near_sdk::serde_json::to_string(&v.deposits(0, 10)).unwrap(),
+            format!(
+                r#"[{{"index":0,"precommitment":"12345","label":"{}","value":"1000000","leaf_index":0,"depositor":"{HEX64}"}}]"#,
+                dec(&l)
+            )
+        );
+        // events, in PP's order
+        let head = r#"EVENT_JSON:{"standard":"blindfill-vault","version":"1.0.0","event":"#;
+        assert_eq!(
+            near_sdk::test_utils::get_logs(),
+            vec![
+                format!(r#"{head}"leaf_inserted","data":[{{"tree":"state","index":0,"leaf":"{0}","root":"{0}"}}]}}"#, dec(&c)),
+                format!(r#"{head}"leaf_inserted","data":[{{"tree":"label","index":0,"leaf":"{0}","root":"{0}"}}]}}"#, dec(&l)),
+                format!(
+                    r#"{head}"deposited","data":[{{"depositor":"{HEX64}","commitment":"{}","label":"{}","value":"1000000","precommitment":"12345"}}]}}"#,
+                    dec(&c),
+                    dec(&l)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn nine_deposits_write_their_gross_bytes_and_index_in_order() {
+        let mut v = Vault::default();
+        for n in 1..=9u64 {
+            let p = (1000 + n).to_string();
+            prepay(&mut v, &p, gross(n) * BYTE);
+            let (r, added) = deposit(&mut v, &p, AMOUNT + n as u128).unwrap();
+            assert_eq!(r, 0);
+            // the call frees the 89 B prepay record and writes its gross bytes
+            assert_eq!(added, gross(n) as i64 - 89, "deposit {n}");
+            let d = &v.deposits(n - 1, 1)[0];
+            assert_eq!((d.index, d.leaf_index, d.value.0, d.label.clone()), (n - 1, n - 1, AMOUNT + n as u128, dec(&label(n))));
+        }
+        assert_eq!((v.state_tree.size, v.state_tree.depth, v.label_tree.size, v.label_tree.depth), (9, 4, 9, 4));
+        assert_eq!(v.totals().deposited.0, 9 * AMOUNT + 45);
+    }
+
+    #[test]
+    fn row_7_a_first_deposit_one_yocto_short_of_904_bytes_is_refused() {
+        let mut v = Vault::default();
+        prepay(&mut v, "5", 904 * BYTE - 1);
+        let e = deposit(&mut v, "5", AMOUNT).unwrap_err();
+        assert!(e.contains("InsufficientStorageDeposit: the deposit wrote 904 B; the prepay covers 903 B"), "{e}");
+    }
+
+    #[test]
+    fn row_7_a_756_byte_prepay_on_a_deposit_that_grows_the_trees_is_refused() {
+        // the second deposit grows both trees by one level: 904 B
+        let mut v = Vault::default();
+        prepay(&mut v, "6", 904 * BYTE);
+        deposit(&mut v, "6", AMOUNT).unwrap();
+        prepay(&mut v, "7", 756 * BYTE);
+        let e = deposit(&mut v, "7", AMOUNT).unwrap_err();
+        assert!(e.contains("InsufficientStorageDeposit: the deposit wrote 904 B; the prepay covers 756 B"), "{e}");
+        // a refused deposit logs no event (the sandbox reads the failed receipt's logs: tests/s02.rs)
+        assert_eq!(near_sdk::test_utils::get_logs(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn row_7_a_148_byte_top_up_makes_it_enough() {
+        let mut v = Vault::default();
+        prepay(&mut v, "6", 904 * BYTE);
+        deposit(&mut v, "6", AMOUNT).unwrap();
+        prepay(&mut v, "7", 756 * BYTE);
+        prepay(&mut v, "7", 148 * BYTE);
+        assert_eq!(deposit(&mut v, "7", AMOUNT).unwrap(), (0, 904 - 89));
+    }
+
+    #[test]
+    fn row_6_no_prepay_is_refused() {
+        let mut v = Vault::default();
+        prepay(&mut v, "8", 904 * BYTE);
+        let e = deposit(&mut v, "9", AMOUNT).unwrap_err();
+        assert!(e.contains("NoPrepay"), "{e}");
+    }
+
+    #[test]
+    fn row_3_a_used_precommitment_is_refused() {
+        let mut v = Vault::default();
+        prepay(&mut v, "8", 904 * BYTE);
+        deposit(&mut v, "8", AMOUNT).unwrap();
+        // storage_prepay refuses a used precommitment; a record left from before the deposit is the only way in
+        v.prepaid.insert(&be("8"), &(904 * BYTE));
+        let e = deposit(&mut v, "8", AMOUNT).unwrap_err();
+        assert!(e.contains("PrecommitmentAlreadyUsed"), "{e}");
+    }
+
+    /// Row 4 or 5 refuses `amount` with `want`, on a fresh vault in a thread of its own (the mocked storage is the
+    /// thread's, kept across `testing_env!`, so a new `Vault::default()` in the same thread would see the last one's
+    /// records).
+    fn amount_refused(amount: u128, want: &'static str) {
+        std::thread::spawn(move || {
+            let mut v = Vault::default();
+            prepay(&mut v, "3", 904 * BYTE);
+            let e = deposit(&mut v, "3", amount).unwrap_err();
+            assert!(e.contains(want), "{amount}: {e}");
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn rows_4_and_5_the_amount_bounds() {
+        amount_refused(0, "MinimumDepositAmount");
+        amount_refused(MIN_DEPOSIT - 1, "MinimumDepositAmount");
+        amount_refused(u128::MAX, "InvalidDepositValue");
+        for amount in [MIN_DEPOSIT, u128::MAX - 1] {
+            std::thread::spawn(move || {
+                let mut v = Vault::default();
+                prepay(&mut v, "3", 904 * BYTE);
+                assert_eq!(deposit(&mut v, "3", amount).unwrap().0, 0, "{amount}");
+                assert_eq!(v.totals().deposited.0, amount);
+            })
+            .join()
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn totals_deposited_never_wraps() {
+        let mut v = Vault::default();
+        prepay(&mut v, "1", 904 * BYTE);
+        deposit(&mut v, "1", u128::MAX - 1).unwrap();
+        prepay(&mut v, "2", 904 * BYTE);
+        let e = deposit(&mut v, "2", 2 * MIN_DEPOSIT).unwrap_err();
+        assert!(e.contains("TotalsOverflow"), "{e}");
+    }
+
+    #[test]
+    fn the_depositor_is_the_messages_never_the_sender() {
+        // intents.near sends the tokens and names another account (vault.md 2.5.1: any sender, the message's depositor)
+        let other = "b".repeat(64);
+        let mut v = Vault::default();
+        prepay(&mut v, "21", 904 * BYTE);
+        call_by(TOKEN, 0);
+        let m = format!(r#"{{"precommitment":"21","depositor":"{other}"}}"#);
+        assert_eq!(v.ft_on_transfer("intents.near".parse().unwrap(), U128(AMOUNT), m).0, 0);
+        assert_eq!(v.deposits(0, 1)[0].depositor.as_str(), other);
+        let logs = near_sdk::test_utils::get_logs();
+        assert!(logs[2].contains(&format!(r#""event":"deposited","data":[{{"depositor":"{other}""#)), "{logs:?}");
+    }
+
+    /// `noteCommitment(value, label, precommitment)` of packages/wallet/src/notes/secrets.ts at main daea6a5, printed
+    /// by Node 24: what the device stores and proves against.
+    const WALLET_COMMITMENTS: [(u128, &str, &str, &str); 2] = [
+        (
+            1_000_000,
+            "3167541333153488070700576821596484314779793765261295951884779512873829920360",
+            "12345",
+            "18397814550587314788443050054570897998434978325342162224857524021341931129750",
+        ),
+        (
+            (1 << 100) + 1_234_567_890_123,
+            "21888242871839275222246405745257275088548364400416034343698204186575808495616",
+            "7",
+            "14144701124191034731627316939866497813649296286387451964003985403915721908665",
+        ),
+    ];
+
+    #[test]
+    fn the_commitment_is_the_wallets_note_commitment() {
+        for (value, l, p, want) in WALLET_COMMITMENTS {
+            assert_eq!(dec(&PoseidonT4::new().hash(&amount_be(value), &be(l), &be(p))), want, "{value}");
+        }
+        // and a real deposit: 1 USDC on 12345 at vault.near, whose first label is the first vector's
+        let mut v = Vault::default();
+        prepay(&mut v, "12345", 904 * BYTE);
+        deposit(&mut v, "12345", 1_000_000).unwrap();
+        assert_eq!(dec(&label(1)), WALLET_COMMITMENTS[0].1);
+        assert_eq!(v.leaves(0, 1), vec![WALLET_COMMITMENTS[0].3.to_string()]);
+    }
+
+    #[test]
+    fn leaf_index_is_the_state_trees() {
+        // a state leaf with no label (a change note's) first: the deposit's leaf is the state tree's second, its label
+        // the label tree's first
+        let mut v = Vault::default();
+        prepay(&mut v, "31", 904 * BYTE);
+        let _ = v.insert_commitment(&mut PoseidonT3::new(), &be("99"));
+        deposit(&mut v, "31", AMOUNT).unwrap();
+        let d = &v.deposits(0, 1)[0];
+        assert_eq!((d.index, d.leaf_index), (0, 1));
+        assert_eq!((v.state_tree.size, v.label_tree.size), (2, 1));
+        let c = PoseidonT4::new().hash(&amount_be(AMOUNT), &label(1), &be("31"));
+        assert_eq!((v.state_tree.leaf_at(0), v.state_tree.leaf_at(1)), (Some(be("99")), Some(c)));
+        assert_eq!(v.state_leaf_index.get(&c), Some(1));
     }
 }
