@@ -4,16 +4,32 @@
 // two hosts are served by the local build and nothing else reaches the network. A server-trust challenge is
 // answered only for those two hosts and only when the leaf certificate is the harness's own (DER compared byte
 // for byte with the certificate index.mjs generated this run).
-//   driver <proxyPort> <certPemPath> <host1> <host2>
+// The view is <width> x <height> CSS px (800 x 600 when not given). WebKit's WebCrypto master key (it wraps every
+// CryptoKey a page keeps in IndexedDB) is 16 random bytes made per run and held in memory, so the driver never
+// reads or writes the login keychain: a keychain item is bound to one build's code hash, and a rebuilt driver would
+// wait on a macOS keychain prompt.
+//   driver <proxyPort> <certPemPath> <host1> <host2> [<width> <height>]
 import AppKit
 import Network
 import WebKit
 
 let args = CommandLine.arguments
-guard args.count == 5, let proxyPort = UInt16(args[1]), let nwPort = NWEndpoint.Port(rawValue: proxyPort) else {
-  FileHandle.standardError.write("usage: driver <proxyPort> <certPemPath> <host1> <host2>\n".data(using: .utf8)!)
+guard args.count == 5 || args.count == 7, let proxyPort = UInt16(args[1]), let nwPort = NWEndpoint.Port(rawValue: proxyPort) else {
+  FileHandle.standardError.write("usage: driver <proxyPort> <certPemPath> <host1> <host2> [<width> <height>]\n".data(using: .utf8)!)
   exit(2)
 }
+let viewWidth = args.count == 7 ? Double(args[5]) ?? 0 : 800
+let viewHeight = args.count == 7 ? Double(args[6]) ?? 0 : 600
+guard viewWidth >= 200, viewHeight >= 200 else {
+  FileHandle.standardError.write("driver: width and height must be numbers of at least 200\n".data(using: .utf8)!)
+  exit(2)
+}
+var masterKeyBytes = [UInt8](repeating: 0, count: 16)
+guard SecRandomCopyBytes(kSecRandomDefault, masterKeyBytes.count, &masterKeyBytes) == errSecSuccess else {
+  FileHandle.standardError.write("driver: no random bytes\n".data(using: .utf8)!)
+  exit(2)
+}
+let webCryptoMasterKey = Data(masterKeyBytes)
 let allowedHosts: Set<String> = [args[3], args[4]]
 
 func pemToDer(_ path: String) -> Data? {
@@ -62,8 +78,8 @@ final class Driver: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     store.proxyConfigurations = [ProxyConfiguration(httpCONNECTProxy: .hostPort(host: "127.0.0.1", port: port))]
     let cfg = WKWebViewConfiguration()
     cfg.websiteDataStore = store
-    view = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: cfg)
-    window = KeyWindow(contentRect: NSRect(x: -4000, y: -4000, width: 800, height: 600), styleMask: [.borderless],
+    view = WKWebView(frame: NSRect(x: 0, y: 0, width: viewWidth, height: viewHeight), configuration: cfg)
+    window = KeyWindow(contentRect: NSRect(x: -4000, y: -4000, width: viewWidth, height: viewHeight), styleMask: [.borderless],
                        backing: .buffered, defer: false)
     super.init()
     cfg.userContentController.add(self, contentWorld: .page, name: "harness")
@@ -71,6 +87,13 @@ final class Driver: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     window.contentView = view
     window.orderFront(nil)
   }
+
+  // MARK: WebCrypto master key (WKNavigationDelegatePrivate; both the current and the older form)
+
+  @objc(_webCryptoMasterKeyForWebView:completionHandler:)
+  func answerWebCryptoMasterKey(_ w: WKWebView, completionHandler: @escaping (Data?) -> Void) { completionHandler(webCryptoMasterKey) }
+  @objc(_webCryptoMasterKeyForWebView:)
+  func answerWebCryptoMasterKeyNow(_ w: WKWebView) -> Data? { webCryptoMasterKey }
 
   // MARK: trust
 

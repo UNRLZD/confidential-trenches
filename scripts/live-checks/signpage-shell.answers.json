@@ -1,558 +1,2568 @@
 {
  "good": {
   "webkit": {
-   "engine": "webkit",
-   "source": "harness, SIGN_HOST from packages/signpage's committed build",
-   "at": "2026-11-01T14:00:08.979Z",
-   "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
-   "topology": "shell",
-   "steps": {
-    "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
-     "top": {
-      "state": "signed-out",
-      "codeSaved": null,
-      "layerHidden": false
+   "phone": {
+    "engine": "webkit",
+    "view": {
+     "name": "phone",
+     "width": 390,
+     "height": 844,
+     "inner": 390
+    },
+    "source": "harness, SIGN_HOST from packages/signpage's committed build",
+    "at": "2026-11-01T16:18:09.200Z",
+    "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "7009c564-4992-4700-aa93-a684da09849c"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "wordsIn": {
+      "openId": "3186cc40-71fc-4338-881d-6bd8dcfc16ba",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1793549894966,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "e0a7cfb9-7650-442c-b277-3faf33459b00"
+     },
+     "nav": {
+      "t": 1793549898183,
+      "okId": "120df726-d0f7-443f-94ef-6ebd3735dec1",
+      "evilId": "a0e75e74-ce99-4bc1-8445-fd6502f05ace",
+      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1793549898390,
+      "reloadId": "8d455278-be51-4aac-8eee-e763617eff3b",
+      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "c0bf9484-0f64-44d8-ace0-75ac0d45d3d9"
+     },
+     "statusGone": {
+      "id": "13b742c9-dad6-4bb0-b9fe-a3208708dc56"
+     },
+     "backfill": {
+      "t": 1793549898700,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "50065512-54ad-445a-84cc-8d80c27e9212"
+     },
+     "wordsOut": {
+      "t": 1793549901914,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "0a7409be-3f66-4ea4-8826-413e5777daeb"
+     },
+     "stranger": {
+      "t": 1793549905215,
+      "done": true
      }
     },
-    "first": {
-     "id": "dab6fc5a-e805-487b-b145-f784d0b2ea72"
-    },
-    "words": {
-     "t": 1793541610289,
-     "top": {
-      "state": "signed-in",
-      "codeSaved": "true",
-      "layerHidden": true
+    "messages": [
+     {
+      "t": 1793549889431,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
      },
-     "layerHidden": true
-    },
-    "wordsOut": {
-     "t": 1793541614205,
-     "top": {
-      "state": "signed-out",
-      "codeSaved": null,
-      "layerHidden": false
+     {
+      "t": 1793549889493,
+      "data": {
+       "v": 1,
+       "id": "7009c564-4992-4700-aa93-a684da09849c",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
      },
-     "layerHidden": false
-    },
-    "last": {
-     "id": "c9fd697a-2e20-40ef-953f-c3f28a606807"
-    },
-    "stranger": {
-     "t": 1793541617505,
-     "done": true
-    }
+     {
+      "t": 1793549890600,
+      "data": {
+       "v": 1,
+       "id": "3186cc40-71fc-4338-881d-6bd8dcfc16ba",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793549895003,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793549898082,
+      "data": {
+       "v": 1,
+       "id": "e0a7cfb9-7650-442c-b277-3faf33459b00",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549898184,
+      "data": {
+       "v": 1,
+       "id": "120df726-d0f7-443f-94ef-6ebd3735dec1",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793549898288,
+      "data": {
+       "v": 1,
+       "id": "a0e75e74-ce99-4bc1-8445-fd6502f05ace",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1793549898390,
+      "data": {
+       "v": 1,
+       "id": "8d455278-be51-4aac-8eee-e763617eff3b",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793549898440,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793549898495,
+      "data": {
+       "v": 1,
+       "id": "c0bf9484-0f64-44d8-ace0-75ac0d45d3d9",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549898599,
+      "data": {
+       "v": 1,
+       "id": "13b742c9-dad6-4bb0-b9fe-a3208708dc56",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549898761,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793549898812,
+      "data": {
+       "v": 1,
+       "id": "50065512-54ad-445a-84cc-8d80c27e9212",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549901917,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549905114,
+      "data": {
+       "v": 1,
+       "id": "0a7409be-3f66-4ea4-8826-413e5777daeb",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549905216,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     }
+    ],
+    "requests": [
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     }
+    ],
+    "errors": []
    },
-   "messages": [
-    {
-     "t": 1793541609220,
-     "data": {
-      "v": 1,
-      "type": "ready",
-      "release": "unreleased",
-      "api": 1
-     }
+   "desktop": {
+    "engine": "webkit",
+    "view": {
+     "name": "desktop",
+     "width": 1440,
+     "height": 900,
+     "inner": 1440
     },
-    {
-     "t": 1793541609278,
-     "data": {
-      "v": 1,
-      "id": "dab6fc5a-e805-487b-b145-f784d0b2ea72",
-      "ok": true,
-      "result": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
+    "source": "harness, SIGN_HOST from packages/signpage's committed build",
+    "at": "2026-11-01T16:18:55.099Z",
+    "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
       }
-     }
-    },
-    {
-     "t": 1793541610315,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": true,
-       "way": "words",
-       "code_saved": true,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    },
-    {
-     "t": 1793541614209,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    },
-    {
-     "t": 1793541617404,
-     "data": {
-      "v": 1,
-      "id": "c9fd697a-2e20-40ef-953f-c3f28a606807",
-      "ok": true,
-      "result": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    },
-    {
-     "t": 1793541617506,
-     "data": {
-      "v": 1,
-      "type": "ready",
-      "release": "unreleased",
-      "api": 1
-     }
-    }
-   ],
-   "requests": [
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
-     "host": "confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    }
-   ],
-   "errors": []
-  },
-  "chromium": {
-   "engine": "chromium",
-   "source": "harness, SIGN_HOST from packages/signpage's committed build",
-   "at": "2026-11-01T14:00:20.007Z",
-   "browser": "chromium 153.0.8010.12 (Playwright)",
-   "topology": "shell",
-   "steps": {
-    "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
-     "top": {
-      "state": "signed-out",
-      "codeSaved": null,
-      "layerHidden": false
-     }
-    },
-    "first": {
-     "id": "e40f9d82-eed5-4927-8c30-91441f17bb12"
-    },
-    "created": {
-     "t": 1793541621051,
-     "top": {
-      "state": "backup",
-      "codeSaved": "false",
-      "layerHidden": false
      },
-     "layerHidden": false
-    },
-    "saved": {
-     "t": 1793541625027,
-     "top": {
-      "state": "signed-in",
-      "codeSaved": "true",
-      "layerHidden": true
+     "first": {
+      "id": "ef2bc505-8092-4424-85d1-3ca71b156d8d"
      },
-     "layerHidden": true
-    },
-    "passkeyOut": {
-     "t": 1793541628969,
-     "top": {
-      "state": "signed-out",
-      "codeSaved": null,
-      "layerHidden": false
+     "topNav": {
+      "tried": true,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
-     "layerHidden": false
-    },
-    "words": {
-     "t": 1793541632916,
-     "top": {
-      "state": "signed-in",
-      "codeSaved": "true",
-      "layerHidden": true
+     "wordsIn": {
+      "openId": "57108e9e-77f5-48a6-982d-95a207f27cd3",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
      },
-     "layerHidden": true
-    },
-    "wordsOut": {
-     "t": 1793541636837,
-     "top": {
-      "state": "signed-out",
-      "codeSaved": null,
-      "layerHidden": false
+     "words": {
+      "t": 1793549940860,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "48fa6749-f1e9-4e2d-a4a6-9db0c794636a"
      },
-     "layerHidden": false
-    },
-    "last": {
-     "id": "dd911bfa-f3ae-4ba7-9e40-57fb058df3de"
-    },
-    "stranger": {
-     "t": 1793541640053,
-     "done": true
-    }
-   },
-   "messages": [
-    {
-     "t": 1793541620143,
-     "data": {
-      "v": 1,
-      "type": "ready",
-      "release": "unreleased",
-      "api": 1
+     "nav": {
+      "t": 1793549944078,
+      "okId": "82afd91e-0428-438c-98fc-ff72d476b6ad",
+      "evilId": "f1033c21-7080-4d3d-895d-cc54ac15e553",
+      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1793549944286,
+      "reloadId": "59348064-8a98-42d7-8f44-f58e21d836db",
+      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "6ad37719-a61b-4100-87b3-fe2f197b6cad"
+     },
+     "statusGone": {
+      "id": "8e0e82d5-aef1-43c3-ab3b-5a04dcb61dee"
+     },
+     "backfill": {
+      "t": 1793549944597,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "a2213c78-c8d2-4882-9400-d9db3d08c2fe"
+     },
+     "wordsOut": {
+      "t": 1793549947811,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "94192190-3141-45f0-be71-c4d815894bcb"
+     },
+     "stranger": {
+      "t": 1793549951113,
+      "done": true
      }
     },
-    {
-     "t": 1793541620147,
-     "data": {
-      "v": 1,
-      "id": "e40f9d82-eed5-4927-8c30-91441f17bb12",
-      "ok": true,
-      "result": {
+    "messages": [
+     {
+      "t": 1793549935327,
+      "data": {
+       "v": 1,
+       "type": "ready",
        "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
+       "api": 1
+      }
+     },
+     {
+      "t": 1793549935388,
+      "data": {
+       "v": 1,
+       "id": "ef2bc505-8092-4424-85d1-3ca71b156d8d",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549936496,
+      "data": {
+       "v": 1,
+       "id": "57108e9e-77f5-48a6-982d-95a207f27cd3",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793549940895,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793549943977,
+      "data": {
+       "v": 1,
+       "id": "48fa6749-f1e9-4e2d-a4a6-9db0c794636a",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549944079,
+      "data": {
+       "v": 1,
+       "id": "82afd91e-0428-438c-98fc-ff72d476b6ad",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793549944182,
+      "data": {
+       "v": 1,
+       "id": "f1033c21-7080-4d3d-895d-cc54ac15e553",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1793549944286,
+      "data": {
+       "v": 1,
+       "id": "59348064-8a98-42d7-8f44-f58e21d836db",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793549944335,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793549944392,
+      "data": {
+       "v": 1,
+       "id": "6ad37719-a61b-4100-87b3-fe2f197b6cad",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549944495,
+      "data": {
+       "v": 1,
+       "id": "8e0e82d5-aef1-43c3-ab3b-5a04dcb61dee",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549944655,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793549944710,
+      "data": {
+       "v": 1,
+       "id": "a2213c78-c8d2-4882-9400-d9db3d08c2fe",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549947814,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549951012,
+      "data": {
+       "v": 1,
+       "id": "94192190-3141-45f0-be71-c4d815894bcb",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793549951113,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
       }
      }
-    },
-    {
-     "t": 1793541621223,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": true,
-       "way": "passkey",
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
+    ],
+    "requests": [
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
      }
-    },
-    {
-     "t": 1793541625086,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": true,
-       "way": "passkey",
-       "code_saved": true,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    },
-    {
-     "t": 1793541628996,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    },
-    {
-     "t": 1793541632953,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": true,
-       "way": "words",
-       "code_saved": true,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    },
-    {
-     "t": 1793541636863,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    },
-    {
-     "t": 1793541639951,
-     "data": {
-      "v": 1,
-      "id": "dd911bfa-f3ae-4ba7-9e40-57fb058df3de",
-      "ok": true,
-      "result": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
-      }
-     }
-    }
-   ],
-   "requests": [
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
-     "host": "confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    }
-   ],
-   "errors": []
+    ],
+    "errors": []
+   }
   },
   "firefox": {
-   "engine": "firefox",
-   "source": "harness, SIGN_HOST from packages/signpage's committed build",
-   "at": "2026-11-01T14:00:43.030Z",
-   "browser": "firefox 155.0 (Playwright)",
-   "topology": "shell",
-   "steps": {
-    "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
-     "top": {
-      "state": "signed-out",
-      "codeSaved": null,
-      "layerHidden": false
+   "phone": {
+    "engine": "firefox",
+    "view": {
+     "name": "phone",
+     "width": 390,
+     "height": 844,
+     "inner": 390
+    },
+    "source": "harness, SIGN_HOST from packages/signpage's committed build",
+    "at": "2026-11-01T16:20:45.866Z",
+    "browser": "firefox 155.0 (Playwright)",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "0c6b0709-9a4c-455d-a685-3bc4d338558e"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "wordsIn": {
+      "openId": "93049aa0-e52c-4d46-9a88-fefb3a01cf9d",
+      "clickedWithFrames": 1,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1793550051549,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "78d48187-ac4d-4d03-b9e2-3a4f8908878f"
+     },
+     "nav": {
+      "t": 1793550054788,
+      "okId": "21c56234-eb08-4586-8ace-6430e3671e38",
+      "evilId": "02f8722a-fa2d-4e3d-b7df-cb57edceee26",
+      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1793550054995,
+      "reloadId": "e1b31ad6-e22f-4987-ba59-d44c444f3686",
+      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "0ff5c8dd-9c64-4bb3-920e-09971f172807"
+     },
+     "statusGone": {
+      "id": "9713ab09-d989-4bd0-87dc-7b09ddcd7e3a"
+     },
+     "backfill": {
+      "t": 1793550055305,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "ac77b128-27de-4db0-8cdc-6cd8041c6547"
+     },
+     "wordsOut": {
+      "t": 1793550058566,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "41f5d98c-8d98-472d-8d22-7db42b316c94"
+     },
+     "stranger": {
+      "t": 1793550061679,
+      "done": true
      }
     },
-    "first": {
-     "id": "c37c1adf-76a6-4bca-9e6e-88310158a38a"
-    },
-    "words": {
-     "t": 1793541644121,
-     "top": {
-      "state": "signed-in",
-      "codeSaved": "true",
-      "layerHidden": true
+    "messages": [
+     {
+      "t": 1793550046101,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
      },
-     "layerHidden": true
-    },
-    "wordsOut": {
-     "t": 1793541648052,
-     "top": {
-      "state": "signed-out",
-      "codeSaved": null,
-      "layerHidden": false
+     {
+      "t": 1793550046111,
+      "data": {
+       "v": 1,
+       "id": "0c6b0709-9a4c-455d-a685-3bc4d338558e",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
      },
-     "layerHidden": false
-    },
-    "last": {
-     "id": "e1aecd3f-debe-4351-9438-5e42ee53ed55"
-    },
-    "stranger": {
-     "t": 1793541651322,
-     "done": true
-    }
+     {
+      "t": 1793550047230,
+      "data": {
+       "v": 1,
+       "id": "93049aa0-e52c-4d46-9a88-fefb3a01cf9d",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793550051622,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793550054689,
+      "data": {
+       "v": 1,
+       "id": "78d48187-ac4d-4d03-b9e2-3a4f8908878f",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550054790,
+      "data": {
+       "v": 1,
+       "id": "21c56234-eb08-4586-8ace-6430e3671e38",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793550054892,
+      "data": {
+       "v": 1,
+       "id": "02f8722a-fa2d-4e3d-b7df-cb57edceee26",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1793550054996,
+      "data": {
+       "v": 1,
+       "id": "e1b31ad6-e22f-4987-ba59-d44c444f3686",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793550055049,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793550055100,
+      "data": {
+       "v": 1,
+       "id": "0ff5c8dd-9c64-4bb3-920e-09971f172807",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550055204,
+      "data": {
+       "v": 1,
+       "id": "9713ab09-d989-4bd0-87dc-7b09ddcd7e3a",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550055359,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793550055466,
+      "data": {
+       "v": 1,
+       "id": "ac77b128-27de-4db0-8cdc-6cd8041c6547",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550058573,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550061582,
+      "data": {
+       "v": 1,
+       "id": "41f5d98c-8d98-472d-8d22-7db42b316c94",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     }
+    ],
+    "requests": [
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     }
+    ],
+    "errors": []
    },
-   "messages": [
-    {
-     "t": 1793541643172,
-     "data": {
-      "v": 1,
-      "type": "ready",
-      "release": "unreleased",
-      "api": 1
+   "desktop": {
+    "engine": "firefox",
+    "view": {
+     "name": "desktop",
+     "width": 1440,
+     "height": 900,
+     "inner": 1440
+    },
+    "source": "harness, SIGN_HOST from packages/signpage's committed build",
+    "at": "2026-11-01T16:20:26.942Z",
+    "browser": "firefox 155.0 (Playwright)",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "d9579c31-8f52-4fb7-9165-cad88a941b9f"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "wordsIn": {
+      "openId": "c09a644f-fc30-48c0-94c0-8fc2a6dc9630",
+      "clickedWithFrames": 1,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1793550032552,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "8967a8e9-c144-4c71-a985-92c2b99e15b3"
+     },
+     "nav": {
+      "t": 1793550035782,
+      "okId": "e492de55-cf79-441b-a176-c807b1aebd38",
+      "evilId": "561a9af1-3f3e-4b5f-946c-e98cc9e608f8",
+      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1793550035994,
+      "reloadId": "4a03fc0d-0130-45a3-961d-57d0161277b4",
+      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "10d1def2-bbde-4efa-bfe1-f98684bb46b6"
+     },
+     "statusGone": {
+      "id": "014b5e05-aad0-4aa7-88f7-71ebd2825d78"
+     },
+     "backfill": {
+      "t": 1793550036307,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "b619d1cc-180c-44df-a6ed-c57094e0a1b6"
+     },
+     "wordsOut": {
+      "t": 1793550039565,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "2cdac6b3-3556-4a9d-a7e0-87f976eb364a"
+     },
+     "stranger": {
+      "t": 1793550042681,
+      "done": true
      }
     },
-    {
-     "t": 1793541643180,
-     "data": {
-      "v": 1,
-      "id": "c37c1adf-76a6-4bca-9e6e-88310158a38a",
-      "ok": true,
-      "result": {
+    "messages": [
+     {
+      "t": 1793550027072,
+      "data": {
+       "v": 1,
+       "type": "ready",
        "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
+       "api": 1
+      }
+     },
+     {
+      "t": 1793550027081,
+      "data": {
+       "v": 1,
+       "id": "d9579c31-8f52-4fb7-9165-cad88a941b9f",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550028192,
+      "data": {
+       "v": 1,
+       "id": "c09a644f-fc30-48c0-94c0-8fc2a6dc9630",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793550032605,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793550035681,
+      "data": {
+       "v": 1,
+       "id": "8967a8e9-c144-4c71-a985-92c2b99e15b3",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550035785,
+      "data": {
+       "v": 1,
+       "id": "e492de55-cf79-441b-a176-c807b1aebd38",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793550035889,
+      "data": {
+       "v": 1,
+       "id": "561a9af1-3f3e-4b5f-946c-e98cc9e608f8",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1793550035996,
+      "data": {
+       "v": 1,
+       "id": "4a03fc0d-0130-45a3-961d-57d0161277b4",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793550036063,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793550036100,
+      "data": {
+       "v": 1,
+       "id": "10d1def2-bbde-4efa-bfe1-f98684bb46b6",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550036205,
+      "data": {
+       "v": 1,
+       "id": "014b5e05-aad0-4aa7-88f7-71ebd2825d78",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550036359,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793550036464,
+      "data": {
+       "v": 1,
+       "id": "b619d1cc-180c-44df-a6ed-c57094e0a1b6",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550039573,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793550042581,
+      "data": {
+       "v": 1,
+       "id": "2cdac6b3-3556-4a9d-a7e0-87f976eb364a",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
       }
      }
+    ],
+    "requests": [
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     }
+    ],
+    "errors": []
+   }
+  },
+  "chromium": {
+   "phone": {
+    "engine": "chromium",
+    "view": {
+     "name": "phone",
+     "width": 390,
+     "height": 844,
+     "inner": 390
     },
-    {
-     "t": 1793541644172,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": true,
-       "way": "words",
-       "code_saved": true,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
+    "source": "harness, SIGN_HOST from packages/signpage's committed build",
+    "at": "2026-11-01T16:38:36.634Z",
+    "browser": "chromium 153.0.8010.12 (Playwright)",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
       }
+     },
+     "first": {
+      "id": "77ddd83f-7e54-4bb1-95fb-b828e6240273"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "passkeyIn": {
+      "openId": "d0331922-ed96-421e-92f1-9ecbc800f806",
+      "layer": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "created": {
+      "t": 1793551118862,
+      "top": {
+       "state": "backup",
+       "codeSaved": "false",
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "saved": {
+      "t": 1793551122820,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "6a378415-5f4e-426a-81c4-452780faf35d"
+     },
+     "passkeyOut": {
+      "t": 1793551126054,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "wordsIn": {
+      "openId": "49aaab50-a9ce-4809-a1d0-17f7d7854544",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1793551133331,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "fcfd3e95-68b1-43de-afb6-9c0c7c755692"
+     },
+     "nav": {
+      "t": 1793551136575,
+      "okId": "f292ad29-f634-4081-ba6c-27da256f687f",
+      "evilId": "1bdbafce-34a7-48ec-80e9-b0e1815f70f4",
+      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1793551136783,
+      "reloadId": "ab823b95-772d-4b52-8088-9af62bc9dee2",
+      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "89c7b8f1-0c06-480a-94fe-f5c3fe2d3545"
+     },
+     "statusGone": {
+      "id": "4255b490-5813-4dbe-834f-d53842c1a3c5"
+     },
+     "backfill": {
+      "t": 1793551137097,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "4231faae-3b3a-4834-a0ab-b425dc6762dc"
+     },
+     "wordsOut": {
+      "t": 1793551140378,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "5244bec5-74ff-44de-990e-94f8943fcdd2"
+     },
+     "stranger": {
+      "t": 1793551143484,
+      "done": true
      }
     },
-    {
-     "t": 1793541648080,
-     "data": {
-      "v": 1,
-      "type": "state",
-      "state": {
+    "messages": [
+     {
+      "t": 1793551116742,
+      "data": {
+       "v": 1,
+       "type": "ready",
        "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551116748,
+      "data": {
+       "v": 1,
+       "id": "77ddd83f-7e54-4bb1-95fb-b828e6240273",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551117855,
+      "data": {
+       "v": 1,
+       "id": "d0331922-ed96-421e-92f1-9ecbc800f806",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793551122861,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551125952,
+      "data": {
+       "v": 1,
+       "id": "6a378415-5f4e-426a-81c4-452780faf35d",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "passkey",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551126056,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551129065,
+      "data": {
+       "v": 1,
+       "id": "49aaab50-a9ce-4809-a1d0-17f7d7854544",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793551133394,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551136473,
+      "data": {
+       "v": 1,
+       "id": "fcfd3e95-68b1-43de-afb6-9c0c7c755692",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551136576,
+      "data": {
+       "v": 1,
+       "id": "f292ad29-f634-4081-ba6c-27da256f687f",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793551136679,
+      "data": {
+       "v": 1,
+       "id": "1bdbafce-34a7-48ec-80e9-b0e1815f70f4",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1793551136785,
+      "data": {
+       "v": 1,
+       "id": "ab823b95-772d-4b52-8088-9af62bc9dee2",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793551136860,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551136894,
+      "data": {
+       "v": 1,
+       "id": "89c7b8f1-0c06-480a-94fe-f5c3fe2d3545",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551136997,
+      "data": {
+       "v": 1,
+       "id": "4255b490-5813-4dbe-834f-d53842c1a3c5",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551137172,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551137276,
+      "data": {
+       "v": 1,
+       "id": "4231faae-3b3a-4834-a0ab-b425dc6762dc",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551140380,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551143382,
+      "data": {
+       "v": 1,
+       "id": "5244bec5-74ff-44de-990e-94f8943fcdd2",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
       }
      }
+    ],
+    "requests": [
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     }
+    ],
+    "errors": []
+   },
+   "desktop": {
+    "engine": "chromium",
+    "view": {
+     "name": "desktop",
+     "width": 1440,
+     "height": 900,
+     "inner": 1440
     },
-    {
-     "t": 1793541651203,
-     "data": {
-      "v": 1,
-      "id": "e1aecd3f-debe-4351-9438-5e42ee53ed55",
-      "ok": true,
-      "result": {
+    "source": "harness, SIGN_HOST from packages/signpage's committed build",
+    "at": "2026-11-01T16:38:07.376Z",
+    "browser": "chromium 153.0.8010.12 (Playwright)",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "6020d222-a3bd-4923-932b-5921af15962c"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "passkeyIn": {
+      "openId": "fe9397e5-dbe8-4b72-87a2-06187e2ce095",
+      "layer": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "created": {
+      "t": 1793551089636,
+      "top": {
+       "state": "backup",
+       "codeSaved": "false",
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "saved": {
+      "t": 1793551093681,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "8c925f77-3430-414b-8a0a-1f82fa45be86"
+     },
+     "passkeyOut": {
+      "t": 1793551096930,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "wordsIn": {
+      "openId": "768cfa21-6559-4f40-a85d-a59bfdcceea0",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1793551104186,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "b984bf5d-d820-46dd-a452-1d43e23a2840"
+     },
+     "nav": {
+      "t": 1793551107408,
+      "okId": "cfbf8368-8cba-4599-a56d-ca41d8649d1f",
+      "evilId": "9df33a62-a9dc-49a7-904d-cbd23bd346f4",
+      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1793551107615,
+      "reloadId": "21c11b92-ce53-48f7-839b-133c16485cfa",
+      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "d031061e-de3c-4dd3-9c57-aee68b495190"
+     },
+     "statusGone": {
+      "id": "9ef9bb22-4bf3-4406-9bdd-c540271968f5"
+     },
+     "backfill": {
+      "t": 1793551107926,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "97c68a3d-f9c2-4f4e-8d03-bbaaff633806"
+     },
+     "wordsOut": {
+      "t": 1793551111202,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "393d01b9-c835-4ebf-a7d0-621529037f1a"
+     },
+     "stranger": {
+      "t": 1793551114309,
+      "done": true
+     }
+    },
+    "messages": [
+     {
+      "t": 1793551087511,
+      "data": {
+       "v": 1,
+       "type": "ready",
        "release": "unreleased",
-       "api": 1,
-       "signed_in": false,
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551087518,
+      "data": {
+       "v": 1,
+       "id": "6020d222-a3bd-4923-932b-5921af15962c",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551088630,
+      "data": {
+       "v": 1,
+       "id": "fe9397e5-dbe8-4b72-87a2-06187e2ce095",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793551093728,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551096828,
+      "data": {
+       "v": 1,
+       "id": "8c925f77-3430-414b-8a0a-1f82fa45be86",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "passkey",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551096932,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551099937,
+      "data": {
+       "v": 1,
+       "id": "768cfa21-6559-4f40-a85d-a59bfdcceea0",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1793551104228,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551107306,
+      "data": {
+       "v": 1,
+       "id": "b984bf5d-d820-46dd-a452-1d43e23a2840",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551107409,
+      "data": {
+       "v": 1,
+       "id": "cfbf8368-8cba-4599-a56d-ca41d8649d1f",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793551107512,
+      "data": {
+       "v": 1,
+       "id": "9df33a62-a9dc-49a7-904d-cbd23bd346f4",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1793551107617,
+      "data": {
+       "v": 1,
+       "id": "21c11b92-ce53-48f7-839b-133c16485cfa",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1793551107684,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551107720,
+      "data": {
+       "v": 1,
+       "id": "d031061e-de3c-4dd3-9c57-aee68b495190",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551107824,
+      "data": {
+       "v": 1,
+       "id": "9ef9bb22-4bf3-4406-9bdd-c540271968f5",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551107995,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1793551108100,
+      "data": {
+       "v": 1,
+       "id": "97c68a3d-f9c2-4f4e-8d03-bbaaff633806",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551111204,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1793551114206,
+      "data": {
+       "v": 1,
+       "id": "393d01b9-c835-4ebf-a7d0-621529037f1a",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
       }
      }
-    }
-   ],
-   "requests": [
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
-     "host": "confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    }
-   ],
-   "errors": []
+    ],
+    "requests": [
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "sign.confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     }
+    ],
+    "errors": []
+   }
   }
  },
  "bad": {
@@ -754,8 +2764,14 @@
  "fstar": {
   "webkit": {
    "engine": "webkit",
-   "source": "harness, SIGN_HOST from this card at 5d762cf with one change: _headers frame-src * instead of APP_HOST",
-   "at": "2026-11-01T14:01:03.555Z",
+   "view": {
+    "name": "phone",
+    "width": 390,
+    "height": 844,
+    "inner": 390
+   },
+   "source": "harness, SIGN_HOST from /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/signpage-shell/site-fstar3",
+   "at": "2026-11-01T16:20:07.586Z",
    "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
    "topology": "shell",
    "steps": {
@@ -764,41 +2780,105 @@
      "top": {
       "state": "signed-out",
       "codeSaved": null,
-      "layerHidden": false
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "attrs": {
+      "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+      "allow": null,
+      "referrerpolicy": "no-referrer"
      }
     },
     "first": {
-     "id": "7b48ad7d-aeb9-4535-9136-c7df00cfb8bc"
+     "id": "3903129f-72c8-403b-a267-7cc837b125f1"
+    },
+    "topNav": {
+     "tried": true,
+     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+    },
+    "wordsIn": {
+     "openId": "f716f03c-be2a-4fbd-a78b-8e2a27f621b0",
+     "clickedWithFrames": 0,
+     "layer": {
+      "state": "words",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 0,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "typed": {
+      "shellHasWords": true,
+      "appChars": 0
+     }
     },
     "words": {
-     "t": 1793541664839,
+     "t": 1793550013419,
      "top": {
       "state": "signed-in",
       "codeSaved": "true",
-      "layerHidden": true
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
-     "layerHidden": true
+     "id": "64aeed97-45dd-41e6-9743-3336dcf438d9"
+    },
+    "nav": {
+     "t": 1793550016709,
+     "okId": "dfc71b6f-1e25-40e0-babc-18f66cd18fa4",
+     "evilId": "cd1cb4ca-5cfc-42a9-96bf-e0b5341740f2",
+     "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "frames": 1
+    },
+    "reload": {
+     "t": 1793550016916,
+     "reloadId": "75a411ff-2214-47de-abd6-a514f947f484",
+     "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     },
+     "id": "23350f45-db6c-43b9-9237-b783bc5f459d"
+    },
+    "statusGone": {
+     "id": "92df343c-8701-4e4d-9192-e5525a298ac7"
+    },
+    "backfill": {
+     "t": 1793550017223,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     },
+     "id": "28be9233-1157-4dda-b760-51bafc964d36"
     },
     "wordsOut": {
-     "t": 1793541668757,
+     "t": 1793550020433,
      "top": {
       "state": "signed-out",
       "codeSaved": null,
-      "layerHidden": false
-     },
-     "layerHidden": false
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     }
     },
     "last": {
-     "id": "7d76b23e-c34b-470b-803c-d59bc430f09e"
+     "id": "54940767-9d24-4fa6-bbcb-cc0f43f3eba8"
     },
     "stranger": {
-     "t": 1793541672042,
+     "t": 1793550023736,
      "done": true
     }
    },
    "messages": [
     {
-     "t": 1793541663763,
+     "t": 1793550007800,
      "data": {
       "v": 1,
       "type": "ready",
@@ -807,10 +2887,10 @@
      }
     },
     {
-     "t": 1793541663828,
+     "t": 1793550007862,
      "data": {
       "v": 1,
-      "id": "7b48ad7d-aeb9-4535-9136-c7df00cfb8bc",
+      "id": "3903129f-72c8-403b-a267-7cc837b125f1",
       "ok": true,
       "result": {
        "release": "unreleased",
@@ -827,11 +2907,32 @@
      }
     },
     {
-     "t": 1793541664865,
+     "t": 1793550008970,
      "data": {
       "v": 1,
-      "type": "state",
-      "state": {
+      "id": "f716f03c-be2a-4fbd-a78b-8e2a27f621b0",
+      "ok": true,
+      "result": {
+       "pending": true
+      }
+     }
+    },
+    {
+     "t": 1793550013474,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793550016607,
+     "data": {
+      "v": 1,
+      "id": "64aeed97-45dd-41e6-9743-3336dcf438d9",
+      "ok": true,
+      "result": {
        "release": "unreleased",
        "api": 1,
        "signed_in": true,
@@ -847,7 +2948,116 @@
      }
     },
     {
-     "t": 1793541668761,
+     "t": 1793550016710,
+     "data": {
+      "v": 1,
+      "id": "dfc71b6f-1e25-40e0-babc-18f66cd18fa4",
+      "ok": true,
+      "result": {}
+     }
+    },
+    {
+     "t": 1793550016812,
+     "data": {
+      "v": 1,
+      "id": "cd1cb4ca-5cfc-42a9-96bf-e0b5341740f2",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793550016917,
+     "data": {
+      "v": 1,
+      "id": "75a411ff-2214-47de-abd6-a514f947f484",
+      "ok": true,
+      "result": {}
+     }
+    },
+    {
+     "t": 1793550016965,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793550017022,
+     "data": {
+      "v": 1,
+      "id": "23350f45-db6c-43b9-9237-b783bc5f459d",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793550017123,
+     "data": {
+      "v": 1,
+      "id": "92df343c-8701-4e4d-9192-e5525a298ac7",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793550017284,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793550017336,
+     "data": {
+      "v": 1,
+      "id": "28be9233-1157-4dda-b760-51bafc964d36",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793550020436,
      "data": {
       "v": 1,
       "type": "state",
@@ -866,10 +3076,10 @@
      }
     },
     {
-     "t": 1793541671941,
+     "t": 1793550023634,
      "data": {
       "v": 1,
-      "id": "7d76b23e-c34b-470b-803c-d59bc430f09e",
+      "id": "54940767-9d24-4fa6-bbcb-cc0f43f3eba8",
       "ok": true,
       "result": {
        "release": "unreleased",
@@ -900,6 +3110,41 @@
     {
      "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     },
     {
@@ -931,8 +3176,14 @@
   },
   "chromium": {
    "engine": "chromium",
-   "source": "harness, SIGN_HOST from this card at 5d762cf with one change: _headers frame-src * instead of APP_HOST",
-   "at": "2026-11-01T14:01:21.086Z",
+   "view": {
+    "name": "phone",
+    "width": 390,
+    "height": 844,
+    "inner": 390
+   },
+   "source": "harness, SIGN_HOST from /Users/mackubucku/Downloads/confidential-trenches-public/.claude/worktrees/signpage-shell/tmp-rec/site-fstar3",
+   "at": "2026-11-01T16:40:26.453Z",
    "browser": "chromium 153.0.8010.12 (Playwright)",
    "topology": "shell",
    "steps": {
@@ -941,68 +3192,146 @@
      "top": {
       "state": "signed-out",
       "codeSaved": null,
-      "layerHidden": false
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "attrs": {
+      "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+      "allow": null,
+      "referrerpolicy": "no-referrer"
      }
     },
     "first": {
-     "id": "4c8c49d8-94aa-45d1-b5cd-2d3356b25021"
+     "id": "3f0a4e83-11db-4c5d-8c33-8b0972f42458"
+    },
+    "topNav": {
+     "tried": true,
+     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+    },
+    "passkeyIn": {
+     "openId": "b05fc0be-066e-478a-8bd0-7a22f3ac4377",
+     "layer": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 0,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     }
     },
     "created": {
-     "t": 1793541682110,
+     "t": 1793551228610,
      "top": {
       "state": "backup",
       "codeSaved": "false",
-      "layerHidden": false
-     },
-     "layerHidden": false
+      "layerHidden": false,
+      "frames": 0,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     }
     },
     "saved": {
-     "t": 1793541686176,
+     "t": 1793551232583,
      "top": {
       "state": "signed-in",
       "codeSaved": "true",
-      "layerHidden": true
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
-     "layerHidden": true
+     "id": "b14e29b6-df2d-4c07-b0c5-71660f0891f5"
     },
     "passkeyOut": {
-     "t": 1793541690113,
+     "t": 1793551235817,
      "top": {
       "state": "signed-out",
       "codeSaved": null,
-      "layerHidden": false
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     }
+    },
+    "wordsIn": {
+     "openId": "04bf8073-9e13-415d-941c-ad8b13797ccb",
+     "clickedWithFrames": 0,
+     "layer": {
+      "state": "words",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 0,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
-     "layerHidden": false
+     "typed": {
+      "shellHasWords": true,
+      "appChars": 0
+     }
     },
     "words": {
-     "t": 1793541694055,
+     "t": 1793551243121,
      "top": {
       "state": "signed-in",
       "codeSaved": "true",
-      "layerHidden": true
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
-     "layerHidden": true
+     "id": "ae67a240-d9ce-4d99-8a5b-d9e4dfa7ca80"
+    },
+    "nav": {
+     "t": 1793551246344,
+     "okId": "d3d05519-3fed-4d7f-962a-b328df8f4788",
+     "evilId": "e60515da-1896-4110-a608-80e89676caca",
+     "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "frames": 1
+    },
+    "reload": {
+     "t": 1793551246551,
+     "reloadId": "a47561d8-05bd-4aef-b6c7-c7e58e956ff4",
+     "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     },
+     "id": "500c2495-3773-4fac-b40d-e22423bc3b97"
+    },
+    "statusGone": {
+     "id": "a22abbc9-3871-4933-8e4f-9430f9d19d1a"
+    },
+    "backfill": {
+     "t": 1793551246862,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     },
+     "id": "641fd4ef-b04f-41bc-86f2-40064091d46b"
     },
     "wordsOut": {
-     "t": 1793541697974,
+     "t": 1793551250139,
      "top": {
       "state": "signed-out",
       "codeSaved": null,
-      "layerHidden": false
-     },
-     "layerHidden": false
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     }
     },
     "last": {
-     "id": "9cbe4177-e8dc-4780-ab19-81020410c357"
+     "id": "ad3dff07-fba3-47db-9721-bfaa25ec6b08"
     },
     "stranger": {
-     "t": 1793541701225,
+     "t": 1793551253243,
      "done": true
     }
    },
    "messages": [
     {
-     "t": 1793541681200,
+     "t": 1793551226571,
      "data": {
       "v": 1,
       "type": "ready",
@@ -1011,10 +3340,10 @@
      }
     },
     {
-     "t": 1793541681206,
+     "t": 1793551226586,
      "data": {
       "v": 1,
-      "id": "4c8c49d8-94aa-45d1-b5cd-2d3356b25021",
+      "id": "3f0a4e83-11db-4c5d-8c33-8b0972f42458",
       "ok": true,
       "result": {
        "release": "unreleased",
@@ -1031,31 +3360,32 @@
      }
     },
     {
-     "t": 1793541682294,
+     "t": 1793551227702,
      "data": {
       "v": 1,
-      "type": "state",
-      "state": {
-       "release": "unreleased",
-       "api": 1,
-       "signed_in": true,
-       "way": "passkey",
-       "code_saved": false,
-       "vault_balance": "0",
-       "wallets": [],
-       "positions": [],
-       "orders": [],
-       "held": [],
-       "ops": []
+      "id": "b05fc0be-066e-478a-8bd0-7a22f3ac4377",
+      "ok": true,
+      "result": {
+       "pending": true
       }
      }
     },
     {
-     "t": 1793541686226,
+     "t": 1793551232632,
      "data": {
       "v": 1,
-      "type": "state",
-      "state": {
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793551235715,
+     "data": {
+      "v": 1,
+      "id": "b14e29b6-df2d-4c07-b0c5-71660f0891f5",
+      "ok": true,
+      "result": {
        "release": "unreleased",
        "api": 1,
        "signed_in": true,
@@ -1071,7 +3401,7 @@
      }
     },
     {
-     "t": 1793541690152,
+     "t": 1793551235819,
      "data": {
       "v": 1,
       "type": "state",
@@ -1090,11 +3420,32 @@
      }
     },
     {
-     "t": 1793541694093,
+     "t": 1793551238833,
      "data": {
       "v": 1,
-      "type": "state",
-      "state": {
+      "id": "04bf8073-9e13-415d-941c-ad8b13797ccb",
+      "ok": true,
+      "result": {
+       "pending": true
+      }
+     }
+    },
+    {
+     "t": 1793551243166,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793551246243,
+     "data": {
+      "v": 1,
+      "id": "ae67a240-d9ce-4d99-8a5b-d9e4dfa7ca80",
+      "ok": true,
+      "result": {
        "release": "unreleased",
        "api": 1,
        "signed_in": true,
@@ -1110,7 +3461,116 @@
      }
     },
     {
-     "t": 1793541698035,
+     "t": 1793551246346,
+     "data": {
+      "v": 1,
+      "id": "d3d05519-3fed-4d7f-962a-b328df8f4788",
+      "ok": true,
+      "result": {}
+     }
+    },
+    {
+     "t": 1793551246448,
+     "data": {
+      "v": 1,
+      "id": "e60515da-1896-4110-a608-80e89676caca",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793551246553,
+     "data": {
+      "v": 1,
+      "id": "a47561d8-05bd-4aef-b6c7-c7e58e956ff4",
+      "ok": true,
+      "result": {}
+     }
+    },
+    {
+     "t": 1793551246627,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793551246656,
+     "data": {
+      "v": 1,
+      "id": "500c2495-3773-4fac-b40d-e22423bc3b97",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551246760,
+     "data": {
+      "v": 1,
+      "id": "a22abbc9-3871-4933-8e4f-9430f9d19d1a",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551246931,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793551247035,
+     "data": {
+      "v": 1,
+      "id": "641fd4ef-b04f-41bc-86f2-40064091d46b",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551250141,
      "data": {
       "v": 1,
       "type": "state",
@@ -1129,10 +3589,10 @@
      }
     },
     {
-     "t": 1793541701124,
+     "t": 1793551253141,
      "data": {
       "v": 1,
-      "id": "9cbe4177-e8dc-4780-ab19-81020410c357",
+      "id": "ad3dff07-fba3-47db-9721-bfaa25ec6b08",
       "ok": true,
       "result": {
        "release": "unreleased",
@@ -1166,8 +3626,897 @@
      "method": "GET"
     },
     {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
      "host": "example.com",
      "path": "/",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  }
+ },
+ "prefix": {
+  "webkit": {
+   "engine": "webkit",
+   "view": {
+    "name": "phone",
+    "width": 390,
+    "height": 844,
+    "inner": 390
+   },
+   "source": "harness, SIGN_HOST from /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/signpage-shell/site-prefix",
+   "at": "2026-11-01T16:19:14.749Z",
+   "browser": "system WebKit 21624.4.5.11.5 (macOS 26.6 25G72)",
+   "topology": "shell",
+   "steps": {
+    "open": {
+     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "attrs": {
+      "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+      "allow": null,
+      "referrerpolicy": "no-referrer"
+     }
+    },
+    "first": {
+     "id": "dc4bbf53-5c82-4987-841c-e4ca950fb43f"
+    },
+    "topNav": {
+     "tried": true,
+     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+    },
+    "wordsIn": {
+     "openId": "2da2d43e-57f8-4945-8091-e34797e494ae",
+     "clickedWithFrames": 1,
+     "layer": {
+      "state": "words",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "typed": {
+      "shellHasWords": true,
+      "appChars": 0
+     }
+    },
+    "words": {
+     "t": 1793549963661,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "id": "476b5e93-7d64-4e9b-a4ff-9f977040b0fa"
+    },
+    "nav": {
+     "t": 1793549981956,
+     "okId": "fe5b0028-5116-4fdc-a32e-717ab5b11648",
+     "evilId": "ccfc7a36-0c20-4243-9ef9-4fe9f0811b2f",
+     "after": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "afterEvil": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "frames": 1
+    },
+    "reload": {
+     "t": 1793549982161,
+     "reloadId": "dbaab728-93af-435f-ab62-b7761ffd360a",
+     "frameHref": null,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "id": "260bda15-e591-4bc2-8e00-9aa78025380d"
+    },
+    "statusGone": {
+     "id": "7a83b708-c626-4bd3-8eaa-c2cc90c8ebd3"
+    },
+    "backfill": {
+     "t": 1793549997430,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     },
+     "id": "bc621749-e2c8-4e79-a9ba-5057628a2e15"
+    },
+    "wordsOut": {
+     "t": 1793550000651,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     }
+    },
+    "last": {
+     "id": "f7b29526-15e3-4fea-ac04-71967ebcb5ec"
+    },
+    "stranger": {
+     "t": 1793550003954,
+     "done": true
+    }
+   },
+   "messages": [
+    {
+     "t": 1793549954960,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793549955027,
+     "data": {
+      "v": 1,
+      "id": "dc4bbf53-5c82-4987-841c-e4ca950fb43f",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793549956131,
+     "data": {
+      "v": 1,
+      "id": "2da2d43e-57f8-4945-8091-e34797e494ae",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793549963688,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793549981855,
+     "data": {
+      "v": 1,
+      "id": "476b5e93-7d64-4e9b-a4ff-9f977040b0fa",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793549981956,
+     "data": {
+      "v": 1,
+      "id": "fe5b0028-5116-4fdc-a32e-717ab5b11648",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793549982059,
+     "data": {
+      "v": 1,
+      "id": "ccfc7a36-0c20-4243-9ef9-4fe9f0811b2f",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793549982161,
+     "data": {
+      "v": 1,
+      "id": "dbaab728-93af-435f-ab62-b7761ffd360a",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793549997228,
+     "data": {
+      "v": 1,
+      "id": "260bda15-e591-4bc2-8e00-9aa78025380d",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793549997330,
+     "data": {
+      "v": 1,
+      "id": "7a83b708-c626-4bd3-8eaa-c2cc90c8ebd3",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793549997507,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793549997549,
+     "data": {
+      "v": 1,
+      "id": "bc621749-e2c8-4e79-a9ba-5057628a2e15",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "words",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793550000653,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793550003861,
+     "data": {
+      "v": 1,
+      "id": "f7b29526-15e3-4fea-ac04-71967ebcb5ec",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793550003956,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    }
+   ],
+   "errors": []
+  },
+  "chromium": {
+   "engine": "chromium",
+   "view": {
+    "name": "phone",
+    "width": 390,
+    "height": 844,
+    "inner": 390
+   },
+   "source": "harness, SIGN_HOST from /Users/mackubucku/Downloads/confidential-trenches-public/.claude/worktrees/signpage-shell/tmp-rec/site-prefix",
+   "at": "2026-11-01T16:39:05.855Z",
+   "browser": "chromium 153.0.8010.12 (Playwright)",
+   "topology": "shell",
+   "steps": {
+    "open": {
+     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "attrs": {
+      "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+      "allow": null,
+      "referrerpolicy": "no-referrer"
+     }
+    },
+    "first": {
+     "id": "62bc4b7b-3b3c-42bf-83f1-04de9c178eb8"
+    },
+    "topNav": {
+     "tried": true,
+     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+    },
+    "passkeyIn": {
+     "openId": "ffd49990-85ab-4608-b524-7c1ff03eb7c8",
+     "layer": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     }
+    },
+    "created": {
+     "t": 1793551151096,
+     "top": {
+      "state": "backup",
+      "codeSaved": "false",
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     }
+    },
+    "saved": {
+     "t": 1793551155151,
+     "top": {
+      "state": "signed-in",
+      "codeSaved": "true",
+      "layerHidden": true,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "id": "0b1e3861-c2e9-4907-bec7-b4268187316d"
+    },
+    "passkeyOut": {
+     "t": 1793551173471,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     }
+    },
+    "wordsIn": {
+     "openId": "97d505e7-6305-416d-b7c6-e78b8e8ca1fc",
+     "clickedWithFrames": 1,
+     "layer": {
+      "state": "words",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "typed": {
+      "shellHasWords": false,
+      "appChars": 92
+     }
+    },
+    "words": {
+     "t": 1793551183872,
+     "top": {
+      "state": "invalid-code",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "id": "701c6223-8d75-4181-b640-48e7d7c9d935"
+    },
+    "nav": {
+     "t": 1793551202183,
+     "okId": "dd61c5c4-8a22-4627-b413-d321a9fccd60",
+     "evilId": "e0b74390-2080-4667-9039-b6f31d64ed72",
+     "after": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "afterEvil": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "frames": 1
+    },
+    "reload": {
+     "t": 1793551202389,
+     "reloadId": "5248cf82-08ac-4081-b36e-ac6fe1d96043",
+     "frameHref": null,
+     "top": {
+      "state": "invalid-code",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "id": "32831307-46c3-48e7-94e0-ea16c026505b"
+    },
+    "statusGone": {
+     "id": "80da3b43-dd5d-4bf6-8002-4be3d94e49d5"
+    },
+    "backfill": {
+     "t": 1793551217678,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     },
+     "id": "be8dde79-e3c6-421c-a061-309aa035e202"
+    },
+    "wordsOut": {
+     "t": 1793551220945,
+     "top": {
+      "state": "signed-out",
+      "codeSaved": null,
+      "layerHidden": false,
+      "frames": 1,
+      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+     }
+    },
+    "last": {
+     "id": "1817d055-d0a7-4ba2-844b-3238e25754f2"
+    },
+    "stranger": {
+     "t": 1793551224049,
+     "done": true
+    }
+   },
+   "messages": [
+    {
+     "t": 1793551145985,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793551145991,
+     "data": {
+      "v": 1,
+      "id": "62bc4b7b-3b3c-42bf-83f1-04de9c178eb8",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551147097,
+     "data": {
+      "v": 1,
+      "id": "ffd49990-85ab-4608-b524-7c1ff03eb7c8",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793551151266,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "passkey",
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551155205,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "passkey",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551173371,
+     "data": {
+      "v": 1,
+      "id": "0b1e3861-c2e9-4907-bec7-b4268187316d",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": true,
+       "way": "passkey",
+       "code_saved": true,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551173473,
+     "data": {
+      "v": 1,
+      "type": "state",
+      "state": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551176480,
+     "data": {
+      "v": 1,
+      "id": "97d505e7-6305-416d-b7c6-e78b8e8ca1fc",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793551202081,
+     "data": {
+      "v": 1,
+      "id": "701c6223-8d75-4181-b640-48e7d7c9d935",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551202183,
+     "data": {
+      "v": 1,
+      "id": "dd61c5c4-8a22-4627-b413-d321a9fccd60",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793551202286,
+     "data": {
+      "v": 1,
+      "id": "e0b74390-2080-4667-9039-b6f31d64ed72",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793551202390,
+     "data": {
+      "v": 1,
+      "id": "5248cf82-08ac-4081-b36e-ac6fe1d96043",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    },
+    {
+     "t": 1793551217474,
+     "data": {
+      "v": 1,
+      "id": "32831307-46c3-48e7-94e0-ea16c026505b",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551217577,
+     "data": {
+      "v": 1,
+      "id": "80da3b43-dd5d-4bf6-8002-4be3d94e49d5",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551217737,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 1793551217841,
+     "data": {
+      "v": 1,
+      "id": "be8dde79-e3c6-421c-a061-309aa035e202",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 1793551223949,
+     "data": {
+      "v": 1,
+      "id": "1817d055-d0a7-4ba2-844b-3238e25754f2",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    }
+   ],
+   "requests": [
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "sign.confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     }
    ],

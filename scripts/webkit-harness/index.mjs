@@ -1,5 +1,5 @@
 // Card signpage-shell: run pages on the Mac's own WebKit.framework (Safari's engine) with both hosts served locally.
-//   const driver = await launchWebKit({ serve })
+//   const driver = await launchWebKit({ serve, width, height })  (the view in CSS px; 800 x 600 when not given)
 // serve(host, pathAndQuery, method, body) -> { status, headers, body } | null (404), called for every request to
 // SIGN_HOST or APP_HOST. WebKit reaches them through an HTTP CONNECT proxy on 127.0.0.1 that tunnels only those two
 // hosts to a local HTTPS server and refuses (and logs) every other host, so nothing reaches the network. The TLS
@@ -26,7 +26,7 @@ const listen = (server) => new Promise((ok, no) => {
   server.listen(0, '127.0.0.1', () => ok(server.address().port));
 });
 
-export async function launchWebKit({ serve }) {
+export async function launchWebKit({ serve, width = 800, height = 600 }) {
   if (process.platform !== 'darwin') throw new Error('webkit-harness: needs macOS (WebKit.framework)');
   if (typeof serve !== 'function') throw new Error('webkit-harness: serve must be a function');
   const dir = mkdtempSync(join(tmpdir(), 'wk-harness-'));
@@ -101,7 +101,7 @@ export async function launchWebKit({ serve }) {
     // 4. The Swift driver, compiled once per run into the temp dir.
     const bin = join(dir, 'wkdriver');
     execFileSync('swiftc', ['-O', '-o', bin, join(HERE, 'driver.swift')], { stdio: ['ignore', 'ignore', 'pipe'] });
-    child = spawn(bin, [String(proxyPort), cert, ...HOSTS], { stdio: ['pipe', 'pipe', 'inherit'] });
+    child = spawn(bin, [String(proxyPort), cert, ...HOSTS, String(width), String(height)], { stdio: ['pipe', 'pipe', 'inherit'] });
     child.stdin.on('error', () => {}); // a write after the driver exits; the exit handler rejects what is pending
 
     const messages = [];

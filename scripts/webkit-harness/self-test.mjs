@@ -37,6 +37,8 @@ try {
       const p = pages[`${host} ${path}`];
       return p ? p() : null;
     },
+    width: 390,
+    height: 844,
   });
   console.log(`webkit: ${d.version}`);
   check('version from the framework', /^system WebKit \d+\.[\d.]+ \(macOS \d+\.\d+(\.\d+)? \w+\)$/.test(d.version), d.version);
@@ -78,7 +80,19 @@ try {
   const appFramed = await until(() => d.messages().filter((m) => m.data?.frame === 'y').length >= 2);
   check('CSP frame-src blocks the third host', !!v && v.data.blocked.includes(THIRD) && !!appFramed && !seen.some((s) => s.includes(THIRD)), JSON.stringify(v?.data));
 
-  // 5. No request reaches the network: other hosts are refused at the proxy and logged.
+  // 5. The view is the width asked for, and a CryptoKey kept in IndexedDB is saved without the login keychain: WebKit
+  // wraps it with its WebCrypto master key, which the driver holds in memory. Kept in the keychain, the key is bound
+  // to the build that made it, and a rebuilt driver waits on a keychain prompt here until the command times out.
+  await d.goto(`https://${SIGN_HOST}/idb`);
+  const wide = await d.evaluate('return window.innerWidth');
+  check('the view is 390 px wide', wide === 390, String(wide));
+  const keyKept = await d.evaluate(`${IDB} const k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+    const db = await open(); await new Promise((ok, no) => { const tx = db.transaction('s', 'readwrite'); tx.objectStore('s').put(k, 'ck'); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const back = await new Promise((ok, no) => { const r = db.transaction('s').objectStore('s').get('ck'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    db.close(); return back instanceof CryptoKey && back.extractable === false ? 'kept' : 'lost';`);
+  check('a non-extractable CryptoKey is kept in IndexedDB', keyKept === 'kept', String(keyKept));
+
+  // 6. No request reaches the network: other hosts are refused at the proxy and logged.
   const fetchOut = await d.evaluate(`try { await fetch('https://example.com/', { mode: 'no-cors' }); return 'reached'; } catch (e) { return 'refused: ' + e.message; }`);
   const ref = await until(() => d.refused().find((r) => r.target.startsWith('example.com:')));
   check('proxy refuses and logs another host', fetchOut.startsWith('refused') && !!ref, `${fetchOut}; log ${JSON.stringify(d.refused())}`);
