@@ -355,7 +355,8 @@ export const VAULT_EVENT_VERSION = "1.0.0";
 /**
  * Each event's data fields, in order. `data` is an array of such objects (the NEP-141 and NEP-171 form of NEP-297
  * events), so one log line may carry several later with no version change. Field elements and amounts are decimal
- * strings, indexes JSON numbers (0-based).
+ * strings, indexes JSON numbers (0-based). Events count only from successful receipts: NEAR keeps a failed receipt's
+ * logs.
  */
 export const VAULT_EVENT_DATA = "array";
 export const VAULT_EVENTS = {
