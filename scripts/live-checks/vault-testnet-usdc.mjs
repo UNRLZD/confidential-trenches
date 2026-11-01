@@ -12,12 +12,14 @@
 //     [--live <file>]   PASS exit 0, FAIL exit 1, error exit 2
 // --account checks another account against the same record (the recorded bad answer). --record writes every RPC answer
 // the run read to <file>, so the check's test can replay it (each NEAR signature replaced, as money-gate-testnet does).
-// --live writes the card's live record (CARD / live: PASS|FAIL, Money path: yes, one Tx line per tx) for the money gate.
+// --live writes the card's live record (CARD / live: PASS|FAIL, Money path: yes, one Tx line per tx) for the money gate,
+// and beside it the tx-bytes file (<record>.tx-bytes.json) with each tx's signed bytes the deploy script kept (the
+// faucet's tx has none), which a tx one operator reads needs to be proven.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS as GATE_RPCS, okOperators, oneOperator, readTx } from "../ci/money-gate.mjs";
+import { BYTES, RPCS as GATE_RPCS, okOperators, operatorOf, proveRead, readTx } from "../ci/money-gate.mjs";
 
 const KEY = "vault-testnet-usdc";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -85,23 +87,31 @@ export async function check({ deployment, account = deployment.account_id, fetch
   const txs = Array.isArray(deployment.txs) ? deployment.txs : [];
   say(txs.length > 0, `the record lists ${txs.length} tx(s)`);
   for (const t of txs) {
-    // in order until two operators read ok: the third host (rate-limited, FastNEAR's again) is asked only when one of
-    // the first two cannot; two hosts of one operator are one read. A tx older than dRPC keeps passes on one operator
-    // by the money gate's own rule (oneOperator), said so.
-    const tx = { chain: "near-testnet", hash: t.hash, signer: t.signer };
+    // in order until two operators read ok: the third host (rate-limited, FastNEAR's again) is asked only when FastNEAR
+    // has not read it ok yet; two hosts of one operator are one read. A tx only one operator reads (older than dRPC
+    // keeps) passes only by its light-client proof, by the money gate's own rule (proveRead).
+    const tx = { chain: "near-testnet", hash: t.hash, signer: t.signer, bytes: t.tx_bytes };
     const reads = [];
     for (const url of rpcs) {
       const ops = okOperators("near-testnet", reads);
       if (ops.size >= 2) break;
+      if (ops.has(operatorOf("near-testnet", url))) continue; // its read could add no second operator
       const out = {};
-      // a 429 is waited out while fewer than two operators read it ok, as in the gate
       const r = await readTx(fetchFn, url, tx, undefined, sleep, true, out);
-      reads.push({ url, r, height: out.height, time: out.time });
+      reads.push({ url, r, result: out.result });
     }
     const decisive = reads.some((x) => /^(failed|old)/.test(x.r));
     const ops = okOperators("near-testnet", reads).size;
-    const one = !decisive && ops === 1 ? await oneOperator(fetchFn, tx, reads, sleep) : null;
-    say(!decisive && (ops >= 2 || one !== null), `tx ${t.hash} (${t.what}) ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}${one ? `; ${one}` : ""}`);
+    let proof = "";
+    let proven = false;
+    if (!decisive && ops === 1)
+      try {
+        proof = `; ${await proveRead(fetchFn, tx, reads, rpcs, undefined, sleep)}`;
+        proven = true;
+      } catch (e) {
+        proof = `; not proven: ${String(e?.message ?? e).slice(0, 300)}`;
+      }
+    say(!decisive && (ops >= 2 || proven), `tx ${t.hash} (${t.what}) ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}${proof}`);
   }
   return { ok, lines };
 }
@@ -122,6 +132,8 @@ export function recorder(fetchFn = fetch) {
   return { answers, fetchFn: wrapped };
 }
 
+/** The tx-bytes file for the live record: { hash: base64 borsh Transaction } for each tx the deploy script signed. */
+export const liveBytes = (deployment) => Object.fromEntries(deployment.txs.filter((t) => typeof t.tx_bytes === "string").map((t) => [t.hash, t.tx_bytes]));
 export const liveRecord = (deployment, r) =>
   [`CARD ${KEY} / live: ${r.ok ? "PASS" : "FAIL"}`, "Money path: yes", ...deployment.txs.map((t) => `Tx: near-testnet ${t.hash} ${t.signer}`), "", ...r.lines.map((l) => `    ${l}`), ""].join("\n");
 
@@ -134,7 +146,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const rec = recorder();
     const r = await check({ deployment, account: opt("--account", deployment.account_id), fetchFn: opt("--record") ? rec.fetchFn : fetch });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(rec.answers) + "\n");
-    if (opt("--live")) writeFileSync(opt("--live"), liveRecord(deployment, r));
+    if (opt("--live")) {
+      writeFileSync(opt("--live"), liveRecord(deployment, r));
+      const bytes = liveBytes(deployment);
+      if (Object.keys(bytes).length) writeFileSync(opt("--live").replace(/\.md$/, BYTES), JSON.stringify(bytes, null, 2) + "\n");
+    }
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
     process.exit(r.ok ? 0 : 1);

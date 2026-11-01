@@ -1,5 +1,7 @@
 /* the probe screen of the return-hop browser run: test only, never in the app's build */
 .probe { padding: 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-.probe button, .probe input { font: inherit; color: var(--text-1); background: var(--bg-raised); border: 1px solid var(--m-line-strong); padding: 8px 12px; }
-.probe button:disabled { opacity: 0.4; }
+/* the probe's own controls only: the app's rows and lines inside it (the phone's account rows, HopLine) keep their styles */
+.probe > button, .probe > div > button[data-control], .probe input { font: inherit; color: var(--text-1); background: var(--bg-raised); border: 1px solid var(--m-line-strong); padding: 8px 12px; }
+.probe > button:disabled, .probe > div > button[data-control]:disabled { opacity: 0.4; }
+.probe > .amenu.ph { align-self: stretch; margin: 0; }
 .probe .tall { height: 1500px; flex: none; }

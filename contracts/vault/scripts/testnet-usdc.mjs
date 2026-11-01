@@ -31,7 +31,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { b58encode, b58decode } from "./deploy-testnet.mjs";
-import { RPCS as GATE_RPCS, okOperators, readTx } from "../../../scripts/ci/money-gate.mjs";
+import { RPCS as GATE_RPCS, okOperators, proveRead, readTx } from "../../../scripts/ci/money-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const MAINNET_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
@@ -208,7 +208,9 @@ async function main() {
     const failed = [r.transaction_outcome, ...r.receipts_outcome].filter((o) => o.outcome.status.Failure);
     if (!("SuccessValue" in (r.status ?? {})) || failed.length) throw new Error(`${what} (${txHash}) failed: ${JSON.stringify(failed[0]?.outcome.status ?? r.status).slice(0, 400)}`);
     const gas = [r.transaction_outcome, ...r.receipts_outcome].reduce((s, o) => s + BigInt(o.outcome.gas_burnt), 0n);
-    const entry = { what, hash: txHash, signer, receiver, gas_burnt: String(gas) };
+    // tx_bytes: the signed borsh Transaction, which hashes to the tx's id; the money gate proves a tx one operator
+    // reads only with them (scripts/ci/money-gate.mjs txBytesFacts)
+    const entry = { what, hash: txHash, signer, receiver, gas_burnt: String(gas), tx_bytes: tx.toString("base64") };
     txs.push(entry);
     console.log(`ok ${what}: ${txHash} (${signer} -> ${receiver}), ${Number(gas) / 1e12} Tgas burnt`);
     return r;
@@ -279,21 +281,30 @@ async function main() {
 
   // 7. every tx read back by the money gate's readTx, in the money gate's RPC order until two operators read ok (the
   // third host, archival-rpc.testnet.near.org, is FastNEAR's again and answers 429 with a Retry-After of minutes, so
-  // it is asked only when needed); none may read failed or old. The live check reads them again by the same rule.
+  // it is asked only when needed); none may read failed or old. A tx one operator reads passes only by its light-client
+  // proof, the money gate's own rule (proveRead). The live check reads them again by the same rule.
   for (const t of txs) {
     let reads = [];
     for (let i = 0; i < 6; i++) {
       reads = [];
       for (const url of TESTNET_RPCS) {
         if (okOperators("near-testnet", reads).size >= 2) break;
-        reads.push({ url, r: await readTx(fetch, url, { chain: "near-testnet", hash: t.hash, signer: t.signer }) });
+        const out = {};
+        reads.push({ url, r: await readTx(fetch, url, { chain: "near-testnet", hash: t.hash, signer: t.signer }, undefined, undefined, true, out), result: out.result });
       }
       if (okOperators("near-testnet", reads).size >= 2) break;
       await sleep(5000);
     }
-    if (okOperators("near-testnet", reads).size < 2 || reads.some((x) => /^(failed|old)/.test(x.r))) throw new Error(`${t.hash} (${t.what}) reads ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}`);
+    const reading = `${t.hash} (${t.what}) reads ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}`;
+    if (reads.some((x) => /^(failed|old)/.test(x.r))) throw new Error(reading);
+    if (okOperators("near-testnet", reads).size < 2)
+      try {
+        console.log(await proveRead(fetch, { chain: "near-testnet", hash: t.hash, signer: t.signer, bytes: t.tx_bytes }, reads, TESTNET_RPCS));
+      } catch (e) {
+        throw new Error(`${reading}; not proven: ${e.message}`);
+      }
   }
-  console.log(`every tx (${txs.length}) reads ok on two testnet operators; next: node scripts/live-checks/vault-testnet-usdc.mjs`);
+  console.log(`every tx (${txs.length}) reads ok on two testnet operators, or is proven; next: node scripts/live-checks/vault-testnet-usdc.mjs`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

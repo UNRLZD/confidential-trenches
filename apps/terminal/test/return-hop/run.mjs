@@ -17,7 +17,11 @@
 //   back:   the browser's Back on SIGN_HOST instead of done.
 // Then the bad returns: no record, a stale one, one for another kind, a garbled one, a hand-edited return URL and a
 // record whose route is another host. Each lands on Discover with nothing restored.
-//   node apps/terminal/test/return-hop/run.mjs [--shots <dir>] [--plant wrong-key]
+// Then the failures (card app-hop-refused): for every caller of the hop (the sign-in sheet, the account menu's Backup,
+// Withdraw and Sign out, and Export through the probe) at both widths, SIGN_HOST refuses the kind (not_allowed), fails
+// it (another code) or never answers it. Each shows one line in place, unlocks the control, offers Retry only where a
+// retry can work, and stays on the screen with no pop-up.
+//   node apps/terminal/test/return-hop/run.mjs [--shots <dir>] [--plant wrong-key] [--only hop|fail|bad]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --plant wrong-key makes the stand-in send every flow back to the withdraw return path, so the run must FAIL.
 import { createHash } from "node:crypto";
@@ -39,6 +43,26 @@ const KINDS = [
   { kind: "withdraw.open", key: "withdraw", control: "hop-withdraw", from: "/verify", route: "verify" },
 ];
 const MODES = ["return", "reload", "back"];
+// The failure runs (card app-hop-refused): SIGN_HOST refuses the open kind (not_allowed: no retry can change the
+// page's rule), fails it with another code (a store error: a retry can work), or never answers it (the kit's 5 s
+// open-kind window, then client_timeout: a retry can work once the signing page is READY again).
+const FAIL_MODES = [
+  { mode: "refused", code: "not_allowed", retry: false },
+  { mode: "error", code: "store_unavailable", retry: true },
+  { mode: "silent", code: null, retry: true },
+];
+const OPEN_WINDOW_MS = 5_000; // SIGNPAGE_TIMEOUT_MS of every open kind (packages/kit/src/signpage/client.ts)
+const SLACK_MS = 1_500;
+// Every caller of the hop, as a user reaches it: the sign-in sheet's ways (Sign in, then Use passkey), the account
+// menu's Backup, Withdraw and Sign out (desktop: the account chip; phone: the Account tab's rows), and Export, which no
+// screen draws yet, through the probe's control as its screen will.
+const TARGETS = [
+  { name: "signin", kind: "signin.open", control: "signin-passkey", from: "/", signedIn: false, place: "sheet" },
+  { name: "backup", kind: "backup.open", control: "acct-backup", from: "/profile", signedIn: true, place: "menu" },
+  { name: "withdraw", kind: "withdraw.open", control: "acct-withdraw", from: "/profile", signedIn: true, place: "menu" },
+  { name: "signout", kind: "signout", control: "acct-signout", from: "/profile", signedIn: true, place: "menu" },
+  { name: "export", kind: "export.open", control: "hop-export", from: "/portfolio", signedIn: true, place: "probe" },
+];
 const WIDTHS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -62,7 +86,13 @@ async function buildProbe() {
 const standIn = (plant) => `const APP = ${JSON.stringify(APP)};
 const RETURN = ${JSON.stringify(Object.fromEntries(KINDS.map((k) => [k.key, plant === "wrong-key" ? "/return/withdraw" : `/return/${k.key}`])))};
 const OPEN = ${JSON.stringify(KINDS.map((k) => k.kind))};
-const STATE = { release: "harness-frame", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
+// a failure run sets self.__standIn = { mode, signedIn } in SIGN_HOST's frames before this script (run.mjs failRun)
+const MODE = (self.__standIn && self.__standIn.mode) || "ok";
+const SIGNED = !!(self.__standIn && self.__standIn.signedIn);
+const STATE = SIGNED
+  ? { release: "harness-frame", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] }
+  : { release: "harness-frame", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
+const CODES = ${JSON.stringify(Object.fromEntries(FAIL_MODES.filter((m) => m.code).map((m) => [m.mode, m.code])))};
 const d = document.documentElement;
 if (window.top !== window) {
   addEventListener("message", (e) => {
@@ -71,6 +101,8 @@ if (window.top !== window) {
     if (m.type === "state") return parent.postMessage({ v: 1, id: m.id, ok: true, result: STATE }, APP);
     if (OPEN.includes(m.type) && Object.hasOwn(RETURN, m.return_key)) {
       localStorage.setItem("opens", String(Number(localStorage.getItem("opens") || 0) + 1));
+      if (MODE === "silent") return;
+      if (Object.hasOwn(CODES, MODE)) return parent.postMessage({ v: 1, id: m.id, ok: false, error: { code: CODES[MODE] } }, APP);
       localStorage.setItem("flow", JSON.stringify({ kind: m.type, return_key: m.return_key, at: Date.now() }));
       setTimeout(() => parent.postMessage({ v: 1, id: m.id, ok: true, result: { pending: true } }, APP), 300);
     }
@@ -234,6 +266,109 @@ async function hopRun(h, w, k, mode, shots, lines) {
   }
 }
 
+/**
+ * A tap that SIGN_HOST refuses, fails or never answers (card app-hop-refused): the tab stays on the screen, the sheet
+ * or menu stays open, the control is unlocked, and one line shows in place of the outcome, with Retry when a retry can
+ * work; a Retry sends the kind again. Never a pop-up, never a silent no-op.
+ */
+async function failRun(h, w, t, f, shots, lines) {
+  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${w.name} ${t.name} ${f.mode}: ${text}`);
+  const { context, rec } = await h.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch });
+  await context.addInitScript(INIT);
+  await context.addInitScript(
+    ([sign, cfg]) => {
+      if (location.origin === sign) Object.defineProperty(self, "__standIn", { value: cfg });
+    },
+    [SIGN, { mode: f.mode, signedIn: t.signedIn }],
+  );
+  const page = await context.newPage();
+  const pageErrors = [];
+  const dialogs = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  page.on("console", (m) => m.type() === "error" && pageErrors.push(m.text()));
+  page.on("dialog", (d) => {
+    dialogs.push(d.type());
+    d.dismiss().catch(() => {});
+  });
+  const opens = () => page.frames().find((fr) => fr.url().startsWith(SIGN))?.evaluate(() => localStorage.getItem("opens") ?? "0").catch(() => null) ?? null;
+  const sel = `[data-control="${t.control}"]:visible`;
+  const line = `[data-hop-failed="${t.control}"]:visible`;
+  try {
+    await page.goto(APP + t.from, { waitUntil: "load" });
+    await ready(page);
+    // reach the control as a user does
+    if (t.place === "sheet") {
+      await page.click(w.isMobile ? ".phh [data-header='S1.1']" : ".btn-signin");
+      await page.waitForSelector("[data-sheet='signin']", { timeout: 3_000 });
+    } else if (t.place === "menu" && !w.isMobile) {
+      await page.click(".tbr .acct");
+      await page.waitForSelector(".amenu[data-state='S1.16']:visible", { timeout: 3_000 });
+    }
+    const t0 = await page.evaluate(() => performance.now());
+    await page.click(sel);
+    const limit = (f.mode === "silent" ? OPEN_WINDOW_MS : 0) + SLACK_MS;
+    const seen = await page
+      .waitForSelector(line, { timeout: limit + 500 })
+      .then(() => page.evaluate((t) => performance.now() - t, t0))
+      .catch(() => null);
+    const shot = path.join(shots, `${w.name}-${t.name}-${f.mode}.png`);
+    await page.screenshot({ path: shot });
+    say(seen !== null && seen <= limit, `the line shows ${seen === null ? "NEVER" : `${Math.round(seen)} ms after the tap`}, limit ${limit} ms`);
+    if (seen === null) return;
+    const read = await page.evaluate(
+      ([l, place]) => {
+        const el = [...document.querySelectorAll(`[data-hop-failed="${l}"]`)].find((e) => e.getClientRects().length > 0);
+        const r = el.getBoundingClientRect();
+        const box = place === "sheet" ? document.querySelector(".sgn-box") : place === "menu" ? [...document.querySelectorAll(".amenu")].find((e) => e.getClientRects().length > 0) : document.querySelector("main");
+        const b = box?.getBoundingClientRect();
+        const retry = el.querySelector("[data-hop-retry]");
+        return {
+          why: el.dataset.hopWhy ?? null,
+          text: el.textContent,
+          draft: el.querySelector("[data-draft-copy]") !== null,
+          inView: r.top >= 0 && r.bottom <= innerHeight && r.width > 0,
+          inPlace: !!b && r.top >= b.top - 1 && r.bottom <= b.bottom + 1,
+          retry: retry ? { disabled: retry.disabled } : null,
+          locked: document.querySelector("main")?.dataset.locked ?? null,
+          url: location.pathname,
+          record: sessionStorage.getItem("ct.return-hop"),
+        };
+      },
+      [t.control, t.place],
+    );
+    say(read.why === f.mode, `the line says why: data-hop-why ${read.why}, "${read.text}"${read.draft ? " (draft copy)" : ""}`);
+    say(read.inView && read.inPlace, `the line is in place (${t.place}) and on screen`);
+    say((read.retry !== null) === f.retry, `Retry ${read.retry ? "shown" : "not shown"}${f.retry ? "" : " (a retry cannot change the page's refusal)"}`);
+    say(read.url === t.from && rec.pages.length === 1 && read.record === null, `the tab stays on ${read.url}, one tab, the return record ${read.record === null ? "removed" : "LEFT"}`);
+    // unlocked, and on again once the signing page is READY (a silent hop takes the client down for its retry)
+    const free = await page
+      .waitForFunction((s) => document.querySelector("main")?.dataset.locked === "" && document.documentElement.dataset.signpage === "ready" && document.querySelector(s.replace(":visible", "")) && [...document.querySelectorAll(s.replace(":visible", ""))].some((e) => e.getClientRects().length > 0 && !e.disabled), sel, { timeout: 15_000, polling: 50 })
+      .then(() => true)
+      .catch(() => false);
+    say(free, `the control is unlocked and on again${f.mode === "silent" ? " once the signing page is READY" : ""}`);
+    const before = await opens();
+    if (f.retry && free) {
+      await page.click(`${line} [data-hop-retry]`);
+      const again = await page
+        .waitForFunction((c) => document.querySelector("main")?.dataset.locked === c, t.control, { timeout: 1_000, polling: 20 })
+        .then(() => true)
+        .catch(() => false);
+      await page.waitForTimeout(200);
+      const after = await opens();
+      say(again && Number(after) === Number(before) + 1, `Retry sends the kind again (control locked ${again ? "yes" : "NO"}, open requests ${before} then ${after})`);
+    } else {
+      say(before === "1", `${before} open request for one tap`);
+    }
+    say(dialogs.length === 0, dialogs.length ? `pop-ups: ${dialogs.join(", ")}` : "no pop-up");
+    const errs = [...pageErrors, ...((await page.evaluate(() => window.__hop?.errs ?? [])) ?? [])];
+    say(errs.length === 0, errs.length ? `errors: ${errs.join("; ")}` : "no page error, no CSP violation");
+  } catch (e) {
+    say(false, `run stopped: ${String(e).split("\n")[0]}`);
+  } finally {
+    await context.close();
+  }
+}
+
 const rec = (kind, key, over = {}) => ({ v: 1, kind, return_key: key, route: "portfolio", sheet: "probe-sheet", control: "hop-signin", fields: { note: "bad" }, scroll: 0, at: Date.now(), ...over });
 
 async function badRun(h, w, name, record, landAt, shots, lines) {
@@ -280,6 +415,9 @@ async function main() {
     return i >= 0 ? args[i + 1] : undefined;
   };
   const plant = opt("--plant");
+  const only = opt("--only");
+  if (only && !["hop", "fail", "bad"].includes(only)) throw new Error(`no such part ${only}`);
+  const part = (name) => !only || only === name;
   if (plant && plant !== "wrong-key") throw new Error(`no such plant ${plant}`);
   const shots = opt("--shots") ?? path.join(tmpdir(), `app-return-hop-${Date.now()}`);
   mkdirSync(shots, { recursive: true });
@@ -297,8 +435,9 @@ async function main() {
   let pre;
   const version = h.browser.version();
   try {
-    for (const w of WIDTHS) for (const k of KINDS) for (const mode of MODES) await hopRun(h, w, k, mode, shots, lines);
-    for (const w of WIDTHS) {
+    if (part("hop")) for (const w of WIDTHS) for (const k of KINDS) for (const mode of MODES) await hopRun(h, w, k, mode, shots, lines);
+    if (part("fail")) for (const w of WIDTHS) for (const t of TARGETS) for (const f of FAIL_MODES) await failRun(h, w, t, f, shots, lines);
+    if (part("bad")) for (const w of WIDTHS) {
       await badRun(h, w, "none", undefined, "/return/signin", shots, lines);
       await badRun(h, w, "stale", rec("signin.open", "signin", { at: Date.now() - TTL_MS - 1_000 }), "/return/signin", shots, lines);
       await badRun(h, w, "another kind", rec("signin.open", "signin"), "/return/backup", shots, lines);
@@ -316,7 +455,7 @@ async function main() {
   for (const l of lines) console.log(l);
   console.log(`info: a no-cors fetch of ${SIGN}/index.html from APP_HOST ${pre}`);
   const ok = lines.length > 0 && lines.every((l) => l.startsWith("ok "));
-  console.log(`app-return-hop: ${ok ? "PASS" : "FAIL"} (${lines.filter((l) => l.startsWith("ok ")).length}/${lines.length} ok${plant ? `, plant ${plant}` : ""}, Chromium ${version}, shots ${shots})`);
+  console.log(`app-return-hop: ${ok ? "PASS" : "FAIL"} (${lines.filter((l) => l.startsWith("ok ")).length}/${lines.length} ok${plant ? `, plant ${plant}` : ""}${only ? `, only ${only}` : ""}, Chromium ${version}, shots ${shots})`);
   process.exit(ok ? 0 : 1);
 }
 
