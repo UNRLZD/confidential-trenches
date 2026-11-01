@@ -17,6 +17,7 @@
 import { OPEN_KINDS } from "./messages.ts";
 import type { ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
 import {
+  SIGNPAGE_MAX_REQUEST_BYTES,
   SIGNPAGE_PARAM_SCHEMAS,
   SIGNPAGE_RESULT_SCHEMAS,
   signpageAnswerErrorSchema,
@@ -27,6 +28,8 @@ import {
   signpageReadySchema,
   signpageStateEventSchema,
 } from "./schema.ts";
+
+export { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_MAX_DEPTH, SIGNPAGE_MAX_REQUEST_BYTES } from "./schema.ts";
 
 /** The `api` of messages.ts, the only one this client speaks. */
 export const SIGNPAGE_CLIENT_API = 1;
@@ -127,11 +130,18 @@ export interface SignpageClient {
   destroy(): void;
 }
 
-/** The request envelope of a kind, built from exactly its allowed params. Throws on an unknown kind or a bad param. */
+/**
+ * The request envelope of a kind, built from exactly its allowed params. Throws on an unknown kind, a bad param or a
+ * request over SIGNPAGE_MAX_REQUEST_BYTES.
+ */
 export function signpageBuildRequest<K extends SignpageKind>(kind: K, params: SignpageParams[K], id: string): SignpageRequest<K> {
   if (!signpageIsKind(kind)) throw new TypeError(`signpage: no such kind ${String(kind)}`);
   if (!SIGNPAGE_PARAM_SCHEMAS[kind](params)) throw new TypeError(`signpage: params are not exactly ${kind}'s`);
-  return { ...params, v: 1, id, type: kind } as SignpageRequest<K>;
+  const msg = { ...params, v: 1, id, type: kind } as SignpageRequest<K>;
+  if (new TextEncoder().encode(JSON.stringify(msg)).length > SIGNPAGE_MAX_REQUEST_BYTES) {
+    throw new TypeError(`signpage: ${kind} is over ${SIGNPAGE_MAX_REQUEST_BYTES} bytes`);
+  }
+  return msg;
 }
 
 /** SIGN_HOST's origin from its release URL; throws on anything but https with no query, fragment or credentials. */

@@ -387,7 +387,7 @@ test("open kinds take only their return key and their own fields (APU-02)", () =
 });
 
 // ------------------------------------------------------------------------------------------------ refusals
-test("answers dropped with no state change: wrong origin, wrong source, wrong id, bad keys, bad arrays, oversized, not plain", async () => {
+test("answers dropped with no state change: wrong origin, wrong source, wrong id, bad keys, bad arrays, over 4 MiB, not plain", async () => {
   const { h, c } = await readyClient();
   const { id, p, settled } = await open(h, c, "buy");
   const good = answer(id, FIXTURES.buy.result);
@@ -416,7 +416,7 @@ test("answers dropped with no state change: wrong origin, wrong source, wrong id
     ["a hole in an array", txsWith((t) => (t.length = 2)), ORIGIN, win, "shape"],
     ["a sparse array of length 2^32-1", answer(id, { stage: "sent", txs: sparse }), ORIGIN, win, "shape"],
     ["an array over the bound", answer(id, { stage: "sent", txs: Array.from({ length: S.SIGNPAGE_MAX_ARRAY + 1 }, () => ({ chain: "solana", hash: "h" })) }), ORIGIN, win, "shape"],
-    ["a body over 64 KiB", answer(id, { stage: "sent", txs: Array.from({ length: 200 }, () => ({ chain: "solana", hash: "x".repeat(400) })) }), ORIGIN, win, "shape"],
+    ["a body over 4 MiB", answer(id, { stage: "sent", txs: Array.from({ length: 10_000 }, () => ({ chain: "solana", hash: "x".repeat(420) })) }), ORIGIN, win, "shape"],
     ["not a plain object", Object.assign(new (class X {})(), good), ORIGIN, win, "shape"],
     ["a string", JSON.stringify(good), ORIGIN, win, "shape"],
     ["a v other than 1", { ...good, v: 2 }, ORIGIN, win, "shape"],
@@ -438,7 +438,7 @@ test("answers dropped with no state change: wrong origin, wrong source, wrong id
   assert.equal((await p).ok, true);
 });
 
-test("the plain-message walk: forbidden keys at any depth, the depth bound, the 64 KiB bound", () => {
+test("the plain-message walk: forbidden keys at any depth, the depth bound, the 4 MiB bound", () => {
   const nest = (n) => {
     let x = { a: 1 };
     for (let i = 0; i < n; i++) x = { a: x };
@@ -450,10 +450,11 @@ test("the plain-message walk: forbidden keys at any depth, the depth bound, the 
   }
   assert.equal(S.signpageIsPlainMessage(nest(S.SIGNPAGE_MAX_DEPTH - 1)), true, "at the depth bound");
   assert.equal(S.signpageIsPlainMessage(nest(S.SIGNPAGE_MAX_DEPTH)), false, "past the depth bound");
-  assert.equal(S.SIGNPAGE_MAX_MESSAGE_BYTES, 65_536);
-  assert.equal(S.signpageIsPlainMessage({ s: "x".repeat(65_000) }), true);
-  assert.equal(S.signpageIsPlainMessage({ s: "x".repeat(65_537) }), false);
-  assert.equal(S.signpageIsPlainMessage({ s: "é".repeat(33_000) }), false, "counted in UTF-8 bytes");
+  const CAP = S.SIGNPAGE_MAX_ANSWER_BYTES;
+  assert.equal(CAP, 4_194_304);
+  assert.equal(S.signpageIsPlainMessage({ s: "x".repeat(CAP - 8) }), true, "exactly 4 MiB of JSON");
+  assert.equal(S.signpageIsPlainMessage({ s: "x".repeat(CAP - 7) }), false, "4 MiB + 1");
+  assert.equal(S.signpageIsPlainMessage({ s: "é".repeat(CAP / 2) }), false, "counted in UTF-8 bytes");
 });
 
 test("a page refusal is passed on as its code", async () => {
@@ -489,6 +490,57 @@ test("state and progress events before READY are dropped", async () => {
   assert.equal(c.snapshot().state, null);
   assert.deepEqual(seen, []);
   assert.equal(c.dropped().shape, 2);
+});
+
+// ------------------------------------------------------------------------------------------------ the two caps
+/** A state with `n` orders, each about 350 bytes of JSON. */
+const bigState = (n) => ({
+  ...STATE,
+  orders: Array.from({ length: n }, (_, i) => ({ ...STATE.orders[0], order_id: `o${i}`, token: `tok-${i}-${"t".repeat(120)}` })),
+});
+const bytes = (v) => new TextEncoder().encode(JSON.stringify(v)).length;
+
+test("the caps are named: requests 64 KiB (the signing page's), answers 4 MiB, arrays 10,000; all on the kit's entry", async () => {
+  assert.equal(C.SIGNPAGE_MAX_REQUEST_BYTES, 65_536);
+  assert.equal(C.SIGNPAGE_MAX_ANSWER_BYTES, 4_194_304);
+  assert.equal(C.SIGNPAGE_MAX_ARRAY, 10_000);
+  const kit = await import("../src/index.ts");
+  for (const k of ["SIGNPAGE_MAX_REQUEST_BYTES", "SIGNPAGE_MAX_ANSWER_BYTES", "SIGNPAGE_MAX_ARRAY"]) assert.ok(k in kit, k);
+});
+
+test("a 3 MiB state with 9,000 orders is read, as the handshake's answer and as a state event", async () => {
+  const s = bigState(9_000);
+  const n = bytes(answer("00000000-0000-4000-8000-000000000000", s));
+  assert.ok(n > 3 * 1_048_576 && n < 4 * 1_048_576, `${n} bytes`);
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  await handshake(h, s);
+  assert.equal(c.snapshot().status, "ready");
+  assert.equal(c.snapshot().state.orders.length, 9_000);
+  h.post({ v: 1, type: "state", state: { ...s, vault_balance: "9" } });
+  assert.equal(c.snapshot().state.vault_balance, "9");
+});
+
+test("a state of 10,000 orders is read; 10,001 orders, or a state over 4 MiB, is dropped", async () => {
+  const { h, c } = await readyClient();
+  h.post({ v: 1, type: "state", state: bigState(10_000) });
+  assert.equal(c.snapshot().state.orders.length, 10_000);
+  const before = c.snapshot();
+  h.post({ v: 1, type: "state", state: bigState(10_001) });
+  const over = { ...bigState(9_000), held: Array.from({ length: 3_000 }, (_, i) => ({ id: `h${i}`, asset: "a".repeat(400), amount: "1" })) };
+  assert.ok(bytes({ v: 1, type: "state", state: over }) > 4_194_304);
+  h.post({ v: 1, type: "state", state: over });
+  assert.equal(c.snapshot(), before);
+  assert.equal(c.dropped().shape, 2);
+});
+
+test("the request cap stays 64 KiB: a bigger request cannot be built", () => {
+  const ids = (n) => Array.from({ length: n }, (_, i) => `order-${i}-${"x".repeat(30)}`);
+  assert.ok(bytes(C.signpageBuildRequest("orders.cancel", { order_ids: ids(1_000) }, "id")) <= 65_536);
+  assert.throws(() => C.signpageBuildRequest("orders.cancel", { order_ids: ids(2_000) }, "id"), /over 65536 bytes/);
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  assert.throws(() => c.request("orders.cancel", { order_ids: ids(2_000) }), TypeError);
 });
 
 // ------------------------------------------------------------------------------------------------ timeouts

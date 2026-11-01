@@ -11,12 +11,20 @@ import type { SignpageKind } from "./messages.ts";
 /** A check of one value. */
 export type SignpageSchema = (v: unknown) => boolean;
 
-/** The largest message the client reads: its JSON, in UTF-8 bytes (the size cap of app.md §2.1 item 1, app.md:116-117). */
-export const SIGNPAGE_MAX_MESSAGE_BYTES = 65_536;
+/**
+ * The largest request, app to page: its JSON, in UTF-8 bytes (the size cap of app.md §2.1 item 1, app.md:116-117).
+ * Requests are small, and the app is the side that could be swapped, so the signing page refuses a bigger one.
+ */
+export const SIGNPAGE_MAX_REQUEST_BYTES = 65_536;
+/**
+ * The largest answer or event, page to app (origin and source already checked): a precaution far above real use, never
+ * a user limit (a `state` with 9,000 orders is about 3 MiB).
+ */
+export const SIGNPAGE_MAX_ANSWER_BYTES = 4_194_304;
 /** The deepest nesting the client reads. */
 export const SIGNPAGE_MAX_DEPTH = 12;
 /** The longest array the client reads. */
-export const SIGNPAGE_MAX_ARRAY = 2_000;
+export const SIGNPAGE_MAX_ARRAY = 10_000;
 const MAX_STRING = 512;
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const INDEX = /^(0|[1-9]\d*)$/;
@@ -47,7 +55,7 @@ const isPlainArray = (v: unknown): v is unknown[] => {
 
 /**
  * True when `v` is made of plain objects, plain dense arrays, strings, finite numbers, booleans and null only, with no
- * forbidden key, at most SIGNPAGE_MAX_DEPTH deep, and its JSON at most SIGNPAGE_MAX_MESSAGE_BYTES long. The walk counts
+ * forbidden key, at most SIGNPAGE_MAX_DEPTH deep, and its JSON at most SIGNPAGE_MAX_ANSWER_BYTES long. The walk counts
  * the characters of every string and key as it goes and stops past the cap, before any JSON is made.
  */
 export function signpageIsPlainMessage(v: unknown): boolean {
@@ -55,20 +63,20 @@ export function signpageIsPlainMessage(v: unknown): boolean {
   const walk = (x: unknown, depth: number): boolean => {
     if (depth > SIGNPAGE_MAX_DEPTH) return false;
     if (x === null || typeof x === "boolean") return true;
-    if (typeof x === "string") return (chars += x.length) <= SIGNPAGE_MAX_MESSAGE_BYTES;
+    if (typeof x === "string") return (chars += x.length) <= SIGNPAGE_MAX_ANSWER_BYTES;
     if (typeof x === "number") return Number.isFinite(x);
     if (Array.isArray(x)) return isPlainArray(x) && x.every((e) => walk(e, depth + 1));
     if (!isPlainObject(x)) return false;
     for (const k of Reflect.ownKeys(x)) {
       if (typeof k !== "string" || FORBIDDEN_KEYS.has(k)) return false;
-      if ((chars += k.length) > SIGNPAGE_MAX_MESSAGE_BYTES) return false;
+      if ((chars += k.length) > SIGNPAGE_MAX_ANSWER_BYTES) return false;
       if (!walk(x[k], depth + 1)) return false;
     }
     return true;
   };
   if (!walk(v, 0)) return false;
   try {
-    return new TextEncoder().encode(JSON.stringify(v)).length <= SIGNPAGE_MAX_MESSAGE_BYTES;
+    return new TextEncoder().encode(JSON.stringify(v)).length <= SIGNPAGE_MAX_ANSWER_BYTES;
   } catch {
     return false;
   }
