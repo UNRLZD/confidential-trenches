@@ -4,17 +4,21 @@
 //     one whose output never names the blocked fetch;
 //   - `cargo` and `rustc` are stubs put first on PATH: the cargo stub copies a planted wasm into the CARGO_TARGET_DIR it
 //     is given (STUB_WASM_A for target dir `a`, STUB_WASM_B for `b`), so the two builds can be made equal or different;
+//   - `cargo +1.96.0 near --version` answers the pinned CARGO_NEAR unless a test plants another (STUB_NEAR_VERSION);
+//     STUB_SLEEP makes each build wait that many seconds, so a test can interrupt one;
+//   - a test that needs an RPC's status answers swaps the blocking fetch for one that answers `status` alone with the
+//     chain ids it is given and blocks every other method;
 //   - the key is the published all-zero ed25519 seed (32 zero bytes; its public key 3b6a27bc…da29 is checked below),
 //     written at run time to a temp dir outside both checkouts and removed afterwards. It never funds anything.
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { deployProblems, loadKey, MAX_FUNCTION_BODY, repoRoots } from "./deploy.mjs";
+import { CARGO_NEAR, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, registrationProblems, repoRoots, rpcProblems } from "./deploy.mjs";
 import { b58encode } from "./near-tx.mjs";
 import { TESTNET_USDC } from "../../../scripts/live-checks/vault-skeleton.mjs";
 
@@ -43,8 +47,8 @@ function keyFile(dir, account = PARENT, pub) {
   return { file: f, pub: real };
 }
 
-// A wasm with one exported `config` whose body is `body` bytes, and `strings` in a custom section.
-function wasm({ body = 4, strings = [TESTNET_USDC] } = {}) {
+// A wasm whose function exports are `exports` (all one function, `body` bytes), with `strings` in a custom section.
+function wasm({ body = 4, strings = [TESTNET_USDC], exports = ["config"] } = {}) {
   const leb = (x) => {
     const o = [];
     do {
@@ -61,7 +65,7 @@ function wasm({ body = 4, strings = [TESTNET_USDC] } = {}) {
     0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [1, 0]),
-    ...section(7, [1, 6, ...Buffer.from("config"), 0, 0]),
+    ...section(7, [exports.length, ...exports.flatMap((e) => [e.length, ...Buffer.from(e), 0, 0])]),
     ...section(10, [1, ...leb(fn.length), ...fn]),
     ...section(0, data),
   ]);
@@ -77,8 +81,9 @@ function stubs(dir, a, b = a) {
   writeFileSync(fb, b);
   writeFileSync(
     path.join(bin, "cargo"),
-    '#!/bin/sh\ncase " $* " in *" --version "*) echo "cargo-near-near 0.0.0 (stub)"; exit 0;; esac\n' +
+    `#!/bin/sh\ncase " $* " in *" --version "*) echo "\${STUB_NEAR_VERSION:-${CARGO_NEAR}}"; exit 0;; esac\n` +
       'mkdir -p "$CARGO_TARGET_DIR/near"\n' +
+      'if [ -n "$STUB_SLEEP" ]; then echo $$ > "$CARGO_TARGET_DIR/../build.pid"; sleep "$STUB_SLEEP"; fi\n' +
       'if [ "$(basename "$CARGO_TARGET_DIR")" = a ]; then cp "$STUB_WASM_A" "$CARGO_TARGET_DIR/near/blindfill_vault.wasm"; else cp "$STUB_WASM_B" "$CARGO_TARGET_DIR/near/blindfill_vault.wasm"; fi\n',
   );
   writeFileSync(path.join(bin, "rustc"), '#!/bin/sh\necho "rustc 1.96.0 (stub)"\n');
@@ -87,12 +92,23 @@ function stubs(dir, a, b = a) {
   return { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, STUB_WASM_A: fa, STUB_WASM_B: fb };
 }
 
-// deploy.mjs with `args`, fetch blocked
-function run(dir, args, env = process.env) {
+// deploy.mjs with `args`, fetch blocked; with `chains` ({ url: chain_id }), `status` alone answers, with that chain id,
+// and every method asked is appended to <dir>/methods.log
+function run(dir, args, env = process.env, chains = null) {
   const block = path.join(dir, "no-network.mjs");
-  writeFileSync(block, 'globalThis.fetch = async (url) => { throw new Error(`network blocked by the test: ${url}`); };\n');
+  const log = path.join(dir, "methods.log");
+  writeFileSync(
+    block,
+    chains
+      ? `import { appendFileSync } from "node:fs";\nconst chains = ${JSON.stringify(chains)};\n` +
+          `globalThis.fetch = async (url, init) => { const { method } = JSON.parse(init.body); appendFileSync(${JSON.stringify(log)}, method + " " + url + "\\n");\n` +
+          `  if (method === "status" && url in chains) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "deploy", result: { chain_id: chains[url] } }) };\n` +
+          "  throw new Error(`network blocked by the test: ${method} ${url}`); };\n"
+      : 'globalThis.fetch = async (url) => { throw new Error(`network blocked by the test: ${url}`); };\n',
+  );
   return spawnSync(process.execPath, ["--import", pathToFileURL(block).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000, env });
 }
+const methods = (dir) => (existsSync(path.join(dir, "methods.log")) ? readFileSync(path.join(dir, "methods.log"), "utf8").trim().split("\n") : []);
 
 const testnet = (dir, key, buildDir) => ["--network", "testnet", "--parent", PARENT, "--key-file", key, "--build-dir", buildDir, "--out", path.join(dir, "out.json")];
 const neverSent = (r) => assert.doesNotMatch(r.stdout + r.stderr, /network blocked/, "the run reached the network");
@@ -205,3 +221,130 @@ test("the wasm refusal is fail-closed: any wasmProblems field but functionExport
   assert.match(deployProblems(wasm(), "sandbox", () => ({ ...ok, futureRule: "not a list" }))[0], /wasmProblems\.futureRule is not a list/);
   for (const field of ["banned", "promises", "exports"]) assert.equal(deployProblems(wasm(), "sandbox", () => ({ ...ok, [field]: ["x"] })).length, 1, field);
 });
+
+test("a wasm exporting withdraw without on_payout is refused before any send, naming withdrawWithoutPayout", () => {
+  const dir = fresh();
+  const k = keyFile(dir);
+  const buildDir = path.join(dir, "build");
+  const r = run(dir, testnet(dir, k.file, buildDir), stubs(dir, wasm({ exports: ["config", "withdraw"] })));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: withdrawWithoutPayout \(vault\.md 2\.8, 2\.5\.7\): withdraw/);
+  neverSent(r);
+  targetsGone(buildDir);
+  assert.deepEqual(deployProblems(wasm({ exports: ["config", "withdraw", "on_payout"] }), "testnet"), []);
+});
+
+// ---- the pinned tools ----
+
+test("a cargo-near that is not the pinned one is refused before any build", () => {
+  const dir = fresh();
+  const k = keyFile(dir);
+  const buildDir = path.join(dir, "build");
+  const r = run(dir, testnet(dir, k.file, buildDir), { ...stubs(dir, wasm()), STUB_NEAR_VERSION: "cargo-near-near 0.21.0" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`cargo near is "cargo-near-near 0\\.21\\.0", want "${CARGO_NEAR.replace(/\./g, "\\.")}": nothing was built`));
+  neverSent(r);
+  assert.equal(existsSync(buildDir), false, "a build ran");
+  // --build-only checks it too
+  const b = run(dir, ["--build-only", "--build-dir", path.join(dir, "build2")], { ...stubs(fresh(), wasm()), STUB_NEAR_VERSION: `${CARGO_NEAR}-dirty` });
+  assert.equal(b.status, 1, b.stdout + b.stderr);
+  assert.match(b.stderr, /cargo near is .*-dirty", want/);
+  assert.equal(existsSync(path.join(dir, "build2")), false, "a build ran");
+});
+
+// ---- the RPCs and their chain ----
+
+test("--network sandbox takes a loopback --rpc only: a mainnet URL is refused before any read", () => {
+  const dir = fresh();
+  const k = keyFile(dir, "test.near");
+  const w = path.join(dir, "v.wasm");
+  writeFileSync(w, wasm());
+  for (const rpc of ["https://rpc.mainnet.near.org", "http://127.0.0.1.nip.io:3030", "http://localhost.example.com:3030"]) {
+    const r = run(dir, ["--network", "sandbox", "--rpc", rpc, "--parent", "test.near", "--key-file", k.file, "--wasm", w, "--out", path.join(dir, "o.json")], process.env, {});
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /--network sandbox takes a loopback --rpc only/, rpc);
+    neverSent(r);
+  }
+  assert.deepEqual(methods(dir), [], "an RPC was asked");
+  for (const ok of ["http://localhost:3030", "http://127.0.0.1:3030", "http://127.4.5.6:1", "http://[::1]:3030"]) assert.deepEqual(rpcProblems("sandbox", ok), [], ok);
+  for (const bad of ["ftp://localhost:3030", "not a url", "http://[::2]:3030"]) assert.equal(rpcProblems("sandbox", bad).length, 1, bad);
+  assert.deepEqual(rpcProblems("testnet", "https://test.rpc.fastnear.com"), []);
+});
+
+test("an RPC that answers the wrong chain_id is refused before any other read: either testnet RPC, or a sandbox that is not one", () => {
+  const [a, b] = ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"];
+  for (const [chains, bad] of [[{ [a]: "mainnet", [b]: "testnet" }, a], [{ [a]: "testnet", [b]: "mainnet" }, b]]) {
+    const dir = fresh();
+    const k = keyFile(dir);
+    const buildDir = path.join(dir, "build");
+    const r = run(dir, testnet(dir, k.file, buildDir), stubs(dir, wasm()), chains);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(r.stderr.includes(`refused before any send: ${bad}: chain_id "mainnet", want "testnet"`), r.stderr);
+    neverSent(r);
+    assert.deepEqual(methods(dir), bad === a ? [`status ${a}`] : [`status ${a}`, `status ${b}`]);
+    targetsGone(buildDir);
+  }
+  // a loopback RPC that is a tunnel to testnet is not a sandbox
+  const dir = fresh();
+  const k = keyFile(dir, "test.near");
+  const w = path.join(dir, "v.wasm");
+  writeFileSync(w, wasm());
+  const rpc = "http://127.0.0.1:3030";
+  const r = run(dir, ["--network", "sandbox", "--rpc", rpc, "--parent", "test.near", "--key-file", k.file, "--wasm", w, "--out", path.join(dir, "o.json")], process.env, { [rpc]: "testnet" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: http:\/\/127\.0\.0\.1:3030: chain_id "testnet", want near-sandbox's test-chain-<id>/);
+  assert.deepEqual(methods(dir), [`status ${rpc}`]);
+  assert.deepEqual(chainProblems("sandbox", "test-chain-Ab3x9"), []);
+  assert.equal(chainProblems("testnet", "test-chain-Ab3x9").length, 1);
+});
+
+// ---- the registration ----
+
+test("storage_deposit is signed only for a fixed bound (min = max) of at most 0.01 N", () => {
+  assert.equal(MAX_REGISTRATION, 10n ** 22n);
+  // Circle's testnet USDC, read 2026-11-01
+  assert.deepEqual(registrationProblems({ min: "1250000000000000000000", max: "1250000000000000000000" }), []);
+  assert.deepEqual(registrationProblems({ min: String(MAX_REGISTRATION), max: String(MAX_REGISTRATION) }), []);
+  assert.match(registrationProblems({ min: "1250000000000000000000", max: "2500000000000000000000" }).join(), /min 1250000000000000000000 is not max 2500000000000000000000/);
+  assert.match(registrationProblems({ min: String(MAX_REGISTRATION + 1n), max: String(MAX_REGISTRATION + 1n) }).join(), /is over MAX_REGISTRATION/);
+  assert.match(registrationProblems({ min: "1250000000000000000000", max: null }).join(), /is not \{min, max\}/);
+  assert.match(registrationProblems(null).join(), /is not \{min, max\}/);
+});
+
+// ---- paths ----
+
+test("a key file inside a root is refused when its path or the root's is spelled in another case", (t) => {
+  const d = fresh();
+  const k = keyFile(d);
+  const flip = (p) => p.replace(/deploy-test-/, "DEPLOY-TEST-");
+  if (!existsSync(flip(k.file))) return t.skip("the file system is case-sensitive");
+  assert.throws(() => loadKey(flip(k.file), PARENT, [TMP]), /--key-file is inside the repository/);
+  assert.throws(() => loadKey(k.file, PARENT, [flip(TMP)]), /--key-file is inside the repository/);
+});
+
+// ---- interrupts ----
+
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  test(`${sig} during a build stops it and removes both target dirs`, async () => {
+    const dir = fresh();
+    const buildDir = path.join(dir, "build");
+    const block = path.join(dir, "no-network.mjs");
+    writeFileSync(block, 'globalThis.fetch = async (url) => { throw new Error(`network blocked by the test: ${url}`); };\n');
+    const c = spawn(process.execPath, ["--import", pathToFileURL(block).href, SCRIPT, "--build-only", "--build-dir", buildDir], { env: { ...stubs(dir, wasm()), STUB_SLEEP: "30" }, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    c.stdout.on("data", (x) => (output += x));
+    c.stderr.on("data", (x) => (output += x));
+    const pidFile = path.join(buildDir, "build.pid");
+    for (let i = 0; i < 200 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(existsSync(path.join(buildDir, "a")), `build a never started: ${output}`);
+    const buildPid = Number(readFileSync(pidFile, "utf8"));
+    const started = Date.now();
+    c.kill(sig);
+    const [code] = await new Promise((r) => c.on("close", (...x) => r(x)));
+    assert.ok(Date.now() - started < 10_000, "the run waited for the build");
+    assert.equal(code, 128 + { SIGINT: 2, SIGTERM: 15 }[sig], output);
+    assert.match(output, new RegExp(`interrupted by ${sig}`));
+    targetsGone(buildDir);
+    assert.throws(() => process.kill(buildPid, 0), /ESRCH/, "the build is still running");
+  });
+}

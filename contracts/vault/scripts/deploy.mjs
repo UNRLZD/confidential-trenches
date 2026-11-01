@@ -3,7 +3,9 @@
 // Builds the vault reproducibly, deploys it with no key and registers it on its token (vault.md 2.8, V1.6).
 //
 // 1. Build: two clean builds with the pinned toolchain and flags, each in its own new target dir, and their sha256
-//    compared. Two different builds stop the run before anything is sent. Both target dirs are removed on every exit;
+//    compared. Before the first build, `rustc +1.96.0` must be 1.96.0 and `cargo +1.96.0 near --version` exactly
+//    CARGO_NEAR. Two different builds stop the run before anything is sent. Both target dirs are removed on every exit,
+//    a SIGINT or SIGTERM included;
 //    the wasm stays at <build-dir>/blindfill_vault.wasm. The flags are fixed here: Rust 1.96.0,
 //    cargo-near's `build non-reproducible-wasm --no-embed-abi --locked`, the release profile of Cargo.toml, and
 //    RUSTFLAGS `-C link-arg=-s --remap-path-prefix=<CARGO_HOME>=/cargo`, so no home path of the machine that built it
@@ -13,14 +15,17 @@
 //    (fail-closed: a field it adds later refuses here too; today none of 2.8's banned imports, promise imports inside
 //    the seven, exports inside 2.5.7's list); every function body at most 196,608 B
 //    (`max_function_body_size`); a testnet deploy must be the testnet build (it names Circle's testnet USDC).
-// 3. The recipe: the parent signs one transaction to vault.<parent> with [CreateAccount, Transfer(code storage +
+// 3. The chain: every RPC the run uses answers `status` with the network's chain id (testnet: "testnet" on both;
+//    sandbox: near-sandbox's test-chain-<id>), else nothing is sent; a sandbox --rpc is a loopback URL only.
+//    The recipe: the parent signs one transaction to vault.<parent> with [CreateAccount, Transfer(code storage +
 //    0.01 N), DeployContract(wasm), FunctionCall(config, 0 deposit)] and no AddKey; the config() call in the same
 //    receipt compiles and runs the wasm, so a wasm that cannot run rolls the whole batch back. The +0.01 N (1,000 B)
 //    pays the 200 B state record the first storage_prepay writes (2.3).
 // 4. Read back: `view_access_key_list` is `keys: []` on every read (testnet: two RPCs at final; sandbox: its RPC at
 //    optimistic and at final), and the code hash is the build's.
 // 5. Registration: the parent calls the token config() names, `storage_deposit(vault, registration_only)` with the
-//    token's own `storage_balance_bounds().min`, then reads `storage_balance_of(vault)` back.
+//    token's own `storage_balance_bounds().min`, signed only when min = max and min <= MAX_REGISTRATION (0.01 N), then
+//    reads `storage_balance_of(vault)` back.
 // It writes the record (--out) and prints the live check to run next.
 //
 // The signer's key comes from --key-file, a path given at run time: the near CLI's keychain file
@@ -36,7 +41,7 @@
 //     [--wasm <file> | --flavor mainnet|testnet] [--vault <id>] [--out <file>]
 import "../../../scripts/net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -53,6 +58,8 @@ export const CONFIG_GAS = 100n * TGAS;
 export const REGISTER_GAS = 30n * TGAS;
 export const MAX_FUNCTION_BODY = 196_608; // max_function_body_size, parameters.snap l.233
 export const TOOLCHAIN = "1.96.0";
+// The cargo-near the vault is built with: `cargo +1.96.0 near --version` must print exactly this.
+export const CARGO_NEAR = "cargo-near-near 0.22.0";
 export const BUILD_ARGS = ["near", "build", "non-reproducible-wasm", "--no-embed-abi", "--locked"];
 export const LIVE_CHECK = "scripts/live-checks/vault-skeleton.mjs";
 
@@ -73,25 +80,69 @@ export function buildCommand({ flavor, cargoHome }) {
 
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 
+// The pinned tools, read before any build: rustc of the pinned toolchain and exactly CARGO_NEAR. Returns their version
+// lines, or throws naming what is not pinned.
+export function toolVersions() {
+  const rustc = execFileSync("rustc", [`+${TOOLCHAIN}`, "--version"], { encoding: "utf8" }).trim();
+  const near = execFileSync("cargo", [`+${TOOLCHAIN}`, "near", "--version"], { encoding: "utf8" }).trim();
+  if (!rustc.startsWith(`rustc ${TOOLCHAIN} `)) throw new Error(`rustc is "${rustc}", want rustc ${TOOLCHAIN}: nothing was built`);
+  if (near !== CARGO_NEAR) throw new Error(`cargo near is "${near}", want "${CARGO_NEAR}": nothing was built`);
+  return { rustc, near };
+}
+
+// One build as a child process in its own process group, so an interrupt can stop the whole build before its target
+// dir is removed. Resolves { status, signal, output } when the child and its group have exited.
+function runBuild(cmd, args, opts, children) {
+  return new Promise((resolve, reject) => {
+    const c = spawn(cmd, args, { ...opts, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    children.add(c);
+    let output = "";
+    const keep = (d) => {
+      output = (output + d).slice(-(1 << 16));
+    };
+    c.stdout.on("data", keep);
+    c.stderr.on("data", keep);
+    c.on("error", (e) => (children.delete(c), reject(e)));
+    c.on("close", (status, signal) => (children.delete(c), resolve({ status, signal, output })));
+  });
+}
+
 // Two clean builds in two new target dirs under buildDir; the wasm and its sha256 when they are equal, else an error
-// naming both.
-export function reproducibleBuild({ flavor, buildDir, log = console.log }) {
+// naming both. The tools are checked first. Both target dirs are removed on every exit, a SIGINT or SIGTERM included:
+// the handler stops the build's process group, the build then fails, and the finally removes the dirs.
+export async function reproducibleBuild({ flavor, buildDir, log = console.log }) {
+  buildDir = path.resolve(buildDir);
   if (existsSync(buildDir) && readdirSync(buildDir).length) throw new Error(`--build-dir ${buildDir} is not empty: each build starts from a new target dir`);
+  const { rustc, near } = toolVersions();
   mkdirSync(buildDir, { recursive: true });
   const cargoHome = process.env.CARGO_HOME ?? path.join(os.homedir(), ".cargo");
   const [cmd, args] = buildCommand({ flavor, cargoHome });
+  // the command as printed and recorded: the remap flag names <CARGO_HOME>, never the home path
+  const shown = `${cmd} ${buildCommand({ flavor, cargoHome: "<CARGO_HOME>" })[1].join(" ")}`;
   const env = { ...process.env };
   delete env.RUSTFLAGS;
   delete env.CARGO_ENCODED_RUSTFLAGS;
   const out = [];
   const file = path.join(buildDir, "blindfill_vault.wasm");
-  // the two target dirs (about 0.5 GB each) go on every exit: a pass, a failed build, two different builds
+  const children = new Set();
+  let interrupted = null;
+  const onSignal = (sig) => {
+    interrupted = sig;
+    for (const c of children) {
+      try {
+        process.kill(-c.pid, "SIGTERM");
+      } catch {}
+    }
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
   try {
     for (const name of ["a", "b"]) {
       const target = path.join(buildDir, name);
-      log(`build ${name}: CARGO_TARGET_DIR=${target} ${cmd} ${args.join(" ")} (in ${CRATE})`);
-      const r = spawnSync(cmd, args, { cwd: CRATE, env: { ...env, CARGO_TARGET_DIR: target }, encoding: "utf8", maxBuffer: 64 << 20 });
-      if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status}): ${(r.stderr || r.stdout || String(r.error)).split("\n").slice(-15).join("\n")}`);
+      log(`build ${name}: CARGO_TARGET_DIR=${target} ${shown} (in ${CRATE})`);
+      const r = await runBuild(cmd, args, { cwd: CRATE, env: { ...env, CARGO_TARGET_DIR: target } }, children);
+      if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}: the build target dirs were removed, nothing was sent`), { signal: interrupted });
+      if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status ?? r.signal}): ${r.output.split("\n").slice(-15).join("\n")}`);
       const wasm = readFileSync(path.join(target, "near", "blindfill_vault.wasm"));
       out.push({ wasm, sha: sha256(wasm) });
       log(`build ${name}: ${wasm.length} B sha256 ${out.at(-1).sha}`);
@@ -99,11 +150,12 @@ export function reproducibleBuild({ flavor, buildDir, log = console.log }) {
     if (out[0].sha !== out[1].sha) throw new Error(`the two clean builds differ: ${out[0].sha} (${out[0].wasm.length} B) and ${out[1].sha} (${out[1].wasm.length} B); nothing was sent`);
     writeFileSync(file, out[0].wasm);
   } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
     for (const name of ["a", "b"]) rmSync(path.join(buildDir, name), { recursive: true, force: true });
   }
-  const rustc = execFileSync("rustc", [`+${TOOLCHAIN}`, "--version"], { encoding: "utf8" }).trim();
-  const near = execFileSync("cargo", [`+${TOOLCHAIN}`, "near", "--version"], { encoding: "utf8" }).trim();
-  return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), build: `${cmd} ${args.join(" ")} (${near}, ${rustc}, ${os.platform()} ${os.arch()})` };
+  if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}`), { signal: interrupted });
+  return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), build: `${shown} (${near}, ${rustc}, ${os.platform()} ${os.arch()})` };
 }
 
 // The size of every function body in a wasm module's code section (section 10).
@@ -165,6 +217,49 @@ export function vaultIdProblems(vault, parent) {
   return [];
 }
 
+// The most a registration may attach: 0.01 N (USDC's bound is 0.00125 N, 2.8).
+export const MAX_REGISTRATION = NEAR / 100n;
+// near-sandbox's chain id: `neard init` without --chain-id names it test-chain-<5 random characters>
+// (near-chain-configs 0.37.4 test_utils.rs l.222-224).
+export const SANDBOX_CHAIN = /^test-chain-[0-9A-Za-z]+$/;
+
+// What is wrong with the RPC a run on `network` would use: a sandbox run talks to this machine only.
+export function rpcProblems(network, url) {
+  if (network !== "sandbox") return [];
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return [`--rpc ${url} is not a URL`];
+  }
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  const loopback = host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+  if (!/^https?:$/.test(u.protocol) || !loopback) return [`--network sandbox takes a loopback --rpc only (localhost, 127.0.0.0/8 or ::1), not ${url}`];
+  return [];
+}
+
+// What is wrong with the chain id an RPC answers for `network`.
+export function chainProblems(network, chainId) {
+  if (network === "testnet") return chainId === "testnet" ? [] : [`chain_id ${JSON.stringify(chainId)}, want "testnet"`];
+  if (network === "sandbox") return typeof chainId === "string" && SANDBOX_CHAIN.test(chainId) ? [] : [`chain_id ${JSON.stringify(chainId)}, want near-sandbox's test-chain-<id>`];
+  return [`no network ${network}`];
+}
+
+// What stops signing storage_deposit with the token's bounds: a fixed price (min = max), at most MAX_REGISTRATION.
+export function registrationProblems(bounds) {
+  let min, max;
+  try {
+    min = BigInt(bounds.min);
+    max = BigInt(bounds.max);
+  } catch {
+    return [`storage_balance_bounds ${JSON.stringify(bounds)} is not {min, max}`];
+  }
+  const p = [];
+  if (min !== max) p.push(`storage_balance_bounds min ${min} is not max ${max}`);
+  if (min > MAX_REGISTRATION) p.push(`storage_balance_bounds min ${min} is over MAX_REGISTRATION ${MAX_REGISTRATION}`);
+  return p;
+}
+
 // The repository's roots: this checkout and, for a worktree, the main checkout.
 export function repoRoots() {
   const roots = [path.resolve(HERE, "../../..")];
@@ -172,12 +267,15 @@ export function repoRoots() {
     const common = execFileSync("git", ["-C", HERE, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim();
     roots.push(path.dirname(common));
   } catch {}
-  return roots.map((r) => realpathSync(r));
+  return roots.map((r) => realpathSync.native(r));
 }
 
 // The signer's key from `file`: { pub (32 B), privateKey (a KeyObject) }. Never returns or prints the secret's text.
+// Paths are compared as the file system spells them (realpathSync.native), so a case-changed path on a
+// case-insensitive disk is still inside its root.
 export function loadKey(file, parent, roots = repoRoots()) {
-  const real = realpathSync(file);
+  const real = realpathSync.native(file);
+  roots = roots.map((r) => realpathSync.native(r));
   for (const r of roots) if (real === r || real.startsWith(r + path.sep)) throw new Error(`--key-file is inside the repository (${r}): a key never lives in the repo`);
   let j;
   try {
@@ -254,10 +352,10 @@ function parseArgs(argv) {
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "t").toLowerCase();
-  const buildDir = o["build-dir"] ?? path.join(os.tmpdir(), `blindfill-vault-build-${stamp}-${process.pid}`);
+  const buildDir = o["build-dir"] ? path.resolve(o["build-dir"]) : path.join(os.tmpdir(), `blindfill-vault-build-${stamp}-${process.pid}`);
 
   if (o["build-only"]) {
-    const b = reproducibleBuild({ flavor: o.flavor ?? "testnet", buildDir });
+    const b = await reproducibleBuild({ flavor: o.flavor ?? "testnet", buildDir });
     console.log(`reproducible: both builds sha256 ${b.sha}, ${b.wasm.length} B; wasm ${b.file}`);
     const p = deployProblems(b.wasm, o.flavor ?? "testnet");
     if (p.length) throw new Error(`the build would be refused: ${p.join("; ")}`);
@@ -271,6 +369,8 @@ async function main() {
   const parent = o.parent;
   const rpcs = network === "testnet" ? TESTNET_RPCS : [o.rpc];
   if (!rpcs[0]) throw new Error("--network sandbox needs --rpc <url>");
+  const rp = rpcProblems(network, rpcs[0]);
+  if (rp.length) throw new Error(rp.join("; "));
   if (network === "testnet" && (o.rpc || o.wasm)) throw new Error("--network testnet takes no --rpc or --wasm: it reads two public RPCs and builds the wasm itself, twice");
   if (network === "testnet" && o.flavor && o.flavor !== "testnet") throw new Error("--network testnet deploys the testnet build only");
   const url = rpcs[0];
@@ -291,7 +391,7 @@ async function main() {
     build = `given: ${o.wasm}`;
     shas = [sha256(wasm)];
   } else {
-    const b = reproducibleBuild({ flavor: network === "testnet" ? "testnet" : (o.flavor ?? "mainnet"), buildDir });
+    const b = await reproducibleBuild({ flavor: network === "testnet" ? "testnet" : (o.flavor ?? "mainnet"), buildDir });
     wasm = b.wasm;
     build = b.build;
     shas = b.shas;
@@ -303,7 +403,13 @@ async function main() {
   const bodies = functionBodies(wasm);
   console.log(`wasm ${wasm.length} B, sha256 ${sha}, ${bodies.length} functions, largest body ${Math.max(...bodies)} B (limit ${MAX_FUNCTION_BODY})`);
 
-  // 3. the parent's nonce; the vault must not exist yet
+  // 3. every RPC this run uses answers the network's chain id; then the parent's nonce; the vault must not exist yet
+  for (const u of rpcs) {
+    const status = await rpc(u, "status", []);
+    const cp = chainProblems(network, status?.chain_id);
+    if (cp.length) throw new Error(`refused before any send: ${u}: ${cp.join("; ")}`);
+    console.log(`chain on ${u}: ${status.chain_id}`);
+  }
   const ak = await rpc(url, "query", { request_type: "view_access_key", account_id: parent, public_key: pubText, finality: "optimistic" });
   if (ak.permission !== "FullAccess") throw new Error(`${parent}'s key ${pubText} is not a full-access key`);
   try {
@@ -345,6 +451,8 @@ async function main() {
   // 5. registration on the token config() names, with the token's own bound
   const token = config.asset;
   const bounds = await view(url, token, "storage_balance_bounds", {});
+  const regp = registrationProblems(bounds);
+  if (regp.length) throw new Error(`deployed ${vault} (tx ${d.hash}), registration refused before signing: ${token}: ${regp.join("; ")}`);
   const min = BigInt(bounds.min);
   const ak2 = await rpc(url, "query", { request_type: "view_access_key", account_id: parent, public_key: pubText, finality: "optimistic" });
   block = await rpc(url, "block", { finality: "final" });
@@ -388,6 +496,6 @@ async function main() {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((e) => {
     console.error(`deploy: ERROR: ${String(e.message)}`);
-    process.exit(1);
+    process.exit(e.signal ? 128 + os.constants.signals[e.signal] : 1);
   });
 }
