@@ -97,3 +97,42 @@ test("a 429 on a state read is waited out, never read as an answer (the first ba
   assert.ok(limited.size >= 6);
   assert.equal(r.ok, true, r.lines.join("\n"));
 });
+
+// Card near-rpc-operators: near.org's testnet archive is FastNEAR's (scripts/ci/near-rpc-operators.mjs), so a tx read
+// ok there and on FastNEAR's own archive, while dRPC lacks it, is one operator's read: BAD. The recorded answers of
+// near.org's host for the one tx the run asked it about stand in for both FastNEAR hosts.
+const ORG = "https://archival-rpc.testnet.near.org";
+const HASH = "64jQRWmUEuk8753kgsLRRa1XE6wM72e6uK4ZQTFGLcmE";
+// dRPC lacks HASH; earliest: what dRPC's status names as its earliest block (none: its status has no recorded answer)
+function drpcLacks(earliest) {
+  const answers = load("vault-testnet-usdc.answers.json");
+  const good = replay(answers);
+  const orgBlock = (params) => answers.some((a) => a.url === ORG && a.method === "block" && JSON.stringify(a.params) === JSON.stringify(params));
+  const height = answers.find((a) => a.url === ORG && a.method === "block").json.result.header.height;
+  const answer = (json) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", id: 1, ...json }) });
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const drpc = url.includes("drpc.org");
+    if (drpc && method === "status" && earliest) return answer({ result: { sync_info: { earliest_block_height: earliest(height) } } });
+    const ours = (method === "EXPERIMENTAL_tx_status" && params.tx_hash === HASH) || (method === "block" && orgBlock(params));
+    if (ours && drpc) return answer({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } });
+    return good(ours ? ORG : url, init);
+  };
+  return { fetchFn, height };
+}
+const ONE_OP_LINE = `tx ${HASH} .* ok on https://archival-rpc\\.testnet\\.fastnear\\.com, missing on https://near-testnet\\.drpc\\.org, ok on https://archival-rpc\\.testnet\\.near\\.org`;
+
+test("regression: a tx read ok on FastNEAR's and near.org's hosts while dRPC lacks a tx it keeps is one operator: FAIL", async () => {
+  for (const earliest of [null, (h) => h, (h) => h - 1000]) {
+    const r = await check({ deployment, fetchFn: drpcLacks(earliest).fetchFn, sleep });
+    assert.equal(r.ok, false);
+    assert.match(r.lines.join("\n"), new RegExp(`^BAD ${ONE_OP_LINE}$`, "m"));
+  }
+});
+
+test("a tx older than dRPC keeps passes on one operator, said so: PASS", async () => {
+  const { fetchFn, height } = drpcLacks((h) => h + 1);
+  const r = await check({ deployment, fetchFn, sleep });
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.match(r.lines.join("\n"), new RegExp(`^ok  ${ONE_OP_LINE}; one operator \\(fastnear\\) read it ok, .*: its block ${height} is older than https://near-testnet\\.drpc\\.org keeps blocks from ${height + 1}`, "m"));
+});

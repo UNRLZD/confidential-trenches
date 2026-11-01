@@ -17,7 +17,7 @@ import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS as GATE_RPCS, readTx } from "../ci/money-gate.mjs";
+import { RPCS as GATE_RPCS, okOperators, oneOperator, readTx } from "../ci/money-gate.mjs";
 
 const KEY = "vault-testnet-usdc";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -85,14 +85,21 @@ export async function check({ deployment, account = deployment.account_id, fetch
   const txs = Array.isArray(deployment.txs) ? deployment.txs : [];
   say(txs.length > 0, `the record lists ${txs.length} tx(s)`);
   for (const t of txs) {
-    // in order until two read ok: the third provider (rate-limited) is asked only when one of the first two cannot
+    // in order until two operators read ok: the third host (rate-limited, FastNEAR's again) is asked only when one of
+    // the first two cannot; two hosts of one operator are one read. A tx older than dRPC keeps passes on one operator
+    // by the money gate's own rule (oneOperator), said so.
+    const tx = { chain: "near-testnet", hash: t.hash, signer: t.signer };
     const reads = [];
     for (const url of rpcs) {
-      if (reads.filter((x) => x.r === "ok").length >= 2) break;
-      reads.push({ url, r: await readTx(fetchFn, url, { chain: "near-testnet", hash: t.hash, signer: t.signer }, undefined, sleep) });
+      if (okOperators("near-testnet", reads).size >= 2) break;
+      const out = {};
+      const r = await readTx(fetchFn, url, tx, undefined, sleep, true, out);
+      reads.push({ url, r, height: out.height });
     }
-    const good = reads.filter((x) => x.r === "ok").length >= 2 && !reads.some((x) => /^(failed|old)/.test(x.r));
-    say(good, `tx ${t.hash} (${t.what}) ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}`);
+    const decisive = reads.some((x) => /^(failed|old)/.test(x.r));
+    const ops = okOperators("near-testnet", reads).size;
+    const one = !decisive && ops === 1 ? await oneOperator(fetchFn, tx, reads, sleep) : null;
+    say(!decisive && (ops >= 2 || one !== null), `tx ${t.hash} (${t.what}) ${reads.map((x) => `${x.r} on ${x.url}`).join(", ")}${one ? `; ${one}` : ""}`);
   }
   return { ok, lines };
 }
