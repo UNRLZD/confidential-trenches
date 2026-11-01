@@ -1,60 +1,92 @@
-// The order record: what the device sends the order sender for each order it signs in advance (wallet.md §7 item 3).
-// Each exit sells from the fresh wallet W, its output goes to W itself, and min_out is fixed inside the signed bytes,
-// so a server that holds this record can only send the order early, at the user's price or better (wallet.md §2.6).
+// The order record: what the device sends the order sender for each order it signs in advance (wallet.md §7 item 3,
+// in the shape of markets.md H5.1; the CO's call of 2026-11-01 00:35Z). POST /v1/orders carries one group of one or two
+// records. Each exit sells from the fresh wallet W, its output goes to W itself, and min_out is fixed inside the signed
+// bytes, so a server that holds this record can only send the order early, at the user's price or better
+// (wallet.md §2.6).
 
 /** The chains a fresh wallet trades on. */
 export type Chain = "solana" | "base" | "robinhood" | "near";
 
 export const CHAINS = ["solana", "base", "robinhood", "near"] as const satisfies readonly Chain[];
 
-export interface OrderRecord {
+/** What fires an order. */
+export interface OrderTrigger {
+  kind: "stop" | "take_profit" | "limit";
+  /** The pool whose price the order sender reads. */
+  pool: string;
+  /** The venue (the program or contract family) that pool belongs to. */
+  venue: string;
+  /** "lte" fires when the price falls to `price` or below (a stop), "gte" when it rises to it or above. */
+  direction: "lte" | "gte";
+  /** Decimal string: the token's price, in `quote_asset` per whole token, at which the order fires. */
+  price: string;
+  /** The asset `price` is counted in, in the chain's own form. */
+  quote_asset: string;
+}
+
+/**
+ * The nonce every variant of an order and its twin share, so the first to land makes all the others invalid
+ * (wallet.md §2.6). Integers are decimal strings.
+ */
+export interface NonceRefs {
+  /** A durable nonce: the nonce account and the nonce value stored in it. */
+  solana: { nonce_account: string; nonce_value: string };
+  base: { wallet: string; nonce: string };
+  robinhood: { wallet: string; nonce: string };
+  /** The access key's nonce: nonces are per key on NEAR. */
+  near: { account: string; public_key: string; nonce: string };
+}
+
+export type NonceRef = NonceRefs[Chain];
+
+export interface OrderRecord<C extends Chain = Chain> {
   v: 1;
-  /** Random id the device picks for this order. */
+  /** 16 random bytes the device picks, lowercase hex. */
   order_id: string;
-  chain: Chain;
+  /** Links an order to its twin (a stop and its take-profit): groups of 1 or 2. Same form as order_id. */
+  group_id: string;
+  chain: C;
   /** The fresh wallet W that signed it, in the chain's own address form. */
   wallet: string;
   /** The token sold, in the chain's own form (a base58 mint, a lowercase 0x address, a NEAR account id). */
   token: string;
-  /** The pool whose price fires the order. */
-  pool: string;
-  /** "tp" take-profit, "sl" stop. */
-  side: "tp" | "sl";
-  /** Decimal string: the token's price, in the chain's native coin per whole token, at which the order fires. */
-  trigger_price: string;
-  /** Integer string: the amount of the token sold, in its base units. */
+  /** Integer string: the amount of the token sold, in its base units; the same in every variant. */
   amount: string;
-  /** Integer string: the least the sell pays W, in the native coin's base units; the same value is in `bytes`. */
+  /** Integer string: the least the sell pays W, in the native coin's base units; the same in every variant's bytes. */
   min_out: string;
+  trigger: OrderTrigger;
+  nonce_ref: NonceRefs[C];
   /**
-   * The nonce the twins share, so the first to land cancels the other: Solana `<nonce account>/<nonce value>`, EVM
-   * `<wallet>/<nonce>`, NEAR `<account>/<public key>/<nonce>`.
+   * 1 to 3 signed variants of the same sell at rising fees, all on `nonce_ref`, so only one can land: base64 of the
+   * signed transaction (Solana, EVM) or the signed NEP-366 delegate (NEAR), byte for byte as the device signed it.
    */
-  nonce_ref: string;
-  /** The order_id of its twin (the stop of a take-profit, and back). */
-  twin_id: string;
-  /** Base64 of the signed transaction (Solana, EVM) or the signed NEP-366 delegate (NEAR). */
-  bytes: string;
+  variants: [string] | [string, string] | [string, string, string];
+  /** NEAR only: the block height at which the delegates expire (their `max_block_height`). */
+  expires_at?: C extends "near" ? number : never;
 }
 
 /** The record's fields, exactly: a receiver refuses a record with any other field. */
 export const ORDER_RECORD_FIELDS = [
   "v",
   "order_id",
+  "group_id",
   "chain",
   "wallet",
   "token",
-  "pool",
-  "side",
-  "trigger_price",
   "amount",
   "min_out",
+  "trigger",
   "nonce_ref",
-  "twin_id",
-  "bytes",
+  "variants",
+  "expires_at",
 ] as const satisfies readonly (keyof OrderRecord)[];
 
-// Compile-time: the field list and the interface name the same thirteen fields.
+/** At most this many signed variants per order. */
+export const ORDER_VARIANTS_MAX = 3;
+
+// Compile-time: the field list and the interface name the same fields, and variants holds 1 to 3.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
 type _OrderRecordFieldsMatch = Assert<Same<keyof OrderRecord, (typeof ORDER_RECORD_FIELDS)[number]>>;
+type _VariantsOneToThree = Assert<Same<OrderRecord["variants"]["length"], 1 | 2 | typeof ORDER_VARIANTS_MAX>>;
+type _NonceRefPerChain = Assert<Same<keyof NonceRefs, Chain>>;

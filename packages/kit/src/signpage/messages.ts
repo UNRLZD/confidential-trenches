@@ -7,7 +7,7 @@
 // Every amount is a decimal string. A request's `id` is crypto.randomUUID(); a retry reuses it, and the page answers a
 // repeated id with its first answer, never a second run, so a timeout and a retry can never buy twice.
 
-import type { Chain } from "../orders/record";
+import type { Chain, OrderTrigger } from "../orders/record";
 
 /** The fifteen request kinds, app to page. */
 export const SIGNPAGE_KINDS = [
@@ -123,7 +123,7 @@ export interface SignpageResults {
   /** Answered once every slice is signed and sent; the fill comes in `progress`. */
   buy: { stage: TradeStage; txs: TxRef[] };
   hop: { stage: HopStage; txs: TxRef[] };
-  "orders.set": { orders: { order_id: string; side: "tp" | "sl"; state: OrderState }[] };
+  "orders.set": { orders: { order_id: string; group_id: string; kind: OrderTrigger["kind"]; state: OrderState }[] };
   "orders.cancel": { orders: { order_id: string; state: OrderState }[]; txs: TxRef[] };
   return: { stage: ReturnStage; txs: TxRef[] };
   "withdraw.open": OpenResult;
@@ -217,8 +217,8 @@ export interface SignpageState {
     chain: Chain;
     wallet: string;
     token: string;
-    side: "tp" | "sl";
-    trigger_price: string;
+    group_id: string;
+    trigger: OrderTrigger;
     state: OrderState;
     /** Unix ms of the last check of its nonce. */
     last_check?: number;
