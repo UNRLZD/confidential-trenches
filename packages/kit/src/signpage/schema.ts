@@ -11,13 +11,15 @@ import type { SignpageKind } from "./messages.ts";
 /** A check of one value. */
 export type SignpageSchema = (v: unknown) => boolean;
 
-/** The largest message the client reads, in UTF-16 code units of its JSON (a full state with many ops fits). */
-export const SIGNPAGE_MAX_MESSAGE_CHARS = 262_144;
+/** The largest message the client reads: its JSON, in UTF-8 bytes (the size cap of app.md §2.1 item 1, app.md:116-117). */
+export const SIGNPAGE_MAX_MESSAGE_BYTES = 65_536;
 /** The deepest nesting the client reads. */
 export const SIGNPAGE_MAX_DEPTH = 12;
+/** The longest array the client reads. */
+export const SIGNPAGE_MAX_ARRAY = 2_000;
 const MAX_STRING = 512;
-const MAX_ARRAY = 2_000;
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const INDEX = /^(0|[1-9]\d*)$/;
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
@@ -26,28 +28,47 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> => {
 };
 
 /**
- * True when `v` is made of plain objects, arrays, strings, finite numbers, booleans and null only, with no forbidden
- * key, at most SIGNPAGE_MAX_DEPTH deep, and its JSON at most SIGNPAGE_MAX_MESSAGE_CHARS long.
+ * A plain dense array of at most SIGNPAGE_MAX_ARRAY items whose own keys are its indexes and `length` only, checked
+ * before anything iterates it: a named key (JSON drops it, so the size check never sees it), an own `__proto__`, a hole
+ * or a huge sparse length is refused at once.
+ */
+const isPlainArray = (v: unknown): v is unknown[] => {
+  if (!Array.isArray(v) || Object.getPrototypeOf(v) !== Array.prototype) return false;
+  const n = v.length;
+  if (n > SIGNPAGE_MAX_ARRAY) return false;
+  const keys = Reflect.ownKeys(v);
+  if (keys.length !== n + 1) return false;
+  for (const k of keys) {
+    if (k === "length") continue;
+    if (typeof k !== "string" || !INDEX.test(k) || Number(k) >= n) return false;
+  }
+  return true;
+};
+
+/**
+ * True when `v` is made of plain objects, plain dense arrays, strings, finite numbers, booleans and null only, with no
+ * forbidden key, at most SIGNPAGE_MAX_DEPTH deep, and its JSON at most SIGNPAGE_MAX_MESSAGE_BYTES long. The walk counts
+ * the characters of every string and key as it goes and stops past the cap, before any JSON is made.
  */
 export function signpageIsPlainMessage(v: unknown): boolean {
+  let chars = 0;
   const walk = (x: unknown, depth: number): boolean => {
     if (depth > SIGNPAGE_MAX_DEPTH) return false;
-    if (x === null || typeof x === "string" || typeof x === "boolean") return true;
+    if (x === null || typeof x === "boolean") return true;
+    if (typeof x === "string") return (chars += x.length) <= SIGNPAGE_MAX_MESSAGE_BYTES;
     if (typeof x === "number") return Number.isFinite(x);
-    if (Array.isArray(x)) {
-      if (Object.getPrototypeOf(x) !== Array.prototype) return false;
-      return x.every((e) => walk(e, depth + 1));
-    }
+    if (Array.isArray(x)) return isPlainArray(x) && x.every((e) => walk(e, depth + 1));
     if (!isPlainObject(x)) return false;
     for (const k of Reflect.ownKeys(x)) {
       if (typeof k !== "string" || FORBIDDEN_KEYS.has(k)) return false;
+      if ((chars += k.length) > SIGNPAGE_MAX_MESSAGE_BYTES) return false;
       if (!walk(x[k], depth + 1)) return false;
     }
     return true;
   };
   if (!walk(v, 0)) return false;
   try {
-    return JSON.stringify(v).length <= SIGNPAGE_MAX_MESSAGE_CHARS;
+    return new TextEncoder().encode(JSON.stringify(v)).length <= SIGNPAGE_MAX_MESSAGE_BYTES;
   } catch {
     return false;
   }
@@ -65,8 +86,7 @@ const iso: SignpageSchema = (v) => str(v) && /^\d{4}-\d{2}-\d{2}T/.test(v as str
 const returnKey: SignpageSchema = (v) => typeof v === "string" && /^[a-z][a-z0-9_-]{0,63}$/.test(v);
 const lit = (x: unknown): SignpageSchema => (v) => v === x;
 const oneOf = (xs: readonly unknown[]): SignpageSchema => (v) => xs.includes(v);
-const arr = (item: SignpageSchema, min = 0): SignpageSchema => (v) =>
-  Array.isArray(v) && v.length >= min && v.length <= MAX_ARRAY && v.every(item);
+const arr = (item: SignpageSchema, min = 0): SignpageSchema => (v) => isPlainArray(v) && v.length >= min && v.every(item);
 /** An object with exactly these keys: every required one, any of the optional ones, nothing else. */
 const obj = (req: Record<string, SignpageSchema>, opt: Record<string, SignpageSchema> = {}): SignpageSchema => (v) => {
   if (!isPlainObject(v)) return false;

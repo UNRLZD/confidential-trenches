@@ -1,21 +1,23 @@
-// The signing-page client's unit tests (APU-02, APU-03, app.md:1327-1328; the client half of AX-05, AX-06): a fake
-// window, document and iframe, Node's fake clock. Every kind of the fifteen has its fixture (a kind with no fixture
-// fails the suite, matching "a kind with no row is refused", W:894). Every dropped message is checked for "no state
-// change": the snapshot is the same object and the request it targets is still open.
+// The signing-page client's unit tests (APU-02, APU-03, app.md:1327-1328; the client half of AX-05, AX-06; BAR-09):
+// a fake window, document and iframe, Node's fake clock. Every kind of the fifteen has its fixture (a kind with no
+// fixture fails the suite, matching "a kind with no row is refused", W:894). Every dropped message is checked for "no
+// state change": the snapshot is the same object and the request it targets is still open.
 //   node --test test/signpage-client.test.mjs
-// SIGNPAGE_CLIENT=<abs path to a client.ts> runs the same tests against another copy (the red-before proofs).
+// SIGNPAGE_SRC=<abs path to a copy of src/> runs the same tests against that copy (the red-before proofs).
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { OPEN_KINDS, SIGNPAGE_KINDS } from "../src/signpage/messages.ts";
 import { FIXTURES, STATE } from "./signpage-fixtures.ts";
 
-const C = await import(
-  process.env.SIGNPAGE_CLIENT ? pathToFileURL(process.env.SIGNPAGE_CLIENT).href : "../src/signpage/client.ts"
-);
+const SRC = process.env.SIGNPAGE_SRC ? pathToFileURL(`${process.env.SIGNPAGE_SRC}/`).href : new URL("../src/", import.meta.url).href;
+const C = await import(`${SRC}signpage/client.ts`);
+const S = await import(`${SRC}signpage/schema.ts`);
 
 const URL_ = "https://sign.confidential.unrealized.trade/";
 const ORIGIN = "https://sign.confidential.unrealized.trade";
+const DOWN = { ok: false, error: { code: "signpage_down" } };
+const TIMEOUT = { ok: false, error: { code: "client_timeout" } };
 
 // ------------------------------------------------------------------------------------------------ fakes
 class FakeChild {
@@ -62,40 +64,47 @@ function makeHost() {
     mount: { appendChild: (f) => f },
   };
   const frame = () => frames[frames.length - 1];
-  const post = (data, origin = ORIGIN, source = frame().contentWindow) =>
-    onMessage?.({ data, origin, source });
-  return { host, frames, frame, post, listening: () => onMessage !== null };
+  const post = (data, origin = ORIGIN, source = frame().contentWindow) => onMessage?.({ data, origin, source });
+  /** every message posted to every frame, in order */
+  const sent = () => frames.flatMap((f) => f.contentWindow.sent);
+  return { host, frames, frame, post, sent, listening: () => onMessage !== null };
 }
 
 const flush = async () => {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
 };
 
 const answer = (id, result) => ({ v: 1, id, ok: true, result });
 const READY = { v: 1, type: "ready", release: "sp-1", api: 1 };
 
-/** A client that has had its handshake and its first state. */
-async function readyClient() {
-  const h = makeHost();
-  const c = C.createSignpageClient({ url: URL_, host: h.host });
+/** The current frame's handshake: its ready, then the answer to the state request the client sends for it. */
+async function handshake(h, state = STATE) {
   h.post(READY);
   await flush();
-  const first = h.frame().contentWindow.sent[0];
-  assert.equal(first.msg.type, "state");
-  h.post(answer(first.msg.id, STATE));
+  const s = h.frame().contentWindow.sent.findLast((x) => x.msg.type === "state");
+  assert.ok(s, "the client asks state after the ready");
+  h.post(answer(s.msg.id, state));
   await flush();
+}
+
+/** A client that has had its handshake. */
+async function readyClient(opts = {}) {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, ...opts });
+  await handshake(h);
   assert.equal(c.snapshot().status, "ready");
   h.frame().contentWindow.sent.length = 0;
   return { h, c };
 }
 
-/** Sends `kind` and returns its id, its promise and whether it has settled. */
+/** Sends `kind` and returns its handle, what was posted and whether it has settled. */
 async function open(h, c, kind) {
   let settled = false;
-  const p = c.request(kind, FIXTURES[kind].params).then((o) => ((settled = true), o));
+  const handle = c.request(kind, FIXTURES[kind].params);
+  const p = handle.outcome.then((o) => ((settled = true), o));
   await flush();
   const sent = h.frame().contentWindow.sent.at(-1);
-  return { id: sent.msg.id, sent, p, settled: () => settled };
+  return { id: handle.id, sent, p, settled: () => settled };
 }
 
 test.beforeEach(() => mock.timers.enable({ apis: ["setTimeout"] }));
@@ -126,21 +135,52 @@ test("only an https release URL with no query, fragment or credentials is taken"
 });
 
 // ------------------------------------------------------------------------------------------------ the handshake
-test("READY: a valid ready makes the client ready and asks state once; requests made while connecting wait for it", async () => {
+test("READY is the frame's first state answer: a ready alone is not READY, and requests wait for the state", async () => {
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   assert.equal(c.snapshot().status, "connecting");
   const early = c.request("restore", {});
   await flush();
-  assert.equal(h.frame().contentWindow.sent.length, 0, "nothing is sent before the handshake");
+  assert.equal(h.sent().length, 0, "nothing is sent before the ready");
   h.post(READY);
   await flush();
-  const sent = h.frame().contentWindow.sent;
-  assert.deepEqual(sent.map((s) => [s.msg.type, s.origin]), [["state", ORIGIN], ["restore", ORIGIN]]);
+  assert.equal(c.snapshot().status, "connecting", "a ready without its state answer is not READY");
+  assert.deepEqual(h.sent().map((s) => [s.msg.type, s.origin]), [["state", ORIGIN]], "only the handshake's state is sent");
+  h.post(answer(h.sent()[0].msg.id, STATE));
+  await flush();
   assert.equal(c.snapshot().status, "ready");
   assert.equal(c.snapshot().release, "sp-1");
-  h.post(answer(sent[1].msg.id, { stage: "started" }));
-  assert.deepEqual(await early, { ok: true, result: { stage: "started" } });
+  assert.deepEqual(c.snapshot().state, STATE);
+  assert.equal(c.snapshot().stale, false);
+  const r = h.sent()[1];
+  assert.equal(r.msg.type, "restore", "the waiting request is posted after READY");
+  assert.equal(r.msg.id, early.id);
+  h.post(answer(early.id, { stage: "started" }));
+  assert.deepEqual(await early.outcome, { ok: true, result: { stage: "started" } });
+});
+
+test("no state answer within 5 s of the ready: down (AE-08's \"no state answer ever\")", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, retryMs: 0 });
+  mock.timers.tick(4_000);
+  h.post(READY);
+  await flush();
+  mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS - 1);
+  await flush();
+  assert.equal(c.snapshot().status, "connecting");
+  mock.timers.tick(1);
+  await flush();
+  assert.equal(c.snapshot().status, "down");
+});
+
+test("a page that refuses the handshake's state is down", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, retryMs: 0 });
+  h.post(READY);
+  await flush();
+  h.post({ v: 1, id: h.sent()[0].msg.id, ok: false, error: { code: "not_allowed" } });
+  await flush();
+  assert.equal(c.snapshot().status, "down");
 });
 
 test("no ready in 5 s: down, and every waiting request answers signpage_down unsent", async () => {
@@ -153,14 +193,13 @@ test("no ready in 5 s: down, and every waiting request answers signpage_down uns
   mock.timers.tick(1);
   await flush();
   assert.equal(c.snapshot().status, "down");
-  assert.deepEqual(await p, { ok: false, error: { code: "signpage_down" } });
-  assert.deepEqual(await c.request("state", {}), { ok: false, error: { code: "signpage_down" } });
-  assert.equal(h.frame().contentWindow.sent.length, 0, "nothing was sent to the page");
+  assert.deepEqual(await p.outcome, DOWN);
+  assert.deepEqual(await c.request("state", {}).outcome, DOWN);
+  assert.equal(h.sent().length, 0, "nothing was sent to the page");
 });
 
-test("a ready the client cannot trust or speak is not READY", async () => {
+test("a ready the client cannot trust is not READY", async () => {
   const cases = [
-    ["api 2", { ...READY, api: 2 }],
     ["wrong origin", READY, "https://evil.confidential.unrealized.trade"],
     ["wrong source", READY, ORIGIN, new FakeChild()],
     ["extra field", { ...READY, route: "x" }],
@@ -170,10 +209,26 @@ test("a ready the client cannot trust or speak is not READY", async () => {
     const c = C.createSignpageClient({ url: URL_, host: h.host, retryMs: 0 });
     h.post(data, origin, source === undefined ? h.frame().contentWindow : source);
     await flush();
+    assert.equal(h.sent().length, 0, `${name}: no state asked`);
     mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS);
     await flush();
     assert.equal(c.snapshot().status, "down", name);
   }
+});
+
+test("a ready with an api this client does not speak: the update state until a reload, with no retry", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  h.post({ ...READY, api: 2 });
+  await flush();
+  assert.equal(c.snapshot().status, "update");
+  assert.equal(h.sent().length, 0);
+  assert.deepEqual(await c.request("buy", FIXTURES.buy.params).outcome, DOWN);
+  mock.timers.tick(C.SIGNPAGE_RETRY_MS * 6);
+  await flush();
+  c.retry();
+  assert.equal(h.frames.length, 1, "no fresh iframe, by timer or by retry()");
+  assert.equal(c.snapshot().status, "update");
 });
 
 test("an iframe error event is the down state at once", async () => {
@@ -183,7 +238,7 @@ test("an iframe error event is the down state at once", async () => {
   assert.equal(c.snapshot().status, "down");
 });
 
-test("down clears with no reload: a fresh iframe every retry, and a late ready from the live frame", async () => {
+test("down clears with no reload: a fresh iframe every retry, and a late handshake from the live frame", async () => {
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS);
@@ -194,14 +249,76 @@ test("down clears with no reload: a fresh iframe every retry, and a late ready f
   assert.equal(c.snapshot().status, "connecting");
   h.post(READY, ORIGIN, h.frames[0].contentWindow); // the removed frame's ready is not this frame's
   await flush();
-  assert.equal(c.snapshot().status, "connecting");
+  assert.equal(h.sent().length, 0);
   mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS);
   assert.equal(c.snapshot().status, "down");
-  h.post(READY); // slow, but from the live frame
-  await flush();
+  await handshake(h); // slow, but from the live frame
   assert.equal(c.snapshot().status, "ready");
   mock.timers.tick(C.SIGNPAGE_RETRY_MS * 3);
   assert.equal(h.frames.length, 2, "no retry once ready");
+});
+
+test("an old frame's state never shows as fresh: a re-mount marks it stale until the new frame's state", async () => {
+  const { h, c } = await readyClient();
+  assert.equal(c.snapshot().stale, false);
+  c.retry();
+  assert.equal(c.snapshot().status, "connecting");
+  assert.equal(c.snapshot().stale, true);
+  mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS);
+  assert.equal(c.snapshot().status, "down");
+  assert.equal(c.snapshot().stale, true);
+  mock.timers.tick(C.SIGNPAGE_RETRY_MS);
+  await handshake(h, { ...STATE, vault_balance: "7" });
+  assert.equal(c.snapshot().status, "ready");
+  assert.equal(c.snapshot().stale, false);
+  assert.equal(c.snapshot().state.vault_balance, "7");
+});
+
+// ------------------------------------------------------------------------------------------------ posted, never "unsent"
+test("the double-buy path: a posted buy ends client_timeout when an open kind's timeout takes the client down", async () => {
+  const { h, c } = await readyClient();
+  const buy = await open(h, c, "buy");
+  const backup = await open(h, c, "backup.open");
+  mock.timers.tick(C.SIGNPAGE_TIMEOUT_MS["backup.open"]);
+  await flush();
+  assert.equal(c.snapshot().status, "down");
+  assert.deepEqual(await backup.p, TIMEOUT);
+  assert.deepEqual(await buy.p, TIMEOUT, "the page has the buy: never reported unsent");
+  assert.deepEqual(await c.request("buy", FIXTURES.buy.params).outcome, DOWN, "a request made while down is unsent");
+  assert.equal(h.sent().filter((s) => s.msg.type === "buy").length, 1);
+  mock.timers.tick(C.SIGNPAGE_RETRY_MS);
+  h.post(READY);
+  await flush();
+  assert.equal(h.frame().contentWindow.sent.at(-1).msg.type, "state", "the next READY asks state, where the buy's outcome is");
+});
+
+test("a posted request ends client_timeout on every other way down: api change, iframe error, retry while ready, destroy", async () => {
+  const ways = {
+    "a ready with another api": (h) => h.post({ ...READY, api: 2 }),
+    "an iframe error": (h) => h.frame().fire("error"),
+    "retry() while ready": (_h, c) => c.retry(),
+    "destroy()": (_h, c) => c.destroy(),
+  };
+  for (const [name, go] of Object.entries(ways)) {
+    const { h, c } = await readyClient();
+    const buy = await open(h, c, "buy");
+    const restore = await open(h, c, "restore");
+    go(h, c);
+    await flush();
+    assert.deepEqual(await buy.p, TIMEOUT, name);
+    assert.deepEqual(await restore.p, TIMEOUT, name);
+    assert.equal(h.sent().filter((s) => s.msg.type === "buy").length, 1, `${name}: the buy is never re-sent`);
+  }
+});
+
+test("a request's id is known at once and is the id posted, so progress events can be matched to it", async () => {
+  const { h, c } = await readyClient();
+  const seen = [];
+  c.onProgress((id, stage) => seen.push([id, stage]));
+  const { id, sent } = await open(h, c, "buy");
+  assert.equal(sent.msg.id, id);
+  h.post({ v: 1, type: "progress", id, stage: "filled" });
+  assert.deepEqual(seen, [[id, "filled"]]);
 });
 
 // ------------------------------------------------------------------------------------------------ the fifteen kinds
@@ -230,7 +347,7 @@ for (const kind of SIGNPAGE_KINDS) {
     const c = C.createSignpageClient({ url: URL_, host: h.host });
     const bad = { ...FIXTURES[kind].params, recipient: "0xattacker" };
     assert.throws(() => C.signpageBuildRequest(kind, bad, "id"), TypeError);
-    return assert.rejects(c.request(kind, bad), TypeError);
+    assert.throws(() => c.request(kind, bad), TypeError);
   });
 
   test(`${kind}: an answer whose result is not ${kind}'s shape is dropped`, async () => {
@@ -270,40 +387,73 @@ test("open kinds take only their return key and their own fields (APU-02)", () =
 });
 
 // ------------------------------------------------------------------------------------------------ refusals
-test("answers dropped with no state change: wrong origin, wrong source, wrong id, bad keys, oversized, not plain", async () => {
+test("answers dropped with no state change: wrong origin, wrong source, wrong id, bad keys, bad arrays, oversized, not plain", async () => {
   const { h, c } = await readyClient();
   const { id, p, settled } = await open(h, c, "buy");
   const good = answer(id, FIXTURES.buy.result);
   const before = c.snapshot();
-  const big = answer(id, { ...FIXTURES.buy.result, txs: Array.from({ length: 1_900 }, () => ({ chain: "solana", hash: "x".repeat(200) })) });
+  const win = h.frame().contentWindow;
+  const txsWith = (f) => {
+    const txs = [{ chain: "solana", hash: "5ig" }];
+    f(txs);
+    return answer(id, { stage: "sent", txs });
+  };
+  const sparse = [];
+  sparse.length = 2 ** 32 - 1;
   const cases = [
-    ["a same-site sibling", good, "https://evil.ct.test", h.frame().contentWindow, "origin"],
-    ["APP_HOST itself", good, "https://confidential.unrealized.trade", h.frame().contentWindow, "origin"],
-    ["SIGN_HOST over http", good, "http://sign.confidential.unrealized.trade", h.frame().contentWindow, "origin"],
-    ["SIGN_HOST with a port", good, "https://sign.confidential.unrealized.trade:8443", h.frame().contentWindow, "origin"],
-    ["a cross-site host", good, "https://app.other.test", h.frame().contentWindow, "origin"],
+    ["a same-site sibling", good, "https://evil.ct.test", win, "origin"],
+    ["APP_HOST itself", good, "https://confidential.unrealized.trade", win, "origin"],
+    ["SIGN_HOST over http", good, "http://sign.confidential.unrealized.trade", win, "origin"],
+    ["SIGN_HOST with a port", good, "https://sign.confidential.unrealized.trade:8443", win, "origin"],
+    ["a cross-site host", good, "https://app.other.test", win, "origin"],
     ["SIGN_HOST's origin from another window", good, ORIGIN, new FakeChild(), "source"],
     ["SIGN_HOST's origin with no source", good, ORIGIN, null, "source"],
-    ["a wrong id", answer("00000000-0000-4000-8000-000000000000", FIXTURES.buy.result), ORIGIN, h.frame().contentWindow, "id"],
-    ["a __proto__ key", JSON.parse(`{"v":1,"id":"${id}","ok":true,"result":{"stage":"sent","txs":[],"__proto__":{"x":1}}}`), ORIGIN, h.frame().contentWindow, "shape"],
-    ["a constructor key", { ...good, result: { ...FIXTURES.buy.result, constructor: "x" } }, ORIGIN, h.frame().contentWindow, "shape"],
-    ["an oversized body", big, ORIGIN, h.frame().contentWindow, "shape"],
-    ["not a plain object", Object.assign(new (class X {})(), good), ORIGIN, h.frame().contentWindow, "shape"],
-    ["a string", JSON.stringify(good), ORIGIN, h.frame().contentWindow, "shape"],
-    ["a v other than 1", { ...good, v: 2 }, ORIGIN, h.frame().contentWindow, "shape"],
-    ["an extra envelope field", { ...good, route: "x" }, ORIGIN, h.frame().contentWindow, "shape"],
-    ["an unknown event", { v: 1, type: "sign", id }, ORIGIN, h.frame().contentWindow, "shape"],
+    ["a wrong id", answer("00000000-0000-4000-8000-000000000000", FIXTURES.buy.result), ORIGIN, win, "id"],
+    ["a __proto__ key", JSON.parse(`{"v":1,"id":"${id}","ok":true,"result":{"stage":"sent","txs":[],"__proto__":{"x":1}}}`), ORIGIN, win, "shape"],
+    ["a constructor key", { ...good, result: { ...FIXTURES.buy.result, constructor: "x" } }, ORIGIN, win, "shape"],
+    ["a 5 MB named key on an array", txsWith((t) => (t.big = "x".repeat(5_000_000))), ORIGIN, win, "shape"],
+    ["an own __proto__ on an array", txsWith((t) => Object.defineProperty(t, "__proto__", { value: 1, enumerable: true, configurable: true, writable: true })), ORIGIN, win, "shape"],
+    ["a hole in an array", txsWith((t) => (t.length = 2)), ORIGIN, win, "shape"],
+    ["a sparse array of length 2^32-1", answer(id, { stage: "sent", txs: sparse }), ORIGIN, win, "shape"],
+    ["an array over the bound", answer(id, { stage: "sent", txs: Array.from({ length: S.SIGNPAGE_MAX_ARRAY + 1 }, () => ({ chain: "solana", hash: "h" })) }), ORIGIN, win, "shape"],
+    ["a body over 64 KiB", answer(id, { stage: "sent", txs: Array.from({ length: 200 }, () => ({ chain: "solana", hash: "x".repeat(400) })) }), ORIGIN, win, "shape"],
+    ["not a plain object", Object.assign(new (class X {})(), good), ORIGIN, win, "shape"],
+    ["a string", JSON.stringify(good), ORIGIN, win, "shape"],
+    ["a v other than 1", { ...good, v: 2 }, ORIGIN, win, "shape"],
+    ["an extra envelope field", { ...good, route: "x" }, ORIGIN, win, "shape"],
+    ["an unknown event", { v: 1, type: "sign", id }, ORIGIN, win, "shape"],
   ];
   for (const [name, data, origin, source, reason] of cases) {
     const d0 = c.dropped()[reason];
+    const t0 = performance.now();
     h.post(data, origin, source);
     await flush();
+    assert.ok(performance.now() - t0 < 1_000, `${name}: refused at once`);
     assert.equal(c.dropped()[reason], d0 + 1, `${name}: dropped as ${reason}`);
     assert.equal(c.snapshot(), before, `${name}: no state change`);
     assert.equal(settled(), false, `${name}: the request is still open`);
   }
-  h.post(good);
-  assert.deepEqual(await p, { ok: true, result: FIXTURES.buy.result });
+  // just under the cap is read
+  h.post(answer(id, { stage: "sent", txs: Array.from({ length: 150 }, () => ({ chain: "solana", hash: "x".repeat(400) })) }));
+  assert.equal((await p).ok, true);
+});
+
+test("the plain-message walk: forbidden keys at any depth, the depth bound, the 64 KiB bound", () => {
+  const nest = (n) => {
+    let x = { a: 1 };
+    for (let i = 0; i < n; i++) x = { a: x };
+    return x;
+  };
+  assert.equal(S.signpageIsPlainMessage({ a: [{ b: 1 }] }), true);
+  for (const k of ["__proto__", "constructor", "prototype"]) {
+    assert.equal(S.signpageIsPlainMessage(JSON.parse(`{"a":[{"b":{"${k}":1}}]}`)), false, k);
+  }
+  assert.equal(S.signpageIsPlainMessage(nest(S.SIGNPAGE_MAX_DEPTH - 1)), true, "at the depth bound");
+  assert.equal(S.signpageIsPlainMessage(nest(S.SIGNPAGE_MAX_DEPTH)), false, "past the depth bound");
+  assert.equal(S.SIGNPAGE_MAX_MESSAGE_BYTES, 65_536);
+  assert.equal(S.signpageIsPlainMessage({ s: "x".repeat(65_000) }), true);
+  assert.equal(S.signpageIsPlainMessage({ s: "x".repeat(65_537) }), false);
+  assert.equal(S.signpageIsPlainMessage({ s: "é".repeat(33_000) }), false, "counted in UTF-8 bytes");
 });
 
 test("a page refusal is passed on as its code", async () => {
@@ -329,16 +479,39 @@ test("state and progress events from the frame update the state and reach the li
   assert.deepEqual(seen, [["x", "filled"]]);
 });
 
+test("state and progress events before READY are dropped", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  const seen = [];
+  c.onProgress((id, stage) => seen.push([id, stage]));
+  h.post({ v: 1, type: "state", state: STATE });
+  h.post({ v: 1, type: "progress", id: "x", stage: "filled" });
+  assert.equal(c.snapshot().state, null);
+  assert.deepEqual(seen, []);
+  assert.equal(c.dropped().shape, 2);
+});
+
 // ------------------------------------------------------------------------------------------------ timeouts
-test("each kind's timeout is the table's (app.md §2.1 item 3)", () => {
+test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none", () => {
   assert.deepEqual(C.SIGNPAGE_TIMEOUT_MS, {
     "deposit.quote": 15_000, "deposit.confirm": 15_000, arm: 5_000, buy: 10_000, hop: 10_000, "orders.set": 15_000,
     "orders.cancel": 15_000, return: 15_000, "withdraw.open": 5_000, "signin.open": 5_000, "backup.open": 5_000,
-    "export.open": 5_000, signout: 5_000, restore: 10_000, state: 5_000,
+    "export.open": 5_000, signout: 5_000, restore: null, state: 5_000,
   });
 });
 
-for (const kind of SIGNPAGE_KINDS) {
+test("restore never times out on the client", async () => {
+  const { h, c } = await readyClient();
+  const { p, settled, id } = await open(h, c, "restore");
+  mock.timers.tick(3_600_000);
+  await flush();
+  assert.equal(settled(), false);
+  assert.equal(c.snapshot().status, "ready");
+  h.post(answer(id, { stage: "started" }));
+  assert.equal((await p).ok, true);
+});
+
+for (const kind of SIGNPAGE_KINDS.filter((k) => C.SIGNPAGE_TIMEOUT_MS[k] !== null)) {
   test(`${kind}: with no answer it ends as client_timeout at its timeout, and a late answer is dropped`, async () => {
     const { h, c } = await readyClient();
     const { id, p, settled } = await open(h, c, kind);
@@ -346,7 +519,7 @@ for (const kind of SIGNPAGE_KINDS) {
     await flush();
     assert.equal(settled(), false);
     mock.timers.tick(1);
-    assert.deepEqual(await p, { ok: false, error: { code: "client_timeout" } });
+    assert.deepEqual(await p, TIMEOUT);
     const isOpen = OPEN_KINDS.includes(kind);
     assert.equal(c.snapshot().status, isOpen ? "down" : "ready", "an open kind's timeout is the down state");
     if (kind === "state") assert.equal(c.snapshot().stale, true, "a state timeout keeps the last state, stale");
@@ -354,6 +527,17 @@ for (const kind of SIGNPAGE_KINDS) {
     assert.equal(c.dropped().id, 1);
   });
 }
+
+test("a money kind's timeout asks state again and never re-sends the kind", async () => {
+  for (const kind of ["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return"]) {
+    const { h, c } = await readyClient();
+    await open(h, c, kind);
+    mock.timers.tick(C.SIGNPAGE_TIMEOUT_MS[kind]);
+    await flush();
+    const types = h.frame().contentWindow.sent.map((s) => s.msg.type);
+    assert.deepEqual(types, [kind, "state"], kind);
+  }
+});
 
 test("APU-03: over 1,000 fake-clock runs no money or navigation kind is ever re-sent by the client", async () => {
   const NEVER_RESENT = ["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return", "withdraw.open", "signin.open", "backup.open", "export.open", "signout"];
@@ -363,8 +547,7 @@ test("APU-03: over 1,000 fake-clock runs no money or navigation kind is ever re-
   for (let run = 0; run < 1_000; run++) {
     if (c.snapshot().status !== "ready") {
       c.retry();
-      h.post(READY);
-      await flush();
+      await handshake(h);
     }
     seed = (seed * 48271) % 2147483647;
     const kind = SIGNPAGE_KINDS[seed % SIGNPAGE_KINDS.length];
@@ -375,12 +558,10 @@ test("APU-03: over 1,000 fake-clock runs no money or navigation kind is ever re-
     await flush();
   }
   const sent = new Map();
-  for (const f of h.frames) for (const s of f.contentWindow.sent) sent.set(s.msg.type, (sent.get(s.msg.type) ?? 0) + 1);
+  for (const s of h.sent()) sent.set(s.msg.type, (sent.get(s.msg.type) ?? 0) + 1);
   for (const k of NEVER_RESENT) assert.equal(sent.get(k) ?? 0, asked.get(k) ?? 0, `${k} sent exactly as often as asked`);
-  for (const f of h.frames) {
-    const ids = f.contentWindow.sent.filter((s) => s.msg.type !== "state").map((s) => s.msg.id);
-    assert.equal(new Set(ids).size, ids.length, "no id is ever sent twice");
-  }
+  const ids = h.sent().map((s) => s.msg.id);
+  assert.equal(new Set(ids).size, ids.length, "no id is ever sent twice");
 });
 
 test("destroy: the listener and the iframe go, and nothing is sent after", async () => {
@@ -388,7 +569,8 @@ test("destroy: the listener and the iframe go, and nothing is sent after", async
   c.destroy();
   assert.equal(h.listening(), false);
   assert.equal(h.frame().removed, true);
-  assert.deepEqual(await c.request("state", {}), { ok: false, error: { code: "signpage_down" } });
+  assert.deepEqual(await c.request("state", {}).outcome, DOWN);
   mock.timers.tick(C.SIGNPAGE_RETRY_MS * 2);
   assert.equal(h.frames.length, 1, "no retry after destroy");
+  assert.equal(h.sent().length, 0);
 });
