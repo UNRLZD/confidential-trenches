@@ -1,0 +1,442 @@
+{
+  "good": {
+    "url": "https://confidential.unrealized.trade",
+    "source": "harness, the test frame",
+    "at": "2026-11-01T03:03:53.305Z",
+    "browser": "153.0.8010.12",
+    "runs": [
+      {
+        "width": "phone",
+        "kind": "served",
+        "unblockedAt": null,
+        "reloaded": null,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 99.10000002384186
+          },
+          {
+            "s": "ready",
+            "t": 107.90000000596046
+          }
+        ],
+        "toast": {
+          "visible": false,
+          "text": null
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/good/phone-served.png"
+      },
+      {
+        "width": "phone",
+        "kind": "blocked",
+        "unblockedAt": 5459.5999999940395,
+        "reloaded": false,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 98
+          },
+          {
+            "s": "down",
+            "t": 5097.200000017881
+          },
+          {
+            "s": "connecting",
+            "t": 15099.5
+          },
+          {
+            "s": "ready",
+            "t": 15110.90000000596
+          }
+        ],
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/good/phone-blocked.png"
+      },
+      {
+        "width": "desktop",
+        "kind": "served",
+        "unblockedAt": null,
+        "reloaded": null,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 84.89999997615814
+          },
+          {
+            "s": "ready",
+            "t": 102
+          }
+        ],
+        "toast": {
+          "visible": false,
+          "text": null
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/good/desktop-served.png"
+      },
+      {
+        "width": "desktop",
+        "kind": "blocked",
+        "unblockedAt": 5412.699999988079,
+        "reloaded": false,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 86.59999999403954
+          },
+          {
+            "s": "down",
+            "t": 5084.699999988079
+          },
+          {
+            "s": "connecting",
+            "t": 15086.699999988079
+          },
+          {
+            "s": "ready",
+            "t": 15098.699999988079
+          }
+        ],
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/good/desktop-blocked.png"
+      }
+    ]
+  },
+  "badSilent": {
+    "url": "https://confidential.unrealized.trade",
+    "source": "harness, SIGN_HOST's real page",
+    "at": "2026-11-01T03:04:25.475Z",
+    "browser": "153.0.8010.12",
+    "runs": [
+      {
+        "width": "phone",
+        "kind": "served",
+        "unblockedAt": null,
+        "reloaded": null,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 92.40000000596046
+          },
+          {
+            "s": "down",
+            "t": 5092.4000000059605
+          }
+        ],
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/silent/phone-served.png"
+      },
+      {
+        "width": "phone",
+        "kind": "blocked",
+        "unblockedAt": 5437,
+        "reloaded": false,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 84
+          },
+          {
+            "s": "down",
+            "t": 5083.4000000059605
+          },
+          {
+            "s": "connecting",
+            "t": 15086.199999988079
+          },
+          {
+            "s": "down",
+            "t": 20084.5
+          }
+        ],
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/silent/phone-blocked.png"
+      },
+      {
+        "width": "desktop",
+        "kind": "served",
+        "unblockedAt": null,
+        "reloaded": null,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 100.59999999403954
+          },
+          {
+            "s": "down",
+            "t": 5100.199999988079
+          }
+        ],
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/silent/desktop-served.png"
+      },
+      {
+        "width": "desktop",
+        "kind": "blocked",
+        "unblockedAt": 5467.5,
+        "reloaded": false,
+        "frames": [
+          {
+            "src": "https://sign.confidential.unrealized.trade/",
+            "attrs": {
+              "sandbox": "allow-scripts allow-same-origin",
+              "allow": "",
+              "referrerpolicy": "no-referrer",
+              "aria-hidden": "true",
+              "tabindex": "-1",
+              "width": "0",
+              "height": "0",
+              "src": "https://sign.confidential.unrealized.trade/",
+              "style": "position: absolute; width: 0px; height: 0px; border: 0px; visibility: hidden;"
+            }
+          }
+        ],
+        "timeline": [
+          {
+            "s": "connecting",
+            "t": 84.90000000596046
+          },
+          {
+            "s": "down",
+            "t": 5083.199999988079
+          },
+          {
+            "s": "connecting",
+            "t": 15089.90000000596
+          },
+          {
+            "s": "down",
+            "t": 20089
+          }
+        ],
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/shots2/silent/desktop-blocked.png"
+      }
+    ]
+  },
+  "badLive": {
+    "url": "https://confidential.unrealized.trade",
+    "source": "live",
+    "at": "2026-11-01T02:13:49.563Z",
+    "browser": "153.0.8010.12",
+    "runs": [
+      {
+        "width": "phone",
+        "kind": "served",
+        "unblockedAt": null,
+        "reloaded": null,
+        "frames": [],
+        "timeline": [],
+        "toast": {
+          "visible": false,
+          "text": null
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/sp/live/phone-served.png"
+      },
+      {
+        "width": "phone",
+        "kind": "blocked",
+        "unblockedAt": 7392.9000000059605,
+        "reloaded": false,
+        "frames": [],
+        "timeline": [],
+        "toast": {
+          "visible": false,
+          "text": null
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/sp/live/phone-blocked.png"
+      },
+      {
+        "width": "desktop",
+        "kind": "served",
+        "unblockedAt": null,
+        "reloaded": null,
+        "frames": [],
+        "timeline": [],
+        "toast": {
+          "visible": false,
+          "text": null
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/sp/live/desktop-served.png"
+      },
+      {
+        "width": "desktop",
+        "kind": "blocked",
+        "unblockedAt": 7375.9000000059605,
+        "reloaded": false,
+        "frames": [],
+        "timeline": [],
+        "toast": {
+          "visible": false,
+          "text": null
+        },
+        "violations": [],
+        "cls": 0,
+        "consoleErrors": [],
+        "shot": "coverage/sp/live/desktop-blocked.png"
+      }
+    ]
+  }
+}

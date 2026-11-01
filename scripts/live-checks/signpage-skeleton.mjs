@@ -11,6 +11,7 @@
 //   node scripts/live-checks/signpage-skeleton.mjs [--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the answer the run read ({ url, status, headers }) to <file>, so the check's test can replay it.
 // packages/signpage/scripts/deploy.mjs runs judge() on the build's _headers before any upload.
+import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
