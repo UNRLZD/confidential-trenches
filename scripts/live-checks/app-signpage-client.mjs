@@ -221,7 +221,7 @@ async function main() {
   const record = opt("--record");
   let rec;
   if (args.includes("--harness")) {
-    const { startHarness, HOSTS } = await import(path.join(REPO, "apps/terminal/test/harness/harness.mjs"));
+    const { startHarness, HOSTS } = await import("../../apps/terminal/test/harness/harness.mjs");
     let frameDir = null;
     const silent = args.includes("--silent");
     const h = await startHarness({
