@@ -1,0 +1,42 @@
+// node --test packages/kit/test/prover/build.test.mjs: prover-worker.js is the pinned snarkjs build byte for byte, then
+// the worker's own code with the kit's setup-file pins; it loads no other script and makes no worker; a snarkjs build
+// with one byte changed is refused. The worker in a real browser: chromium.e2e.mjs.
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { buildProverWorker, proverWorkerSource, snarkjsBuildPath, SNARKJS_BUILD } from "../../src/prover/build.mjs";
+import { ZK_SETUP_FILES } from "../../src/zk/setup-files.ts";
+
+test("prover-worker.js = licence line + pinned snarkjs.min.js + worker.js with the kit's pins", () => {
+  const out = mkdtempSync(join(tmpdir(), "kit-prover-"));
+  const r = buildProverWorker(out);
+  const file = readFileSync(r.file);
+  assert.equal(r.bytes, file.length);
+  assert.equal(r.sha256, createHash("sha256").update(file).digest("hex"));
+  const nl = file.indexOf(10);
+  assert.match(file.subarray(0, nl).toString(), /^\/\/ Blindfill prover worker\. snarkjs 0\.7\.5 .*GPL-3\.0/);
+  const sj = file.subarray(nl + 1, nl + 1 + SNARKJS_BUILD.bytes);
+  assert.equal(createHash("sha256").update(sj).digest("hex"), SNARKJS_BUILD.sha256);
+  const body = file.subarray(nl + 1 + SNARKJS_BUILD.bytes).toString();
+  const pins = JSON.parse(body.match(/const PINS = (\{.*?\});/)[1]);
+  assert.deepEqual(Object.keys(pins).sort(), Object.keys(ZK_SETUP_FILES).sort());
+  for (const [name, p] of Object.entries(ZK_SETUP_FILES)) assert.deepEqual(pins[name], { bytes: p.bytes, sha256: p.sha256 });
+  assert.ok(!body.includes("/*@PINS@*/"));
+  // one file: no script loaded at run time, no worker of its own, no eval; single thread
+  for (const bad of [/importScripts\s*\(/, /new\s+(Shared)?Worker\s*\(/, /\beval\s*\(/, /new\s+Function\s*\(/, /\bimport\s*\(/])
+    assert.doesNotMatch(body, bad);
+  assert.match(body, /fullProve\(m\.input, c\.wasm, c\.zkey, undefined, undefined, \{ singleThread: true \}\)/);
+});
+
+test("a snarkjs.min.js with one byte changed is refused", () => {
+  const sj = readFileSync(snarkjsBuildPath());
+  sj[1000] ^= 1;
+  const f = join(mkdtempSync(join(tmpdir(), "kit-prover-")), "snarkjs.min.js");
+  writeFileSync(f, sj);
+  assert.throws(() => proverWorkerSource({ snarkjsPath: f }), /snarkjs\.min\.js sha256 [0-9a-f]{64}, pinned 3bf5b512/);
+  writeFileSync(f, sj.subarray(1));
+  assert.throws(() => proverWorkerSource({ snarkjsPath: f }), /snarkjs\.min\.js is 710895 B, pinned 710896 B/);
+});
