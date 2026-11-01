@@ -501,9 +501,9 @@ export function txBytesFacts(b64, id) {
 //    priority_fee (deprecated, always 0: views.rs:1781), signature, hash, and nonce_index and nonce_mode only when they
 //    are not V0's (views.rs:1758-1761, :1768-1776). It has no block_hash: findTxBytes tries the blocks before the tx's
 //    own, and only the one that makes the bytes hash to the id is kept.
-//  - V0 is signer_id, public_key, nonce u64, receiver_id, block_hash, actions (transaction.rs:36-50); V1 is a 1 then
+//  - V0 is signer_id, public_key, nonce u64, receiver_id, block_hash, actions (transaction.rs:36-51); V1 is a 1 then
 //    signer_id, public_key, TransactionNonce (0 then nonce u64, or 1 then nonce u64 and nonce_index u16), receiver_id,
-//    block_hash, actions, nonce_mode (Monotonic 0, Strict 1) (transaction.rs:56-60, :103-112, :114-123, :231-241). A view
+//    block_hash, actions, nonce_mode (Monotonic 0, Strict 1) (transaction.rs:66-71, :113-119, :122-140, :268-276). A view
 //    with neither nonce_index nor nonce_mode is a V0 or a V1 with a plain nonce, Monotonic: both are tried. A view with
 //    either (a gas-key tx) is refused: no recorded tx pins one.
 //  - Action is a borsh tag then its payload (core/primitives/src/action/mod.rs:375-397, payloads mod.rs:46-75, :94-112,
@@ -513,7 +513,7 @@ export function txBytesFacts(b64, id) {
 //    Option<u128>, receiver_id String, method_names Vec<String>), FullAccess = 1 (mod.rs:39-44;
 //    core/primitives-core/src/account.rs:801-809, :909-920, :959-972; view: views.rs:165-211).
 //  - Delegate is a SignedDelegateAction: sender_id, receiver_id, actions, nonce u64, max_block_height u64, public_key,
-//    then a Signature (action/delegate.rs:34-41, :55-58; its view: views.rs:1520-1523, :1597-1600); its actions are
+//    then a Signature (action/delegate.rs:46-64, :78-81; its view: views.rs:1520-1523, :1597-1600); its actions are
 //    NonDelegateAction, an Action with Action's own serde and borsh (delegate.rs:370-371).
 //  - a PublicKey is tag 0 then 32 bytes for ed25519, a Signature 0 then 64 bytes (core/crypto/src/signature.rs:39-43,
 //    :398-404, :1129-1135). Balance is u128 (near-token), Gas u64.
@@ -560,6 +560,7 @@ function permission(p, w) {
 // one action of the view; `code(sha256)` gives a deployed contract's bytes by their hash, or null. Inside a Delegate an
 // action has Action's own serde (delegate.rs:370-371), the view's shape for the two kinds pinned there.
 const IN_DELEGATE = ["AddKey", "FunctionCall"];
+const NOT_READ = Symbol("code not read yet");
 function action(a, code, inDelegate = false) {
   if (inDelegate && !(a !== null && typeof a === "object" && Object.keys(a).length === 1 && IN_DELEGATE.includes(Object.keys(a)[0])))
     throw new Error(`an action inside a Delegate this check does not rebuild: ${JSON.stringify(a)?.slice(0, 60)}`);
@@ -574,6 +575,7 @@ function action(a, code, inDelegate = false) {
       const h = b64(v.code, `${w}'s code hash`);
       if (h.length !== 32) throw new Error(`${w}'s code hash is not 32 bytes`);
       const c = code(h);
+      if (c === NOT_READ) return Buffer.from([1]); // findTxBytes's check before its code read: the bytes are thrown away
       if (!Buffer.isBuffer(c) || !sha(c).equals(h)) throw new Error(`${w}: no code read back that hashes to ${h.toString("base64")}`);
       return Buffer.concat([Buffer.from([1]), bytesVec(c)]);
     }
@@ -635,6 +637,9 @@ export async function findTxBytes(fetchFn, url, id, known, sleep = wait, max = M
     if (j?.error || !j?.result) throw new Error(`${hostOf(url) ?? url} ${method}: ${JSON.stringify(j?.error ?? "no result").slice(0, 120)}`);
     return j.result;
   };
+  // a field, kind or key it does not rebuild is refused before any read: a DeployContract's code read included (its
+  // code is not checked here, only the rest of the tx)
+  rebuildTx(t, "11111111111111111111111111111111", () => NOT_READ);
   const codes = new Map();
   if (Array.isArray(t.actions) && t.actions.some((a) => a !== null && typeof a === "object" && Object.hasOwn(a, "DeployContract"))) {
     const first = known.transaction_outcome?.outcome?.receipt_ids?.[0];
@@ -645,14 +650,13 @@ export async function findTxBytes(fetchFn, url, id, known, sleep = wait, max = M
     codes.set(sha(c).toString("hex"), c);
   }
   const code = (h) => codes.get(h.toString("hex")) ?? null;
-  rebuildTx(t, "11111111111111111111111111111111", code); // a field, kind or key it does not rebuild is refused before any walk
   let hash = known.transaction_outcome?.block_hash;
   for (let back = 0; back <= max; back++) {
     if (typeof hash !== "string") throw new Error(`no block ${back} back from its own`);
     for (const bytes of rebuildTx(t, hash, code)) if (sha(Buffer.from(bytes, "base64")).equals(hash32(id))) return { bytes, back };
     if (back < max) hash = (await call("block", { block_id: hash })).header?.prev_hash;
   }
-  throw new Error(`no block from its own back ${max} makes its tx JSON hash to it`);
+  throw new Error(`no block from its own back ${max} makes its tx JSON hash to it: a tx whose block hash is older passes only on two operators' reads or by its tx-bytes file (${LIVE}<card>${BYTES}): keep its tx-bytes file`);
 }
 
 /** One EXPERIMENTAL_light_client_proof answer for `id`, checked against the head's block_merkle_root (32 bytes).

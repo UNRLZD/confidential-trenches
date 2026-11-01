@@ -1425,7 +1425,9 @@ test("tx rebuild planted: a changed block on the walk, its own block hash, or on
   await assert.rejects(rebuilt(t, own), /UNKNOWN_BLOCK/);
   // a walk cut short of the right block: refused at the cap
   const s = walkHost(t);
-  await assert.rejects(findTxBytes(s.fetchFn, t.host, t.id, t.known, s.sleep, back - 1), new RegExp(`no block from its own back ${back - 1} makes its tx JSON hash to it`));
+  await assert.rejects(findTxBytes(s.fetchFn, t.host, t.id, t.known, s.sleep, back - 1), new RegExp(`no block from its own back ${back - 1} makes its tx JSON hash to it: .*keep its tx-bytes file`));
+  // a cap of exactly its depth reaches it
+  assert.equal((await findTxBytes(s.fetchFn, t.host, t.id, t.known, s.sleep, back)).back, back);
   // the deployed code, read back with one byte changed: its hash is no longer the view's
   const d = clone(trTx("HVkQ7DY9pYjCiuKeXdCPencjHyzwzs3NBUVzSHgHEK7m"));
   const c = Buffer.from(d.code, "base64");
@@ -1512,17 +1514,58 @@ test("tx rebuild: a NEAR answer is read with every integer past 2^53 kept exact,
   const lossy = JSON.parse(text).result;
   assert.equal(lossy.transaction.actions[0].Delegate.delegate_action.max_block_height, 18446744073709552000);
   await assert.rejects(rebuilt(t, lossy), /not a u64/);
-  // the gate's own read (rpc, through a fetch answer's text) keeps it
+  // the gate's own read (rpc) of a real fetch Response, which offers both json() and text(), keeps it
   const out = {};
-  const fetchFn = async (url, init) => {
-    const { method } = JSON.parse(init.body);
-    const body = method === "block" ? JSON.stringify({ jsonrpc: "2.0", id: 1, result: { header: { timestamp_nanosec: "1790000000000000000" } } }) : text;
-    return { ok: true, status: 200, headers: new Headers(), text: async () => body };
-  };
   const known = { ...t.known, status: { SuccessValue: "" }, final_execution_status: "FINAL", receipts: [], receipts_outcome: [] };
   const served = JSON.stringify({ jsonrpc: "2.0", id: 1, result: known }).replace('"max_block_height":"18446744073709551615"', '"max_block_height":18446744073709551615');
-  const f2 = async (url, init) => (JSON.parse(init.body).method === "block" ? fetchFn(url, init) : { ok: true, status: 200, headers: new Headers(), text: async () => served });
+  const block = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { header: { timestamp_nanosec: "1790000000000000000" } } });
+  const f2 = async (url, init) => new Response(JSON.parse(init.body).method === "block" ? block : served, { status: 200, headers: { "content-type": "application/json" } });
   assert.equal(await readTx(f2, "stub", { chain: "near", hash: t.id, signer: t.signer }, 0, async () => {}, true, out), "ok");
   assert.equal(out.result.transaction.actions[0].Delegate.delegate_action.max_block_height, "18446744073709551615");
   assert.equal(txBytesFacts((await rebuilt(t, out.result)).bytes, t.id).signer, "sweat-relayer.near");
+});
+
+test("tx rebuild: the gate walks back 64 blocks, no more: a tx whose block hash is 64 blocks before its own rebuilds, 65 is refused", async () => {
+  const t = trTx("6oFdTV6xQ5gMnDyf4jd2TJDL1qgyn2CeS583aGdyRQgf");
+  const { back } = await rebuilt(t);
+  // the recorded walk put `extra` stand-in blocks further from the tx: its block hash is then back + extra blocks back
+  const deeper = (extra) => {
+    const x = clone(t);
+    const real = x.known.transaction_outcome.block_hash;
+    const fake = Array.from({ length: extra }, (_, i) => enc58(createHash("sha256").update(`stand-in ${i}`).digest()));
+    fake.forEach((h, i) => (x.blocks[h] = fake[i + 1] ?? real));
+    x.known.transaction_outcome.block_hash = fake[0];
+    return x;
+  };
+  assert.equal((await rebuilt(deeper(64 - back))).back, 64);
+  await assert.rejects(rebuilt(deeper(65 - back)), /no block from its own back 64 makes its tx JSON hash to it: .*keep its tx-bytes file/);
+});
+
+test("tx rebuild: a deploy from a parent to a new sub-account (the testnet vault skeleton's own, 7sbN) reads its code at the block its receipt ran in, a block after the tx's", async () => {
+  const t = trTx("7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML");
+  const ran = t.known.receipts_outcome.find((o) => o.id === t.known.transaction_outcome.outcome.receipt_ids[0]);
+  assert.notEqual(t.known.transaction.signer_id, t.known.transaction.receiver_id);
+  assert.notEqual(ran.block_hash, t.known.transaction_outcome.block_hash);
+  assert.deepEqual(kindsOf(t), ["CreateAccount", "Transfer", "DeployContract", "FunctionCall"]);
+  const s = walkHost(t);
+  const { bytes } = await findTxBytes(s.fetchFn, t.host, t.id, t.known, s.sleep);
+  assert.equal(txBytesFacts(bytes, t.id).receiver, "vault.bf-vs-20261101t012200.testnet");
+  assert.deepEqual(s.log.filter((l) => l.startsWith("query")), [`query ${ran.block_hash}`]);
+  // the vault's code hash on record (contracts/vault/deployments/testnet-skeleton.json) is the code rebuilt into it
+  assert.equal(enc58(createHash("sha256").update(Buffer.from(t.code, "base64")).digest()), "GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn");
+});
+
+test("tx rebuild planted: a DeployContract tx with a field it does not rebuild is refused before its code is read", async () => {
+  const t = trTx("HVkQ7DY9pYjCiuKeXdCPencjHyzwzs3NBUVzSHgHEK7m");
+  for (const [what, edit] of [
+    ["an extra tx field", (x) => (x.memo = "x")],
+    ["an unknown kind beside it", (x) => x.actions.push({ NoSuchAction: {} })],
+    ["a code hash of 31 bytes", (x) => (x.actions[0].DeployContract.code = Buffer.alloc(31).toString("base64"))],
+  ]) {
+    const known = clone(t.known);
+    edit(known.transaction);
+    const s = walkHost(t);
+    await assert.rejects(findTxBytes(s.fetchFn, t.host, t.id, known, s.sleep), /does not rebuild|not 32 bytes/, what);
+    assert.deepEqual(s.log, [], what);
+  }
 });
