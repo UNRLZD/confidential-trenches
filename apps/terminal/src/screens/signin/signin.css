@@ -40,8 +40,7 @@
 .tbr-ph { margin-left: auto; display: flex; align-items: center; }
 .phh .signin { height: 40px; padding: 0 16px; border-radius: 12px; background: var(--m-ink-field); box-shadow: inset 0 0 0 1px var(--m-line); font: 600 15px var(--font-ui); display: flex; align-items: center; }
 .phh .balp { height: 40px; border-radius: 12px; background: var(--m-ink-field); box-shadow: inset 0 0 0 1px var(--m-line); padding: 0 4px 0 12px; display: flex; align-items: center; gap: 9px; flex: none; }
-/* the value keeps the skeleton's width, as .balblock does on desktop, so the pill does not move when the balance lands */
-.phh .balp .v { min-width: 56px; text-align: right; font: 500 14px var(--font-num); letter-spacing: -0.02em; }
+.phh .balp .v { font: 500 14px var(--font-num); letter-spacing: -0.02em; }
 .phh .balp .sk { width: 56px; height: 14px; }
 .phh .balp .plus { width: 32px; height: 32px; border-radius: 9px; background: var(--acc); color: #04150c; display: flex; align-items: center; justify-content: center; }
 .phh button:disabled .plus { background: var(--bg-raised); color: var(--text-3); }

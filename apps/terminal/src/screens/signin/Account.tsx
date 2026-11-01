@@ -46,8 +46,8 @@ export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean 
     if (m.kind === "out") setMenu(false);
   }, [m.kind]);
 
-  // Signed out and signed in are two clusters, each its own key: when the state lands (S1.2 to S1.1) the one drawn
-  // replaces the other at the bar's end; the old one never moves across the bar (BAR-04).
+  // The skeleton (S1.2), signed out (S1.1) and signed in (S1.3/S1.4) are three clusters, each its own key: when the
+  // state lands the one drawn replaces the skeleton at the bar's end, so nothing on screen moves across it (BAR-04).
   if (m.kind === "out")
     return (
       <div className="tbr" data-header="S1.1" key="out">
@@ -57,7 +57,7 @@ export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean 
       </div>
     );
   return (
-    <div className="tbr" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} ref={box} key="in">
+    <div className="tbr" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} ref={box} key={m.kind === "loading" ? "loading" : "in"}>
       <div className="balblock">
         <Balance m={m} />
       </div>
@@ -128,7 +128,7 @@ export function PhoneAccount() {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
   const m = headerModel(src.snapshot);
-  // as on desktop: Sign in and the balance pill are two controls, each its own key, so one replaces the other (BAR-04)
+  // as on desktop: the skeleton, Sign in and the balance pill are each their own key, so one replaces another (BAR-04)
   if (m.kind === "out")
     return (
       <div className="tbr-ph" key="out">
@@ -140,7 +140,7 @@ export function PhoneAccount() {
       </div>
     );
   return (
-    <div className="tbr-ph" key="in">
+    <div className="tbr-ph" key={m.kind === "loading" ? "loading" : "in"}>
       <button type="button" className="hit44" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} data-action="deposit" disabled={!src.moneyOn || m.kind === "loading"}>
         <span className="balp">
           <Balance m={m} />
