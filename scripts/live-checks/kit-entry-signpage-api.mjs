@@ -28,7 +28,7 @@ export const REPO = "UNRLZD/confidential-trenches";
 export const KINDS = [
   "deposit.quote", "deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return",
   "withdraw.open", "signin.open", "backup.open", "export.open", "signout", "restore", "state",
-  // SIGN_HOST's shell (card signpage-shell, the CO's review FIX item 4, 2026-11-01): where the app is, and a top reload
+  // SIGN_HOST's shell (card signpage-shell, review item 4, 2026-11-01): where the app is, and a top reload
   "nav", "reload",
 ];
 // app.md §7 ask P1 (app.md:1669-1672): the only names allowed beside the kinds

@@ -4,8 +4,7 @@ Runs pages on the Mac's own WebKit.framework (Safari's engine, a WKWebView with 
 non-persistent data store), with SIGN_HOST and APP_HOST served by your `serve` function, not the live sites.
 
 - Needs macOS 14 or later, `swiftc` (Xcode command line tools) and `openssl` on the PATH.
-- Run the self-test on the Mac queue:
-  `HEAVY_REMOTE=0 scripts/heavy.sh wk-harness -- node scripts/webkit-harness/self-test.mjs`
+- Run the self-test: `node scripts/webkit-harness/self-test.mjs`
 - Use it from a live check: `const d = await launchWebKit({ serve, width, height })` (the view in CSS px, 800 x 600
   when not given), then `d.goto`, `d.evaluate`, `d.click`, `d.type` (native keys, to whatever holds the page's focus),
   `d.messages`, `d.evaluateFrame`, `d.close` (see the top of `index.mjs`).
