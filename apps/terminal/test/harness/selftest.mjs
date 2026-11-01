@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The harness's self-test (card app-harness-hosts): in headless Chromium,
-//   - each host serves: app.ct.test (the terminal's build under its own _headers), sign.ct.test (SIGN_HOST's stand-in),
+//   - each host serves: app.ct.test (the terminal's build under its own _headers), sign.ct.test (the signing page's build under its
+//     own _headers),
 //     evil.ct.test (same-site sibling) and app.other.test (cross-site), each at its own origin with no port, in a
 //     secure context, with the headers its build's _headers file sets;
 //   - the browser itself reads evil.ct.test as same-site and app.other.test as cross-site to sign.ct.test
@@ -17,7 +18,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseHeadersFile } from "../../scripts/check-deploy.ts";
-import { addAuthenticator, defaultSites, HOSTS, startHarness, startScreencast } from "./harness.mjs";
+import { addAuthenticator, HOSTS, startHarness, startScreencast } from "./harness.mjs";
 import { headersFor } from "./server.mjs";
 
 const ROLES = Object.keys(HOSTS);
@@ -87,9 +88,7 @@ const expectedHeaders = (root) => {
 };
 
 export async function run({ plant = null, shots = null } = {}) {
-  const sites = defaultSites();
-  if (plant === "no-sibling") delete sites[HOSTS.sibling];
-  const h = await startHarness({ sites });
+  const h = await startHarness({ edit: (sites) => plant === "no-sibling" && delete sites[HOSTS.sibling] });
   const rec = { plant, browser: h.browser.version(), hosts: [], fetchSite: {}, outside: {}, passkey: {}, recorders: {} };
   try {
     const { context, rec: r } = await h.newContext({ viewport: { width: 1440, height: 900 } });
@@ -99,7 +98,7 @@ export async function run({ plant = null, shots = null } = {}) {
 
     const visit = async (role) => {
       const name = HOSTS[role];
-      const entry = { role, host: name, expected: expectedHeaders(defaultSites()[name].root) };
+      const entry = { role, host: name, expected: h.sites[name] ? expectedHeaders(h.sites[name].root) : {} };
       rec.hosts.push(entry);
       try {
         const res = await page.goto(`https://${name}/`, { waitUntil: "load" });

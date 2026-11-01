@@ -24,13 +24,15 @@
     "role": "sign",
     "host": "sign.ct.test",
     "expected": {
-     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors https://app.ct.test; object-src 'none'; base-uri 'none'; form-action 'none'",
-     "permissions-policy": "publickey-credentials-create=(self), publickey-credentials-get=(self)"
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
     },
     "status": 200,
     "served": {
-     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors https://app.ct.test; object-src 'none'; base-uri 'none'; form-action 'none'",
-     "permissions-policy": "publickey-credentials-create=(self), publickey-credentials-get=(self)"
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
     },
     "origin": "https://sign.ct.test",
     "secure": true
@@ -75,12 +77,12 @@
    "shiftSum": 0,
    "shiftCount": 0,
    "pages": 1,
-   "frames": 11,
+   "frames": 9,
    "timestampsRise": true
   },
   "requests": [
    {
-    "t": 73,
+    "t": 50,
     "url": "https://app.ct.test/",
     "host": "app.ct.test",
     "method": "GET",
@@ -91,7 +93,7 @@
     "failure": null
    },
    {
-    "t": 113,
+    "t": 72,
     "url": "https://app.ct.test/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -102,7 +104,7 @@
     "failure": null
    },
    {
-    "t": 113,
+    "t": 72,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -113,7 +115,7 @@
     "failure": null
    },
    {
-    "t": 113,
+    "t": 72,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -124,7 +126,7 @@
     "failure": null
    },
    {
-    "t": 113,
+    "t": 72,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -135,8 +137,8 @@
     "failure": null
    },
    {
-    "t": 113,
-    "url": "https://app.ct.test/assets/index-4-aiKqcO.js",
+    "t": 73,
+    "url": "https://app.ct.test/assets/index-Ckddi3aW.js",
     "host": "app.ct.test",
     "method": "GET",
     "type": "script",
@@ -146,7 +148,7 @@
     "failure": null
    },
    {
-    "t": 113,
+    "t": 74,
     "url": "https://app.ct.test/assets/style-tyJGpiSY.css",
     "host": "app.ct.test",
     "method": "GET",
@@ -157,7 +159,7 @@
     "failure": null
    },
    {
-    "t": 162,
+    "t": 123,
     "url": "https://app.ct.test/assets/ct-stack-1x-cool-BSLhwoVz.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -168,7 +170,7 @@
     "failure": null
    },
    {
-    "t": 162,
+    "t": 123,
     "url": "https://app.ct.test/assets/ct-stack-1x-z6B8R7os.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -179,7 +181,7 @@
     "failure": null
    },
    {
-    "t": 162,
+    "t": 123,
     "url": "https://app.ct.test/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -190,7 +192,7 @@
     "failure": null
    },
    {
-    "t": 162,
+    "t": 123,
     "url": "https://app.ct.test/assets/wordmark-dots-header-1x-DtpRNm76.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -201,7 +203,7 @@
     "failure": null
    },
    {
-    "t": 162,
+    "t": 124,
     "url": "https://app.ct.test/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -212,7 +214,7 @@
     "failure": null
    },
    {
-    "t": 162,
+    "t": 124,
     "url": "https://app.ct.test/assets/ct-stack-phone-2x-7fLYhN9M.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -223,7 +225,7 @@
     "failure": null
    },
    {
-    "t": 1238,
+    "t": 1187,
     "url": "https://sign.ct.test/",
     "host": "sign.ct.test",
     "method": "GET",
@@ -234,7 +236,7 @@
     "failure": null
    },
    {
-    "t": 1295,
+    "t": 1233,
     "url": "https://evil.ct.test/",
     "host": "evil.ct.test",
     "method": "GET",
@@ -245,18 +247,18 @@
     "failure": null
    },
    {
-    "t": 1343,
+    "t": 1277,
     "url": "https://sign.ct.test/?from=sibling",
     "host": "sign.ct.test",
     "method": "GET",
     "type": "fetch",
     "navigation": false,
     "frameHost": "evil.ct.test",
-    "status": 200,
-    "failure": "net::ERR_ABORTED"
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
    },
    {
-    "t": 1349,
+    "t": 1282,
     "url": "https://app.other.test/",
     "host": "app.other.test",
     "method": "GET",
@@ -267,18 +269,18 @@
     "failure": null
    },
    {
-    "t": 1409,
+    "t": 1328,
     "url": "https://sign.ct.test/?from=cross",
     "host": "sign.ct.test",
     "method": "GET",
     "type": "fetch",
     "navigation": false,
     "frameHost": "app.other.test",
-    "status": 200,
-    "failure": "net::ERR_ABORTED"
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
    },
    {
-    "t": 1415,
+    "t": 1331,
     "url": "https://example.com/",
     "host": "example.com",
     "method": "GET",
@@ -300,13 +302,6 @@
    {
     "host": "app.ct.test",
     "method": "GET",
-    "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
-    "status": 200,
-    "fetchSite": "same-origin"
-   },
-   {
-    "host": "app.ct.test",
-    "method": "GET",
     "path": "/assets/style-tyJGpiSY.css",
     "status": 200,
     "fetchSite": "same-origin"
@@ -315,6 +310,13 @@
     "host": "app.ct.test",
     "method": "GET",
     "path": "/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
     "status": 200,
     "fetchSite": "same-origin"
    },
@@ -335,7 +337,7 @@
    {
     "host": "app.ct.test",
     "method": "GET",
-    "path": "/assets/index-4-aiKqcO.js",
+    "path": "/assets/index-Ckddi3aW.js",
     "status": 200,
     "fetchSite": "same-origin"
    },
@@ -443,13 +445,15 @@
     "role": "sign",
     "host": "sign.ct.test",
     "expected": {
-     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors https://app.ct.test; object-src 'none'; base-uri 'none'; form-action 'none'",
-     "permissions-policy": "publickey-credentials-create=(self), publickey-credentials-get=(self)"
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
     },
     "status": 200,
     "served": {
-     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors https://app.ct.test; object-src 'none'; base-uri 'none'; form-action 'none'",
-     "permissions-policy": "publickey-credentials-create=(self), publickey-credentials-get=(self)"
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
     },
     "origin": "https://sign.ct.test",
     "secure": true
@@ -492,12 +496,12 @@
    "shiftSum": 0,
    "shiftCount": 0,
    "pages": 1,
-   "frames": 7,
+   "frames": 6,
    "timestampsRise": true
   },
   "requests": [
    {
-    "t": 58,
+    "t": 63,
     "url": "https://app.ct.test/",
     "host": "app.ct.test",
     "method": "GET",
@@ -508,7 +512,7 @@
     "failure": null
    },
    {
-    "t": 105,
+    "t": 85,
     "url": "https://app.ct.test/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -519,7 +523,7 @@
     "failure": null
    },
    {
-    "t": 105,
+    "t": 85,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -530,7 +534,7 @@
     "failure": null
    },
    {
-    "t": 105,
+    "t": 85,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -541,7 +545,7 @@
     "failure": null
    },
    {
-    "t": 105,
+    "t": 85,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -552,8 +556,8 @@
     "failure": null
    },
    {
-    "t": 105,
-    "url": "https://app.ct.test/assets/index-4-aiKqcO.js",
+    "t": 88,
+    "url": "https://app.ct.test/assets/index-Ckddi3aW.js",
     "host": "app.ct.test",
     "method": "GET",
     "type": "script",
@@ -563,7 +567,7 @@
     "failure": null
    },
    {
-    "t": 105,
+    "t": 88,
     "url": "https://app.ct.test/assets/style-tyJGpiSY.css",
     "host": "app.ct.test",
     "method": "GET",
@@ -574,7 +578,7 @@
     "failure": null
    },
    {
-    "t": 145,
+    "t": 124,
     "url": "https://app.ct.test/assets/ct-stack-1x-cool-BSLhwoVz.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -585,7 +589,7 @@
     "failure": null
    },
    {
-    "t": 145,
+    "t": 124,
     "url": "https://app.ct.test/assets/ct-stack-1x-z6B8R7os.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -596,7 +600,7 @@
     "failure": null
    },
    {
-    "t": 148,
+    "t": 124,
     "url": "https://app.ct.test/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -607,7 +611,7 @@
     "failure": null
    },
    {
-    "t": 148,
+    "t": 124,
     "url": "https://app.ct.test/assets/wordmark-dots-header-1x-DtpRNm76.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -618,7 +622,7 @@
     "failure": null
    },
    {
-    "t": 148,
+    "t": 124,
     "url": "https://app.ct.test/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -629,7 +633,7 @@
     "failure": null
    },
    {
-    "t": 148,
+    "t": 124,
     "url": "https://app.ct.test/assets/ct-stack-phone-2x-7fLYhN9M.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -640,7 +644,7 @@
     "failure": null
    },
    {
-    "t": 1160,
+    "t": 1132,
     "url": "https://sign.ct.test/",
     "host": "sign.ct.test",
     "method": "GET",
@@ -651,7 +655,7 @@
     "failure": null
    },
    {
-    "t": 1183,
+    "t": 1150,
     "url": "https://evil.ct.test/",
     "host": "evil.ct.test",
     "method": "GET",
@@ -662,18 +666,18 @@
     "failure": null
    },
    {
-    "t": 1194,
+    "t": 1163,
     "url": "https://sign.ct.test/?from=sibling",
     "host": "sign.ct.test",
     "method": "GET",
     "type": "fetch",
     "navigation": false,
     "frameHost": "evil.ct.test",
-    "status": 200,
-    "failure": "net::ERR_ABORTED"
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
    },
    {
-    "t": 1200,
+    "t": 1168,
     "url": "https://app.other.test/",
     "host": "app.other.test",
     "method": "GET",
@@ -684,18 +688,18 @@
     "failure": null
    },
    {
-    "t": 1224,
+    "t": 1189,
     "url": "https://sign.ct.test/?from=cross",
     "host": "sign.ct.test",
     "method": "GET",
     "type": "fetch",
     "navigation": false,
     "frameHost": "app.other.test",
-    "status": 200,
-    "failure": "net::ERR_ABORTED"
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
    },
    {
-    "t": 1229,
+    "t": 1194,
     "url": "https://example.com/",
     "host": "example.com",
     "method": "GET",
@@ -724,13 +728,6 @@
    {
     "host": "app.ct.test",
     "method": "GET",
-    "path": "/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
-    "status": 200,
-    "fetchSite": "same-origin"
-   },
-   {
-    "host": "app.ct.test",
-    "method": "GET",
     "path": "/assets/style-tyJGpiSY.css",
     "status": 200,
     "fetchSite": "same-origin"
@@ -752,7 +749,14 @@
    {
     "host": "app.ct.test",
     "method": "GET",
-    "path": "/assets/index-4-aiKqcO.js",
+    "path": "/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/index-Ckddi3aW.js",
     "status": 200,
     "fetchSite": "same-origin"
    },
@@ -860,13 +864,15 @@
     "role": "sign",
     "host": "sign.ct.test",
     "expected": {
-     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors https://app.ct.test; object-src 'none'; base-uri 'none'; form-action 'none'",
-     "permissions-policy": "publickey-credentials-create=(self), publickey-credentials-get=(self)"
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
     },
     "status": 200,
     "served": {
-     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors https://app.ct.test; object-src 'none'; base-uri 'none'; form-action 'none'",
-     "permissions-policy": "publickey-credentials-create=(self), publickey-credentials-get=(self)"
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
     },
     "origin": "https://sign.ct.test",
     "secure": true
@@ -911,12 +917,12 @@
    "shiftSum": 0,
    "shiftCount": 0,
    "pages": 1,
-   "frames": 7,
+   "frames": 6,
    "timestampsRise": true
   },
   "requests": [
    {
-    "t": 59,
+    "t": 62,
     "url": "https://app.ct.test/",
     "host": "app.ct.test",
     "method": "GET",
@@ -927,7 +933,7 @@
     "failure": null
    },
    {
-    "t": 84,
+    "t": 101,
     "url": "https://app.ct.test/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -938,7 +944,7 @@
     "failure": null
    },
    {
-    "t": 84,
+    "t": 101,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -949,7 +955,7 @@
     "failure": null
    },
    {
-    "t": 85,
+    "t": 102,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -960,7 +966,7 @@
     "failure": null
    },
    {
-    "t": 85,
+    "t": 102,
     "url": "https://app.ct.test/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
     "host": "app.ct.test",
     "method": "GET",
@@ -971,8 +977,8 @@
     "failure": null
    },
    {
-    "t": 85,
-    "url": "https://app.ct.test/assets/index-4-aiKqcO.js",
+    "t": 102,
+    "url": "https://app.ct.test/assets/index-Ckddi3aW.js",
     "host": "app.ct.test",
     "method": "GET",
     "type": "script",
@@ -982,7 +988,7 @@
     "failure": null
    },
    {
-    "t": 85,
+    "t": 102,
     "url": "https://app.ct.test/assets/style-tyJGpiSY.css",
     "host": "app.ct.test",
     "method": "GET",
@@ -993,7 +999,7 @@
     "failure": null
    },
    {
-    "t": 133,
+    "t": 161,
     "url": "https://app.ct.test/assets/ct-stack-1x-cool-BSLhwoVz.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -1004,7 +1010,7 @@
     "failure": null
    },
    {
-    "t": 133,
+    "t": 164,
     "url": "https://app.ct.test/assets/ct-stack-1x-z6B8R7os.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -1015,7 +1021,7 @@
     "failure": null
    },
    {
-    "t": 134,
+    "t": 165,
     "url": "https://app.ct.test/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -1026,7 +1032,7 @@
     "failure": null
    },
    {
-    "t": 134,
+    "t": 165,
     "url": "https://app.ct.test/assets/wordmark-dots-header-1x-DtpRNm76.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -1037,7 +1043,7 @@
     "failure": null
    },
    {
-    "t": 134,
+    "t": 165,
     "url": "https://app.ct.test/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -1048,7 +1054,7 @@
     "failure": null
    },
    {
-    "t": 134,
+    "t": 165,
     "url": "https://app.ct.test/assets/ct-stack-phone-2x-7fLYhN9M.svg",
     "host": "app.ct.test",
     "method": "GET",
@@ -1059,7 +1065,7 @@
     "failure": null
    },
    {
-    "t": 1143,
+    "t": 1193,
     "url": "https://sign.ct.test/",
     "host": "sign.ct.test",
     "method": "GET",
@@ -1070,7 +1076,7 @@
     "failure": null
    },
    {
-    "t": 1177,
+    "t": 1213,
     "url": "https://evil.ct.test/",
     "host": "evil.ct.test",
     "method": "GET",
@@ -1081,18 +1087,18 @@
     "failure": null
    },
    {
-    "t": 1192,
+    "t": 1226,
     "url": "https://sign.ct.test/?from=sibling",
     "host": "sign.ct.test",
     "method": "GET",
     "type": "fetch",
     "navigation": false,
     "frameHost": "evil.ct.test",
-    "status": 200,
-    "failure": "net::ERR_ABORTED"
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
    },
    {
-    "t": 1197,
+    "t": 1230,
     "url": "https://app.other.test/",
     "host": "app.other.test",
     "method": "GET",
@@ -1103,18 +1109,18 @@
     "failure": null
    },
    {
-    "t": 1217,
+    "t": 1250,
     "url": "https://sign.ct.test/?from=cross",
     "host": "sign.ct.test",
     "method": "GET",
     "type": "fetch",
     "navigation": false,
     "frameHost": "app.other.test",
-    "status": 200,
-    "failure": "net::ERR_ABORTED"
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
    },
    {
-    "t": 1221,
+    "t": 1253,
     "url": "https://example.com/",
     "host": "example.com",
     "method": "GET",
@@ -1136,14 +1142,21 @@
    {
     "host": "app.ct.test",
     "method": "GET",
-    "path": "/assets/style-tyJGpiSY.css",
+    "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
     "status": 200,
     "fetchSite": "same-origin"
    },
    {
     "host": "app.ct.test",
     "method": "GET",
-    "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+    "path": "/assets/index-Ckddi3aW.js",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/style-tyJGpiSY.css",
     "status": 200,
     "fetchSite": "same-origin"
    },
@@ -1165,13 +1178,6 @@
     "host": "app.ct.test",
     "method": "GET",
     "path": "/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
-    "status": 200,
-    "fetchSite": "same-origin"
-   },
-   {
-    "host": "app.ct.test",
-    "method": "GET",
-    "path": "/assets/index-4-aiKqcO.js",
     "status": 200,
     "fetchSite": "same-origin"
    },

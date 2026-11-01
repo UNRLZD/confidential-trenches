@@ -10,7 +10,7 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseHeadersFile } from "../../scripts/check-deploy.ts";
 import { makeCert } from "./certs.mjs";
-import { defaultSites, HOSTS, MAPPED, TERMINAL } from "./harness.mjs";
+import { buildSignpage, defaultSites, HOSTS, MAPPED, SIGNPAGE, TERMINAL } from "./harness.mjs";
 import { headersFor, startServer } from "./server.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +18,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 let cert;
 let server;
 let appRoot;
+let signRoot;
 
 // GET https://<name><urlPath> from the server, checking the certificate against <name> with the run's cert as the CA
 const get = (name, urlPath = "/") =>
@@ -37,13 +38,15 @@ before(async () => {
   appRoot = mkdtempSync(path.join(tmpdir(), "ct-harness-app-"));
   cpSync(path.join(TERMINAL, "public/_headers"), path.join(appRoot, "_headers"));
   writeFileSync(path.join(appRoot, "index.html"), "<!doctype html><title>app</title>");
-  server = await startServer({ cert: cert.cert, key: cert.key, sites: { ...defaultSites(), [HOSTS.app]: { root: appRoot, spa: true } } });
+  signRoot = buildSignpage();
+  server = await startServer({ cert: cert.cert, key: cert.key, sites: { ...defaultSites(signRoot), [HOSTS.app]: { root: appRoot, spa: true } } });
 });
 
 after(async () => {
   await server?.close();
   cert?.remove();
   rmSync(appRoot, { recursive: true, force: true });
+  rmSync(signRoot, { recursive: true, force: true });
 });
 
 const fileHeaders = (file) => headersFor(parseHeadersFile(readFileSync(file, "utf8")).rules, "/");
@@ -51,7 +54,7 @@ const fileHeaders = (file) => headersFor(parseHeadersFile(readFileSync(file, "ut
 test("every host serves over TLS with a certificate valid for its name, under its own build's _headers", async () => {
   const want = {
     [HOSTS.app]: fileHeaders(path.join(TERMINAL, "public/_headers")),
-    [HOSTS.sign]: fileHeaders(path.join(HERE, "sites/sign-standin/_headers")),
+    [HOSTS.sign]: fileHeaders(path.join(SIGNPAGE, "public/_headers")),
     [HOSTS.sibling]: new Map(),
     [HOSTS.cross]: new Map(),
   };
@@ -63,6 +66,7 @@ test("every host serves over TLS with a certificate valid for its name, under it
   }
   assert.ok(want[HOSTS.app].get("content-security-policy")?.includes("frame-ancestors 'none'"));
   assert.match(want[HOSTS.sign].get("permissions-policy") ?? "", /publickey-credentials-create=\(self\)/);
+  assert.match(want[HOSTS.sign].get("content-security-policy") ?? "", /frame-ancestors https:\/\/confidential\.unrealized\.trade/);
   // a route with no file is the SPA's index.html, as Pages serves a build with no 404.html
   assert.equal((await get(HOSTS.app, "/discover")).status, 200);
   assert.deepEqual(new Set(server.log.map((e) => e.host)), new Set(Object.values(HOSTS)));
@@ -71,8 +75,8 @@ test("every host serves over TLS with a certificate valid for its name, under it
 test("an unmapped host, a path out of the build and the _headers file are refused", async () => {
   // the certificate covers *.ct.test, so the TLS check passes and the server refuses the name
   assert.equal((await get("nothere.ct.test")).status, 421);
-  assert.equal((await get(HOSTS.sign, "/../../harness.mjs")).status, 404);
-  assert.equal((await get(HOSTS.sign, "/..%2F..%2Fharness.mjs")).status, 404);
+  assert.equal((await get(HOSTS.sibling, "/../../harness.mjs")).status, 404);
+  assert.equal((await get(HOSTS.sibling, "/..%2F..%2Fharness.mjs")).status, 404);
   assert.equal((await get(HOSTS.sign, "/_headers")).status, 404);
   assert.equal((await get(HOSTS.sign, "/%E0%A4%A")).status, 400);
   // a name the certificate does not cover fails the TLS check

@@ -13,7 +13,9 @@
 // Recorders. A request log of every request of the context with the host of the document that made it (BAR-10,
 // AX-09), the pages the context opened (BAR-01), layout shifts summed from a PerformanceObserver with no input
 // exclusion (BAR-04), and a CDP screencast with timestamps (BAR-03). BAR-11's clock is Playwright's own page.clock.
+import { copyFileSync, cpSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeCert } from "./certs.mjs";
@@ -21,6 +23,7 @@ import { startServer } from "./server.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TERMINAL = path.resolve(HERE, "../..");
+export const SIGNPAGE = path.resolve(TERMINAL, "../../packages/signpage");
 
 export const HOSTS = {
   app: "app.ct.test", // APP_HOST
@@ -31,12 +34,23 @@ export const HOSTS = {
 // the domains the certificate covers and the browser maps to the harness; any other name is not found
 export const MAPPED = ["*.ct.test", "*.other.test"];
 
-/** Each host's build: APP_HOST's real build and _headers; SIGN_HOST's stand-in until signpage-skeleton lands. */
-export function defaultSites() {
+/**
+ * SIGN_HOST's build as its deploy makes it (packages/signpage/scripts/deploy.mjs build(): index.html and public/
+ * copied into a fresh folder), read as files, not imported: the terminal's code never imports a Blindfill package
+ * past the kit's entry. The caller removes the folder.
+ */
+export function buildSignpage() {
+  const out = mkdtempSync(path.join(tmpdir(), "ct-harness-sign-"));
+  copyFileSync(path.join(SIGNPAGE, "index.html"), path.join(out, "index.html"));
+  cpSync(path.join(SIGNPAGE, "public"), out, { recursive: true });
+  return out;
+}
+
+/** Each host's build: the terminal's build (pnpm --filter terminal build) and the signing page's, each with its own _headers. */
+export function defaultSites(signRoot) {
   return {
     [HOSTS.app]: { root: path.join(TERMINAL, "dist"), spa: true },
-    // STAND-IN: replace with the signing page's build (packages/signpage) when card signpage-skeleton lands
-    [HOSTS.sign]: { root: path.join(HERE, "sites/sign-standin") },
+    [HOSTS.sign]: { root: signRoot },
     [HOSTS.sibling]: { root: path.join(HERE, "sites/plain") },
     [HOSTS.cross]: { root: path.join(HERE, "sites/plain") },
   };
@@ -51,16 +65,24 @@ const hostOf = (u) => {
 };
 
 /**
- * Starts the server and Chromium. Close with close(); it deletes the certificate.
- * @param {{ sites?: Record<string, { root: string, spa?: boolean }>, headless?: boolean }} [opts]
+ * Starts the server and Chromium. Close with close(); it deletes the certificate and the signing page's build.
+ * @param {{ edit?: (sites: Record<string, { root: string, spa?: boolean }>) => void, headless?: boolean }} [opts]
+ *   edit changes the default sites before the server starts
  */
 export async function startHarness(opts = {}) {
   const { chromium } = createRequire(path.join(TERMINAL, "package.json"))("playwright");
   const cert = makeCert(MAPPED);
+  const signRoot = buildSignpage();
+  const sites = defaultSites(signRoot);
+  opts.edit?.(sites);
+  const cleanup = () => {
+    cert.remove();
+    rmSync(signRoot, { recursive: true, force: true });
+  };
   let server;
   let browser;
   try {
-    server = await startServer({ cert: cert.cert, key: cert.key, sites: opts.sites ?? defaultSites() });
+    server = await startServer({ cert: cert.cert, key: cert.key, sites });
     const rules = [...MAPPED.map((d) => `MAP ${d} 127.0.0.1:${server.port}`), "MAP * ~NOTFOUND"].join(", ");
     browser = await chromium.launch({
       headless: opts.headless ?? true,
@@ -69,11 +91,12 @@ export async function startHarness(opts = {}) {
   } catch (e) {
     await browser?.close();
     await server?.close();
-    cert.remove();
+    cleanup();
     throw e;
   }
   return {
     browser,
+    sites,
     serverLog: server.log,
     /** A new context with the request log, the page log and the layout-shift recorder attached. */
     async newContext(contextOpts = {}) {
@@ -85,7 +108,7 @@ export async function startHarness(opts = {}) {
         await browser.close();
       } finally {
         await server.close();
-        cert.remove();
+        cleanup();
       }
     },
   };

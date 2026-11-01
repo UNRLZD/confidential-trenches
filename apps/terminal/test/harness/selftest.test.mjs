@@ -1,6 +1,7 @@
 // node --test apps/terminal/test/harness/selftest.test.mjs: the self-test's verdict replays recorded runs
-// (selftest.answers.json), each read on 2026-11-01 at 01:38Z by selftest.mjs --record through scripts/heavy.sh on the
-// PC box (headless Chromium 153.0.8010.12, Playwright 1.63.0) from the terminal's build at main 13370b7:
+// (selftest.answers.json), each read on 2026-11-01 at 01:44Z by selftest.mjs --record through scripts/heavy.sh on the
+// PC box (headless Chromium 153.0.8010.12, Playwright 1.63.0) from the terminal's and the signing page's builds at main
+// f4df583 (signpage-skeleton's _headers on sign.ct.test):
 //   good:             PASS (every host serves, a passkey with PRF registers, both logs name every host);
 //   badAuthenticator: --plant no-authenticator, no virtual authenticator on the page: FAIL on the passkey lines only;
 //   badSibling:       --plant no-sibling, evil.ct.test left out of the server: FAIL on that host's line only.
@@ -28,9 +29,12 @@ test("recorded good answer: every host serves, an authenticator registers, both 
   assert.ok(r.lines.includes("ok  PRF output 32 bytes, equal on two gets"));
   assert.ok(r.lines.some((l) => /^ok  the request log names every host \(\d+ requests\)$/.test(l)));
   assert.ok(r.lines.some((l) => /^ok  the server's log names every host \(\d+ requests\)$/.test(l)));
-  // APP_HOST was served under its build's own policy headers, the three the deploy gate holds
-  const app = ANSWERS.good.hosts.find((h) => h.role === "app");
-  assert.deepEqual(Object.keys(app.served).sort(), ["content-security-policy", "integrity-policy", "permissions-policy"]);
+  // APP_HOST and SIGN_HOST were each served under its own build's policy headers, the three the self-test compares
+  for (const role of ["app", "sign"]) {
+    const h = ANSWERS.good.hosts.find((x) => x.role === role);
+    assert.deepEqual(Object.keys(h.served).sort(), ["content-security-policy", "integrity-policy", "permissions-policy"], role);
+  }
+  assert.match(ANSWERS.good.hosts.find((x) => x.role === "sign").served["content-security-policy"], /frame-ancestors https:\/\/confidential\.unrealized\.trade/);
 });
 
 test("recorded bad answer: no virtual authenticator, so no passkey registers: FAIL", () => {
