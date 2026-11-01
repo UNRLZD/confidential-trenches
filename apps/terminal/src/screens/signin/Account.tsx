@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router";
 import type { RouteId } from "../../routes/routes.ts";
 import { ROUTES } from "../../routes/routes.ts";
+import { HopLine } from "./HopLine.tsx";
 import { Icon } from "./Icon.tsx";
 import { headerModel, usd } from "./model.ts";
 import type { HeaderModel } from "./model.ts";
@@ -81,16 +82,19 @@ export function AccountMenu({ src, m, onDone, phone = false }: { src: SigninSour
   const { pathname } = useLocation();
   const route = routeOf(pathname);
   const off = !src.moneyOn;
-  const go = (run: () => Promise<unknown>) => async () => {
-    await run();
-    onDone?.();
+  // the menu closes as the tab moves to SIGN_HOST; a hop that did not leave keeps it open with its line (HopLine)
+  const go = (run: () => Promise<{ ok: boolean } | null>) => async () => {
+    if ((await run())?.ok) onDone?.();
   };
   const view = (control: string) => ({ route, sheet: null, control, fields: {} });
   const row = (control: string, children: ReactNode, onClick: () => void, extra?: ReactNode) => (
-    <button type="button" className="mrow" data-control={control} disabled={off || src.locked === control} onClick={onClick}>
-      <span className="ml">{children}</span>
-      {extra}
-    </button>
+    <>
+      <button type="button" className="mrow" data-control={control} disabled={off || src.locked === control} onClick={onClick}>
+        <span className="ml">{children}</span>
+        {extra}
+      </button>
+      <HopLine control={control} />
+    </>
   );
   return (
     <div className={phone ? "amenu ph" : "amenu"} role="menu" data-state="S1.16">

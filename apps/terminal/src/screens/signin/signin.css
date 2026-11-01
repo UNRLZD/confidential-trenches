@@ -75,6 +75,13 @@
 .rline .warn { color: var(--warn); font-weight: 600; }
 .rline .retry { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 14px var(--font-ui); }
 
+/* a tap that did not open (HopLine): one line under the tapped control, with Retry where a retry can work */
+.hopline { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 4px; font: 600 14px var(--font-ui); }
+.hopline .warn { color: var(--warn); }
+.hopline .retry { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 14px var(--font-ui); }
+.hopline .retry:disabled { color: var(--text-3); }
+.amenu .hopline { padding: 0 6px 4px 12px; }
+
 @media (max-width: 767.98px) {
   .sgn { align-items: flex-end; z-index: 110; }
   .sgn-scrim { background: rgba(0,0,0,.6); }
@@ -87,5 +94,7 @@
   .sgn-opt.primary { height: 56px; }
   .rbal { font-size: 34px; }
   .rline .retry { height: 44px; border-radius: 14px; }
+  .hopline { min-height: 44px; }
+  .hopline .retry { height: 44px; border-radius: 14px; }
 }
 @media (min-width: 768px) { .amenu.ph { display: none; } }
