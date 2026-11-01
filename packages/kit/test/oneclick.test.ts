@@ -3,6 +3,7 @@
 // fixtures/oneclick-quotes.json holds two real answers that verify under 1Click's key: a live one (read back by status)
 // and a keyless dry one. A changed signed field must fail the signature, a changed request must fail the echo, an
 // unsigned field (appFees, a live answer's request deadline) is bound some other way, and the floors are the device's.
+/// <reference types="node" />
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
