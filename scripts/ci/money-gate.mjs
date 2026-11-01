@@ -25,7 +25,9 @@
 // reads it as failed or older. Two hosts of one operator are one read (NEAR's operators: near-rpc-operators.mjs). A
 // NEAR tx only one operator reads (one older than dRPC keeps: no second keyless archival operator exists,
 // near-rpc-operators.mjs) passes only when FastNEAR's light-client proof of it, and of every receipt it led to, each a
-// success, reaches a final block dRPC names on the tx's network (proveNearTx); the output names it PROVEN ON dRPC.
+// success, reaches a final block dRPC names on the tx's network (proveNearTx), and its signed bytes, from the record's
+// tx-bytes file or rebuilt from FastNEAR's own tx JSON (findTxBytes), hash to its id and name its signer; the output
+// names it PROVEN ON dRPC.
 // near-testnet is NEAR's test network, read on its own RPCs with the same rules: a testnet tx written as "Tx: near" is
 // read on the mainnet RPCs, where it does not exist, and is refused. A testnet tx is never real-money proof: parseLive's
 // `real` lists the mainnet txs only, and a release counts those alone.
@@ -209,6 +211,11 @@ const hostOf = (url) => {
   }
 };
 
+// JSON with every integer past 2^53 kept as its digits: a NEAR tx JSON carries u64s JavaScript numbers cannot hold (a
+// Delegate's max_block_height of u64::MAX, read 2026-11-01), and its bytes are rebuilt from them (findTxBytes). Node 24's
+// JSON.parse hands a reviver each value's source text.
+export const exactJson = (text) => JSON.parse(text, (k, v, ctx) => (typeof v === "number" && !Number.isSafeInteger(v) && /^\d+$/.test(ctx?.source ?? "") ? ctx.source : v));
+
 async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) {
   let last;
   let rate = 0;
@@ -226,7 +233,7 @@ async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) 
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
         signal: AbortSignal.timeout(20000),
       });
-      const j = r.status === 429 ? null : await r.json();
+      const j = r.status === 429 ? null : typeof r.text === "function" ? exactJson(await r.text()) : await r.json();
       if (r.status === 429 || j.error?.code === -429 || j.error?.code === 429) {
         if (!rateWait) throw Object.assign(new Error(NOT_WAITED), { rate: true, notWaited: true });
         const after = Number(r.headers?.get?.("retry-after") ?? NaN);
@@ -369,8 +376,8 @@ export const okOperators = (chain, reads) => new Set(reads.filter((a) => a.r ===
 //    the RPC builds the path, chain/jsonrpc/src/lib.rs:2530-2545, core/store/src/merkle_proof.rs:28-44).
 // Borsh: integers little-endian, a Vec or String is a u32 length then its items, a CryptoHash 32 bytes.
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-export function base58(s) {
-  if (typeof s !== "string" || !s.length || s.length > 64) throw new Error(`not a base58 hash: ${String(s).slice(0, 70)}`);
+export function base58(s, max = 64) {
+  if (typeof s !== "string" || !s.length || s.length > max) throw new Error(`not a base58 hash: ${String(s).slice(0, 70)}`);
   let n = 0n;
   for (const c of s) {
     const i = BASE58.indexOf(c);
@@ -486,6 +493,172 @@ export function txBytesFacts(b64, id) {
   return { signer, receiver: account(), version: v1 ? 1 : 0 };
 }
 
+// Card money-gate-tx-rebuild: a tx's signed bytes rebuilt from an operator's own tx JSON (the `transaction` field of
+// EXPERIMENTAL_tx_status, a SignedTransactionView), so a tx one operator reads is provable from its id alone, with no
+// bytes kept by the record's writer. The JSON proves itself: only bytes that hash to the id pass (txBytesFacts), so a
+// host that changes any field gets no pass. Cited from nearcore 2.14.0 (bc4e9e8cfb03d9e82f027883055624e18576993e):
+//  - the view (core/primitives/src/views.rs:1747-1762) is signer_id, public_key, nonce, receiver_id, actions,
+//    priority_fee (deprecated, always 0: views.rs:1781), signature, hash, and nonce_index and nonce_mode only when they
+//    are not V0's (views.rs:1758-1761, :1768-1776). It has no block_hash: findTxBytes tries the blocks before the tx's
+//    own, and only the one that makes the bytes hash to the id is kept.
+//  - V0 is signer_id, public_key, nonce u64, receiver_id, block_hash, actions (transaction.rs:36-51); V1 is a 1 then
+//    signer_id, public_key, TransactionNonce (0 then nonce u64, or 1 then nonce u64 and nonce_index u16), receiver_id,
+//    block_hash, actions, nonce_mode (Monotonic 0, Strict 1) (transaction.rs:66-71, :113-119, :122-140, :268-276). A view
+//    with neither nonce_index nor nonce_mode is a V0 or a V1 with a plain nonce, Monotonic: both are tried. A view with
+//    either (a gas-key tx) is refused: no recorded tx pins one.
+//  - Action is a borsh tag then its payload (core/primitives/src/action/mod.rs:375-397, payloads mod.rs:46-75, :94-112,
+//    :249-268, :301-315); the view of each (views.rs:1487-1569, built by views.rs:1571-1645). DeployContract's view
+//    holds sha256 of the code, not the code (views.rs:1575-1577): the code is read back and kept only when it hashes so.
+//  - AddKey is a PublicKey then an AccessKey: nonce u64 then its permission, FunctionCall = 0 (allowance
+//    Option<u128>, receiver_id String, method_names Vec<String>), FullAccess = 1 (mod.rs:39-44;
+//    core/primitives-core/src/account.rs:801-809, :909-920, :959-972; view: views.rs:165-211).
+//  - Delegate is a SignedDelegateAction: sender_id, receiver_id, actions, nonce u64, max_block_height u64, public_key,
+//    then a Signature (action/delegate.rs:46-64, :78-81; its view: views.rs:1520-1523, :1597-1600); its actions are
+//    NonDelegateAction, an Action with Action's own serde and borsh (delegate.rs:370-371).
+//  - a PublicKey is tag 0 then 32 bytes for ed25519, a Signature 0 then 64 bytes (core/crypto/src/signature.rs:39-43,
+//    :398-404, :1129-1135). Balance is u128 (near-token), Gas u64.
+// The kinds rebuilt are the ones a real recorded tx pins (money-gate.tx-rebuild.json): CreateAccount, DeployContract,
+// FunctionCall, Transfer, AddKey with FullAccess or a FunctionCall permission with an allowance, DeleteKey,
+// DeleteAccount and Delegate (holding AddKey with FullAccess or FunctionCall), with ed25519 keys, in V0 and V1. Every
+// other kind nearcore has (Stake, a permission with no allowance or a gas-key one, DelegateV2, the global-contract
+// kinds, DeterministicStateInit, UniversalStateInit, the gas-key transfers), any other field and a secp256k1 or ML-DSA
+// key are refused, never guessed: such a tx passes on two operators' reads or by its tx-bytes file, as before.
+const TX_FIELDS = ["signer_id", "public_key", "nonce", "receiver_id", "actions", "priority_fee", "signature", "hash", "nonce_index", "nonce_mode"];
+const exact = (o, keys, what) => {
+  if (o === null || typeof o !== "object" || Array.isArray(o)) throw new Error(`${what} is not an object`);
+  const got = Object.keys(o).sort().join(",");
+  if (got !== [...keys].sort().join(",")) throw new Error(`${what} has fields ${got}, not ${[...keys].sort().join(",")}`);
+};
+// ed25519 alone: no recorded tx pins a secp256k1 key or signature (tag 1), so one is refused
+const ed25519 = (s, n, what) => {
+  const m = typeof s === "string" ? /^ed25519:([1-9A-HJ-NP-Za-km-z]+)$/.exec(s) : null;
+  if (!m) throw new Error(`${what} ${String(s).slice(0, 40)} that is not ed25519`);
+  const b = base58(m[1], 100);
+  if (b.length !== n) throw new Error(`an ed25519 ${what} that is not ${n} bytes`);
+  return Buffer.concat([Buffer.from([0]), b]);
+};
+const pubKey = (s) => ed25519(s, 32, "a public key");
+const accountId = (s) => {
+  if (typeof s !== "string" || s.length < 2 || s.length > 64 || !ACCOUNT.test(s)) throw new Error(`${String(s).slice(0, 70)} is not an account id`);
+  return str(s);
+};
+const b64 = (s, what) => {
+  if (typeof s !== "string" || Buffer.from(s, "base64").toString("base64") !== s) throw new Error(`${what} is not base64`);
+  return Buffer.from(s, "base64");
+};
+const bytesVec = (b) => Buffer.concat([u32(b.length), b]);
+// FullAccess 1; FunctionCall 0 then allowance (Some: 1 then u128), receiver_id, method_names. An allowance of null
+// (None) has no pin, nor have the gas-key permissions: refused.
+function permission(p, w) {
+  if (p === "FullAccess") return Buffer.from([1]);
+  const f = one(p, "FunctionCall") ? p.FunctionCall : null;
+  if (!f || f.allowance === null) throw new Error(`${w} with a permission this check does not rebuild: ${JSON.stringify(p)?.slice(0, 60)}`);
+  exact(f, ["allowance", "receiver_id", "method_names"], `${w}'s FunctionCall permission`);
+  if (!Array.isArray(f.method_names)) throw new Error(`${w}'s method_names is not a list`);
+  return Buffer.concat([Buffer.from([0, 1]), uint(f.allowance, 16), str(f.receiver_id), u32(f.method_names.length), ...f.method_names.map(str)]);
+}
+// one action of the view; `code(sha256)` gives a deployed contract's bytes by their hash, or null. Inside a Delegate an
+// action has Action's own serde (delegate.rs:370-371), the view's shape for the two kinds pinned there.
+const IN_DELEGATE = ["AddKey", "FunctionCall"];
+const NOT_READ = Symbol("code not read yet");
+function action(a, code, inDelegate = false) {
+  if (inDelegate && !(a !== null && typeof a === "object" && Object.keys(a).length === 1 && IN_DELEGATE.includes(Object.keys(a)[0])))
+    throw new Error(`an action inside a Delegate this check does not rebuild: ${JSON.stringify(a)?.slice(0, 60)}`);
+  if (a === "CreateAccount") return Buffer.from([0]);
+  if (a === null || typeof a !== "object" || Array.isArray(a) || Object.keys(a).length !== 1) throw new Error(`an action this check does not rebuild: ${JSON.stringify(a)?.slice(0, 60)}`);
+  const [kind] = Object.keys(a);
+  const v = a[kind];
+  const w = `a ${kind} action`;
+  switch (kind) {
+    case "DeployContract": {
+      exact(v, ["code"], w);
+      const h = b64(v.code, `${w}'s code hash`);
+      if (h.length !== 32) throw new Error(`${w}'s code hash is not 32 bytes`);
+      const c = code(h);
+      if (c === NOT_READ) return Buffer.from([1]); // findTxBytes's check before its code read: the bytes are thrown away
+      if (!Buffer.isBuffer(c) || !sha(c).equals(h)) throw new Error(`${w}: no code read back that hashes to ${h.toString("base64")}`);
+      return Buffer.concat([Buffer.from([1]), bytesVec(c)]);
+    }
+    case "FunctionCall":
+      exact(v, ["method_name", "args", "gas", "deposit"], w);
+      return Buffer.concat([Buffer.from([2]), str(v.method_name), bytesVec(b64(v.args, `${w}'s args`)), uint(v.gas, 8), uint(v.deposit, 16)]);
+    case "Transfer":
+      exact(v, ["deposit"], w);
+      return Buffer.concat([Buffer.from([3]), uint(v.deposit, 16)]);
+    case "AddKey":
+      exact(v, ["public_key", "access_key"], w);
+      exact(v.access_key, ["nonce", "permission"], `${w}'s access_key`);
+      return Buffer.concat([Buffer.from([5]), pubKey(v.public_key), uint(v.access_key.nonce, 8), permission(v.access_key.permission, w)]);
+    case "DeleteKey":
+      exact(v, ["public_key"], w);
+      return Buffer.concat([Buffer.from([6]), pubKey(v.public_key)]);
+    case "DeleteAccount":
+      exact(v, ["beneficiary_id"], w);
+      return Buffer.concat([Buffer.from([7]), accountId(v.beneficiary_id)]);
+    case "Delegate": {
+      exact(v, ["delegate_action", "signature"], w);
+      const d = v.delegate_action;
+      exact(d, ["sender_id", "receiver_id", "actions", "nonce", "max_block_height", "public_key"], `${w}'s delegate_action`);
+      if (!Array.isArray(d.actions)) throw new Error(`${w} with no actions list`);
+      const inner = d.actions.map((x) => action(x, code, true));
+      return Buffer.concat([Buffer.from([8]), accountId(d.sender_id), accountId(d.receiver_id), u32(inner.length), ...inner, uint(d.nonce, 8), uint(d.max_block_height, 8), pubKey(d.public_key), ed25519(v.signature, 64, "signature")]);
+    }
+  }
+  throw new Error(`an action kind this check does not rebuild: ${kind}`);
+}
+
+/** The candidate borsh Transactions (base64) a SignedTransactionView `t` can be, with `blockHash` (base58) as its block
+ * hash: V0, and V1 with a plain nonce in Monotonic mode, whose view is the same. Throws on a field, kind or key it does
+ * not rebuild, nonce_index and nonce_mode among them. `code(sha256)` returns a deployed contract's bytes or null. */
+export function rebuildTx(t, blockHash, code = () => null) {
+  if (t === null || typeof t !== "object" || Array.isArray(t)) throw new Error("no tx JSON");
+  const extra = Object.keys(t).filter((k) => !TX_FIELDS.includes(k));
+  if (extra.length) throw new Error(`its tx JSON has a field this check does not rebuild: ${extra.join(", ")}`);
+  for (const k of ["signer_id", "public_key", "nonce", "receiver_id", "actions", "signature", "hash"]) if (!Object.hasOwn(t, k)) throw new Error(`its tx JSON has no ${k}`);
+  for (const k of ["nonce_index", "nonce_mode"]) if (Object.hasOwn(t, k)) throw new Error(`its tx JSON has ${k} (a gas-key nonce or nonce mode), which no recorded tx pins`);
+  if (Object.hasOwn(t, "priority_fee") && t.priority_fee !== 0) throw new Error(`its tx JSON has priority_fee ${t.priority_fee}, not 0`);
+  const head = Buffer.concat([accountId(t.signer_id), pubKey(t.public_key)]);
+  if (!Array.isArray(t.actions)) throw new Error("its tx JSON has no actions list");
+  const rest = Buffer.concat([accountId(t.receiver_id), hash32(blockHash), u32(t.actions.length), ...t.actions.map((a) => action(a, code))]);
+  const nonce = uint(t.nonce, 8);
+  // V1 with a plain nonce (TransactionNonce 0) and Monotonic mode (0); a gas-key nonce or Strict mode has no pin
+  return [Buffer.concat([head, nonce, rest]), Buffer.concat([Buffer.from([1]), head, Buffer.from([0]), nonce, rest, Buffer.from([0])])].map((b) => b.toString("base64"));
+}
+const MAX_WALK = 64;
+/** The signed bytes of NEAR tx `id`, rebuilt from the prover's EXPERIMENTAL_tx_status answer `known`: its block hash is
+ * found among the blocks from the tx's own back MAX_WALK, read on `url` (a candidate is never trusted: only bytes that
+ * hash to the id are kept); a DeployContract's code is read back on `url` at the block its receipt ran in and kept only
+ * when it hashes to the view's code hash. Returns { bytes, back } (back: blocks walked back), or throws why not. */
+export async function findTxBytes(fetchFn, url, id, known, sleep = wait, max = MAX_WALK) {
+  const t = known?.transaction;
+  if (t?.hash !== id) throw new Error(`its tx JSON names hash ${String(t?.hash).slice(0, 60)}, not ${id}`);
+  const call = async (method, params) => {
+    const j = await rpc(fetchFn, url, method, params, sleep);
+    if (j?.error || !j?.result) throw new Error(`${hostOf(url) ?? url} ${method}: ${JSON.stringify(j?.error ?? "no result").slice(0, 120)}`);
+    return j.result;
+  };
+  // a field, kind or key it does not rebuild is refused before any read: a DeployContract's code read included (its
+  // code is not checked here, only the rest of the tx)
+  rebuildTx(t, "11111111111111111111111111111111", () => NOT_READ);
+  const codes = new Map();
+  if (Array.isArray(t.actions) && t.actions.some((a) => a !== null && typeof a === "object" && Object.hasOwn(a, "DeployContract"))) {
+    const first = known.transaction_outcome?.outcome?.receipt_ids?.[0];
+    const ran = (Array.isArray(known.receipts_outcome) ? known.receipts_outcome : []).find((o) => o?.id === first);
+    if (typeof ran?.block_hash !== "string") throw new Error("a DeployContract tx whose receipt names no block");
+    const r = await call("query", { request_type: "view_code", account_id: t.receiver_id, block_id: ran.block_hash });
+    const c = b64(r.code_base64, "the code read back");
+    codes.set(sha(c).toString("hex"), c);
+  }
+  const code = (h) => codes.get(h.toString("hex")) ?? null;
+  let hash = known.transaction_outcome?.block_hash;
+  for (let back = 0; back <= max; back++) {
+    if (typeof hash !== "string") throw new Error(`no block ${back} back from its own`);
+    for (const bytes of rebuildTx(t, hash, code)) if (sha(Buffer.from(bytes, "base64")).equals(hash32(id))) return { bytes, back };
+    if (back < max) hash = (await call("block", { block_id: hash })).header?.prev_hash;
+  }
+  throw new Error(`no block from its own back ${max} makes its tx JSON hash to it: a tx whose block hash is older passes only on two operators' reads or by its tx-bytes file (${LIVE}<card>${BYTES}): keep its tx-bytes file`);
+}
+
 /** One EXPERIMENTAL_light_client_proof answer for `id`, checked against the head's block_merkle_root (32 bytes).
  * Returns the proven outcome and its block's height and time (ms); throws why it does not prove. */
 export function checkProof(p, id, headRoot) {
@@ -561,23 +734,30 @@ export async function proveNearTx(fetchFn, tx, prover, head, known, sleep = wait
   return { height: first.height, time: first.time, outcomes: proven.size, head: `${hb.header.height} ${headHash}` };
 }
 
-/** A NEAR tx one operator read ok (answers: [{ url, r, result }] in list's order), proven by its signed tx bytes
- * (tx.bytes, base64 borsh Transaction, from the record's tx-bytes file) and FastNEAR's light-client proof against
- * dRPC's final block, or it throws why not. Returns the PROVEN ON line. The live check and the deploy script use it
- * as the gate does. A tx with no bytes passes only on two operators' reads. */
+/** A NEAR tx one operator read ok (answers: [{ url, r, result }] in list's order), proven by its signed tx bytes and
+ * FastNEAR's light-client proof against dRPC's final block, or it throws why not. The bytes are tx.bytes (base64 borsh
+ * Transaction, from the record's tx-bytes file) when the record has them, else rebuilt from FastNEAR's own tx JSON
+ * (findTxBytes); either way they must hash to the id. Returns the PROVEN ON line. The live check and the deploy script
+ * use it as the gate does. */
 export async function proveRead(fetchFn, tx, answers, list, floor = FLOOR, sleep = wait) {
-  if (!tx.bytes) throw new Error(`no signed tx bytes for it (${LIVE}<card>${BYTES}): a tx one operator reads passes only by its bytes and its proof`);
-  const facts = txBytesFacts(tx.bytes, tx.hash);
-  if (facts.signer !== tx.signer) throw new Error(`its tx bytes name signer ${facts.signer}, not ${tx.signer}`);
   const prover = answers.find((a) => a.r === "ok" && operatorOf(tx.chain, a.url) === "fastnear" && a.result);
   const head = list.find((u) => operatorOf(tx.chain, u) === "drpc");
   if (!prover || !head) throw new Error("no FastNEAR read ok, or no dRPC host, to prove it on");
+  let bytes = tx.bytes;
+  let from = `its tx-bytes file (${LIVE}<card>${BYTES})`;
+  if (!bytes) {
+    const r = await findTxBytes(fetchFn, prover.url, tx.hash, prover.result, sleep);
+    bytes = r.bytes;
+    from = `rebuilt from ${hostOf(prover.url)}'s tx JSON, block hash ${r.back} block(s) back`;
+  }
+  const facts = txBytesFacts(bytes, tx.hash);
+  if (facts.signer !== tx.signer) throw new Error(`its tx bytes name signer ${facts.signer}, not ${tx.signer}`);
   const p = await proveNearTx(fetchFn, tx, prover.url, head, prover.result, sleep);
   const old = when(p.time, floor);
   if (old !== "ok") throw new Error(`proven, but ${old}`);
   // the block named is the one whose outcome root holds the tx's outcome: the next block with a chunk on its shard
   // after the one that ran it (view_client_actor.rs:1171-1186)
-  return `PROVEN ON ${hostOf(head)}: ${tx.chain} ${tx.hash} (V${facts.version}, ${facts.signer} to ${facts.receiver}): ${p.outcomes} outcome(s) proven by ${hostOf(prover.url)}'s light-client proof against final block ${p.head}; confirmed in block ${p.height}, ${new Date(p.time).toISOString()}`;
+  return `PROVEN ON ${hostOf(head)}: ${tx.chain} ${tx.hash} (V${facts.version}, ${facts.signer} to ${facts.receiver}): ${p.outcomes} outcome(s) proven by ${hostOf(prover.url)}'s light-client proof against final block ${p.head}; confirmed in block ${p.height}, ${new Date(p.time).toISOString()}; tx bytes ${from}`;
 }
 
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
