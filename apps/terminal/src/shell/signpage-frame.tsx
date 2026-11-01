@@ -1,13 +1,14 @@
 import type { SignpageClient, SignpageClientSnapshot } from "@blindfill/kit";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { reloadAll } from "./in-shell.ts";
 import "./signpage-frame.css";
 
 // The terminal's link to SIGN_HOST: the kit's client in parent mode, started by start.tsx (the terminal runs framed in
 // SIGN_HOST's shell, in-shell.ts). Every screen reads the client and its state from useSignpage(); money controls are
 // on only while moneyOn is true. The down state is a fixed toast, so it moves nothing on the page (BAR-04), and its
 // Retry asks the shell again. A signing page whose message API this build does not speak is the update state (CH-146):
-// money off until a reload.
+// money off until a reload, which the shell does for the top window (the shell and the app in it).
 // <html data-signpage="connecting|ready|down|update"> names the state for the browser tests and the live check.
 
 /** SIGN_HOST's release URL: the shell's origin, the only one the client posts to and hears. */
@@ -59,7 +60,7 @@ export function SignpageFrame({ client, children }: { client: SignpageClient; ch
       {snapshot.status === "update" && (
         <div className="spdown" role="status">
           <span className="tt">{UPDATE}</span>
-          <button type="button" className="retry" onClick={() => location.reload()}>
+          <button type="button" className="retry" onClick={() => void reloadAll(client, location)}>
             {RELOAD}
           </button>
         </div>
