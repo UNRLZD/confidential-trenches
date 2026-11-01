@@ -44,8 +44,9 @@ export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "co
 export type WalletStoreName = (typeof WALLET_STORES)[number];
 // The meta keys a caller may write: the seed record and the settings (wallet.md:204, 06b:585-634). K_wrap and the lane
 // are the store's own.
-export type WalletMetaKey = "seed" | "settings" | "status";
-export type WalletEvent = { kind: "changed"; stores: WalletStoreName[] } | { kind: "signout" };
+export type WalletMetaKey = "seed" | "settings";
+// "closed": this store's own connection was closed by another tab's delete or upgrade (versionchange); open it again
+export type WalletEvent = { kind: "changed"; stores: WalletStoreName[] } | { kind: "signout" } | { kind: "closed" };
 
 export interface WalletStoreOptions {
   name?: string; // tests only: the database name
@@ -68,6 +69,9 @@ export interface WalletStore {
   insertSeed(seed: unknown): Promise<{ inserted: boolean; seed: unknown }>;
   // Sets the stored seed's code_saved to true (the backup's "Saved", 06b ses.5) and nothing else.
   setCodeSaved(): Promise<void>;
+  // Writes meta/"status" from the stored seed when it is missing or behind (a database from before the status record);
+  // insertSeed and setCodeSaved write it themselves, in the seed's own transaction.
+  syncStatus(): Promise<void>;
   // Deletes the database. Refuses while the stored seed's 12 words are its only copy and not saved (backupFirst).
   signOut(): Promise<void>;
   close(): void;
@@ -77,6 +81,7 @@ type Bytes = Uint8Array<ArrayBuffer>;
 type Wrapped = { iv: Bytes; ct: ArrayBuffer };
 const K_WRAP = "k_wrap";
 const LANE = "lane";
+const STATUS = "status";
 const MAX_INDEX = 0xffffffff; // derive/keys.ts counter(): an index is a u32
 
 const req = <T>(r: IDBRequest<T>): Promise<T> =>
@@ -164,7 +169,7 @@ function checkKey(store: WalletStoreName, key: string): void {
 function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
-  if (store === "meta" && key !== "seed" && key !== "settings" && key !== "status") throw new Error(`meta key ${key} is the store's own`);
+  if (store === "meta" && key !== "seed" && key !== "settings") throw new Error(`meta key ${key} is the store's own`);
   // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
   // setCodeSaved only, and goes only with signOut
   if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");
@@ -177,10 +182,30 @@ export function backupFirst(seed: unknown): boolean {
   return s?.source !== "prf" && s?.code_saved !== true;
 }
 
+// The seed's public facts, meta/"status" = { v: 1, source, code_saved }: no secret, so SIGN_HOST's frame reads it and
+// never the seed (card signpage-frame-state). The store's own record: insertSeed and setCodeSaved write it in the seed's
+// own transaction, syncStatus fills it for a database from before it; no caller puts or deletes it.
+function statusOf(seed: unknown): { v: 1; source: string | null; code_saved: boolean } {
+  const s = seed as { source?: unknown; code_saved?: unknown } | undefined;
+  return { v: 1, source: typeof s?.source === "string" ? s.source : null, code_saved: s?.code_saved === true };
+}
+
 // zeroes a decrypted seed's entropy once it has been read (the store's own copy; a caller's copy is the caller's)
 function wipe(seed: unknown): void {
   const e = (seed as { entropy?: unknown } | undefined)?.entropy;
   if (e instanceof Uint8Array) e.fill(0);
+}
+
+async function unwrapWith(kWrap: CryptoKey, store: WalletStoreName, key: string, raw: unknown): Promise<unknown> {
+  if (raw === undefined) return undefined;
+  const { iv, ct } = raw as Wrapped;
+  if (!(iv instanceof Uint8Array) || !(ct instanceof ArrayBuffer)) throw new Error(`${store}/${key} is not wrapped`);
+  const plain = await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, ct);
+  try {
+    return decode(plain);
+  } finally {
+    new Uint8Array(plain).fill(0);
+  }
 }
 
 function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
@@ -197,7 +222,10 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   const locks = opts.locks === undefined ? (globalThis.navigator?.locks ?? null) : opts.locks;
   const subtle = globalThis.crypto.subtle;
   let db: IDBDatabase | null = await openDb(idb, name);
-  db.onversionchange = () => shut();
+  db.onversionchange = () => {
+    shut();
+    opts.onEvent?.({ kind: "closed" });
+  };
   function shut(): void {
     db?.close();
     db = null;
@@ -220,7 +248,9 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   }
   // Writes `next` only if the record still holds `before` (same iv, or both absent), in one transaction with strict
   // durability; resolves after the commit. false: another tab wrote first.
-  async function casPut(store: WalletStoreName, key: string, before: unknown, next: unknown): Promise<boolean> {
+  // `also`: more records of the same store written in the same transaction, only when the compare holds; `next`
+  // undefined writes `also` alone, the record under `key` left as it is.
+  async function casPut(store: WalletStoreName, key: string, before: unknown, next: unknown, also: [string, unknown][] = []): Promise<boolean> {
     const tx = live().transaction(store, "readwrite", { durability: "strict" });
     const os = tx.objectStore(store);
     const finished = done(tx);
@@ -231,7 +261,8 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       await finished.catch(() => {});
       return false;
     }
-    os.put(next, key);
+    if (next !== undefined) os.put(next, key);
+    for (const [k, v] of also) os.put(v, k);
     await finished;
     return true;
   }
@@ -265,17 +296,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       plain.fill(0);
     }
   }
-  async function unwrap(store: WalletStoreName, key: string, raw: unknown): Promise<unknown> {
-    if (raw === undefined) return undefined;
-    const { iv, ct } = raw as Wrapped;
-    if (!(iv instanceof Uint8Array) || !(ct instanceof ArrayBuffer)) throw new Error(`${store}/${key} is not wrapped`);
-    const plain = await subtle.decrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, ct);
-    try {
-      return decode(plain);
-    } finally {
-      new Uint8Array(plain).fill(0);
-    }
-  }
+  const unwrap = (store: WalletStoreName, key: string, raw: unknown): Promise<unknown> => unwrapWith(kWrap, store, key, raw);
   const notify = (stores: WalletStoreName[]): void => channel.postMessage({ kind: "changed", stores });
 
   // The device's lane, drawn once (wallet.md:247): 8 divides 256, so one random byte mod 8 is uniform.
@@ -335,7 +356,8 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     },
     insertSeed(seed) {
       return seedLocked(async () => {
-        const inserted = await casPut("meta", "seed", undefined, await wrap("meta", "seed", seed));
+        const status: [string, unknown][] = [[STATUS, await wrap("meta", STATUS, statusOf(seed))]];
+        const inserted = await casPut("meta", "seed", undefined, await wrap("meta", "seed", seed), status);
         if (inserted) notify(["meta"]);
         return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
       });
@@ -348,7 +370,8 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         const seed = (await unwrap("meta", "seed", before)) as Record<string, unknown>;
         try {
           if (seed.code_saved === true) return;
-          if (await casPut("meta", "seed", before, await wrap("meta", "seed", { ...seed, code_saved: true }))) {
+          const status: [string, unknown][] = [[STATUS, await wrap("meta", STATUS, { ...statusOf(seed), code_saved: true })]];
+          if (await casPut("meta", "seed", before, await wrap("meta", "seed", { ...seed, code_saved: true }), status)) {
             notify(["meta"]);
             return;
           }
@@ -357,6 +380,23 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         }
       }
       });
+    },
+    async syncStatus() {
+      for (;;) {
+        const before = await getRaw("meta", "seed");
+        if (before === undefined) return;
+        const seed = await unwrap("meta", "seed", before);
+        const want = statusOf(seed);
+        wipe(seed);
+        const cur = await unwrap("meta", STATUS, await getRaw("meta", STATUS)).catch(() => undefined);
+        const now = cur as { v?: unknown; source?: unknown; code_saved?: unknown } | undefined;
+        if (now?.v === 1 && now.source === want.source && now.code_saved === want.code_saved) return;
+        // only while the seed is still the one read: a seed write in between writes its own status, and this reads again
+        if (await casPut("meta", "seed", before, undefined, [[STATUS, await wrap("meta", STATUS, want)]])) {
+          notify(["meta"]);
+          return;
+        }
+      }
     },
     async delete(store, key) {
       checkCallerKey(store, key);
@@ -414,5 +454,68 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       shut();
       channel.close();
     },
+  };
+}
+
+/** What SIGN_HOST's frame reads: records, opened under K_wrap, and keys. It writes nothing. */
+export interface WalletStoreReader {
+  get(store: WalletStoreName, key: string): Promise<unknown>;
+  keys(store: WalletStoreName): Promise<string[]>;
+  close(): void;
+}
+
+/**
+ * The read-only open (SIGN_HOST's frame, card signpage-frame-state): it makes no database (an open that would make one
+ * is aborted in its upgrade), never writes K_wrap, the lane or a counter, takes no Web Lock and opens no channel.
+ * null when there is nothing to read yet: no database, or one with no K_wrap. onEvent hears "closed" when another tab's
+ * delete or upgrade closes this connection (versionchange).
+ */
+export async function openWalletStoreReader(
+  opts: Pick<WalletStoreOptions, "name" | "indexedDB" | "onEvent"> = {},
+): Promise<WalletStoreReader | null> {
+  const idb = opts.indexedDB ?? globalThis.indexedDB;
+  const name = opts.name ?? WALLET_DB;
+  const opened = await new Promise<IDBDatabase | null>((ok, no) => {
+    const r = idb.open(name);
+    // no database here: this open would make one, so it is aborted and nothing is left behind
+    r.onupgradeneeded = () => r.transaction?.abort();
+    r.onsuccess = () => ok(r.result);
+    r.onerror = (e) => {
+      if (r.error?.name !== "AbortError") return no(r.error);
+      e.preventDefault();
+      ok(null);
+    };
+  });
+  if (opened === null) return null;
+  let db: IDBDatabase | null = opened;
+  const shut = (): void => {
+    db?.close();
+    db = null;
+  };
+  opened.onversionchange = () => {
+    shut();
+    opts.onEvent?.({ kind: "closed" });
+  };
+  const live = (): IDBDatabase => {
+    if (db === null) throw new Error("the wallet store is closed (signed out or closed)");
+    return db;
+  };
+  const getRaw = async (store: WalletStoreName, key: string): Promise<unknown> =>
+    req(live().transaction(store, "readonly").objectStore(store).get(key));
+  if (!WALLET_STORES.every((n) => opened.objectStoreNames.contains(n))) return (shut(), null);
+  const k = (await getRaw("meta", K_WRAP).catch(() => undefined)) as CryptoKey | undefined;
+  if (!(k instanceof CryptoKey) || k.extractable || k.algorithm.name !== "AES-GCM") return (shut(), null);
+  return {
+    async get(store, key) {
+      checkKey(store, key);
+      if (store === "meta" && key === K_WRAP) throw new Error("K_wrap is never read out");
+      return unwrapWith(k, store, key, await getRaw(store, key));
+    },
+    async keys(store) {
+      checkKey(store, "x");
+      const all = await req(live().transaction(store, "readonly").objectStore(store).getAllKeys());
+      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE)));
+    },
+    close: shut,
   };
 }

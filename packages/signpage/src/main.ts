@@ -7,9 +7,9 @@
 //   neither control and both steps refuse, so a framing page cannot get a click on them. In the frame the page speaks
 //   the postMessage API (src/api.ts, card signpage-postmessage), started below, with the state the store holds
 //   (src/state.ts, card signpage-frame-state): signed in, words saved, the way in and the ops, posted again on each change.
-//   The frame never opens the seed record: it reads the seed's key and the status record meta/"status" { v, source,
-//   code_saved }, which this page writes top-level (markStatus) after every seed landing and after Saved, and syncs from
-//   the seed on every top-level load, so a crash between the seed's write and the status's heals on the next visit.
+//   The frame never opens the seed record and opens the store read-only: it reads the seed's key and the status record
+//   meta/"status" { v, source, code_saved }, which the store writes in the seed's own transaction. A database from
+//   before the status record gets it on the next top-level load (syncStatus, below).
 // - Create passkey / Use passkey run the ceremony (@blindfill/wallet/signin/passkey). A PRF result becomes the seed's
 //   entropy, written by the store's insertSeed only if no seed is stored (two tabs never write one over the other); the
 //   record is 06b:459's { v, entropy, source: "prf", code_saved: false, created_ms } (ses.2, ses.7, 06b:776, :781), so
@@ -42,11 +42,11 @@
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, openWalletStoreReader, WALLET_CHANNEL, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
-import { frameState, markStatus } from "./state.ts";
+import { frameState } from "./state.ts";
 
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code";
 
@@ -206,6 +206,8 @@ const open = async (): Promise<WalletStore> =>
   (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
+      // a delete or upgrade closed our connection: the next step opens the store again
+      if (e.kind === "closed") store = null;
       if (e.kind !== "signout") return;
       store = null;
       show("signed-out");
@@ -218,18 +220,9 @@ const topLevelOnly = (): void => {
   if (framed) throw new Error("sign-in and sign-out run top-level only, never in a frame");
 };
 
-// The stored seed's public facts into meta/"status" for the frame (src/state.ts), top-level only. A failed write leaves
-// the sign-in as it is: the frame then reads the seed's key alone (signed in, the Backup dot) until the next load.
-async function mark(s: Seed): Promise<void> {
-  if (framed) return;
-  const facts = { source: s.source, code_saved: s.code_saved };
-  await markStatus(await open(), facts).catch(() => {});
-}
-
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
-  await mark(l.seed);
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }
@@ -284,7 +277,6 @@ async function saved(): Promise<void> {
   await saveWords(await open());
   const s = await readSeed();
   if (!s) return show("signed-out");
-  await mark(s);
   show("signed-in", shown(s));
 }
 
@@ -315,12 +307,22 @@ show("loading");
 if (framed) root.dataset.signin = "framed";
 else
   void run(async () => {
+    // one backfill: a database from before the status record gets it from the seed (the store writes it itself since);
+    // a failed one leaves the frame reading the seed's key alone (signed in, the Backup dot) until the next load
+    await open()
+      .then((st) => st.syncStatus())
+      .catch(() => {});
     const s = await readSeed();
     if (s) await landed({ screen: "signed-in", seed: s });
     else show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
   });
 
 if (framed) {
-  const fs = frameState((onEvent) => openWalletStore({ onEvent }));
+  // the frame's own channel: it hears another tab's sign-in even when no database exists yet to open
+  const channel = new BroadcastChannel(WALLET_CHANNEL);
+  const fs = frameState(
+    (onEvent) => openWalletStoreReader({ onEvent }),
+    (fn) => channel.addEventListener("message", (m) => fn(m.data)),
+  );
   startApi({ parent: window.parent, listen: (fn) => window.addEventListener("message", fn), state: fs.state, watch: fs.watch });
 }

@@ -8,9 +8,10 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords } from "@blindfill/wallet/derive";
-import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { openWalletStore, openWalletStoreReader, WALLET_CHANNEL, type WalletStore, type WalletStoreReader } from "@blindfill/wallet/store";
+import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY } from "../../kit/src/signpage/schema.ts";
 import { APP_ORIGIN, RELEASE, signedOutState, startApi, type IncomingMessage } from "../src/api.ts";
-import { frameState, markStatus, opOf, statusOf, type FrameState } from "../src/state.ts";
+import { ANSWER_ROOM, frameState, opOf, pickOps, stateOf, type ChannelListen, type FrameState, type OpRow } from "../src/state.ts";
 
 const ENTROPY = () => new Uint8Array(16).fill(0x7f);
 const WORDS = entropyToWords(ENTROPY());
@@ -19,14 +20,34 @@ const ENTROPY_HEX = "7f".repeat(16);
 const closers: (() => void)[] = [];
 after(() => closers.forEach((c) => c()));
 
+/** The frame's own BroadcastChannel on the store's channel for database `name`, as main.ts opens it. */
+const channelOf = (name: string): ChannelListen => (fn) => {
+  const ch = new BroadcastChannel(`${WALLET_CHANNEL}/${name}`);
+  ch.onmessage = (m) => fn(m.data);
+  closers.push(() => ch.close());
+};
+/** A raw IndexedDB delete, as a crash or an older release would leave the database. */
+function rawDelete(idb: IDBFactory, name: string, store: string, key: string): Promise<void> {
+  return new Promise((ok, no) => {
+    const o = idb.open(name);
+    o.onerror = () => no(o.error);
+    o.onsuccess = () => {
+      const tx = o.result.transaction(store, "readwrite");
+      tx.objectStore(store).delete(key);
+      tx.oncomplete = () => (o.result.close(), ok());
+      tx.onerror = () => no(tx.error);
+    };
+  });
+}
+
 let n = 0;
-/** One database, a tab on it, and the frame's page on it. */
+/** One database, a tab on it, and the frame's page on it (the read-only open and its own channel, as main.ts). */
 async function setup() {
   const idb = new IDBFactory();
   const name = `frame-state-${process.pid}-${n++}`;
   const tab = (): Promise<WalletStore> =>
     openWalletStore({ indexedDB: idb, name }).then((s) => (closers.push(() => s.close()), s));
-  const fs: FrameState = frameState((onEvent) => openWalletStore({ indexedDB: idb, name, onEvent }));
+  const fs: FrameState = frameState((onEvent) => openWalletStoreReader({ indexedDB: idb, name, onEvent }), channelOf(name));
   closers.push(() => fs.close());
   const posted: unknown[] = [];
   const parent = { postMessage: (msg: unknown, to: string) => void (to === APP_ORIGIN && posted.push(msg)) };
@@ -52,15 +73,14 @@ async function setup() {
     }
     assert.fail(`no state event met the check; events: ${JSON.stringify(events())}`);
   };
-  return { tab, fs, ask, events, event, posted };
+  return { tab, fs, ask, events, event, posted, idb, name };
 }
 
 const seed = (source: string, code_saved: boolean) => ({ v: 1, entropy: ENTROPY(), source, code_saved, created_ms: 1_767_225_600_000 });
 type Source = "prf" | "random" | "code" | "wallet";
-/** A sign-in as SIGN_HOST's top-level page makes it: the seed first, then its status (main.ts landed). */
+/** A sign-in as SIGN_HOST's top-level page makes it: insertSeed, which writes the status in the seed's transaction. */
 async function signIn(t: WalletStore, source: Source, code_saved: boolean): Promise<void> {
   await t.insertSeed(seed(source, code_saved));
-  await markStatus(t, { source, code_saved });
 }
 
 test("a stored seed gives signed_in true with its way: prf and random are passkey, code is words, wallet is wallet", async () => {
@@ -83,35 +103,28 @@ test("with no seed stored the frame answers signed out, exactly signedOutState()
 test("crash order: a seed with no status is signed in, code_saved false, no way; a status with no seed is signed out", async () => {
   const p = await setup();
   const t = await p.tab();
-  await t.put("meta", "status", { v: 1, source: "prf", code_saved: true });
-  assert.deepEqual(await p.ask(), signedOutState());
-  await t.insertSeed(seed("code", true));
-  await t.delete("meta", "status");
+  // a database from before the status record: the seed alone
+  await signIn(t, "code", true);
+  await rawDelete(p.idb, p.name, "meta", "status");
   const s = await p.ask();
   assert.deepEqual(s, { ...signedOutState(), signed_in: true });
   assert.ok(!Object.hasOwn(s, "way"));
-  // a status of another shape reads as none
-  for (const bad of [{ source: "prf", code_saved: true }, { v: 1, source: "face", code_saved: true }, { v: 1, source: "prf", code_saved: "yes" }, "prf"]) {
-    await t.put("meta", "status", bad);
-    assert.deepEqual(await p.ask(), { ...signedOutState(), signed_in: true }, JSON.stringify(bad));
-  }
-  // the next top-level load writes it
-  await markStatus(t, { source: "code", code_saved: true });
-  assert.equal((await p.ask()).way, "words");
+  // the top-level load's backfill writes it
+  await t.syncStatus();
+  assert.deepEqual(await p.ask(), { ...signedOutState(), signed_in: true, way: "words", code_saved: true });
+  // a status with no seed: signed out
+  await rawDelete(p.idb, p.name, "meta", "seed");
+  assert.deepEqual(await p.ask(), signedOutState());
 });
 
-test("markStatus: code_saved only goes up, nothing is written when it already says the same", async () => {
+test("no database: the frame reads signed out, makes no database, and hears the first sign-in on its own channel", async () => {
   const p = await setup();
+  assert.deepEqual(await p.ask(), signedOutState());
+  assert.deepEqual(await p.idb.databases(), [], "the frame made no database");
   const t = await p.tab();
-  await markStatus(t, { source: "random", code_saved: false });
-  assert.deepEqual(await t.get("meta", "status"), { v: 1, source: "random", code_saved: false });
-  await markStatus(t, { source: "random", code_saved: true });
-  await markStatus(t, { source: "random", code_saved: false }); // a stale tab's read of the seed before Saved
-  assert.deepEqual(statusOf(await t.get("meta", "status")), { source: "random", code_saved: true });
-  let puts = 0;
-  const counting = { ...t, put: async (...a: Parameters<WalletStore["put"]>) => (puts++, t.put(...a)) } as WalletStore;
-  await markStatus(counting, { source: "random", code_saved: true });
-  assert.equal(puts, 0);
+  await signIn(t, "prf", false);
+  const e = await p.event((s) => s.signed_in === true);
+  assert.equal(e.way, "passkey");
 });
 
 test("a sign-in in another tab posts signed_in true; saving the words there posts code_saved true", async () => {
@@ -119,11 +132,10 @@ test("a sign-in in another tab posts signed_in true; saving the words there post
   const t = await p.tab();
   assert.equal((await p.ask()).signed_in, false);
   await signIn(t, "random", false);
-  const e1 = await p.event((s) => s.signed_in === true && s.way !== undefined);
+  const e1 = await p.event((s) => s.signed_in === true);
   assert.equal(e1.code_saved, false);
   assert.equal(e1.way, "passkey");
   await t.setCodeSaved();
-  await markStatus(t, { source: "random", code_saved: true });
   const e2 = await p.event((s) => s.code_saved === true);
   assert.equal(e2.signed_in, true);
 });
@@ -138,7 +150,7 @@ test("a sign-out in another tab posts signed_in false, and a later sign-in is st
   // the frame's store was closed by the sign out; it opens a new one and keeps listening
   const t2 = await p.tab();
   await signIn(t2, "code", true);
-  const e = await p.event((s) => s.signed_in === true && s.way !== undefined);
+  const e = await p.event((s) => s.signed_in === true);
   assert.equal(e.way, "words");
 });
 
@@ -217,22 +229,81 @@ test("exact keys: the state's keys and value types, and nothing secret in it", a
 });
 
 test("a store the frame cannot open or read answers signed out, with no error text", async () => {
+  const quiet: ChannelListen = () => {};
   // IndexedDB refused (a blocked store, a private window): open throws
-  const blocked = frameState(() => Promise.reject(new DOMException("The user denied permission to access the database.", "SecurityError")));
+  const blocked = frameState(() => Promise.reject(new DOMException("The user denied permission to access the database.", "SecurityError")), quiet);
   assert.deepEqual(await blocked.state(), signedOutState());
   // no IndexedDB at all
-  const none = frameState((onEvent) => openWalletStore({ indexedDB: undefined as unknown as IDBFactory, onEvent }));
+  const none = frameState((onEvent) => openWalletStoreReader({ indexedDB: undefined as unknown as IDBFactory, onEvent }), quiet);
   assert.deepEqual(await none.state(), signedOutState());
   // a store whose reads fail after it opened: signed out, and the next read opens it again
+  const idb = new IDBFactory();
+  const t = await openWalletStore({ indexedDB: idb, name: "frame-state-fail" });
+  closers.push(() => t.close());
+  await t.insertSeed(seed("prf", false));
   let opens = 0;
   const failing = frameState(async (onEvent) => {
     opens++;
-    const s = await openWalletStore({ indexedDB: new IDBFactory(), name: `frame-state-fail-${opens}`, onEvent });
-    closers.push(() => s.close());
-    return { ...s, keys: () => Promise.reject(new Error("internal: read failed at 0x1")) } as WalletStore;
-  });
+    const s = await openWalletStoreReader({ indexedDB: idb, name: "frame-state-fail", onEvent });
+    closers.push(() => s?.close());
+    return { ...s!, keys: () => Promise.reject(new Error("internal: read failed at 0x1")) } as WalletStoreReader;
+  }, quiet);
   closers.push(() => failing.close());
   assert.deepEqual(await failing.state(), signedOutState());
   assert.deepEqual(await failing.state(), signedOutState());
   assert.equal(opens, 2);
+});
+
+// pickOps: the count cap, then the byte cap, each at its boundary
+const row = (i: number, txs = 0): OpRow => ({
+  op: { id: `op-${String(i).padStart(6, "0")}`, kind: "buy", stage: "filled", txs: Array.from({ length: txs }, () => ({ chain: "solana" as const, hash: "5".repeat(512) })) },
+  t: i,
+});
+const answerBytes = (st: unknown) => new TextEncoder().encode(JSON.stringify({ v: 1, id: crypto.randomUUID(), ok: true, result: st })).length;
+
+test("pickOps: past SIGNPAGE_MAX_ARRAY ops the newest that many are kept, oldest first", () => {
+  const base = stateOf(true, { source: "prf", code_saved: true }, []);
+  const rows = Array.from({ length: SIGNPAGE_MAX_ARRAY + 1 }, (_, i) => row(i)).reverse();
+  const ops = pickOps(base, rows);
+  assert.equal(ops.length, SIGNPAGE_MAX_ARRAY);
+  assert.equal(ops[0]!.id, "op-000001", "the oldest is the one dropped");
+  assert.equal(ops.at(-1)!.id, `op-${String(SIGNPAGE_MAX_ARRAY).padStart(6, "0")}`);
+  assert.equal(pickOps(base, rows.slice(1)).length, SIGNPAGE_MAX_ARRAY, "exactly the cap: all kept");
+});
+
+test("pickOps: the oldest are dropped until the answer fits SIGNPAGE_MAX_ANSWER_BYTES with ANSWER_ROOM to spare", () => {
+  const base = stateOf(true, { source: "prf", code_saved: true }, []);
+  const rows = Array.from({ length: 100 }, (_, i) => row(i, 100)); // about 54 KB each, 5.4 MB in all
+  const ops = pickOps(base, rows);
+  const kept = { ...base, ops };
+  const limit = SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM;
+  assert.ok(ops.length > 0 && ops.length < 100, String(ops.length));
+  assert.equal(ops.at(-1)!.id, "op-000099", "the newest stay");
+  const size = new TextEncoder().encode(JSON.stringify(kept)).length;
+  assert.ok(size <= limit, `${size} > ${limit}`);
+  // one more (the next older) would not fit: the boundary
+  const older = rows[100 - ops.length - 1]!.op;
+  assert.ok(new TextEncoder().encode(JSON.stringify({ ...base, ops: [older, ...ops] })).length > limit);
+  assert.ok(answerBytes(kept) <= SIGNPAGE_MAX_ANSWER_BYTES);
+  // the limit met to the byte: an older op that takes exactly the bytes left is kept; one byte more and it is dropped
+  const enc = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
+  const slack = limit - size;
+  const filler = (idLen: number, txs: { chain: "solana"; hash: string }[]) => ({ id: "f".repeat(idLen), kind: "buy" as const, stage: "filled" as const, txs });
+  const full = { chain: "solana" as const, hash: "5".repeat(512) };
+  const fit = (() => {
+    const txs: (typeof full)[] = [];
+    while (enc(filler(1, [...txs, full, full])) + 1 <= slack) txs.push(full);
+    for (let h = 512; h >= 0; h--) {
+      const t = h ? [...txs, { chain: "solana" as const, hash: "5".repeat(h) }] : txs;
+      const need = slack - (enc(filler(0, t)) + 1);
+      if (need >= 1 && need <= 512) return filler(need, t);
+    }
+    return null;
+  })();
+  assert.ok(fit, `no filler for ${slack} bytes`);
+  const kept2 = pickOps(base, [{ op: fit, t: -1 }, ...rows.slice(100 - ops.length)]);
+  assert.equal(kept2.length, ops.length + 1, "exactly at the limit: kept");
+  assert.equal(enc({ ...base, ops: kept2 }), limit);
+  const over = { ...fit, id: `${fit.id}f` };
+  assert.equal(pickOps(base, [{ op: over, t: -1 }, ...rows.slice(100 - ops.length)]).length, ops.length, "one byte over: dropped");
 });

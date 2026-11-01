@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
+import * as walletStore from "@blindfill/wallet/store";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { frameState } from "../src/state.ts";
 
@@ -16,17 +17,25 @@ test("the frame's state path never calls get on meta/seed", async () => {
   const name = `frame-no-seed-read-${process.pid}`;
   const reads: string[] = [];
   const changes: number[] = [];
-  const fs = frameState(async (onEvent) => {
-    const s = await openWalletStore({ indexedDB: idb, name, onEvent });
-    closers.push(() => s.close());
-    return {
-      ...s,
-      get: (store, key) => {
-        reads.push(`${store}/${key}`);
-        return s.get(store, key);
-      },
-    } as WalletStore;
-  });
+  // the read-only open where the store has one (main.ts), the full store before it
+  const reader = (walletStore as Record<string, unknown>).openWalletStoreReader as typeof openWalletStore | undefined;
+  const ch = new BroadcastChannel(`ct-wallet/${name}`);
+  closers.push(() => ch.close());
+  const fs = (frameState as (...a: unknown[]) => ReturnType<typeof frameState>)(
+    async (onEvent: (e: walletStore.WalletEvent) => void) => {
+      const s = await (reader ?? openWalletStore)({ indexedDB: idb, name, onEvent });
+      if (!s) return s;
+      closers.push(() => s.close());
+      return {
+        ...s,
+        get: (store: walletStore.WalletStoreName, key: string) => {
+          reads.push(`${store}/${key}`);
+          return s.get(store, key);
+        },
+      } as WalletStore;
+    },
+    (fn: (e: unknown) => void) => (ch.onmessage = (m) => fn(m.data)),
+  );
   closers.push(() => fs.close());
   fs.watch(() => changes.push(Date.now()));
 
@@ -34,11 +43,9 @@ test("the frame's state path never calls get on meta/seed", async () => {
   closers.push(() => tab.close());
   await fs.state(); // signed out
   await tab.insertSeed({ v: 1, entropy: new Uint8Array(16).fill(0x7f), source: "random", code_saved: false, created_ms: 1 });
-  await tab.put("meta", "status", { v: 1, source: "random", code_saved: false });
   await tab.put("ops", crypto.randomUUID(), { kind: "deposit", stage: "waiting", txs: [], created_ms: 2 });
   const signedIn = await fs.state();
   await tab.setCodeSaved();
-  await tab.put("meta", "status", { v: 1, source: "random", code_saved: true });
   const saved = await fs.state();
   await tab.signOut();
   await new Promise((ok) => setTimeout(ok, 30));
