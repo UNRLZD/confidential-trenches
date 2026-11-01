@@ -1,6 +1,6 @@
 // node --test apps/terminal/test/harness/selftest.test.mjs: the self-test's verdict replays recorded runs
-// (selftest.answers.json), each read on 2026-11-01 at 01:44Z by selftest.mjs --record through scripts/heavy.sh on the
-// PC box (headless Chromium 153.0.8010.12, Playwright 1.63.0) from the terminal's and the signing page's builds at main
+// (selftest.answers.json), each read on 2026-11-01 at 01:44Z by selftest.mjs --record in headless Chromium
+// 153.0.8010.12 (Playwright 1.63.0) from the terminal's and the signing page's builds at main
 // f4df583 (signpage-skeleton's _headers on sign.ct.test):
 //   good:             PASS (every host serves, a passkey with PRF registers, both logs name every host);
 //   badAuthenticator: --plant no-authenticator, no virtual authenticator on the page: FAIL on the passkey lines only;

@@ -1,6 +1,6 @@
 {
  "good": {
-  "note": "apps/helper at 0c8f86c (card/helper-rpc-proxy) run with node src/server.ts on the owner's Mac, no RPC URL set, so each chain used its public default (api.mainnet-beta.solana.com, mainnet.base.org, rpc.mainnet.chain.robinhood.com, rpc.mainnet.fastnear.com); read 2026-11-01T06:23:37.318Z (api.confidential.unrealized.trade does not run this commit yet)",
+  "note": "apps/helper at 0c8f86c (card/helper-rpc-proxy) run with node src/server.ts on a Mac, no RPC URL set, so each chain used its public default (api.mainnet-beta.solana.com, mainnet.base.org, rpc.mainnet.chain.robinhood.com, rpc.mainnet.fastnear.com); read 2026-11-01T06:23:37.318Z (api.confidential.unrealized.trade does not run this commit yet)",
   "base": "http://127.0.0.1:18090",
   "reads": [
    {
