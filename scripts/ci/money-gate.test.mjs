@@ -718,7 +718,9 @@ test("a 429 whose Retry-After is past the 600 s cap is no answer at once: refuse
 const FN_ARCH = "https://archival-rpc.mainnet.fastnear.com";
 const ORG_ARCH = "https://archival-rpc.mainnet.near.org";
 const H = 222400000;
-function operators({ drpc = "missing", earliest = H - 100, org = "ok", drpcStatus = true } = {}) {
+// dRPC's earliest block is an hour after the tx's block (NOV2) unless earliestAt says otherwise; chain: its status's
+// chain_id (default: the host's own network); fn: FastNEAR's archive's own tx answer ("ok" or a reply body)
+function operators({ drpc = "missing", earliest = H - 100, org = "ok", drpcStatus = true, chain, earliestAt = NOV2 + 3600, fn = "ok", height = H } = {}) {
   const log = [];
   const fetchFn = async (url, init) => {
     const host = new URL(url).host;
@@ -726,11 +728,15 @@ function operators({ drpc = "missing", earliest = H - 100, org = "ok", drpcStatu
     log.push(`ask ${host} ${method}`);
     const json = (status, body, headers = {}) => ({ ok: status < 400, status, headers: new Headers(headers), json: async () => body });
     const isDrpc = host === DRPC || host === "near-testnet.drpc.org";
-    if (isDrpc && method === "status") return drpcStatus ? json(200, { result: { sync_info: { earliest_block_height: earliest } } }) : json(503, {});
+    const net = chain ?? (host === DRPC ? "mainnet" : "testnet");
+    if (isDrpc && method === "status") return drpcStatus ? json(200, { result: { chain_id: net, sync_info: { earliest_block_height: earliest } } }) : json(503, {});
+    if (isDrpc && method === "block") return json(200, { result: { header: { height: earliest, timestamp_nanosec: String(BigInt(earliestAt) * 1000000000n) } } });
     if (isDrpc && drpc === "missing") return json(200, { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } });
+    if (isDrpc && drpc !== "ok") return json(200, { jsonrpc: "2.0", id: 1, ...drpc });
+    if (host === new URL(FN_ARCH).host && fn !== "ok" && method === "EXPERIMENTAL_tx_status") return json(200, { jsonrpc: "2.0", id: 1, ...fn });
     if (host === new URL(ORG_ARCH).host && org === 429) return json(429, { error: { code: -429, message: "rate limited" } }, { "retry-after": "600" });
     const a = chainAnswers(NOV2)(url, method);
-    if (method === "block") a.result.header.height = H;
+    if (method === "block") a.result.header.height = height;
     return json(200, { jsonrpc: "2.0", id: 1, ...a });
   };
   const sleep = async (ms) => void log.push(`sleep ${ms}`);
@@ -750,7 +756,7 @@ test("regression: a tx older than dRPC keeps passes on one operator, said so, ne
   const r = await moneyGate(rec(`Money path: yes\nTx: near ${NEAR_TX} intents.near\n`), s.fetchFn, WITH_ORG, { sleep: s.sleep });
   assert.deepEqual(r.refusals, []);
   assert.deepEqual(r.single, [
-    `near ${NEAR_TX}: one operator (fastnear) read it ok, on ${FN_ARCH}, ${ORG_ARCH}: its block ${H} is older than https://near.drpc.org keeps blocks from ${H + 1}, and no second keyless archival operator holds it`,
+    `near ${NEAR_TX}: one operator (fastnear) read it ok, on ${FN_ARCH}, ${ORG_ARCH}: its block ${H}, 2026-11-02T00:00:00.000Z, is older than https://near.drpc.org (mainnet) keeps blocks from ${H + 1}, 2026-11-02T01:00:00.000Z, and no second keyless archival operator holds it`, // near-rpc-operators: one operator (the message names both FastNEAR hosts)
   ]);
   // the same on the real list
   const s2 = operators({ earliest: H + 1 });
@@ -783,6 +789,39 @@ test("regression: near.org's 429 after FastNEAR read ok is not waited, since it 
   assert.deepEqual(r.notes, [`near ${NEAR_TX} on ${ORG_ARCH}: rate limited, not waited: its read could add no second operator`]);
 });
 
+// Card near-rpc-operators, review round 1 (each refused here; the one-operator rule passed each at 4c1eeb2).
+const UNKNOWN_TX = { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } };
+const nearRec = () => rec(`Money path: yes\nTx: near ${NEAR_TX} intents.near\n`);
+test("regression: FastNEAR's own archive answers missing, near.org's reads ok, dRPC lacks it as old: refused, as on main", async () => {
+  const s = operators({ earliest: H + 1, fn: UNKNOWN_TX });
+  const r = await moneyGate(nearRec(), s.fetchFn, WITH_ORG, { sleep: s.sleep });
+  assert.equal(r.refusals.length, 1);
+  assert.deepEqual(r.single, []);
+});
+
+test("regression: only UNKNOWN_TRANSACTION is missing: dRPC's result null or {} is no answer, refused", async () => {
+  for (const drpc of [{ result: null }, { result: {} }]) {
+    const s = operators({ earliest: H + 1, drpc });
+    const r = await moneyGate(nearRec(), s.fetchFn, WITH_ORG, { sleep: s.sleep });
+    assert.match(r.refusals.join("\n"), /no answer \(a reply with no status\) on https:\/\/near\.drpc\.org/, JSON.stringify(drpc));
+    assert.deepEqual(r.single, []);
+  }
+});
+
+test("regression: dRPC's status from the other network's node is refused", async () => {
+  const s = operators({ earliest: H + 1, chain: "testnet" });
+  const r = await moneyGate(nearRec(), s.fetchFn, WITH_ORG, { sleep: s.sleep });
+  assert.equal(r.refusals.length, 1);
+  assert.deepEqual(r.single, []);
+});
+
+test("regression: a fresh tx whose block FastNEAR names below dRPC's earliest height, but whose time is after it, is refused", async () => {
+  const s = operators({ earliest: H + 1, height: 1, earliestAt: NOV2 - 3600 });
+  const r = await moneyGate(nearRec(), s.fetchFn, WITH_ORG, { sleep: s.sleep });
+  assert.equal(r.refusals.length, 1);
+  assert.deepEqual(r.single, []);
+});
+
 test("near-testnet: the same rule on its own two operators", async () => {
   const tx = rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`);
   const keeps = operators({ earliest: H - 1 });
@@ -790,7 +829,7 @@ test("near-testnet: the same rule on its own two operators", async () => {
   const old = operators({ earliest: H + 1 });
   const r = await moneyGate(tx, old.fetchFn, { "near-testnet": REAL_RPCS["near-testnet"] }, { sleep: old.sleep });
   assert.deepEqual(r.refusals, []);
-  assert.match(r.single[0], /^near-testnet \S+: one operator \(fastnear\) read it ok, on https:\/\/archival-rpc\.testnet\.fastnear\.com, https:\/\/archival-rpc\.testnet\.near\.org: .* \(testnet, not real-money proof\)$/);
+  assert.match(r.single[0], /^near-testnet \S+: one operator \(fastnear\) read it ok, on https:\/\/archival-rpc\.testnet\.fastnear\.com, https:\/\/archival-rpc\.testnet\.near\.org: .* \(testnet, not real-money proof\)$/); // near-rpc-operators: one operator (the message names both FastNEAR hosts)
 });
 // Card money-gate-rate: near.org's testnet archive answers 429 with a Retry-After of about 279 s (read 2026-11-01), and
 // a record lists many txs. Hosts are asked in order; while fewer than two have read a tx ok, a 429 is waited out as

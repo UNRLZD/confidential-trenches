@@ -108,12 +108,14 @@ function drpcLacks(earliest) {
   const answers = load("vault-testnet-usdc.answers.json");
   const good = replay(answers);
   const orgBlock = (params) => answers.some((a) => a.url === ORG && a.method === "block" && JSON.stringify(a.params) === JSON.stringify(params));
-  const height = answers.find((a) => a.url === ORG && a.method === "block").json.result.header.height;
+  const { height, timestamp_nanosec: time } = answers.find((a) => a.url === ORG && a.method === "block").json.result.header;
   const answer = (json) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", id: 1, ...json }) });
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     const drpc = url.includes("drpc.org");
-    if (drpc && method === "status" && earliest) return answer({ result: { sync_info: { earliest_block_height: earliest(height) } } });
+    if (drpc && method === "status" && earliest) return answer({ result: { chain_id: "testnet", sync_info: { earliest_block_height: earliest(height) } } });
+    // dRPC's earliest block, an hour after the tx's block
+    if (drpc && method === "block" && earliest && params.block_id === earliest(height)) return answer({ result: { header: { height: params.block_id, timestamp_nanosec: String(BigInt(time) + 3600n * 10n ** 9n) } } });
     const ours = (method === "EXPERIMENTAL_tx_status" && params.tx_hash === HASH) || (method === "block" && orgBlock(params));
     if (ours && drpc) return answer({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } });
     return good(ours ? ORG : url, init);
@@ -134,5 +136,5 @@ test("a tx older than dRPC keeps passes on one operator, said so: PASS", async (
   const { fetchFn, height } = drpcLacks((h) => h + 1);
   const r = await check({ deployment, fetchFn, sleep });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.match(r.lines.join("\n"), new RegExp(`^ok  ${ONE_OP_LINE}; one operator \\(fastnear\\) read it ok, .*: its block ${height} is older than https://near-testnet\\.drpc\\.org keeps blocks from ${height + 1}`, "m"));
+  assert.match(r.lines.join("\n"), new RegExp(`^ok  ${ONE_OP_LINE}; one operator \\(fastnear\\) read it ok, .*: its block ${height}, \\S+, is older than https://near-testnet\\.drpc\\.org \\(testnet\\) keeps blocks from ${height + 1}, `, "m"));
 });

@@ -17,7 +17,7 @@ import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS as GATE_RPCS, okOperators, oneOperator, readTx } from "../ci/money-gate.mjs";
+import { RPCS as GATE_RPCS, okOperators, oneOperator, operatorOf, readTx } from "../ci/money-gate.mjs";
 
 const KEY = "vault-testnet-usdc";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -91,10 +91,12 @@ export async function check({ deployment, account = deployment.account_id, fetch
     const tx = { chain: "near-testnet", hash: t.hash, signer: t.signer };
     const reads = [];
     for (const url of rpcs) {
-      if (okOperators("near-testnet", reads).size >= 2) break;
+      const ops = okOperators("near-testnet", reads);
+      if (ops.size >= 2) break;
       const out = {};
-      const r = await readTx(fetchFn, url, tx, undefined, sleep, true, out);
-      reads.push({ url, r, height: out.height });
+      // a 429 is waited out only when this host could add an operator, as in the gate
+      const r = await readTx(fetchFn, url, tx, undefined, sleep, !ops.has(operatorOf("near-testnet", url)), out);
+      reads.push({ url, r, height: out.height, time: out.time });
     }
     const decisive = reads.some((x) => /^(failed|old)/.test(x.r));
     const ops = okOperators("near-testnet", reads).size;
