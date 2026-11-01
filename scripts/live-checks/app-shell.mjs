@@ -61,8 +61,10 @@ export function judge(rec) {
     else say(tokens.includes(s.served), `${s.src} integrity ${tokens.includes(s.served) ? "equals" : "differs from"} the sha384 of the bytes served`);
   }
   const tagged = new Set(scripts.map((s) => s.src));
-  // only the top frame's scripts count: the signing page's hidden frame is judged by SIGN_HOST's own checks (signpage-*)
-  const untagged = [...new Set((rec.loadedScripts ?? []).filter((l) => l.top).map((l) => l.url))].filter((u) => !tagged.has(u));
+  // only the top frame's scripts count: the signing page's hidden frame is judged by SIGN_HOST's own checks (signpage-*);
+  // a script not marked as another frame's (a bare address, or no top mark) counts as the top frame's
+  const loaded = (rec.loadedScripts ?? []).map((l) => (typeof l === "string" ? { url: l, top: true } : l));
+  const untagged = [...new Set(loaded.filter((l) => l.top !== false).map((l) => l.url))].filter((u) => !tagged.has(u));
   say(untagged.length === 0, `every script loaded is a tag with its integrity${untagged.length ? `: not a tag: ${untagged.join(", ")}` : ""}`);
 
   const loads = rec.loads ?? [];

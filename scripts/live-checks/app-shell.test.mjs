@@ -82,4 +82,9 @@ test("scripts: only the top frame's count; the signing page's frame is left to S
   // the same file loaded by the iframe does not hide one from the top frame
   r = mut((rec) => rec.loadedScripts.push(frame(rec, `${rec.url}/assets/late.js`, false), frame(rec, `${rec.url}/assets/late.js`, true)));
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)));
+  // a record in the old shape (a bare address) or with no frame mark counts as the top frame's, so it never passes loosely
+  r = mut((rec) => rec.loadedScripts.push(`${rec.url}/assets/late.js`));
+  assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
+  r = mut((rec) => rec.loadedScripts.push({ url: `${rec.url}/assets/late.js` }));
+  assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
 });
