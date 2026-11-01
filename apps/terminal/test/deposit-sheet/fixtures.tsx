@@ -1,6 +1,6 @@
 // The deposit sheet on fixtures (run.mjs): the app's own DepositSheet fed through DepositSourceProvider instead of the
-// kit and SIGN_HOST. ?f=<fixture> picks what each call answers; the amount comes back as a hop's restored field would
-// (AE-02: the amount survives the backup gate). The run fixes the page clock (Playwright page.clock) at NOW, so the
+// kit and SIGN_HOST. ?f=<fixture> picks what each call answers; the sheet opens with the fixture's amount
+// (the source's start; inside the shell a typed amount survives the backup gate in the sheet's own state, AE-02). The run fixes the page clock (Playwright page.clock) at NOW, so the
 // counter and the countdown read the same in every shot. Every quote, copy and hop is recorded in window.__calls. Test only.
 import type { SignpageClientSnapshot, SignpageResults, SignpageState } from "@blindfill/kit";
 import { StrictMode } from "react";
@@ -94,7 +94,7 @@ const src: DepositSource = {
     return null;
   },
   locked: null,
-  restored: { route: "discover", sheet: "deposit", control: "deposit-backup", fields: { amount: fx.amount ?? "15" }, scroll: 0 },
+  start: { amount: fx.amount ?? "15" },
   now: () => Date.now(),
   copy: (text) => void window.__calls.push({ kind: "copy", text }),
 };
