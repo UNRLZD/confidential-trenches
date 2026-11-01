@@ -91,6 +91,12 @@ export function noteSecretsFromWords(words: string, ref: NoteRef): DeviceNoteSec
   }
 }
 
+/** The commitment the vault computes for a note (kit order: value, label, precommitment); needs no secret. */
+export function noteCommitment(value: bigint, label: bigint, precommitment: bigint): bigint {
+  if (typeof value !== "bigint" || value < 0n || value >= 1n << 128n) throw new Error("value must be a u128");
+  return noteHash("commitment", { value, label, precommitment });
+}
+
 /** The whole note once the vault has given it a value and a label (the deposit's amount and label, or settle's). */
 export function vaultNote(s: DeviceNoteSecrets, value: bigint, label: bigint): VaultNote {
   if (typeof value !== "bigint" || value < 0n || value >= 1n << 128n) throw new Error("value must be a u128");
