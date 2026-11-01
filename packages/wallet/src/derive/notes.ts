@@ -4,7 +4,11 @@
 // precommitment is Poseidon(nullifier, secret), its nullifier hash Poseidon(nullifier), and its commitment
 // Poseidon(value, label, precommitment). Poseidon inputs are field elements, counters and tags as the integers they hold.
 // Nothing here logs; a nullifier, a secret and a master never leave the device (wallet.md:162-164).
-import { poseidon1, poseidon2, poseidon3, poseidon4, poseidon5 } from "poseidon-lite";
+import { poseidon1 } from "poseidon-lite/poseidon1";
+import { poseidon2 } from "poseidon-lite/poseidon2";
+import { poseidon3 } from "poseidon-lite/poseidon3";
+import { poseidon4 } from "poseidon-lite/poseidon4";
+import { poseidon5 } from "poseidon-lite/poseidon5";
 import { CHAINS, type Chain, P } from "./constants.ts";
 import { chainTag, counter, field, hkdfSeed } from "./keys.ts";
 

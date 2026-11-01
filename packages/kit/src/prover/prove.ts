@@ -15,7 +15,9 @@
 // - The pairing check is the vault's, with its compiled key: the page carries no verifier. prove-e2e.test.ts checks
 //   the worker's proofs with snarkjs and the release's withdraw.vkey.
 // Nothing here logs: the input holds the note's secrets.
-import { poseidon1, poseidon2, poseidon3 } from "poseidon-lite";
+import { poseidon1 } from "poseidon-lite/poseidon1";
+import { poseidon2 } from "poseidon-lite/poseidon2";
+import { poseidon3 } from "poseidon-lite/poseidon3";
 import { vaultWithdrawInput, type VaultWithdrawInput, type VaultWithdrawInputArgs } from "../vault/inputs.ts";
 import { VAULT_WITHDRAW_SIGNALS, vaultProof, type VaultSnarkjsProof, type VaultWithdrawSignals } from "../vault/shapes.ts";
 import type { Prover } from "./client.ts";

@@ -3,7 +3,7 @@
 // picked to cover a row with no price, no 5m stats, a graduated and an on-curve pump.fun token, a token with no
 // launchpad, another launchpad, and mint or freeze authority still set), and the pump.fun curve accounts of the
 // on-curve rows as api.mainnet-beta.solana.com answered getMultipleAccounts at the same minute. The rows hold exactly
-// the terminal's field list (apps/terminal/src/screens/discover/fields.ts) plus buys_1h and sells_1h, in their wire
+// the terminal's field list (apps/terminal/src/screens/discover/fields.ts, which holds buys_1h and sells_1h), in their wire
 // forms, and pass the terminal's one curve rule (apps/terminal/src/screens/market/curve.ts).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -25,8 +25,9 @@ const raw = (k: keyof typeof RAW, symbol: string) => (RAW[k] as Record<string, u
 const row = (k: keyof typeof RAW, symbol: string) => rowsOf(k).find((r) => r.symbol === symbol)!;
 const recordedRpc = { handle: async () => ({ status: 200, body: JSON.stringify(CURVES.answer) }) };
 
-test("the field list is the terminal's ROW_FIELDS in its order, then buys_1h and sells_1h (asked for the Trending column)", () => {
-  assert.deepEqual(ROW_FIELDS, [...TERMINAL_FIELDS, "buys_1h", "sells_1h"]);
+test("the field list is the terminal's ROW_FIELDS in its order, which ends with buys_1h and sells_1h (asked for the Trending column)", () => {
+  assert.deepEqual(ROW_FIELDS, TERMINAL_FIELDS);
+  assert.deepEqual(ROW_FIELDS.slice(-2), ["buys_1h", "sells_1h"]);
 });
 
 test("recorded Jupiter answers: every row holds exactly the field list, every required field, in its wire form", () => {

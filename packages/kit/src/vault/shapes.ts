@@ -226,12 +226,22 @@ export function vaultRelayFeeWithinBackstop(relayFee: bigint, withdrawn: bigint)
 }
 
 /**
+ * VaultWithdrawal's seven fields (7.1): the context's fields less processor, which is the vault itself. The vault
+ * refuses a withdrawal with any other key when it reads the call.
+ */
+const VAULT_WITHDRAWAL_KEYS: readonly string[] = VAULT_CONTEXT_FIELDS.map(([name]) => name).filter((name) => name !== "processor");
+
+/**
  * What the vault would refuse in this withdrawal, read before the device spends a proof on it (2.5.2 rows 1, 2, 7
- * and 8): the form of every field, recipient or fee_recipient equal to the vault or intents.near, a deadline already
- * passed at nowMs, withdrawn 0 or over a u128, and relay_fee over the backstop. Empty when none.
+ * and 8): a key outside VaultWithdrawal's seven, the form of every field, recipient or fee_recipient equal to the vault
+ * or intents.near, a deadline already passed at nowMs, withdrawn 0 or over a u128, and relay_fee over the backstop.
+ * Empty when none.
  */
 export function vaultWithdrawalProblems(w: VaultWithdrawal, withdrawn: bigint, vaultId: string, nowMs: number): string[] {
   const out: string[] = [];
+  for (const k of Object.keys(w)) {
+    if (!VAULT_WITHDRAWAL_KEYS.includes(k)) out.push(`${k}: not a field of the withdrawal`);
+  }
   const at = (f: () => unknown): void => {
     try {
       f();
@@ -345,7 +355,8 @@ export const VAULT_EVENT_VERSION = "1.0.0";
 /**
  * Each event's data fields, in order. `data` is an array of such objects (the NEP-141 and NEP-171 form of NEP-297
  * events), so one log line may carry several later with no version change. Field elements and amounts are decimal
- * strings, indexes JSON numbers (0-based).
+ * strings, indexes JSON numbers (0-based). Events count only from successful receipts: NEAR keeps a failed receipt's
+ * logs.
  */
 export const VAULT_EVENT_DATA = "array";
 export const VAULT_EVENTS = {

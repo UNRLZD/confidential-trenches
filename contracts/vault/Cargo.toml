@@ -18,7 +18,7 @@ testnet = []
 # The near-sandbox suite (tests/harness, VT-S*): its tests are `[[test]]` targets that need this feature, so a plain
 # `cargo test` (CI) neither builds nor runs them, and nothing here reaches the wasm build. Run through
 # tests/harness/run.sh.
-sandbox = ["dep:near-workspaces", "dep:tokio", "dep:reqwest", "dep:openssl"]
+sandbox = ["dep:near-workspaces", "dep:tokio", "dep:reqwest", "dep:openssl", "dep:near-primitives", "dep:near-crypto"]
 
 [dependencies]
 # near-sdk 5.29.1 without default features (no wee_alloc), as the vault's gas proof built it. `legacy` gives the plain
@@ -39,6 +39,11 @@ tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "time"],
 # the HTTP client near-workspaces already uses (via near-jsonrpc-client 0.22.0): the harness reads
 # EXPERIMENTAL_tx_status, which near-workspaces does not expose, to name each receipt's method for the gas table.
 reqwest = { version = "=0.12.28", optional = true }
+# NEP-366: U's own call as a signed `DelegateAction` that a relayer account sends (VT-S02, tests/s02.rs), which
+# near-workspaces cannot build. The versions near-workspaces 0.23.0 already links, as the research gas proof named them
+# (proofs/g1-vault-gas/sandbox/Cargo.toml at research main ffcba5e).
+near-primitives = { version = "=0.37.4", optional = true }
+near-crypto = { version = "=0.37.4", optional = true }
 
 # near-jsonrpc-client takes native-tls, which on Linux links OpenSSL; a Linux host may have no OpenSSL headers, so
 # OpenSSL is built from source there (needs perl and make), as in the research gas proof.

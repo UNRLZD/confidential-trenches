@@ -34,8 +34,9 @@ const edit = (fn) => {
   return { ...A.good, body: JSON.stringify(s) };
 };
 
-test("the frozen list is the terminal's ROW_FIELDS, then buys_1h and sells_1h", () => {
-  assert.deepEqual(FIELDS, [...TERMINAL_FIELDS, "buys_1h", "sells_1h"]);
+test("the frozen list is the terminal's ROW_FIELDS, which ends with buys_1h and sells_1h", () => {
+  assert.deepEqual(FIELDS, [...TERMINAL_FIELDS]);
+  assert.deepEqual(FIELDS.slice(-2), ["buys_1h", "sells_1h"]);
 });
 
 test("recorded good answer: the snapshot, five lists, every row in exactly the frozen fields: PASS", async () => {

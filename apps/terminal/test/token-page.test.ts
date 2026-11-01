@@ -120,8 +120,7 @@ test("words: every draft is marked, and the drafts are exactly the three state l
   for (const w of Object.values(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0);
 });
 
-test("route map: the token route draws the token page; Discover is not routed by this card", () => {
+test("route map: the token route draws the token page", () => {
   const src = readFileSync(new URL("../src/routes/Screen.tsx", import.meta.url), "utf8");
   assert.match(src, /token:\s*TokenRoute/);
-  assert.doesNotMatch(src, /discover:/);
 });
