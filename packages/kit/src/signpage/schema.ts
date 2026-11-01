@@ -56,12 +56,15 @@ const isPlainArray = (v: unknown): v is unknown[] => {
 /**
  * True when `v` is made of plain objects, plain dense arrays, strings, finite numbers, booleans and null only, with no
  * forbidden key, at most SIGNPAGE_MAX_DEPTH deep, and its JSON at most SIGNPAGE_MAX_ANSWER_BYTES long. The walk counts
- * the characters of every string and key as it goes and stops past the cap, before any JSON is made.
+ * one per value it visits, plus the characters of every string and key, and stops past the cap, before any JSON is
+ * made: every value is at least one byte of JSON, so a JSON within the cap never needs more visits than that. This
+ * also bounds a message that shares one array many times over (structured clone keeps shared references), whose
+ * leaves would otherwise be walked once per path. A count, not a seen-set: it bounds unshared values too.
  */
 export function signpageIsPlainMessage(v: unknown): boolean {
   let chars = 0;
   const walk = (x: unknown, depth: number): boolean => {
-    if (depth > SIGNPAGE_MAX_DEPTH) return false;
+    if (depth > SIGNPAGE_MAX_DEPTH || ++chars > SIGNPAGE_MAX_ANSWER_BYTES) return false;
     if (x === null || typeof x === "boolean") return true;
     if (typeof x === "string") return (chars += x.length) <= SIGNPAGE_MAX_ANSWER_BYTES;
     if (typeof x === "number") return Number.isFinite(x);

@@ -534,6 +534,40 @@ test("a state of 10,000 orders is read; 10,001 orders, or a state over 4 MiB, is
   assert.equal(c.dropped().shape, 2);
 });
 
+test("a shared-array bomb is refused fast, at depth 1 and depth 2 (every value visited is counted)", async () => {
+  const { h, c } = await readyClient();
+  const inner = new Array(10_000).fill(null);
+  const d1 = new Array(10_000).fill(inner); // 10^8 leaves in about 30 KB of references
+  const d2 = new Array(10_000).fill(d1); // 10^12 leaves
+  for (const [name, bomb] of [["depth 1", d1], ["depth 2", d2]]) {
+    let t0 = performance.now();
+    assert.equal(S.signpageIsPlainMessage({ v: 1, type: "progress", id: "x", stage: "filled", bomb }), false, name);
+    let ms = performance.now() - t0;
+    assert.ok(ms < 1_000, `${name}: the walk refused it in ${Math.round(ms)} ms`);
+    const before = c.snapshot();
+    const d0 = c.dropped().shape;
+    t0 = performance.now();
+    h.post({ v: 1, type: "progress", id: "x", stage: "filled", bomb });
+    ms = performance.now() - t0;
+    assert.ok(ms < 1_000, `${name}: the client dropped it in ${Math.round(ms)} ms`);
+    assert.equal(c.dropped().shape, d0 + 1, name);
+    assert.equal(c.snapshot(), before, name);
+  }
+});
+
+test("4.2M unshared nulls are refused by the walk, before any JSON is made", () => {
+  const nulls = Array.from({ length: 420 }, () => new Array(10_000).fill(null));
+  const stringify = JSON.stringify;
+  let calls = 0;
+  JSON.stringify = (...a) => (calls++, stringify(...a));
+  try {
+    assert.equal(S.signpageIsPlainMessage({ nulls }), false);
+  } finally {
+    JSON.stringify = stringify;
+  }
+  assert.equal(calls, 0, "refused by the count, not the JSON");
+});
+
 test("the request cap stays 64 KiB: a bigger request cannot be built", () => {
   const ids = (n) => Array.from({ length: n }, (_, i) => `order-${i}-${"x".repeat(30)}`);
   assert.ok(bytes(C.signpageBuildRequest("orders.cancel", { order_ids: ids(1_000) }, "id")) <= 65_536);
