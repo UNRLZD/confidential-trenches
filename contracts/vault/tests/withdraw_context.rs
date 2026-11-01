@@ -12,13 +12,16 @@
 //! 1. `vt_s07_each_field_changed_after_proving_is_refused`: the proof carries one request's context; the call then
 //!    changes recipient, `register_deposit`, fee recipient, `relay_fee`, refund precommitment, deadline, `salt`, or the
 //!    processor the proof was made for. Each is refused with `ContextMismatch`, the unchanged request passes rows 1-3,
-//!    and the vault's raw state is the same bytes before and after (nothing spent: `spent` has no row).
+//!    and the vault's raw state is the same bytes before and after (nothing spent: `spent` has no row). A recipient or
+//!    fee recipient that is the vault or intents.near, with its own context, is refused with `InvalidRecipient`.
 //! 2. `vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes`: the probe contract sends `withdraw` calls
 //!    whose `deadline_ms` is the probe's own block time plus an offset; each lands in a later block, whose time the
 //!    vault reads. Offset 0 is a deadline one block before the block it lands in: refused with `DeadlineExpired`. Then
 //!    rounds of offsets around the measured block interval until one lands in a block whose time in ms equals its
 //!    deadline: it passes. Every call in every round is checked against the rule `block ms <= deadline_ms`, with the
 //!    landing block's time read from RPC (`timestamp_nanosec` / 1,000,000, rounded down: what the vault reads).
+//!
+//! 3. `extra_top_level_arguments_are_refused_at_parse`: a fourth top-level key is refused when the input is read.
 //!
 //! Each prints its gas table: `vault::withdraw` under failed receipts is the parse and check part's gas.
 #![cfg(feature = "sandbox")]
@@ -145,8 +148,45 @@ async fn vt_s07_each_field_changed_after_proving_is_refused() -> R<()> {
         assert_eq!(vault_state(&h).await?, before, "{name}: a state byte changed");
         println!("{name} changed: refused (ContextMismatch), {:.3} Tgas", o.calls_exactly(&h.vault, "withdraw", 1)?[0].gas_burnt as f64 / 1e12);
     }
+    // a payee that is the vault or intents.near, with the context that request carries: row 2 refuses it
+    for (k, payee) in [("recipient", h.vault.to_string()), ("recipient", "intents.near".into()), ("fee_recipient", h.vault.to_string()), ("fee_recipient", "intents.near".into())] {
+        let req = set(k, json!(payee));
+        let o = h.call_outcome(&relayer, &h.vault, "withdraw", call_args(&req, &context(&req, h.vault.as_str(), &sc)), NearToken::from_yoctonear(ATTACHED), GAS).await?;
+        let f = withdraw_failure(&h, &o).map_err(|e| format!("{k} = {payee}: {e}"))?;
+        assert!(f.contains(&format!("InvalidRecipient: {k} is")), "{k} = {payee}: want InvalidRecipient, got {f}");
+        assert_eq!(vault_state(&h).await?, before, "{k} = {payee}: a state byte changed");
+        println!("{k} = {payee}: refused (InvalidRecipient)");
+    }
     assert_eq!(h.view(&h.vault, "spends", json!({"from": 0, "limit": 10})).await?, json!([]), "a spend was written");
     assert_eq!(vault_state(&h).await?, before, "a state byte changed");
+    println!("{}", h.gas_table());
+    Ok(())
+}
+
+/// The call carries exactly withdraw's three arguments: a fourth top-level key (`processor`, `extra`) is refused when
+/// near-sdk reads the input (`#[deny_unknown_arguments]`), before the state is read or any row runs.
+#[tokio::test]
+async fn extra_top_level_arguments_are_refused_at_parse() -> R<()> {
+    let h = Harness::start().await?;
+    let _ = h.deploy_vault().await?;
+    let relayer = h.account("relayer", 50).await?;
+    let bob: AccountId = format!("bob.{}", h.root.id()).parse()?;
+    let sc = scope(&h).await?;
+    let w = request(&h, &bob, relayer.id()).await?;
+    let ctx = context(&w, h.vault.as_str(), &sc);
+    let before = vault_state(&h).await?;
+    for (k, v) in [("processor", json!(format!("other-vault.{}", h.root.id()))), ("extra", json!(1))] {
+        let mut args = call_args(&w, &ctx);
+        args[k] = v;
+        let o = h.call_outcome(&relayer, &h.vault, "withdraw", args, NearToken::from_yoctonear(ATTACHED), GAS).await?;
+        let f = withdraw_failure(&h, &o)?;
+        assert!(f.contains("Failed to deserialize input from JSON"), "top-level {k}: want the input refused, got {f}");
+        assert_eq!(vault_state(&h).await?, before, "top-level {k}: a state byte changed");
+        println!("top-level {k}: refused at parse, {:.3} Tgas", o.calls_exactly(&h.vault, "withdraw", 1)?[0].gas_burnt as f64 / 1e12);
+    }
+    // the same request without them reaches rows 1-3 and passes them
+    let o = h.call_outcome(&relayer, &h.vault, "withdraw", call_args(&w, &ctx), NearToken::from_yoctonear(ATTACHED), GAS).await?;
+    assert!(withdraw_failure(&h, &o)?.contains("WithdrawIncomplete"));
     println!("{}", h.gas_table());
     Ok(())
 }

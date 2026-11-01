@@ -2,16 +2,18 @@
 //! `withdraw(withdrawal, proof, public_signals)` (vault.md 2.5.2), its parse and check part: rows 1 to 3, in that
 //! order, every one before any proof is verified, anything is spent or any byte is written.
 //!
-//! - Row 1, the parse. The call's JSON is read strictly: `withdrawal` has exactly the seven fields of 7.1, no other
-//!   and none twice; `proof` is `verifier::Proof`; `public_signals` exactly 8 strings. Then every number, each to its
+//! - Row 1, the parse. The call's JSON is read strictly: the call has exactly the three arguments, no other
+//!   (`#[deny_unknown_arguments]`); `withdrawal` has exactly the seven fields of 7.1, no other and none twice; `proof`
+//!   is `verifier::Proof`; `public_signals` exactly 8 strings. Then every number, each to its
 //!   one value: the 8 proof coordinates canonical decimals below q (`InvalidNumber`, `InvalidProofEncoding`), the 8
 //!   public signals canonical decimals below p (`InvalidNumber`, `FieldOverflow`), `refund_precommitment` a canonical
 //!   decimal in 1..p-1 (`InvalidNumber`, `FieldOverflow`, `InvalidRefundPrecommitment` for 0), `register_deposit` and
 //!   `relay_fee` canonical decimals below 2^128 (`InvalidNumber`, `AmountOverflow`), `salt` exactly 32 lowercase hex
 //!   characters (`context::salt_from_hex`, else `InvalidSalt`), and `deadline_ms` a JSON integer 0..2^64-1 (serde's
-//!   u64: a string, a fraction, an exponent, a sign or 2^64 is refused when the call's JSON is read). So each value the
-//!   context hashes has one JSON spelling, as the kit writes it (`packages/kit/src/vault/shapes.ts`, `vaultDecimal`,
-//!   `salt`, `vaultContextInput`).
+//!   u64: a string, a fraction, an exponent, a sign or 2^64 is refused when the call's JSON is read). So each field
+//!   reads as one value, and the context binds that value (a JSON escape such as `\u0030` is another spelling of the
+//!   same string, and reads as the same value). The kit reads the same forms (`packages/kit/src/vault/shapes.ts`,
+//!   `vaultDecimal`, `salt`, `vaultContextInput`).
 //! - Row 2: `env::block_timestamp_ms() <= deadline_ms` (`DeadlineExpired`), then `recipient` and `fee_recipient` are
 //!   neither this vault nor `INTENTS` (`InvalidRecipient`). The clock is the block the withdraw receipt runs in:
 //!   nearcore's block timestamp in ns, divided by 1,000,000 and rounded down (near-sdk 5.29.1 `env.rs` l.390-392).
@@ -20,7 +22,8 @@
 //!
 //! Rows 4 to 15 (depths, roots, the amount checks, the proof, the nullifier, the change leaf, storage and payouts) are
 //! card vault-withdraw-verify's and the cards after it. Until they land, a request that passes rows 1-3 is refused with
-//! `WithdrawIncomplete`: the call panics, so nothing is written and the attached NEAR goes back to the signer.
+//! `WithdrawIncomplete`: the call panics, so nothing is written and the attached NEAR goes back to the predecessor
+//! (the account that called `withdraw`).
 //!
 //! Ported from Privacy Pools v1.3.0 `packages/contracts/src/contracts/PrivacyPool.sol:44-48` (`withdraw`'s
 //! `validWithdrawal`: the processooor and the context) and `Entrypoint.sol:133-141` (`relay`), Copyright 2025 0XBOW
@@ -142,6 +145,7 @@ impl Vault {
     /// Rows 1-3 of 2.5.2 on the request, at this block's time; a request that passes them is refused with
     /// `WithdrawIncomplete` until rows 4-15 land (card vault-withdraw-verify), so nothing is spent or written.
     #[payable]
+    #[deny_unknown_arguments]
     pub fn withdraw(&mut self, withdrawal: Withdrawal, proof: Proof, public_signals: [String; 8]) {
         let _checked = check_request(
             &withdrawal,
@@ -400,7 +404,10 @@ mod tests {
         let s = signals("1");
         let max = u128::MAX.to_string();
         let over = "340282366920938463463374607431768211456"; // 2^128
-        for (v, want) in [(over, "AmountOverflow"), ("01", "InvalidNumber"), ("+1", "InvalidNumber"), ("1.0", "InvalidNumber"), ("", "InvalidNumber")] {
+        // limb 1 set (2^128), limb 0 set alone (2^192 + 5), every limb set (2^256 - 1)
+        let limb0 = "6277101735386680763835789423207666416102355444464034512901";
+        let all = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+        for (v, want) in [(over, "AmountOverflow"), (limb0, "AmountOverflow"), (all, "AmountOverflow"), ("01", "InvalidNumber"), ("+1", "InvalidNumber"), ("1.0", "InvalidNumber"), ("", "InvalidNumber")] {
             refused(&Withdrawal { register_deposit: v.into(), ..base() }, &proof(), &s, 0, want);
             refused(&Withdrawal { relay_fee: v.into(), ..base() }, &proof(), &s, 0, want);
         }

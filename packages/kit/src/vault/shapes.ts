@@ -225,8 +225,11 @@ export function vaultRelayFeeWithinBackstop(relayFee: bigint, withdrawn: bigint)
   return relayFee * 10_000n <= withdrawn * BigInt(VAULT_CONSTANTS.MAX_RELAY_FEE_BPS);
 }
 
-/** VaultWithdrawal's seven fields (7.1): the vault refuses a withdrawal with any other key when it reads the call. */
-const VAULT_WITHDRAWAL_KEYS: readonly string[] = ["recipient", "register_deposit", "fee_recipient", "relay_fee", "refund_precommitment", "deadline_ms", "salt"];
+/**
+ * VaultWithdrawal's seven fields (7.1): the context's fields less processor, which is the vault itself. The vault
+ * refuses a withdrawal with any other key when it reads the call.
+ */
+const VAULT_WITHDRAWAL_KEYS: readonly string[] = VAULT_CONTEXT_FIELDS.map(([name]) => name).filter((name) => name !== "processor");
 
 /**
  * What the vault would refuse in this withdrawal, read before the device spends a proof on it (2.5.2 rows 1, 2, 7
