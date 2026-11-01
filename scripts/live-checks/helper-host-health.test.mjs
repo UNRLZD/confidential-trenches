@@ -4,8 +4,9 @@
 // answer from the same image built with another commit (854f02d): FAIL. bad_star: the good answer with
 // Access-Control-Allow-Origin: * on every read: FAIL.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -65,4 +66,41 @@ test("the CLI on a host that does not answer is an error, exit 2", () => {
   const r = spawnSync(process.execPath, [path.join(HERE, "helper-host-health.mjs"), "--base", "http://127.0.0.1:9", "--commit", COMMIT], { encoding: "utf8" });
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /live-check helper-host-health: ERROR: /);
+});
+
+// The expected commit follows every input of the helper image, not apps/helper alone: in a repo of its own, a commit
+// on main that touches only packages/kit (or only the lockfile) is the commit the live check expects next.
+test("the expected commit is main's newest first-parent commit that touched an image input: a kit-only or lockfile-only commit moves it", async () => {
+  const ROOT = path.resolve(HERE, "../..");
+  const repo = mkdtempSync(path.join(tmpdir(), "hhh-commit-"));
+  try {
+    for (const f of ["scripts/live-checks/helper-host-health.mjs", "scripts/net-window.mjs", "apps/helper/deploy/image-inputs.mjs"]) {
+      if (!existsSync(path.join(ROOT, f))) continue;
+      mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+      cpSync(path.join(ROOT, f), path.join(repo, f));
+    }
+    const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+    const git = (...a) => execFileSync("git", ["-C", repo, ...a], { encoding: "utf8", env }).trim();
+    const commit = (file, msg) => {
+      mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+      writeFileSync(path.join(repo, file), `${msg}\n`);
+      git("add", "--", file);
+      git("commit", "-q", "--no-gpg-sign", "-m", msg, "--", file);
+      return git("rev-parse", "HEAD");
+    };
+    git("init", "-q", "-b", "main");
+    git("add", "--", "scripts", ...(existsSync(path.join(repo, "apps")) ? ["apps"] : []));
+    git("commit", "-q", "--no-gpg-sign", "-m", "the check");
+    const { mainCommit } = await import(new URL(`file://${repo}/scripts/live-checks/helper-host-health.mjs`).href);
+    const helper = commit("apps/helper/src/server.ts", "helper");
+    assert.equal(mainCommit(), helper);
+    const kit = commit("packages/kit/src/index.ts", "kit only");
+    assert.equal(mainCommit(), kit, "a kit-only commit must move the expected commit");
+    const lock = commit("pnpm-lock.yaml", "lockfile only");
+    assert.equal(mainCommit(), lock, "a lockfile-only commit must move the expected commit");
+    commit("apps/terminal/src/x.ts", "terminal only");
+    assert.equal(mainCommit(), lock, "a commit outside the image's inputs leaves it");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

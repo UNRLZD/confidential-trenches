@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { IMAGE_INPUTS } from "./image-inputs.mjs";
 
 const DEPLOY = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["-C", DEPLOY, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
@@ -88,6 +89,7 @@ export function layout({ context, dockerfile }, out) {
     .split("\0")
     .filter((f) => f && !ignored(f) && existsSync(path.join(context, f)));
   const stages = [];
+  const sources = new Set();
   const byName = new Map();
   let st;
   for (const { op, args, text } of instructions(readFileSync(dockerfile, "utf8"))) {
@@ -116,6 +118,7 @@ export function layout({ context, dockerfile }, out) {
           cpSync(at, target, { recursive: true, verbatimSymlinks: true });
           continue;
         }
+        sources.add(s);
         const matched = files.filter((f) => f === s || s === "." || f.startsWith(`${s}/`));
         assert.ok(matched.length, `COPY ${src}: nothing in the build context (left out by .dockerignore, or missing)`);
         for (const f of matched) {
@@ -136,7 +139,7 @@ export function layout({ context, dockerfile }, out) {
     }
   }
   const last = stages.at(-1);
-  return { dir: last.dir, cwd: path.join(last.dir, last.cwd), cmd: last.cmd };
+  return { dir: last.dir, cwd: path.join(last.dir, last.cwd), cmd: last.cmd, sources: [...sources] };
 }
 
 let tmp;
@@ -201,4 +204,12 @@ test("the build context's .dockerignore keeps out secrets, the repo's history, t
     assert.equal(ignored(rel(p)), true, `${p} must stay out`);
   for (const p of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "apps/helper/package.json", "apps/helper/src/server.ts", "apps/helper/src/withdraw/withdraw.vkey", "packages/kit/package.json", "packages/kit/src/index.ts"])
     assert.equal(ignored(rel(p)), false, `${p} must be in`);
+});
+
+test("IMAGE_INPUTS is the image's inputs: every COPY source, the Dockerfile and .dockerignore lie under it, and each entry covers one", () => {
+  const rel = (abs) => path.relative(ROOT, abs).split(path.sep).join("/");
+  const inputs = [...image.sources.map((s) => rel(path.join(build.context, s))), rel(build.dockerfile), rel(path.join(build.context, ".dockerignore"))];
+  const under = (p, i) => p === i || p.startsWith(`${i}/`);
+  assert.deepEqual(inputs.filter((p) => !IMAGE_INPUTS.some((i) => under(p, i))), [], "a COPY source outside IMAGE_INPUTS");
+  assert.deepEqual(IMAGE_INPUTS.filter((i) => !inputs.some((p) => under(p, i))), [], "an IMAGE_INPUTS entry that is no input");
 });

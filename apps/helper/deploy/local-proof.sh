@@ -4,14 +4,14 @@
 # request. The proxy runs with planted vendor keys made for this run (never a real key); 1Click's token list answers
 # with any bearer, so the proxied read reaches the real vendor with the planted JWT on it. It needs Docker:
 #   bash apps/helper/deploy/local-proof.sh [<out dir>]
-# The expected commit is this checkout's newest
-# first-parent commit that changed apps/helper; OTHER is another commit, for the bad-commit answer. The recorded
+# The expected commit is this checkout's newest first-parent commit that changed one of the image's inputs
+# (deploy/image-inputs.mjs, as the live check reads them); OTHER is another commit, for the bad-commit answer. The recorded
 # answers land in <out dir> (default a new temp dir): good.json, bad-commit.json, proxy-good.json and
 # proxy-bad-echo.json (a wrong build that echoes the 1Click key in a header).
 set -uo pipefail
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 OUT=${1:-$(mktemp -d)}
-C=$(git -C "$ROOT" rev-list -1 --first-parent HEAD -- apps/helper)
+C=$(git -C "$ROOT" rev-list -1 --first-parent HEAD -- $(node "$ROOT/apps/helper/deploy/image-inputs.mjs"))
 OTHER=$(git -C "$ROOT" rev-parse HEAD~1)
 [ "$OTHER" = "$C" ] && OTHER=$(git -C "$ROOT" rev-parse "$C~1")
 CHECK="$ROOT/scripts/live-checks/helper-host-health.mjs"
