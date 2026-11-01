@@ -6,6 +6,7 @@ import type { Chain } from "@blindfill/kit";
 import { useState } from "react";
 import type { RouteId } from "../../src/routes/routes.ts";
 import { PhoneAccountMenu } from "../../src/screens/signin/Account.tsx";
+import { HopLine } from "../../src/screens/signin/HopLine.tsx";
 import { useReturnHop } from "../../src/shell/ReturnHop.tsx";
 import type { HopStart } from "../../src/shell/ReturnHop.tsx";
 import { start } from "../../src/shell/start.tsx";
@@ -38,18 +39,20 @@ function Probe({ id }: { id: RouteId }) {
       {/* the controls sit below the fold, so a tap on one is made with the page scrolled */}
       <div className="tall" />
       {CONTROLS.map((c) => (
-        <button
-          key={c.control}
-          type="button"
-          data-control={c.control}
-          disabled={locked === c.control}
-          onClick={async () => {
-            const o = await c.go(hop, { route: id, sheet, control: c.control, fields: sheet ? { note } : {} });
-            if (o && !o.ok) setError(o.error.code);
-          }}
-        >
-          {c.control}
-        </button>
+        <div key={c.control}>
+          <button
+            type="button"
+            data-control={c.control}
+            disabled={locked === c.control}
+            onClick={async () => {
+              const o = await c.go(hop, { route: id, sheet, control: c.control, fields: sheet ? { note } : {} });
+              if (o && !o.ok) setError(o.error.code);
+            }}
+          >
+            {c.control}
+          </button>
+          <HopLine control={c.control} />
+        </div>
       ))}
       <div className="tall" />
     </main>
