@@ -27,7 +27,9 @@ const store = createFileStore(input.store);
 let asks = 0;
 const tokenStatus = async (): Promise<TokenStatus> => {
   const s = input.status[Math.min(asks++, input.status.length - 1)] ?? "halted";
-  return { token: input.token, caught_up: true, halted: s === "halted", vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height: 0, last_event: null };
+  // the watch's answer as of the newest final height: caught up to it
+  const block_height = Number((await rpcs[0]("block", { finality: "final" }) as { header: { height: number } }).header.height);
+  return { token: input.token, caught_up: true, halted: s === "halted", vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height, last_event: null };
 };
 const deps = {
   cfg: { vault: input.vault, token: input.token, marginK: BigInt(input.marginK) },
