@@ -13,9 +13,12 @@
   "dependencies": {
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
-    "@scure/base": "2.4.0"
+    "@scure/base": "2.4.0",
+    "@zk-kit/lean-imt": "2.2.4",
+    "poseidon-lite": "0.3.0"
   },
   "devDependencies": {
-    "@types/node": "24.10.1"
+    "@types/node": "24.10.1",
+    "snarkjs": "0.7.5"
   }
 }
