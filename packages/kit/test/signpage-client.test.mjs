@@ -534,22 +534,81 @@ test("a state of 10,000 orders is read; 10,001 orders, or a state over 4 MiB, is
   assert.equal(c.dropped().shape, 2);
 });
 
-test("a shared-array bomb is refused fast, at depth 1 and depth 2 (every value visited is counted)", async () => {
+// The bound is proved by counting, never by the clock (a slow runner took 1134 ms for the same walk: main's CI run
+// 41272481724). schema.ts:67 counts one visit per value (`++chars`) and refuses at visit SIGNPAGE_MAX_ANSWER_BYTES + 1,
+// before any JSON is made. Every value is at least one byte of JSON, so a message that needs exactly that many visits
+// still fails the JSON size check after the walk: the walk's verdict shows as whether JSON.stringify ran.
+const CAP = 4_194_304;
+/** The visits the walk counts for `v`: one per value, plus the characters of every string and key (schema.ts:67-77). */
+const visitsOf = (v) => {
+  if (v === null || typeof v !== "object") return 1 + (typeof v === "string" ? v.length : 0);
+  if (Array.isArray(v)) return 1 + v.reduce((n, e) => n + visitsOf(e), 0);
+  return 1 + Object.keys(v).reduce((n, k) => n + k.length + visitsOf(v[k]), 0);
+};
+const message = (bomb) => ({ v: 1, type: "progress", id: "x", stage: "filled", bomb });
+/** A message whose walk needs exactly `visits` visits, built from arrays shared `depth` levels deep, plus a few nulls. */
+function withVisits(depth, visits) {
+  const inner = new Array(10_000).fill(null); // 10,001 visits per path
+  const mid = new Array(100).fill(inner); // depth 2: 1,000,101 visits per path
+  const bomb = [];
+  const unit = depth === 1 ? inner : mid;
+  const per = visitsOf(unit);
+  const fixed = visitsOf(message([]));
+  const n = Math.floor((visits - fixed) / per);
+  for (let i = 0; i < n; i++) bomb.push(unit);
+  if (depth === 2) for (let i = 0; i < Math.floor((visits - fixed - n * per) / 10_001); i++) bomb.push(inner);
+  const msg = message(bomb);
+  const pad = visits - visitsOf(msg);
+  assert.ok(pad >= 0 && bomb.length + pad <= 10_000, `${depth}: ${pad} nulls to add`);
+  for (let i = 0; i < pad; i++) bomb.push(null);
+  assert.equal(visitsOf(msg), visits);
+  return msg;
+}
+/** Whether the walk got past its count, seen as a JSON.stringify call. */
+function walkedThenJson(msg) {
+  const stringify = JSON.stringify;
+  let calls = 0;
+  JSON.stringify = (...a) => (calls++, stringify(...a));
+  try {
+    return { accepted: S.signpageIsPlainMessage(msg), json: calls };
+  } finally {
+    JSON.stringify = stringify;
+  }
+}
+
+test("the walk's bound is exact: visit 4,194,304 passes the count, visit 4,194,305 is refused by it, at depth 1 and depth 2", () => {
+  assert.equal(S.SIGNPAGE_MAX_ANSWER_BYTES, CAP);
+  for (const depth of [1, 2]) {
+    const at = walkedThenJson(withVisits(depth, CAP));
+    // The count let it through; the JSON (at least one byte per value) is over the cap, so it is refused there.
+    assert.deepEqual(at, { accepted: false, json: 1 }, `depth ${depth}: exactly ${CAP} visits get past the count`);
+    const over = walkedThenJson(withVisits(depth, CAP + 1));
+    assert.deepEqual(over, { accepted: false, json: 0 }, `depth ${depth}: ${CAP + 1} visits are refused by the count, before any JSON`);
+  }
+});
+
+test("a message whose JSON is exactly 4 MiB is read; one byte more is refused", () => {
+  const exact = [("x").repeat(CAP - 4)]; // ["xxx..."] is the string plus 4 bytes
+  assert.equal(bytes(exact), CAP);
+  assert.equal(S.signpageIsPlainMessage(exact), true);
+  assert.equal(S.signpageIsPlainMessage([("x").repeat(CAP - 3)]), false);
+});
+
+test("a shared-array bomb is dropped by the client, at depth 1 and depth 2: the state is the same, the clock is only an outer limit", async () => {
   const { h, c } = await readyClient();
   const inner = new Array(10_000).fill(null);
   const d1 = new Array(10_000).fill(inner); // 10^8 leaves in about 30 KB of references
   const d2 = new Array(10_000).fill(d1); // 10^12 leaves
-  for (const [name, bomb] of [["depth 1", d1], ["depth 2", d2]]) {
+  const bombs = [["depth 1", message(d1)], ["depth 2", message(d2)], ["depth 1, at the bound + 1", withVisits(1, CAP + 1)], ["depth 2, at the bound + 1", withVisits(2, CAP + 1)]];
+  for (const [name, msg] of bombs) {
     let t0 = performance.now();
-    assert.equal(S.signpageIsPlainMessage({ v: 1, type: "progress", id: "x", stage: "filled", bomb }), false, name);
-    let ms = performance.now() - t0;
-    assert.ok(ms < 1_000, `${name}: the walk refused it in ${Math.round(ms)} ms`);
+    assert.equal(S.signpageIsPlainMessage(msg), false, name);
+    assert.ok(performance.now() - t0 < 10_000, `${name}: the walk took over 10 s`);
     const before = c.snapshot();
     const d0 = c.dropped().shape;
     t0 = performance.now();
-    h.post({ v: 1, type: "progress", id: "x", stage: "filled", bomb });
-    ms = performance.now() - t0;
-    assert.ok(ms < 1_000, `${name}: the client dropped it in ${Math.round(ms)} ms`);
+    h.post(msg);
+    assert.ok(performance.now() - t0 < 10_000, `${name}: the client took over 10 s`);
     assert.equal(c.dropped().shape, d0 + 1, name);
     assert.equal(c.snapshot(), before, name);
   }
