@@ -1,6 +1,9 @@
 {
   "name": "@blindfill/kit",
   "type": "module",
+  "scripts": {
+    "test": "tsc -p tsconfig.json"
+  },
   "exports": {
     ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
     "./core": { "types": "./src/core.ts", "default": "./src/core.ts" },
