@@ -1,7 +1,7 @@
 {
  "version": "blindfill-vault-v1",
  "notes": [
-  "VT-U02's scope, label and context vectors for the Blindfill vault v1, made by packages/kit/src/vault/shapes.ts with Node's keccak-256; packages/kit/test/vault-shapes.test.ts recomputes every one.",
+  "VT-U02's scope, label and context vectors for the Blindfill vault v1, made by packages/kit/src/vault/shapes.ts with Node's keccak-256; packages/kit/test/vault-shapes.test.mjs recomputes every one.",
   "p = 21888242871839275222246405745257275088548364400416034343698204186575808495617. Each value is keccak256(preimage) read big-endian, then mod p.",
   "scope: borsh((\"blindfill-vault-v1\", vault, asset)), asset being the vault's TOKEN account; three Borsh strings (a u32 little-endian byte length, then the bytes).",
   "label: scope as 32 bytes big-endian, then nonce as 32 bytes big-endian (PP's abi.encodePacked(SCOPE, nonce)).",

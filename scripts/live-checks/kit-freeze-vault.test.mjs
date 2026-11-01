@@ -1,21 +1,27 @@
 // node --test scripts/live-checks/kit-freeze-vault.test.mjs: the live check replays recorded answers
-// (kit-freeze-vault.answers.json). The good answer is shapes.ts and vault-v1.json as the card merges them: PASS. Each
-// bad answer is the good one with one exact edit: FAIL. One more bad answer is made here from the first edit: the
-// swapped context order with vectors that the swapped code made itself, so the two files agree with each other and
-// only the check's own encoders catch them.
+// (kit-freeze-vault.answers.json, each file an array of its lines). The good answer is shapes.ts and vault-v1.json as
+// the card merges them: PASS. Each bad answer is the good one with one exact edit: FAIL. One more bad answer is made
+// here from the first edit: the swapped context order with vectors that the swapped code made itself, so the two files
+// agree with each other and only the check's own encoders catch them. Last, files that try to escape the sandbox,
+// stop it early or forge its verdict: FAIL, with nothing written.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, checkFiles, keccak256, load, read } from "./kit-freeze-vault.mjs";
+import { check, checkFiles, fromLines, keccak256, load, read } from "./kit-freeze-vault.mjs";
 
 process.removeAllListeners("warning"); // stripTypeScriptTypes is marked experimental
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "kit-freeze-vault.answers.json"), "utf8"));
-const GOOD = A.good.main;
+const GOOD = fromLines(A.good).main;
 const edited = (b) => ({ ...GOOD, [b.file]: GOOD[b.file].replace(b.from, b.to) });
-const bad = (name) => A.bad.find((b) => b.name === name);
+const bad = (name) => {
+  const b = A.bad.find((x) => x.name === name);
+  assert.ok(b, name);
+  return b;
+};
 
 // keccak-256 of 200 'a's (two 136-byte blocks), by OpenSSL 3.5.9's keccak-256 (Homebrew Node 24.22.1, 2026-11-01)
 const A200 = "96ea54061def936c4be90b518992fdc6f12f535068a256229aca54267b4d084d";
@@ -28,25 +34,44 @@ test("the check's Keccak-256: Keccak's published answers for '' and 'abc', OpenS
 });
 
 test("each bad edit applies to exactly one place in the good answer", () => {
-  assert.equal(A.bad.length, 5);
+  assert.equal(A.bad.length, 14);
   for (const b of A.bad) assert.equal(GOOD[b.file].split(b.from).length - 1, 1, b.name);
 });
 
 test("recorded good answer: PASS, every line ok", async () => {
   const r = await check({ refs: ["main"], files: { main: GOOD } });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.deepEqual(r.lines.map((l) => l.slice(0, 10)), Array(6).fill("main: ok  "));
-  assert.match(r.lines[1], /exactly two fields: VAULT_DEPOSIT_MESSAGE_FIELDS \["precommitment","depositor"\], vaultDepositMessage\(\) writes \["precommitment","depositor"\]$/);
-  assert.match(r.lines[2], /U ft_transfer_call on TOKEN; R ft_transfer_call on TOKEN; V ft_transfer_call on TOKEN; shapes that sign an ft_withdraw: none$/);
-  assert.match(r.lines[5], /8 scope, 10 label and 32 context vectors recompute/);
+  assert.deepEqual(r.lines.map((l) => l.slice(0, 10)), Array(4).fill("main: ok  "));
+  assert.match(r.lines[1], /26 data exports equal the paper's values$/);
+  assert.match(r.lines[2], /every function behaves as the paper says$/);
+  assert.match(r.lines[3], /8 scope, 10 label and 32 context vectors recompute/);
 });
 
-test("recorded bad answer, recipient and fee_recipient swapped in the context order: FAIL", async () => {
-  const r = await checkFiles(edited(bad("recipient and fee_recipient swapped in the context order")));
-  assert.equal(r.ok, false);
-  assert.match(r.lines[4], /^BAD the context order in shapes\.ts: \["processor","fee_recipient","register_deposit","recipient"/);
-  assert.match(r.lines[5], /^BAD .*context 1: shapes\.ts makes other bytes/);
-});
+// each recorded bad answer, the line it fails on and what that line names
+const CASES = [
+  ["recipient and fee_recipient swapped in the context order", 1, /differ: VAULT_CONTEXT_FIELDS/],
+  ["a third deposit-message field", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
+  ["ft_withdraw named as R's carrier", 1, /differ: VAULT_DEPOSIT_SIGNERS/],
+  ["ft_withdraw named as V's carrier", 1, /differ: VAULT_DEPOSIT_SIGNERS/],
+  ["a setup-file sha256 changed", 1, /differ: VAULT_SETUP_FILES/],
+  ["vaultContextInput reads recipient from fee_recipient", 3, /vaultContextInput reads the request to other bytes/],
+  ["vaultFieldOf reads the digest little-endian", 2, /not: vaultFieldOf reads big-endian, mod p/],
+  ["MAX_RELAY_FEE_BPS 500", 1, /differ: VAULT_CONSTANTS/],
+  ["carrier gas 100 Tgas", 1, /differ: VAULT_DEPOSIT_CARRIER, VAULT_DEPOSIT_SIGNERS/],
+  ["carrier deposit 0 yocto", 1, /differ: VAULT_DEPOSIT_CARRIER, VAULT_DEPOSIT_SIGNERS/],
+  ["TOKEN changed", 1, /differ: VAULT_CONSTANTS/],
+  ["the 389-byte reserve dropped from the withdraw attachment", 2, /not: vaultWithdrawYocto/],
+  ["the backstop multiplier changed", 2, /not: vaultRelayFeeWithinBackstop/],
+  ["an event field dropped", 1, /differ: VAULT_EVENTS/],
+];
+for (const [name, line, why] of CASES) {
+  test(`recorded bad answer, ${name}: FAIL`, async () => {
+    const r = await checkFiles(edited(bad(name)));
+    assert.equal(r.ok, false, r.lines.join("\n"));
+    assert.match(r.lines[line], /^BAD /);
+    assert.match(r.lines[line], why);
+  });
+}
 
 test("bad answer, the swapped order with vectors the swapped code made itself: FAIL on the check's own bytes", async () => {
   const files = edited(bad("recipient and fee_recipient swapped in the context order"));
@@ -62,36 +87,33 @@ test("bad answer, the swapped order with vectors the swapped code made itself: F
   }
   const r = await checkFiles({ ...files, vectors: JSON.stringify(V) });
   assert.equal(r.ok, false);
-  assert.match(r.lines[5], /^BAD .*context 1 does not recompute/);
+  assert.match(r.lines[3], /^BAD .*context 1 does not recompute/);
 });
 
-test("recorded bad answer, a third deposit-message field: FAIL", async () => {
-  const r = await checkFiles(edited(bad("a third deposit-message field")));
-  assert.equal(r.ok, false);
-  assert.match(r.lines[1], /^BAD the deposit message has exactly two fields: VAULT_DEPOSIT_MESSAGE_FIELDS \["precommitment","depositor","refund_to"\]/);
-});
-
-test("recorded bad answers, ft_withdraw named as R's or V's carrier: FAIL", async () => {
-  for (const [name, id] of [["ft_withdraw named as R's carrier", "R"], ["ft_withdraw named as V's carrier", "V"]]) {
-    const r = await checkFiles(edited(bad(name)));
-    assert.equal(r.ok, false, name);
-    assert.match(r.lines[2], new RegExp(`^BAD the carrier: .*${id} ft_withdraw on intents\\.near; .*shapes that sign an ft_withdraw: VAULT_DEPOSIT_SIGNERS$`), name);
-  }
-});
-
-test("recorded bad answer, a setup-file sha256 changed: FAIL", async () => {
-  const r = await checkFiles(edited(bad("a setup-file sha256 changed")));
-  assert.equal(r.ok, false);
-  assert.match(r.lines[3], /^BAD the six setup-file sha256 values equal vault\.md 2\.6; differ: trusted-setup\/final-keys\/withdraw\.zkey$/);
-});
-
-test("main good but the tag bad: FAIL; a shapes.ts that imports another module: FAIL", async () => {
+test("main good but the tag bad: FAIL; a shapes.ts with a static import: FAIL", async () => {
   const r = await check({ refs: ["main", "kit-v1"], files: { main: GOOD, "kit-v1": edited(bad("a third deposit-message field")) } });
   assert.equal(r.ok, false);
-  assert.ok(r.lines.some((l) => l.startsWith("kit-v1: BAD the deposit message")));
+  assert.ok(r.lines.some((l) => l.startsWith("kit-v1: BAD ")));
   const i = await checkFiles({ ...GOOD, shapes: `import { x } from "./x.ts";\n${GOOD.shapes}` });
   assert.equal(i.ok, false);
   assert.match(i.lines[0], /^BAD shapes\.ts loads as one module: shapes\.ts imports another module$/);
+});
+
+test("the sandbox: a file write, a child process, an early exit(0) and a forged PASS all FAIL, and nothing is written", async () => {
+  const out = path.join(tmpdir(), `kfv-escape-${process.pid}`);
+  rmSync(out, { force: true });
+  const tries = [
+    `const fs = process.getBuiltinModule("node:fs"); fs.writeFileSync(${JSON.stringify(out)}, "x");`,
+    `const os = await import("node:os"); process.getBuiltinModule("node:child_process").execSync("true");`,
+    `process.exit(0);`,
+    `console.log("PASS"); process.stdout.write("deadbeef PASS\\n"); process.exit(0);`,
+  ];
+  for (const t of tries) {
+    const r = await checkFiles({ ...GOOD, shapes: `${GOOD.shapes}\n${t}\n` });
+    assert.equal(r.ok, false, t);
+    assert.ok(r.lines.some((l) => l.startsWith("BAD ")), `${t}\n${r.lines.join("\n")}`);
+  }
+  assert.equal(existsSync(out), false);
 });
 
 test("read() asks GitHub for the two files at the ref and refuses a missing one", async () => {
