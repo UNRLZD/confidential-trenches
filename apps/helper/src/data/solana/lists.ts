@@ -133,10 +133,19 @@ function bps(pct: unknown, min = -Infinity, max = Infinity): number | null {
 }
 
 const count = (v: unknown): number | null => (Number.isSafeInteger(v) && (v as number) >= 0 ? (v as number) : null);
+/** A window's buy and sell sides: Jupiter drops a side that is zero (a row with buys only has no sellVolume and no
+ *  numSells), so a side is 0 when the other is there, and both unknown when neither is. */
+function sides(w: Record<string, unknown>, buy: string, sell: string): [unknown, unknown] {
+  const has = (k: string) => Object.hasOwn(w, k);
+  if (!has(buy) && !has(sell)) return [undefined, undefined];
+  return [has(buy) ? w[buy] : 0, has(sell) ? w[sell] : 0];
+}
 const sum = (a: unknown, b: unknown): string | null => (finite(a) && finite(b) && a >= 0 && b >= 0 ? dec(a + b) : null);
 const net = (a: unknown, b: unknown): string | null => (finite(a) && finite(b) && a >= 0 && b >= 0 ? dec(a - b, true) : null);
 const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
-const not = (v: unknown): boolean | null => (typeof v === "boolean" ? !v : null);
+/** An authority still set: Jupiter writes `<kind>AuthorityDisabled: true` when it is gone and, when it is not, drops
+ *  the flag and names the authority (230 of 230 rows read 1 Nov 15:16Z); neither is unknown. */
+const authority = (disabled: unknown, holder: unknown): boolean | null => (disabled === true ? false : address(holder) !== null ? true : null);
 
 // C0 and C1 controls and the direction marks that can reorder a symbol on screen
 const STRIP = /[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
@@ -171,6 +180,12 @@ export function toRow(raw: unknown, asOfMs: number): Row | null {
   const s5 = obj(j.stats5m);
   const s1 = obj(j.stats1h);
   const s24 = obj(j.stats24h);
+  const [v5b, v5s] = sides(s5, "buyVolume", "sellVolume");
+  const [v1b, v1s] = sides(s1, "buyVolume", "sellVolume");
+  const [v24b, v24s] = sides(s24, "buyVolume", "sellVolume");
+  const [n5b, n5s] = sides(s5, "numBuys", "numSells");
+  const [n1b, n1s] = sides(s1, "numBuys", "numSells");
+  const [n24b, n24s] = sides(s24, "numBuys", "numSells");
   const audit = obj(j.audit);
   const launchpad = typeof j.launchpad === "string" && LAUNCHPAD.test(j.launchpad) ? j.launchpad : null;
   return {
@@ -184,7 +199,7 @@ export function toRow(raw: unknown, asOfMs: number): Row | null {
     created_s: seconds(obj(j.firstPool).createdAt, asOfMs) ?? seconds(j.createdAt, asOfMs),
     price_usd: dec(j.usdPrice),
     mc_usd: dec(j.mcap),
-    vol_24h_usd: sum(s24.buyVolume, s24.sellVolume),
+    vol_24h_usd: sum(v24b, v24s),
     chg_5m_bps: bps(s5.priceChange, -100),
     chg_1h_bps: bps(s1.priceChange, -100),
     chg_24h_bps: bps(s24.priceChange, -100),
@@ -195,24 +210,24 @@ export function toRow(raw: unknown, asOfMs: number): Row | null {
     as_of_ms: asOfMs,
     creator: address(j.dev),
     creator_sold_bps: null,
-    dev_bps: null, // D-S5's own read of the dev's token account, not Jupiter's
+    dev_bps: bps(audit.devBalancePercentage, 0, 100),
     snipers_bps: null, // not served in the hackathon (06b Risk `snipers_bps`)
-    mint_auth: not(audit.mintAuthorityDisabled),
-    freeze_auth: not(audit.freezeAuthorityDisabled),
-    vol_5m_usd: sum(s5.buyVolume, s5.sellVolume),
-    buys_5m: count(s5.numBuys),
-    sells_5m: count(s5.numSells),
-    net_5m_usd: net(s5.buyVolume, s5.sellVolume),
+    mint_auth: authority(audit.mintAuthorityDisabled, j.mintAuthority),
+    freeze_auth: authority(audit.freezeAuthorityDisabled, j.freezeAuthority),
+    vol_5m_usd: sum(v5b, v5s),
+    buys_5m: count(n5b),
+    sells_5m: count(n5s),
+    net_5m_usd: net(v5b, v5s),
     risk_src: "jupiter",
     launchpad,
     // listed: 10,000 once Jupiter names its graduated pool; on a curve: the curve read below; otherwise unknown
     curve_bps: address(j.graduatedPool) !== null ? 10_000 : null,
-    vol_1h_usd: sum(s1.buyVolume, s1.sellVolume),
+    vol_1h_usd: sum(v1b, v1s),
     chg_4h_bps: null, // Jupiter has no 4h window (06b)
-    buys_24h: count(s24.numBuys),
-    sells_24h: count(s24.numSells),
-    buys_1h: count(s1.numBuys),
-    sells_1h: count(s1.numSells),
+    buys_24h: count(n24b),
+    sells_24h: count(n24s),
+    buys_1h: count(n1b),
+    sells_1h: count(n1s),
   };
 }
 

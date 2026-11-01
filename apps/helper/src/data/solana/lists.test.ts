@@ -93,7 +93,26 @@ test("the CO's asks: price null with no usdPrice, launchpad null with none, curv
   }
   assert.ok(graduated.some((r) => r.launchpad === "pump.fun"), "a graduated launchpad token keeps its launchpad");
   assert.ok(all.some((r) => r.launchpad === null) && all.some((r) => r.launchpad === "pump.fun") && all.some((r) => r.launchpad === "stonkfun"));
+  // an authority still set: Jupiter drops the Disabled flag and names the authority
+  const rawAll = RAW.new.concat(RAW.trending_5m, RAW.trending_1h) as any[];
+  for (const r of all) {
+    const j = rawAll.find((x) => x.id === r.token);
+    assert.equal(r.mint_auth, j.audit.mintAuthorityDisabled === true ? false : typeof j.mintAuthority === "string" ? true : null, `${r.symbol} mint`);
+    assert.equal(r.freeze_auth, j.audit.freezeAuthorityDisabled === true ? false : typeof j.freezeAuthority === "string" ? true : null, `${r.symbol} freeze`);
+    assert.equal(r.dev_bps, typeof j.audit.devBalancePercentage === "number" ? Math.round(j.audit.devBalancePercentage * 100) : null, `${r.symbol} dev`);
+  }
+  assert.ok(all.some((r) => r.mint_auth === true) && all.some((r) => r.freeze_auth === true) && all.some((r) => typeof r.dev_bps === "number"));
   for (const r of rowsOf("trending_1h")) assert.ok(Number.isSafeInteger(r.buys_1h) && Number.isSafeInteger(r.sells_1h), `${r.symbol}`);
+});
+
+test("a window with one side only: Jupiter drops a zero side, so it reads 0; a window with neither side reads null", () => {
+  const good = raw("trending_5m", "TRUMP") as any;
+  const r = toRow({ ...good, stats5m: { buyVolume: 220.27984179577888, numBuys: 2, numTraders: 2 }, stats1h: { sellVolume: 10, numSells: 1 }, stats24h: { priceChange: 1 } }, AS_OF)!;
+  assert.deepEqual([r.vol_5m_usd, r.net_5m_usd, r.buys_5m, r.sells_5m], ["220.279841796", "220.279841796", 2, 0]);
+  assert.deepEqual([r.vol_1h_usd, r.buys_1h, r.sells_1h], ["10", 0, 1]);
+  assert.deepEqual([r.vol_24h_usd, r.buys_24h, r.sells_24h, r.chg_24h_bps], [null, null, null, 100]);
+  const none = toRow({ ...good, stats5m: undefined }, AS_OF)!;
+  assert.deepEqual([none.vol_5m_usd, none.net_5m_usd, none.buys_5m, none.sells_5m, none.chg_5m_bps], [null, null, null, null, null]);
 });
 
 test("pump.fun curves: the program address of each mint is the recorded request's, and the recorded accounts read 0-9,999", async () => {
@@ -185,7 +204,7 @@ test("hostile rows: no valid mint, symbol or name drops the row; numbers out of 
   assert.equal(r.name, "<img src=x onerror=alert(1)>", "text is data: kept as text, the app escapes it");
   assert.deepEqual(
     [r.price_usd, r.mc_usd, r.liq_usd, r.holders, r.chg_5m_bps, r.vol_5m_usd, r.net_5m_usd, r.buys_5m, r.sells_5m, r.chg_1h_bps, r.buys_1h, r.vol_24h_usd, r.buys_24h, r.top10_bps, r.mint_auth, r.freeze_auth, r.launchpad, r.creator, r.curve_bps, r.created_s],
-    [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, true, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
   );
   assert.deepEqual(Object.keys(r), [...ROW_FIELDS]);
 });
