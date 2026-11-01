@@ -315,6 +315,8 @@ dependencies = [
  "ark-bn254",
  "ark-ff",
  "light-poseidon",
+ "near-crypto",
+ "near-primitives",
  "near-sdk",
  "near-workspaces",
  "openssl",

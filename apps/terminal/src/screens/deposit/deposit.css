@@ -1,0 +1,91 @@
+/* The deposit sheet's styles. Every value is R5's (design/proto/assets/proto.css at design-lock-r5: the drawer :227,
+   the phone sheet :258-261, the funds drawer :728-821, .mdep :770-777), which carries the live UNRLZD terminal's tokens.
+   Desktop sizes are layout px on the 1920 design, drawn at --fit-zoom (fit.ts): the 440 drawer is 330 css px at 1440.
+   The sheet's box and its action's box are the same in every state (BAR-05; owner pick "Same height", OD:270). */
+.dep {
+  --bg-panel: #111111; --bg-drawer: #0c0c0c; --border-panel: #1f1f1f; --border-strong: #2a2a2a; --border-row: #171717;
+  --paper: #f4f4f2; --on-paper: #0a0a0a; --acc: #50e397; --acc-rgb: 80,227,151; --on-acc: #0a0a0a;
+  --sell: #ff5d4d; --warn: #f2b543; --warn-rgb: 242,181,67; --blue: #5b8cff; --blue-rgb: 91,140,255;
+  --m-ink-panel: #111111;
+  position: fixed; inset: 0; z-index: 100;
+}
+.dep button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.dep button:disabled { cursor: default; }
+.dep-scrim { position: absolute; inset: 0; background: rgba(5,5,5,.5); }
+.dep-box { position: absolute; top: 0; right: 0; bottom: 0; width: 440px; background: var(--bg-drawer); border-left: 1px solid var(--border-panel); display: flex; flex-direction: column; }
+.dep .grab { display: none; }
+.dhd { height: 56px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--border-panel); }
+.dhd .bal { margin-left: auto; font: 14px var(--font-num); color: var(--text-2); }
+.dep-x { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-2); }
+.dbody { flex: 1; min-height: 0; overflow: hidden; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.dseg { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; border: 1px solid var(--border-panel); flex: none; }
+.dseg button { height: 38px; border-radius: 9px; font: 500 15px var(--font-ui); color: var(--text-2); }
+.dseg button.on { background: var(--border-strong); color: var(--text-1); }
+.dpicks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dpick .lb, .damt .lb, .dget .lb { font: 500 13px var(--font-ui); color: var(--text-3); height: 18px; display: flex; align-items: center; }
+.dpick .lb { margin-bottom: 8px; color: var(--text-2); }
+.drow { height: 56px; border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-panel); display: flex; align-items: center; gap: 12px; padding: 0 14px; }
+.drow .nm { font: 600 15px var(--font-ui); }
+.dep .sk { display: block; width: 70px; height: 14px; background: #181818; border-radius: 6px; animation: dep-skp 1.2s linear infinite; }
+@keyframes dep-skp { 50% { opacity: .55; } }
+.damt { border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-drawer); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.damt.bad { border-color: var(--sell); }
+.damt .row { display: flex; align-items: baseline; gap: 8px; }
+.damt .v { font: 500 34px/1 var(--font-num); letter-spacing: -0.03em; color: var(--text-1); background: none; border: 0; padding: 0; outline: none; width: 100%; min-width: 0; }
+.damt .u { font: 600 16px var(--font-ui); color: var(--text-2); margin-left: auto; flex: none; }
+.lim { display: flex; justify-content: space-between; font: 12px var(--font-ui); color: var(--text-3); margin-top: -4px; padding: 0 2px; }
+.lim .loss { color: var(--sell); }
+.dget { border-radius: 12px; background: #181818; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.dget .v { font: 500 26px/1 var(--font-num); letter-spacing: -0.02em; height: 26px; display: flex; align-items: center; }
+.dget .v .sk { width: 110px; height: 26px; }
+.dstrip { display: grid; grid-template-columns: 1fr 1fr 1fr; border-radius: 12px; background: var(--bg-panel); border: 1px solid var(--border-panel); }
+.dstrip > div { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dstrip > div + div { box-shadow: inset 1px 0 0 var(--border-panel); }
+.dstrip .k { font: 500 12px var(--font-ui); color: var(--text-3); height: 15px; display: flex; align-items: center; }
+.dstrip .v { font-size: 15px; color: var(--text-1); height: 18px; display: flex; align-items: center; }
+.dstrip .v .sk { width: 54px; }
+.dep .t3 { color: var(--text-3); }
+.dstat { display: flex; align-items: center; gap: 10px; min-height: 44px; border-radius: 12px; padding: 0 14px; background: var(--bg-panel); border: 1px solid var(--border-panel); font: 500 14px var(--font-ui); flex: none; }
+.dstat.warn { color: var(--warn); }
+.dstat.blue { color: var(--blue); }
+.dstat .cnt { font-family: var(--font-num); display: inline-block; width: 6ch; height: 18px; line-height: 18px; contain: strict; font-variant-numeric: tabular-nums; font-kerning: none; } /* the counter ticks in place (BAR-11): a fixed box, and its text padded to one length (DepositSheet Stat), since Chromium counted a sub-pixel layout shift on the text run each time its length changed */
+.dstat.row { justify-content: space-between; padding-right: 6px; }
+.dstat .retry { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 14px var(--font-ui); }
+.dline { margin: 0; font: 13px/1.4 var(--font-ui); color: var(--text-2); padding: 0 2px; }
+.addrb { border-radius: 14px; border: 1px solid var(--border-panel); background: var(--bg-panel); padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.addrb .ca { font: 600 13px var(--font-ui); color: var(--text-1); display: flex; align-items: center; gap: 6px; }
+.addrb .ca .gap { width: 10px; }
+.addrb .hex { font: 14px/1.55 var(--font-num); color: var(--text-1); text-align: center; letter-spacing: 0.02em; word-spacing: 0.35em; overflow-wrap: anywhere; }
+.addrb .kv { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr; border-top: 1px solid var(--border-row); padding-top: 10px; }
+.addrb .kv .k { font: 11px var(--font-ui); color: var(--text-3); height: 14px; display: flex; align-items: center; }
+.addrb .kv .r { text-align: right; }
+.addrb .kv .r .k { justify-content: flex-end; }
+.addrb .kv .v { font: 500 13px var(--font-num); margin-top: 4px; }
+.ddone { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 0 8px; }
+.damt-done { font: 500 34px/1 var(--font-num); letter-spacing: -0.03em; color: var(--text-1); }
+.dsub { font: 14px var(--font-ui); color: var(--text-2); }
+.dfoot { flex: none; height: 81px; padding: 12px 16px 16px; border-top: 1px solid var(--border-panel); }
+.dbtn { height: 52px; border-radius: 13px; font: 600 16px var(--font-ui); display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.dep .dbtn.buy { background: var(--acc); color: var(--on-acc); box-shadow: 0 10px 30px rgba(var(--acc-rgb), .18); }
+.dep .dbtn.paper { background: var(--paper); color: var(--on-paper); }
+.dep .dbtn.off { background: #181818; color: var(--text-3); }
+@media (prefers-reduced-motion: reduce) { .dep .sk { animation: none; } }
+
+/* phone: the sheet from the bottom at 88% of the screen in every state (proto.css :258-261; deposit-390.html) */
+@media (max-width: 767.98px) {
+  .dep { z-index: 110; }
+  .dep-scrim { background: rgba(0,0,0,.6); }
+  .dep-box { top: auto; left: 0; width: auto; height: 88%; border-left: 0; background: var(--m-ink-panel); border-radius: 26px 26px 0 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.07); padding-bottom: 8px; }
+  .dep .grab { display: flex; justify-content: center; height: 21px; padding-top: 8px; flex: none; }
+  .dep .grab i { width: 38px; height: 5px; border-radius: 3px; background: #333; }
+  .dhd { height: 48px; border-bottom: 0; padding: 0 12px 0 16px; }
+  .dep-x { width: 44px; height: 44px; border-radius: 14px; background: #181818; }
+  .dbody { padding: 4px 16px 16px; }
+  .dseg button { height: 44px; }
+  .damt .v { font-size: 44px; letter-spacing: -0.02em; }
+  .dstat .retry { height: 44px; border-radius: 14px; }
+  .dstat.row { padding-right: 0; border: 0; }
+  .addrb { padding: 14px; gap: 10px; }
+  .dfoot { height: 76px; padding: 8px 16px 12px; border-top: 0; }
+  .dbtn { height: 56px; border-radius: 16px; font-size: 17px; }
+}
