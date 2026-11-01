@@ -5,11 +5,11 @@
 //! (`contracts/vault/tests/harness/run.sh --test withdraw_spend`); a plain `cargo test` builds this file empty.
 //!
 //! The proofs are tests/fixtures/withdraw-spends.json (the kit's input builder and snarkjs, made by
-//! make-withdraw-spends.mjs) over six test deposits on vault.test.near, the harness's vault. The deposit path is card
-//! vault-deposit-insert's, so the six deposits' state is made by the vault's own tree code (`insert_commitment`,
-//! `insert_label`) in near-sdk's mocked chain at vault.test.near, with `deposited` their sum, and put into the deployed
-//! vault by the sandbox's state patch; the account's storage use is raised by exactly those records' bytes. The vault's
-//! code comes only from the 2.8 deploy recipe.
+//! make-withdraw-spends.mjs) over six test deposits on vault.test.near, the harness's vault. The six deposits' tree
+//! state is made by the vault's own tree code (`insert_commitment`, `insert_label`) in near-sdk's mocked chain at
+//! vault.test.near, with `deposited` their sum, and put into the deployed vault by the sandbox's state patch, so these
+//! tests need no token and no prepay; the account's storage use is raised by exactly those records' bytes. The
+//! vault's code comes only from the 2.8 deploy recipe. Deposits through `ft_on_transfer` are tests/s02.rs's.
 //!
 //! 1. `vt_s05_one_nullifier_spends_once`: the same call twice; a second proof with the same nullifier; two proofs of
 //!    one nullifier sent at once by two relayers, landing in one block. Each time exactly one succeeds and the others
@@ -17,6 +17,9 @@
 //! 2. `vt_s06_unknown_zero_and_other_vault_roots_are_refused`: a state root or ASP root that is unknown, 0, or another
 //!    vault's (the same notes under another scope) is refused (`UnknownStateRoot`, `UnknownLabelRoot`) with no byte
 //!    changed; a proof against an older root (4 of the 6 deposits) lands.
+//! 3. `rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes`: rows 4, 7, 8, 9 and 10 refuse with no state byte,
+//!    no storage use and no log changed; three landed calls each write 2.3's bytes for their account ids (+74 B when
+//!    the state tree grows a level) and log exactly `leaf_inserted` then `withdrawn`.
 //!
 //! Until card vault-withdraw-payouts, a withdrawal that lands pays nothing: these tests read the spend's record, the
 //! change leaf, `totals` and the raw state. Each prints its gas table: `vault::withdraw` is the vault's own work
@@ -58,8 +61,8 @@ fn deposits_state(vault: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
     let mut v = Vault::default();
     let mut h = PoseidonT3::new();
     for (leaf, label) in f["leaves"].as_array().unwrap().iter().zip(f["labels"].as_array().unwrap()) {
-        v.insert_commitment(&mut h, &be(leaf.as_str().unwrap()));
-        v.insert_label(&mut h, &be(label.as_str().unwrap()));
+        let _ = v.insert_commitment(&mut h, &be(leaf.as_str().unwrap()));
+        let _ = v.insert_label(&mut h, &be(label.as_str().unwrap()));
     }
     env::state_write(&v);
     let mut kv: Vec<(Vec<u8>, Vec<u8>)> = near_sdk::mock::with_mocked_blockchain(|b| b.take_storage()).into_iter().collect();
@@ -147,6 +150,7 @@ async fn withdraw(h: &Harness, by: &Account, a: Value) -> R<Outcome> {
 /// `a` is refused with `want` and no byte of the vault's state changes.
 async fn refused(h: &Harness, by: &Account, a: Value, want: &str) -> R<()> {
     let before = vault_state(h).await?;
+    let used = h.account_view(&h.vault, "final").await?["storage_usage"].clone();
     let o = withdraw(h, by, a).await?;
     match landed(h, &o)? {
         Ok(_) => return Err(format!("landed, want {want}").into()),
@@ -155,7 +159,9 @@ async fn refused(h: &Harness, by: &Account, a: Value, want: &str) -> R<()> {
     // no event or log from a refused call, the change leaf's leaf_inserted included
     let r = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
     assert!(r.logs.is_empty(), "{want}: a refused call logged {:?}", r.logs);
+    h.wait_final(&h.vault).await?;
     assert_eq!(vault_state(h).await?, before, "{want}: a state byte changed");
+    assert_eq!(h.account_view(&h.vault, "final").await?["storage_usage"], used, "{want}: the storage use changed");
     Ok(())
 }
 
@@ -256,6 +262,50 @@ async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused() -> R<()> {
     // and the unchanged same_call lands after its refusals
     let o = withdraw(&h, &relayer, args("same_call", None)).await?;
     landed(&h, &o)?.map_err(|f| format!("same_call: {f}"))?;
+    println!("{}", h.gas_table());
+    Ok(())
+}
+
+#[tokio::test]
+async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes() -> R<()> {
+    let h = vault_with_deposits().await?;
+    let relayer = h.account("relayer", 50).await?;
+    let old = args("old_root", None)["public_signals"].clone();
+    let at = |i: usize| old[i].as_str().unwrap().to_string();
+    for (i, x, want) in [
+        (4, "33".to_string(), "InvalidTreeDepth"),
+        (6, "33".to_string(), "InvalidTreeDepth"),
+        (2, "0".to_string(), "InvalidWithdrawalAmount"),
+        (2, "340282366920938463463374607431768211456".to_string(), "AmountOverflow"),
+        (2, "999999".to_string(), "RelayFeeGreaterThanMax"),
+        (2, "31000001".to_string(), "InvalidPoolState"),
+        (2, "1000000".to_string(), "InvalidProof"),
+        (3, at(3), "InvalidProof"),
+        (5, at(5), "InvalidProof"),
+        (6, "4".to_string(), "InvalidProof"),
+    ] {
+        refused(&h, &relayer, args("same_call", Some((i, &x))), want).await?;
+        println!("signal {i} = {x}: refused ({want})");
+    }
+
+    // 2.3: 710 B with a 64-byte payer and recipient; these are shorter, and the third grows the state tree a level
+    let short = (64 - relayer.id().as_str().len() as u64) + (64 - "alice.test.near".len() as u64);
+    let mut wrote = vec![];
+    for name in ["same_call", "same_nullifier_a", "one_block_a"] {
+        let used = h.account_view(&h.vault, "final").await?["storage_usage"].as_u64().ok_or("storage_usage")?;
+        let o = withdraw(&h, &relayer, args(name, None)).await?;
+        let gas = landed(&h, &o)?.map_err(|f| format!("{name}: {f}"))?;
+        let r = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
+        let events: Vec<&str> = r.logs.iter().map(|l| l.split(r#""event":""#).nth(1).and_then(|e| e.split('"').next()).unwrap_or("")).collect();
+        assert_eq!(events, ["leaf_inserted", "withdrawn"], "{name}: {:?}", r.logs);
+        assert!(r.logs[0].contains(r#""tree":"state""#) && r.logs[0].contains(&signal(name, 0)), "{}", r.logs[0]);
+        h.wait_final(&h.vault).await?;
+        let now = h.account_view(&h.vault, "final").await?["storage_usage"].as_u64().ok_or("storage_usage")?;
+        let depth = h.view(&h.vault, "state_tree", json!({})).await?["depth"].clone();
+        println!("{name}: landed, {:.3} Tgas, wrote {} B, state tree depth {depth}", gas as f64 / 1e12, now - used);
+        wrote.push(now - used);
+    }
+    assert_eq!(wrote, vec![710 - short, 710 - short, 710 - short + 74]);
     println!("{}", h.gas_table());
     Ok(())
 }

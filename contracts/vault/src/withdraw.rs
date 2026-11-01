@@ -26,16 +26,17 @@
 //! - Row 7: `withdrawnValue != 0` (`InvalidWithdrawalAmount`). Row 8: it is below 2^128 (`AmountOverflow`), then the
 //!   backstop `relay_fee * 10,000 <= withdrawnValue * MAX_RELAY_FEE_BPS`, both products exact
 //!   (`RelayFeeGreaterThanMax`).
-//!   Row 9: `withdrawnValue <= deposited - spent + returned`, the value the notes hold (`InvalidPoolState`).
+//!   Row 9: `withdrawnValue <= deposited - (spent - returned)`, the value the notes hold, each subtraction checked
+//!   (`InvalidPoolState`).
 //! - Row 10: Groth16 verify with the withdraw key, the 8 signals in snarkjs order (`verifier::verify_withdraw`,
 //!   `InvalidProof`).
 //! - Row 11: `existingNullifierHash` not in `spent` (`NullifierAlreadySpent`); a spend is keyed on it, never on the
 //!   proof's bytes, which anyone can re-randomise. Row 12: `newCommitmentHash` into the state tree with LeanIMT's
 //!   checks (`LeafAlreadyExists`, `LeafCannotBeZero`, `MaxTreeDepthReached`), even when the change is 0. Every refusal
-//!   of rows 1-12 comes before the first write and the first log; then the change leaf (and its `leaf_inserted`), the
-//!   `spent` row, the `spends` record (status `in_flight`, `payer` the predecessor, the request's recipient,
-//!   `relay_fee` as `fee`, its `refund_precommitment` and `context`, refund fields 0) and `totals.spent +=
-//!   withdrawnValue` are written, and `withdrawn` is logged.
+//!   of rows 1-12 comes before the first write and the first log; then the change leaf, the `spent` row, the `spends`
+//!   record (status `in_flight`, `payer` the predecessor, the request's recipient, `relay_fee` as `fee`, its
+//!   `refund_precommitment` and `context`, refund fields 0) and `totals.spent += withdrawnValue` are written, and the
+//!   call logs exactly `leaf_inserted` (the change leaf) then `withdrawn`. A refused call logs nothing.
 //!
 //! Rows 13-15 (the fee split, the storage charge and the payouts with `on_payout`) are card vault-withdraw-payouts'.
 //! Until they land, `withdraw` returns after row 12: the note is spent and its change note is in the tree, nothing is
@@ -218,9 +219,11 @@ impl Vault {
         if !fee_within_backstop(relay_fee, withdrawn) {
             env::panic_str("RelayFeeGreaterThanMax: relay_fee is over the backstop");
         }
-        // row 9
+        // row 9: what the notes hold, deposited - (spent - returned), each subtraction checked. returned is part of
+        // spent (a payout's undelivered part), so it is taken from spent first: no sum can pass 2^128 - 1 and refuse a
+        // pool that holds up to u128::MAX.
         let t = &self.totals;
-        let held = t.deposited.0.checked_add(t.returned.0).and_then(|x| x.checked_sub(t.spent.0));
+        let held = t.spent.0.checked_sub(t.returned.0).and_then(|out| t.deposited.0.checked_sub(out));
         if held.is_none_or(|held| withdrawn > held) {
             env::panic_str("InvalidPoolState: withdrawnValue is over the value the vault's notes hold");
         }
@@ -236,12 +239,13 @@ impl Vault {
         if self.spent.contains_key(&nullifier_hash) {
             env::panic_str("NullifierAlreadySpent");
         }
-        // row 9 bounds withdrawn by deposited + returned - spent, so this cannot fail; it is taken before any write or
-        // log all the same, so nothing after the first one can refuse
+        // taken before any write, so nothing after the first write can refuse (row 9 makes it fail only on a total that
+        // could never be reached: spent + withdrawn over 2^128 - 1)
         let spent = self.totals.spent.0.checked_add(withdrawn).unwrap_or_else(|| env::panic_str("InvalidPoolState"));
         // row 12: insert_commitment makes every check (LeafAlreadyExists, the leaf below p and not 0, the depth) before
-        // it writes the leaf and logs leaf_inserted; it is the last row that can refuse
-        let (new_leaf_index, _) = self.insert_commitment(&mut PoseidonT3::new(), &new_commitment);
+        // it writes the leaf; it is the last row that can refuse. Its leaf_inserted is logged below, after the writes.
+        let ins = self.insert_commitment(&mut PoseidonT3::new(), &new_commitment);
+        let new_leaf_index = ins.index;
         // row 11, its writes: nothing below refuses
         let index = self.spends.len();
         self.spent.insert(&nullifier_hash, &index);
@@ -261,6 +265,8 @@ impl Vault {
             context: field::to_be(&c.signals[SIGNAL_CONTEXT]),
         });
         self.totals.spent = U128(spent);
+        // every check has passed: the change leaf's leaf_inserted, then withdrawn
+        ins.event().emit();
         Event::Withdrawn {
             processor: &c.fields.processor,
             value: withdrawn,
@@ -740,8 +746,9 @@ mod spend_tests {
     use super::*;
     use crate::verifier::Q;
     use near_sdk::serde_json::{self, Value};
-    use near_sdk::test_utils::VMContextBuilder;
-    use near_sdk::{testing_env, Gas};
+    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::Gas;
+    use std::collections::BTreeMap;
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     const SPENDS: &str = include_str!("../tests/fixtures/withdraw-spends.json");
@@ -751,13 +758,35 @@ mod spend_tests {
         serde_json::from_str(SPENDS).unwrap()
     }
 
+    /// A fresh mocked call at the fixture's vault on `storage`: its own gas and logs, the given records.
+    fn call_on(storage: std::collections::HashMap<Vec<u8>, Vec<u8>>) {
+        env::set_blockchain_interface(near_sdk::MockedBlockchain::new(
+            VMContextBuilder::new()
+                .current_account_id(fixture()["vault"].as_str().unwrap().parse().unwrap())
+                .predecessor_account_id(RELAYER.parse().unwrap())
+                .block_timestamp(1_800_000_000_000_000_000)
+                .prepaid_gas(Gas::from_tgas(300))
+                .build(),
+            near_sdk::test_vm_config(),
+            near_sdk::RuntimeFeesConfig::test(),
+            vec![],
+            storage,
+            Default::default(),
+            None,
+        ));
+    }
+
+    /// A fresh mocked call that keeps every record written so far.
     fn call() {
-        testing_env!(VMContextBuilder::new()
-            .current_account_id(fixture()["vault"].as_str().unwrap().parse().unwrap())
-            .predecessor_account_id(RELAYER.parse().unwrap())
-            .block_timestamp(1_800_000_000_000_000_000)
-            .prepaid_gas(Gas::from_tgas(300))
-            .build());
+        call_on(near_sdk::mock::with_mocked_blockchain(|b| b.take_storage()));
+    }
+
+    /// Every raw record the mocked chain holds, in key order; then a fresh call on the same records.
+    fn raw() -> BTreeMap<Vec<u8>, Vec<u8>> {
+        let s = near_sdk::mock::with_mocked_blockchain(|b| b.take_storage());
+        let copy = s.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        call_on(s);
+        copy
     }
 
     fn be(dec: &str) -> crate::Bytes32 {
@@ -767,15 +796,14 @@ mod spend_tests {
     /// The fixture's vault: its six deposits in both trees and `deposited` their sum (the deposit path is card
     /// vault-deposit-insert's; this is the state it leaves).
     fn vault() -> Vault {
-        call();
         // a fresh chain: no record of an earlier vault in this test
-        near_sdk::mock::with_mocked_blockchain(|b| b.take_storage());
+        call_on(Default::default());
         let f = fixture();
         let mut v = Vault::default();
         let mut h = PoseidonT3::new();
         for (leaf, label) in f["leaves"].as_array().unwrap().iter().zip(f["labels"].as_array().unwrap()) {
-            v.insert_commitment(&mut h, &be(leaf.as_str().unwrap()));
-            v.insert_label(&mut h, &be(label.as_str().unwrap()));
+            let _ = v.insert_commitment(&mut h, &be(leaf.as_str().unwrap()));
+            let _ = v.insert_label(&mut h, &be(label.as_str().unwrap()));
         }
         v.totals.deposited = U128(f["deposited"].as_str().unwrap().parse().unwrap());
         v
@@ -798,16 +826,11 @@ mod spend_tests {
         catch_unwind(AssertUnwindSafe(|| v.withdraw(w, p, s))).map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
     }
 
-    /// Everything a call could write: the struct's bytes and the storage it uses.
-    fn written(v: &Vault) -> (Vec<u8>, u64) {
-        (near_sdk::borsh::to_vec(v).unwrap(), env::storage_usage())
-    }
-
-    /// `c` is refused with `want`, and nothing is written: the mocked chain keeps a panicking call's writes, so a
-    /// write before the refusal would show here.
+    /// `c` is refused with `want`, and nothing is written or logged: the mocked chain keeps a panicking call's writes
+    /// and logs, so a write or a log before the refusal would show here, in the struct or in any raw record.
     fn refused(v: &mut Vault, (w, p, s): (Withdrawal, Proof, [String; 8]), want: &str) {
         call();
-        let before = written(v);
+        let (struct_before, raw_before) = (near_sdk::borsh::to_vec(&*v).unwrap(), raw());
         match catch_unwind(AssertUnwindSafe(|| v.withdraw(w, p, s))) {
             Ok(()) => panic!("passed, want {want}"),
             Err(e) => {
@@ -815,8 +838,9 @@ mod spend_tests {
                 assert!(e.contains(want), "want {want}, got {e:?}")
             }
         }
-        assert_eq!(written(v), before, "{want}: a byte was written");
-        assert_eq!(near_sdk::test_utils::get_logs(), Vec::<String>::new(), "{want}: a refused call logged");
+        assert_eq!(get_logs(), Vec::<String>::new(), "{want}: a refused call logged");
+        assert_eq!(near_sdk::borsh::to_vec(&*v).unwrap(), struct_before, "{want}: a struct byte changed");
+        assert!(raw() == raw_before, "{want}: a raw record changed");
     }
 
     fn with_signal(mut c: (Withdrawal, Proof, [String; 8]), i: usize, x: &str) -> (Withdrawal, Proof, [String; 8]) {
@@ -957,7 +981,14 @@ mod spend_tests {
         let mut v = vault();
         // same_call carries relay_fee 500,000
         refused(&mut v, with_signal(spend("same_call"), SIGNAL_WITHDRAWN, "0"), "InvalidWithdrawalAmount");
-        refused(&mut v, with_signal(spend("same_call"), SIGNAL_WITHDRAWN, "340282366920938463463374607431768211456"), "AmountOverflow");
+        // row 8: 2^128, 2^192 + 5 (limb 0 set alone) and p - 1 are not below 2^128
+        for x in [
+            "340282366920938463463374607431768211456",
+            "6277101735386680763835789423207666416102355444464034512901",
+            "21888242871839275222246405745257275088548364400416034343698204186575808495616",
+        ] {
+            refused(&mut v, with_signal(spend("same_call"), SIGNAL_WITHDRAWN, x), "AmountOverflow");
+        }
         // the backstop: 500,000 x 10,000 <= w x 5,000 needs w >= 1,000,000
         refused(&mut v, with_signal(spend("same_call"), SIGNAL_WITHDRAWN, "999999"), "RelayFeeGreaterThanMax");
         refused(&mut v, with_signal(spend("same_call"), SIGNAL_WITHDRAWN, "1000000"), "InvalidProof");
@@ -970,14 +1001,46 @@ mod spend_tests {
     fn row_9_counts_what_was_spent_and_returned() {
         let mut v = vault();
         v.totals.deposited = U128(2_000_000);
-        withdraw(&mut v, spend("old_root")).map(|_| ()).expect_err("3,000,000 over 2,000,000 held");
+        refused(&mut v, spend("old_root"), "InvalidPoolState"); // 3,000,000 over 2,000,000 held
+        v.totals.deposited = U128(3_000_000);
+        v.totals.spent = U128(1_000_000);
+        refused(&mut v, spend("old_root"), "InvalidPoolState"); // over 2,000,000 held
         v.totals.returned = U128(1_000_000);
-        withdraw(&mut v, spend("old_root")).unwrap();
-        // now deposited + returned - spent = 0
+        withdraw(&mut v, spend("old_root")).unwrap(); // 3,000,000 held
+        assert_eq!(v.totals.spent.0, 4_000_000);
+        // now deposited - (spent - returned) = 0
         refused(&mut v, spend("same_call"), "InvalidPoolState");
-        // a broken total (spent over deposited + returned) refuses, never wraps
+        // a broken total refuses, never wraps: spent - returned over deposited, and returned over spent
         v.totals.spent = U128(u128::MAX);
         refused(&mut v, spend("same_call"), "InvalidPoolState");
+        v.totals.spent = U128(0);
+        v.totals.returned = U128(1);
+        refused(&mut v, spend("same_call"), "InvalidPoolState");
+    }
+
+    #[test]
+    fn row_9_takes_returned_from_spent_first() {
+        // deposits of 3,000,000; a 2,000,000 spend whose payout bounced (returned), its refund note spent and bounced
+        // again: spent 4,000,000 is over deposited, and the notes hold 3,000,000
+        let mut v = vault();
+        v.totals.deposited = U128(3_000_000);
+        v.totals.spent = U128(4_000_000);
+        v.totals.returned = U128(4_000_000);
+        withdraw(&mut v, spend("same_call")).expect("2,000,000 of the 3,000,000 held");
+        assert_eq!(v.totals.spent.0, 6_000_000);
+        // now 1,000,000 held
+        refused(&mut v, spend("old_root"), "InvalidPoolState");
+    }
+
+    #[test]
+    fn row_9_a_pool_whose_deposited_plus_returned_passes_u128_max_still_pays() {
+        // deposited + returned = 2^128 is never summed: the notes hold u128::MAX and a valid withdrawal lands
+        let mut v = vault();
+        v.totals.deposited = U128(u128::MAX);
+        v.totals.returned = U128(1);
+        v.totals.spent = U128(1);
+        withdraw(&mut v, spend("same_call")).unwrap();
+        assert_eq!(v.totals.spent.0, 2_000_001);
     }
 
     #[test]
@@ -1001,7 +1064,7 @@ mod spend_tests {
         let mut v = vault();
         let c = spend("same_nullifier_a");
         call();
-        v.insert_commitment(&mut PoseidonT3::new(), &be(&c.2[SIGNAL_NEW_COMMITMENT]));
+        let _ = v.insert_commitment(&mut PoseidonT3::new(), &be(&c.2[SIGNAL_NEW_COMMITMENT]));
         refused(&mut v, c, "LeafAlreadyExists");
         assert_eq!((v.spends.len(), v.totals.spent.0), (0, 0));
         assert!(!v.spent.contains_key(&be(&spend("same_nullifier_a").2[SIGNAL_NULLIFIER_HASH])));
@@ -1026,5 +1089,162 @@ mod spend_tests {
             let carry_part = ((al * b as u128) >> 64) + ah * b as u128;
             assert_eq!(hi, carry_part >> 64, "{a} x {b}");
         }
+    }
+
+    /// mul_wide's carry, on a pair where the low half wraps: fee * 10,000 carries into the high half, so dropping the
+    /// carry would pass a fee one unit over the backstop.
+    #[test]
+    fn the_backstop_holds_where_mul_wide_carries() {
+        let fee: u128 = 17_898_852_500_041_363_196_590_733_634_102_624_255;
+        let (hi, lo) = (fee >> 64, fee & u64::MAX as u128);
+        let (h, l) = (hi * 10_000, lo * 10_000);
+        assert!((h << 64).wrapping_add(l) < l, "this pair carries");
+        assert!(!fee_within_backstop(fee, 2 * fee - 1));
+        assert!(fee_within_backstop(fee, 2 * fee));
+    }
+
+    /// mul_wide against a schoolbook product limb by limb, on random and carry-forcing inputs, and the backstop against
+    /// it on both sides of the boundary.
+    #[test]
+    fn mul_wide_and_the_backstop_match_a_schoolbook_product() {
+        fn school(a: u128, b: u64) -> (u128, u128) {
+            let limbs = [a as u64 as u128, (a >> 64) as u64 as u128];
+            let (mut r, mut carry) = ([0u128; 2], 0u128);
+            for i in 0..2 {
+                let t = limbs[i] * b as u128 + carry;
+                r[i] = t & u64::MAX as u128;
+                carry = t >> 64;
+            }
+            (carry, r[0] | (r[1] << 64))
+        }
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let mut carries = 0;
+        for i in 0..200_000u64 {
+            let a = ((next() as u128) << 64) | next() as u128;
+            let b = match i % 3 {
+                0 => 10_000,
+                1 => 5_000,
+                _ => next(),
+            };
+            assert_eq!(mul_wide(a, b), school(a, b), "{a} x {b}");
+            let (h, l) = ((a >> 64) * b as u128, (a & u64::MAX as u128) * b as u128);
+            carries += ((h << 64).wrapping_add(l) < l) as u32;
+        }
+        assert!(carries > 100, "carries {carries}");
+        for _ in 0..50_000 {
+            let w = ((next() as u128) << 64) | next() as u128;
+            for fee in [w / 2, w / 2 + 1, w / 2 - (w / 2 > 0) as u128, ((next() as u128) << 64) | next() as u128] {
+                assert_eq!(fee_within_backstop(fee, w), school(fee, 10_000) <= school(w, 5_000), "{fee} {w}");
+                assert_eq!(fee_within_backstop(fee, w), fee <= w / 2, "{fee} {w}");
+            }
+        }
+    }
+
+    /// A landed call writes exactly its records (2.3: 710 B with a 64-byte payer and recipient; here the payer is 17 B
+    /// and the recipient 15 B, so 710 - 47 - 49 = 614, and 74 B more when the state tree grows a level) and logs exactly
+    /// the change leaf's leaf_inserted, then withdrawn.
+    #[test]
+    fn a_landed_call_writes_its_bytes_and_logs_leaf_inserted_then_withdrawn() {
+        let mut v = vault();
+        let mut wrote = vec![];
+        for name in ["same_call", "same_nullifier_a", "one_block_a"] {
+            call();
+            let before = env::storage_usage();
+            let (w, p, s) = spend(name);
+            v.withdraw(w, p, s.clone());
+            wrote.push((env::storage_usage() - before, v.state_tree.depth));
+            let root = field::to_decimal(&field::from_be(&v.state_tree.root()));
+            let index = v.state_tree.size - 1;
+            let ev = |name: &str, data: String| {
+                format!(r#"EVENT_JSON:{{"standard":"blindfill-vault","version":"1.0.0","event":"{name}","data":[{{{data}}}]}}"#)
+            };
+            assert_eq!(
+                get_logs(),
+                vec![
+                    ev("leaf_inserted", format!(r#""tree":"state","index":{index},"leaf":"{}","root":"{root}""#, s[SIGNAL_NEW_COMMITMENT])),
+                    ev(
+                        "withdrawn",
+                        format!(
+                            r#""processor":"vault.test.near","value":"{}","spent_nullifier":"{}","new_commitment":"{}""#,
+                            s[SIGNAL_WITHDRAWN], s[SIGNAL_NULLIFIER_HASH], s[SIGNAL_NEW_COMMITMENT]
+                        )
+                    ),
+                ],
+                "{name}"
+            );
+        }
+        // the third change leaf is index 8: the state tree grows from depth 3 to 4
+        assert_eq!(wrote, vec![(614, 3), (614, 3), (688, 4)]);
+    }
+
+    /// Every public signal is bound by the proof: one that rows 1-9 accept, changed, fails row 10.
+    #[test]
+    fn each_public_signal_changed_where_rows_1_to_9_accept_it_fails_the_proof() {
+        let mut v = vault();
+        let old = spend("old_root").2;
+        for (i, x) in [
+            (SIGNAL_NEW_COMMITMENT, "12345"),
+            (SIGNAL_NULLIFIER_HASH, old[SIGNAL_NULLIFIER_HASH].as_str()),
+            (SIGNAL_WITHDRAWN, "1999999"),
+            (SIGNAL_WITHDRAWN, "2000001"),
+            (SIGNAL_STATE_ROOT, old[SIGNAL_STATE_ROOT].as_str()),
+            (SIGNAL_STATE_DEPTH, "2"),
+            (SIGNAL_STATE_DEPTH, "4"),
+            (SIGNAL_ASP_ROOT, old[SIGNAL_ASP_ROOT].as_str()),
+            (SIGNAL_ASP_DEPTH, "2"),
+            (SIGNAL_ASP_DEPTH, "32"),
+        ] {
+            refused(&mut v, with_signal(spend("same_call"), i, x), "InvalidProof");
+        }
+        // the context: row 3 refuses a changed one first
+        let mut ctx = field::from_decimal(&spend("same_call").2[SIGNAL_CONTEXT]).unwrap();
+        ctx[3] ^= 1;
+        refused(&mut v, with_signal(spend("same_call"), SIGNAL_CONTEXT, &field::to_decimal(&ctx)), "ContextMismatch");
+        // and the verifier itself binds every one of the 8, the context included
+        call();
+        let (_, p, s) = spend("same_call");
+        let signals = s.each_ref().map(|x| field::from_decimal(x).unwrap());
+        assert!(verifier::verify_withdraw(&p.encode(), &signals));
+        for i in 0..8 {
+            let mut t = signals;
+            t[i][3] ^= 1;
+            assert!(field::ge(&field::P, &t[i]) && t[i] != field::P, "signal {i} stays below p");
+            call();
+            assert!(!verifier::verify_withdraw(&p.encode(), &t), "signal {i} changed verifies");
+        }
+        withdraw(&mut v, spend("same_call")).unwrap();
+    }
+
+    /// The vault reads the 8 public signals at the positions the kit's VAULT_WITHDRAW_SIGNALS names, read from the
+    /// kit's own source, so a change on either side fails here.
+    #[test]
+    fn the_signal_positions_are_the_kits() {
+        const SHAPES: &str = include_str!("../../../packages/kit/src/vault/shapes.ts");
+        let at = SHAPES.find("export const VAULT_WITHDRAW_SIGNALS = [").expect("VAULT_WITHDRAW_SIGNALS in shapes.ts");
+        let list = &SHAPES[at..at + SHAPES[at..].find("] as const").expect("its end")];
+        let kit: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+        let vault = [
+            ("newCommitmentHash", SIGNAL_NEW_COMMITMENT),
+            ("existingNullifierHash", SIGNAL_NULLIFIER_HASH),
+            ("withdrawnValue", SIGNAL_WITHDRAWN),
+            ("stateRoot", SIGNAL_STATE_ROOT),
+            ("stateTreeDepth", SIGNAL_STATE_DEPTH),
+            ("ASPRoot", SIGNAL_ASP_ROOT),
+            ("ASPTreeDepth", SIGNAL_ASP_DEPTH),
+            ("context", SIGNAL_CONTEXT),
+        ];
+        assert_eq!(kit.len(), 8, "{kit:?}");
+        for (name, i) in vault {
+            assert_eq!(kit.iter().position(|k| *k == name), Some(i), "{name}");
+        }
+        let mut positions: Vec<usize> = vault.iter().map(|x| x.1).collect();
+        positions.sort();
+        assert_eq!(positions, (0..8).collect::<Vec<_>>());
     }
 }
