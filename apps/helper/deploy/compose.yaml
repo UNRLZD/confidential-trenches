@@ -8,6 +8,13 @@ services:
       args:
         HELPER_COMMIT: ${HELPER_COMMIT:?set HELPER_COMMIT}
     image: ct-helper:${HELPER_COMMIT:?set HELPER_COMMIT}
+    # The vendor keys (src/proxy/vendors.ts), from the host only: the shell that runs compose, or deploy/.env next to
+    # this file (chmod 600, ignored by git, outside the image). An empty one means that vendor is called with no key.
+    environment:
+      JUPITER_API_KEY: ${JUPITER_API_KEY:-}
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+      LIFI_API_KEY: ${LIFI_API_KEY:-}
+      ONECLICK_JWT: ${ONECLICK_JWT:-}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
