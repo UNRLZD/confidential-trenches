@@ -38,9 +38,11 @@
 //     seed record only { iv, ct }, localStorage empty.
 //   no-prf run (hasPrf false; card wallet-typed-words, 06b ses.4, ses.5, ses.12, W:914): Create passkey stores a random
 //     seed, wrapped, with code_saved false and goes on in the same visit to the backup screen (data-signin="backup")
-//     with its account and 12 words drawn (counted, never read); a mouse press on Saved within 500 ms of it drawn does
-//     nothing (the same activation guard as Sign out's), and one after the window signs in as the same account with
-//     code_saved true and Sign out drawn. In a fresh store, Recovery code with words that fail the BIP-39 checksum shows
+//     with its account and 12 words drawn (counted, never read). Copy, Saved and Backup take Sign out's activation
+//     guard: a mouse press on Copy and one on Saved, each within 500 ms of it drawn, do nothing (no clipboard write,
+//     counted by a wrapper on writeText that never reads the text); after the window Copy writes once and Saved signs
+//     in as the same account with code_saved true and Sign out drawn. On the reload with a planted unsaved seed, a press
+//     on Backup within 500 ms of it drawn draws no words, and one after the window opens the backup with 12 words. In a fresh store, Recovery code with words that fail the BIP-39 checksum shows
 //     "invalid-code" and stores nothing; the 12 words of A.8's seed (16 zero bytes, built from the pinned BIP-39 list)
 //     sign in as A.8's T_0, the check's own derivation, with code_saved true.
 //   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
@@ -80,16 +82,28 @@ const DRAWN = () => {
       globalThis.__ctPresses.push({ at: e.timeStamp, repeat: e.repeat === true });
     }, true);
   addEventListener("focus", (e) => e.target === window && (globalThis.__ctFocusAt = performance.now()));
+  // every clipboard write the page makes is counted (the text is never read or kept)
+  const cb = globalThis.navigator?.clipboard;
+  if (cb?.writeText) {
+    const write = cb.writeText.bind(cb);
+    globalThis.__ctCopies = 0;
+    cb.writeText = (t) => ((globalThis.__ctCopies += 1), write(t));
+  }
   new MutationObserver(() => {
     const b = document.querySelector('[data-action="signout"]');
     if (b && b !== globalThis.__ctSignout) {
       globalThis.__ctSignout = b;
       globalThis.__ctDrawn = performance.now();
     }
-    const v = document.querySelector('[data-action="saved"]');
-    if (v && v !== globalThis.__ctSaved) {
-      globalThis.__ctSaved = v;
-      globalThis.__ctSavedDrawn = performance.now();
+    // the other guarded controls' draw times, by data-action
+    globalThis.__ctDrawnAt ??= {};
+    globalThis.__ctDrawnEl ??= {};
+    for (const a of ["saved", "copy", "backup"]) {
+      const v = document.querySelector(`[data-action="${a}"]`);
+      if (v && v !== globalThis.__ctDrawnEl[a]) {
+        globalThis.__ctDrawnEl[a] = v;
+        globalThis.__ctDrawnAt[a] = performance.now();
+      }
     }
   }).observe(document, { childList: true, subtree: true });
 };
@@ -160,10 +174,22 @@ export function judge(rec) {
   const c = n.create ?? {};
   say(c.state === "backup" && HEX64.test(c.account ?? "") && c.seed === true && c.seedWrapped === true && c.codeSaved === "false" && c.words === 12,
     `no-prf: Create passkey stores a random seed and opens the backup screen with its 12 words (${c.state}, account ${c.account ? "shown" : "none"}, seed ${c.seed ? "stored" : "none"}, code_saved ${c.codeSaved}, ${c.words ?? 0} words)`);
+  const inWindow = (x, a) => x.pressed === true && x.pressOn === a && typeof x.withinMs === "number" && x.withinMs < PROTECT_MS;
+  const ce = n.copyEarly ?? {};
+  say(inWindow(ce, "copy") && ce.after?.copies === 0 && ce.after?.state === "backup",
+    `no-prf: a press on Copy within 500 ms of it drawn copies nothing (${ms(ce)}, ${ce.after?.copies ?? "no"} clipboard write(s))`);
   const se = n.savedEarly ?? {};
-  say(se.pressed === true && se.pressOn === "saved" && typeof se.withinMs === "number" && se.withinMs < PROTECT_MS &&
-      se.after?.state === "backup" && se.after?.codeSaved === "false",
+  say(inWindow(se, "saved") && se.after?.state === "backup" && se.after?.codeSaved === "false",
     `no-prf: a press on Saved within 500 ms of it drawn does nothing (${ms(se)}, ${se.after?.state}, code_saved ${se.after?.codeSaved})`);
+  const cl = n.copyLate ?? {};
+  say(cl.pressed === true && cl.copies === 1 && cl.state === "backup",
+    `no-prf: Copy after the window writes the words to the clipboard once (${cl.copies ?? "no"} write(s), ${cl.state})`);
+  const be = n.backupEarly ?? {};
+  say(inWindow(be, "backup") && be.after?.state === "signed-in" && be.after?.words === 0,
+    `no-prf: a press on Backup within 500 ms of it drawn draws no words (${ms(be)}, ${be.after?.state}, ${be.after?.words ?? "no"} words)`);
+  const bl = n.backupLate ?? {};
+  say(bl.state === "backup" && bl.words === 12 && HEX64.test(bg.account ?? "") && bl.account === bg.account,
+    `no-prf: Backup after the window draws the 12 words of the account shown (${bl.state}, ${bl.words ?? 0} words)`);
   const sv = n.saved ?? {};
   say(sv.state === "signed-in" && HEX64.test(c.account ?? "") && sv.account === c.account && sv.codeSaved === "true" && sv.signoutButtons === 1 && sv.words === 0,
     `no-prf: Saved signs in as the same account with code_saved true and Sign out drawn (${sv.state}, code_saved ${sv.codeSaved}, ${sv.signoutButtons ?? 0} Sign out)`);
@@ -288,6 +314,22 @@ async function settled(page) {
     }
     return { state: m.dataset.signin, account: m.dataset.account ?? null, codeSaved: m.dataset.codeSaved ?? null, db, seed, kWrap, seedWrapped, seedIv, localStorage: localStorage.length };
   });
+}
+// A mouse press on each guarded control in turn, at once: each press's time from its control drawn and where it landed,
+// then the page 300 ms after the last (its state, the 12 words drawn, the clipboard writes made so far), shared by all.
+async function earlyPresses(page, actions) {
+  const out = {};
+  for (const action of actions) {
+    const pressed = await page.click(`[data-action="${action}"]`, { timeout: WAIT_MS }).then(() => true, () => false);
+    const t = await page.evaluate((a) => ({ at: globalThis.__ctPresses?.at(-1)?.at ?? null, drawn: globalThis.__ctDrawnAt?.[a] ?? null, pressOn: globalThis.__ctPressOn ?? null }), action);
+    out[action] = { pressed, pressOn: t.pressOn, withinMs: pressed && t.at !== null && t.drawn !== null ? t.at - t.drawn : null };
+  }
+  await page.waitForTimeout(300);
+  const after = await settled(page);
+  after.words = await page.locator("[data-words] li").count();
+  after.copies = await page.evaluate(() => globalThis.__ctCopies ?? null);
+  for (const action of actions) out[action].after = after;
+  return out;
 }
 async function click(page, action) {
   const before = await page.evaluate(() => document.getElementById("signin").dataset.signin);
@@ -604,12 +646,15 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       record.noPrf.open = await settled(page);
       record.noPrf.create = await click(page, "create");
       record.noPrf.create.words = await page.locator("[data-words] li").count();
-      // a press on Saved at once, inside the guard's 500 ms from Saved drawn: nothing happens
-      const pressed = await page.click('[data-action="saved"]', { timeout: WAIT_MS }).then(() => true, () => false);
-      const t = await page.evaluate(() => ({ at: globalThis.__ctPresses?.at(-1)?.at ?? null, drawn: globalThis.__ctSavedDrawn ?? null, pressOn: globalThis.__ctPressOn ?? null }));
+      // a press on Copy, then one on Saved, at once: inside the guard's 500 ms from each drawn, nothing happens
+      const early = await earlyPresses(page, ["copy", "saved"]);
+      record.noPrf.copyEarly = early.copy;
+      record.noPrf.savedEarly = early.saved;
+      // past the window from the draw and from those presses: Copy writes once, then Saved
+      await page.waitForTimeout(PROTECT_MS + 200);
+      const copied = await page.click('[data-action="copy"]', { timeout: WAIT_MS }).then(() => true, () => false);
       await page.waitForTimeout(300);
-      record.noPrf.savedEarly = { pressed, pressOn: t.pressOn, withinMs: t.at !== null && t.drawn !== null ? t.at - t.drawn : null, after: await settled(page) };
-      // past the window from Saved drawn and from that press
+      record.noPrf.copyLate = { pressed: copied, copies: await page.evaluate(() => globalThis.__ctCopies ?? null), state: (await settled(page)).state };
       await page.waitForTimeout(PROTECT_MS + 200);
       record.noPrf.saved = await click(page, "saved");
       record.noPrf.saved.signoutButtons = await page.locator('[data-action="signout"]').count();
@@ -635,6 +680,11 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const gate = await settled(page);
       gate.signoutButtons = await page.locator('[data-action="signout"]').count();
       record.noPrf.backupGate = gate;
+      // Backup on that page: a press at once draws nothing; one after the window draws the 12 words
+      record.noPrf.backupEarly = (await earlyPresses(page, ["backup"])).backup;
+      await page.waitForTimeout(PROTECT_MS + 200);
+      record.noPrf.backupLate = await click(page, "backup");
+      record.noPrf.backupLate.words = await page.locator("[data-words] li").count();
       // typed words, in a fresh store (its own context): first words whose checksum fails, then A.8's seed's 12 words
       const list = await wordlist(fetchFn);
       const a8 = [...Array(11).fill(list[0]), list[3]].join(" "); // 16 zero bytes: indices 0 x 11, then 3 (checksum)

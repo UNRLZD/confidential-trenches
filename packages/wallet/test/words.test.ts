@@ -4,13 +4,19 @@
 // IndexedDB is fake-indexeddb; WebCrypto, Web Locks and BroadcastChannel are Node's own. The browser run of the same
 // path (a virtual authenticator with hasPrf false landing on the backup screen) is test/passkey.e2e.mjs.
 // No assertion prints a word: words are compared with assert.ok and a message that names the case, not its words.
+// WORDS_SRC=<path> runs the same cases on another copy of words.ts (the planted bad copies of the red runs).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { IDBFactory } from "fake-indexeddb";
 import * as d from "../src/derive/index.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
-import { backupWords, checkSeed, depositQuoteAllowed, noPrfSeed, saveWords, storeSeed, typedSeed, WordsRefused, type Seed } from "../src/signin/words.ts";
+import type { Opener, Seed } from "../src/signin/words.ts";
+
+const SRC = process.env.WORDS_SRC ? pathToFileURL(process.env.WORDS_SRC).href : "../src/signin/words.ts";
+const w: typeof import("../src/signin/words.ts") = await import(SRC);
+const { backupWords, checkSeed, depositQuoteAllowed, noPrfSeed, saveWords, signInNoPrf, signInPrf, signInTyped, storeSeed, typedSeed, WordsRefused } = w;
 
 const opened: WalletStore[] = [];
 after(() => opened.forEach((s) => s.close()));
@@ -20,6 +26,10 @@ const open = async (): Promise<WalletStore> => {
   return s;
 };
 const ON_SIGN_HOST = { hostname: d.SIGN_HOST, topLevel: true };
+const opener = (s: WalletStore): Opener => () => Promise.resolve(s);
+// 1..16: never zero, so a test of zeroing tells a wiped buffer from one that was zero already
+const ONE_TO_16 = (): Uint8Array => Uint8Array.from({ length: 16 }, (_, i) => i + 1);
+const zeroed = (b: Uint8Array): boolean => b.every((x) => x === 0);
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8"));
 const big = (h: string): bigint => BigInt(`0x${h}`);
@@ -51,8 +61,8 @@ test("typed words give kit-freeze-keys' vector addresses, stored as a code seed 
   assert.equal(typed.source, "code");
   assert.equal(typed.code_saved, true);
   assert.equal(typed.created_ms, 7);
-  const stored = await storeSeed(s, typed);
-  assert.ok(typed.entropy.every((x) => x === 0), "the given entropy is zeroed once stored");
+  const { inserted, seed: stored } = await storeSeed(opener(s), typed);
+  assert.equal(inserted, true);
   assertA8(stored, "typed and stored");
   // read back from the store on a reload: the same seed, the same keys
   assertA8(checkSeed(await s.get("meta", "seed"))!, "read back");
@@ -98,7 +108,7 @@ test("a no-PRF seed (ses.4) is random, not saved, and gets no deposit quote unti
   const n = noPrfSeed({ random: (b) => b.set(Uint8Array.from({ length: 16 }, (_, i) => i + 1)), now: () => 9 });
   assert.deepEqual([n.source, n.code_saved, n.created_ms], ["random", false, 9]);
   assert.deepEqual(Array.from(n.entropy), Array.from({ length: 16 }, (_, i) => i + 1));
-  const stored = await storeSeed(s, n);
+  const { seed: stored } = await storeSeed(opener(s), n);
   assert.deepEqual([stored.source, stored.code_saved], ["random", false]);
   // no deposit quote while the 12 words are the only copy and not saved; sign out refuses too (the store's own gate)
   assert.equal(depositQuoteAllowed(await s.get("meta", "seed")), false);
@@ -144,15 +154,58 @@ test("the 12 words are drawn on SIGN_HOST's top-level page only, never in a fram
 
 test("insert-only: a second sign-in (no-PRF or typed) never replaces the stored seed; the stored one comes back", async () => {
   const s = await open();
-  const first = await storeSeed(s, noPrfSeed());
+  const first = (await storeSeed(opener(s), noPrfSeed())).seed;
   const firstHex = Buffer.from(first.entropy).toString("hex");
-  const typed = typedSeed(A8_WORDS);
-  const got = await storeSeed(s, typed);
-  assert.equal(Buffer.from(got.entropy).toString("hex"), firstHex);
-  assert.equal(got.source, "random");
-  assert.ok(typed.entropy.every((x) => x === 0), "the losing seed's entropy is zeroed");
-  const again = await storeSeed(s, noPrfSeed());
-  assert.equal(Buffer.from(again.entropy).toString("hex"), firstHex);
+  const got = await storeSeed(opener(s), typedSeed(A8_WORDS));
+  assert.equal(got.inserted, false);
+  assert.equal(Buffer.from(got.seed.entropy).toString("hex"), firstHex);
+  assert.equal(got.seed.source, "random");
+  const again = await storeSeed(opener(s), noPrfSeed());
+  assert.equal(Buffer.from(again.seed.entropy).toString("hex"), firstHex);
+});
+
+test("a seed's entropy is zeroed on every path: written, lost to another tab's seed, and an open that fails", async () => {
+  const s = await open();
+  const won = { v: 1 as const, entropy: ONE_TO_16(), source: "random" as const, code_saved: false, created_ms: 1 };
+  assert.equal((await storeSeed(opener(s), won)).inserted, true);
+  assert.ok(zeroed(won.entropy), "the written seed's entropy");
+  const lost = { ...won, entropy: ONE_TO_16().reverse() };
+  assert.equal((await storeSeed(opener(s), lost)).inserted, false);
+  assert.ok(zeroed(lost.entropy), "the losing seed's entropy");
+  // another tab signed out during the passkey sheet: the store's open fails, and the entropy is still wiped
+  const closed = { ...won, entropy: ONE_TO_16() };
+  await assert.rejects(storeSeed(() => Promise.reject(new Error("the wallet store is closed")), closed), /closed/);
+  assert.ok(zeroed(closed.entropy), "the entropy of a seed whose store did not open");
+  const prf = ONE_TO_16();
+  await assert.rejects(signInPrf(() => Promise.reject(new Error("the wallet store is closed")), prf), /closed/);
+  assert.ok(zeroed(prf), "a PRF entropy whose store did not open");
+  const prf2 = ONE_TO_16();
+  assert.equal((await signInPrf(opener(s), prf2)).screen, "signed-in");
+  assert.ok(zeroed(prf2), "a PRF entropy that lost to the stored seed");
+});
+
+test("where a sign-in lands: the backup only for a no-PRF seed this sign-in made; a lost race lands signed in", async () => {
+  // no-PRF create on an empty store: its own backup
+  const a = await open();
+  const r = await signInNoPrf(opener(a));
+  assert.deepEqual([r.screen, r.seed.source, r.seed.code_saved], ["backup", "random", false]);
+  // typed words that lose to another tab's unsaved random seed: signed in on that seed, never its backup
+  const t = await signInTyped(opener(a), A8_WORDS);
+  assert.deepEqual([t.screen, t.seed.source, t.seed.code_saved], ["signed-in", "random", false]);
+  // a second no-PRF create that loses: signed in too, no words of a seed it did not make
+  assert.equal((await signInNoPrf(opener(a))).screen, "signed-in");
+  // typed words on an empty store: signed in on the code seed, A.8's keys
+  const b = await open();
+  const u = await signInTyped(opener(b), A8_WORDS);
+  assert.deepEqual([u.screen, u.seed.source, u.seed.code_saved], ["signed-in", "code", true]);
+  assertA8(u.seed, "signInTyped");
+  // bad words are refused before the store is opened
+  let opened = 0;
+  await assert.rejects(signInTyped(() => (opened++, Promise.resolve(b)), "abandon ".repeat(12)), WordsRefused);
+  assert.equal(opened, 0);
+  // a PRF seed lands signed in (the passkey gives its words back)
+  const c = await open();
+  assert.equal((await signInPrf(opener(c), ONE_TO_16())).screen, "signed-in");
 });
 
 test("checkSeed refuses anything but a whole seed record", () => {

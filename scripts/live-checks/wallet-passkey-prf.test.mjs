@@ -45,10 +45,25 @@ const TW = [
   "BAD no-prf: typed words that fail the checksum show Invalid code and store nothing",
   "BAD no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true",
 ];
+// wallet-typed-words' review round (Copy and Backup take the guard): records made before it hold no copyEarly,
+// copyLate, backupEarly or backupLate, so these four lines are BAD on them for that reason
+const R7 = [
+  "BAD no-prf: a press on Copy within 500 ms of it drawn copies nothing",
+  "BAD no-prf: Copy after the window writes the words to the clipboard once",
+  "BAD no-prf: a press on Backup within 500 ms of it drawn draws no words",
+  "BAD no-prf: Backup after the window draws the 12 words of the account shown",
+];
+function beforeR7(rec) {
+  assert.equal(rec.noPrf.copyEarly, undefined);
+  assert.equal(rec.noPrf.backupEarly, undefined);
+  const lines = BAD(rec);
+  for (const l of R7) assert.ok(lines.includes(l), l);
+  return lines.filter((l) => !R7.includes(l));
+}
 // a record made before wallet-typed-words: its five lines are all BAD, and the rest is returned
 function beforeTW(rec) {
   assert.equal(rec.noPrf.typed, undefined);
-  const lines = BAD(rec);
+  const lines = beforeR7(rec);
   for (const l of TW) assert.ok(lines.includes(l), l);
   return lines.filter((l) => !TW.includes(l));
 }
@@ -102,7 +117,7 @@ test("the recorded bad answer (no PRF falls back to a random seed without notice
 test("card wallet-typed-words' recorded red (the page at 18cd57a) fails on its five no-PRF lines only", () => {
   const r = answers.bad18cd57a;
   assert.equal(judge(r).pass, false);
-  assert.deepEqual(BAD(r), TW);
+  assert.deepEqual(beforeR7(r), TW);
   // Create with no PRF stored nothing and stayed on the no-PRF notice; there was no Recovery code to type into
   assert.deepEqual([r.noPrf.create.state, r.noPrf.create.seed, r.noPrf.create.words], ["no-prf", false, 0]);
   assert.equal(r.noPrf.invalid.noInput, true);
@@ -111,10 +126,24 @@ test("card wallet-typed-words' recorded red (the page at 18cd57a) fails on its f
 
 test("card wallet-typed-words' red at 3fd742b (Saved with no activation guard) fails on the early Saved press only", () => {
   const r = answers.bad3fd742b;
-  assert.deepEqual(BAD(r), ["BAD no-prf: a press on Saved within 500 ms of it drawn does nothing"]);
+  assert.deepEqual(beforeR7(r), ["BAD no-prf: a press on Saved within 500 ms of it drawn does nothing"]);
   // the press reached Saved inside the window and marked the words saved
   assert.ok(r.noPrf.savedEarly.withinMs < 500 && r.noPrf.savedEarly.pressOn === "saved");
   assert.deepEqual([r.noPrf.savedEarly.after.state, r.noPrf.savedEarly.after.codeSaved], ["signed-in", "true"]);
+});
+
+test("the review round's red (the page at a50f04a: Backup and Copy with no activation guard) fails on those two presses only", () => {
+  const r = answers.bada50f04a;
+  assert.deepEqual(BAD(r), [
+    "BAD no-prf: a press on Copy within 500 ms of it drawn copies nothing",
+    // the early press already wrote once, so the press after the window makes the second write
+    "BAD no-prf: Copy after the window writes the words to the clipboard once",
+    "BAD no-prf: a press on Backup within 500 ms of it drawn draws no words",
+  ]);
+  // each press landed inside the window: Copy wrote to the clipboard, Backup drew the 12 words
+  assert.ok(r.noPrf.copyEarly.withinMs < 500 && r.noPrf.copyEarly.pressOn === "copy" && r.noPrf.copyEarly.after.copies >= 1);
+  assert.ok(r.noPrf.backupEarly.withinMs < 500 && r.noPrf.backupEarly.pressOn === "backup");
+  assert.deepEqual([r.noPrf.backupEarly.after.state, r.noPrf.backupEarly.after.words], ["backup", 12]);
 });
 
 test("round 2's recorded reds fail on their own lines", () => {
@@ -195,6 +224,18 @@ test("each broken step fails the check", () => {
     ["a backup screen with 11 words drawn", (r) => (r.noPrf.create.words = 11)],
     ["a backup screen with no account", (r) => (r.noPrf.create.account = null)],
     ["a no-PRF seed stored in the clear", (r) => (r.noPrf.create.seedWrapped = false)],
+    ["an early Copy press that writes the words", (r) => (r.noPrf.copyEarly.after = { ...r.noPrf.copyEarly.after, copies: 1 })],
+    ["an early Copy press that came after the window", (r) => (r.noPrf.copyEarly.withinMs = 500)],
+    ["an early Copy press that missed Copy", (r) => (r.noPrf.copyEarly.pressOn = "BODY")],
+    ["no early Copy press", (r) => delete r.noPrf.copyEarly],
+    ["a Copy after the window that writes nothing", (r) => (r.noPrf.copyLate.copies = 0)],
+    ["a Copy after the window that writes twice", (r) => (r.noPrf.copyLate.copies = 2)],
+    ["an early Backup press that draws the words", (r) => (r.noPrf.backupEarly.after = { ...r.noPrf.backupEarly.after, state: "backup", words: 12 })],
+    ["an early Backup press that came after the window", (r) => (r.noPrf.backupEarly.withinMs = 501)],
+    ["an early Backup press that missed Backup", (r) => (r.noPrf.backupEarly.pressOn = "BODY")],
+    ["no early Backup press", (r) => delete r.noPrf.backupEarly],
+    ["a Backup after the window with 11 words", (r) => (r.noPrf.backupLate.words = 11)],
+    ["a Backup of another account", (r) => (r.noPrf.backupLate.account = "33".repeat(32))],
     ["an early Saved press that marks the words saved", (r) => (r.noPrf.savedEarly.after = { ...r.noPrf.savedEarly.after, state: "signed-in", codeSaved: "true" })],
     ["an early Saved press that came after the window", (r) => (r.noPrf.savedEarly.withinMs = 500)],
     ["an early Saved press that missed Saved", (r) => (r.noPrf.savedEarly.pressOn = "BODY")],

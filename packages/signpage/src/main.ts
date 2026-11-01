@@ -26,10 +26,11 @@
 //   keydown, or within 500 ms of Sign out being drawn, the page becoming visible (visibilitychange, pageshow) or the
 //   window gaining focus; the same for mouse, touch, pen and keyboard. A click that a cross-site page lined up before
 //   sending this window here (a double-click trick, a burst of clicks, a held Enter) does nothing; a press after a
-//   500 ms pause works on every input. It guards the two controls that act with no sheet of the browser's own: Sign
-//   out, and the backup's Saved, which opens the deposit gate of a seed whose 12 words are the only copy (W:888), so a
-//   lined-up click cannot mark words saved that the user never saw. Create passkey and Use passkey open the browser's
-//   own passkey sheet, which carries the browser's protection.
+//   500 ms pause works on every input. It guards every control that acts with no sheet of the browser's own (GUARDED):
+//   Sign out; the backup's Saved, which opens the deposit gate of a seed whose 12 words are the only copy (W:888), so a
+//   lined-up click cannot mark words saved that the user never saw; Backup, which draws the 12 words; and Copy, which
+//   puts them on the clipboard, so a lined-up burst cannot draw the words and copy them for a paste the page asks for.
+//   Create passkey and Use passkey open the browser's own passkey sheet, which carries the browser's protection.
 // - The page shows public values only, but for the backup screen's 12 words: the account's profile key T_0 (wallet.md:68,
 //   a public key, never a NEAR account or money), in data-account, so a check can compare it. The entropy and seed64
 //   are zeroed once used; the 12 words are a JS string, which cannot be zeroed, and reach the DOM only on the backup
@@ -38,7 +39,7 @@
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
 import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
-import { backupWords, checkSeed, noPrfSeed, saveWords, storeSeed, typedSeed, WordsRefused, type Seed } from "@blindfill/wallet/signin/words";
+import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { signedOutState, startApi } from "./api.ts";
 
@@ -70,7 +71,7 @@ root.id = "signin";
 if (framed) root.dataset.framed = "true";
 document.body.append(root);
 
-// The activation guard of Sign out and Saved (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
+// The activation guard of the GUARDED controls (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
 // (capture phase), so the gap to the previous input is known when Sign out sees its press.
 const guard = activationGuard(performance.now());
 const reshown = (): void => guard.shown(performance.now());
@@ -84,12 +85,13 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
+const GUARDED = new Set(["signout", "saved", "backup", "copy"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
   b.dataset.action = action;
   b.textContent = label;
-  if (action !== "signout" && action !== "saved") {
+  if (!GUARDED.has(action)) {
     b.addEventListener("click", onClick);
     return b;
   }
@@ -209,10 +211,11 @@ const topLevelOnly = (): void => {
   if (framed) throw new Error("sign-in and sign-out run top-level only, never in a frame");
 };
 
-// A seed stored here: the backup screen when its 12 words are the only copy and not saved, else signed in.
-function landed(s: Seed): void {
-  if (backupFirst(s)) return void showBackup(s);
-  show("signed-in", shown(s));
+// Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
+// stored, which may be another tab's (never its words then).
+function landed(l: Landing): void {
+  if (l.screen === "backup") return void showBackup(l.seed);
+  show("signed-in", shown(l.seed));
 }
 
 async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean): Promise<void> {
@@ -221,14 +224,12 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   const had = await readSeed();
   if (had) return show("signed-in", shown(had));
   const r = await ceremony();
-  if (r.kind === "no-prf" && create) {
-    // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
-    return landed(await storeSeed(await open(), noPrfSeed()));
-  }
+  // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
+  if (r.kind === "no-prf" && create) return landed(await signInNoPrf(open));
   if (r.kind !== "prf") return show(r.kind);
-  // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown
-  const stored = await storeSeed(await open(), { v: 1, entropy: r.entropy, source: "prf", code_saved: false, created_ms: Date.now() });
-  show("signed-in", shown(stored));
+  // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
+  // zeroed on every path, an open that fails included (words.ts storeSeed)
+  landed(await signInPrf(open, r.entropy));
 }
 
 // ses.10-12: the typed 12 words, checked on the device before anything else; a failure stores nothing
@@ -236,14 +237,14 @@ async function signInWords(typed: string): Promise<void> {
   topLevelOnly();
   const had = await readSeed();
   if (had) return show("signed-in", shown(had));
-  let seed: Seed;
+  let l: Landing;
   try {
-    seed = typedSeed(typed);
+    l = await signInTyped(open, typed);
   } catch (e) {
     if (e instanceof WordsRefused) return show("invalid-code");
     throw e;
   }
-  landed(await storeSeed(await open(), seed));
+  landed(l);
 }
 
 // The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.

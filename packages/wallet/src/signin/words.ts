@@ -12,7 +12,11 @@
 //   give is the kit's own derivation of their entropy, so they open the same keys as kit-freeze-keys' vectors.
 // - The 12 words are drawn only on SIGN_HOST's top-level page (W:914): backupWords refuses anywhere else.
 // - Every seed is written through the store's insert-only insertSeed under its seed lock, so two tabs never write one
-//   over the other; code_saved only goes to true, through setCodeSaved.
+//   over the other; code_saved only goes to true, through setCodeSaved. The sign-in steps (signInPrf, signInNoPrf,
+//   signInTyped) take the store's opener, so a seed's entropy is zeroed on every path, an open that fails included.
+// - Where a sign-in lands: the backup screen only for a seed this sign-in made whose 12 words are the only copy (ses.4).
+//   A sign-in that loses the insert to another tab's seed lands signed in on that seed and never shows its words: the
+//   user did not ask for them, and typed words that lost are not silently turned into another account's backup.
 // - Nothing here sends anything: the words, the entropy and the seed never leave this page (wallet.md:162-164).
 import { entropyToWords, newEntropy, SIGN_HOST } from "../derive/index.ts";
 import { backupFirst, type WalletStore } from "../store/index.ts";
@@ -74,16 +78,41 @@ export function typedSeed(typed: string, env: WordsEnv = {}): Seed {
   return { v: 1, entropy, source: "code", code_saved: true, created_ms: (env.now ?? Date.now)() };
 }
 
+export type Opener = () => Promise<WalletStore>;
+/** Where a sign-in lands, and the seed stored afterwards (the caller zeroes its entropy once used). */
+export type Landing = { screen: "signed-in" | "backup"; seed: Seed };
+
 /**
- * Writes `seed` only if no seed is stored (insertSeed) and resolves to the seed stored afterwards: this one, or the one
- * another tab stored first. The given entropy is zeroed either way; the caller zeroes the returned one once used.
+ * Opens the store and writes `seed` only if no seed is stored (insertSeed). Resolves to whether this seed was written
+ * and the seed stored afterwards: this one, or the one another tab stored first. The given entropy is zeroed on every
+ * path, an open or a write that fails included.
  */
-export async function storeSeed(store: WalletStore, seed: Seed): Promise<Seed> {
+export async function storeSeed(open: Opener, seed: Seed): Promise<{ inserted: boolean; seed: Seed }> {
   try {
-    return checkSeed((await store.insertSeed(seed)).seed)!;
+    const r = await (await open()).insertSeed(seed);
+    return { inserted: r.inserted, seed: checkSeed(r.seed)! };
   } finally {
     seed.entropy.fill(0);
   }
+}
+
+function land(r: { inserted: boolean; seed: Seed }): Landing {
+  return { screen: r.inserted && backupFirst(r.seed) ? "backup" : "signed-in", seed: r.seed };
+}
+
+/** A passkey's PRF entropy (ses.2, ses.7): stored as a PRF seed; the entropy is zeroed on every path. */
+export async function signInPrf(open: Opener, entropy: Uint8Array): Promise<Landing> {
+  return land(await storeSeed(open, { v: 1, entropy, source: "prf", code_saved: false, created_ms: Date.now() }));
+}
+
+/** A passkey without PRF on create (ses.4): a random seed, then its backup screen when this seed is the one stored. */
+export async function signInNoPrf(open: Opener, env: WordsEnv = {}): Promise<Landing> {
+  return land(await storeSeed(open, noPrfSeed(env)));
+}
+
+/** Typed words (ses.10-12): refused with WordsRefused before the store is opened; a code seed lands signed in. */
+export async function signInTyped(open: Opener, typed: string, env: WordsEnv = {}): Promise<Landing> {
+  return land(await storeSeed(open, typedSeed(typed, env)));
 }
 
 /** The backup's Saved (ses.5): the stored seed's code_saved becomes true, and nothing else changes. */
