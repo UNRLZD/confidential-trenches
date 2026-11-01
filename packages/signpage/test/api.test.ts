@@ -237,6 +237,28 @@ test("the request cap is UTF-8 bytes of the JSON, 64 KiB, checked before any fie
   assert.deepEqual(p.msgs()[1], notAllowed(id), "exactly at the cap is read");
 });
 
+test("a shared-reference bomb of nulls and numbers is refused fast: every value visited spends the budget", async () => {
+  const p = page();
+  const id = uuid();
+  const nulls = Array.from({ length: 10_000 }, () => null);
+  const nums = Array.from({ length: 10_000 }, () => 0);
+  const depth1 = Array.from({ length: 10_000 }, () => nulls);
+  const depth2 = Array.from({ length: 10_000 }, () => Array.from({ length: 10 }, () => nums));
+  const wide = Object.fromEntries(Array.from({ length: 10_000 }, (_, i) => [`k${i}`, nulls]));
+  const bad: unknown[] = [
+    { v: 1, id, type: "buy", list: depth1 },
+    { v: 1, id, type: "buy", list: depth2 },
+    { v: 1, id, type: "buy", wide },
+  ];
+  for (const d of bad) {
+    const t0 = performance.now();
+    p.send(d);
+    await p.idle();
+    assert.ok(performance.now() - t0 < 1_000, `refused in ${Math.round(performance.now() - t0)} ms`);
+  }
+  assert.equal(p.posted.length, 1, "only ready");
+});
+
 test("SIGNPAGE_MAX_REQUEST_BYTES equals the kit's (app-signpage-client 6db85d4), 65,536 until that card merges", async () => {
   const schema = new URL("../../kit/src/signpage/schema.ts", import.meta.url);
   if (existsSync(schema)) {

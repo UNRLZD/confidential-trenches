@@ -41,7 +41,7 @@ function sheet(answers: { create?: Answer; get?: Answer[] }) {
     },
   } as unknown as CredentialsContainer;
   let n = 0;
-  const env = { credentials, hasWebAuthn: true, hostname: d.SIGN_HOST, random: (b: Uint8Array) => b.fill(++n) };
+  const env = { credentials, hasWebAuthn: true, hostname: d.SIGN_HOST, topLevel: true, random: (b: Uint8Array) => b.fill(++n) };
   return { env, calls };
 }
 const withPrf = (out = PRF_OUT) => ({ prf: { enabled: true, results: { first: out.slice().buffer } } });
@@ -174,4 +174,21 @@ test("the ceremony runs on SIGN_HOST only", async () => {
     await assert.rejects(p.getPasskey({ ...s.env, hostname }), /only/);
     assert.equal(s.calls.length, 0);
   }
+});
+
+test("in a frame both calls refuse before the sheet is asked (wallet.md:921-922)", async () => {
+  for (const topLevel of [false, undefined]) {
+    const s = sheet({ create: { ext: withPrf() }, get: [{ ext: withPrf() }] });
+    await assert.rejects(p.createPasskey({ ...s.env, topLevel }), /top-level only/);
+    await assert.rejects(p.getPasskey({ ...s.env, topLevel }), /top-level only/);
+    assert.equal(s.calls.length, 0);
+  }
+});
+
+test("the PRF output is wiped in the buffer the sheet returned", async () => {
+  const buf = PRF_OUT.slice().buffer;
+  const s = sheet({ get: [{ ext: { prf: { results: { first: buf } } } }] });
+  const r = await p.getPasskey(s.env);
+  assert.equal(r.kind === "prf" && hex(r.entropy), hex(want(PRF_OUT)));
+  assert.ok(new Uint8Array(buf).every((x) => x === 0), "the ArrayBuffer the sheet returned is zeroed");
 });

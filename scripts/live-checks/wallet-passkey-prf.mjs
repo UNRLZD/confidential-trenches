@@ -9,6 +9,11 @@
 //     own that shares none with the kit (node:crypto; the BIP-39 list read from bitcoin/bips and pinned by sha256):
 //     HKDF-SHA256 to the entropy (wallet.md:47), the 12 words, PBKDF2 to seed64 (:54), HKDF-SHA512 info "profile" ‖ 0
 //     to the ed25519 key (:68, :70-88). It must equal A.
+//   Also in the prf run: a second tab open before the first passkey is made then presses Create and runs no ceremony
+//     (its authenticator makes no passkey), and the stored seed is unchanged; the first tab's Sign out shows signed out
+//     in the second; the page framed by APP_HOST (a parent served at APP_HOST's address by this check) shows no sign-in
+//     or sign-out control; each signed-in step says code_saved false (data-code-saved, the Backup dot).
+//   race run: two tabs, each with its own passkey, press Create at once; both end on one account, the one stored.
 //   In each signed-in step the store is read raw (card wallet-store): K_wrap a non-extractable AES-GCM CryptoKey, the
 //     seed record only { iv, ct }, localStorage empty.
 //   no-prf run (hasPrf false): Create passkey opens the no-PRF state (data-signin="no-prf"), shows no account and
@@ -21,7 +26,8 @@
 // Records hold public values only (states, the public account ids, rp ids): never the PRF output, the entropy, the
 // words or a key. Every seed is a throwaway virtual authenticator's, never funded and never printed.
 import { createHash, createPrivateKey, createPublicKey, hkdfSync, pbkdf2Sync } from "node:crypto";
-import { realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +35,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const SIGN_HOST = "sign.confidential.unrealized.trade";
+export const APP_HOST = "confidential.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
+const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
 export const PRF_INPUT = "confidential-trenches/v1/seed";
 export const WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt";
 export const WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"; // BIP-39's own pin
@@ -52,6 +60,18 @@ export function judge(rec) {
     say(t.seed === true && t.seedWrapped === true && t.kWrap?.cryptoKey === true && t.kWrap?.extractable === false && t.kWrap?.alg === "AES-GCM" && t.localStorage === 0,
       `prf ${k}: the seed record is wrapped ({ iv, ct }) under a non-extractable AES-GCM K_wrap, nothing in localStorage`);
   }
+  for (const k of ["create", "reload", "signin"])
+    say(s[k]?.codeSaved === "false", `prf ${k}: the seed record says code_saved false, the Backup dot shows (${s[k]?.codeSaved})`);
+  const g = p.guard ?? {};
+  say(g.open?.state === "signed-out" && g.after?.state === "signed-in" && g.after?.account === A && g.credentials === 0 && !!g.ivBefore && g.ivBefore === g.ivAfter,
+    `prf: Create in a second tab with a seed already stored runs no ceremony and keeps the seed (${g.after?.state}, ${g.credentials} new passkey(s), seed ${g.ivBefore && g.ivBefore === g.ivAfter ? "unchanged" : "changed"})`);
+  say(p.crossTab?.state === "signed-out" && !p.crossTab?.account, `prf: Sign out in one tab shows signed out in the other (${p.crossTab?.state})`);
+  const f = p.framed ?? {};
+  say(f.framed === "true" && f.buttons === 0 && f.actions === 0 && typeof f.state === "string",
+    `prf: framed by APP_HOST the page shows no sign-in or sign-out control (framed ${f.framed}, ${f.buttons} button(s))`);
+  const r = p.race ?? {};
+  say(r.a?.state === "signed-in" && r.b?.state === "signed-in" && HEX64.test(r.a?.account ?? "") && r.a?.account === r.b?.account && r.reload?.account === r.a?.account,
+    `prf: two tabs that create at once end on one account, the one stored (${r.a?.account && r.a?.account === r.b?.account ? "one" : "two"})`);
   const rps = p.credentials ?? [];
   say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
   say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
@@ -95,22 +115,29 @@ const playwright = () => createRequire(path.join(REPO, "apps/terminal/package.js
 
 async function launch({ harness, site }) {
   const { chromium } = playwright();
-  if (!harness) return { browser: await chromium.launch(), close: async () => {} };
+  if (!harness) return { browser: await chromium.launch(), harnessApp: false, close: async () => {} };
   const { makeCert } = await import("../../apps/terminal/test/harness/certs.mjs");
   const { startServer } = await import("../../apps/terminal/test/harness/server.mjs");
   const { buildSignpage } = await import("../../apps/terminal/test/harness/harness.mjs");
   const root = site ?? buildSignpage();
-  const cert = makeCert([SIGN_HOST]);
-  const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root } } });
+  // APP_HOST's address serves the framing parent here too: Chromium's local network access checks refuse a public
+  // parent framing a host that resolves to this machine, so on the harness both are local.
+  const app = mkdtempSync(path.join(tmpdir(), "ct-passkey-app-"));
+  writeFileSync(path.join(app, "index.html"), FRAME_PARENT);
+  const cert = makeCert([SIGN_HOST, APP_HOST]);
+  const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root }, [APP_HOST]: { root: app, spa: true } } });
+  const map = [SIGN_HOST, APP_HOST].map((h) => `MAP ${h} 127.0.0.1:${server.port}`).join(", ");
   const browser = await chromium.launch({
-    args: [`--host-resolver-rules=MAP ${SIGN_HOST} 127.0.0.1:${server.port}, MAP * ~NOTFOUND`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
+    args: [`--host-resolver-rules=${map}, MAP * ~NOTFOUND`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
   });
   return {
     browser,
+    harnessApp: true,
     close: async () => {
       await browser.close();
       await server.close();
       cert.remove();
+      rmSync(app, { recursive: true, force: true });
       if (!site) rmSync(root, { recursive: true, force: true });
     },
   };
@@ -139,6 +166,7 @@ async function settled(page) {
     let seed = false;
     let kWrap = null;
     let seedWrapped = null;
+    let seedIv = null;
     if (db) {
       const raw = await new Promise((ok) => {
         const r = indexedDB.open("ct-wallet");
@@ -159,8 +187,9 @@ async function settled(page) {
       if (seed)
         seedWrapped = !!raw.s && typeof raw.s === "object" && Object.keys(raw.s).sort().join() === "ct,iv" &&
           raw.s.iv instanceof Uint8Array && raw.s.iv.length === 12 && raw.s.ct instanceof ArrayBuffer && raw.s.ct.byteLength > 16;
+      if (seedWrapped) seedIv = Array.from(raw.s.iv, (x) => x.toString(16).padStart(2, "0")).join("");
     }
-    return { state: m.dataset.signin, account: m.dataset.account ?? null, db, seed, kWrap, seedWrapped, localStorage: localStorage.length };
+    return { state: m.dataset.signin, account: m.dataset.account ?? null, codeSaved: m.dataset.codeSaved ?? null, db, seed, kWrap, seedWrapped, seedIv, localStorage: localStorage.length };
   });
 }
 async function click(page, action) {
@@ -188,18 +217,50 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
   {
     const h = await launch({ harness, site });
     try {
-      const page = await (await h.browser.newContext()).newPage();
+      const ctx = await h.browser.newContext();
+      const page = await ctx.newPage();
       watch(page, errors);
       const creds = await authenticator(page, true);
+      // a second tab, open before the first one makes a passkey: its button must then run no ceremony
+      const tab2 = await ctx.newPage();
+      watch(tab2, errors);
+      const creds2 = await authenticator(tab2, true);
       await page.goto(url);
+      await tab2.goto(url);
       const steps = {};
+      const guard = {};
       steps.open = await settled(page);
+      guard.open = await settled(tab2);
       steps.create = await click(page, "create");
+      guard.ivBefore = steps.create.seedIv;
+      guard.after = await click(tab2, "create");
+      guard.ivAfter = guard.after.seedIv;
+      guard.credentials = (await creds2()).length;
+      record.prf.guard = guard;
       await page.reload();
       steps.reload = await settled(page);
       steps.signout = await click(page, "signout");
+      // the other tab hears the sign out
+      await tab2.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signed-out", null, { timeout: WAIT_MS }).catch(() => {});
+      record.prf.crossTab = await tab2.evaluate(() => ({ state: document.getElementById("signin").dataset.signin, account: document.getElementById("signin").dataset.account ?? null }));
       steps.signin = await click(page, "use");
       record.prf.steps = steps;
+      // framed by APP_HOST: the parent is a page this check serves at APP_HOST's address; the frame is SIGN_HOST itself
+      const APP = `https://${APP_HOST}/__wallet-passkey-prf-frame`;
+      if (!h.harnessApp) await ctx.route(APP, (rt) => rt.fulfill({ status: 200, contentType: "text/html", body: FRAME_PARENT }));
+      const parent = await ctx.newPage();
+      watch(parent, errors);
+      await parent.goto(APP);
+      const frame = await (await parent.waitForSelector("iframe", { timeout: WAIT_MS })).contentFrame();
+      await frame.waitForFunction(() => {
+        const st = document.getElementById("signin")?.dataset.signin;
+        return st && st !== "loading";
+      }, null, { timeout: WAIT_MS }).catch(() => {});
+      record.prf.framed = await frame.evaluate(() => {
+        const m = document.getElementById("signin");
+        return { framed: m?.dataset.framed ?? null, state: m?.dataset.signin ?? null, buttons: document.querySelectorAll("button").length, actions: document.querySelectorAll("[data-action]").length };
+      }).catch(() => ({}));
+      await parent.close();
       record.prf.credentials = await creds();
       const out = await page.evaluate(async (input) => {
         const c = await navigator.credentials.get({
@@ -213,6 +274,25 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         prfHex = out;
         record.prf.expected = accountOfPrf(Buffer.from(out, "hex"), await wordlist(fetchFn));
       }
+    } finally {
+      await h.close();
+    }
+  }
+  // race: two tabs, each with its own passkey, press the button at once; one seed is stored and both show it
+  {
+    const h = await launch({ harness, site });
+    try {
+      const ctx = await h.browser.newContext();
+      const [a, b] = [await ctx.newPage(), await ctx.newPage()];
+      for (const t of [a, b]) {
+        watch(t, errors);
+        await authenticator(t, true);
+        await t.goto(url);
+        await settled(t);
+      }
+      const [ra, rb] = await Promise.all([click(a, "create"), click(b, "create")]);
+      await a.reload();
+      record.prf.race = { a: ra, b: rb, reload: await settled(a) };
     } finally {
       await h.close();
     }

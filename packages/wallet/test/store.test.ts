@@ -366,3 +366,24 @@ test("raiseDepositIndex refuses a min whose lane index is past 2^32 - 1, before 
   if (top < 0xffffffff) await assert.rejects(s.raiseDepositIndex(SCOPE, 0xffffffff), /past 2\^32 - 1/);
   assert.equal(await s.reserveDepositIndex(SCOPE), top, "the refused raises wrote nothing");
 });
+
+test("insertSeed writes the seed only when none is stored: two tabs that both read 'no seed' never write over each other", async () => {
+  const idb = new IDBFactory();
+  const a = await openWalletStore({ indexedDB: idb });
+  const b = await openWalletStore({ indexedDB: idb });
+  assert.equal(await a.get("meta", "seed"), undefined);
+  assert.equal(await b.get("meta", "seed"), undefined);
+  const A = { entropy: new Uint8Array(16).fill(1), source: "prf", code_saved: false };
+  const B = { entropy: new Uint8Array(16).fill(2), source: "prf", code_saved: false };
+  const [ra, rb] = await Promise.all([a.insertSeed(A), b.insertSeed(B)]);
+  assert.equal([ra.inserted, rb.inserted].filter(Boolean).length, 1, "exactly one tab inserts");
+  const winner = ra.inserted ? A : B;
+  assert.deepEqual(ra.seed, winner);
+  assert.deepEqual(rb.seed, winner);
+  assert.deepEqual(await a.get("meta", "seed"), winner);
+  assert.deepEqual(await b.get("meta", "seed"), winner);
+  // a later insert never replaces it either
+  const again = await a.insertSeed({ entropy: new Uint8Array(16).fill(3), source: "prf", code_saved: false });
+  assert.equal(again.inserted, false);
+  assert.deepEqual(again.seed, winner);
+});
