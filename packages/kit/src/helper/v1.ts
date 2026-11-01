@@ -1,12 +1,15 @@
 // The helper API /v1, frozen with the kit on Nov 1 06:00Z: every path of markets.md H7 with its 7.1 changes
 // (research main ffcba5e). It is what the kit, the signing page and any outside wallet, terminal or bot call on a
 // helper: ours, or their own copy of it.
-// Types and constants only. It imports nothing and signs nothing; a helper holds API keys, never a money key, and can
-// only carry what the device signed. Nothing a helper answers is trusted for anything signed: the device checks every
-// answer against its own request and its own chain reads before it signs.
+// Types and constants only. It imports only the kit's own order record (Chain and OrderRecord, never redefined here)
+// and signs nothing; a helper holds API keys, never a money key, and can only carry what the device signed. Nothing a
+// helper answers is trusted for anything signed: the device checks every answer against its own request and its own
+// chain reads before it signs.
 // Wire rules: JSON bodies, signed bytes in standard base64, no cookies; the kit calls with HELPER_FETCH_INIT; every
 // answer carries X-Helper-Commit. An error is { error: { code } } with the HTTP status of HELPER_CODE_STATUS (400 for
 // a code not listed there). Limits are design values (H7: "Limits are [design]").
+
+import type { Chain, OrderRecord } from "../orders/record";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Common
@@ -54,8 +57,6 @@ export type HelperNearAccount = string;
 export type HelperNearPublicKey = string;
 /** A transaction id in its chain's form. */
 export type HelperTxHash = string;
-
-export type HelperChain = "solana" | "base" | "robinhood" | "near";
 
 /** The parts of /v1/health, one per value of H7's Part column (7.1 row "GET /v1/health parts"). */
 export const HELPER_PARTS = ["proxy", "relay", "intents", "delegate", "orders", "log"] as const;
@@ -194,18 +195,18 @@ export const HELPER_RPC_METHODS = {
     "eth_getTransactionByHash",
   ],
   near: ["query", "block", "gas_price", "tx", "send_tx", "EXPERIMENTAL_tx_status", "EXPERIMENTAL_protocol_config"],
-} as const satisfies Record<HelperChain, readonly string[]>;
+} as const satisfies Record<Chain, readonly string[]>;
 
 export const HELPER_RPC_BATCH_MAX = 10;
 
-export interface HelperJsonRpcRequest<C extends HelperChain = HelperChain> {
+export interface HelperJsonRpcRequest<C extends Chain = Chain> {
   jsonrpc: "2.0";
   id: number | string;
   method: (typeof HELPER_RPC_METHODS)[C][number];
   params?: unknown;
 }
 /** One request, or a batch of 1 to HELPER_RPC_BATCH_MAX. */
-export type HelperRpcRequest<C extends HelperChain = HelperChain> = HelperJsonRpcRequest<C> | HelperJsonRpcRequest<C>[];
+export type HelperRpcRequest<C extends Chain = Chain> = HelperJsonRpcRequest<C> | HelperJsonRpcRequest<C>[];
 /** The provider's JSON-RPC answer, passed through. */
 export type HelperRpcAnswer = unknown;
 /** method_not_allowed: a method off the chain's allowlist, in any request of a batch. */
@@ -577,32 +578,13 @@ export type HelperIntentsCode = (typeof HELPER_INTENTS_CODES)[number];
 // /v1/orders
 // ---------------------------------------------------------------------------------------------------------------
 
-/** 16 random bytes from the device, as 32 lowercase hex characters. */
-export type HelperOrderId = string;
-
-export interface HelperOrderTrigger {
-  kind: "stop" | "take_profit" | "limit";
-  pool: string;
-  venue: string;
-  direction: "lte" | "gte";
-  price: string;
-  quote_asset: string;
-}
-
-export interface HelperOrder {
-  order_id: HelperOrderId;
-  chain: HelperChain;
-  /**
-   * 1 to 3 signed transactions, byte for byte as the device signed them, all on one nonce; on NEAR, signed delegate
-   * actions (base64 borsh), wrapped by the order sender's delegate account.
-   */
-  variants: [HelperBase64] | [HelperBase64, HelperBase64] | [HelperBase64, HelperBase64, HelperBase64];
-  trigger: HelperOrderTrigger;
-  /** NEAR only: the block height when the bytes expire. */
-  expires_at?: number;
-  /** SHA-256 of the random token the device keeps, as 64 lowercase hex characters. */
-  token_hash: string;
-}
+/**
+ * One order as the order sender takes it: the kit's own OrderRecord (orders/record.ts: group_id, the trigger
+ * {kind, pool, venue, direction, price, quote_asset}, variants[1..3] signed on one nonce, expires_at for NEAR, nonce_ref
+ * per H5.1) with the hash of the order's token. The token is a random secret the device keeps; status, replace and
+ * delete need it, and the helper stores only its SHA-256, as 64 lowercase hex characters.
+ */
+export type HelperOrder = OrderRecord & { token_hash: string };
 
 export interface HelperOrdersRequest {
   group_id: string;
@@ -622,26 +604,23 @@ export const HELPER_ORDER_CODES = [
 export type HelperOrderCode = (typeof HELPER_ORDER_CODES)[number];
 
 export interface HelperOrdersAnswer {
-  orders: ({ order_id: HelperOrderId; state: "armed" } | { order_id: HelperOrderId; error: { code: HelperOrderCode } })[];
+  orders: ({ order_id: OrderRecord["order_id"]; state: "armed" } | { order_id: OrderRecord["order_id"]; error: { code: HelperOrderCode } })[];
 }
 
+/** The order sender's own states (H5.1), not the device's. */
 export type HelperOrderState = "armed" | "firing" | "sent" | "filled" | "void" | "expired" | "deleted";
 
 /** 1 to 100 items; `token` is the order's own capability, of which the helper stores only the hash. */
 export interface HelperOrdersStatusRequest {
-  items: { order_id: HelperOrderId; token: string }[];
+  items: { order_id: OrderRecord["order_id"]; token: string }[];
 }
 
 export interface HelperOrdersStatusAnswer {
-  items: { order_id: HelperOrderId; state: HelperOrderState; tx_id?: HelperTxHash; last_try?: string; reason?: string }[];
+  items: { order_id: OrderRecord["order_id"]; state: HelperOrderState; tx_id?: HelperTxHash; last_try?: string; reason?: string }[];
 }
 
-/** PUT /v1/orders/{order_id}: new variants on the same nonce_ref. */
-export interface HelperOrderReplaceRequest {
-  token: string;
-  variants: [HelperBase64] | [HelperBase64, HelperBase64] | [HelperBase64, HelperBase64, HelperBase64];
-  expires_at?: number;
-}
+/** PUT /v1/orders/{order_id}: new variants on the same nonce_ref, in the order record's own fields. */
+export type HelperOrderReplaceRequest = { token: string } & Pick<OrderRecord, "variants" | "expires_at">;
 
 export interface HelperOrderReplaceAnswer {
   state: HelperOrderState;
