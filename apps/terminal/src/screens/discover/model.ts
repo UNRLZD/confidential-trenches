@@ -6,6 +6,7 @@
 // (v1.20): amber at the line, coral at 1.5 x, a null field grey and never a pass.
 import type { MarketRow, MarketSnapshot } from "./fields.ts";
 import { age, change, count, DASH, price, usd } from "./format.ts";
+import { onCurve } from "../market/curve.ts";
 
 export type ColumnKey = "new" | "trending" | "hot" | "graduating";
 export type Win = "5m" | "1h";
@@ -18,7 +19,6 @@ export const COLUMNS: readonly { key: ColumnKey; win: Win }[] = [
 ];
 
 const num = (v: string | null | undefined) => (typeof v === "string" && /^\d+(\.\d+)?$/.test(v) ? Number(v) : 0);
-const onCurve = (r: MarketRow) => typeof r.curve_bps === "number" && r.curve_bps >= 0 && r.curve_bps < 10000;
 
 /** One row per token, the first seen kept. */
 function unique(rows: readonly MarketRow[]): MarketRow[] {

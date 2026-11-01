@@ -26,7 +26,6 @@
 .dsc-ring { position: relative; display: block; flex: none; }
 .dsc-ring svg { position: absolute; inset: 0; }
 .dsc-ravatar { position: absolute; display: block; }
-.dsc-av { display: flex; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; font-family: var(--font-num); font-weight: 700; letter-spacing: -0.05em; }
 .dsc-rpill { position: absolute; left: 50%; bottom: -3px; transform: translateX(-50%); padding: 0 4px; border-radius: 4px; background: #111; font: 600 9px/13px var(--font-num); letter-spacing: 0.04em; color: var(--blue); white-space: nowrap; }
 .dsc-rpill[data-curve="true"] { color: var(--text-2); }
 .dsc-info { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

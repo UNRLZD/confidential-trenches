@@ -1,0 +1,2 @@
+/* the token avatar (Avatar.tsx); values are Discover's, after UNRLZD TokenAvatar */
+.tok-av { display: flex; flex: none; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; font-family: var(--font-num); font-weight: 700; letter-spacing: -0.05em; }
