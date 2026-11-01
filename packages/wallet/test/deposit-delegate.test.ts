@@ -164,6 +164,55 @@ test("no hand-made read is signed: the module exports no signer but depositDeleg
   await assert.rejects(sign({}, { keys: "keys_no_account" }), DepositAccountRefused);
 });
 
+test("what is signed is what was read: args and seed64 changed while the reads are out do not reach the call", async () => {
+  const signedArgs = (out: { signed_delegate: string }) => {
+    const d = decodeSignedDelegate(bytesOf(out.signed_delegate));
+    const a = d.actions[0]!;
+    assert.equal(a.kind, "FunctionCall");
+    return { d, args: JSON.parse(Buffer.from(a.kind === "FunctionCall" ? a.args : new Uint8Array()).toString()) };
+  };
+  const balanceOf = (v: string) => [...Buffer.from(JSON.stringify(v))];
+  // The amount raised to the cap during the reads, U read at 25 USDC: the call stays at the amount that was read.
+  {
+    const args: DepositDelegateArgs = { ...ARGS };
+    const edit = (kind: ReadKind, j: any) => {
+      if (kind !== "balance") return;
+      j.result.result = balanceOf("25000000");
+      args.amount = HELPER_BIND_DEPOSIT_CAP;
+    };
+    const out = await depositDelegate(SEED, S, I, args, replayDepositReads("testnet", PUB, { edit }));
+    assert.equal(args.amount, HELPER_BIND_DEPOSIT_CAP); // the change happened
+    assert.equal(signedArgs(out).args.amount, "25000000");
+    assert.equal(out.signed_delegate, V.signed_delegate);
+  }
+  // The caller's seed64 zeroed during the reads: the call is still U's, the account that was read.
+  {
+    const seed = Uint8Array.from(SEED);
+    const edit = (kind: ReadKind) => void (kind === "code" && seed.fill(0));
+    const out = await depositDelegate(seed, S, I, ARGS, replayDepositReads("testnet", PUB, { edit }));
+    assert.ok(seed.every((x) => x === 0));
+    assert.equal(signedArgs(out).d.sender_id, U);
+    assert.equal(out.signed_delegate, V.signed_delegate);
+  }
+  // The network, P and the window changed during the reads: none of them reaches the call.
+  {
+    const args: DepositDelegateArgs = { ...ARGS, window: 120 };
+    const edit = (kind: ReadKind) => {
+      if (kind !== "code") return;
+      args.network = "mainnet";
+      args.precommitment = 8n;
+      args.window = 600;
+    };
+    const out = await depositDelegate(SEED, S, I, args, replayDepositReads("testnet", PUB, { edit }));
+    assert.equal(out.signed_delegate, V.signed_delegate);
+  }
+  // The caller's seed is never written: depositDelegate works on its own copy.
+  const seed = Uint8Array.from(SEED);
+  await sign();
+  await depositDelegate(seed, S, I, ARGS, replayDepositReads("testnet", PUB));
+  assert.deepEqual(seed, SEED);
+});
+
 test("borsh: our encoding of near-api-js 7.3.1's delegate (the helper's fixture) equals its bytes before the signature", () => {
   const fx = JSON.parse(readFileSync(new URL("../../../apps/helper/src/bind/fixtures/near-api-js-deposit.json", import.meta.url), "utf8"));
   const theirs = bytesOf(fx.signed_delegate);

@@ -18,7 +18,7 @@
 // The only way in is depositDelegate: U's reads on two RPCs first, then U's key is derived, signs and is zeroed, so no
 // hand-made read and no read of another network can be signed from.
 // The signed call goes only to the release's relayer, POST RELEASE_BIND_URL (wallet.md:898: "never self-submitted and
-// never another relayer"), with no redirect followed; the signing page's CSP lets it reach no other helper
+// never another relayer"), with redirect: "error", so fetch follows none; the signing page's CSP lets it reach no other helper
 // (packages/signpage/public/_headers). The request carries the signed delegate alone: no key, no words, no other id of
 // the user. Its answer is read up to BIND_ANSWER_MAX_BYTES. Nothing here logs.
 //
@@ -50,7 +50,7 @@ export const BIND_ANSWER_MAX_BYTES = 1_024;
 const U64_MAX = (1n << 64n) - 1n;
 const U128_MAX = (1n << 128n) - 1n;
 
-export type DelegateRefusalCode = "input" | "window" | "no_vault" | "nonce" | "call";
+export type DelegateRefusalCode = "input" | "window" | "no_vault" | "nonce" | "key" | "call";
 export class DepositDelegateRefused extends Error {
   readonly code: DelegateRefusalCode;
   constructor(code: DelegateRefusalCode, detail: string) {
@@ -153,6 +153,8 @@ function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: Dep
 
   const u = depositId(seed64, s, i);
   try {
+    // The read must be of the key that signs: never a call from an account other than the one just read.
+    if (read.account !== u.id) throw new DepositDelegateRefused("key", "the read is not of U_{s,i}");
     let call: ReturnType<typeof vaultDepositCall>;
     try {
       call = vaultDepositCall({ vault, token, mover: u.id, amount: args.amount, precommitment: args.precommitment });
@@ -191,8 +193,17 @@ function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: Dep
 export async function depositDelegate(
   seed64: Uint8Array, s: bigint, i: number, args: DepositDelegateArgs, rpcs: readonly [NearRpc, NearRpc],
 ): Promise<SignedDepositDelegate> {
-  const read = await readDepositAccount(seed64, s, i, args.amount, args.network, rpcs);
-  return signDepositDelegate(seed64, s, i, args, read);
+  // Everything the call is made from is copied before the first await: a change to args or seed64 while the reads are
+  // out cannot reach what is signed. The seed's copy is zeroed on every path.
+  const own: DepositDelegateArgs = { network: args.network, amount: args.amount, precommitment: args.precommitment, window: args.window };
+  if (!(seed64 instanceof Uint8Array) || seed64.length !== 64) throw new DepositDelegateRefused("input", "seed64 must be 64 bytes");
+  const seed = Uint8Array.from(seed64);
+  try {
+    const read = await readDepositAccount(seed, s, i, own.amount, own.network, rpcs);
+    return signDepositDelegate(seed, s, i, own, read);
+  } finally {
+    seed.fill(0);
+  }
 }
 
 /** The relayer's answer, checked: a tx hash, or one of the deposit codes. Anything else throws. */
@@ -213,7 +224,6 @@ export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "s
     body: JSON.stringify({ signed_delegate: signed.signed_delegate }),
     signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
   });
-  if (res.redirected || res.type === "opaqueredirect") throw new Error("relayer: redirected");
   let body: unknown;
   try {
     body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await readCapped(res, BIND_ANSWER_MAX_BYTES)));

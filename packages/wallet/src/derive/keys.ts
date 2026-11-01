@@ -123,25 +123,28 @@ export const profileKey = (seed64: Uint8Array, k: number) => oneTime(seed64, inf
 
 // ---------- SLIP-10 ed25519, hardened steps only ----------
 const HARDENED = 0x80000000;
-// Every intermediate buffer (each step's I, its data and the parent's key and chain code) is zeroed once used.
+// No intermediate copy is made: each step reads the parent's key and chain code as views of its I, and each I and each
+// step's data is zeroed once used. Only the leaf's key and chain code are copied out.
 export function slip10Ed25519(seed: Uint8Array, path: number[]): { key: Uint8Array; chainCode: Uint8Array } {
+  const I = slip10Leaf(seed, path);
+  const out = { key: I.slice(0, 32), chainCode: I.slice(32) };
+  I.fill(0);
+  return out;
+}
+// The leaf's I (key || chain code), the caller's to zero.
+function slip10Leaf(seed: Uint8Array, path: number[]): Uint8Array {
   for (const step of path)
     if (!Number.isSafeInteger(step) || step < HARDENED || step > 0xffffffff)
       throw new Error("SLIP-10 ed25519 takes hardened steps only");
   let I = hmac(sha512, ascii("ed25519 seed"), seed);
-  let key = I.slice(0, 32), chainCode = I.slice(32);
-  I.fill(0);
   for (const step of path) {
-    const data = concat(Uint8Array.of(0), key, u32(step));
-    I = hmac(sha512, chainCode, data);
+    const data = concat(Uint8Array.of(0), I.subarray(0, 32), u32(step));
+    const next = hmac(sha512, I.subarray(32), data);
     data.fill(0);
-    key.fill(0);
-    chainCode.fill(0);
-    key = I.slice(0, 32);
-    chainCode = I.slice(32);
     I.fill(0);
+    I = next;
   }
-  return { key, chainCode };
+  return I;
 }
 
 // ---------- fresh wallets W_{c,l,j} ----------
@@ -166,8 +169,9 @@ export function freshWallet(seed64: Uint8Array, c: Chain, l: bigint, j: number):
   const inf = hex(info.wallet(c, l, j));
   const steps = [44, CHAINS[c].coin, a, b].map((x) => x + HARDENED);
   if (CHAINS[c].curve === "ed25519") {
-    const { key, chainCode } = slip10Ed25519(seed64, steps);
-    chainCode.fill(0);
+    const leaf = slip10Leaf(seed64, steps); // only the key is copied out; the leaf's chain code is never copied
+    const key = leaf.slice(0, 32);
+    leaf.fill(0);
     const publicKey = ed25519.getPublicKey(key);
     const address = c === "sol" || c === "hop-sol" ? base58.encode(publicKey) : hex(publicKey);
     return { chain: c, info: inf, path, address, publicKey, secretKey: key };
