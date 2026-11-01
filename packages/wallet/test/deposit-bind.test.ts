@@ -54,6 +54,8 @@ class Chain {
   /** Every tx the relayer sent, by hash, and those every receipt of which is final. */
   txs = new Map<string, Sent>();
   finals = new Set<string>();
+  /** A tx read on one side only (the other answers the node's timeout). */
+  finalOnlyOn: "a" | "b" | undefined = undefined;
   txReads = 0;
   /** Runs on each sleep: the test's clock. Default: one block on each side. */
   tick: () => void = () => this.blocks(1n);
@@ -83,12 +85,13 @@ class Chain {
       tx: async ({ tx_hash, sender_account_id }) => {
         this.txReads++;
         const t = this.txs.get(tx_hash);
-        if (!t || !this.finals.has(tx_hash) || sender_account_id !== RELAYER) return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } };
+        if (!t || sender_account_id !== RELAYER || (this.finalOnlyOn !== undefined && this.finalOnlyOn !== k))
+          return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } };
         return {
           jsonrpc: "2.0",
           id: "x",
           result: {
-            final_execution_status: "FINAL",
+            final_execution_status: this.finals.has(tx_hash) ? "FINAL" : "EXECUTED_OPTIMISTIC",
             status: { SuccessValue: "" },
             transaction: {
               hash: tx_hash,
@@ -373,7 +376,9 @@ test("planted: a re-sign at a new nonce is impossible: a moved nonce is refused,
   const refusedNonce = (e: unknown) => e instanceof DepositBindRefused && e.code === "nonce";
   // U's nonce already past the earlier call: not a lapse
   t.chain.a.nonce = t.chain.b.nonce = earlier.nonce;
+  const r0 = t.chain.readsOfKeys;
   await assert.rejects(resignDeposit(SEED, 1n, t.i, args, earlier, "lapse", t.deps.rpcs), refusedNonce);
+  assert.equal(t.chain.readsOfKeys - r0, 2); // the gate's read only: U's key is not used
   // R4 with U's nonce moved: the signer would sign at nonce + 2, and that call is dropped
   await assert.rejects(resignDeposit(SEED, 1n, t.i, args, earlier, "resign_needed", t.deps.rpcs), refusedNonce);
   // the gate reads the old nonce, the signer's read sees it moved
@@ -697,23 +702,59 @@ test("REVIEW A2: the Delegate ran in its window but the token's receipt is delay
 
 // The relayer answers the first call with a tx_hash of another final transaction: the device cannot tie it to U's call,
 // so it never signs a second call on P, whatever U's nonce and balance say.
-test("F1: a relayer's tx_hash that does not carry U's signed call is never trusted: no second call on P", async () => {
-  const t = await setup(["hash:" + base58.encode(new Uint8Array(32).fill(0xee))], () => () => {});
-  const other: Sent = { ...({} as Sent), nonce: 0n, mbh: 0n, p: 0n, bytes: "", low: 0n, hash: base58.encode(new Uint8Array(32).fill(0xee)), sender: t.u, receiver: NET.token, pk: publicKeyOf(t.u), sig: "ed25519:" + base58.encode(new Uint8Array(64).fill(7)) };
-  t.chain.txs.set(other.hash, other);
-  t.chain.finals.add(other.hash); // a real final tx, of something else
-  const n0 = t.chain.a.nonce;
+for (const lie of ["signature", "nonce"] as const) {
+  test(`F1: a relayer's tx_hash of a final tx that does not carry U's signed call (its ${lie}) is never trusted: no second call on P`, async () => {
+    const LIE = base58.encode(new Uint8Array(32).fill(0xee));
+    const t = await setup(["hash:" + LIE], () => () => {});
+    const n0 = t.chain.a.nonce;
+    const ac = new AbortController();
+    let ticks = 0;
+    t.chain.tick = () => {
+      t.chain.blocks(10n);
+      if (ticks === 0) {
+        // the call ran and was refused (the USDC is back in U); the hash names a final tx of U's call's fields but one
+        const s0 = t.sent[0]!;
+        const other: Sent = { ...s0, hash: LIE, ...(lie === "signature" ? { sig: "ed25519:" + base58.encode(new Uint8Array(64).fill(7)) } : { nonce: s0.nonce + 1n }) };
+        t.chain.txs.set(LIE, other);
+        t.chain.finals.add(LIE);
+        t.chain.a.nonce = t.chain.b.nonce = n0 + 1n;
+      }
+      if (++ticks === 80) ac.abort(new Error("caller stopped"));
+    };
+    await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /caller stopped/);
+    assert.ok(t.chain.low() > t.sent[0]!.mbh + 100n, "long past the window");
+    assert.ok(t.chain.txReads > 0, "the hash was read");
+    assert.equal(t.sent.length, 1, t.sent.map((s) => s.nonce).join(","));
+  });
+}
+
+test("F1: a refused call's tx read FINAL on one RPC only: no second call on P", async () => {
+  const t = await setup(["tx"], (c) => (s) => ((c.a.nonce = c.b.nonce = s.nonce), c.finals.add(s.hash)));
+  t.chain.finalOnlyOn = "a";
   const ac = new AbortController();
   let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 60 && ac.abort(new Error("caller stopped")));
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /caller stopped/);
+  assert.equal(t.sent.length, 1);
+});
+
+test("F1: a refused call's tx is FINAL but U's USDC is not back to what it was signed from: no new call until it is", async () => {
+  let calls = 0;
+  const t = await setup(["tx", "tx"], (c) => (s) => {
+    c.a.nonce = c.b.nonce = s.nonce;
+    c.finals.add(s.hash);
+    if (++calls === 1) c.balance -= AMOUNT; // 75M left, still above the amount
+    else (c.balance -= AMOUNT, c.addRow(s.p));
+  });
+  let polls = 0;
+  let backAt = -1;
   t.chain.tick = () => {
     t.chain.blocks(10n);
-    if (ticks === 0) t.chain.a.nonce = t.chain.b.nonce = n0 + 1n; // the call ran and was refused: the USDC is back in U
-    if (++ticks === 80) ac.abort(new Error("caller stopped"));
+    if (++polls === 30) ((t.chain.balance = 100_000_000n), (backAt = Number(t.chain.low())));
   };
-  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /caller stopped/);
-  assert.ok(t.chain.low() > t.sent[0]!.mbh + 100n, "long past the window");
-  assert.ok(t.chain.txReads > 0, "the hash was read");
-  assert.equal(t.sent.length, 1, t.sent.map((s) => s.nonce).join(","));
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 2);
+  assert.ok(backAt > 0 && t.sent[1]!.low >= backAt, `sent at ${t.sent[1]!.low}, the USDC back at ${backAt}`);
 });
 
 test("F1: with no relayer account in the release, a refused call's tx cannot be read: the device never signs again on P", async () => {
@@ -805,4 +846,73 @@ test("F2 (M28): the pages' next read starts at the lower count of the two RPCs, 
   t.chain.a.rows = [];
   t.chain.addRow(t.note.precommitment); // the vault's real row 0, on both
   assert.equal((await w.read()).state, "held");
+});
+
+test("F2 (M17): prepay_open whose wait outlives the window: the dead bytes are not sent again; a lapse re-sign at the same nonce is", async () => {
+  const store = await noteStore();
+  const first = await store.planDeposit(1n, pc);
+  const i = (first.ref as { i: number }).i;
+  const chain = new Chain(depositAccount(SEED, 1n, i).account);
+  await store.move(first.id, "PLANNED", "INCOMING");
+  await store.move(first.id, "INCOMING", "UNSPENT", { leaf: { value: AMOUNT, label: 1000n, commitment: noteCommitment(AMOUNT, 1000n, first.precommitment), leafIndex: 0n } });
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
+  const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  const r = relayer(chain, ["prepay_open", "tx"], lands(chain));
+  let polls = 0;
+  chain.tick = () => (chain.blocks(10n), ++polls === 20 && chain.addRow(first.precommitment)); // held 200 blocks later
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
+  landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps));
+  assert.equal(r.sent.length, 2);
+  assert.notEqual(r.sent[1]!.bytes, r.sent[0]!.bytes);
+  assert.equal(r.sent[1]!.nonce, r.sent[0]!.nonce);
+  assert.ok(r.sent[1]!.low > r.sent[0]!.mbh + LAPSE_MARGIN);
+});
+
+test("F2 (M30): a note already UNSPENT with another leaf is refused, never overwritten", async () => {
+  const t = await setup();
+  await t.store.move(t.note.id, "PLANNED", "INCOMING");
+  await t.store.move(t.note.id, "INCOMING", "UNSPENT", { leaf: { value: AMOUNT, label: 1000n, commitment: noteCommitment(AMOUNT, 1000n, t.note.precommitment), leafIndex: 9n } });
+  t.chain.addRow(t.note.precommitment); // leaf_index 0
+  await assert.rejects(bindDeposit(SEED, t.args, t.deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "note");
+});
+
+test("F2 (M50, M51): a deposits row at the wrong index, or with a value of 2^128 or more, is not a page: unsure", async () => {
+  const t = await setup();
+  const w = new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs);
+  t.chain.addRow(t.note.precommitment);
+  t.chain.a.rows[0]!.index = 1;
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  t.chain.a.rows[0]!.index = 0;
+  for (const side of [t.chain.a, t.chain.b]) side.rows[0]!.value = (1n << 128n).toString();
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  for (const side of [t.chain.a, t.chain.b]) side.rows[0]!.value = AMOUNT.toString();
+  assert.equal((await w.read()).state, "held");
+});
+
+test("F2 (M47): a lapse whose nonce moves between the device's read and the signer's: no call at another nonce is sent", async () => {
+  const t = await setup(["tx"], () => () => {}); // carried, never lands
+  const n0 = t.chain.a.nonce;
+  let flipped = false;
+  let armed = false;
+  const rpcs = t.deps.rpcs.map((r) => ({
+    name: r.name,
+    tx: r.tx,
+    query: async (p: Record<string, unknown>) => {
+      const j = await r.query(p);
+      const past = t.sent.length > 0 && t.chain.low() > t.sent[0]!.mbh + LAPSE_MARGIN;
+      // past the window: the device reads U's nonce unchanged on both, then its second pages read; right after that a
+      // same-nonce sibling's Delegate runs elsewhere (its row comes a tick later), before the signer's read
+      if (!flipped && past && p.request_type === "view_access_key_list" && r.name === t.deps.rpcs[1].name) armed = true;
+      else if (!flipped && armed && p.method_name === "deposits" && r.name === t.deps.rpcs[1].name) {
+        flipped = true;
+        t.chain.a.nonce = t.chain.b.nonce = n0 + 1n;
+        t.chain.balance -= AMOUNT;
+      }
+      return j;
+    },
+  })) as unknown as [BindRpc, BindRpc];
+  t.chain.tick = () => (t.chain.blocks(10n), flipped && t.chain.a.rows.length === 0 && t.chain.addRow(t.note.precommitment));
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, rpcs }));
+  assert.ok(flipped);
+  assert.deepEqual(t.sent.map((s) => s.nonce), [n0 + 1n]);
 });
