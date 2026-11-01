@@ -13,8 +13,11 @@
 
 pub mod constants;
 pub mod context;
+pub mod events;
 pub mod field;
 pub mod poseidon;
+pub mod promise;
+pub mod verifier_keys;
 
 use constants::*;
 use near_sdk::collections::{LookupMap, LookupSet, Vector};
