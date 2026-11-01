@@ -6,6 +6,9 @@
 //! a prepay out from under a deposit in flight, and the deposit (2.5.1 rows 6-7) deletes the record and checks that its
 //! amount covers the bytes the deposit really wrote. Anyone may prepay or add to a record.
 //!
+//! The vault's first prepay also writes the contract's state record from `Default` (200 B at this layout, measured in
+//! tests/s02.rs), once ever; the deploy recipe's extra 0.01 N pays it (2.8), not the prepay.
+//!
 //! A NEAR addition: Privacy Pools v1.3.0 has no storage deposit (EVM has none; vault.md 2.7 Dev 3).
 
 use crate::constants::DEPOSIT_STORAGE_BYTES;
