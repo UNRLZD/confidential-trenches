@@ -42,7 +42,6 @@ export const CHANGED = [
 
 // Scripts in the searched folders that open no connection from Node, and why.
 export const KEEP = {
-  "scripts/live-checks/app-signpage-client.mjs": "the connections are the browser's (Playwright) and a loopback harness; Node opens none to a remote host",
   "scripts/ci/verify-gate.mjs": "reads git history only, no network",
   "scripts/ci/kit-reach.mjs": "reads the tree only, no network",
   "scripts/perf-table.mjs": "reads files only, no network",
