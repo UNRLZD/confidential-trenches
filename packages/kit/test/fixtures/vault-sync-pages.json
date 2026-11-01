@@ -1,0 +1,598 @@
+{
+ "about": "card vault-kit-sync. recorded: the testnet vault's 2.5.6 views read on two RPCs (state_tree at final, then every view at the lower height), by the card's recorder, before any deposit landed. pageSet: three deposits and two spends (one settled, one paid) in the vault's serde form, field for field the order of contracts/vault/src/lib.rs DepositView and SpendView; test values only.",
+ "recorded": {
+  "recorded_at": "2026-11-01T14:45:15.294Z",
+  "vault": "vault.bf-vs-20261101t012200.testnet",
+  "rpcs": [
+   "https://test.rpc.fastnear.com",
+   "https://near-testnet.drpc.org"
+  ],
+  "answers": [
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "state_tree",
+     "args_base64": "e30=",
+     "finality": "final"
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       123,
+       34,
+       115,
+       105,
+       122,
+       101,
+       34,
+       58,
+       48,
+       44,
+       34,
+       100,
+       101,
+       112,
+       116,
+       104,
+       34,
+       58,
+       48,
+       44,
+       34,
+       114,
+       111,
+       111,
+       116,
+       34,
+       58,
+       34,
+       48,
+       34,
+       125
+      ]
+     },
+     "id": "blindfill"
+    }
+   },
+   {
+    "rpc": "https://near-testnet.drpc.org",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "state_tree",
+     "args_base64": "e30=",
+     "finality": "final"
+    },
+    "answer": {
+     "id": "blindfill",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "24rppnk5NsUDLsGz3zi4WYED5C5VscwDTbEA7wcekX15",
+      "block_height": 275762776,
+      "logs": [],
+      "result": [
+       123,
+       34,
+       115,
+       105,
+       122,
+       101,
+       34,
+       58,
+       48,
+       44,
+       34,
+       100,
+       101,
+       112,
+       116,
+       104,
+       34,
+       58,
+       48,
+       44,
+       34,
+       114,
+       111,
+       111,
+       116,
+       34,
+       58,
+       34,
+       48,
+       34,
+       125
+      ]
+     }
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "state_tree",
+     "args_base64": "e30=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       123,
+       34,
+       115,
+       105,
+       122,
+       101,
+       34,
+       58,
+       48,
+       44,
+       34,
+       100,
+       101,
+       112,
+       116,
+       104,
+       34,
+       58,
+       48,
+       44,
+       34,
+       114,
+       111,
+       111,
+       116,
+       34,
+       58,
+       34,
+       48,
+       34,
+       125
+      ]
+     },
+     "id": "blindfill"
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "label_tree",
+     "args_base64": "e30=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       123,
+       34,
+       115,
+       105,
+       122,
+       101,
+       34,
+       58,
+       48,
+       44,
+       34,
+       100,
+       101,
+       112,
+       116,
+       104,
+       34,
+       58,
+       48,
+       44,
+       34,
+       114,
+       111,
+       111,
+       116,
+       34,
+       58,
+       34,
+       48,
+       34,
+       125
+      ]
+     },
+     "id": "blindfill"
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "deposits",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     },
+     "id": "blindfill"
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "spends",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     },
+     "id": "blindfill"
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "leaves",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     },
+     "id": "blindfill"
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "labels",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     },
+     "id": "blindfill"
+    }
+   },
+   {
+    "rpc": "https://near-testnet.drpc.org",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "state_tree",
+     "args_base64": "e30=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "id": "blindfill",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       123,
+       34,
+       115,
+       105,
+       122,
+       101,
+       34,
+       58,
+       48,
+       44,
+       34,
+       100,
+       101,
+       112,
+       116,
+       104,
+       34,
+       58,
+       48,
+       44,
+       34,
+       114,
+       111,
+       111,
+       116,
+       34,
+       58,
+       34,
+       48,
+       34,
+       125
+      ]
+     }
+    }
+   },
+   {
+    "rpc": "https://near-testnet.drpc.org",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "label_tree",
+     "args_base64": "e30=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "id": "blindfill",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       123,
+       34,
+       115,
+       105,
+       122,
+       101,
+       34,
+       58,
+       48,
+       44,
+       34,
+       100,
+       101,
+       112,
+       116,
+       104,
+       34,
+       58,
+       48,
+       44,
+       34,
+       114,
+       111,
+       111,
+       116,
+       34,
+       58,
+       34,
+       48,
+       34,
+       125
+      ]
+     }
+    }
+   },
+   {
+    "rpc": "https://near-testnet.drpc.org",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "deposits",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "id": "blindfill",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     }
+    }
+   },
+   {
+    "rpc": "https://near-testnet.drpc.org",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "spends",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "id": "blindfill",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     }
+    }
+   },
+   {
+    "rpc": "https://near-testnet.drpc.org",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "leaves",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "id": "blindfill",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     }
+    }
+   },
+   {
+    "rpc": "https://near-testnet.drpc.org",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "labels",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+     "block_id": 275762775
+    },
+    "answer": {
+     "id": "blindfill",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+      "block_height": 275762775,
+      "logs": [],
+      "result": [
+       91,
+       93
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "pageSet": {
+  "vault": "vault.bf-vs-20261101t012200.testnet",
+  "height": 275800000,
+  "blockHash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
+  "state_tree": {
+   "size": 6,
+   "depth": 3,
+   "root": "5555555555555555555555555555555555555555556455"
+  },
+  "label_tree": {
+   "size": 4,
+   "depth": 2,
+   "root": "9876543210987654321098765432109876544110"
+  },
+  "deposits": [
+   {
+    "index": 0,
+    "precommitment": "123456789012345678901234567890",
+    "label": "9876543210987654321098765432109876543210",
+    "value": "5000000",
+    "leaf_index": 0,
+    "depositor": "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de"
+   },
+   {
+    "index": 1,
+    "precommitment": "123456789012345678901234567891",
+    "label": "9876543210987654321098765432109876543211",
+    "value": "10000000",
+    "leaf_index": 1,
+    "depositor": "0d04229851cfaececfd8555b8951387197dee82f15d5f22a725e1d14b948c68a"
+   },
+   {
+    "index": 2,
+    "precommitment": "123456789012345678901234567892",
+    "label": "9876543210987654321098765432109876543212",
+    "value": "15000000",
+    "leaf_index": 2,
+    "depositor": "35b4d174e4b3fe6f9dd9b60d0046ccc0a02dadc9981a637f127233da5657cbb7"
+   }
+  ],
+  "spends": [
+   {
+    "index": 0,
+    "nullifier_hash": "5555555555555555555555555555555555555555555655",
+    "withdrawn": "2000000",
+    "new_leaf_index": 3,
+    "refund_precommitment": "5555555555555555555555555555555555555555555755",
+    "refund_value": "0",
+    "refund_label": "9876543210987654321098765432109876543213",
+    "refund_leaf_index": 4,
+    "status": "settled",
+    "payer": "relayer.bf-vs-20261101t012200.testnet",
+    "reserve": "0",
+    "recipient": "alice.testnet",
+    "fee": "10000",
+    "context": "5555555555555555555555555555555555555555555855"
+   },
+   {
+    "index": 1,
+    "nullifier_hash": "5555555555555555555555555555555555555555555656",
+    "withdrawn": "1000000",
+    "new_leaf_index": 5,
+    "refund_precommitment": "5555555555555555555555555555555555555555555756",
+    "refund_value": "0",
+    "refund_label": "0",
+    "refund_leaf_index": 0,
+    "status": "paid",
+    "payer": "relayer.bf-vs-20261101t012200.testnet",
+    "reserve": "3890000000000000000000",
+    "recipient": "bob.testnet",
+    "fee": "0",
+    "context": "5555555555555555555555555555555555555555555856"
+   }
+  ],
+  "leaves": [
+   "5555555555555555555555555555555555555555555555",
+   "5555555555555555555555555555555555555555555556",
+   "5555555555555555555555555555555555555555555557",
+   "5555555555555555555555555555555555555555555558",
+   "5555555555555555555555555555555555555555555559",
+   "5555555555555555555555555555555555555555555560"
+  ],
+  "labels": [
+   "9876543210987654321098765432109876543210",
+   "9876543210987654321098765432109876543211",
+   "9876543210987654321098765432109876543212",
+   "9876543210987654321098765432109876543213"
+  ]
+ }
+}

@@ -10,23 +10,25 @@
 //! sender's token balance, the vault's token balance and the vault's whole raw state before and after: the balances
 //! end where they began and not one state byte changes.
 //!
-//! 1. `a_direct_call_is_refused`: anyone but the token calling `ft_on_transfer` (`NotTheToken`).
-//! 2. `another_token_is_refused`: a second token's `ft_transfer_call` with a good message (`NotTheToken`); the sender
+//! 1. `a_direct_call_is_refused_{mock,usdc}`: anyone but the token calling `ft_on_transfer` (`NotTheToken`).
+//! 2. `another_token_is_refused_{mock,usdc}`: a second token's `ft_transfer_call` with a good message (`NotTheToken`); the sender
 //!    gets that token back.
-//! 3. `every_bad_message_is_refused`: bad JSON, a JSON array, a missing `depositor`, a missing `precommitment`, a third field, a
+//! 3. `every_bad_message_is_refused_{mock,usdc}`: bad JSON, a JSON array, a missing `depositor`, a missing `precommitment`, a third field, a
 //!    message over 1,024 B, a precommitment as a JSON number, a non-canonical precommitment, p, an invalid account id
 //!    and `depositor` = the vault.
-//! 4. `the_kits_message_passes_the_message_checks`: the kit's own bytes (packages/kit/src/vault/shapes.ts
+//! 4. `the_kits_message_passes_the_message_checks_{mock,usdc}`: the kit's own bytes (packages/kit/src/vault/shapes.ts
 //!    `vaultDepositMessage`), and the same message padded to exactly 1,024 B, pass rows 1-2. Until card
 //!    vault-deposit-insert adds rows 3-12, `ft_on_transfer` then returns the whole amount as unused, so the token gives
 //!    it back and the vault keeps no USDC without a note.
 //!
-//! Each prints its gas table.
+//! Each case runs on both tokens (vault.md 5): the mock token (`_mock`) and the real USDC wasm (`_usdc`, card
+//! vault-sandbox-usdc); on USDC, case 2's other token is the same real USDC code at another account. Each prints its
+//! gas table.
 #![cfg(feature = "sandbox")]
 
 mod harness;
 
-use harness::{wasm_from_env, Harness, Outcome, Receipt, R, ONE_YOCTO, TOKEN_STORAGE};
+use harness::{wasm_from_env, Harness, Outcome, Receipt, TokenKind, R, ONE_YOCTO, TOKEN_STORAGE};
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json};
 use near_workspaces::types::{Gas, NearToken};
@@ -98,17 +100,26 @@ async fn refused(h: &Harness, o: &Outcome, token: &AccountId, sender: &AccountId
     Ok(())
 }
 
-/// The vault, the mock token at TOKEN with the vault registered, and a sender `u` holding HELD.
-async fn setup() -> R<(Harness, Account)> {
-    let h = Harness::with_vault_and_mock_token().await?;
+/// The vault, `kind`'s token at TOKEN with the vault registered, and a sender `u` holding HELD.
+async fn setup(kind: TokenKind) -> R<(Harness, Account)> {
+    let h = Harness::with_vault_and(kind).await?;
     let u = h.account("u", 10).await?;
     h.mint(u.id(), HELD).await?;
     Ok((h, u))
 }
 
 #[tokio::test]
-async fn a_direct_call_is_refused() -> R<()> {
-    let (h, u) = setup().await?;
+async fn a_direct_call_is_refused_mock() -> R<()> {
+    a_direct_call_is_refused(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn a_direct_call_is_refused_usdc() -> R<()> {
+    a_direct_call_is_refused(TokenKind::Usdc).await
+}
+
+async fn a_direct_call_is_refused(kind: TokenKind) -> R<()> {
+    let (h, u) = setup(kind).await?;
     let token = h.token.clone();
     let before = snapshot(&h, &token, u.id()).await?;
     let args = json!({"sender_id": u.id(), "amount": AMOUNT.to_string(), "msg": KIT_MSG});
@@ -122,16 +133,35 @@ async fn a_direct_call_is_refused() -> R<()> {
 }
 
 #[tokio::test]
-async fn another_token_is_refused() -> R<()> {
-    let (h, u) = setup().await?;
-    // a second token: the same mock code at another account, the vault and u registered on it
+async fn another_token_is_refused_mock() -> R<()> {
+    another_token_is_refused(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn another_token_is_refused_usdc() -> R<()> {
+    another_token_is_refused(TokenKind::Usdc).await
+}
+
+async fn another_token_is_refused(kind: TokenKind) -> R<()> {
+    let (h, u) = setup(kind).await?;
+    // a second token: the same code as TOKEN's at another account, the vault and u registered on it
     let other = h.root.create_subaccount("othertoken").initial_balance(NearToken::from_near(30)).transact().await?.into_result()?;
-    other.deploy(&wasm_from_env("MOCK_TOKEN_WASM")?).await?.into_result()?;
     let other_id = other.id().clone();
     let reg = json!({"account_id": h.vault, "registration_only": true});
-    let _ = h.call(&h.root, &other_id, "storage_deposit", reg, TOKEN_STORAGE, Gas::from_tgas(10)).await?;
-    let mint = json!({"account_id": u.id(), "amount": HELD.to_string()});
-    let _ = h.call(&h.root, &other_id, "mint", mint, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
+    match kind {
+        TokenKind::Mock => {
+            other.deploy(&wasm_from_env("MOCK_TOKEN_WASM")?).await?.into_result()?;
+            let _ = h.call(&h.root, &other_id, "storage_deposit", reg, TOKEN_STORAGE, Gas::from_tgas(10)).await?;
+            let mint = json!({"account_id": u.id(), "amount": HELD.to_string()});
+            let _ = h.call(&h.root, &other_id, "mint", mint, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
+        }
+        TokenKind::Usdc => {
+            let roles = h.usdc_roles()?;
+            h.init_usdc(&other, roles).await?;
+            let _ = h.call(&h.root, &other_id, "storage_deposit", reg, TOKEN_STORAGE, Gas::from_tgas(10)).await?;
+            h.usdc_mint(&other_id, roles, u.id(), HELD).await?;
+        }
+    }
     let before = snapshot(&h, &other_id, u.id()).await?;
     assert_eq!(before.sender, HELD);
     let o = transfer_call(&h, &u, &other_id, KIT_MSG).await?;
@@ -141,8 +171,17 @@ async fn another_token_is_refused() -> R<()> {
 }
 
 #[tokio::test]
-async fn every_bad_message_is_refused() -> R<()> {
-    let (h, u) = setup().await?;
+async fn every_bad_message_is_refused_mock() -> R<()> {
+    every_bad_message_is_refused(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn every_bad_message_is_refused_usdc() -> R<()> {
+    every_bad_message_is_refused(TokenKind::Usdc).await
+}
+
+async fn every_bad_message_is_refused(kind: TokenKind) -> R<()> {
+    let (h, u) = setup(kind).await?;
     let token = h.token.clone();
     let over = format!("{KIT_MSG}{}", " ".repeat(1_025 - KIT_MSG.len()));
     assert_eq!(over.len(), 1_025);
@@ -172,8 +211,17 @@ async fn every_bad_message_is_refused() -> R<()> {
 }
 
 #[tokio::test]
-async fn the_kits_message_passes_the_message_checks() -> R<()> {
-    let (h, u) = setup().await?;
+async fn the_kits_message_passes_the_message_checks_mock() -> R<()> {
+    the_kits_message_passes_the_message_checks(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn the_kits_message_passes_the_message_checks_usdc() -> R<()> {
+    the_kits_message_passes_the_message_checks(TokenKind::Usdc).await
+}
+
+async fn the_kits_message_passes_the_message_checks(kind: TokenKind) -> R<()> {
+    let (h, u) = setup(kind).await?;
     let token = h.token.clone();
     let padded = format!("{KIT_MSG}{}", " ".repeat(1_024 - KIT_MSG.len()));
     assert_eq!(padded.len(), 1_024);
