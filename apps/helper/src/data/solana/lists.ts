@@ -1,7 +1,7 @@
 // GET /v1/market/lists?chain=solana: Discover's Solana lists (markets paper M4.2 and D1.1 rows D-S2 to D-S4 and D-S14,
 // docs/plan1/markets.md:2265-2283; the field lists frozen with the app's screens, markets.md:3366-3367). The answer is
 // 06b §6.1's `snapshot` of `Row`s, the shape the terminal reads (apps/terminal/src/screens/discover/fields.ts), with
-// `buys_1h` and `sells_1h` added for the Trending column (the CO's ask from card app-discover-solana).
+// `buys_1h` and `sells_1h` added for the Trending column (asked in card app-discover-solana).
 //
 // Sources: Jupiter's `/tokens/v2/recent` (New) and `/tokens/v2/toptrending/5m` and `/1h` (limit 100), read through the
 // helper's own proxy (src/proxy/), so its key, cache, 429 back-off and key-in-answer refusal apply unchanged; and, for
@@ -18,7 +18,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { gzipSync } from "node:zlib";
 
-/** fields.ts ROW_FIELDS in its order, then the two the CO asked for the Trending column. */
+/** fields.ts ROW_FIELDS in its order, then the two added for the Trending column. */
 export const ROW_FIELDS = [
   "chain", "token", "symbol", "name", "icon", "venue", "label", "created_s", "price_usd", "mc_usd", "vol_24h_usd",
   "chg_5m_bps", "chg_1h_bps", "chg_24h_bps", "liq_usd", "holders", "top10_bps", "src", "as_of_ms",

@@ -25,7 +25,7 @@ const raw = (k: keyof typeof RAW, symbol: string) => (RAW[k] as Record<string, u
 const row = (k: keyof typeof RAW, symbol: string) => rowsOf(k).find((r) => r.symbol === symbol)!;
 const recordedRpc = { handle: async () => ({ status: 200, body: JSON.stringify(CURVES.answer) }) };
 
-test("the field list is the terminal's ROW_FIELDS in its order, then buys_1h and sells_1h (the CO's Trending ask)", () => {
+test("the field list is the terminal's ROW_FIELDS in its order, then buys_1h and sells_1h (asked for the Trending column)", () => {
   assert.deepEqual(ROW_FIELDS, [...TERMINAL_FIELDS, "buys_1h", "sells_1h"]);
 });
 
@@ -80,7 +80,7 @@ test("one row field by field against its recorded Jupiter row (TRUMP, top trendi
   assert.deepEqual([r.icon, r.venue, r.label, r.dev_bps, r.snipers_bps, r.creator_sold_bps, r.chg_4h_bps], [false, null, null, null, null, null, null]);
 });
 
-test("the CO's asks: price null with no usdPrice, launchpad null with none, curve 10,000 once graduated, buys and sells for 1h", () => {
+test("app-discover-solana's asks: price null with no usdPrice, launchpad null with none, curve 10,000 once graduated, buys and sells for 1h", () => {
   const noPrice = rowsOf("new").filter((r) => r.price_usd === null);
   assert.ok(noPrice.length >= 1);
   for (const r of noPrice) assert.equal((RAW.new as any[]).find((j) => j.id === r.token).usdPrice, undefined);
