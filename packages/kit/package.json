@@ -3,7 +3,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node -e \"import('@blindfill/kit').then(m => { if (!m.SIGNPAGE_KINDS) process.exit(1) })\""
+    "test": "tsc -p tsconfig.json && node -e \"import('@blindfill/kit').then(m => { if (!m.SIGNPAGE_KINDS || !m.ZK_SETUP_FILES) process.exit(1) })\" && node --test test/zk-setup-files.test.mjs"
   },
   "exports": {
     ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
