@@ -21,7 +21,11 @@
 // commitment or root, an order's signature or a wallet address on a line that names no transaction passes, whatever
 // its shape. The rule is the same for every chain and every shape.
 // Each Tx is read back on the public RPCs of its chain: it passes only
-// when two of them read it as succeeded, on or after 2026-11-01T00:00:00Z, and none reads it as failed or older.
+// when two of them, run by two different operators, read it as succeeded, on or after 2026-11-01T00:00:00Z, and none
+// reads it as failed or older. Two hosts of one operator are one read (NEAR's operators: near-rpc-operators.mjs). One
+// case passes on one operator, named in the output: a NEAR tx older than dRPC keeps, since no second keyless archival
+// operator exists (near-rpc-operators.mjs); every host of that operator must read it ok, and the tx's block must be
+// below, and older than, the earliest block dRPC's own status names on the tx's network (oneOperator).
 // near-testnet is NEAR's test network, read on its own RPCs with the same rules: a testnet tx written as "Tx: near" is
 // read on the mainnet RPCs, where it does not exist, and is refused. A testnet tx is never real-money proof: parseLive's
 // `real` lists the mainnet txs only, and a release counts those alone.
@@ -38,19 +42,21 @@ import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync, realpathSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { operatorOf as nearOperatorOf } from "./near-rpc-operators.mjs";
+import { RPC_OPERATORS } from "./rpc-operators.mjs";
 
-// Public RPCs, none ours; each answered a tx read on 2026-10-26 between 11:48 and 11:54Z. NEAR lists three:
-// near.org's archival RPC says it is deprecated and rate-limits, and near.drpc.org keeps only recent txs (enough for a
-// fresh live record).
+// Public RPCs, none ours; each answered a tx read on 2026-10-26 between 11:48 and 11:54Z. NEAR lists two operators on
+// three hosts: FastNEAR's archival RPC, dRPC (which keeps only recent txs, enough for a fresh live record), and
+// near.org's archival RPC, which FastNEAR runs (near-rpc-operators.mjs): a second door to FastNEAR when its own host
+// rate-limits, never a second operator.
 export const RPCS = {
   near: ["https://archival-rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://archival-rpc.mainnet.near.org"],
   solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com"],
   base: ["https://mainnet.base.org", "https://base.drpc.org"],
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
-  // NEAR testnet, read 2026-10-31 at 16:16Z: three providers, as for mainnet. test.rpc.fastnear.com and
-  // near-testnet.drpc.org keep only recent txs (each answered UNKNOWN_TRANSACTION for a 2026-10-26 tx that both
-  // archival RPCs read), so the archival ones keep a record readable after a few days; FastNEAR's archival RPC stands
-  // in for its test.rpc (one provider, never two answers).
+  // NEAR testnet, read 2026-10-31 at 16:16Z: the same two operators on three hosts, as for mainnet.
+  // test.rpc.fastnear.com and near-testnet.drpc.org keep only recent txs (each answered UNKNOWN_TRANSACTION for a
+  // 2026-10-26 tx that both archival RPCs read), so FastNEAR's archival RPC stands in for its test.rpc.
   "near-testnet": ["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.testnet.near.org"],
 };
 // test networks: read back like any chain, never real-money proof
@@ -178,17 +184,19 @@ export function parseLive(text, key) {
   return { moneyPath, txs, real: txs.filter((t) => !TESTNET.has(t.chain)), problems, verdict };
 }
 
-// A rate limit is waited out, never read as an answer: near.org's archival RPC, one of the two that keep a NEAR tx
-// older than drpc's window, answers HTTP 429 (or code -429) with a Retry-After of 43 s to 600 s (read 2026-10-31).
+// A rate limit is waited out, never read as an answer: a public RPC may answer HTTP 429 (or code -429) with a
+// Retry-After (near.org's archival RPC gave 43 s to 600 s, read 2026-10-31).
 // A 429 waits its Retry-After seconds, or 2 s doubling when it gives none (or a date), and asks again, up to
 // RATE_TRIES waits in a row; a Retry-After past RATE_CAP seconds is no answer at once. Other trouble (no reply, a
 // reply that is not JSON, an HTTP error with no RPC error) is asked 3 times, 2 s and 4 s apart. Each host is asked
 // at most once a second.
-// Once two hosts have read a tx ok, a remaining host is still asked once, but with rateWait off: its 429 is no answer at
-// once (NOT_WAITED), never waited and never decisive. A failed or old answer from it still refuses.
+// Once two operators have read a tx ok, a remaining host is still asked once, but with rateWait off: its 429 is no
+// answer at once (NOT_WAITED), never waited and never decisive. A failed or old answer from it still refuses. While
+// fewer than two operators have read it ok, a 429 from any host is waited, a second host of one operator included:
+// its "missing" refuses a one-operator pass (oneOperator), so it must be heard.
 const RATE_TRIES = 5;
 const RATE_CAP = 600;
-const NOT_WAITED = "rate limited, not waited: two hosts read it ok";
+const NOT_WAITED = "rate limited, not waited: two operators read it ok";
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const lastAsked = new Map();
 const hostOf = (url) => {
@@ -275,8 +283,8 @@ export function failedReceipts(r) {
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
 
 // One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read. rateWait off: a 429 is
-// NOT_WAITED at once.
-export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait, rateWait = true) {
+// NOT_WAITED at once. A NEAR read puts its block's height in out.height.
+export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait, rateWait = true, out = {}) {
   let j;
   try {
     if (NEAR.has(chain)) {
@@ -285,7 +293,8 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       j = await rpc(fetchFn, url, "EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: signer, wait_until: "NONE" }, sleep, rateWait);
       if (j.error) return j.error.cause?.name === "UNKNOWN_TRANSACTION" ? "missing" : `error ${JSON.stringify(j.error).slice(0, 120)}`;
       const r = j.result;
-      if (!r?.status) return "missing";
+      // only UNKNOWN_TRANSACTION above is "missing": a reply with no error and no status ({}, result null) is no answer
+      if (!r?.status) return "no answer (a reply with no status)";
       if (r.status.Failure) return "failed";
       if (r.final_execution_status !== "FINAL") return `not final (${r.final_execution_status})`;
       if (!("SuccessValue" in r.status || "SuccessReceiptId" in r.status)) return `not final (${Object.keys(r.status)[0]})`;
@@ -295,6 +304,8 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       const b = await rpc(fetchFn, url, "block", { block_id: r.transaction_outcome?.block_hash }, sleep, rateWait);
       const ns = b.result?.header?.timestamp_nanosec;
       if (!ns) return "no block time";
+      out.height = b.result.header.height;
+      out.time = Number(BigInt(ns) / 1000000n);
       return when(Number(BigInt(ns) / 1000000n), floor);
     }
     if (chain === "solana") {
@@ -321,12 +332,62 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
   }
 }
 
+// The operator of an RPC: NEAR's from near-rpc-operators.mjs, the other chains' from rpc-operators.mjs, each cited
+// there. A URL neither map holds (a test's stub) is its own operator; every host in RPCS is in a map
+// (near-rpc-operators.test.mjs).
+export const operatorOf = (chain, url) =>
+  (NEAR.has(chain) ? nearOperatorOf(url) : (RPC_OPERATORS[chain]?.[hostOf(url)?.toLowerCase()] ?? null)) ?? url;
+/** The operators whose reads ([{ url, r }]) read the tx ok: two of them, never two hosts of one, prove a tx. */
+export const okOperators = (chain, reads) => new Set(reads.filter((a) => a.r === "ok").map((a) => operatorOf(chain, a.url)));
+
+// The one case a tx passes on one operator: a NEAR tx no second operator can hold. Refused (null) unless
+//  - one operator read it ok and every host of that operator read it ok: a "missing", or no answer (a 429 past the
+//    cap), from any of them refuses, as it would with two operators;
+//  - every other operator's host answered UNKNOWN_TRANSACTION ("missing"; any other reply is no answer);
+//  - each such host's status names the tx's network, and an earliest block whose height is above the tx's block and
+//    whose time, read from that host by that height, is after the tx's block time (the one height and time the ok
+//    reads agree on).
+// answers: [{ url, r, height, time }]. Returns why it passes, or null.
+export async function oneOperator(fetchFn, tx, answers, sleep) {
+  if (!NEAR.has(tx.chain)) return null;
+  const network = tx.chain === "near" ? "mainnet" : "testnet";
+  const ok = answers.filter((a) => a.r === "ok");
+  const [op, ...more] = new Set(ok.map((a) => operatorOf(tx.chain, a.url)));
+  if (!op || more.length) return null;
+  if (answers.some((a) => operatorOf(tx.chain, a.url) === op && a.r !== "ok")) return null;
+  const heights = new Set(ok.map((a) => a.height));
+  const times = new Set(ok.map((a) => a.time));
+  const [h] = heights;
+  const [t] = times;
+  if (heights.size !== 1 || times.size !== 1 || !Number.isSafeInteger(h) || !Number.isSafeInteger(t)) return null;
+  const others = answers.filter((a) => operatorOf(tx.chain, a.url) !== op);
+  if (!others.length || others.some((a) => a.r !== "missing")) return null;
+  const kept = [];
+  for (const a of others) {
+    try {
+      const st = (await rpc(fetchFn, a.url, "status", [], sleep)).result;
+      if (st?.chain_id !== network) return null;
+      const e = st.sync_info?.earliest_block_height;
+      if (!Number.isSafeInteger(e) || h >= e) return null;
+      const head = (await rpc(fetchFn, a.url, "block", { block_id: e }, sleep)).result?.header;
+      if (head?.height !== e || typeof head.timestamp_nanosec !== "string" || !/^\d+$/.test(head.timestamp_nanosec)) return null;
+      const te = Number(BigInt(head.timestamp_nanosec) / 1000000n);
+      if (t >= te) return null;
+      kept.push(`${a.url} (${network}) keeps blocks from ${e}, ${new Date(te).toISOString()}`);
+    } catch {
+      return null;
+    }
+  }
+  return `one operator (${op}) read it ok, on ${ok.map((a) => a.url).join(", ")}: its block ${h}, ${new Date(t).toISOString()}, is older than ${kept.join(" and ")}, and no second keyless archival operator holds it`;
+}
+
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
 // moneyCode() found in the change; sleep: how a wait is waited (a test records it)
 export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
   const refusals = [];
   const read = [];
-  const notes = []; // a host's 429 not waited because two hosts had read the tx ok
+  const notes = []; // a host's 429 not waited because two operators read it ok
+  const single = []; // a tx read ok on one operator only, where no second one can hold it (oneOperator)
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
   const byCard = new Map();
   for (const c of money?.commits ?? []) {
@@ -364,21 +425,26 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
       const answers = [];
-      // in the listed order; a 429 is waited out only while fewer than two hosts have read the tx ok
+      // in the listed order; a 429 is waited out while fewer than two operators read it ok
+      const okOps = () => okOperators(tx.chain, answers);
       for (const url of rpcs[tx.chain]) {
-        const rateWait = answers.filter((a) => a.r === "ok").length < 2;
-        answers.push({ url, r: await readTx(fetchFn, url, tx, floor, sleep, rateWait) });
+        const rateWait = okOps().size < 2;
+        const out = {};
+        const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, out);
+        answers.push({ url, r, height: out.height, time: out.time });
       }
       const ok = answers.filter((a) => a.r === "ok");
       const decisive = answers.filter((a) => /^(failed|old)/.test(a.r));
       const note = TESTNET.has(tx.chain) ? " (testnet, not real-money proof)" : "";
       for (const a of ok) read.push(`${tx.chain} ${tx.hash} ok on ${a.url}${note}`);
       for (const a of answers) if (a.r === NOT_WAITED) notes.push(`${tx.chain} ${tx.hash} on ${a.url}: ${NOT_WAITED}`);
-      if (decisive.length || ok.length < 2)
+      const one = !decisive.length && okOps().size === 1 ? await oneOperator(fetchFn, tx, answers, sleep) : null;
+      if (one) single.push(`${tx.chain} ${tx.hash}: ${one}${note}`);
+      else if (decisive.length || okOps().size < 2)
         refusals.push(`${path}: ${tx.chain} ${tx.hash}: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}`);
     }
   }
-  return { refusals, read, notes };
+  return { refusals, read, notes, single };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
@@ -440,9 +506,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
-  const { refusals, read, notes } = await moneyGate(records, fetch, RPCS, { every, money });
+  const { refusals, read, notes, single } = await moneyGate(records, fetch, RPCS, { every, money });
   for (const r of read) console.log(`money-gate: ${r}`);
   for (const n of notes) console.log(`money-gate: ${n}`);
+  for (const o of single) console.log(`money-gate: ONE OPERATOR: ${o}`);
   if (refusals.length) {
     for (const r of refusals) console.error(`money-gate: REFUSED: ${r}`);
     process.exit(1);

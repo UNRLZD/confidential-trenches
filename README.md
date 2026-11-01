@@ -73,7 +73,7 @@ Plain reads from two public NEAR RPCs. No account, no key, no install beyond `cu
 ```sh
 VAULT=<vault account>
 USDC=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1
-for RPC in https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org; do
+for RPC in https://rpc.mainnet.fastnear.com https://near.drpc.org; do
   q() { curl -s "$RPC" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":$1}"; }
   # 1. the vault has no access key
   q "{\"request_type\":\"view_access_key_list\",\"finality\":\"final\",\"account_id\":\"$VAULT\"}" | jq -c .result.keys
@@ -102,10 +102,10 @@ pnpm install --frozen-lockfile
 pnpm -r --if-present --no-bail run test
 ```
 
-A passing run of `pnpm -r --if-present --no-bail run test` ends with:
+A passing run exits with 0, and every package's summary reads:
 
 ```text
-# fail 0
+ℹ fail 0
 ```
 
 The private buy calls only `@blindfill/kit`'s public entry, as any wallet, bot or agent would, and ends with:
@@ -239,8 +239,6 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 | `scripts/live-checks/` | A live check for each change, run after every deploy |
 
 ## Checks
-
-927 tests, all passing on every pull request.
 
 | Run | Checks |
 |---|---|

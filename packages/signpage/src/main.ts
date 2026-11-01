@@ -11,8 +11,14 @@
 //   record is 06b:459's { v, entropy, source: "prf", code_saved: false, created_ms } (ses.2, ses.7, 06b:776, :781), so
 //   the Backup dot shows (data-code-saved="false"). A no-PRF gate keys on source, never on code_saved.
 // - A seed already stored is never replaced and no ceremony runs (wallet.md:919: sign out first).
-// - A passkey without PRF makes nothing here and shows its own state, "no-prf", which the no-PRF path takes over
-//   (card wallet-typed-words); never a silent fallback to another seed.
+// - The no-PRF path and the typed words (card wallet-typed-words, @blindfill/wallet/signin/words; wallet.md:48-49, W:914;
+//   06b ses.4, ses.5, ses.8, ses.10-12). Create passkey with a passkey that has no PRF makes a random seed { source:
+//   "random", code_saved: false } (ses.4) and goes on, in the same top-level visit, to the backup screen
+//   (data-signin="backup"): the 12 words, Copy and Saved. Saved sets code_saved (ses.5); leaving without it keeps the
+//   Backup dot, and the signed-in screen then offers Backup again. Use passkey with a passkey that has no PRF makes
+//   nothing (ses.8) and offers the 12 words. Recovery code takes typed words: the BIP-39 checksum is checked on the
+//   device first, a failure shows "Invalid code" (CN-41) and stores nothing, and good words store { source: "code",
+//   code_saved: true } (ses.12). Words are drawn and typed on the top-level page only, never in a frame (W:914).
 // - Sign out deletes the store (wallet.md:156); another tab's sign out shows signed-out here too. It is not drawn, and the
 //   store refuses it, while the 12 words are the only copy and not saved (backupFirst: source not "prf" and code_saved
 //   false; wallet.md:922). Its activation guard is Chromium's own rule for its permission and payment sheets (./guard.ts):
@@ -20,22 +26,28 @@
 //   keydown, or within 500 ms of Sign out being drawn, the page becoming visible (visibilitychange, pageshow) or the
 //   window gaining focus; the same for mouse, touch, pen and keyboard. A click that a cross-site page lined up before
 //   sending this window here (a double-click trick, a burst of clicks, a held Enter) does nothing; a press after a
-//   500 ms pause works on every input. Sign out is the one control it guards: Create passkey and Use passkey open the
-//   browser's own passkey sheet, which carries the browser's protection.
-// - The page shows public values only: the account's profile key T_0 (wallet.md:68, a public key, never a NEAR account
-//   or money), in data-account, so a check can compare it. The entropy and seed64 are zeroed once used; the 12 words
-//   are a JS string, which cannot be zeroed, and never reach the DOM.
+//   500 ms pause works on every input. It guards every control that acts with no sheet of the browser's own (GUARDED):
+//   Sign out; the backup's Saved, which opens the deposit gate of a seed whose 12 words are the only copy (W:888), so a
+//   lined-up click cannot mark words saved that the user never saw; Backup, which draws the 12 words; and Copy, which
+//   puts them on the clipboard, so a lined-up burst cannot draw the words and copy them for a paste the page asks for.
+//   Create passkey and Use passkey open the browser's own passkey sheet, which carries the browser's protection.
+// - The page shows public values only, but for the backup screen's 12 words: the account's profile key T_0 (wallet.md:68,
+//   a public key, never a NEAR account or money), in data-account, so a check can compare it. The entropy and seed64
+//   are zeroed once used; the 12 words are a JS string, which cannot be zeroed, and reach the DOM only on the backup
+//   screen, top-level, and leave it only by the user's own tap on Copy (W:914).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
 import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { signedOutState, startApi } from "./api.ts";
 
-type Seed = { v: 1; entropy: Uint8Array; source: "prf" | "random" | "code" | "wallet"; code_saved: boolean; created_ms: number };
-type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error";
+type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code";
 
-// DRAFT COPY: the final words are not set yet.
+// DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801) and
+// "invalid-code" (CN-41, signed, 09-design-brief.md:2335). recovery is S2.1's [draft copy: Recovery code]
+// (09-design-brief.md:1811); backup is 06b ses.17's menu item; next is a draft for S2.5's submit, which has no words yet.
 const WORDS = {
   create: "Create passkey",
   use: "Use passkey",
@@ -45,6 +57,12 @@ const WORDS = {
   cancelled: "Cancelled",
   unsupported: "This browser has no passkeys. Use your 12 words.",
   error: "Something went wrong. Try again.",
+  recovery: "Recovery code",
+  backup: "Backup",
+  copy: "Copy",
+  saved: "Saved",
+  next: "Continue",
+  "invalid-code": "Invalid code",
 } as const;
 
 const framed = window.top !== window;
@@ -53,7 +71,7 @@ root.id = "signin";
 if (framed) root.dataset.framed = "true";
 document.body.append(root);
 
-// Sign out's activation guard (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
+// The activation guard of the GUARDED controls (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
 // (capture phase), so the gap to the previous input is known when Sign out sees its press.
 const guard = activationGuard(performance.now());
 const reshown = (): void => guard.shown(performance.now());
@@ -67,12 +85,13 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
+const GUARDED = new Set(["signout", "saved", "backup", "copy"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
   b.dataset.action = action;
   b.textContent = label;
-  if (action !== "signout") {
+  if (!GUARDED.has(action)) {
     b.addEventListener("click", onClick);
     return b;
   }
@@ -96,7 +115,7 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
   return b;
 }
 
-function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }): void {
+function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }, words?: string): void {
   root.dataset.signin = state;
   if (seed) {
     root.dataset.account = seed.account;
@@ -106,7 +125,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     delete root.dataset.codeSaved;
   }
   const parts: HTMLElement[] = [];
-  if (state !== "loading" && state !== "signed-out" && state !== "signed-in") {
+  if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words") {
     const p = document.createElement("p");
     p.textContent = WORDS[state];
     parts.push(p);
@@ -116,9 +135,42 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     p.textContent = WORDS["signed-in"];
     parts.push(p);
     if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
-  } else if (!framed && state !== "loading" && state !== "unsupported") {
-    parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey))));
-    parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey))));
+    // the Backup dot: the 12 words are the only copy and not saved (ses.17, ses.18)
+    if (!framed && seed && !seed.signout) parts.push(button("backup", WORDS.backup, () => void run(openBackup)));
+  } else if (state === "backup") {
+    // the 12 words, top-level only (W:914): show() is never asked for them in a frame, and backupWords refuses there
+    if (!framed && words) {
+      const list = document.createElement("ol");
+      list.dataset.words = "12";
+      for (const w of words.split(" ")) {
+        const li = document.createElement("li");
+        li.textContent = w;
+        list.append(li);
+      }
+      parts.push(list);
+      parts.push(button("copy", WORDS.copy, () => void navigator.clipboard?.writeText(words).catch(() => {})));
+      parts.push(button("saved", WORDS.saved, () => void run(saved)));
+    }
+  } else if (!framed && (state === "words" || state === "invalid-code")) {
+    const box = document.createElement("textarea");
+    box.dataset.input = "words";
+    box.rows = 3;
+    box.autocomplete = "off";
+    box.spellcheck = false;
+    box.setAttribute("autocapitalize", "none");
+    box.setAttribute("autocorrect", "off");
+    parts.push(box);
+    parts.push(button("next", WORDS.next, () => {
+      const typed = box.value;
+      box.value = "";
+      void run(() => signInWords(typed));
+    }));
+  } else if (!framed && state !== "loading") {
+    if (state !== "unsupported") {
+      parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey, true))));
+      parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
+    }
+    parts.push(button("recovery", WORDS.recovery, () => show("words")));
   }
   root.replaceChildren(...parts);
 }
@@ -153,35 +205,70 @@ const open = async (): Promise<WalletStore> =>
     },
   }));
 
-const SOURCES = ["prf", "random", "code", "wallet"];
-function checkSeed(s: unknown): Seed | undefined {
-  if (s === undefined) return undefined;
-  const x = s as Seed;
-  if (!(x?.entropy instanceof Uint8Array && x.entropy.length === 16 && SOURCES.includes(x.source) && typeof x.code_saved === "boolean"))
-    throw new Error("the stored seed is broken");
-  return x;
-}
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
 
 const topLevelOnly = (): void => {
   if (framed) throw new Error("sign-in and sign-out run top-level only, never in a frame");
 };
 
-async function signIn(ceremony: () => Promise<PasskeyOutcome>): Promise<void> {
+// Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
+// stored, which may be another tab's (never its words then).
+function landed(l: Landing): void {
+  if (l.screen === "backup") return void showBackup(l.seed);
+  show("signed-in", shown(l.seed));
+}
+
+async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean): Promise<void> {
   topLevelOnly();
   // never replace a seed already stored here, and run no ceremony: sign out first (wallet.md:919)
   const had = await readSeed();
   if (had) return show("signed-in", shown(had));
   const r = await ceremony();
+  // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
+  if (r.kind === "no-prf" && create) return landed(await signInNoPrf(open));
   if (r.kind !== "prf") return show(r.kind);
+  // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
+  // zeroed on every path, an open that fails included (words.ts storeSeed)
+  landed(await signInPrf(open, r.entropy));
+}
+
+// ses.10-12: the typed 12 words, checked on the device before anything else; a failure stores nothing
+async function signInWords(typed: string): Promise<void> {
+  topLevelOnly();
+  const had = await readSeed();
+  if (had) return show("signed-in", shown(had));
+  let l: Landing;
   try {
-    const seed: Seed = { v: 1, entropy: r.entropy, source: "prf", code_saved: false, created_ms: Date.now() };
-    // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown
-    const { seed: stored } = await (await open()).insertSeed(seed);
-    show("signed-in", shown(checkSeed(stored)!));
-  } finally {
-    r.entropy.fill(0);
+    l = await signInTyped(open, typed);
+  } catch (e) {
+    if (e instanceof WordsRefused) return show("invalid-code");
+    throw e;
   }
+  landed(l);
+}
+
+// The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.
+function showBackup(s: Seed): void {
+  topLevelOnly();
+  const seen = shown({ ...s, entropy: s.entropy.slice() });
+  try {
+    show("backup", seen, backupWords(s));
+  } finally {
+    s.entropy.fill(0);
+  }
+}
+async function openBackup(): Promise<void> {
+  const s = await readSeed();
+  if (!s) return show("signed-out");
+  showBackup(s);
+}
+// Saved (ses.5): code_saved becomes true; the Backup dot clears and Sign out is drawn
+async function saved(): Promise<void> {
+  topLevelOnly();
+  await saveWords(await open());
+  const s = await readSeed();
+  if (!s) return show("signed-out");
+  show("signed-in", shown(s));
 }
 
 async function signOut(): Promise<void> {
