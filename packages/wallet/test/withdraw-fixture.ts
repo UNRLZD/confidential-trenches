@@ -1,5 +1,5 @@
 // The shared vector for withdraw-request.test.ts and key-zeroing.test.ts (card wallet-withdraw-request). The vault,
-// its scope, the fee recipient, the recipient, register_deposit and relay_fee are the relayer's own fixture
+// its scope, the fee recipient, register_deposit and relay_fee are the relayer's own fixture
 // (apps/helper/src/withdraw/fixtures/withdraw-request.json, the vector its checks 1-4 are tested on), so the request is
 // built for the config those checks run with. The notes are deposit notes of the public test seed (all-zero BIP-39
 // entropy, test/vectors/a8.json), 2, 5 and 10 USDC, with labels vaultLabelOf(scope, 1..3), among other test leaves.
@@ -19,14 +19,13 @@ const RELAYER = JSON.parse(readFileSync(new URL("../../../apps/helper/src/withdr
   vault: string;
   scope: string;
   fee_recipient: string;
-  request: { withdrawal: { recipient: string; register_deposit: string; relay_fee: string } };
+  request: { withdrawal: { register_deposit: string; relay_fee: string } };
 };
 export const VAULT = RELAYER.vault;
 export const TOKEN = VAULT_CONSTANTS.TOKEN; // the relayer's fixture leaves the 64-hex token out for the secret scan
 export const SCOPE = vaultScopeOf(keccak_256, VAULT, TOKEN);
 if (SCOPE !== BigInt(RELAYER.scope)) throw new Error("the relayer fixture's scope is not this vault's");
 export const FEE_RECIPIENT = RELAYER.fee_recipient;
-export const RECIPIENT = RELAYER.request.withdrawal.recipient;
 export const REGISTER_DEPOSIT = BigInt(RELAYER.request.withdrawal.register_deposit);
 export const RELAY_FEE = BigInt(RELAYER.request.withdrawal.relay_fee);
 
@@ -36,7 +35,16 @@ export const BLOCK_NS = "1793750000123999999";
 export const BLOCK_MS = 1_793_750_000_123;
 export const NOTE_VALUES = [2_000_000n, 5_000_000n, 10_000_000n];
 
-export type Vault = { w: WalletStore; ns: NoteStore; notes: NoteRecord[]; stateTree: VaultTree; labelTree: VaultTree; failPut: { on?: (rec: unknown) => boolean } };
+export type Vault = {
+  w: WalletStore;
+  ns: NoteStore;
+  notes: NoteRecord[];
+  stateTree: VaultTree;
+  labelTree: VaultTree;
+  failPut: { on?: (rec: unknown) => boolean };
+  /** A new tab's note store on the same database (as after the page died), now v.ns. */
+  reopen: () => Promise<NoteStore>;
+};
 
 const open: Vault[] = [];
 /** Lets every vault's stores go (their Web Locks keep the test process alive). */
@@ -52,7 +60,8 @@ export async function vaultWith(values = NOTE_VALUES): Promise<Vault> {
     if (s === "notes" && failPut.on?.(v)) throw new Error("the store refused the write");
     return w.put(s, k, v);
   };
-  const ns = await openNoteStore({ ...w, put } as WalletStore);
+  const store = { ...w, put } as WalletStore;
+  const ns = await openNoteStore(store);
   const state: bigint[] = [11n, 12n]; // other depositors' leaves
   const labels: bigint[] = [21n, 22n];
   const notes: NoteRecord[] = [];
@@ -66,12 +75,15 @@ export async function vaultWith(values = NOTE_VALUES): Promise<Vault> {
     labels.push(label);
     notes.push(n);
   }
-  const v: Vault = { w, ns, notes, stateTree: new VaultTree(state), labelTree: new VaultTree(labels), failPut };
+  const v: Vault = { w, ns, notes, stateTree: new VaultTree(state), labelTree: new VaultTree(labels), failPut, reopen: async () => (v.ns = await openNoteStore(store)) };
   open.push(v);
   return v;
 }
 
-/** The request's arguments on this vault: 3 USDC to the relayer fixture's recipient, the deadline 10 minutes out. */
+/** The ids registerDepositOf was asked about, in order (the request asks for its A_{l,j} only). */
+export const registerAsked: string[] = [];
+
+/** The request's arguments on this vault: 3 USDC to the note's A_{l,j}, the deadline 590 s out. */
 export function argsFor(v: Vault, prover: VaultProver, over: Partial<WithdrawRequestArgs> = {}): WithdrawRequestArgs {
   return {
     seed64: SEED,
@@ -83,8 +95,7 @@ export function argsFor(v: Vault, prover: VaultProver, over: Partial<WithdrawReq
     labelTree: v.labelTree,
     newestStateRoot: v.stateTree.root!,
     newestLabelRoot: v.labelTree.root!,
-    recipient: RECIPIENT,
-    registerDeposit: REGISTER_DEPOSIT,
+    registerDepositOf: async (id) => (registerAsked.push(id), REGISTER_DEPOSIT),
     feeRecipient: FEE_RECIPIENT,
     relayFee: RELAY_FEE,
     amount: 3_000_000n,

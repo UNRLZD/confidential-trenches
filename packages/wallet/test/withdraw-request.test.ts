@@ -18,9 +18,10 @@ import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultContextInput, vaultContextOf, ZK_SETUP_FILES, type VaultProver, type VaultSnarkjsProof } from "@blindfill/kit";
 import { checkWithdraw } from "../../../apps/helper/src/withdraw/checks.ts";
-import { noteSecrets } from "../src/notes/secrets.ts";
+import { armAccount } from "../src/derive/index.ts";
+import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
 import { blockTimeMsOf, withdrawDeadlineMs, withdrawRequest, WITHDRAW_SEND_MARGIN_MS } from "../src/withdraw/request.ts";
-import { argsFor, BLOCK_MS, BLOCK_NS, closeVaults, FEE_RECIPIENT, RELAY_FEE, SCOPE, SEED, signalsProver, TOKEN, VAULT, vaultWith } from "./withdraw-fixture.ts";
+import { argsFor, BLOCK_MS, BLOCK_NS, closeVaults, FEE_RECIPIENT, REGISTER_DEPOSIT, registerAsked, RELAY_FEE, SCOPE, SEED, signalsProver, TOKEN, VAULT, vaultWith } from "./withdraw-fixture.ts";
 
 // snarkjs is the kit's own (a dev dependency of packages/kit), as prove-e2e.test.ts runs it
 const KIT = new URL("../../kit/", import.meta.url);
@@ -55,6 +56,7 @@ const feeMin = (fee = RELAY_FEE) => ({ feeMin: async () => fee });
 
 test("a real proof of the request passes the relayer's checks 1-4 as written, and the note is RESERVED", async () => {
   const v = await vaultWith();
+  registerAsked.length = 0;
   const r = await withdrawRequest(argsFor(v, snarkProver()));
   const verdict = await checkWithdraw(structuredClone(r.body), CFG, feeMin());
   assert.deepEqual(verdict.ok ? "ok" : verdict, "ok");
@@ -68,11 +70,31 @@ test("a real proof of the request passes the relayer's checks 1-4 as written, an
   assert.equal(r.body.public_signals[7], vaultContextOf(keccak_256, vaultContextInput(VAULT, r.body.withdrawal), SCOPE).toString());
   assert.equal(r.body.public_signals[2], String(3_000_000n + RELAY_FEE));
   assert.equal(r.body.fund_recipient, true);
-  // the same checks refuse it once a field the proof binds moves: the salt (check 2), and the fee recipient (check 3)
-  const salted = structuredClone(r.body);
-  salted.withdrawal.salt = "0".repeat(32);
-  assert.equal((await checkWithdraw(salted, CFG, feeMin())).ok, false);
-  assert.equal((await checkWithdraw(structuredClone(r.body), { ...CFG, feeRecipient: "other.near" }, feeMin())).ok, false);
+  // it pays this note's own A_{l,0}, and register_deposit was read for exactly that id
+  const a = armAccount(SEED, v.notes[1]!.leaf!.label, 0);
+  a.secretKey.fill(0);
+  assert.equal(r.recipient, a.id);
+  assert.equal(r.body.withdrawal.recipient, a.id);
+  assert.deepEqual(registerAsked, [a.id]);
+  assert.equal(r.body.withdrawal.register_deposit, REGISTER_DEPOSIT.toString());
+  // the same checks refuse it once a field the proof binds moves: the salt, the recipient (another note's A), the
+  // deadline and the fee recipient (check 2, the context); and a relayer whose fee recipient is another (check 3)
+  const other = armAccount(SEED, v.notes[2]!.leaf!.label, 0);
+  other.secretKey.fill(0);
+  const moved: [string, (b: typeof r.body) => void, string][] = [
+    ["salt", (b) => (b.withdrawal.salt = "0".repeat(32)), "bad_proof"],
+    ["recipient", (b) => (b.withdrawal.recipient = other.id), "bad_proof"],
+    ["deadline_ms", (b) => (b.withdrawal.deadline_ms += 1), "bad_proof"],
+    ["fee_recipient", (b) => (b.withdrawal.fee_recipient = "other.near"), "bad_proof"],
+  ];
+  for (const [what, move, code] of moved) {
+    const b = structuredClone(r.body);
+    move(b);
+    const no = await checkWithdraw(b, CFG, feeMin());
+    assert.equal(no.ok ? "ok" : no.code, code, what);
+  }
+  const theirs = await checkWithdraw(structuredClone(r.body), { ...CFG, feeRecipient: "other.near" }, feeMin());
+  assert.equal(theirs.ok ? "ok" : theirs.code, "bad_fee_recipient");
 });
 
 test("WU-06: HELD is written before the proof, RESERVED after it and before the request is handed back", async () => {
@@ -228,6 +250,7 @@ test("a stored note with a bad context list is refused on read", async () => {
     ["a HELD note with no list", (n) => delete n.contexts, /contexts/],
     ["a HELD note whose last entry is another deadline", (n) => ((n.contexts as { deadlineMs: bigint }[])[0]!.deadlineMs = 1n), /contexts/],
     ["an entry with another field", (n) => ((n.contexts as Record<string, unknown>[])[0]!.salt = "00"), /may not hold salt/],
+    ["an earlier entry's deadline not a u64", (n) => (n.contexts = [{ context: "6", deadlineMs: 5 }, ...(n.contexts as unknown[])]), /deadlineMs/],
   ];
   for (const [what, spoil, why] of cases) {
     const v = await vaultWith();
@@ -238,4 +261,68 @@ test("a stored note with a bad context list is refused on read", async () => {
     await v.w.put("notes", id, rec);
     await assert.rejects(v.ns.get(id), why, what);
   }
+});
+
+// A label's chain of notes: the deposit note, then change 0, 1 and 2, each landed as sync lands it (the child UNSPENT on
+// its leaf, its parent SPENT), with the page dying during a proof in the middle and a retry from a new tab.
+test("deposit -> change 0 -> change 1 -> change 2, a crash and retry in the middle: every (l, j) and secret its own", async () => {
+  const v = await vaultWith([20_000_000n]);
+  const seen = { lj: new Set<string>(), nullifierHash: new Set<string>(), refund: new Set<string>(), recipient: new Set<string>() };
+  let spends = v.notes[0]!.id;
+  for (let k = 0; k < 3; k++) {
+    if (k === 1) {
+      const dying: VaultProver = {
+        load: async () => {},
+        prove: async () => {
+          v.ns.close(); // the page dies mid-proof: its tab lock goes, nothing more is written
+          throw new Error("the page died");
+        },
+      };
+      await assert.rejects(withdrawRequest(argsFor(v, dying, { amount: 1_000_000n })), /the page died/);
+      await v.reopen();
+      assert.equal((await v.ns.get(spends))?.state, "UNSPENT", "a new tab frees the dead tab's HELD note at once");
+    }
+    const r = await withdrawRequest(argsFor(v, signalsProver(), { amount: 1_000_000n }));
+    assert.equal(r.noteId, spends, `spend ${k}: the label's newest note is the one picked`);
+    assert.equal(r.change.j, k, `spend ${k}: change index`);
+    for (const [set, x] of [
+      [seen.lj, `${r.change.l}/${r.change.j}`],
+      [seen.nullifierHash, r.body.public_signals[1]],
+      [seen.refund, r.body.withdrawal.refund_precommitment],
+      [seen.recipient, r.recipient],
+    ] as const) {
+      assert.ok(!set.has(x), `spend ${k}: a repeat`);
+      set.add(x);
+    }
+    // the proof's newCommitmentHash is the commitment of the change note this device derives and lands
+    const pc = noteSecrets(SEED, r.change).precommitment;
+    const commitment = noteCommitment(r.changeValue, r.change.l, pc);
+    assert.equal(r.body.public_signals[0], commitment.toString(), `spend ${k}: newCommitmentHash`);
+    v.stateTree.append([commitment]);
+    const child = await v.ns.add({ ref: r.change, scope: SCOPE, precommitment: pc, state: "UNSPENT", leaf: { value: r.changeValue, label: r.change.l, commitment, leafIndex: BigInt(v.stateTree.size - 1) } });
+    assert.equal((await v.ns.get(spends))?.state, "SPENT", `spend ${k}: the parent is SPENT once its change lands`);
+    if (k === 1) assert.equal((await v.ns.get(spends))?.contexts?.length, 2, "the dead attempt's context is kept");
+    spends = child.id;
+  }
+});
+
+test("boundaries: an exact cover, the deadline at T + 600,000, another scope's note never picked, a negative fee refused", async () => {
+  const v = await vaultWith();
+  // exact cover: the 2 USDC note pays 2 USDC less the fee, leaving change 0
+  const exact = await withdrawRequest(argsFor(v, signalsProver(), { amount: 2_000_000n - RELAY_FEE }));
+  assert.equal(exact.noteId, v.notes[0]!.id);
+  assert.equal(exact.changeValue, 0n);
+  // the latest deadline the request takes: T + 600,000 exactly
+  const late = await withdrawRequest(argsFor(v, signalsProver(), { deadlineMs: BLOCK_MS + 600_000 }));
+  assert.equal(late.body.withdrawal.deadline_ms, BLOCK_MS + 600_000);
+  // a 100 USDC note of another vault's scope in the same store: never picked
+  const other = SCOPE + 1n;
+  let n = await v.ns.planDeposit(other, (ref) => noteSecrets(SEED, ref).precommitment);
+  n = await v.ns.move(n.id, "PLANNED", "INCOMING");
+  await v.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: { value: 100_000_000n, label: 99n, commitment: noteCommitment(100_000_000n, 99n, n.precommitment), leafIndex: 0n } });
+  const p = signalsProver();
+  await assert.rejects(withdrawRequest(argsFor(v, p, { amount: 50_000_000n })), /no unspent note covers/);
+  assert.deepEqual(p.log, []);
+  await assert.rejects(withdrawRequest(argsFor(v, p, { relayFee: -1n })), /relayFee: below 0/);
+  assert.deepEqual(p.log, []);
 });

@@ -9,6 +9,11 @@
 // - The change note is change note j of the spent note's label l, with j fixed by the spent note (keys.ts
 //   changeIndex: a label's first note, any kind but change, makes change 0; change note k makes k + 1); its secrets
 //   come from the seed (l.177-179). The refund note of the same (l, j) gives refund_precommitment (l.186-188).
+// - The recipient is this note's own arming account A_{l,j} (markets.md l.989 and l.1534, "The kit makes every
+//   withdrawal's `recipient` this note's `A_{l,j}` (W:671)"; wallet.md l.645 step 5, the l.907 row), derived here after the pick, never taken
+//   from the caller, so no caller can pay another note's A or any other account. A's secret key is zeroed at once:
+//   only its id is used. register_deposit is the caller's two-RPC read of A's registration (registerDepositOf),
+//   asked for A's id after the pick and before anything is written.
 // - The withdrawal and its context are the kit's vaultWithdrawRequest: a fresh 16-byte salt from the device, the
 //   vault's own scope, the context the vault recomputes (vaultContextOf over vaultContextInput, the vault as processor).
 //   The proof is the kit's vaultProveWithdraw, through the prover worker the caller passes; it refuses a worker answer
@@ -44,7 +49,7 @@ import {
   vaultWithdrawRequest,
 } from "@blindfill/kit";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { changeIndex } from "../derive/index.ts";
+import { armAccount, changeIndex } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
 
@@ -71,9 +76,11 @@ export type WithdrawRequestArgs = {
   labelTree: VaultTree;
   newestStateRoot: bigint;
   newestLabelRoot: bigint;
-  recipient: string;
-  /** NEAR, in yocto, for the recipient's token registration: 0 when it is registered. */
-  registerDeposit: bigint;
+  /**
+   * NEAR, in yocto, for A_{l,j}'s token registration, read on two RPCs for the id it is given: 0 when
+   * storage_balance_of(A) is set, storage_balance_bounds.min when it is null (wallet.md l.907).
+   */
+  registerDepositOf: (accountId: string) => Promise<bigint>;
   /** The release's relayer fee recipient, never a helper's answer. */
   feeRecipient: string;
   /** The fee, in the token's base units, taken from the note on top of the amount. */
@@ -91,6 +98,8 @@ export type WithdrawRequest = {
   body: HelperWithdrawRequest;
   /** The spent note, now RESERVED in the store. */
   noteId: string;
+  /** The withdrawal's recipient: A_{l,j} of the spent note's (l, j), a lowercase 64-hex implicit id. */
+  recipient: string;
   /** The change note this withdrawal makes (value: the note's less amount and fee) and its refund note's ref. */
   change: NoteRefChange;
   refund: NoteRef;
@@ -119,11 +128,12 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
   const seed = Uint8Array.from(a.seed64);
   try {
     const { notes, prover, vaultId, token, stateTree, labelTree, newestStateRoot, newestLabelRoot } = a;
-    const { recipient, registerDeposit, feeRecipient, relayFee, amount, deadlineMs } = a;
+    const { registerDepositOf, feeRecipient, relayFee, amount, deadlineMs } = a;
     const blockTimeMs = blockTimeMsOf(a.blockTimestampNanosec);
-    for (const [k, v] of Object.entries({ registerDeposit, relayFee, amount, newestStateRoot, newestLabelRoot })) {
+    for (const [k, v] of Object.entries({ relayFee, amount, newestStateRoot, newestLabelRoot })) {
       if (typeof v !== "bigint") throw new Error(`${k}: not a bigint`);
     }
+    if (typeof registerDepositOf !== "function") throw new Error("registerDepositOf: not a function");
     if (amount <= 0n) throw new Error("amount: 0 or less");
     if (relayFee < 0n) throw new Error("relayFee: below 0");
     if (relayFee >= amount) throw new Error("relayFee: at or above the amount"); // the §2.8 arming row, l.907
@@ -138,6 +148,11 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     const j = note.ref.kind === "change" ? changeIndex({ kind: "change", j: note.ref.j }) : changeIndex({ kind: "deposit" });
     const change: NoteRefChange = { kind: "change", l: leaf.label, j };
     const refund: NoteRef = { kind: "refund", l: leaf.label, j };
+    const arm = armAccount(seed, leaf.label, j);
+    const recipient = arm.id;
+    arm.secretKey.fill(0);
+    const registerDeposit = await registerDepositOf(recipient);
+    if (typeof registerDeposit !== "bigint") throw new Error("registerDepositOf: not a bigint");
     const spent = noteSecrets(seed, note.ref);
     const next = noteSecrets(seed, change);
     const req = vaultWithdrawRequest({
@@ -182,7 +197,7 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
       await free();
       throw e;
     }
-    return { body, noteId: note.id, change, refund, changeValue: leaf.value - withdrawn };
+    return { body, noteId: note.id, recipient, change, refund, changeValue: leaf.value - withdrawn };
   } finally {
     seed.fill(0);
   }
