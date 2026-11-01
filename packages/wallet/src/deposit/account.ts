@@ -1,7 +1,7 @@
 // U, the one-time NEAR account of one deposit, and the reads that say U is safe to sign from (card
 // wallet-deposit-account; docs/plan1/wallet.md §2.4 step 7, W:416, and the vault paper's 2.10 (a), V:666-668, at
 // research aa5bc1e). The device derives U = U_{s,i} by the kit's frozen path (../derive depositId, HKDF info
-// "onetime/in" ‖ s ‖ i, W:63) and, once U exists, reads on two RPCs:
+// "onetime/in" ‖ s ‖ i, W:64) and, once U exists, reads on two RPCs:
 //   - U's key list: exactly U's own key, full access (an implicit account's id is the hex of that key, D18, D19);
 //   - U's key nonce, from that list (the delegate signs nonce + 1, W:416);
 //   - U's USDC by ft_balance_of, at or above the amount;
