@@ -946,10 +946,15 @@
     ]
   },
   "bad": {
-    "source": "harness, terminal build ../../../../../../../private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/main-cf7b85a/apps/terminal/dist, the stand-in shell",
+    "source": "harness, terminal build of main cf7b85a, the stand-in shell",
     "expect": "in",
     "path": "/discover?ref=app-in-shell",
-    "at": "2026-11-01T14:16:30.192Z",
+    "at": "2026-11-01T15:04:45.832Z",
+    "engines": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
     "browsers": {
       "chromium": "153.0.8010.12",
       "firefox": "155.0",
@@ -979,7 +984,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/chromium-phone.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone.png"
       },
       {
         "engine": "chromium",
@@ -1004,7 +1009,32 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/chromium-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone-late.png"
+      },
+      {
+        "engine": "chromium",
+        "width": "phone",
+        "kind": "silent",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone-silent.png"
       },
       {
         "engine": "chromium",
@@ -1029,7 +1059,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/chromium-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone-tap.png"
       },
       {
         "engine": "chromium",
@@ -1054,7 +1084,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/chromium-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop.png"
       },
       {
         "engine": "chromium",
@@ -1079,7 +1109,32 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/chromium-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop-late.png"
+      },
+      {
+        "engine": "chromium",
+        "width": "desktop",
+        "kind": "silent",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop-silent.png"
       },
       {
         "engine": "chromium",
@@ -1104,7 +1159,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/chromium-desktop-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop-tap.png"
       },
       {
         "engine": "firefox",
@@ -1129,7 +1184,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/firefox-phone.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone.png"
       },
       {
         "engine": "firefox",
@@ -1154,7 +1209,32 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/firefox-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone-late.png"
+      },
+      {
+        "engine": "firefox",
+        "width": "phone",
+        "kind": "silent",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone-silent.png"
       },
       {
         "engine": "firefox",
@@ -1179,7 +1259,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/firefox-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone-tap.png"
       },
       {
         "engine": "firefox",
@@ -1204,7 +1284,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/firefox-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop.png"
       },
       {
         "engine": "firefox",
@@ -1229,7 +1309,32 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/firefox-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop-late.png"
+      },
+      {
+        "engine": "firefox",
+        "width": "desktop",
+        "kind": "silent",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop-silent.png"
       },
       {
         "engine": "firefox",
@@ -1254,7 +1359,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/firefox-desktop-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop-tap.png"
       },
       {
         "engine": "webkit",
@@ -1279,7 +1384,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/webkit-phone.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone.png"
       },
       {
         "engine": "webkit",
@@ -1304,7 +1409,32 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/webkit-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone-late.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "phone",
+        "kind": "silent",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone-silent.png"
       },
       {
         "engine": "webkit",
@@ -1329,7 +1459,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/webkit-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone-tap.png"
       },
       {
         "engine": "webkit",
@@ -1354,7 +1484,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/webkit-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop.png"
       },
       {
         "engine": "webkit",
@@ -1379,7 +1509,32 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/webkit-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop-late.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "desktop",
+        "kind": "silent",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop-silent.png"
       },
       {
         "engine": "webkit",
@@ -1404,7 +1559,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad3/webkit-desktop-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop-tap.png"
       }
     ]
   }
