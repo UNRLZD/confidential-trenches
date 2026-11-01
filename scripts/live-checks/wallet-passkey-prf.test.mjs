@@ -40,6 +40,10 @@ test("each broken step fails the check", () => {
     ["no PRF output read back", (r) => (r.prf.prfOk = false)],
     ["no-PRF with a seed stored but no account shown", (r) => (r.noPrf.create = { state: "no-prf", account: null, seed: true })],
     ["no-PRF shown as an error", (r) => (r.noPrf.create.state = "error")],
+    ["an extractable K_wrap", (r) => (r.prf.steps.create.kWrap.extractable = true)],
+    ["no K_wrap", (r) => (r.prf.steps.signin.kWrap = null)],
+    ["a seed record stored in the clear", (r) => (r.prf.steps.reload.seedWrapped = false)],
+    ["something in localStorage", (r) => (r.prf.steps.signin.localStorage = 1)],
     ["a CSP violation", (r) => r.errors.push("console: Refused to load the script")],
     ["an empty record", (r) => Object.keys(r).forEach((k) => delete r[k])],
   ];

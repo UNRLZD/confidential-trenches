@@ -9,6 +9,8 @@
 //     own that shares none with the kit (node:crypto; the BIP-39 list read from bitcoin/bips and pinned by sha256):
 //     HKDF-SHA256 to the entropy (wallet.md:47), the 12 words, PBKDF2 to seed64 (:54), HKDF-SHA512 info "profile" ‖ 0
 //     to the ed25519 key (:68, :70-88). It must equal A.
+//   In each signed-in step the store is read raw (card wallet-store): K_wrap a non-extractable AES-GCM CryptoKey, the
+//     seed record only { iv, ct }, localStorage empty.
 //   no-prf run (hasPrf false): Create passkey opens the no-PRF state (data-signin="no-prf"), shows no account and
 //     stores no seed: never a silent fallback to another seed.
 //   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
@@ -45,6 +47,11 @@ export function judge(rec) {
   say(s.reload?.state === "signed-in" && s.reload?.account === A, `prf: a reload is the same account with no sheet (${s.reload?.state})`);
   say(s.signout?.state === "signed-out" && !s.signout?.account && s.signout?.db === false, `prf: Sign out deletes the store (${s.signout?.state}, store ${s.signout?.db ? "kept" : "gone"})`);
   say(s.signin?.state === "signed-in" && s.signin?.account === A && HEX64.test(A ?? ""), `prf: Use passkey signs in as the same account (${s.signin?.state}, ${s.signin?.account === A ? "same" : "other"})`);
+  for (const k of ["create", "reload", "signin"]) {
+    const t = s[k] ?? {};
+    say(t.seed === true && t.seedWrapped === true && t.kWrap?.cryptoKey === true && t.kWrap?.extractable === false && t.kWrap?.alg === "AES-GCM" && t.localStorage === 0,
+      `prf ${k}: the seed record is wrapped ({ iv, ct }) under a non-extractable AES-GCM K_wrap, nothing in localStorage`);
+  }
   const rps = p.credentials ?? [];
   say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
   say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
@@ -84,15 +91,14 @@ export function accountOfEntropy(entropy, list) {
 export const accountOfPrf = (prf, list) => accountOfEntropy(entropyOfPrf(prf), list);
 
 // ------------------------------------------------------------------------------------------------ the probe
-const harnessDir = path.join(REPO, "apps/terminal/test/harness");
 const playwright = () => createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
 
 async function launch({ harness, site }) {
   const { chromium } = playwright();
   if (!harness) return { browser: await chromium.launch(), close: async () => {} };
-  const { makeCert } = await import(path.join(harnessDir, "certs.mjs"));
-  const { startServer } = await import(path.join(harnessDir, "server.mjs"));
-  const { buildSignpage } = await import(path.join(harnessDir, "harness.mjs"));
+  const { makeCert } = await import("../../apps/terminal/test/harness/certs.mjs");
+  const { startServer } = await import("../../apps/terminal/test/harness/server.mjs");
+  const { buildSignpage } = await import("../../apps/terminal/test/harness/harness.mjs");
   const root = site ?? buildSignpage();
   const cert = makeCert([SIGN_HOST]);
   const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root } } });
@@ -128,21 +134,33 @@ async function settled(page) {
   return page.evaluate(async () => {
     const m = document.getElementById("signin");
     const db = (await indexedDB.databases()).some((d) => d.name === "ct-wallet");
+    // the store as stored (card wallet-store, wallet.md:152-154): K_wrap a non-extractable AES-GCM CryptoKey, the seed
+    // record only { iv, ct }, nothing in localStorage. Read raw, never decrypted.
     let seed = false;
+    let kWrap = null;
+    let seedWrapped = null;
     if (db) {
-      seed = await new Promise((ok) => {
+      const raw = await new Promise((ok) => {
         const r = indexedDB.open("ct-wallet");
         r.onsuccess = () => {
           const d = r.result;
-          if (!d.objectStoreNames.contains("meta")) return (d.close(), ok(false));
-          const g = d.transaction("meta").objectStore("meta").getKey("seed");
-          g.onsuccess = () => (d.close(), ok(g.result !== undefined));
-          g.onerror = () => (d.close(), ok(false));
+          if (!d.objectStoreNames.contains("meta")) return (d.close(), ok({}));
+          const os = d.transaction("meta").objectStore("meta");
+          const k = os.get("k_wrap");
+          const sd = os.get("seed");
+          sd.onsuccess = () => (d.close(), ok({ k: k.result, s: sd.result }));
+          sd.onerror = () => (d.close(), ok({}));
         };
-        r.onerror = () => ok(false);
+        r.onerror = () => ok({});
       });
+      seed = raw.s !== undefined;
+      if (raw.k !== undefined)
+        kWrap = { cryptoKey: raw.k instanceof CryptoKey, extractable: raw.k?.extractable ?? null, alg: raw.k?.algorithm?.name ?? null };
+      if (seed)
+        seedWrapped = !!raw.s && typeof raw.s === "object" && Object.keys(raw.s).sort().join() === "ct,iv" &&
+          raw.s.iv instanceof Uint8Array && raw.s.iv.length === 12 && raw.s.ct instanceof ArrayBuffer && raw.s.ct.byteLength > 16;
     }
-    return { state: m.dataset.signin, account: m.dataset.account ?? null, db, seed };
+    return { state: m.dataset.signin, account: m.dataset.account ?? null, db, seed, kWrap, seedWrapped, localStorage: localStorage.length };
   });
 }
 async function click(page, action) {
