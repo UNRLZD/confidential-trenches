@@ -6,8 +6,9 @@
 // 1. The wasm: mainnet USDC's deployed code (17208628…33a1), pulled by view_code on two mainnet RPCs and refused unless
 //    both answer the pinned bytes (vault.md Pinned sources, USDC row: 321,491 B, sha256 b98ccd53…cfe6, code hash
 //    DVJx7F3d…oNX8q). Reads only on mainnet: nothing is signed or sent there.
-// 2. One team testnet key, made in this process and written to the macOS Keychain (service ct-testnet-usdc, account =
-//    the token's id) before any account exists, then read back and compared; it is never printed or written to a file.
+// 2. One testnet key, made in this process and written to the macOS Keychain (the service named by --keychain-service,
+//    account = the token's id) before any account exists, then read back and compared; it is never printed or written
+//    to a file. The flag is required: the script names no Keychain item of its own.
 // 3. The token: a fresh named account the testnet faucet makes with that key (as mainnet's token account holds one
 //    full-access key). It creates the role accounts <role>.<token>, each with the same key and 0.2 N.
 // 4. One transaction signed by the token to itself, [DeployContract, FunctionCall init], as mainnet's tx
@@ -22,7 +23,7 @@
 // Every transaction is read back by the money gate's own readTx on the testnet RPCs and must read ok on two of them.
 // The ids, the tx hashes and the code hash go to contracts/vault/deployments/testnet-usdc.json; then run
 // scripts/live-checks/vault-testnet-usdc.mjs. Testnet only; no dependency.
-//   node contracts/vault/scripts/testnet-usdc.mjs [--token <name>.testnet] [--out <file>]
+//   node contracts/vault/scripts/testnet-usdc.mjs --keychain-service <name> [--token <name>.testnet] [--out <file>]
 import "../../../scripts/net-window.mjs";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -40,7 +41,6 @@ export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.d
 export const TESTNET_RPCS = GATE_RPCS["near-testnet"];
 const SEND_RPC = "https://test.rpc.fastnear.com";
 const FAUCET = "https://helper.nearprotocol.com/account"; // as contracts/vault/scripts/deploy-testnet.mjs
-export const KEYCHAIN_SERVICE = "ct-testnet-usdc";
 export const ROLES = ["admin", "owner", "pauser", "blocklister", "mm1", "mm2", "minter", "ctl1", "ctl2", "holder"];
 export const INIT_NAMES = ["admin_ids", "master_minter_ids", "owner_ids", "pauser_ids", "blocklister_id", "metadata"];
 export const ALLOWANCE = "1000000000000000"; // 1,000,000,000 USDC of allowance for the minter
@@ -143,16 +143,27 @@ async function pullMainnet() {
   return { wasm: blobs[0], metadata };
 }
 
+/** The Keychain service from --keychain-service: required, no default, and one plain word, since it goes into the
+ *  `security -i` command line below. */
+export function keychainService(argv) {
+  const i = argv.indexOf("--keychain-service");
+  const v = i < 0 ? undefined : argv[i + 1];
+  if (v === undefined || v.startsWith("--")) throw new Error("--keychain-service <name> is required: the Keychain service the key is written to");
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(v)) throw new Error(`--keychain-service ${JSON.stringify(v)}: want letters, digits, '.', '_' or '-'`);
+  return v;
+}
+
 // the Keychain: written through `security -i` on stdin, so the secret is never in a process's arguments
-function keychainPut(account, secret) {
-  execFileSync("security", ["-i"], { input: `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${account} -w ${secret}\n`, stdio: ["pipe", "ignore", "pipe"] });
-  const back = execFileSync("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"], { stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
+function keychainPut(service, account, secret) {
+  execFileSync("security", ["-i"], { input: `add-generic-password -U -s ${service} -a ${account} -w ${secret}\n`, stdio: ["pipe", "ignore", "pipe"] });
+  const back = execFileSync("security", ["find-generic-password", "-s", service, "-a", account, "-w"], { stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
   if (back !== secret) throw new Error("the Keychain does not read back the key it was given; nothing made");
 }
 
 async function main() {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
+  const service = keychainService(a);
   const out = opt("--out", path.join(HERE, "../deployments/testnet-usdc.json"));
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "t").toLowerCase();
   const token = opt("--token", `bf-usdc-${stamp}.testnet`);
@@ -168,8 +179,8 @@ async function main() {
   const pub = Buffer.from(jwk.x, "base64url");
   const seed = Buffer.from(jwk.d, "base64url");
   const pubText = `ed25519:${b58encode(pub)}`;
-  keychainPut(token, `ed25519:${b58encode(Buffer.concat([seed, pub]))}`);
-  console.log(`key ${pubText} written to the Keychain (service ${KEYCHAIN_SERVICE}, account ${token}) and read back`);
+  keychainPut(service, token, `ed25519:${b58encode(Buffer.concat([seed, pub]))}`);
+  console.log(`key ${pubText} written to the Keychain (service ${service}, account ${token}) and read back`);
 
   const txs = [];
   const nonces = new Map();
@@ -253,7 +264,7 @@ async function main() {
     wasm_sha256: PIN.sha256,
     wasm_bytes: wasm.length,
     wasm_from: `view_code of mainnet ${MAINNET_USDC} on ${MAINNET_RPCS.join(" and ")}, equal bytes`,
-    key: { public_key: pubText, keychain: { service: KEYCHAIN_SERVICE, account: token }, holders: [token, ...ROLES.map(id)] },
+    key: { public_key: pubText, holders: [token, ...ROLES.map(id)] },
     roles: Object.fromEntries(ROLES.map((r) => [r, id(r)])),
     init: { ...init, metadata: { ...metadata, icon: metadata.icon ? `<mainnet's icon, ${metadata.icon.length} chars>` : null } },
     minter_allowance: ALLOWANCE,

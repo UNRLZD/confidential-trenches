@@ -2,10 +2,9 @@
 # The helper's local proof (cards helper-host-health and helper-proxy): the image, the compose stack behind the real
 # Caddyfile on plain http, the live checks against it, and no IP and no key in any log after a 502 and a malformed
 # request. The proxy runs with planted vendor keys made for this run (never a real key); 1Click's token list answers
-# with any bearer, so the proxied read reaches the real vendor with the planted JWT on it. It needs Docker,
-# so it runs through the heavy queue:
-#   scripts/heavy.sh helper-proof -- bash apps/helper/deploy/local-proof.sh [<out dir>]
-# (on the Mac queue with HEAVY_REMOTE=0 while the box has no Docker). The expected commit is this checkout's newest
+# with any bearer, so the proxied read reaches the real vendor with the planted JWT on it. It needs Docker:
+#   bash apps/helper/deploy/local-proof.sh [<out dir>]
+# The expected commit is this checkout's newest
 # first-parent commit that changed apps/helper; OTHER is another commit, for the bad-commit answer. The recorded
 # answers land in <out dir> (default a new temp dir): good.json, bad-commit.json, proxy-good.json and
 # proxy-bad-echo.json (a wrong build that echoes the 1Click key in a header).
@@ -42,7 +41,7 @@ echo "== live check through Caddy"
 node "$CHECK" --base http://127.0.0.1:18080 --commit "$C" --record "$OUT/good.json" | tail -1; echo "rc=${PIPESTATUS[0]} (want 0)"
 node "$CHECK" --base http://127.0.0.1:18080 --commit "$OTHER" >/dev/null; echo "against $OTHER: rc=$? (want 1)"
 echo "== helper-proxy live check through Caddy: POST /v1/proxy/oneclick/v0/tokens, planted keys"
-node "$PCHECK" --base http://127.0.0.1:18080 --keys-env --record "$OUT/proxy-good.json" --planted | tail -1; echo "rc=${PIPESTATUS[0]} (want 0)"
+node "$PCHECK" --base http://127.0.0.1:18080 --record "$OUT/proxy-good.json" --planted | tail -1; echo "rc=${PIPESTATUS[0]} (want 0)"
 echo "== a proxied read through Caddy: cached list, 200 reads; cold (one per 5.2 s, past the 5 s cache), 12 reads; 1Click direct, 12 reads"
 pct() { sort -n | awk '{a[NR]=$1} END {printf "p50 %.1f ms, p95 %.1f ms, n=%d\n", a[int((NR+1)*0.5)]*1000, a[int((NR-1)*0.95)+1]*1000, NR}'; }
 for _ in $(seq 1 200); do curl -s -o /dev/null -w '%{time_total}\n' -X POST -H 'Origin: https://confidential.unrealized.trade' http://127.0.0.1:18080/v1/proxy/oneclick/v0/tokens; done | pct
@@ -82,5 +81,5 @@ grep -c 'X-Debug-Upstream-Auth' "$OUT/echo-src/src/server.ts" | sed 's/^/echo li
 docker build -q --build-arg HELPER_COMMIT="$C" -t ct-helper:echo "$OUT/echo-src" >/dev/null
 docker run -d --rm --name ct-helper-proof-echo -e ONECLICK_JWT -e JUPITER_API_KEY -e RELAY_API_KEY -e LIFI_API_KEY -p 127.0.0.1:18082:8080 ct-helper:echo >/dev/null
 for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:18082/v1/health 2>/dev/null && break; sleep 0.5; done
-node "$PCHECK" --base http://127.0.0.1:18082 --keys-env --record "$OUT/proxy-bad-echo.json" --planted | grep -E '^BAD|live-check'; echo "rc=${PIPESTATUS[0]} (want 1)"
+node "$PCHECK" --base http://127.0.0.1:18082 --record "$OUT/proxy-bad-echo.json" --planted | grep -E '^BAD|live-check'; echo "rc=${PIPESTATUS[0]} (want 1)"
 echo "== done"

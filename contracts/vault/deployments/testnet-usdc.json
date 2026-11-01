@@ -7,10 +7,6 @@
   "wasm_from": "view_code of mainnet 17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1 on https://rpc.mainnet.fastnear.com and https://near.drpc.org, equal bytes",
   "key": {
     "public_key": "ed25519:C7zETSXQq5C4r15ov4BPFk4TF6RPbfktK457V5TrJVfV",
-    "keychain": {
-      "service": "ct-testnet-usdc",
-      "account": "bf-usdc-20261101t022248.testnet"
-    },
     "holders": [
       "bf-usdc-20261101t022248.testnet",
       "admin.bf-usdc-20261101t022248.testnet",

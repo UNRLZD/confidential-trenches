@@ -3,13 +3,14 @@
 // in its image behind deploy/Caddyfile, run by deploy/compose.yaml on a Mac (HELPER_HOST has no server yet): PASS.
 // bad_echo: a real answer from a wrong build of the same source that echoes the 1Click key in a header: FAIL. Made
 // from the good answer: the key in the body in base64, an answer that is not a token list, a missing source header,
-// and no key to look for: each FAIL.
+// and no key to look for: each FAIL. The keys come from the environment only.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, read } from "./helper-proxy.mjs";
+import { ENV_KEYS, envKeys, judge, read } from "./helper-proxy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-proxy.answers.json"), "utf8"));
@@ -69,4 +70,18 @@ test("no key to look for is never a pass", async () => {
   const r = await run(A.good, []);
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes("BAD 0 vendor key(s) to look for"));
+});
+
+test("the keys to look for come from the four env variables only; a blank one is not looked for", () => {
+  assert.deepEqual(ENV_KEYS, ["JUPITER_API_KEY", "RELAY_API_KEY", "LIFI_API_KEY", "ONECLICK_JWT"]);
+  assert.deepEqual(envKeys({ JUPITER_API_KEY: "j1", RELAY_API_KEY: " ", ONECLICK_JWT: "o1\n", OTHER_KEY: "x" }), ["j1", "o1"]);
+  assert.deepEqual(envKeys({}), []);
+});
+
+test("run with none of them set, the check is an error naming the variables, and reads nothing", () => {
+  const stub = "globalThis.fetch=async(u)=>{throw new Error('called '+u)}";
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !ENV_KEYS.includes(k)));
+  const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, path.join(HERE, "helper-proxy.mjs")], { encoding: "utf8", env, timeout: 30_000 });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stderr.trim(), "live-check helper-proxy: ERROR: no vendor key to look for: set at least one of JUPITER_API_KEY, RELAY_API_KEY, LIFI_API_KEY, ONECLICK_JWT");
 });
