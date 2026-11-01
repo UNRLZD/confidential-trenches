@@ -20,11 +20,23 @@
 // - Sign out: broadcast "signout" on BroadcastChannel "ct-wallet", then delete the database (06b:1235, wallet.md:156);
 //   other tabs close their connection on the delete's versionchange, so the delete is not blocked. A store that is
 //   already closed refuses to sign out, so a stale tab never deletes a newer account's database.
+// - The seed lock: sign out (from reading the seed until its delete has succeeded or failed), insertSeed and
+//   setCodeSaved each run under the store's exclusive Web Lock "ct-wallet/seed". An earlier tab's sign out holds it until
+//   its database is gone, so a stale tab's sign out then fails its liveness check and never deletes, and no seed insert
+//   can run between a sign out's check and its delete. The lock is not given back when the delete reports blocked:
+//   Chromium fires blocked as soon as one connection reports it ignored the versionchange
+//   (connection_coordinator.cc:102-105, :700-705), which a tab our own "signout" broadcast closed mid-transaction reports
+//   at once (idb_database.cc:301-305), so blocked does not mean every other tab has closed; the spec, Firefox and WebKit
+//   fire it later (IDB 3.0 §5.3 steps 6-8), and the lock may not rest on either order. Holding it through a blocked
+//   delete blocks nothing IndexedDB does not already block: every seed operation needs an open store, and every open
+//   waits behind the queued delete. With no Web Locks (opts.locks null) sign out, insertSeed and setCodeSaved refuse:
+//   they never run unlocked.
 // - restore step 7 (wallet.md:319-322) moves a counter up with raiseDepositIndex, under the same lock and
 //   compare-and-set; nothing ever lowers a counter.
 
 export const WALLET_DB = "ct-wallet"; // 06b:538
 export const WALLET_LOCK = "ct-wallet/counters"; // the store's own; 06b:743 named "ct-wallet"
+export const WALLET_SEED_LOCK = "ct-wallet/seed"; // the store's own: sign out and every seed write
 export const WALLET_CHANNEL = "ct-wallet"; // 06b:746
 export const WALLET_LANES = 8; // wallet.md:247
 // wallet.md:197-204, the note store table.
@@ -50,6 +62,13 @@ export interface WalletStore {
   keys(store: WalletStoreName): Promise<string[]>;
   reserveDepositIndex(scope: bigint): Promise<number>;
   raiseDepositIndex(scope: bigint, min: number): Promise<number>;
+  // Writes the seed record only if none is stored, in one transaction (a compare-and-set on "absent"), so two tabs
+  // that both read "no seed" never write one over the other. Resolves to the record that is stored afterwards: this
+  // one when inserted, the other tab's when it lost.
+  insertSeed(seed: unknown): Promise<{ inserted: boolean; seed: unknown }>;
+  // Sets the stored seed's code_saved to true (the backup's "Saved", 06b ses.5) and nothing else.
+  setCodeSaved(): Promise<void>;
+  // Deletes the database. Refuses while the stored seed's 12 words are its only copy and not saved (backupFirst).
   signOut(): Promise<void>;
   close(): void;
 }
@@ -146,6 +165,22 @@ function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
   if (store === "meta" && key !== "seed" && key !== "settings") throw new Error(`meta key ${key} is the store's own`);
+  // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
+  // setCodeSaved only, and goes only with signOut
+  if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");
+}
+// A seed whose 12 words are its only copy and not saved yet: no source but the passkey's PRF gives them back
+// (wallet.md:922, 06b:776-781). Sign out refuses it until the backup has set code_saved.
+export function backupFirst(seed: unknown): boolean {
+  if (seed === undefined) return false;
+  const s = seed as { source?: unknown; code_saved?: unknown };
+  return s?.source !== "prf" && s?.code_saved !== true;
+}
+
+// zeroes a decrypted seed's entropy once it has been read (the store's own copy; a caller's copy is the caller's)
+function wipe(seed: unknown): void {
+  const e = (seed as { entropy?: unknown } | undefined)?.entropy;
+  if (e instanceof Uint8Array) e.fill(0);
 }
 
 function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
@@ -173,6 +208,11 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   };
   const locked = <T>(fn: () => Promise<T>): Promise<T> =>
     locks ? (locks.request(WALLET_LOCK, { mode: "exclusive" }, fn) as Promise<T>) : fn();
+  const seedLock = name === WALLET_DB ? WALLET_SEED_LOCK : `${WALLET_SEED_LOCK}/${name}`;
+  const seedLocked = async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (!locks) throw new Error("no Web Locks: the seed is written and signed out only under the seed lock");
+    return locks.request(seedLock, { mode: "exclusive" }, fn) as Promise<T>;
+  };
 
   async function getRaw(store: WalletStoreName, key: string): Promise<unknown> {
     const tx = live().transaction(store, "readonly");
@@ -212,18 +252,29 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   }
   const kWrap = await loadKey().catch(fail);
 
+  // The plaintext bytes (a seed record's are its entropy as hex) are zeroed once used, on every path. What stays is in JS
+  // strings, which cannot be zeroed: encode's JSON text and hex() of each byte field, and decode's JSON text and the hex
+  // strings it parses back; they are left to the garbage collector.
   async function wrap(store: WalletStoreName, key: string, value: unknown): Promise<Wrapped> {
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
     const plain = encode(value);
-    const ct = await subtle.encrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, plain);
-    return { iv, ct };
+    try {
+      const ct = await subtle.encrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, plain);
+      return { iv, ct };
+    } finally {
+      plain.fill(0);
+    }
   }
   async function unwrap(store: WalletStoreName, key: string, raw: unknown): Promise<unknown> {
     if (raw === undefined) return undefined;
     const { iv, ct } = raw as Wrapped;
     if (!(iv instanceof Uint8Array) || !(ct instanceof ArrayBuffer)) throw new Error(`${store}/${key} is not wrapped`);
     const plain = await subtle.decrypt({ name: "AES-GCM", iv, additionalData: aadFor(store, key) }, kWrap, ct);
-    return decode(plain);
+    try {
+      return decode(plain);
+    } finally {
+      new Uint8Array(plain).fill(0);
+    }
   }
   const notify = (stores: WalletStoreName[]): void => channel.postMessage({ kind: "changed", stores });
 
@@ -282,6 +333,31 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       await done(tx);
       notify([store]);
     },
+    insertSeed(seed) {
+      return seedLocked(async () => {
+        const inserted = await casPut("meta", "seed", undefined, await wrap("meta", "seed", seed));
+        if (inserted) notify(["meta"]);
+        return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
+      });
+    },
+    setCodeSaved() {
+      return seedLocked(async () => {
+      for (;;) {
+        const before = await getRaw("meta", "seed");
+        if (before === undefined) throw new Error("no seed is stored");
+        const seed = (await unwrap("meta", "seed", before)) as Record<string, unknown>;
+        try {
+          if (seed.code_saved === true) return;
+          if (await casPut("meta", "seed", before, await wrap("meta", "seed", { ...seed, code_saved: true }))) {
+            notify(["meta"]);
+            return;
+          }
+        } finally {
+          wipe(seed);
+        }
+      }
+      });
+    },
     async delete(store, key) {
       checkCallerKey(store, key);
       const tx = live().transaction(store, "readwrite", { durability: "strict" });
@@ -314,14 +390,24 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       return next;
     },
     async signOut() {
-      live(); // a closed store never deletes the database: it may be a newer account's
-      channel.postMessage({ kind: "signout" });
-      shut();
-      channel.close();
-      await new Promise<void>((ok, no) => {
-        const r = idb.deleteDatabase(name);
-        r.onsuccess = () => ok();
-        r.onerror = () => no(r.error);
+      await seedLocked(async () => {
+        // the backup comes first while the 12 words are the only copy (wallet.md:922)
+        const seed = await unwrap("meta", "seed", await getRaw("meta", "seed"));
+        const refuse = backupFirst(seed);
+        wipe(seed);
+        if (refuse) throw new Error("back up the 12 words before signing out: they are the only copy");
+        // a closed store never deletes the database: it may be a newer account's. Checked here, after the last await and
+        // with none between it and deleteDatabase, so a store closed while the backup check ran refuses too.
+        live();
+        channel.postMessage({ kind: "signout" });
+        shut();
+        channel.close();
+        // held until the delete succeeds or fails, through any blocked (see the top)
+        await new Promise<void>((ok, no) => {
+          const r = idb.deleteDatabase(name);
+          r.onsuccess = () => ok();
+          r.onerror = () => no(r.error);
+        });
       });
     },
     close() {
