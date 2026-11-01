@@ -31,7 +31,9 @@ const WINDOW = 600_000n; // deadline_ms = T + 600,000 - r (wallet.md §2.5 step 
 class Kill extends Error {}
 
 // The chain and the people outside the device. It outlives every kill.
-type Goal = { value: bigint; arm: bigint; refuseFirst: boolean };
+// refuseFirst: the first proof sent fails. lateLand: the relayer answers "refused" and lands it at its deadline anyway;
+// otherwise it holds the proof past its deadline and the vault refuses it
+type Goal = { value: bigint; arm: bigint; refuseFirst: boolean; lateLand?: boolean };
 class World {
   now = 1_800_000_000_000n;
   goals: Goal[];
@@ -41,6 +43,7 @@ class World {
   spent = new Set<bigint>(); // precommitments whose nullifier hash is in the spent set
   relayer = new Map<bigint, { deadline: bigint; changePc: bigint; amount: bigint }>(); // proofs the relayer holds
   refused = new Set<bigint>();
+  claimed = new Set<bigint>(); // the relayer has answered "refused" for this note's proof
   dropped = new Set<bigint>(); // the user changed the amount once on this change note's withdrawal form
   paidOut = 0n;
   nextLeaf = 0n;
@@ -62,7 +65,7 @@ const changeRef = (p: NoteRecord): NoteRef => ({ kind: "change", l: p.leaf!.labe
 
 // The page: one act per call, chosen only from the store and the chain (and the proofs it holds in memory, which a kill
 // drops). Returns false once every goal is met.
-async function act(ns: NoteStore, world: World, proofs: Set<string>): Promise<boolean> {
+async function act(ns: NoteStore, world: World, proofs: Map<string, string>): Promise<boolean> {
   const all = await ns.list();
   // money in
   for (const n of all.filter((x) => x.state === "PLANNED" || x.state === "INCOMING")) {
@@ -91,7 +94,7 @@ async function act(ns: NoteStore, world: World, proofs: Set<string>): Promise<bo
       const drop = n.ref.kind === "change" && n.leaf!.value > 0n && !world.dropped.has(n.precommitment);
       if (arm || drop) {
         const held = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: world.now + WINDOW });
-        proofs.add(held.id);
+        proofs.set(held.id, held.attempt!);
         return true;
       }
     }
@@ -99,12 +102,12 @@ async function act(ns: NoteStore, world: World, proofs: Set<string>): Promise<bo
       // a HELD note always has its proof in this page: one held by a killed page was freed at the open
       assert.ok(proofs.has(n.id), "a dead page's HELD note survived the open");
       if (n.ref.kind === "change") {
-        await ns.move(n.id, "HELD", "UNSPENT"); // the user changed the amount: the proof is dropped
+        await ns.move(n.id, "HELD", "UNSPENT", { attempt: proofs.get(n.id) }); // the user changed the amount: dropped
         proofs.delete(n.id);
         world.dropped.add(n.precommitment);
         return true;
       }
-      return (await ns.move(n.id, "HELD", "RESERVED"), true); // written before the proof leaves
+      return (await ns.move(n.id, "HELD", "RESERVED", { attempt: proofs.get(n.id) }), true); // written before the proof leaves
     }
     if (n.state === "RESERVED") {
       if (world.spent.has(n.precommitment)) {
@@ -121,9 +124,23 @@ async function act(ns: NoteStore, world: World, proofs: Set<string>): Promise<bo
       }
       const held = world.relayer.get(n.precommitment);
       if (held) {
-        world.relayer.delete(n.precommitment);
         const refuse = world.goals[goal!]!.refuseFirst && !world.refused.has(n.precommitment);
-        if (refuse) {
+        const late = world.goals[goal!]!.lateLand === true;
+        if (refuse && late && !world.claimed.has(n.precommitment)) {
+          // the relayer answers "refused" but still holds the proof: that word frees nothing (F1)
+          world.claimed.add(n.precommitment);
+          await assert.rejects(ns.move(n.id, "RESERVED", "UNSPENT", { blockTimeMs: world.now }), /can still land/);
+          return (world.tick(), true);
+        }
+        world.relayer.delete(n.precommitment);
+        if (refuse && late) {
+          // ... and lands it at its deadline
+          world.refused.add(n.precommitment);
+          world.now = held.deadline;
+          world.spent.add(n.precommitment);
+          world.paidOut += held.amount;
+          world.land(held.changePc, n.leaf!.value - held.amount, n.leaf!.label);
+        } else if (refuse) {
           // the relayer holds it past its deadline: the vault refuses it then
           world.refused.add(n.precommitment);
           world.now = held.deadline + 1n;
@@ -134,8 +151,11 @@ async function act(ns: NoteStore, world: World, proofs: Set<string>): Promise<bo
         }
         return (world.tick(), true);
       }
-      if (world.now <= n.deadlineMs!) return ((world.now = n.deadlineMs! + 1n), world.tick(), true);
-      return (await ns.move(n.id, "RESERVED", "UNSPENT"), true); // past its deadline with nothing landed
+      if (world.now <= n.deadlineMs!) {
+        await assert.rejects(ns.move(n.id, "RESERVED", "UNSPENT", { blockTimeMs: world.now }), /can still land/, "freed before its deadline");
+        return ((world.now = n.deadlineMs! + 1n), world.tick(), true);
+      }
+      return (await ns.move(n.id, "RESERVED", "UNSPENT", { blockTimeMs: world.now }), true); // past its deadline, nothing landed
     }
   }
   return false;
@@ -196,7 +216,7 @@ async function run(goals: Goal[], killAt: number[]): Promise<{ world: World; fin
   let reopens = 0;
   for (let guard = 0; guard < 50; guard++) {
     const w = await openWalletStore({ indexedDB: idb });
-    const proofs = new Set<string>(); // the page's memory: gone at a kill
+    const proofs = new Map<string, string>(); // the page's memory (note id -> attempt): gone at a kill
     let ns: NoteStore | undefined;
     try {
       ns = await openNoteStore(counted(w, world)); // the open finishes what a killed page left
@@ -230,7 +250,7 @@ function endState(goals: Goal[], r: Awaited<ReturnType<typeof run>>): void {
 
 const GOALS: Goal[] = [
   { value: 102_070_000_000_000_000_000_000_000n, arm: 100_000_000_000_000_000_000_000_000n, refuseFirst: true },
-  { value: 20_120_000n, arm: 20_120_000n, refuseFirst: false }, // a change note of value 0
+  { value: 20_120_000n, arm: 20_120_000n, refuseFirst: true, lateLand: true }, // a change note of value 0
 ];
 
 test("P-01 (store part): a kill after every single step, then reopen: no double count, no lost note, the same end", async () => {
@@ -253,7 +273,7 @@ test("P-01 (store part): kills at random steps, several per run, 300 runs", asyn
     const goals: Goal[] = [];
     for (let g = 0, n = 1 + rnd(3); g < n; g++) {
       const value = big();
-      goals.push({ value, arm: (value * BigInt(1 + rnd(100))) / 100n, refuseFirst: rnd(2) === 0 });
+      goals.push({ value, arm: (value * BigInt(1 + rnd(100))) / 100n, refuseFirst: rnd(2) === 0, lateLand: rnd(2) === 0 });
     }
     const kills = Array.from({ length: rnd(4) }, () => 1 + rnd(60));
     endState(goals, await run(goals, kills));
