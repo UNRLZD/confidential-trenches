@@ -7,7 +7,7 @@
 // Every amount is a decimal string. A request's `id` is crypto.randomUUID(); a retry reuses it, and the page answers a
 // repeated id with its first answer, never a second run, so a timeout and a retry can never buy twice.
 
-import type { Chain, OrderTrigger } from "../orders/record";
+import type { Chain, OrderTrigger } from "../orders/record.ts";
 
 /** The fifteen request kinds, app to page. */
 export const SIGNPAGE_KINDS = [
