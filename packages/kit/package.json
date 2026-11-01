@@ -2,6 +2,7 @@
   "name": "@blindfill/kit",
   "type": "module",
   "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node -e \"import('@blindfill/kit').then(m => { if (!m.SIGNPAGE_KINDS) process.exit(1) })\""
   },
   "exports": {

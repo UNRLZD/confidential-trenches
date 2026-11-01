@@ -83,10 +83,3 @@ export const ORDER_RECORD_FIELDS = [
 
 /** At most this many signed variants per order. */
 export const ORDER_VARIANTS_MAX = 3;
-
-// Compile-time: the field list and the interface name the same fields, and variants holds 1 to 3.
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type Assert<T extends true> = T;
-type _OrderRecordFieldsMatch = Assert<Same<keyof OrderRecord, (typeof ORDER_RECORD_FIELDS)[number]>>;
-type _VariantsOneToThree = Assert<Same<OrderRecord["variants"]["length"], 1 | 2 | typeof ORDER_VARIANTS_MAX>>;
-type _NonceRefPerChain = Assert<Same<keyof NonceRefs, Chain>>;

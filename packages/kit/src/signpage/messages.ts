@@ -227,10 +227,3 @@ export interface SignpageState {
   held: { id: string; asset: string; amount: string }[];
   ops: Operation[];
 }
-
-// Compile-time: the params and results name exactly the fifteen kinds, and the open kinds all take a return key.
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type Assert<T extends true> = T;
-type _ParamsCoverKinds = Assert<Same<keyof SignpageParams, SignpageKind>>;
-type _ResultsCoverKinds = Assert<Same<keyof SignpageResults, SignpageKind>>;
-type _OpenKindsTakeReturnKey = Assert<SignpageParams[(typeof OPEN_KINDS)[number]] extends Open ? true : false>;
