@@ -36,7 +36,7 @@ function replay(answers) {
 test("the recording holds the testnet and mainnet RPCs' answers to both txs", () => {
   const urls = new Set(ANSWERS.map((a) => a.url));
   for (const u of ["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.mainnet.fastnear.com"]) assert.ok(urls.has(u), u);
-  const hashes = new Set(ANSWERS.filter((a) => a.method === "tx").map((a) => a.params.tx_hash));
+  const hashes = new Set(ANSWERS.filter((a) => a.method === "EXPERIMENTAL_tx_status").map((a) => a.params.tx_hash));
   assert.deepEqual([...hashes].sort(), [OLD.hash, FRESH.hash].sort());
   // no signature is kept: it has a NEAR secret key's shape
   assert.doesNotMatch(JSON.stringify(ANSWERS), /ed25519:[1-9A-HJ-NP-Za-km-z]{86,88}/);

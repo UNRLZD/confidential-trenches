@@ -23,6 +23,7 @@
 // The ids, the tx hashes and the code hash go to contracts/vault/deployments/testnet-usdc.json; then run
 // scripts/live-checks/vault-testnet-usdc.mjs. Testnet only; no dependency.
 //   node contracts/vault/scripts/testnet-usdc.mjs [--token <name>.testnet] [--out <file>]
+import "../../../scripts/net-window.mjs";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";

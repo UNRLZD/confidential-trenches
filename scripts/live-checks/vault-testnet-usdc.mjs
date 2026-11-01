@@ -13,6 +13,7 @@
 // --account checks another account against the same record (the recorded bad answer). --record writes every RPC answer
 // the run read to <file>, so the check's test can replay it (each NEAR signature replaced, as money-gate-testnet does).
 // --live writes the card's live record (CARD / live: PASS|FAIL, Money path: yes, one Tx line per tx) for the money gate.
+import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

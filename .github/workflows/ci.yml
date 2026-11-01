@@ -39,6 +39,8 @@ jobs:
         run: '"$RUNNER_TEMP/gitleaks" dir . --config .gitleaks.toml --redact --no-banner'
       - name: scan the history
         run: '"$RUNNER_TEMP/gitleaks" git . --config .gitleaks.toml --redact --no-banner'
+      - name: the config's planted cases
+        run: GITLEAKS="$RUNNER_TEMP/gitleaks" node --test scripts/ci/gitleaks-config.test.mjs
 
   deep-import:
     runs-on: ubuntu-24.04
@@ -76,16 +78,19 @@ jobs:
           node-version: 24
       - name: the gate's own tests
         run: node --test scripts/ci/verify-gate.test.mjs
-      # the gate runs as main has it, so a pull request cannot change its own gate
-      # the body goes in through env, never into the script text
+      # the gate runs as main has it, so a pull request cannot change its own gate: the base's whole scripts/ tree is
+      # extracted, so every file the gate imports comes from the base too; the gate reads the PR from its working
+      # directory, the head checkout (process.cwd(), scripts/ci/verify-gate.mjs and money-gate.mjs), never from its own
+      # path. scripts/ci/base-gate.test.mjs replays these lines. The body goes in through env, never into the script text.
       - name: every commit names its card, and each card has its live check
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          git show "$BASE:scripts/ci/verify-gate.mjs" > "$RUNNER_TEMP/verify-gate.mjs"
-          node "$RUNNER_TEMP/verify-gate.mjs" "$BASE" "$HEAD"
+          mkdir -p "$RUNNER_TEMP/base"
+          git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
+          node "$RUNNER_TEMP/base/scripts/ci/verify-gate.mjs" "$BASE" "$HEAD"
 
   # The gate waits out a 429 (scripts/ci/money-gate.mjs rpc()), and an old NEAR tx reads only on FastNEAR's and
   # near.org's archival RPCs, near.org at 4 a minute (10 per 10 min, near.org's deprecation post; read 2026-10-31).
@@ -108,6 +113,8 @@ jobs:
           node-version: 24
       - name: the gate's own tests
         run: node --test scripts/ci/money-gate.test.mjs
+      - name: the pull-request gate steps load each base gate with every file it imports
+        run: node --test scripts/ci/base-gate.test.mjs
       - name: the testnet live check replays its recorded good and bad answers
         run: node --test scripts/live-checks/money-gate-testnet.test.mjs
       - name: every money-path live record's txs read back on chain
@@ -120,8 +127,10 @@ jobs:
         run: |
           case "$EVENT" in
             pull_request)
-              git show "$PR_BASE:scripts/ci/money-gate.mjs" > "$RUNNER_TEMP/money-gate.mjs"
-              node "$RUNNER_TEMP/money-gate.mjs" "$PR_BASE" "$PR_HEAD" ;;
+              # as main has it, with the base's whole scripts/ tree (see verify-gate); it reads the head checkout
+              mkdir -p "$RUNNER_TEMP/base"
+              git archive "$PR_BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
+              node "$RUNNER_TEMP/base/scripts/ci/money-gate.mjs" "$PR_BASE" "$PR_HEAD" ;;
             push)
               if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
                 node scripts/ci/money-gate.mjs --all

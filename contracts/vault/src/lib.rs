@@ -14,6 +14,7 @@
 pub mod constants;
 pub mod events;
 pub mod field;
+pub mod poseidon;
 pub mod promise;
 
 use constants::*;

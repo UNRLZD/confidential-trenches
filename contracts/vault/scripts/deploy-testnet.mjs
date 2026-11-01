@@ -13,6 +13,7 @@
 // exports) or is not a testnet build (its bytes must name Circle's testnet USDC and "testnet", never mainnet's id or
 // "mainnet"), and after the deploy it refuses a config() that names anything but those pinned values. It writes the account, the tx hash and the wasm's sha256 to --out (default
 // contracts/vault/deployments/testnet-skeleton.json); then run scripts/live-checks/vault-skeleton.mjs.
+import "../../../scripts/net-window.mjs";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";

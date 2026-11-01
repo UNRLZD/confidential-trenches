@@ -64,7 +64,7 @@ test("bad answer made from the good one: the holder one base unit short: FAIL", 
 test("bad answer made from the good one: the deploy tx read as failed: FAIL", async () => {
   const deploy = deployment.txs.find((t) => /deploy the USDC wasm/.test(t.what)).hash;
   const patch = (json, { method, params }) => {
-    if (method === "tx" && params.tx_hash === deploy) json.result.status = { Failure: { ActionError: { index: 1 } } };
+    if (method === "EXPERIMENTAL_tx_status" && params.tx_hash === deploy) json.result.status = { Failure: { ActionError: { index: 1 } } };
     return json;
   };
   const r = await check({ deployment, fetchFn: replay(load("vault-testnet-usdc.answers.json"), patch), sleep });

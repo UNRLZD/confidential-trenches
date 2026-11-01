@@ -17,6 +17,7 @@
 //      type in fsn1 when Hetzner answers that one unavailable. Another location needs a new IP and so an owner DNS
 //      change: the script stops and says so instead.
 // The root password Hetzner returns for a server made without an ssh key is dropped unread: admin is over Tailscale.
+import "../../../scripts/net-window.mjs";
 import { execFileSync } from "node:child_process";
 
 export const API = "https://api.hetzner.cloud/v1";
@@ -117,8 +118,21 @@ export function readToken() {
   return execFileSync("security", ["find-generic-password", "-s", "ct-hetzner", "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 }
 
-/** argv without node and the script; deps are injected by the test. Returns the exit code. */
+/** The line printed for an error nobody handled: what failed, the step it was on, and the network cause code (e.cause.code). */
+export const errorLine = (e) => `create-server: ERROR: ${e?.message ?? e} (step: ${e?.step ?? "start"}${e?.cause?.code ? `, cause: ${e.cause.code}` : ""})`;
+
+/** argv without node and the script; deps are injected by the test. Returns the exit code. A throw carries the step it was on. */
 export async function main(argv, deps = {}) {
+  const at = { step: "start" };
+  try {
+    return await run(argv, deps, at);
+  } catch (e) {
+    if (e && typeof e === "object") e.step = at.step;
+    throw e;
+  }
+}
+
+async function run(argv, deps, at) {
   const { fetch: f = globalThis.fetch, token: getToken = readToken, log = console.log, err = console.error, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = deps;
   const dry = argv.includes("--dry-run");
   const commit = argv.includes("--commit") ? argv[argv.indexOf("--commit") + 1] : undefined;
@@ -137,11 +151,13 @@ export async function main(argv, deps = {}) {
     return 0;
   }
 
+  at.step = "1 Dockerfile on GitHub";
   const raw = await f(`https://raw.githubusercontent.com/${REPO}/${commit}/apps/helper/Dockerfile`, { method: "HEAD" });
   if (raw.status !== 200) {
     err(`refused: ${REPO} at ${commit} has no apps/helper/Dockerfile on GitHub (HTTP ${raw.status}); push the commit first`);
     return 1;
   }
+  at.step = "token from the Keychain";
   const token = getToken();
   if (!token) {
     err("refused: Keychain item ct-hetzner is empty");
@@ -158,6 +174,7 @@ export async function main(argv, deps = {}) {
   };
   const why = (r) => `HTTP ${r.status} ${r.j?.error?.code ?? ""} ${r.j?.error?.message ?? ""}`.trim();
 
+  at.step = "2 primary IP";
   const ip = await api("GET", `/primary_ips/${PRIMARY_IP.id}`);
   const pip = ip.j?.primary_ip;
   if (!ip.ok || !pip) {
@@ -170,6 +187,7 @@ export async function main(argv, deps = {}) {
   }
   log(`ok  primary IP ${PRIMARY_IP.name} ${pip.ip} in ${LOCATION}, unassigned`);
 
+  at.step = "3 server name";
   const ex = await api("GET", `/servers?name=${NAME}`);
   if (!ex.ok) {
     err(`refused: cannot list servers named ${NAME}: ${why(ex)}`);
@@ -180,6 +198,7 @@ export async function main(argv, deps = {}) {
     return 1;
   }
 
+  at.step = "4 firewall";
   let fw;
   const fl = await api("GET", `/firewalls?name=${FIREWALL.name}`);
   if (!fl.ok) {
@@ -204,6 +223,7 @@ export async function main(argv, deps = {}) {
   }
 
   for (const body of p.servers) {
+    at.step = `5 server create (${body.server_type})`;
     const r = await api("POST", "/servers", { ...body, firewalls: [{ firewall: fw.id }] });
     if (!r.ok) {
       if (UNAVAILABLE.has(r.j?.error?.code)) {
@@ -218,6 +238,7 @@ export async function main(argv, deps = {}) {
     log(`ok  server ${s.name} made: id ${s.id}, ${body.server_type} in ${LOCATION}, ${s.public_net?.ipv4?.ip ?? PRIMARY_IP.ip}`);
     const action = r.j.action;
     for (let i = 0; action && i < 90; i++) {
+      at.step = "5 server create action";
       const a = await api("GET", `/actions/${action.id}`);
       const st = a.j?.action?.status;
       if (st === "success") break;
@@ -239,7 +260,7 @@ if (import.meta.main) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (e) => {
-      console.error(`create-server: ERROR: ${e.message}`);
+      console.error(errorLine(e));
       process.exit(2);
     },
   );
