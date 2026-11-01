@@ -3,7 +3,9 @@
 // It reads packages/kit/src/helper/v1.ts and packages/kit/src/index.ts from GitHub (main, then the 06:00Z freeze tag)
 // and parses them with the TypeScript parser, never running them. It checks, against values pinned here from
 // markets.md at research main ffcba5e (the public repo carries no papers):
-//   - the file imports nothing, and index.ts exports it ("export * from ./helper/v1");
+//   - the file imports nothing outside the kit (only `import type` of Chain and OrderRecord from ../orders/record, the
+//     CO's call at 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
+//     TS2308), and index.ts exports it ("export * from ./helper/v1");
 //   - the path list equals H7's table (markets.md:3329-3345) with 7.1's new POST /v1/log (:3277), and the health parts
 //     are {proxy, relay, intents, delegate, orders, log} (:3278, :3331);
 //   - /v1/bind's body is one signed delegate, and its deposit shape is a DelegateAction holding ft_transfer_call (:3274,
@@ -77,6 +79,9 @@ export const CODES = {
 export const STATUS = { token_halted: 503, receiver_is_vault: 403, id_not_ours: 403, sender_struck: 403, prepay_open: 409, not_paid: 409, receiver_not_registered: 409 };
 const DELEGATE_FIELDS = ["sender_id", "receiver_id", "actions", "nonce", "max_block_height", "public_key"];
 const NEVER_IN_INTENTS = ["msg", "memo", "storage_deposit"];
+// the one import v1.ts makes, and the wallet's exported names it must not declare (CO, 00:35Z)
+export const IMPORTS = ['import type { Chain, OrderRecord } from "../orders/record";'];
+export const WALLET_NAMES = ["Chain", "CHAINS", "TxRef", "Stage", "ErrorCode", "Operation", "OrderState", "WalletState", "OrderRecord", "SigninWay", "ReturnKey"];
 
 // ---- reading TypeScript as data ----
 const fail = (m) => {
@@ -167,7 +172,7 @@ const membersOf = ({ decls }, name) => {
 const imports = ({ sf }) => {
   const found = [];
   const visit = (n) => {
-    if (ts.isImportDeclaration(n) || ts.isImportEqualsDeclaration(n) || (ts.isExportDeclaration(n) && n.moduleSpecifier)) found.push(n.getText(sf).slice(0, 60));
+    if (ts.isImportDeclaration(n) || ts.isImportEqualsDeclaration(n) || (ts.isExportDeclaration(n) && n.moduleSpecifier)) found.push(n.getText(sf).replace(/\s+/g, " "));
     else if (ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) found.push(n.getText(sf).slice(0, 60));
     else if (ts.isImportTypeNode(n)) found.push(n.getText(sf).slice(0, 60));
     ts.forEachChild(n, visit);
@@ -195,9 +200,13 @@ export function checkV1(text) {
   } catch (e) {
     return [[false, `v1.ts ${e.message}`]];
   }
-  t("v1.ts imports nothing", () => {
+  t("v1.ts imports only the kit's order record", () => {
     const i = imports(f);
-    return i.length === 0 || `imports ${i.join("; ")}`;
+    return same(i, IMPORTS) || `imports ${i.map((x) => x.slice(0, 80)).join("; ") || "nothing"}`;
+  });
+  t("v1.ts redefines none of the wallet's exported names", () => {
+    const dup = WALLET_NAMES.filter((n) => f.decls.has(n));
+    return dup.length === 0 || `declares ${dup.join(", ")}`;
   });
   t("the path list equals H7 with 7.1's changes", () => {
     const got = constOf(f, "HELPER_V1_PATHS").map((p) => `${p.method} ${p.path}`);

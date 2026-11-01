@@ -7,7 +7,8 @@
 //   health_up: a /v1/health answer written to H7 and card helper-host-health's end state (every part "down"), read
 //     from APP_HOST's Origin and from a stranger's, since the host does not answer yet.
 // The bad answers are the good one with one change each: a /v1/intents type that carries a msg (a move into the
-// vault), a CORS list holding "*", and more below. Each must FAIL.
+// vault), a CORS list holding "*", and more below (an import from outside the kit, the wallet's names redefined). Each
+// must FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -47,7 +48,7 @@ const failed = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 test("recorded good answer, main and the tag, the helper not up yet: PASS", async () => {
   const r = await check({ fetchFn: replay(REC.good), now: AFTER, tag: TAG });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.filter((l) => l.startsWith("ok ")).length, 2 * 9 + 1, r.lines.join("\n"));
+  assert.equal(r.lines.filter((l) => l.startsWith("ok ")).length, 2 * 10 + 1, r.lines.join("\n"));
   assert.ok(r.lines.includes(`ok  main's v1.ts equals the tag ${TAG}'s byte for byte`));
   assert.match(r.lines.at(-1), /^-- {2}https:\/\/api\.confidential\.unrealized\.trade\/v1\/health does not answer yet \(TimeoutError\)/);
 });
@@ -82,7 +83,9 @@ test("recorded bad answer: a CORS list holding \"*\": FAIL", async () => {
 
 test("more bad answers, each caught by its own line", () => {
   const cases = [
-    ["an import", (t) => `import { x } from "../core";\n${t}`, /^v1\.ts imports nothing: imports import \{ x \}/],
+    ["an import from outside the kit", (t) => t.replace('import type { Chain, OrderRecord } from "../orders/record";', 'import type { Chain, OrderRecord } from "../orders/record";\nimport { x } from "@blindfill/wallet";'), /^v1\.ts imports only the kit's order record: imports .*@blindfill\/wallet/],
+    ["no import, the order record redefined", (t) => t.replace('import type { Chain, OrderRecord } from "../orders/record";', 'export type Chain = "solana" | "base" | "robinhood" | "near";\nexport interface OrderRecord { v: 1; variants: [string]; expires_at?: number; order_id: string }'), null],
+    ["a local Chain beside the import", (t) => t.replace("export type HelperBase64 = string;", 'export type HelperBase64 = string;\nexport type ErrorCode = string;'), /^v1\.ts redefines none of the wallet's exported names: declares ErrorCode/],
     ["/v1/log dropped", (t) => t.replace('  { method: "POST", path: "/v1/log", part: "log", limitBytes: 4096 },\n', ""), /path list .*missing \[POST \/v1\/log\]/],
     ["a third intent kind", (t) => t.replace("export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw;", 'export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw | { intent: "mt_withdraw" };'), /intent kinds \[ft_withdraw,mt_withdraw,transfer\]/],
     ["storage_deposit on ft_withdraw", (t) => t.replace("  amount: HelperDecimal;\n}\n\nexport type HelperIntent", "  amount: HelperDecimal;\n  storage_deposit?: HelperDecimal;\n}\n\nexport type HelperIntent"), /a field storage_deposit is in the body/],
@@ -97,6 +100,11 @@ test("more bad answers, each caught by its own line", () => {
     const text = edit(good);
     assert.notEqual(text, good, what);
     const bad = checkV1(text).filter(([ok]) => !ok).map(([, line]) => line);
+    if (want === null) {
+      // two lines: the import is gone, and Chain and OrderRecord are declared here
+      assert.deepEqual(bad, ["v1.ts imports only the kit's order record: imports nothing", "v1.ts redefines none of the wallet's exported names: declares Chain, OrderRecord"], what);
+      continue;
+    }
     assert.equal(bad.length, 1, `${what}: ${bad.join(" | ")}`);
     assert.match(bad[0], want, what);
   }
