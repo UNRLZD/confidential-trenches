@@ -7,7 +7,9 @@
 //   node --test apps/helper/src/bind/send.test.ts
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import * as nodeFs from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,6 +19,7 @@ import {
   MAX_FAILED_SENDS,
   PREPAY_BYTES,
   PREPAY_MAX_BYTES,
+  PER_P_WORST_YOCTO,
   RELAYER_FLOOR_YOCTO,
   RpcError,
   USDC_PAUSED,
@@ -38,10 +41,11 @@ import {
   type SendDeps,
   type SendReads,
   type Settled,
+  type StoreFs,
   type TxOutcome,
   type TxRef,
 } from "./send.ts";
-import { USDC_CODE_HASH, type TokenStatus } from "../token-status/status.ts";
+import { USDC_CODE_HASH, pausedAt, type TokenStatus } from "../token-status/status.ts";
 
 const VAULT = "vault.confidential.unrlzd.near";
 const RELAYER = "bind.test.near";
@@ -104,6 +108,9 @@ class Chain {
   resolved: string[] = [];
   statuses: TokenStatus[] = [OPEN];
   statusAsks = 0;
+  /** The watch's pause history's answer for a height (status.ts pausedAt). */
+  pausedAt: (height: bigint) => boolean | null = () => false;
+  resolveOpts: { resend: boolean; gone: boolean }[] = [];
   /** Runs inside a relayer send, after its durable write (a race). */
   during?: () => Promise<void>;
   /** Final height moves by this after each prepay that lands, besides its receipts. */
@@ -176,8 +183,9 @@ class Chain {
     return {
       account: RELAYER,
       balance: async () => this.balance,
-      resolve: async (tx) => {
+      resolve: async (tx, opts) => {
         this.resolved.push(tx.tx_hash);
+        this.resolveOpts.push(opts);
         return this.resolveAs.get(tx.tx_hash) ?? this.outcomes.get(tx.tx_hash) ?? { kind: "unknown", tx_hash: tx.tx_hash, why: "not found" };
       },
       send: async (action, guard, before) => {
@@ -207,6 +215,7 @@ class Chain {
         this.statusAsks++;
         return { ...s, block_height: s.block_height === -1 ? Number(this.final + this.ahead) : s.block_height };
       },
+      pausedAt: async (h) => this.pausedAt(h),
     };
   }
   prepays = () => this.txs.filter((t) => t.action.kind === "storage_prepay");
@@ -353,12 +362,19 @@ test("the count and the carried index are one write before the send goes: a cras
   assert.equal(ok(await w.carry(req)), r.sends[0]!.tx_hash);
 });
 
-test("a send dropped before inclusion frees its bytes: resign_needed, not counted, and the same bytes are carried again", async () => {
+test("a send of ours dropped before inclusion goes again once, signed afresh: U's call lands, nothing counted", async () => {
   const w = world();
   w.chain.fates = ["dropped", "lands"];
+  const h = ok(await w.carry(next(w)));
+  assert.deepEqual([rec(w).sends.map((x) => x.state), rec(w).failed, rec(w).landed, rec(w).sends[1]!.tx_hash], [["dropped", "landed"], 0, true, h]);
+});
+
+test("a send dropped twice frees its bytes: resign_needed, not counted, and the same bytes are carried again", async () => {
+  const w = world();
+  w.chain.fates = ["dropped", "dropped", "lands"];
   const req = next(w);
   assert.equal(code(await w.carry(req)), "resign_needed");
-  assert.deepEqual([rec(w).sends[0]!.state, rec(w).failed], ["dropped", 0]);
+  assert.deepEqual([rec(w).sends.map((x) => x.state), rec(w).failed], [["dropped", "dropped"], 0]);
   ok(await w.carry(req));
   assert.equal(rec(w).landed, true);
 });
@@ -550,57 +566,76 @@ test("(i) a send landed for U at another amount, or by a stranger on P, is not U
   assert.deepEqual([rec(v).failed, rec(v).landed, rec(v).sends[0]!.state], [1, false, "failed"]);
 });
 
-test("(i) R3's exception: USDC's own receipt failed with its paused error and the watch, caught up, shows the pause: not counted", async () => {
+test("(i) R3's exception: USDC's own receipt failed with its paused error and the watch shows USDC paused at that height: not counted", async () => {
   const w = world();
   w.chain.fates = ["paused", "lands"];
-  w.chain.statuses = [OPEN, OPEN, OPEN, OPEN, HALTED]; // before the checks, check 9, the prepay, the send, the read after it
+  const asked: bigint[] = [];
+  w.chain.pausedAt = (h) => (asked.push(h), true);
   ok(await w.carry(next(w)));
   assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state, rec(w).sends[0]!.counted], [0, "exempt", false]);
-  w.chain.statuses = [OPEN];
-  w.chain.statusAsks = 0;
+  assert.deepEqual(asked, [w.chain.final], "asked at the token receipt's own height");
+  w.chain.pausedAt = () => false;
   ok(await w.carry(next(w)));
   assert.equal(rec(w).landed, true);
 });
 
-test("(i) R3's exception reads the watch at the failure's height: unpaused only after it still exempts", async () => {
+test("PROBE N6: paused at the failure, unpaused, then a blocklist and another pause: the history still says paused there, not counted", async () => {
   const w = world();
   w.chain.fates = ["paused"];
-  const unpausedLater: TokenStatus = { ...OPEN, last_event: { name: "unpaused", block_height: 1_000_000, receipt_id: "r" } };
-  w.chain.statuses = [OPEN, OPEN, OPEN, OPEN, unpausedLater];
+  let failAt = 0n;
+  w.chain.pausedAt = (h) => {
+    failAt = h;
+    const at = Number(h);
+    return pausedAt({ from: 0, pausedAtFrom: false, caughtUpTo: at + 50, events: [{ name: "paused", block_height: at - 3 }, { name: "unpaused", block_height: at + 2 }, { name: "paused", block_height: at + 9 }] }, at);
+  };
   ok(await w.carry(next(w)));
+  assert.ok(failAt > 0n);
   assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state], [0, "exempt"]);
+});
+
+test("status.ts pausedAt: the state at a height from the history; a pause or unpause in that block is paused; null outside what was read", () => {
+  const h = { from: 100, pausedAtFrom: false, caughtUpTo: 200, events: [{ name: "unpaused" as const, block_height: 150 }, { name: "paused" as const, block_height: 120 }] };
+  assert.deepEqual([110, 119, 120, 121, 149, 150, 151, 200].map((x) => pausedAt(h, x)), [false, false, true, true, true, true, false, false]);
+  assert.deepEqual([pausedAt(h, 99), pausedAt(h, 201)], [null, null]);
+  assert.equal(pausedAt({ ...h, pausedAtFrom: true, events: [] }, 150), true);
+});
+
+test("(i) R3's exception waits for the watch: no answer at the failure's height leaves the send pending; a later call settles it", async () => {
   const v = world();
   v.chain.fates = ["paused"];
-  const unpausedBefore: TokenStatus = { ...OPEN, last_event: { name: "unpaused", block_height: 5, receipt_id: "r" } };
-  v.chain.statuses = [OPEN, OPEN, OPEN, OPEN, unpausedBefore];
+  v.chain.pausedAt = () => null;
   ok(await v.carry(next(v)));
-  assert.deepEqual([rec(v).failed, rec(v).sends[0]!.state], [1, "failed"]);
+  assert.deepEqual([rec(v).failed, rec(v).sends[0]!.state, rec(v).sends[0]!.counted], [0, "pending", true]);
+  v.chain.pausedAt = () => true;
+  v.chain.statuses = [OPEN, OPEN, HALTED]; // before the checks, check 9; the prepay's guard holds
+  v.chain.statusAsks = 0;
+  assert.equal(code(await v.carry(next(v))), "token_halted");
+  assert.deepEqual([rec(v).failed, rec(v).sends[0]!.state], [0, "exempt"]);
 });
 
-test("(i) R3's exception waits for the watch: not caught up, or caught up short of the failure's height, leaves the send pending; a later call settles it", async () => {
-  for (const short of [LAGGING, { ...HALTED, block_height: 5 }]) {
-    const v = world();
-    v.chain.fates = ["paused"];
-    v.chain.statuses = [OPEN, OPEN, OPEN, OPEN, short];
-    ok(await v.carry(next(v)));
-    assert.deepEqual([rec(v).failed, rec(v).sends[0]!.state, rec(v).sends[0]!.counted], [0, "pending", true]);
-    v.chain.statuses = [OPEN, OPEN, HALTED]; // before the checks, check 9, the settle's read; the prepay's guard holds
-    v.chain.statusAsks = 0;
-    assert.equal(code(await v.carry(next(v))), "token_halted");
-    assert.deepEqual([rec(v).failed, rec(v).sends[0]!.state], [0, "exempt"]);
-  }
-});
-
-test("(i) the paused error from a receipt that is not the token's counts, and so does the token's while the watch shows USDC open", async () => {
+test("(i) the paused error from a receipt that is not the token's counts, and so does the token's when the history says open there", async () => {
   const w = world();
   w.chain.fates = ["paused_elsewhere"];
-  w.chain.statuses = [OPEN, OPEN, OPEN, OPEN, HALTED];
+  w.chain.pausedAt = () => true;
   ok(await w.carry(next(w)));
   assert.equal(rec(w).failed, 1);
   const v = world();
   v.chain.fates = ["paused"];
   ok(await v.carry(next(v)));
   assert.equal(rec(v).failed, 1);
+});
+
+test("a delegate that ran past its max_block_height (DelegateActionExpired) is the relayer's late delivery: dropped, never counted", async () => {
+  const w = world();
+  const real = w.deps.relayer.send;
+  w.deps.relayer.send = async (action, guard, before) => {
+    const out = await real(action, guard, before);
+    if (action.kind === "delegate" && out.kind === "final") return { ...out, receipts: [{ executor: w.u.id, ok: false, failure: '{"ActionError":{"kind":{"DelegateActionExpired":null}}}', height: w.chain.final }] };
+    return out;
+  };
+  w.chain.fates = ["refused_by_vault"];
+  assert.equal(code(await w.carry(next(w))), "resign_needed");
+  assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state, w.chain.sends().length], [0, "dropped", 1]);
 });
 
 test("(i) a failed prepay counts; with P not in the pages it rolls back and asks for a re-sign; with P in the pages it closes P", async () => {
@@ -677,6 +712,17 @@ test("M1: createSendReads.depositSettled answers unknown until both finals pass 
   assert.deepEqual(await reads.depositSettled(78n, 1009n), { state: "absent" });
 });
 
+test("PROBE N5: depositSettled reads the pages at the height that passed, though the lower provider then answers a lower final", async () => {
+  const row = { index: 0, precommitment: "77", label: "0", value: "5", leaf_index: 0, depositor: "a".repeat(64) };
+  let lowAsks = 0;
+  const mk = (high: boolean): Rpc => async (method, params) => {
+    if (method === "block") return { header: { height: high ? 1011 : lowAsks++ === 0 ? 1011 : 1007 } }; // a load balancer
+    return { result: [...Buffer.from(JSON.stringify((params as { block_id: number }).block_id >= 1009 ? [row] : []))] };
+  };
+  const reads = createSendReads([mk(true), mk(false)], { vault: VAULT, token: VAULT_TOKEN }, 50);
+  assert.deepEqual(await reads.depositSettled(77n, 1009n), { state: "held", depositor: row.depositor, value: 5n });
+});
+
 test("createSendReads: two providers that disagree are refused; finalHeight is the lower, newestFinalHeight the higher", async () => {
   const mk = (final: number, balance: string): Rpc => async (method) => {
     if (method === "block") return { header: { height: final } };
@@ -729,11 +775,28 @@ test("M2: a prepay that never went out is held while unknown, then rolled back o
   assert.deepEqual([w.chain.prepays().length, rec(w).prepaid_bytes, rec(w).prepays.length, rec(w).failed], [1, 756, 1, 0]);
 });
 
-test("M2: a prepay that never went out, dropped at once: rolled back, resign_needed, not counted", async () => {
+test("M2: a prepay dropped at once is rolled back and goes again once; dropped twice, resign_needed, nothing counted", async () => {
   const w = world();
   w.chain.prepayFates = ["dropped", "lands"];
-  assert.equal(code(await w.carry(next(w))), "resign_needed");
-  assert.deepEqual([rec(w).prepaid_bytes, rec(w).prepays.length, rec(w).failed], [0, 0, 0]);
+  ok(await w.carry(next(w)));
+  assert.deepEqual([rec(w).prepaid_bytes, rec(w).prepays.length, rec(w).failed, w.chain.prepays().length], [756, 1, 0, 1]);
+  const v = world();
+  v.chain.prepayFates = ["dropped", "dropped", "lands"];
+  assert.equal(code(await v.carry(next(v))), "resign_needed");
+  assert.deepEqual([rec(v).prepaid_bytes, rec(v).prepays.length, rec(v).failed, v.chain.sends().length], [0, 0, 0, 0]);
+});
+
+test("PROBE N8 (carry side): an open send is re-sent only while its delegate is K or more ahead, and is gone once past it", async () => {
+  const w = world();
+  w.chain.fates = ["unknown", "lands"];
+  ok(await w.carry(next(w)));
+  const mbh = BigInt(rec(w).sends[0]!.max_block_height);
+  for (const [final, want] of [[mbh - 20n, { resend: true, gone: false }], [mbh - 19n, { resend: false, gone: false }], [mbh, { resend: false, gone: true }]] as const) {
+    w.chain.final = final;
+    w.chain.resolveOpts = [];
+    assert.equal(code(await w.carry(signed(w.u, P, 101n, final + 100n))), "in_flight");
+    assert.deepEqual(w.chain.resolveOpts, [want]);
+  }
 });
 
 test("M2: a prepay that failed on chain, read only on the next call, counts once and is rolled back before the next prepay", async () => {
@@ -870,8 +933,9 @@ test("R1 at once: two senders on one P, each past check 7 before either is bound
   assert.equal(w.chain.prepays().length, 1);
 });
 
-test("relayer_low: under 0.3302526 N (one send's gas at 1e9 bought up front plus row 7's worst case) answers 503 and sends nothing", async () => {
-  assert.equal(RELAYER_FLOOR_YOCTO, 330_252_600_000_000_000_000_000n);
+test("relayer_low: under 0.310501 N (one send's gas at 1e9 bought up front plus a (U, P)'s worst, 0.010501 N) answers 503 and sends nothing", async () => {
+  assert.equal(PER_P_WORST_YOCTO, ((9040n + 3n * 300n + 2n * 280n + 1n) * 10n ** 24n) / 10n ** 6n); // 0.00904 + 3 x 0.0003 + 2 x 0.0002805
+  assert.equal(RELAYER_FLOOR_YOCTO, 310_501_000_000_000_000_000_000n);
   const w = world();
   w.chain.balance = RELAYER_FLOOR_YOCTO - 1n;
   const a = await w.carry(next(w));
@@ -902,202 +966,492 @@ test("a request that is not canonical base64 is refused at check 1 and never mat
   assert.equal(code(await w.carry({ signed_delegate: loose })), "bad_shape");
 });
 
+
 // ---- M3, M4: the store ----
 
-test("M3: one process per store: a second open of the directory is refused while the first holds it, and taken after close", () => {
+const emptyRecord = (u: string) => ({ u, p: "1", prepaid_bytes: 0, failed: 0, struck: false, landed: false, p_closed: false, prepays: [], sends: [], carried: [] });
+/** A child process that opens the store on `dir`, writes `won` or `lost` to `dir/<tag>`, then holds it `holdMs`. */
+function storeChild(dir: string, tag: string, holdMs: number) {
+  const src = `
+    import { writeFileSync } from "node:fs";
+    import { createFileStore } from ${JSON.stringify(new URL("./send.ts", import.meta.url).href)};
+    let out = "won";
+    try { createFileStore(${JSON.stringify(dir)}); } catch (e) { out = "lost " + e.message; }
+    writeFileSync(${JSON.stringify(dir)} + "/" + ${JSON.stringify(tag)}, out);
+    setTimeout(() => {}, ${holdMs});`;
+  return spawn(process.execPath, ["--input-type=module", "-e", src], { stdio: "ignore" });
+}
+const exited = (c: ReturnType<typeof spawn>) => new Promise((r) => c.on("exit", r));
+const until = async (f: () => boolean) => {
+  for (let i = 0; i < 400 && !f(); i++) await new Promise((r) => setTimeout(r, 25));
+};
+
+test("M3: one process per store: a second open is refused while the first holds it, and opens after close", () => {
   const dir = mkdtempSync(join(tmpdir(), "bind-lock-"));
   const a = createFileStore(dir);
-  assert.throws(() => createFileStore(dir), /held by process/);
+  assert.throws(() => createFileStore(dir), /is held by another process/);
   a.close();
-  createFileStore(dir).close();
-  writeFileSync(join(dir, "lock"), "999999999"); // a lock whose process is gone is taken over
   const c = createFileStore(dir);
-  assert.throws(() => createFileStore(dir), /held by process/);
   c.close();
-  assert.throws(() => c.put({ u: "ab".repeat(32), p: "1", prepaid_bytes: 0, failed: 0, struck: false, landed: false, p_closed: false, prepays: [], sends: [], carried: [] }), /closed/);
+  assert.throws(() => c.put(emptyRecord("ab".repeat(32))), /closed/);
 });
 
-test("M4: create-if-absent links a written temp file: the name is whole or absent, EEXIST keeps the first, no temp is left", () => {
-  const dir = mkdtempSync(join(tmpdir(), "bind-once-"));
-  writeFileSync(join(dir, ".tmp-1-0"), "{"); // a temp left by a crash before its link: never read as a record
+test("PROBE N2: a holder killed with SIGKILL leaves no stale lock: the next start (any PID, PID 1 again in a container) opens the store", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-kill-"));
+  const child = storeChild(dir, "first", 60_000);
+  await until(() => existsSync(join(dir, "first")));
+  assert.equal(readFileSync(join(dir, "first"), "utf8"), "won");
+  assert.throws(() => createFileStore(dir), /is held by another process/);
+  child.kill("SIGKILL");
+  await exited(child);
+  createFileStore(dir).close();
+});
+
+test("PROBE N3: starts at the same moment leave exactly one holder", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-race-"));
+  const kids = ["a", "b", "c", "d"].map((t) => storeChild(dir, t, 1_500));
+  await until(() => ["a", "b", "c", "d"].every((t) => existsSync(join(dir, t))));
+  const outs = ["a", "b", "c", "d"].map((t) => readFileSync(join(dir, t), "utf8"));
+  assert.equal(outs.filter((o) => o === "won").length, 1, outs.join(" | "));
+  await Promise.all(kids.map(exited));
+});
+
+test("PROBE N3, scheduled: B pauses right after any read of the lock while A takes the store; B resumes: still exactly one holder", async () => {
+  // the review's interleaving (lockchild2.mjs): a start that reads the lock's contents and acts on them later can
+  // remove a live holder's lock; a kernel lock has nothing to read, so the pause point never comes and A waits it out
+  const dir = mkdtempSync(join(tmpdir(), "bind-race2-"));
+  writeFileSync(join(dir, "lock"), "99990");
+  const send = JSON.stringify(new URL("./send.ts", import.meta.url).href);
+  const child = (role: "A" | "B") => `
+    import fs from "node:fs";
+    import { syncBuiltinESMExports } from "node:module";
+    const dir = ${JSON.stringify(dir)};
+    const spin = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    const waitFor = (f, ms) => { const t0 = Date.now(); while (!fs.existsSync(dir + "/" + f) && Date.now() - t0 < ms) spin(1); };
+    if (${JSON.stringify(role)} === "B") {
+      const orig = fs.readFileSync;
+      fs.readFileSync = function (p, ...rest) {
+        const v = orig.call(this, p, ...rest);
+        if (String(p).endsWith("/lock") && !fs.existsSync(dir + "/b-read")) { fs.writeFileSync(dir + "/b-read", ""); waitFor("a-done", 5000); }
+        return v;
+      };
+      syncBuiltinESMExports();
+    }
+    const { createFileStore } = await import(${send});
+    if (${JSON.stringify(role)} === "A") waitFor("b-read", 1000);
+    let out = "won";
+    try { createFileStore(dir); } catch (e) { out = "lost"; }
+    fs.writeFileSync(dir + "/" + ${JSON.stringify(role)} + "-" + out, "");
+    if (${JSON.stringify(role)} === "A") fs.writeFileSync(dir + "/a-done", "");
+    spin(1500);`;
+  const kids = (["B", "A"] as const).map((r) => spawn(process.execPath, ["--input-type=module", "-e", child(r)], { stdio: "ignore" }));
+  await Promise.all(kids.map(exited));
+  assert.equal(readdirSync(dir).filter((f) => /^(A|B)-won$/.test(f)).length, 1, readdirSync(dir).join(" "));
+});
+
+test("PROBE N4: temps a crash left (any name) never block a start and are swept once the lock is held; temp names are random", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-tmp-"));
+  writeFileSync(join(dir, `.tmp-${process.pid}-0`), "partial");
+  writeFileSync(join(dir, ".tmp-1-0"), "{");
   const s = createFileStore(dir);
-  const u = "ab".repeat(32);
-  const r = { u, p: "1", prepaid_bytes: 0, failed: 0, struck: false, landed: false, p_closed: false, prepays: [], sends: [], carried: [] };
-  assert.equal(s.get(u), null);
-  assert.equal(s.create(r).created, true);
-  assert.equal(s.create({ ...r, p: "2" }).created, false);
-  assert.equal(s.get(u)!.p, "1");
-  assert.equal(s.bind(5n, u), u);
-  assert.equal(s.bind(5n, "cd".repeat(32)), u);
-  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith(".tmp") && f !== ".tmp-1-0"), []);
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith(".tmp")), []);
+  const names: string[] = [];
+  const spy = createFileStore(mkdtempSync(join(tmpdir(), "bind-tmpname-")), { ...nodeFs, openSync: ((p: string, f: string) => (names.push(String(p)), nodeFs.openSync(p, f))) as typeof nodeFs.openSync });
+  spy.put(emptyRecord("ab".repeat(32)));
+  spy.put(emptyRecord("ab".repeat(32)));
+  const tmps = names.filter((n) => n.includes(".tmp-"));
+  assert.equal(tmps.length, 2);
+  assert.ok(tmps.every((n) => /\.tmp-[0-9a-f]{32}$/.test(n)) && tmps[0] !== tmps[1]);
   s.close();
-  assert.equal(existsSync(join(dir, "lock")), false);
+  spy.close();
 });
 
-// ---- the relayer on two fake providers ----
+test("M4: create-if-absent is temp write, fsync, close, link, unlink, fsync of the directory; a replace is temp write, fsync, rename, fsync of the directory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-order-"));
+  const calls: string[] = [];
+  const name = (p: unknown) => (typeof p === "string" ? (p === dir ? "dir" : p.includes(".tmp-") ? "tmp" : p.slice(dir.length + 1).replace(/^(u|p)-.*/, "$1")) : "fd");
+  const rec = (fn: string, f: (...a: never[]) => unknown) => (...a: unknown[]) => {
+    calls.push(`${fn} ${name(a[0])}${fn === "linkSync" || fn === "renameSync" ? " " + name(a[1]) : ""}`);
+    return (f as (...a: unknown[]) => unknown)(...a);
+  };
+  const fs = Object.fromEntries((["closeSync", "fsyncSync", "linkSync", "openSync", "renameSync", "unlinkSync", "writeSync"] as const).map((k) => [k, rec(k, nodeFs[k] as never)]));
+  const s = createFileStore(dir, { ...nodeFs, ...fs } as StoreFs);
+  const u = "ab".repeat(32);
+  const want = (end: string[]) => ["openSync tmp", "writeSync fd", "fsyncSync fd", "closeSync fd", ...end, "openSync dir", "fsyncSync fd", "closeSync fd"];
+  calls.length = 0;
+  assert.equal(s.create(emptyRecord(u)).created, true);
+  assert.deepEqual(calls, want(["linkSync tmp u", "unlinkSync tmp"]));
+  calls.length = 0;
+  assert.equal(s.create(emptyRecord(u)).created, false);
+  assert.deepEqual(calls, want(["linkSync tmp u", "unlinkSync tmp"]), "EEXIST: the temp unlinked, the directory synced");
+  assert.equal(s.get(u)!.p, "1");
+  calls.length = 0;
+  s.put({ ...emptyRecord(u), p: "2" });
+  assert.deepEqual(calls, want(["renameSync tmp u"]));
+  calls.length = 0;
+  assert.equal(s.bind(5n, u), u);
+  assert.deepEqual(calls, want(["linkSync tmp p", "unlinkSync tmp"]));
+  assert.equal(s.bind(5n, "cd".repeat(32)), u);
+  s.close();
+});
+
+// ---- the relayer on fake providers that answer as nearcore does ----
+// send_tx with wait_until NONE validates the transaction and answers a refusal as INVALID_TRANSACTION, the
+// InvalidTxError in `data` (near-jsonrpc-primitives 0.37.4 types/transactions.rs, From<RpcTransactionError>);
+// broadcast_tx_async answers only a hash (near-jsonrpc-client 0.22.0, its error type has no variant). A transaction is included after landMs if its nonce is still above the key's, else dropped silently. `tx`
+// answers UNKNOWN_TRANSACTION for a hash it has not seen, and a regular provider forgets after its garbage collection.
 
 function relayerSecret(): string {
   const { privateKey } = generateKeyPairSync("ed25519");
   const j = privateKey.export({ format: "jwk" });
   return "ed25519:" + base58(Buffer.concat([Buffer.from(j.d as string, "base64url"), Buffer.from(j.x as string, "base64url")]));
 }
-const txNonce = (b64: string) => {
+type ParsedTx = { hash: string; nonce: bigint; blockHash: string } & ({ action: 2; precommitment: string; bytes: bigint } | { action: 8; delegate: ReturnType<typeof decodeSignedDelegate> });
+function parseTx(b64: string): ParsedTx {
   const b = Buffer.from(b64, "base64");
-  return b.readBigUInt64LE(4 + b.readUInt32LE(0) + 33);
-};
-const nearError = (cause: unknown) => new RpcError("broadcast_tx_async", { name: "HANDLER_ERROR", cause });
-type ProviderOpts = {
-  /** ms until a broadcast lands */
-  landMs?: (b64: string) => number;
-  /** an error this provider throws for this call, or undefined */
-  fail?: (i: number, method: string, b64?: string) => unknown;
-};
-/** Two fake providers over one ledger: a broadcast lands after landMs and moves the key's nonce; `tx` reads it. */
-function providers(opts: ProviderOpts = {}) {
-  const state = { keyNonce: 10n, final: 2_000n, landed: new Map<string, bigint>(), nonces: [] as bigint[] };
-  const hashOf = (b64: string) => {
-    const b = Buffer.from(b64, "base64");
-    return base58(createHash("sha256").update(b.subarray(0, b.length - 65)).digest());
+  let i = 0;
+  const s = () => {
+    const n = b.readUInt32LE(i);
+    i += 4;
+    const v = b.subarray(i, i + n);
+    i += n;
+    return v;
   };
-  const mk = (i: number): Rpc => async (method, params) => {
-    const b64 = method === "broadcast_tx_async" ? (params as string[])[0]! : undefined;
-    const err = opts.fail?.(i, method, b64);
-    if (err !== undefined) throw err;
-    if (method === "block") {
-      const p = params as { block_id?: string };
-      return { header: { height: Number(state.final), hash: base58(createHash("sha256").update(`b${p.block_id ?? state.final}`).digest()) } };
+  s();
+  i += 33;
+  const nonce = b.readBigUInt64LE(i);
+  i += 8;
+  s();
+  const blockHash = base58(b.subarray(i, i + 32));
+  i += 32 + 4;
+  const tag = b[i++]!;
+  const hash = base58(createHash("sha256").update(b.subarray(0, b.length - 65)).digest());
+  if (tag === 2) {
+    s();
+    const args = JSON.parse(s().toString()) as { precommitment: string };
+    i += 8;
+    let dep = 0n;
+    for (let k = 15; k >= 0; k--) dep = (dep << 8n) | BigInt(b[i + k]!);
+    return { hash, nonce, blockHash, action: 2, precommitment: args.precommitment, bytes: dep / 10n ** 19n };
+  }
+  return { hash, nonce, blockHash, action: 8, delegate: decodeSignedDelegate(new Uint8Array(b.subarray(i, b.length - 65))) };
+}
+const invalidTx = (err: unknown) => new RpcError("send_tx", { code: -32000, name: "HANDLER_ERROR", cause: { name: "INVALID_TRANSACTION" }, data: { TxExecutionError: { InvalidTxError: err } } });
+
+/** One ledger behind two regular providers and an archival one. */
+class Node {
+  final = 1_000n;
+  keyNonce = 10n;
+  userNonce = new Map<string, bigint>();
+  usdc = new Map<string, bigint>();
+  pages = new Map<string, { depositor: string; value: bigint }>();
+  prepaid = new Map<string, bigint>();
+  blocks = new Map<string, bigint>();
+  landed = new Map<string, unknown>();
+  /** what the regular providers have forgotten (garbage collection) */
+  forgotten = new Set<string>();
+  log: { hash: string; kind: string; nonce: bigint; dropped?: string; expired?: boolean }[] = [];
+  sent: bigint[] = [];
+  landMs: (tx: ParsedTx) => number = () => 1;
+  /** provider i (2: archival) fails this method with this error */
+  fail?: (i: number, method: string, tx?: ParsedTx) => unknown;
+  /** send_tx answers Expired (the block hash is past the validity window) */
+  expired = false;
+  bh(h: bigint) {
+    const hash = base58(createHash("sha256").update(`b${h}`).digest());
+    this.blocks.set(hash, h);
+    return hash;
+  }
+  user(): Key {
+    const k = newKey();
+    this.userNonce.set(k.id, 100n);
+    this.usdc.set(k.id, 10n * AMOUNT);
+    return k;
+  }
+  private land(tx: ParsedTx) {
+    if (this.landed.has(tx.hash)) return;
+    if (tx.nonce <= this.keyNonce) {
+      this.log.push({ hash: tx.hash, kind: tx.action === 2 ? "prepay" : "delegate", nonce: tx.nonce, dropped: "InvalidNonce" });
+      return;
     }
-    if (method === "query") return { nonce: Number(state.keyNonce), amount: (10n ** 24n).toString(), permission: "FullAccess" };
-    if (method === "broadcast_tx_async") {
-      const h = hashOf(b64!);
-      const n = txNonce(b64!);
-      if (!state.nonces.includes(n)) state.nonces.push(n);
-      setTimeout(() => {
-        if (state.landed.has(h)) return;
-        state.final += 3n;
-        state.landed.set(h, state.final);
-        if (n > state.keyNonce) state.keyNonce = n;
-      }, opts.landMs?.(b64!) ?? 1);
-      return h;
+    this.keyNonce = tx.nonce;
+    const r = (executor: string, ok: boolean, failure = "") => {
+      this.final += 1n;
+      return { block_hash: this.bh(this.final), outcome: { executor_id: executor, status: ok ? { SuccessValue: "" } : { Failure: failure } } };
+    };
+    if (tx.action === 2) {
+      this.prepaid.set(tx.precommitment, (this.prepaid.get(tx.precommitment) ?? 0n) + tx.bytes);
+      this.landed.set(tx.hash, { final_execution_status: "FINAL", receipts_outcome: [r(VAULT, true), r(RELAYER, true)] });
+      this.log.push({ hash: tx.hash, kind: "prepay", nonce: tx.nonce });
+      return;
     }
-    if (method === "tx") {
-      const h = (params as { tx_hash: string }).tx_hash;
-      if (!state.landed.has(h)) throw new RpcError("tx", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } });
-      return { final_execution_status: "FINAL", receipts_outcome: [{ block_hash: "bh", outcome: { executor_id: VAULT, status: { SuccessValue: "" } } }] };
+    const d = tx.delegate;
+    const expired = this.final + 1n > d.max_block_height;
+    this.log.push({ hash: tx.hash, kind: "delegate", nonce: tx.nonce, expired });
+    if (expired) {
+      this.landed.set(tx.hash, { final_execution_status: "FINAL", receipts_outcome: [r(d.sender_id, false, '{"ActionError":{"kind":{"DelegateActionExpired":null}}}')] });
+      return;
     }
-    throw new Error(`fake provider: ${method}`);
-  };
-  return { state, rpcs: [mk(0), mk(1)] as [Rpc, Rpc] };
+    this.userNonce.set(d.sender_id, d.nonce);
+    const msg = JSON.parse((JSON.parse(Buffer.from((d.actions[0] as { args: Uint8Array }).args).toString()) as { msg: string }).msg) as { precommitment: string };
+    this.usdc.set(d.sender_id, this.usdc.get(d.sender_id)! - AMOUNT);
+    const outcome = { final_execution_status: "FINAL", receipts_outcome: [r(d.sender_id, true), r(VAULT_TOKEN, true), r(VAULT, true)] };
+    this.pages.set(msg.precommitment, { depositor: d.sender_id, value: AMOUNT });
+    this.landed.set(tx.hash, outcome);
+  }
+  private rpc(i: number): Rpc {
+    return async (method, params) => {
+      const tx = method === "send_tx" ? parseTx((params as { signed_tx_base64: string }).signed_tx_base64) : undefined;
+      const err = this.fail?.(i, method, tx);
+      if (err !== undefined) throw err;
+      if (method === "query") {
+        const q = params as { request_type: string };
+        if (q.request_type === "view_access_key") return { nonce: Number(this.keyNonce), permission: "FullAccess" };
+        if (q.request_type === "view_account") return { amount: (10n ** 24n).toString() };
+      }
+      if (method === "block") {
+        const p = params as { block_id?: string };
+        if (p.block_id !== undefined) return { header: { height: Number(this.blocks.get(p.block_id) ?? 0n), hash: p.block_id } };
+        return { header: { height: Number(this.final), hash: this.bh(this.final) } };
+      }
+      if (method === "send_tx") {
+        assert.equal((params as { wait_until: string }).wait_until, "NONE");
+        if (this.landed.has(tx!.hash)) return { final_execution_status: "NONE" };
+        if (this.expired) throw invalidTx("Expired");
+        if (tx!.nonce <= this.keyNonce) throw invalidTx({ InvalidNonce: { tx_nonce: Number(tx!.nonce), ak_nonce: Number(this.keyNonce) } });
+        if (!this.sent.includes(tx!.nonce)) this.sent.push(tx!.nonce);
+        setTimeout(() => this.land(tx!), this.landMs(tx!));
+        return { final_execution_status: "NONE" };
+      }
+      if (method === "broadcast_tx_async") {
+        // a hash and nothing else: an invalid transaction is dropped silently
+        const t = parseTx((params as string[])[0]!);
+        if (!this.landed.has(t.hash)) setTimeout(() => this.land(t), this.landMs(t));
+        return t.hash;
+      }
+      if (method === "tx") {
+        const h = (params as { tx_hash: string }).tx_hash;
+        if (!this.landed.has(h) || (i < 2 && this.forgotten.has(h))) throw new RpcError("tx", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } });
+        return this.landed.get(h);
+      }
+      throw new Error(`node: ${method}`);
+    };
+  }
+  rpcs = (): [Rpc, Rpc] => [this.rpc(0), this.rpc(1)];
+  archival = (): Rpc => this.rpc(2);
+  relayer = (waitMs = 1_000) => createRelayer(this.rpcs(), this.archival(), RELAYER, relayerSecret(), VAULT, waitMs);
+  reads(): SendReads {
+    return {
+      accessKey: async (a): Promise<KeyRead> => (this.userNonce.has(a) ? { kind: "key", permission: "FullAccess", nonce: this.userNonce.get(a)! } : { kind: "no_account" }),
+      finalHeight: async () => this.final,
+      newestFinalHeight: async () => this.final,
+      ftBalance: async (a) => this.usdc.get(a) ?? 0n,
+      pUsed: async (p) => this.pages.has(p.toString()),
+      deposit: async (p) => this.pages.get(p.toString()) ?? null,
+      depositSettled: async (p, h) => {
+        if (this.final < h) return { state: "unknown" };
+        const row = this.pages.get(p.toString());
+        return row === undefined ? { state: "absent" } : { state: "held", ...row };
+      },
+      trees: async () => ({ state: 5n, label: 5n }),
+    };
+  }
+  deps(store: DepositStore, relayer: Relayer): SendDeps {
+    return {
+      cfg: { vault: VAULT, token: VAULT_TOKEN, marginK: 20n },
+      reads: this.reads(),
+      store,
+      relayer,
+      tokenStatus: async () => ({ ...OPEN, block_height: Number(this.final) }),
+      pausedAt: async () => false,
+    };
+  }
 }
 const prepayAction = (p: bigint): RelayerAction => ({ kind: "storage_prepay", precommitment: p, bytes: 756n });
 const open = async () => null;
 const keep = (into: TxRef[]) => (t: TxRef) => void into.push(t);
+const noResend = { resend: false, gone: false };
+const resend = { resend: true, gone: false };
+const newStore = () => createFileStore(mkdtempSync(join(tmpdir(), "bind-node-")));
 
-test("H1: the queue is released at the broadcast, not at FINAL: a second send goes out while the first waits, with the next nonce", async () => {
+test("PROBE N1: the key's nonce jumps (key re-added); send_tx's InvalidNonce re-reads it, the refused prepay goes again at once, and every later call lands", async () => {
+  const node = new Node();
+  const store = newStore();
+  const deps = node.deps(store, node.relayer(300));
+  const u0 = node.user();
+  ok(await carryDeposit(signed(u0, P, 101n, node.final + 100n), deps));
+  node.keyNonce += 1_000_000n; // AddKey sets a key's nonce to the block height x 1,000,000
+  const answers: string[] = [];
+  for (let i = 1; i <= 5; i++) {
+    const u = node.user();
+    answers.push(code(await carryDeposit(signed(u, P + BigInt(i), 101n, node.final + 100n), deps)));
+  }
+  assert.deepEqual(answers, ["ok", "ok", "ok", "ok", "ok"]);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(node.log.filter((x) => x.dropped !== undefined).length, 0, "nothing silently dropped");
+  assert.equal(node.prepaid.size, 6);
+  store.close();
+});
+
+test("PROBE N8: a send that reached no node is not re-sent once its delegate is within K; past its max_block_height it settles dropped, uncounted, and the new call lands", async () => {
+  const node = new Node();
+  const u = node.user();
+  let down = true;
+  node.fail = (i, m, tx) => (down && i < 2 && m === "send_tx" && tx?.action === 8 ? new Error("fetch failed") : undefined);
+  const store = newStore();
+  const deps = node.deps(store, node.relayer(300));
+  assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "ok");
+  assert.equal(store.get(u.id)!.sends[0]!.state, "pending");
+  down = false;
+  node.final += 200n; // the device waits out D1's max_block_height and signs D2 for the same P
+  assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "ok");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(node.log.filter((x) => x.kind === "delegate" && x.expired).length, 0, "D1 never went out past its window");
+  const r = store.get(u.id)!;
+  assert.deepEqual([r.sends.map((x) => x.state), r.failed, r.landed], [["dropped", "landed"], 0, true]);
+  store.close();
+});
+
+test("H1: the queue is released at the send, not at FINAL: a second transaction goes out while the first waits, with the next nonce", async () => {
+  const node = new Node();
   let first = "";
-  const { state, rpcs } = providers({ landMs: (b) => (b === first ? 300 : 1) });
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 3_000);
+  node.landMs = (tx) => (tx.hash === first ? 300 : 400); // included in nonce order, as the pool orders one key's
+  const r = node.relayer(3_000);
   const order: string[] = [];
   const a = r.send(prepayAction(1n), open, (tx) => {
-    first = tx.signed_tx;
+    first = tx.tx_hash;
     order.push(`a ${tx.nonce}`);
   });
-  void a.then(() => order.push("a final"));
   let landedAtB = -1;
   const b = r.send(prepayAction(2n), open, (tx) => {
-    landedAtB = state.landed.size;
+    landedAtB = node.landed.size;
     order.push(`b ${tx.nonce}`);
   });
   const [outA, outB] = await Promise.all([a, b]);
   assert.deepEqual([outA.kind, outB.kind], ["final", "final"]);
   assert.equal(landedAtB, 0, "b signed before a landed");
-  assert.deepEqual(order.slice(0, 2), ["a 11", "b 12"], "b signed and sent before a's FINAL");
+  assert.deepEqual(order, ["a 11", "b 12"]);
 });
 
 test("H1: the guard runs in the queue right before signing; a guarded call signs, writes and sends nothing", async () => {
-  const { state, rpcs } = providers();
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 2_000);
+  const node = new Node();
+  const r = node.relayer();
   const wrote: TxRef[] = [];
   const out = await r.send(prepayAction(1n), async () => "resign_needed", keep(wrote));
-  assert.deepEqual([out.kind, (out as { code: string }).code, wrote.length, state.nonces.length], ["guarded", "resign_needed", 0, 0]);
+  assert.deepEqual([out.kind, (out as { code: string }).code, wrote.length, node.sent.length], ["guarded", "resign_needed", 0, 0]);
   await r.send(prepayAction(2n), open, keep(wrote));
   assert.equal(wrote[0]!.nonce, "11", "a guarded call uses no nonce");
 });
 
-test("the durable write comes before the broadcast: a write that fails sends nothing", async () => {
-  const { state, rpcs } = providers();
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 1_000);
+test("the durable write comes before the send: a write that fails sends nothing", async () => {
+  const node = new Node();
+  const r = node.relayer();
   await assert.rejects(
     r.send(prepayAction(1n), open, () => {
       throw new Error("ENOSPC");
     }),
     /ENOSPC/,
   );
-  assert.equal(state.nonces.length, 0);
+  assert.equal(node.sent.length, 0);
 });
 
-test("nonces: sends in flight at once get distinct nonces; after a nonce refusal the key is read again", async () => {
-  const { state, rpcs } = providers({ landMs: () => 50, fail: (_i, m, b) => (m === "broadcast_tx_async" && txNonce(b!) <= state.keyNonce ? nearError({ name: "INVALID_TRANSACTION", info: { InvalidNonce: {} } }) : undefined) });
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 1_000);
+test("nonces: transactions in flight at once get distinct nonces; a refused one is dropped and the next reads the key again", async () => {
+  const node = new Node();
+  node.landMs = () => 50;
+  const r = node.relayer();
   const outs = await Promise.all([1n, 2n, 3n].map((p) => r.send(prepayAction(p), open, () => undefined)));
   assert.deepEqual(outs.map((o) => o.kind), ["final", "final", "final"]);
-  assert.deepEqual(state.nonces, [11n, 12n, 13n]);
-  state.keyNonce = 40n; // the key moved past our local next
+  assert.deepEqual(node.sent, [11n, 12n, 13n]);
+  node.keyNonce = 40n;
   const refused = await r.send(prepayAction(4n), open, () => undefined);
-  assert.equal(refused.kind, "dropped", "refused on both, its hash unknown on both and the key nonce past it");
+  assert.deepEqual([refused.kind, (refused as { why: string }).why], ["dropped", "the key nonce passed it"]);
   const again: TxRef[] = [];
   assert.equal((await r.send(prepayAction(5n), open, keep(again))).kind, "final");
   assert.equal(again[0]!.nonce, "41");
 });
 
-test("PROBE E: one provider names the hash unknown past its nonce while the other cannot be read: unknown, never dropped", async () => {
-  let down = new Set<string>(["0:broadcast_tx_async", "1:broadcast_tx_async"]);
-  const { state, rpcs } = providers({ fail: (i, m) => (down.has(`${i}:${m}`) ? new Error("fetch failed") : undefined) });
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 50);
+test("a drop read by resolve also re-reads the key for the next transaction", async () => {
+  const node = new Node();
+  let down = true;
+  node.fail = (i, m) => (down && i < 2 && m === "send_tx" ? new Error("fetch failed") : undefined);
+  const r = node.relayer(50);
   const tx: TxRef[] = [];
   assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
-  state.keyNonce = 11n; // provider 0 reads the key past the tx's nonce and the hash unknown
-  down = new Set(["0:broadcast_tx_async", "1:broadcast_tx_async", "1:query", "1:tx"]);
-  assert.equal((await r.resolve(tx[0]!)).kind, "unknown");
-  down = new Set(["0:broadcast_tx_async", "1:broadcast_tx_async"]);
-  assert.equal((await r.resolve(tx[0]!)).kind, "dropped");
+  node.keyNonce = 500n; // the key moved while ours never went out
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "dropped");
+  down = false;
+  const again: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(2n), open, keep(again))).kind, "final");
+  assert.equal(again[0]!.nonce, "501");
 });
 
-test("M2/E: one provider refuses the broadcast while the other takes it: the outcome is read, never rolled back on one word", async () => {
-  const { state, rpcs } = providers({ fail: (i, m) => (i === 0 && m === "broadcast_tx_async" ? nearError({ name: "INVALID_TRANSACTION", info: { ShardCongested: null } }) : undefined) });
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 2_000);
-  const out = await r.send(prepayAction(1n), open, () => undefined);
+test("PROBE E: one provider names the hash unknown past its nonce while the other cannot be read: unknown, never dropped", async () => {
+  const node = new Node();
+  let down = new Set<string>(["0:send_tx", "1:send_tx"]);
+  node.fail = (i, m) => (down.has(`${i}:${m}`) ? new Error("fetch failed") : undefined);
+  const r = node.relayer(50);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  node.keyNonce = 11n;
+  down = new Set(["0:send_tx", "1:send_tx", "1:query", "1:tx"]);
+  assert.equal((await r.resolve(tx[0]!, resend)).kind, "unknown");
+  down = new Set(["0:send_tx", "1:send_tx"]);
+  assert.equal((await r.resolve(tx[0]!, resend)).kind, "dropped");
+});
+
+test("Low 4: a landed transaction a regular provider forgot (garbage collection) reads final from the archival one, never dropped", async () => {
+  const node = new Node();
+  const r = node.relayer();
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "final");
+  node.forgotten.add(tx[0]!.tx_hash);
+  node.keyNonce = 99n;
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+  node.fail = (i) => (i === 2 ? new Error("fetch failed") : undefined);
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "no archival read: never dropped");
+});
+
+test("M2/E: one provider cannot take the send while the other does: the outcome is read, never rolled back on one word", async () => {
+  const node = new Node();
+  node.fail = (i, m) => (i === 0 && m === "send_tx" ? new Error("fetch failed") : undefined);
+  const out = await node.relayer().send(prepayAction(1n), open, () => undefined);
   assert.equal(out.kind, "final");
-  assert.equal(state.landed.size, 1);
+  assert.equal(node.landed.size, 1);
 });
 
-test("M2/C: a broadcast that reached no provider is unknown; resolve() sends the stored bytes again and reads it landed", async () => {
+test("M2/C: a send that reached no provider is unknown; resolve() sends the stored bytes again and reads it landed; resend false sends nothing", async () => {
+  const node = new Node();
   let down = true;
-  const { state, rpcs } = providers({ fail: (_i, m) => (down && m === "broadcast_tx_async" ? new Error("fetch failed") : undefined) });
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 50);
+  node.fail = (i, m) => (down && i < 2 && m === "send_tx" ? new Error("fetch failed") : undefined);
+  const r = node.relayer(50);
   const tx: TxRef[] = [];
   assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
   down = false;
-  await r.resolve(tx[0]!); // it goes out now and lands a moment later
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown");
+  assert.equal(node.sent.length, 0, "resend false: not sent");
+  await r.resolve(tx[0]!, resend);
   await new Promise((res) => setTimeout(res, 20));
-  assert.equal((await r.resolve(tx[0]!)).kind, "final");
-  assert.equal(state.landed.size, 1);
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+  assert.equal(node.landed.size, 1);
 });
 
-test("M2/C: dropped only on Expired, or once the key nonce passed the tx's on both providers with its hash unknown on both", async () => {
-  let expired = false;
-  const { state, rpcs } = providers({
-    fail: (_i, m) => (m !== "broadcast_tx_async" ? undefined : expired ? nearError({ name: "INVALID_TRANSACTION", info: { Expired: null } }) : new Error("fetch failed")),
-  });
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 50);
+test("M2/C: dropped only on Expired, or the key nonce past the tx's on both providers, or gone; always with the hash unknown everywhere", async () => {
+  const node = new Node();
+  let down = true;
+  node.fail = (i, m) => (down && i < 2 && m === "send_tx" ? new Error("fetch failed") : undefined);
+  const r = node.relayer(50);
   const tx: TxRef[] = [];
   assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
-  assert.equal((await r.resolve(tx[0]!)).kind, "unknown", "the key nonce is below the tx's");
-  state.keyNonce = 11n;
-  assert.equal((await r.resolve(tx[0]!)).kind, "dropped");
-  state.keyNonce = 0n;
-  expired = true;
-  assert.equal((await r.resolve(tx[0]!)).kind, "dropped");
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "the key nonce is below the tx's");
+  assert.deepEqual(await r.resolve(tx[0]!, { resend: false, gone: true }), { kind: "dropped", tx_hash: tx[0]!.tx_hash, why: "its delegate expired" });
+  down = false;
+  node.expired = true;
+  assert.deepEqual(await r.resolve(tx[0]!, resend), { kind: "dropped", tx_hash: tx[0]!.tx_hash, why: "Expired" });
+  node.expired = false;
+  node.keyNonce = 11n;
+  assert.deepEqual(await r.resolve(tx[0]!, noResend), { kind: "dropped", tx_hash: tx[0]!.tx_hash, why: "the key nonce passed it" });
+  node.fail = (i, m) => (i === 2 && m === "tx" ? new Error("fetch failed") : undefined);
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "the archival provider unread: never dropped");
 });
 
 test("createRelayer refuses a key whose public half is not its seed's", () => {
@@ -1105,17 +1459,15 @@ test("createRelayer refuses a key whose public half is not its seed's", () => {
   const raw = base58decode(relayerSecret().slice(8));
   raw[63] = raw[63]! ^ 1;
   assert.throws(() => relayerKey("ed25519:" + base58(raw)), /public half/);
-  assert.throws(() => createRelayer(providers().rpcs, RELAYER, "ed25519:" + base58(raw), VAULT), /public half/);
+  const node = new Node();
+  assert.throws(() => createRelayer(node.rpcs(), node.archival(), RELAYER, "ed25519:" + base58(raw), VAULT), /public half/);
 });
 
 test("the relayer's transaction: borsh Transaction V0 with the ed25519 key tag and one Delegate (tag 8) of the bytes as signed", async () => {
-  const { rpcs } = providers();
+  const node = new Node();
   const tx: TxRef[] = [];
-  const w = world();
-  const signedDelegate = Buffer.from(next(w).signed_delegate, "base64");
-  w.store.close();
-  const r = createRelayer(rpcs, RELAYER, relayerSecret(), VAULT, 1_000);
-  await r.send({ kind: "delegate", signed: signedDelegate, receiver: "ab".repeat(32) }, open, keep(tx));
+  const signedDelegate = Buffer.from(signed(node.user(), P, 101n, node.final + 100n).signed_delegate, "base64");
+  await node.relayer().send({ kind: "delegate", signed: signedDelegate, receiver: "ab".repeat(32) }, open, keep(tx));
   const b = Buffer.from(tx[0]!.signed_tx, "base64");
   let i = 4 + b.readUInt32LE(0);
   assert.equal(b.subarray(4, i).toString(), RELAYER);
@@ -1133,13 +1485,14 @@ test("the relayer's transaction: borsh Transaction V0 with the ed25519 key tag a
 });
 
 test("a receipt that ran with SuccessReceiptId is ok, a Failure is not; each receipt's height is its block's", async () => {
-  const { rpcs } = providers();
+  const node = new Node();
   const outcomes = [
     { block_hash: "x", outcome: { executor_id: "u", status: { SuccessReceiptId: "r" } } },
     { block_hash: "y", outcome: { executor_id: VAULT, status: { Failure: { ActionError: {} } } } },
   ];
-  const r0: Rpc = async (m, p) => (m === "tx" ? { final_execution_status: "FINAL", receipts_outcome: outcomes } : m === "block" && (p as { block_id?: string }).block_id === "y" ? { header: { height: 7777 } } : rpcs[0](m, p));
-  const r = createRelayer([r0, rpcs[1]], RELAYER, relayerSecret(), VAULT, 1_000);
+  const [r0, r1] = node.rpcs();
+  const over: Rpc = async (m, p) => (m === "tx" ? { final_execution_status: "FINAL", receipts_outcome: outcomes } : m === "block" && (p as { block_id?: string }).block_id === "y" ? { header: { height: 7777 } } : r0(m, p));
+  const r = createRelayer([over, r1], node.archival(), RELAYER, relayerSecret(), VAULT, 1_000);
   const out = await r.send(prepayAction(1n), open, () => undefined);
   assert.equal(out.kind, "final");
   const rs = (out as { receipts: Receipt[] }).receipts;

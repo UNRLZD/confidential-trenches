@@ -5,10 +5,11 @@
 //           "requests":[{"signed_delegate"},...]}
 //   stdout: {"answers":[{"status","body"},...],"record":<U's record or null>}
 // `status` stands in for the token watch, which is not built (token-status/status.ts): each ask takes the next answer,
-// the last repeats. The requests run at once.
+// the last repeats; its pause history is read from the token itself at the asked block (pausedAt below). The requests
+// run at once.
 import { readFileSync } from "node:fs";
 import { decodeSignedDelegate } from "../../src/bind/checks.ts";
-import { carryDeposit, createFileStore, createRelayer, createSendReads, nearRpc } from "../../src/bind/send.ts";
+import { USDC_PAUSED, carryDeposit, createFileStore, createRelayer, createSendReads, nearRpc } from "../../src/bind/send.ts";
 import { USDC_CODE_HASH, type TokenStatus } from "../../src/token-status/status.ts";
 
 type Input = {
@@ -31,12 +32,25 @@ const tokenStatus = async (): Promise<TokenStatus> => {
   const block_height = Number((await rpcs[0]("block", { finality: "final" }) as { header: { height: number } }).header.height);
   return { token: input.token, caught_up: true, halted: s === "halted", vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height, last_event: null };
 };
+// The watch's pause history stands in as a read of the token at that block: USDC answers every call, its views
+// included, with "FiatToken: paused" while paused; the mock token never pauses.
+const pausedAt = async (height: bigint): Promise<boolean | null> => {
+  try {
+    await rpcs[0]("query", { request_type: "call_function", block_id: Number(height), account_id: input.token, method_name: "ft_balance_of", args_base64: Buffer.from(JSON.stringify({ account_id: input.vault })).toString("base64") });
+    return false;
+  } catch (e) {
+    if (String(e instanceof Error ? e.message : e).includes(USDC_PAUSED)) return true;
+    throw e;
+  }
+};
 const deps = {
   cfg: { vault: input.vault, token: input.token, marginK: BigInt(input.marginK) },
   reads: createSendReads(rpcs, { vault: input.vault, token: input.token }),
   store,
-  relayer: createRelayer(rpcs, input.relayer.account_id, input.relayer.secret_key, input.vault),
+  // the sandbox node keeps every block, so it stands in for the archival provider too
+  relayer: createRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault),
   tokenStatus,
+  pausedAt,
 };
 const answers = await Promise.all(
   input.requests.map((r) =>
