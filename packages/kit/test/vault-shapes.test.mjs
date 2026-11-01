@@ -1,4 +1,4 @@
-// node --test packages/kit/test/vault-shapes.test.ts: the vault's frozen shapes (src/vault/shapes.ts) against
+// node --test packages/kit/test/vault-shapes.test.mjs: the vault's frozen shapes (src/vault/shapes.ts) against
 // VT-U02's vectors (test/vectors/vault-v1.json) and the vault's own refusals.
 // Anchors outside this code: this test's Keccak-256 against Keccak's published answers; scope and label vectors 1-5 against
 // the values the Rust test contract of the gas proof matched byte for byte (research repo,
@@ -15,19 +15,19 @@ const V = JSON.parse(readFileSync(new URL("./vectors/vault-v1.json", import.meta
 const M64 = (1n << 64n) - 1n;
 const RC = [0x1n, 0x8082n, 0x800000000000808an, 0x8000000080008000n, 0x808bn, 0x80000001n, 0x8000000080008081n, 0x8000000000008009n, 0x8an, 0x88n, 0x80008009n, 0x8000000an, 0x8000808bn, 0x800000000000008bn, 0x8000000000008089n, 0x8000000000008003n, 0x8000000000008002n, 0x8000000000000080n, 0x800an, 0x800000008000000an, 0x8000000080008081n, 0x8000000000008080n, 0x80000001n, 0x8000000080008008n];
 const ROT = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14]; // r[x + 5y]
-const rot = (v: bigint, n: number): bigint => (n === 0 ? v : ((v << BigInt(n)) | (v >> BigInt(64 - n))) & M64);
-function keccak(data: Uint8Array): Uint8Array {
+const rot = (v, n) => (n === 0 ? v : ((v << BigInt(n)) | (v >> BigInt(64 - n))) & M64);
+function keccak(data) {
   const padded = new Uint8Array((Math.floor(data.length / 136) + 1) * 136);
   padded.set(data);
   padded[data.length] ^= 0x01;
   padded[padded.length - 1] ^= 0x80;
-  const A: bigint[] = Array(25).fill(0n);
+  const A = Array(25).fill(0n);
   for (let o = 0; o < padded.length; o += 136) {
     for (let i = 0; i < 17; i++) for (let b = 7; b >= 0; b--) A[i] ^= BigInt(padded[o + 8 * i + b]) << BigInt(8 * b);
     for (let r = 0; r < 24; r++) {
       const C = [0, 1, 2, 3, 4].map((x) => A[x] ^ A[x + 5] ^ A[x + 10] ^ A[x + 15] ^ A[x + 20]);
       for (let x = 0; x < 5; x++) for (let y = 0; y < 25; y += 5) A[x + y] ^= C[(x + 4) % 5] ^ rot(C[(x + 1) % 5], 1);
-      const B: bigint[] = Array(25);
+      const B = Array(25);
       for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) B[y + 5 * ((2 * x + 3 * y) % 5)] = rot(A[x + 5 * y], ROT[x + 5 * y]);
       for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) A[x + 5 * y] = B[x + 5 * y] ^ (~B[((x + 1) % 5) + 5 * y] & M64 & B[((x + 2) % 5) + 5 * y]);
       A[0] ^= RC[r];
@@ -37,11 +37,11 @@ function keccak(data: Uint8Array): Uint8Array {
   for (let i = 0; i < 32; i++) out[i] = Number((A[i >> 3] >> BigInt(8 * (i & 7))) & 0xffn);
   return out;
 }
-const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
+const hex = (b) => Buffer.from(b).toString("hex");
 const U128 = (1n << 128n) - 1n;
 const U64 = (1n << 64n) - 1n;
-type Input = Record<string, string>;
-const numbers = (i: Input): S.VaultContextInput => ({
+
+const numbers = (i) => ({
   processor: i.processor,
   recipient: i.recipient,
   register_deposit: BigInt(i.register_deposit),
@@ -92,7 +92,7 @@ test("every context vector recomputes: preimage, keccak, value; the JSON request
     assert.equal(S.vaultContextOf(keccak, c, BigInt(v.scope)).toString(), v.context, v.name);
     if (c.deadline_ms <= BigInt(Number.MAX_SAFE_INTEGER)) {
       const { processor, deadline_ms, ...rest } = v.input;
-      const w: S.VaultWithdrawal = { ...(rest as Omit<S.VaultWithdrawal, "deadline_ms">), deadline_ms: Number(deadline_ms) };
+      const w = { ...rest, deadline_ms: Number(deadline_ms) };
       assert.equal(hex(S.vaultContextPreimage(S.vaultContextInput(processor, w), BigInt(v.scope))), v.preimage_hex, v.name);
     }
   }
@@ -113,8 +113,8 @@ test("scope and label vectors 1-5 equal the Rust test contract's checked values"
     "14440030918343722459967934192161211715061971369022762455311673702646373551159",
     "21234485001799590847612286848541450892023551040792988963797719224933049675641",
   ];
-  assert.deepEqual(V.scope.slice(0, 5).map((v: { scope: string }) => v.scope), rustScopes);
-  assert.deepEqual(V.label.slice(0, 5).map((v: { label: string }) => v.label), rustLabels);
+  assert.deepEqual(V.scope.slice(0, 5).map((v) => v.scope), rustScopes);
+  assert.deepEqual(V.label.slice(0, 5).map((v) => v.label), rustLabels);
 });
 
 test("context vectors 25 and 26 equal the Rust contract's Borsh bytes with relay_fee (u128 LE) and salt put in place", () => {
@@ -134,8 +134,8 @@ test("context vectors 25 and 26 equal the Rust contract's Borsh bytes with relay
 });
 
 test("VT-U02's cases are all present, and the two vectors that differ only in salt give two contexts", () => {
-  const ins = V.context.map((v: { input: Input }) => v.input);
-  const has = (f: (i: Input) => boolean, what: string) => assert.ok(ins.some(f), what);
+  const ins = V.context.map((v) => v.input);
+  const has = (f, what) => assert.ok(ins.some(f), what);
   has((i) => i.register_deposit === "0", "register_deposit 0");
   has((i) => i.register_deposit !== "0", "register_deposit not 0");
   has((i) => i.relay_fee === "0", "relay_fee 0");
@@ -175,7 +175,7 @@ test("the deposit message: exactly precommitment and depositor, in that order, a
 });
 
 test("every move into the vault is the moving account's own ft_transfer_call; no shape signs an ft_withdraw", () => {
-  for (const id of ["U", "R", "V"] as const) {
+  for (const id of ["U", "R", "V"]) {
     const c = S.VAULT_DEPOSIT_SIGNERS[id];
     assert.equal(c.method, "ft_transfer_call", id);
     assert.equal(c.receiver_id, "TOKEN", id);
@@ -206,14 +206,14 @@ test("salt, numbers and ids are refused in every form the vault refuses", () => 
     assert.throws(() => S.vaultDecimal(d, "n"), /n: not/, d);
   }
   assert.equal(S.vaultDecimal("0", "n"), 0n);
-  const w: S.VaultWithdrawal = { recipient: "a.near", register_deposit: "0", fee_recipient: "b.near", relay_fee: "1", refund_precommitment: "7", deadline_ms: 1, salt: "0".repeat(32) };
+  const w = { recipient: "a.near", register_deposit: "0", fee_recipient: "b.near", relay_fee: "1", refund_precommitment: "7", deadline_ms: 1, salt: "0".repeat(32) };
   assert.throws(() => S.vaultContextInput("v.near", { ...w, relay_fee: "01" }), /relay_fee/);
   assert.throws(() => S.vaultContextInput("v.near", { ...w, deadline_ms: -1 }), /deadline_ms/);
   assert.throws(() => S.vaultContextInput("v.near", { ...w, deadline_ms: 2 ** 53 }), /deadline_ms/);
 });
 
 test("snarkjs's proof becomes the vault's argument as written; a coordinate at q or a projective point is refused", () => {
-  const p: S.VaultSnarkjsProof = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"], protocol: "groth16", curve: "bn128" };
+  const p = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"], protocol: "groth16", curve: "bn128" };
   assert.deepEqual(S.vaultProof(p), { a: ["1", "2"], b: [["3", "4"], ["5", "6"]], c: ["7", "8"] });
   assert.throws(() => S.vaultProof({ ...p, pi_a: [S.VAULT_FIELD_Q.toString(), "2", "1"] }), /below q/);
   assert.throws(() => S.vaultProof({ ...p, pi_a: ["01", "2", "1"] }), /canonical/);
