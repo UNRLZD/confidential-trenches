@@ -5,12 +5,14 @@
 // - In headless Chromium (KIT_PROVER_E2E=1, a heavy job: Playwright), the prover is the real worker, prover-worker.js
 //   built by build.mjs, started by client.ts under SIGN_HOST's own headers (packages/signpage/public/_headers, every
 //   header of its one /* rule on every response; the worker file also gets its own policy, wallet.md W:880). It prints
-//   each call's times with the CPU, the vault paper's V2.5 desktop row (docs/plan1/vault.md l.1199).
+//   each call's times with the CPU, the vault paper's V2.5 desktop row (docs/plan1/vault.md l.1199). With
+//   KIT_PROVER_E2E_OUT=<dir> it also writes the first proof as proof.json and public.json there, for the snarkjs CLI:
+//   snarkjs groth16 verify packages/kit/zk/withdraw.vkey <dir>/public.json <dir>/proof.json
 // The leaves are fixture 1 of vault-inputs.test.ts (fixtures/prove-fixture.ts): test values only, never money.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { cpus, tmpdir } from "node:os";
@@ -229,6 +231,12 @@ test(
         t.diagnostic(`call ${k}: snarkjs groth16.verify with zk/withdraw.vkey -> ${accepted}`);
         assert.equal(accepted, true);
         for (const s of tampered(c.result.publicSignals)) assert.equal(await verify(s, c.result.proof), false);
+      }
+      const out = process.env.KIT_PROVER_E2E_OUT;
+      if (out) {
+        mkdirSync(out, { recursive: true });
+        writeFileSync(join(out, "proof.json"), JSON.stringify(ok.calls[0]!.result!.proof));
+        writeFileSync(join(out, "public.json"), JSON.stringify(ok.calls[0]!.result!.publicSignals));
       }
 
       const leaf = await runPage("state-leaf", 1);
