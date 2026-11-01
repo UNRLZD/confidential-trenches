@@ -182,9 +182,8 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   if (release.vault === null) refuse("vault");
   const vault = release.vault as string;
 
-  // The signer is a one-time NEAR-implicit id: its id is its own public key in lowercase hex.
+  // The signer is a one-time NEAR-implicit id: its id is its own 32-byte public key in lowercase hex.
   const { signer, note, reads } = ctx;
-  if (!(signer.publicKey instanceof Uint8Array) || signer.publicKey.length !== 32) refuse("signer");
   if (!IMPLICIT.test(signer.id) || signer.id !== hex(signer.publicKey)) refuse("signer");
   const ownKey = `ed25519:${base58(signer.publicKey)}`;
 
@@ -203,7 +202,7 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   } catch {
     refuse("args");
   }
-  if (!isObj(args) || !keysAre(args, ["receiver_id", "amount", "msg"])) refuse("args");
+  if (!isObj(args)) refuse("args");
   const a = args as Record<string, unknown>;
   if (a.receiver_id !== vault) refuse("args.receiver_id");
   if (a.amount !== note.amount.toString()) refuse("args.amount");

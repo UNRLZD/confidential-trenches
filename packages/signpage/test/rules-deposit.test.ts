@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { ONECLICK_SIGNING_KEYS, OneClickQuoteError, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
+import { checkOneClickQuote, ONECLICK_SIGNING_KEYS, OneClickQuoteError, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
 import { refundId, returnId, depositId } from "../../wallet/src/derive/keys.ts";
 import { encodeDelegateAction, RELEASE_BIND_URL, type DelegateFields } from "../../wallet/src/deposit/delegate.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
@@ -31,6 +31,10 @@ const vector = JSON.parse(readFileSync(new URL("../../wallet/test/vectors/deposi
 };
 const quotes = JSON.parse(readFileSync(new URL("../../kit/test/fixtures/oneclick-quotes.json", import.meta.url), "utf8")) as {
   dry: { request: OneClickRequest; answer: { timestamp: string } & Record<string, unknown> };
+};
+// A real keyless dry answer for 1 USDC from Solana: its minAmountOut 984,526 is under MIN_DEPOSIT (its source in the file; kept beside the kit's 1Click answers, where the gitleaks allowlist takes a signature field).
+const small = JSON.parse(readFileSync(new URL("../../kit/test/fixtures/deposit-quote-1usdc.json", import.meta.url), "utf8")) as {
+  request: OneClickRequest; answer: { timestamp: string; quote: { minAmountOut: string } } & Record<string, unknown>;
 };
 
 const SEED = new Uint8Array(64).fill(0x42); // the wallet's public test seed (its vectors' made_by)
@@ -240,4 +244,13 @@ test("the deposit quote: the answer goes through the kit's 1Click check with its
   const a = structuredClone(Q.answer) as Record<string, Record<string, unknown>>;
   a.quote.amountOut = String(BigInt(a.quote.amountOut as string) + 1n); // a signed field changed
   assert.throws(() => checkDepositQuote(req(), a, qctx()), (e: unknown) => e instanceof OneClickQuoteError && e.check === "signature");
+  // A quote whose minAmountOut is under MIN_DEPOSIT: the kit's check passes it when the output is not for the vault,
+  // and the deposit rule refuses it, whatever the caller puts in its options.
+  assert.ok(BigInt(small.answer.quote.minAmountOut) < 1_000_000n);
+  const now = Date.parse(small.answer.timestamp) + 1_000;
+  const opts = { path: "keyless", pricing: "usdc", decimalsIn: 6, decimalsOut: 6, now } as const;
+  assert.equal(checkOneClickQuote(small.request, small.answer, { ...opts, intoVault: false }).amountIn, 1_000_000n);
+  const c = qctx({ check: opts });
+  (c.check as Record<string, unknown>).intoVault = false;
+  assert.throws(() => checkDepositQuote(small.request, small.answer, c), (e: unknown) => e instanceof OneClickQuoteError && e.check === "floor");
 });
