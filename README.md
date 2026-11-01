@@ -88,7 +88,7 @@ done
 | Line | A passing read |
 |---|---|
 | 1 | `[]` on both RPCs |
-| 2 | `<code hash>`, equal to the hash of `pnpm run build:vault` |
+| 2 | `<code hash>`, equal to the hash of `<the vault's reproducible build>` |
 | 3 | the USDC balance equals what `totals()` says the vault owes |
 
 ### For AI agents and scripts
@@ -99,11 +99,10 @@ Node 24 or later and pnpm 10.33.1. Coding agents also read [AGENTS.md](AGENTS.md
 git clone https://github.com/UNRLZD/confidential-trenches
 cd confidential-trenches
 pnpm install --frozen-lockfile
-pnpm test
-pnpm --dir examples/private-buy start
+pnpm -r --if-present --no-bail run test
 ```
 
-A passing run of `pnpm test` ends with:
+A passing run of `pnpm -r --if-present --no-bail run test` ends with:
 
 ```text
 # fail 0
@@ -235,7 +234,6 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 | `packages/exit/` | Money out with only the 12 words and public RPCs |
 | `apps/terminal/` | The UNRLZD terminal |
 | `apps/helper/` | The helper server: API keys, relays and signed orders, never a money key |
-| `examples/private-buy/` | A private buy in about 50 lines |
 | `docs/` | The architecture and security pages |
 | `scripts/ci/` | CI gates |
 | `scripts/live-checks/` | A live check for each change, run after every deploy |
@@ -248,7 +246,7 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 |---|---|
 | `pnpm run check:imports` | No app reaches past the kit's public entry |
 | `pnpm run test:gates` | Every CI gate refuses its planted case |
-| `gitleaks dir . --config .gitleaks.toml` | No secret in the tree |
+| `gitleaks dir . --config .gitleaks.toml --redact` | No secret in the tree |
 | `node scripts/ci/money-gate.mjs --all` | Every money-path transaction reads back on two public RPCs |
 
 ## Prior work
