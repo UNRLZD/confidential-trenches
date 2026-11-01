@@ -191,14 +191,14 @@ export function parseLive(text, key) {
 // RATE_TRIES waits in a row; a Retry-After past RATE_CAP seconds is no answer at once. Other trouble (no reply, a
 // reply that is not JSON, an HTTP error with no RPC error) is asked 3 times, 2 s and 4 s apart. Each host is asked
 // at most once a second.
-// A 429 is waited only while the host could add a second operator: once two operators have read a tx ok, or the
-// host's own operator has, it is still asked once, but with rateWait off: its 429 is no answer at once (NOT_WAITED),
-// never waited and never decisive. A failed or old answer from it still refuses. One operator's read never passes a tx
+// A host whose operator already read the tx ok is not asked. Once two operators have read a tx ok, a remaining host
+// (a third operator's) is still asked once, but with rateWait off: its 429 is no answer at once (NOT_WAITED), never
+// waited and never decisive. A failed or old answer from it still refuses. One operator's read never passes a tx
 // alone: a NEAR tx no second operator reads passes only by its light-client proof (proveNearTx), which needs no
 // second read on the same operator.
 const RATE_TRIES = 5;
 const RATE_CAP = 600;
-const NOT_WAITED = "rate limited, not waited: its read could add no second operator";
+const NOT_WAITED = "rate limited, not waited: two operators read it ok";
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const lastAsked = new Map();
 const hostOf = (url) => {
@@ -579,10 +579,13 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
       const answers = [];
-      // in the listed order; a 429 is waited out only while the host could add a second operator
+      // in the listed order; a host whose operator already read it ok is not asked (near.org's after FastNEAR's archive:
+      // one operator's second door adds no read, and a proof needs none); a 429 is waited out only while fewer than
+      // two operators read it ok
       const okOps = () => okOperators(tx.chain, answers);
       for (const url of rpcs[tx.chain]) {
-        const rateWait = okOps().size < 2 && !okOps().has(operatorOf(tx.chain, url));
+        if (okOps().has(operatorOf(tx.chain, url))) continue;
+        const rateWait = okOps().size < 2;
         const out = {};
         const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, out);
         answers.push({ url, r, result: out.result });

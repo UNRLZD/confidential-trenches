@@ -100,8 +100,8 @@ jobs:
 
   # Each NEAR tx is read on FastNEAR's archive, dRPC and near.org's archive, which FastNEAR also runs
   # (scripts/ci/near-rpc-operators.mjs). near.org's host answers 429 with a Retry-After of 43 to 600 s (4 a minute,
-  # 10 per 10 min, near.org's deprecation post; read 2026-10-31); the gate waits it out only while near.org could add
-  # a second operator, which it never can once FastNEAR's archive read the tx ok: then it is asked once, unwaited. A
+  # 10 per 10 min, near.org's deprecation post; read 2026-10-31); the gate asks it only when FastNEAR's archive gave
+  # no ok read (it adds no second operator), and then waits it out. A
   # tx older than dRPC keeps (about 29 h on mainnet, read 2026-11-01) is proven instead: three dRPC reads (status, the
   # final block, that block by hash) and one FastNEAR light-client proof per outcome (about 5 s for a 3-outcome tx,
   # 2026-11-01), no near.org read. --all read 26 testnet txs in 4 min (2026-11-01), so 30 minutes covers the tests and
