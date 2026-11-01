@@ -2,3 +2,4 @@
 export * from "./signpage/messages.ts";
 export * from "./orders/record.ts";
 export * from "./helper/v1.ts";
+export * from "./zk/setup-files.ts";

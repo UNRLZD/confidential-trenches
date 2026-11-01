@@ -57,6 +57,12 @@ importers:
 
   packages/kit: {}
 
+  packages/signpage:
+    devDependencies:
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
+
   packages/wallet:
     dependencies:
       '@noble/curves':
