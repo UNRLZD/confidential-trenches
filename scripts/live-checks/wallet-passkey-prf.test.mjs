@@ -7,8 +7,10 @@
 // the page at c46a6fc (Sign out taken by a press with no real input; Sign out drawn for a seed whose 12 words are the only
 // copy and not saved). Round 4's: bad23f373f, the page at 23f373f (Sign out armed by a pointer move: a moving press and
 // Tab then Enter within 500 ms of the page shown sign out, a finger's tap with drift signs out in the same tap, a still
-// tap never signs out). Records made before round 4 hold no guard or phone steps (prf.protect, phone): those steps' lines
-// are BAD on them for that reason, checked as such below.
+// tap never signs out), and badNoListeners, a planted page without the guard's pageshow, focus and visibilitychange
+// listeners (a press right after each signs out). Records made before round 4 hold no guard or phone steps (prf.protect,
+// phone), and records made before the trigger steps (bad23f373f and older) hold no prf.triggers: those steps' lines are
+// BAD on them for that reason, checked as such below.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -30,6 +32,14 @@ test("the recorded good answer passes", () => {
 
 const BAD = (rec) => bad(rec).map((l) => l.split(" (")[0]);
 // round 4's steps, which records made before round 4 do not hold
+const TRIGGERS = ["visibilitychange", "pageshow", "focus"].map((k) => `BAD prf: a press within 500 ms after ${k} does nothing`);
+// a record made before the trigger steps: their lines are all BAD (not recorded), and the rest is returned
+function beforeTriggers(rec) {
+  assert.equal(rec.prf.triggers, undefined);
+  const lines = BAD(rec);
+  for (const l of TRIGGERS) assert.ok(lines.includes(l), l);
+  return lines.filter((l) => !TRIGGERS.includes(l));
+}
 const R4 = [
   "BAD prf: a mouse press within 500 ms of Sign out shown does nothing",
   "BAD prf: Tab then Enter within 500 ms of Sign out shown does nothing",
@@ -41,7 +51,7 @@ const R4 = [
 function beforeR4(rec) {
   assert.equal(rec.prf.protect, undefined);
   assert.equal(rec.phone, undefined);
-  const lines = BAD(rec);
+  const lines = beforeTriggers(rec);
   for (const l of R4) assert.ok(lines.includes(l), l);
   return lines.filter((l) => !R4.includes(l));
 }
@@ -74,7 +84,7 @@ test("round 2's recorded reds fail on their own lines", () => {
 
 test("round 4's recorded red (the page at 23f373f) fails on each guard step and on the still tap", () => {
   const r = answers.bad23f373f;
-  assert.deepEqual(BAD(r), [
+  assert.deepEqual(beforeTriggers(r), [
     "BAD prf: a mouse press within 500 ms of Sign out shown does nothing",
     "BAD prf: Tab then Enter within 500 ms of Sign out shown does nothing",
     "BAD phone: a tap within 500 ms of Sign out shown does nothing",
@@ -87,6 +97,16 @@ test("round 4's recorded red (the page at 23f373f) fails on each guard step and 
   }
   assert.ok(r.phone.still.withinMs >= 500);
   assert.equal(r.phone.still.after.state, "signed-in");
+});
+
+test("the planted page without the guard's pageshow, focus and visibilitychange listeners fails on each trigger only", () => {
+  const r = answers.badNoListeners;
+  assert.deepEqual(BAD(r), TRIGGERS);
+  for (const k of ["visibilitychange", "pageshow", "focus"]) {
+    const t = r.prf.triggers[k];
+    assert.ok(t.withinMs < 500 && t.sinceDrawMs >= 500 && t.pressOn === "signout", k);
+    assert.equal(t.after.state, "signed-out", k);
+  }
 });
 
 test("each broken step fails the check", () => {
@@ -127,6 +147,13 @@ test("each broken step fails the check", () => {
     ["Enter that never reached Sign out", (r) => (r.prf.protect.enter.pressOn = "BODY")],
     ["a tap that missed Sign out", (r) => (r.phone.tap.pressOn = null)],
     ["a still tap that missed Sign out", (r) => (r.phone.still.pressOn = "MAIN")],
+    ["a press after visibilitychange that signs out", (r) => (r.prf.triggers.visibilitychange.after = { state: "signed-out", account: null })],
+    ["a press after pageshow that signs out", (r) => (r.prf.triggers.pageshow.after = { state: "signed-out", account: null })],
+    ["a press after focus that signs out", (r) => (r.prf.triggers.focus.after = { state: "signed-out", account: null })],
+    ["a press that came after the focus window", (r) => (r.prf.triggers.focus.withinMs = 520)],
+    ["a trigger with Sign out drawn inside the window", (r) => (r.prf.triggers.pageshow.sinceDrawMs = 120)],
+    ["a press after a trigger that missed Sign out", (r) => (r.prf.triggers.visibilitychange.pressOn = "BODY")],
+    ["no trigger steps", (r) => delete r.prf.triggers],
     ["no phone sign-in", (r) => (r.phone.create = { state: "error", account: null })],
     ["Sign out drawn for a seed whose 12 words are the only copy", (r) => (r.noPrf.backupGate.signoutButtons = 1)],
     ["the planted no-backup seed not shown", (r) => (r.noPrf.backupGate.state = "error")],

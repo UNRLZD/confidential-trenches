@@ -1,10 +1,10 @@
 {
- "note": "Recorded 2026-11-01T06:08Z on the Mac queue (scripts/heavy.sh, HEAVY_REMOTE=0; the PC box queue waited 90 min), all on the browser harness (--harness: SIGN_HOST's and APP_HOST's real names mapped to a local https server, SIGN_HOST under the shipped public/_headers). good: SIGN_HOST's own build at this commit (re-recorded 2026-11-01T06:38Z in round 4, with the guard and phone steps). bad: a planted copy of src/main.ts whose no-PRF branch stores a random seed and signs in without notice (the brief's bad answer). badC6a2fbe: the page as committed at c6a2fbe. badNoGuard: a planted copy without the 'seed already stored' guard. badC46a6fc: the page as committed at c46a6fc (round 3's reds: Sign out armed with no real input, and drawn for a seed whose 12 words are the only copy). bad23f373f (2026-11-01T06:38Z): the page as committed at 23f373f (round 4's reds: Sign out armed by a pointer move, so a moving press, Tab then Enter and a finger's tap with drift sign out within 500 ms of the page shown, and a still tap never does). Records before round 4 hold no prf.protect or phone steps. Each planted page is built the same way (Vite, sha384 in index.html). Public values only: states, the throwaway accounts' T_0 ids, rp ids, the stored seed's AES-GCM iv; no PRF output, entropy, words or key.",
+ "note": "Recorded 2026-11-01T06:08Z on the Mac queue (scripts/heavy.sh, HEAVY_REMOTE=0; the PC box queue waited 90 min), all on the browser harness (--harness: SIGN_HOST's and APP_HOST's real names mapped to a local https server, SIGN_HOST under the shipped public/_headers). good: SIGN_HOST's own build at this commit (re-recorded 2026-11-01T07:02Z in round 4, with the guard, trigger and phone steps). bad: a planted copy of src/main.ts whose no-PRF branch stores a random seed and signs in without notice (the brief's bad answer). badC6a2fbe: the page as committed at c6a2fbe. badNoGuard: a planted copy without the 'seed already stored' guard. badC46a6fc: the page as committed at c46a6fc (round 3's reds: Sign out armed with no real input, and drawn for a seed whose 12 words are the only copy). bad23f373f (2026-11-01T06:38Z): the page as committed at 23f373f (round 4's reds: Sign out armed by a pointer move, so a moving press, Tab then Enter and a finger's tap with drift sign out within 500 ms of the page shown, and a still tap never does). badNoListeners (2026-11-01T07:02Z): a planted copy of src/main.ts without the guard's pageshow, focus and visibilitychange listeners. Records before round 4 hold no prf.protect or phone steps; records before badNoListeners hold no prf.triggers. Each planted page is built the same way (Vite, sha384 in index.html). Public values only: states, the throwaway accounts' T_0 ids, rp ids, the stored seed's AES-GCM iv; no PRF output, entropy, words or key.",
  "good": {
   "key": "wallet-passkey-prf",
   "url": "https://sign.confidential.unrealized.trade/",
   "mode": "harness",
-  "at": "2026-11-01T06:38:43.508Z",
+  "at": "2026-11-01T07:02:04.416Z",
   "prf": {
    "guard": {
     "open": {
@@ -22,10 +22,10 @@
      "seedIv": null,
      "localStorage": 0
     },
-    "ivBefore": "ad27e4c20f4bfd36857c68c4",
+    "ivBefore": "161b93c77bfd9223a558c9e7",
     "after": {
      "state": "signed-in",
-     "account": "6d538660b6bdc11ada2232e55646b5037193d07ed071f13e7d683412bed5c146",
+     "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -35,20 +35,20 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "ad27e4c20f4bfd36857c68c4",
+     "seedIv": "161b93c77bfd9223a558c9e7",
      "localStorage": 0
     },
-    "ivAfter": "ad27e4c20f4bfd36857c68c4",
+    "ivAfter": "161b93c77bfd9223a558c9e7",
     "credentials": 0
    },
    "protect": {
     "mouse": {
      "pressed": true,
-     "withinMs": 80.5,
+     "withinMs": 99.69999998807907,
      "pressOn": "signout",
      "after": {
       "state": "signed-in",
-      "account": "6d538660b6bdc11ada2232e55646b5037193d07ed071f13e7d683412bed5c146",
+      "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
       "codeSaved": "false",
       "db": true,
       "seed": true,
@@ -58,17 +58,17 @@
        "alg": "AES-GCM"
       },
       "seedWrapped": true,
-      "seedIv": "ad27e4c20f4bfd36857c68c4",
+      "seedIv": "161b93c77bfd9223a558c9e7",
       "localStorage": 0
      }
     },
     "enter": {
      "pressed": true,
-     "withinMs": 15.799999952316284,
+     "withinMs": 16.80000001192093,
      "pressOn": "signout",
      "after": {
       "state": "signed-in",
-      "account": "6d538660b6bdc11ada2232e55646b5037193d07ed071f13e7d683412bed5c146",
+      "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
       "codeSaved": "false",
       "db": true,
       "seed": true,
@@ -78,7 +78,75 @@
        "alg": "AES-GCM"
       },
       "seedWrapped": true,
-      "seedIv": "ad27e4c20f4bfd36857c68c4",
+      "seedIv": "161b93c77bfd9223a558c9e7",
+      "localStorage": 0
+     }
+    }
+   },
+   "triggers": {
+    "visibilitychange": {
+     "pressed": true,
+     "kind": "dispatched, visibilityState visible",
+     "withinMs": 1.399999976158142,
+     "sinceDrawMs": 1022.6999999880791,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "161b93c77bfd9223a558c9e7",
+      "localStorage": 0
+     }
+    },
+    "pageshow": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.5,
+     "sinceDrawMs": 2030.5999999642372,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "161b93c77bfd9223a558c9e7",
+      "localStorage": 0
+     }
+    },
+    "focus": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.300000011920929,
+     "sinceDrawMs": 3084.399999976158,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "161b93c77bfd9223a558c9e7",
       "localStorage": 0
      }
     }
@@ -105,7 +173,7 @@
     },
     "create": {
      "state": "signed-in",
-     "account": "6d538660b6bdc11ada2232e55646b5037193d07ed071f13e7d683412bed5c146",
+     "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -115,12 +183,12 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "ad27e4c20f4bfd36857c68c4",
+     "seedIv": "161b93c77bfd9223a558c9e7",
      "localStorage": 0
     },
     "reload": {
      "state": "signed-in",
-     "account": "6d538660b6bdc11ada2232e55646b5037193d07ed071f13e7d683412bed5c146",
+     "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -130,7 +198,7 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "ad27e4c20f4bfd36857c68c4",
+     "seedIv": "161b93c77bfd9223a558c9e7",
      "localStorage": 0
     },
     "signout": {
@@ -146,7 +214,7 @@
     },
     "signin": {
      "state": "signed-in",
-     "account": "6d538660b6bdc11ada2232e55646b5037193d07ed071f13e7d683412bed5c146",
+     "account": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -156,7 +224,7 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "7e554d7c558213980429295c",
+     "seedIv": "787d9bf66e8488e011d6abb9",
      "localStorage": 0
     }
    },
@@ -172,11 +240,11 @@
     }
    ],
    "prfOk": true,
-   "expected": "6d538660b6bdc11ada2232e55646b5037193d07ed071f13e7d683412bed5c146",
+   "expected": "f759d738b5f8793fc2409ec23a76b04252acfc289f344b204555a885e4c25425",
    "race": {
     "a": {
      "state": "signed-in",
-     "account": "be4e05f9291ac9d6f3964c2045052fee67f949ef41f8fd3c2739b5a91edf4014",
+     "account": "9b348f167992f6e4c1e955ac8d0276f6ef81dc828168e7fa94dae19fab516d78",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -186,12 +254,12 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "68209104a9d9e76c7457b3a1",
+     "seedIv": "be1148dac31b9bae0b5e016b",
      "localStorage": 0
     },
     "b": {
      "state": "signed-in",
-     "account": "be4e05f9291ac9d6f3964c2045052fee67f949ef41f8fd3c2739b5a91edf4014",
+     "account": "9b348f167992f6e4c1e955ac8d0276f6ef81dc828168e7fa94dae19fab516d78",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -201,12 +269,12 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "68209104a9d9e76c7457b3a1",
+     "seedIv": "be1148dac31b9bae0b5e016b",
      "localStorage": 0
     },
     "reload": {
      "state": "signed-in",
-     "account": "be4e05f9291ac9d6f3964c2045052fee67f949ef41f8fd3c2739b5a91edf4014",
+     "account": "9b348f167992f6e4c1e955ac8d0276f6ef81dc828168e7fa94dae19fab516d78",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -216,7 +284,7 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "68209104a9d9e76c7457b3a1",
+     "seedIv": "be1148dac31b9bae0b5e016b",
      "localStorage": 0
     }
    }
@@ -224,7 +292,7 @@
   "phone": {
    "create": {
     "state": "signed-in",
-    "account": "eb158b748086939a37c1ad89c7ede8f53fd3b00ae60c6fbb8a4566180007c7a8",
+    "account": "73cc7ce08c23650876ad61d26a7e123b2b3b96e279968f143d8ea929c51e29a8",
     "codeSaved": "false",
     "db": true,
     "seed": true,
@@ -234,12 +302,12 @@
      "alg": "AES-GCM"
     },
     "seedWrapped": true,
-    "seedIv": "6b15bdd7e4f454ca81b3a651",
+    "seedIv": "ec0a6c2e6c29df82672af639",
     "localStorage": 0
    },
    "reload": {
     "state": "signed-in",
-    "account": "eb158b748086939a37c1ad89c7ede8f53fd3b00ae60c6fbb8a4566180007c7a8",
+    "account": "73cc7ce08c23650876ad61d26a7e123b2b3b96e279968f143d8ea929c51e29a8",
     "codeSaved": "false",
     "db": true,
     "seed": true,
@@ -249,16 +317,16 @@
      "alg": "AES-GCM"
     },
     "seedWrapped": true,
-    "seedIv": "6b15bdd7e4f454ca81b3a651",
+    "seedIv": "ec0a6c2e6c29df82672af639",
     "localStorage": 0
    },
    "tap": {
     "pressed": true,
-    "withinMs": 63.19999998807907,
+    "withinMs": 64.40000003576279,
     "pressOn": "signout",
     "after": {
      "state": "signed-in",
-     "account": "eb158b748086939a37c1ad89c7ede8f53fd3b00ae60c6fbb8a4566180007c7a8",
+     "account": "73cc7ce08c23650876ad61d26a7e123b2b3b96e279968f143d8ea929c51e29a8",
      "codeSaved": "false",
      "db": true,
      "seed": true,
@@ -268,13 +336,13 @@
       "alg": "AES-GCM"
      },
      "seedWrapped": true,
-     "seedIv": "6b15bdd7e4f454ca81b3a651",
+     "seedIv": "ec0a6c2e6c29df82672af639",
      "localStorage": 0
     }
    },
    "still": {
     "pressed": true,
-    "withinMs": 818.2000000476837,
+    "withinMs": 813.3000000119209,
     "pressOn": "signout",
     "after": {
      "state": "signed-out",
@@ -322,7 +390,7 @@
    },
    "backupGate": {
     "state": "signed-in",
-    "account": "5e426ef6fff08d9651594809fc5d440568c75699e297d12f9f9093d6be113542",
+    "account": "07fddbb9c5bc4a33fe55c13970923106e9d01b4ec13a13f5ef8adffff90cd2f3",
     "codeSaved": "false",
     "db": true,
     "seed": true,
@@ -332,7 +400,7 @@
      "alg": "AES-GCM"
     },
     "seedWrapped": true,
-    "seedIv": "f3951d9155437217102c9bb0",
+    "seedIv": "52316dc422937dceacb4aeac",
     "localStorage": 0,
     "signoutButtons": 0
    }
@@ -1650,6 +1718,401 @@
     },
     "seedWrapped": true,
     "seedIv": "788123a26ca93ef538c42da2",
+    "localStorage": 0,
+    "signoutButtons": 0
+   }
+  },
+  "errors": []
+ },
+ "badNoListeners": {
+  "key": "wallet-passkey-prf",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-01T07:02:16.087Z",
+  "prf": {
+   "guard": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    },
+    "ivBefore": "0fa25a0f2ecafe89ae175a3a",
+    "after": {
+     "state": "signed-in",
+     "account": "0767d17dfac0d319bacf37b83f38d4e423cba4e00fe7df239e494426489970e4",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "0fa25a0f2ecafe89ae175a3a",
+     "localStorage": 0
+    },
+    "ivAfter": "0fa25a0f2ecafe89ae175a3a",
+    "credentials": 0
+   },
+   "protect": {
+    "mouse": {
+     "pressed": true,
+     "withinMs": 81.80000001192093,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "0767d17dfac0d319bacf37b83f38d4e423cba4e00fe7df239e494426489970e4",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "0fa25a0f2ecafe89ae175a3a",
+      "localStorage": 0
+     }
+    },
+    "enter": {
+     "pressed": true,
+     "withinMs": 15.100000023841858,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "0767d17dfac0d319bacf37b83f38d4e423cba4e00fe7df239e494426489970e4",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "0fa25a0f2ecafe89ae175a3a",
+      "localStorage": 0
+     }
+    }
+   },
+   "triggers": {
+    "visibilitychange": {
+     "pressed": true,
+     "kind": "dispatched, visibilityState visible",
+     "withinMs": 1.4000000357627869,
+     "sinceDrawMs": 1021.8999999761581,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-out",
+      "account": null,
+      "codeSaved": null,
+      "db": false,
+      "seed": false,
+      "kWrap": null,
+      "seedWrapped": null,
+      "seedIv": null,
+      "localStorage": 0
+     }
+    },
+    "pageshow": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.300000011920929,
+     "sinceDrawMs": 615.8000000119209,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-out",
+      "account": null,
+      "codeSaved": null,
+      "db": false,
+      "seed": false,
+      "kWrap": null,
+      "seedWrapped": null,
+      "seedIv": null,
+      "localStorage": 0
+     }
+    },
+    "focus": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.0999999642372131,
+     "sinceDrawMs": 656.2000000476837,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-out",
+      "account": null,
+      "codeSaved": null,
+      "db": false,
+      "seed": false,
+      "kWrap": null,
+      "seedWrapped": null,
+      "seedIv": null,
+      "localStorage": 0
+     }
+    }
+   },
+   "crossTab": {
+    "state": "signed-out",
+    "account": null
+   },
+   "steps": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    },
+    "create": {
+     "state": "signed-in",
+     "account": "0767d17dfac0d319bacf37b83f38d4e423cba4e00fe7df239e494426489970e4",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "0fa25a0f2ecafe89ae175a3a",
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "0767d17dfac0d319bacf37b83f38d4e423cba4e00fe7df239e494426489970e4",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "0fa25a0f2ecafe89ae175a3a",
+     "localStorage": 0
+    },
+    "signout": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": false,
+     "seed": false,
+     "kWrap": null,
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    },
+    "signin": {
+     "state": "signed-in",
+     "account": "0767d17dfac0d319bacf37b83f38d4e423cba4e00fe7df239e494426489970e4",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "1537d1d7119de632178152f9",
+     "localStorage": 0
+    }
+   },
+   "framed": {
+    "framed": "true",
+    "state": "signed-in",
+    "buttons": 0,
+    "actions": 0
+   },
+   "credentials": [
+    {
+     "rpId": "sign.confidential.unrealized.trade"
+    }
+   ],
+   "prfOk": true,
+   "expected": "0767d17dfac0d319bacf37b83f38d4e423cba4e00fe7df239e494426489970e4",
+   "race": {
+    "a": {
+     "state": "signed-in",
+     "account": "aaeb78d706f4550bdbcb84e8c3194eeff2f501980ba2f9281d0c677103ec428b",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "64eb15f7fd073b3ab7235d19",
+     "localStorage": 0
+    },
+    "b": {
+     "state": "signed-in",
+     "account": "aaeb78d706f4550bdbcb84e8c3194eeff2f501980ba2f9281d0c677103ec428b",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "64eb15f7fd073b3ab7235d19",
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "aaeb78d706f4550bdbcb84e8c3194eeff2f501980ba2f9281d0c677103ec428b",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "64eb15f7fd073b3ab7235d19",
+     "localStorage": 0
+    }
+   }
+  },
+  "phone": {
+   "create": {
+    "state": "signed-in",
+    "account": "bc99f6b7c24719c22c824fc8f8b67bbeeacd308b987c73b5027dc35029223a74",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "ab955168f640b17f3ea3120c",
+    "localStorage": 0
+   },
+   "reload": {
+    "state": "signed-in",
+    "account": "bc99f6b7c24719c22c824fc8f8b67bbeeacd308b987c73b5027dc35029223a74",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "ab955168f640b17f3ea3120c",
+    "localStorage": 0
+   },
+   "tap": {
+    "pressed": true,
+    "withinMs": 64.19999998807907,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-in",
+     "account": "bc99f6b7c24719c22c824fc8f8b67bbeeacd308b987c73b5027dc35029223a74",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "ab955168f640b17f3ea3120c",
+     "localStorage": 0
+    }
+   },
+   "still": {
+    "pressed": true,
+    "withinMs": 814,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": false,
+     "seed": false,
+     "kWrap": null,
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    }
+   }
+  },
+  "noPrf": {
+   "open": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "seedIv": null,
+    "localStorage": 0
+   },
+   "create": {
+    "state": "no-prf",
+    "account": null,
+    "codeSaved": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "seedIv": null,
+    "localStorage": 0
+   },
+   "backupGate": {
+    "state": "signed-in",
+    "account": "661f0c89eae7799d2066bbfaeab3c11ed776aa43ec05905114ba35aff6597273",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "0ded546006331590b24ca029",
     "localStorage": 0,
     "signoutButtons": 0
    }
