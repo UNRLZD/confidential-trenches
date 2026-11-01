@@ -187,7 +187,7 @@ function Stat({ tone, label, counter = null }: { tone: "warn" | "blue"; label: R
   return (
     <div className={`dstat ${tone}`} data-counter={counter ?? undefined}>
       <span>{label}</span>
-      {counter !== null && <span className="num cnt">{counter}s</span>}
+      {counter !== null && <span className="num cnt">{`${counter}s`.padEnd(6, "\u2007")}</span>}
     </div>
   );
 }

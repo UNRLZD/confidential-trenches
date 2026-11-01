@@ -48,7 +48,7 @@
 .dstat { display: flex; align-items: center; gap: 10px; min-height: 44px; border-radius: 12px; padding: 0 14px; background: var(--bg-panel); border: 1px solid var(--border-panel); font: 500 14px var(--font-ui); flex: none; }
 .dstat.warn { color: var(--warn); }
 .dstat.blue { color: var(--blue); }
-.dstat .cnt { font-family: var(--font-num); display: inline-block; width: 6ch; height: 18px; line-height: 18px; contain: strict; font-variant-numeric: tabular-nums; font-kerning: none; } /* the counter ticks in place: its box never moves or grows (BAR-11) */
+.dstat .cnt { font-family: var(--font-num); display: inline-block; width: 6ch; height: 18px; line-height: 18px; contain: strict; font-variant-numeric: tabular-nums; font-kerning: none; } /* the counter ticks in place (BAR-11): a fixed box, and its text padded to one length (DepositSheet Stat), since Chromium counted a sub-pixel layout shift on the text run each time its length changed */
 .dstat.row { justify-content: space-between; padding-right: 6px; }
 .dstat .retry { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 14px var(--font-ui); }
 .dline { margin: 0; font: 13px/1.4 var(--font-ui); color: var(--text-2); padding: 0 2px; }
