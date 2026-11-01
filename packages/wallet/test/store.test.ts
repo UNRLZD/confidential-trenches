@@ -528,6 +528,10 @@ test("openWalletStoreReader: makes no database, writes nothing, reads records an
     assert.deepEqual(await r.get("meta", "status"), { v: 1, source: "random", code_saved: true });
     assert.deepEqual(await r.get("ops", "op1"), { kind: "deposit", stage: "waiting", txs: [] });
     await assert.rejects(r.get("meta", "k_wrap"));
+    // the frame's reader opens meta/status and ops only: never the seed, nor a note or a wallet
+    await assert.rejects(r.get("meta", "seed"), /meta\/status and ops only/);
+    await assert.rejects(r.get("meta", "settings"), /meta\/status and ops only/);
+    await assert.rejects(r.get("notes", "n1"), /meta\/status and ops only/);
   } finally {
     for (const m of Object.keys(saved)) proto[m] = saved[m]!;
   }

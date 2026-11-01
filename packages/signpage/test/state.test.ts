@@ -304,6 +304,8 @@ test("pickOps: the oldest are dropped until the answer fits SIGNPAGE_MAX_ANSWER_
   const kept2 = pickOps(base, [{ op: fit, t: -1 }, ...rows.slice(100 - ops.length)]);
   assert.equal(kept2.length, ops.length + 1, "exactly at the limit: kept");
   assert.equal(enc({ ...base, ops: kept2 }), limit);
+  // the answer around it (v, id, ok) still fits the client's limit: ANSWER_ROOM is the envelope's room
+  assert.ok(answerBytes({ ...base, ops: kept2 }) <= SIGNPAGE_MAX_ANSWER_BYTES, String(answerBytes({ ...base, ops: kept2 })));
   const over = { ...fit, id: `${fit.id}f` };
   assert.equal(pickOps(base, [{ op: over, t: -1 }, ...rows.slice(100 - ops.length)]).length, ops.length, "one byte over: dropped");
 });

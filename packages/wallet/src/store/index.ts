@@ -457,7 +457,10 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   };
 }
 
-/** What SIGN_HOST's frame reads: records, opened under K_wrap, and keys. It writes nothing. */
+/**
+ * What SIGN_HOST's frame reads: meta/status and the ops records, opened under K_wrap, and keys. It opens no other record
+ * (never the seed, K_wrap, a note or a wallet) and writes nothing.
+ */
 export interface WalletStoreReader {
   get(store: WalletStoreName, key: string): Promise<unknown>;
   keys(store: WalletStoreName): Promise<string[]>;
@@ -508,7 +511,8 @@ export async function openWalletStoreReader(
   return {
     async get(store, key) {
       checkKey(store, key);
-      if (store === "meta" && key === K_WRAP) throw new Error("K_wrap is never read out");
+      // the frame's two reads; every other record (the seed, K_wrap, a note) is refused before it is read
+      if (store !== "ops" && !(store === "meta" && key === STATUS)) throw new Error(`the reader opens meta/status and ops only, not ${store}/${key}`);
       return unwrapWith(k, store, key, await getRaw(store, key));
     },
     async keys(store) {

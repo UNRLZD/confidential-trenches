@@ -20,7 +20,10 @@
 //   - every state (answer or event) with exactly the frozen keys (`way` never while signed out), no other message kind;
 //   - no SIGN_HOST frame ever reads the seed record: an init script in every SIGN_HOST frame wraps IndexedDB's get,
 //     getAll and openCursor and records any get of meta/seed and any getAll or cursor over "meta" (the frame reads
-//     the status and the seed's key only). The top-level tab may read it; it is not the frame.
+//     the status and the seed's key only). The top-level tab may read it; it is not the frame;
+//   - no SIGN_HOST frame writes IndexedDB or makes a database: the same script records every put, add, delete, clear,
+//     deleteDatabase and completed upgrade in a frame (the frame opens the store read-only, also on a fresh profile
+//     and after Sign out).
 // The parent frames SIGN_HOST with the kit's own SIGNPAGE_IFRAME_ATTRIBUTES, as the terminal's client does.
 // Each event must come within EVENT_MS of the top tab's step. The ops a signing kind writes have no writer on SIGN_HOST
 // yet, so they are checked by packages/signpage/test/state.test.ts, not here. No money, no network beyond SIGN_HOST:
@@ -124,6 +127,9 @@ export function judge(rec) {
   const seedReads = frames.flatMap((f) => f.seedReads ?? []);
   say(frames.length >= 2 && frames.every((f) => Array.isArray(f.seedReads) && f.calls > 0) && seedReads.length === 0,
     `no SIGN_HOST frame reads the seed record (${frames.length} frames, ${frames.map((f) => f.calls).join("+")} IndexedDB reads, ${seedReads.length} of the seed${seedReads.length ? `: ${seedReads.join("; ")}` : ""})`);
+  const writes = frames.flatMap((f) => f.writes ?? []);
+  say(frames.length >= 2 && frames.every((f) => Array.isArray(f.writes)) && writes.length === 0,
+    `no SIGN_HOST frame writes IndexedDB or makes a database (${frames.length} frames, ${writes.length} writes${writes.length ? `: ${writes.slice(0, 6).join("; ")}${writes.length > 6 ? "; ..." : ""}` : ""})`);
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -186,11 +192,35 @@ async function top(page, not) {
 
 // Runs in every document of the context before its scripts: in a SIGN_HOST frame, every IndexedDB get, getAll and
 // openCursor is counted, and one that reads the seed record (a get of meta/seed, any getAll or cursor over "meta") is
-// recorded. The top-level SIGN_HOST tab is not wrapped: it is where the seed is meant to be read.
+// recorded; so is every write: a put, add, delete or clear, a deleteDatabase, and an open whose upgrade completes (it
+// made or upgraded a database; the read-only open aborts its upgrade, which leaves nothing). The top-level SIGN_HOST
+// tab is not wrapped: it is where the seed is read and the store written.
 const SPY = (host) => {
   if (location.hostname !== host || window.top === window) return;
-  window.__idb = { calls: 0, seedReads: [] };
+  window.__idb = { calls: 0, seedReads: [], writes: [] };
+  const F = IDBFactory.prototype;
+  const open = F.open;
+  F.open = function (...a) {
+    const r = open.apply(this, a);
+    r.addEventListener("upgradeneeded", (e) => {
+      r.transaction?.addEventListener("complete", () => window.__idb.writes.push(`open ${a[0]} made or upgraded it (v${e.oldVersion} to v${e.newVersion})`));
+    });
+    return r;
+  };
+  const del = F.deleteDatabase;
+  F.deleteDatabase = function (...a) {
+    window.__idb.writes.push(`deleteDatabase ${a[0]}`);
+    return del.apply(this, a);
+  };
   const P = IDBObjectStore.prototype;
+  for (const m of ["put", "add", "delete", "clear"]) {
+    const orig = P[m];
+    P[m] = function (...a) {
+      const key = m === "delete" ? a[0] : m === "clear" ? "*" : a[1];
+      window.__idb.writes.push(`${m} ${this.name}/${key === undefined ? "(in-line key)" : String(key)}`);
+      return orig.apply(this, a);
+    };
+  }
   for (const m of ["get", "getAll", "openCursor"]) {
     const orig = P[m];
     P[m] = function (...a) {
@@ -276,7 +306,7 @@ export async function collect({ harness, site, url }) {
     rec.frames = [];
     for (const p of [parent, second])
       for (const f of p.frames().filter((x) => x !== p.mainFrame() && new URL(x.url()).hostname === SIGN_HOST))
-        rec.frames.push((await f.evaluate(() => window.__idb ?? null).catch(() => null)) ?? { calls: 0, seedReads: null });
+        rec.frames.push((await f.evaluate(() => window.__idb ?? null).catch(() => null)) ?? { calls: 0, seedReads: null, writes: null });
     await ctx.close();
   } finally {
     await h.close();
