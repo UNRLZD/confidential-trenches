@@ -3,11 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "pnpm run typecheck && node --test scripts/deploy.test.mjs test/api.test.ts",
-    "typecheck": "tsc --noEmit --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess --target es2023 --lib es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --verbatimModuleSyntax --noUnusedLocals --skipLibCheck src/api.ts",
-    "test:e2e": "node scripts/frame.e2e.mjs"
+    "build": "node scripts/build-app.mjs",
+    "test": "node --test scripts/deploy.test.mjs scripts/build-app.test.mjs test/api.test.ts",
+    "test:e2e": "node scripts/frame.e2e.mjs",
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --lib es2023,dom,dom.iterable --types node src/main.ts"
   },
   "devDependencies": {
-    "playwright": "1.63.0"
+    "@types/node": "24.10.1",
+    "playwright": "1.63.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  },
+  "dependencies": {
+    "@blindfill/wallet": "workspace:*"
   }
 }

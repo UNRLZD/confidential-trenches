@@ -2,8 +2,10 @@
 // W:1118; the shapes are packages/kit/src/signpage/messages.ts, api 1). APP_HOST frames this page as a hidden iframe.
 // The page listens, then posts `ready` to its parent with targetOrigin APP_ORIGIN, so no other embedder hears it. A
 // message is read only when its origin is APP_ORIGIN exactly and its source is the window that framed this page; any
-// other is dropped with no answer and no change. Anything but a plain object with an id that is a crypto.randomUUID()
-// is dropped too: no answer can be addressed to it. Every other message gets one answer, sent only to the parent with
+// other is dropped with no answer and no change. So is a request over SIGNPAGE_MAX_MESSAGE_BYTES of JSON or not made of
+// plain objects, arrays with index keys only, strings, finite numbers, booleans and null (A:116-117), checked before
+// any field is read, and anything but a plain object with an id that is a crypto.randomUUID(): no answer can be
+// addressed to it. Every other message gets one answer, sent only to the parent with
 // targetOrigin APP_ORIGIN: `state` with exactly {v: 1, id, type} is answered with the state; every other kind, a kind
 // with no row, a v other than 1 and a field its row does not allow are refused as "not_allowed" (W:917; app.md
 // §2.1 A2-A4, A:116-117), each signing kind until its own payload rules land (W:886-917). No field of a refused message
@@ -11,7 +13,7 @@
 // answer again, never a second run (messages.ts). Answers carry states only, never a key, the words or a note secret
 // (W §2.9 row 11).
 //
-// public/api.js is this file with its types removed (scripts/api-build.mjs); index.html loads it with its sha384.
+// src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
 import type { ReadyEvent, SignpageAnswer, SignpageKind, SignpageState } from "../../kit/src/signpage/messages.ts";
 
@@ -21,6 +23,10 @@ export const APP_ORIGIN = "https://confidential.unrealized.trade";
 export const RELEASE = "unreleased";
 /** The api of messages.ts this page speaks. */
 export const API = 1;
+/** The largest request read, in UTF-16 code units of its JSON (A:116-117; the kit's SIGNPAGE_MAX_MESSAGE_BYTES). */
+export const SIGNPAGE_MAX_MESSAGE_BYTES = 65_536;
+/** The deepest request read. */
+const MAX_DEPTH = 12;
 /** How many answered ids are kept for a retry; the oldest goes first. */
 export const REMEMBERED_IDS = 1024;
 
@@ -64,6 +70,40 @@ export function signedOutState(): SignpageState {
   };
 }
 
+/**
+ * True when `v` is plain data (objects with Object or null prototype, arrays with index keys only) within the caps.
+ * Every value, key and string character spends at least one character of its JSON, so the walk stops once that budget
+ * passes the cap: a structure that shares one object many times cannot make it, or the JSON size check, run long.
+ */
+function isPlainRequest(v: unknown): boolean {
+  let budget = SIGNPAGE_MAX_MESSAGE_BYTES;
+  const walk = (x: unknown, depth: number): boolean => {
+    if (depth > MAX_DEPTH || --budget < 0) return false;
+    if (typeof x === "string") return (budget -= x.length) >= 0;
+    if (x === null || typeof x === "boolean") return true;
+    if (typeof x === "number") return Number.isFinite(x);
+    if (typeof x !== "object") return false;
+    if (Array.isArray(x)) {
+      if (Object.getPrototypeOf(x) !== Array.prototype || x.length > budget) return false;
+      const keys = Reflect.ownKeys(x);
+      if (keys.length !== x.length + 1 || keys.some((k, i) => (i < x.length ? k !== String(i) : k !== "length"))) return false;
+      return x.every((e) => walk(e, depth + 1));
+    }
+    const proto: unknown = Object.getPrototypeOf(x);
+    if (proto !== Object.prototype && proto !== null) return false;
+    for (const k of Reflect.ownKeys(x)) {
+      if (typeof k !== "string" || (budget -= k.length) < 0 || !walk((x as Record<string, unknown>)[k], depth + 1)) return false;
+    }
+    return true;
+  };
+  if (!walk(v, 0)) return false;
+  try {
+    return JSON.stringify(v).length <= SIGNPAGE_MAX_MESSAGE_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 /** The envelope's fields when `data` is a plain object with a UUID id; null when no answer can go to it. */
 function envelope(data: unknown): Record<string, unknown> | null {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
@@ -87,6 +127,7 @@ export function startApi(host: ApiHost): void {
 
   host.listen((e) => {
     if (e.origin !== APP_ORIGIN || e.source !== host.parent) return;
+    if (!isPlainRequest(e.data)) return;
     const m = envelope(e.data);
     if (!m) return;
     const id = m.id as string;
@@ -100,14 +141,4 @@ export function startApi(host: ApiHost): void {
     post(answer);
   });
   post({ v: 1, type: "ready", release: RELEASE, api: API });
-}
-
-interface BrowserWindow {
-  parent: PostTarget;
-  addEventListener(type: "message", fn: (e: IncomingMessage) => void): void;
-}
-// In the browser, framed by APP_HOST: start. A top-level visit has no app to answer.
-const win = (globalThis as { window?: BrowserWindow }).window;
-if (win !== undefined && win.parent !== (win as unknown)) {
-  startApi({ parent: win.parent, listen: (fn) => win.addEventListener("message", fn), state: signedOutState });
 }

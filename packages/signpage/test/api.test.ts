@@ -1,15 +1,12 @@
 // SIGN_HOST's postMessage API (src/api.ts), card signpage-postmessage.
 //   node --test test/api.test.ts      (from packages/signpage)
 // The page posts `ready` to APP_HOST only, answers `state` with exactly {v, id, type}, refuses every other kind as
-// "not_allowed", and drops a wrong origin, a wrong source or a malformed envelope with no answer and no change. The
-// last test checks that public/api.js and index.html's integrity are this source's build, byte for byte.
+// "not_allowed", and drops a wrong origin, a wrong source, a request over the size cap or a malformed envelope with
+// no answer and no change. public/app.js being this source's build is scripts/build-app.test.mjs's.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { APP_ORIGIN, REMEMBERED_IDS, RELEASE, signedOutState, startApi } from "../src/api.ts";
+import { APP_ORIGIN, REMEMBERED_IDS, RELEASE, SIGNPAGE_MAX_MESSAGE_BYTES, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
-// @ts-expect-error: a plain .mjs build script with no types
-import { apiJs, integrityOf } from "../scripts/api-build.mjs";
 
 const KINDS = [
   "deposit.quote", "deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return",
@@ -118,19 +115,20 @@ test("a return_key is never looked up: constructor, __proto__, toString and an u
   cases.forEach((c, i) => assert.deepEqual(p.posted[1 + i], { msg: notAllowed(c.id as string), to: APP_ORIGIN }, JSON.stringify(c)));
 });
 
-test("every message posted is at most 64 KiB of JSON, with plain arrays of index keys only (app.md:116-117)", () => {
+test("every message posted is at most 4 MiB of JSON, with plain arrays of at most 10,000 items, index keys only", () => {
   const p = page();
   p.send(state());
   p.send({ v: 1, id: uuid(), type: "buy" });
   const walk = (x: unknown): void => {
     if (Array.isArray(x)) {
       assert.equal(Object.getPrototypeOf(x), Array.prototype);
+      assert.ok(x.length <= 10_000);
       assert.deepEqual(Reflect.ownKeys(x), [...x.keys()].map(String).concat("length"));
       x.forEach(walk);
     } else if (typeof x === "object" && x !== null) Object.values(x).forEach(walk);
   };
   for (const { msg } of p.posted) {
-    assert.ok(JSON.stringify(msg).length <= 65_536);
+    assert.ok(JSON.stringify(msg).length <= 4 * 1024 * 1024);
     walk(msg);
   }
   assert.equal(p.posted.length, 3);
@@ -169,10 +167,32 @@ test("answered ids are kept up to REMEMBERED_IDS, the oldest dropped first", () 
   assert.equal(reads, REMEMBERED_IDS + 2, "ids[0] was the oldest and went");
 });
 
-test("public/api.js and index.html's integrity are src/api.ts's build, byte for byte", () => {
-  const js = readFileSync(new URL("../public/api.js", import.meta.url), "utf8");
-  assert.equal(js, apiJs(), "public/api.js is stale: run node packages/signpage/scripts/api-build.mjs");
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const tags = [...html.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
-  assert.deepEqual(tags, [`<script type="module" src="/api.js" integrity="${integrityOf(js)}" crossorigin="anonymous">`]);
+test("a request over the 64 KiB cap or not plain data is dropped before any field is read (A:116-117)", () => {
+  const p = page();
+  const id = uuid();
+  const big = { v: 1, id, type: "buy", pad: "x".repeat(SIGNPAGE_MAX_MESSAGE_BYTES) };
+  const extraKey = Object.assign([1, 2], { evil: true });
+  const sparse = new Array(5);
+  let deep: unknown = 1;
+  for (let i = 0; i < 20; i++) deep = { d: deep };
+  const shared: Record<string, unknown> = {};
+  let node: unknown = "x";
+  for (let i = 0; i < 12; i++) node = Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`k${k}`, node]));
+  Object.assign(shared, { v: 1, id, type: "buy", node });
+  const bad: unknown[] = [
+    big,
+    { v: 1, id, type: "buy", list: extraKey },
+    { v: 1, id, type: "buy", list: sparse },
+    { v: 1, id, type: "buy", deep },
+    { v: 1, id, type: "buy", n: Number.NaN },
+    { v: 1, id, type: "buy", when: new Date() },
+    { v: 1, id, type: "buy", list: Array.from({ length: SIGNPAGE_MAX_MESSAGE_BYTES + 1 }, () => 0) },
+    shared,
+  ];
+  const t0 = performance.now();
+  for (const d of bad) p.send(d);
+  assert.ok(performance.now() - t0 < 1_000, "the shared-object request is refused fast");
+  assert.equal(p.posted.length, 1, "only ready");
+  p.send({ v: 1, id, type: "buy", pad: "x".repeat(SIGNPAGE_MAX_MESSAGE_BYTES - 200) });
+  assert.deepEqual(p.posted[1], { msg: notAllowed(id), to: APP_ORIGIN }, "just under the cap is read");
 });

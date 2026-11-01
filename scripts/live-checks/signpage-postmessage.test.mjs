@@ -69,6 +69,9 @@ test("the good run with one change each: FAIL", () => {
     "a stranger's frame loads under the served headers": (rec) => {
       rec.runs.find((r) => r.parent === "https://example.com" && r.headers === "served").loaded = true;
     },
+    "the framed page renders a sign-in control": (rec) => {
+      appRun(rec).rendered = { elements: 2, controls: ['<button type="button" data-action="create">Create passkey</button>'] };
+    },
     "a stranger run missing": (rec) => {
       rec.runs = rec.runs.filter((r) => r.parent !== "https://app.other.test");
     },

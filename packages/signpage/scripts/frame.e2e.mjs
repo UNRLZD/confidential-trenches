@@ -12,7 +12,7 @@ const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
 const GOOD = JSON.parse(readFileSync(join(REPO, "scripts/live-checks/signpage-skeleton.answers.json"), "utf8")).good;
 const PAGE = readFileSync(join(PKG, "index.html"), "utf8");
-const API_JS = readFileSync(join(PKG, "public/api.js"), "utf8");
+const APP_JS = readFileSync(join(PKG, "public/app.js"), "utf8");
 const SIGN = "https://sign.confidential.unrealized.trade/";
 const APP = "https://confidential.unrealized.trade/";
 const STRANGER = "https://example.com/";
@@ -24,7 +24,7 @@ async function framed(browser, parent, signHeaders) {
   const ctx = await browser.newContext();
   const refused = [];
   await ctx.route(SIGN, (r) => r.fulfill({ status: 200, headers: signHeaders, body: PAGE }));
-  await ctx.route(`${SIGN}api.js`, (r) => r.fulfill({ status: 200, headers: { ...signHeaders, "content-type": "text/javascript" }, body: API_JS }));
+  await ctx.route(`${SIGN}app.js`, (r) => r.fulfill({ status: 200, headers: { ...signHeaders, "content-type": "text/javascript" }, body: APP_JS }));
   await ctx.route(parent, (r) =>
     r.fulfill({ status: 200, contentType: "text/html", body: `<!doctype html><iframe src="${SIGN}"></iframe>` }),
   );

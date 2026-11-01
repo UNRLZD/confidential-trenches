@@ -9,6 +9,8 @@
 //     `state` with an extra field, `state` with v 2, an unknown kind and `buy` are answered {ok: false, error: {code:
 //     "not_allowed"}}; a message whose id is no UUID gets no answer; a repeated id gets its first answer again; the same
 //     `state` sent from another APP_HOST window (not the frame's parent) gets no answer; nothing else arrives;
+//     inside the frame the page renders nothing a user could press: no sign-in or sign-out control, no element in its
+//     body (sign-in and sign-out run top-level only, wallet.md:921-922);
 //   - from https://example.com, https://evil.ct.test (same-site with the test hosts) and https://app.other.test
 //     (cross-site), each twice: under the headers as served, the frame is blocked (frame-ancestors) and nothing
 //     arrives; with frame-ancestors lifted from SIGN_HOST's CSP, the frame loads and runs its script, and still nothing
@@ -59,6 +61,8 @@ export function judge(rec) {
   else {
     const msgs = app.messages ?? [];
     say(app.loaded === true, `from APP_HOST: the frame ${app.loaded ? "loads" : "does not load"}`);
+    const rd = app.rendered;
+    say(rd != null && rd.elements === 0 && rd.controls.length === 0, `from APP_HOST: the framed page renders ${rd == null ? "nothing readable (not recorded)" : `${rd.elements} element(s)${rd.controls.length ? `, controls ${rd.controls.join(" ")}` : ", no control"}`}, want none (sign-in and sign-out run top-level only)`);
     const foreign = msgs.filter((m) => m.origin !== signOrigin || !m.fromFrame);
     say(foreign.length === 0, `from APP_HOST: every message comes from the frame at ${signOrigin}${foreign.length ? ` (but ${foreign.length} from ${foreign.map((m) => m.origin).join(", ")})` : ""}`);
     const ready = msgs.filter((m) => isObj(m.data) && m.data.type === "ready");
@@ -217,6 +221,10 @@ async function run(browser, { parent, headers, signUrl, dir }) {
   const frame = page.frames().find((f) => f !== page.mainFrame() && f.url() === signUrl);
   const loaded = frame !== undefined;
   const frames = page.frames().map((f) => f.url());
+  // what the framed page renders: every element in its body (none is right) and the controls among them
+  const rendered = loaded
+    ? await frame.evaluate(() => ({ elements: document.body ? document.body.querySelectorAll("*").length : -1, controls: [...document.querySelectorAll("button, a, input, select, textarea, form, [data-action], [onclick], #signin")].map((e) => e.outerHTML.slice(0, 120)) })).catch((e) => ({ elements: -1, controls: [`unreadable: ${e.message}`] }))
+    : null;
   const sent = await page.evaluate(SEND, signOrigin);
   await page.waitForTimeout(SETTLE_MS);
   const messages = await page.evaluate(() => window.__log);
@@ -225,7 +233,7 @@ async function run(browser, { parent, headers, signUrl, dir }) {
   const apiFetched = signRequests.some((r) => r.type === "script" && r.status === 200);
   const scriptRan = loaded && apiFetched && !errors.some((e) => /integrity|Content Security Policy|Trusted Type/i.test(e));
   await ctx.close();
-  return { parent, headers, loaded, frames, sentAt, scriptRan, signRequests, sent, messages, errors };
+  return { parent, headers, loaded, frames, rendered, sentAt, scriptRan, signRequests, sent, messages, errors };
 }
 
 export async function collect({ browser, signUrl = SIGN_URL, dir, source }) {

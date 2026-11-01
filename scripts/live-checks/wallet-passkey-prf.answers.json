@@ -1,0 +1,217 @@
+{
+ "note": "Recorded 2026-11-01T02:59Z on the PC box (scripts/heavy.sh), both on the browser harness (--harness: SIGN_HOST's real name mapped to a local https server, each build under the shipped public/_headers). good: SIGN_HOST's own build at this commit. bad: a planted copy of src/main.ts whose no-PRF branch stores a random seed and signs in without notice (the brief's bad answer), built the same way. Public values only: states, the throwaway accounts' T_0 ids, rp ids; no PRF output, entropy, words or key.",
+ "good": {
+  "key": "wallet-passkey-prf",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-01T02:59:46.050Z",
+  "prf": {
+   "steps": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "localStorage": 0
+    },
+    "create": {
+     "state": "signed-in",
+     "account": "c5044e709af4103eac0f0f6266cb379845ed1d3339224c60067ab3ba49a1e81e",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "c5044e709af4103eac0f0f6266cb379845ed1d3339224c60067ab3ba49a1e81e",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "localStorage": 0
+    },
+    "signout": {
+     "state": "signed-out",
+     "account": null,
+     "db": false,
+     "seed": false,
+     "kWrap": null,
+     "seedWrapped": null,
+     "localStorage": 0
+    },
+    "signin": {
+     "state": "signed-in",
+     "account": "c5044e709af4103eac0f0f6266cb379845ed1d3339224c60067ab3ba49a1e81e",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "localStorage": 0
+    }
+   },
+   "credentials": [
+    {
+     "rpId": "sign.confidential.unrealized.trade"
+    }
+   ],
+   "prfOk": true,
+   "expected": "c5044e709af4103eac0f0f6266cb379845ed1d3339224c60067ab3ba49a1e81e"
+  },
+  "noPrf": {
+   "open": {
+    "state": "signed-out",
+    "account": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "localStorage": 0
+   },
+   "create": {
+    "state": "no-prf",
+    "account": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "localStorage": 0
+   }
+  },
+  "errors": []
+ },
+ "bad": {
+  "key": "wallet-passkey-prf",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-01T02:59:47.643Z",
+  "prf": {
+   "steps": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "localStorage": 0
+    },
+    "create": {
+     "state": "signed-in",
+     "account": "997ab899fb5c792b7f6e7ba45d93c8797550eeeecaed5e7c92f7db315ba34d88",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "997ab899fb5c792b7f6e7ba45d93c8797550eeeecaed5e7c92f7db315ba34d88",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "localStorage": 0
+    },
+    "signout": {
+     "state": "signed-out",
+     "account": null,
+     "db": false,
+     "seed": false,
+     "kWrap": null,
+     "seedWrapped": null,
+     "localStorage": 0
+    },
+    "signin": {
+     "state": "signed-in",
+     "account": "997ab899fb5c792b7f6e7ba45d93c8797550eeeecaed5e7c92f7db315ba34d88",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "localStorage": 0
+    }
+   },
+   "credentials": [
+    {
+     "rpId": "sign.confidential.unrealized.trade"
+    }
+   ],
+   "prfOk": true,
+   "expected": "997ab899fb5c792b7f6e7ba45d93c8797550eeeecaed5e7c92f7db315ba34d88"
+  },
+  "noPrf": {
+   "open": {
+    "state": "signed-out",
+    "account": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "localStorage": 0
+   },
+   "create": {
+    "state": "signed-in",
+    "account": "bb7cba7d61ed802731142c71810042a9dafeed6b34004e9692d35b0bd609ac38",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "localStorage": 0
+   }
+  },
+  "errors": []
+ }
+}
