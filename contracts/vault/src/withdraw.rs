@@ -24,16 +24,18 @@
 //!   label tree has had, never 0 (`UnknownLabelRoot`). Every root is kept (vault.md 2.4, Dev 2), so a proof made
 //!   against an older root still lands, and a root of another vault, which hashes another scope's labels, is unknown.
 //! - Row 7: `withdrawnValue != 0` (`InvalidWithdrawalAmount`). Row 8: it is below 2^128 (`AmountOverflow`), then the
-//!   backstop `relay_fee * 10,000 <= withdrawnValue * MAX_RELAY_FEE_BPS`, both products exact (`RelayFeeGreaterThanMax`).
+//!   backstop `relay_fee * 10,000 <= withdrawnValue * MAX_RELAY_FEE_BPS`, both products exact
+//!   (`RelayFeeGreaterThanMax`).
 //!   Row 9: `withdrawnValue <= deposited - spent + returned`, the value the notes hold (`InvalidPoolState`).
 //! - Row 10: Groth16 verify with the withdraw key, the 8 signals in snarkjs order (`verifier::verify_withdraw`,
 //!   `InvalidProof`).
 //! - Row 11: `existingNullifierHash` not in `spent` (`NullifierAlreadySpent`); a spend is keyed on it, never on the
 //!   proof's bytes, which anyone can re-randomise. Row 12: `newCommitmentHash` into the state tree with LeanIMT's
 //!   checks (`LeafAlreadyExists`, `LeafCannotBeZero`, `MaxTreeDepthReached`), even when the change is 0. Every refusal
-//!   of rows 1-12 comes before the first write; then the change leaf, the `spent` row, the `spends` record (status
-//!   `in_flight`, `payer` the predecessor, the request's recipient, `relay_fee` as `fee`, its `refund_precommitment`
-//!   and `context`, refund fields 0) and `totals.spent += withdrawnValue` are written, and `withdrawn` is logged.
+//!   of rows 1-12 comes before the first write and the first log; then the change leaf (and its `leaf_inserted`), the
+//!   `spent` row, the `spends` record (status `in_flight`, `payer` the predecessor, the request's recipient,
+//!   `relay_fee` as `fee`, its `refund_precommitment` and `context`, refund fields 0) and `totals.spent +=
+//!   withdrawnValue` are written, and `withdrawn` is logged.
 //!
 //! Rows 13-15 (the fee split, the storage charge and the payouts with `on_payout`) are card vault-withdraw-payouts'.
 //! Until they land, `withdraw` returns after row 12: the note is spent and its change note is in the tree, nothing is
@@ -192,7 +194,8 @@ impl Vault {
     /// Rows 4-9 of 2.5.2 on a request that passed rows 1-3; any failure panics. Returns `withdrawnValue`.
     pub fn check_spend(&self, signals: &[U256; 8], relay_fee: u128) -> u128 {
         // row 4
-        if !at_most(&signals[SIGNAL_STATE_DEPTH], MAX_TREE_DEPTH) || !at_most(&signals[SIGNAL_ASP_DEPTH], MAX_TREE_DEPTH) {
+        let (state_depth, asp_depth) = (&signals[SIGNAL_STATE_DEPTH], &signals[SIGNAL_ASP_DEPTH]);
+        if !at_most(state_depth, MAX_TREE_DEPTH) || !at_most(asp_depth, MAX_TREE_DEPTH) {
             env::panic_str("InvalidTreeDepth: a tree depth is over 32");
         }
         // rows 5 and 6: is_known_root refuses 0
@@ -233,7 +236,11 @@ impl Vault {
         if self.spent.contains_key(&nullifier_hash) {
             env::panic_str("NullifierAlreadySpent");
         }
-        // row 12: insert_commitment refuses before it writes
+        // row 9 bounds withdrawn by deposited + returned - spent, so this cannot fail; it is taken before any write or
+        // log all the same, so nothing after the first one can refuse
+        let spent = self.totals.spent.0.checked_add(withdrawn).unwrap_or_else(|| env::panic_str("InvalidPoolState"));
+        // row 12: insert_commitment makes every check (LeafAlreadyExists, the leaf below p and not 0, the depth) before
+        // it writes the leaf and logs leaf_inserted; it is the last row that can refuse
         let (new_leaf_index, _) = self.insert_commitment(&mut PoseidonT3::new(), &new_commitment);
         // row 11, its writes: nothing below refuses
         let index = self.spends.len();
@@ -253,8 +260,7 @@ impl Vault {
             fee: c.fields.relay_fee,
             context: field::to_be(&c.signals[SIGNAL_CONTEXT]),
         });
-        // row 9 bounds withdrawn by deposited + returned - spent, so this sum cannot overflow
-        self.totals.spent = U128(self.totals.spent.0 + withdrawn);
+        self.totals.spent = U128(spent);
         Event::Withdrawn {
             processor: &c.fields.processor,
             value: withdrawn,
@@ -810,6 +816,7 @@ mod spend_tests {
             }
         }
         assert_eq!(written(v), before, "{want}: a byte was written");
+        assert_eq!(near_sdk::test_utils::get_logs(), Vec::<String>::new(), "{want}: a refused call logged");
     }
 
     fn with_signal(mut c: (Withdrawal, Proof, [String; 8]), i: usize, x: &str) -> (Withdrawal, Proof, [String; 8]) {

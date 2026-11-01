@@ -13,7 +13,7 @@
 //!
 //! 1. `vt_s05_one_nullifier_spends_once`: the same call twice; a second proof with the same nullifier; two proofs of
 //!    one nullifier sent at once by two relayers, landing in one block. Each time exactly one succeeds and the others
-//!    are refused with `NullifierAlreadySpent`, and a refused call changes no byte of the vault's state.
+//!    are refused with `NullifierAlreadySpent`; a refused call changes no byte of the vault's state and logs nothing.
 //! 2. `vt_s06_unknown_zero_and_other_vault_roots_are_refused`: a state root or ASP root that is unknown, 0, or another
 //!    vault's (the same notes under another scope) is refused (`UnknownStateRoot`, `UnknownLabelRoot`) with no byte
 //!    changed; a proof against an older root (4 of the 6 deposits) lands.
@@ -152,6 +152,9 @@ async fn refused(h: &Harness, by: &Account, a: Value, want: &str) -> R<()> {
         Ok(_) => return Err(format!("landed, want {want}").into()),
         Err(f) => assert!(f.contains(want), "want {want}, got {f}"),
     }
+    // no event or log from a refused call, the change leaf's leaf_inserted included
+    let r = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
+    assert!(r.logs.is_empty(), "{want}: a refused call logged {:?}", r.logs);
     assert_eq!(vault_state(h).await?, before, "{want}: a state byte changed");
     Ok(())
 }
