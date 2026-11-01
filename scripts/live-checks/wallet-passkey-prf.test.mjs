@@ -12,7 +12,10 @@
 // within 500 ms of the first and a repeated Enter sign out). Records made before round 4 hold no guard or phone steps
 // (prf.protect, phone), records made before the trigger steps (bad23f373f and older) hold no prf.triggers, and records
 // made before round 5 hold no prf.burst or prf.repeat: those steps' lines are BAD on them for that reason, checked as
-// such below.
+// such below. Card wallet-typed-words: good re-recorded with the no-PRF run's backup, Saved and typed-words steps;
+// bad18cd57a, the page at 18cd57a (no-PRF Create stores nothing and opens no backup; no typed words), fails on those four
+// lines only. Every record before it fails those four lines for that reason (its no-PRF Create was right then), checked
+// as such below.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -33,6 +36,20 @@ test("the recorded good answer passes", () => {
 });
 
 const BAD = (rec) => bad(rec).map((l) => l.split(" (")[0]);
+// card wallet-typed-words' steps: a record made before it fails each (the no-PRF Create then opened no backup)
+const TW = [
+  "BAD no-prf: Create passkey stores a random seed and opens the backup screen with its 12 words",
+  "BAD no-prf: Saved signs in as the same account with code_saved true and Sign out drawn",
+  "BAD no-prf: typed words that fail the checksum show Invalid code and store nothing",
+  "BAD no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true",
+];
+// a record made before wallet-typed-words: its four lines are all BAD, and the rest is returned
+function beforeTW(rec) {
+  assert.equal(rec.noPrf.typed, undefined);
+  const lines = BAD(rec);
+  for (const l of TW) assert.ok(lines.includes(l), l);
+  return lines.filter((l) => !TW.includes(l));
+}
 // round 5's steps, which records made before round 5 do not hold
 const R5 = [
   "BAD prf: a burst's second click, past 500 ms from Sign out drawn and within 500 ms of the first, does nothing",
@@ -42,7 +59,7 @@ const R5 = [
 function beforeR5(rec) {
   assert.equal(rec.prf.burst, undefined);
   assert.equal(rec.prf.repeat, undefined);
-  const lines = BAD(rec);
+  const lines = beforeTW(rec);
   for (const l of R5) assert.ok(lines.includes(l), l);
   return lines.filter((l) => !R5.includes(l));
 }
@@ -74,7 +91,20 @@ function beforeR4(rec) {
 test("the recorded bad answer (no PRF falls back to a random seed without notice) fails on that line", () => {
   const r = judge(answers.bad);
   assert.equal(r.pass, false);
-  assert.deepEqual(beforeR4(answers.bad), ["BAD no-prf: Create passkey opens the no-PRF path"]);
+  assert.deepEqual(beforeR4(answers.bad), []);
+  // its no-PRF Create signed in on a random seed with no backup screen: the create line, which beforeTW asserts BAD
+  assert.equal(answers.bad.noPrf.create.state, "signed-in");
+  assert.equal(answers.bad.noPrf.create.seed, true);
+});
+
+test("card wallet-typed-words' recorded red (the page at 18cd57a) fails on its four no-PRF lines only", () => {
+  const r = answers.bad18cd57a;
+  assert.equal(judge(r).pass, false);
+  assert.deepEqual(BAD(r), TW);
+  // Create with no PRF stored nothing and stayed on the no-PRF notice; there was no Recovery code to type into
+  assert.deepEqual([r.noPrf.create.state, r.noPrf.create.seed, r.noPrf.create.words], ["no-prf", false, 0]);
+  assert.equal(r.noPrf.invalid.noInput, true);
+  assert.equal(r.noPrf.typed.noInput, true);
 });
 
 test("round 2's recorded reds fail on their own lines", () => {
@@ -126,7 +156,7 @@ test("the planted page without the guard's pageshow, focus and visibilitychange 
 
 test("round 5's recorded red (the page at 265ad22) fails on the burst and the repeated Enter only", () => {
   const r = answers.bad265ad22;
-  assert.deepEqual(BAD(r), R5);
+  assert.deepEqual(beforeTW(r), R5);
   // the burst's second click came past 500 ms from the draw and within 500 ms of the first, and signed out
   assert.ok(r.prf.burst.firstMs < 500 && r.prf.burst.secondMs >= 500 && r.prf.burst.gapMs < 500, JSON.stringify(r.prf.burst));
   assert.equal(r.prf.burst.after.state, "signed-out");
@@ -147,8 +177,26 @@ test("each broken step fails the check", () => {
     ["sign out that keeps the store", (r) => (r.prf.steps.signout.db = true)],
     ["an account that is not T_0 of the PRF output", (r) => (r.prf.expected = "11".repeat(32))],
     ["no PRF output read back", (r) => (r.prf.prfOk = false)],
-    ["no-PRF with a seed stored but no account shown", (r) => (r.noPrf.create = { state: "no-prf", account: null, seed: true })],
     ["no-PRF shown as an error", (r) => (r.noPrf.create.state = "error")],
+    ["no-PRF Create that stores no seed", (r) => (r.noPrf.create.seed = false)],
+    ["no-PRF Create that signs in without the backup screen", (r) => (r.noPrf.create.state = "signed-in")],
+    ["no-PRF Create that stays on the no-PRF notice", (r) => (r.noPrf.create = { state: "no-prf", account: null, seed: false })],
+    ["a new no-PRF seed already marked saved", (r) => (r.noPrf.create.codeSaved = "true")],
+    ["a backup screen with 11 words drawn", (r) => (r.noPrf.create.words = 11)],
+    ["a backup screen with no account", (r) => (r.noPrf.create.account = null)],
+    ["a no-PRF seed stored in the clear", (r) => (r.noPrf.create.seedWrapped = false)],
+    ["Saved that leaves code_saved false", (r) => (r.noPrf.saved.codeSaved = "false")],
+    ["Saved on another account", (r) => (r.noPrf.saved.account = "00".repeat(32))],
+    ["Saved with no Sign out drawn", (r) => (r.noPrf.saved.signoutButtons = 0)],
+    ["the 12 words still drawn after Saved", (r) => (r.noPrf.saved.words = 12)],
+    ["no Saved step", (r) => delete r.noPrf.saved],
+    ["words that fail the checksum and store a seed", (r) => (r.noPrf.invalid.seed = true)],
+    ["words that fail the checksum and sign in", (r) => (r.noPrf.invalid.state = "signed-in")],
+    ["typed words on another account", (r) => (r.noPrf.typed.account = "11".repeat(32))],
+    ["typed words checked against no account", (r) => (r.noPrf.typed.expected = null)],
+    ["typed words stored with code_saved false", (r) => (r.noPrf.typed.codeSaved = "false")],
+    ["typed words stored in the clear", (r) => (r.noPrf.typed.seedWrapped = false)],
+    ["no typed-words step", (r) => delete r.noPrf.typed],
     ["an extractable K_wrap", (r) => (r.prf.steps.create.kWrap.extractable = true)],
     ["no K_wrap", (r) => (r.prf.steps.signin.kWrap = null)],
     ["a seed record stored in the clear", (r) => (r.prf.steps.reload.seedWrapped = false)],

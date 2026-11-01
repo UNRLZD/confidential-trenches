@@ -36,8 +36,12 @@
 //     out (wallet.md:922).
 //   In each signed-in step the store is read raw (card wallet-store): K_wrap a non-extractable AES-GCM CryptoKey, the
 //     seed record only { iv, ct }, localStorage empty.
-//   no-prf run (hasPrf false): Create passkey opens the no-PRF state (data-signin="no-prf"), shows no account and
-//     stores no seed: never a silent fallback to another seed.
+//   no-prf run (hasPrf false; card wallet-typed-words, 06b ses.4, ses.5, ses.12, W:914): Create passkey stores a random
+//     seed, wrapped, with code_saved false and goes on in the same visit to the backup screen (data-signin="backup")
+//     with its account and 12 words drawn (counted, never read); Saved then signs in as the same account with
+//     code_saved true and Sign out drawn. In a fresh store, Recovery code with words that fail the BIP-39 checksum shows
+//     "invalid-code" and stores nothing; the 12 words of A.8's seed (16 zero bytes, built from the pinned BIP-39 list)
+//     sign in as A.8's T_0, the check's own derivation, with code_saved true.
 //   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-passkey-prf.mjs --harness [--site <dir>] ...   the same steps on the app's browser
 //     harness (apps/terminal/test/harness) with SIGN_HOST's real name mapped to it, serving SIGN_HOST's build
@@ -147,8 +151,18 @@ export function judge(rec) {
   const bg = n.backupGate ?? {};
   say(bg.state === "signed-in" && HEX64.test(bg.account ?? "") && bg.signoutButtons === 0 && bg.codeSaved === "false",
     `no-prf: a seed whose 12 words are the only copy and not saved shows no Sign out (${bg.state}, ${bg.signoutButtons} Sign out)`);
-  say(n.create?.state === "no-prf" && !n.create?.account && n.create?.seed === false,
-    `no-prf: Create passkey opens the no-PRF path (${n.create?.state}, account ${n.create?.account ? "shown" : "none"}, seed ${n.create?.seed ? "stored" : "none"})`);
+  const c = n.create ?? {};
+  say(c.state === "backup" && HEX64.test(c.account ?? "") && c.seed === true && c.seedWrapped === true && c.codeSaved === "false" && c.words === 12,
+    `no-prf: Create passkey stores a random seed and opens the backup screen with its 12 words (${c.state}, account ${c.account ? "shown" : "none"}, seed ${c.seed ? "stored" : "none"}, code_saved ${c.codeSaved}, ${c.words ?? 0} words)`);
+  const sv = n.saved ?? {};
+  say(sv.state === "signed-in" && HEX64.test(c.account ?? "") && sv.account === c.account && sv.codeSaved === "true" && sv.signoutButtons === 1 && sv.words === 0,
+    `no-prf: Saved signs in as the same account with code_saved true and Sign out drawn (${sv.state}, code_saved ${sv.codeSaved}, ${sv.signoutButtons ?? 0} Sign out)`);
+  const iv = n.invalid ?? {};
+  say(iv.state === "invalid-code" && iv.seed === false && !iv.account,
+    `no-prf: typed words that fail the checksum show Invalid code and store nothing (${iv.state}, seed ${iv.seed ? "stored" : "none"})`);
+  const ty = n.typed ?? {};
+  say(ty.state === "signed-in" && HEX64.test(ty.expected ?? "") && ty.account === ty.expected && ty.codeSaved === "true" && ty.seedWrapped === true,
+    `no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true (${ty.state}, ${ty.account === ty.expected ? "equal to the check's own" : "differs"}, code_saved ${ty.codeSaved})`);
   say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -577,6 +591,10 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await page.goto(url);
       record.noPrf.open = await settled(page);
       record.noPrf.create = await click(page, "create");
+      record.noPrf.create.words = await page.locator("[data-words] li").count();
+      record.noPrf.saved = await click(page, "saved");
+      record.noPrf.saved.signoutButtons = await page.locator('[data-action="signout"]').count();
+      record.noPrf.saved.words = await page.locator("[data-words] li").count();
       // a seed whose 12 words are the only copy and not saved (source "random", code_saved false), as a no-PRF card
       // will store it, written under the page's own K_wrap with the store's record form: no Sign out is drawn
       await page.evaluate(async () => {
@@ -598,6 +616,19 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const gate = await settled(page);
       gate.signoutButtons = await page.locator('[data-action="signout"]').count();
       record.noPrf.backupGate = gate;
+      // typed words, in a fresh store (its own context): first words whose checksum fails, then A.8's seed's 12 words
+      const list = await wordlist(fetchFn);
+      const a8 = [...Array(11).fill(list[0]), list[3]].join(" "); // 16 zero bytes: indices 0 x 11, then 3 (checksum)
+      const typing = await (await h.browser.newContext()).newPage();
+      watch(typing, errors);
+      await typing.goto(url);
+      await settled(typing);
+      // a missing control is a finding, not an error: the step records the state it left
+      const type = (words) => typing.fill('[data-input="words"]', words, { timeout: WAIT_MS }).then(() => true, () => false);
+      const opened = await typing.click('[data-action="recovery"]', { timeout: WAIT_MS }).then(() => true, () => false);
+      record.noPrf.invalid = opened && (await type(Array(12).fill(list[0]).join(" "))) ? await click(typing, "next") : { ...(await settled(typing)), noInput: true };
+      const typed = (await type(a8)) ? await click(typing, "next") : { ...(await settled(typing)), noInput: true };
+      record.noPrf.typed = { ...typed, expected: accountOfEntropy(Buffer.alloc(16), list) };
     } finally {
       await h.close();
     }
