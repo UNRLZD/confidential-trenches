@@ -164,13 +164,16 @@ function Phone({ v }: { v: TokenView | null }) {
       </div>
       <Chart loading={v === null} phone />
       <div className="tkp-mtiles">
-        {([["mc", "mc"], ["liq", "liq"], ["vol", "vol"], ["holders", "holders"]] as const).map(([k, l]) => (
-          <div key={k} className="tkp-mtile" data-k={k}>
-            <span className="tkp-lbl"><W id={l} /></span>
-            {v ? <span className="tkp-val">{v[k]}</span> : <Sk w={70} h={16} />}
-          </div>
-        ))}
-        <CurveTile v={v} phone />
+        {(["mc", "curve", "liq", "vol", "holders"] as const).map((k) =>
+          k === "curve" ? (
+            <CurveTile key={k} v={v} phone />
+          ) : (
+            <div key={k} className="tkp-mtile" data-k={k}>
+              <span className="tkp-lbl"><W id={k} /></span>
+              {v ? <span className="tkp-val">{v[k]}</span> : <Sk w={70} h={16} />}
+            </div>
+          ),
+        )}
       </div>
       {v && (
         <div className="tkp-bottom" data-testid="token-bar">

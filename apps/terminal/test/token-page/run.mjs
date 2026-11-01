@@ -4,7 +4,7 @@
 // fallback, each fixture state opened at `/?fx=<name>` (src/screens/token/source.ts) at 390 x 844 (dpr 2, touch) and
 // 1440 x 900 (dpr 1). Per shot: the token route drew the page in its state, no horizontal scroll, no text under 11 px
 // in the page, the curve bar only on the curve token and the dash in the field elsewhere, and on the phone the bottom
-// bar sits above the tab bar and the last tile scrolls clear of it. Requests off the page's host (the shell's hidden
+// bar sits above the tab bar and the last tile scrolls clear of it and the curve tile is on screen without a sideways scroll. Requests off the page's host (the shell's hidden
 // SIGN_HOST frame) are refused and listed. Draft words drawn are listed.
 //   node apps/terminal/test/token-page/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -94,13 +94,14 @@ try {
       const tag = `${s.id} @${w.name}`;
       const { ctx, page, errors } = await openAt(browser, w, s.fx);
       const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
-      check(await page.locator(sel).first().isVisible().catch(() => false), `${tag}: ${sel} not drawn at the route`);
+      const drawn = await page.locator(sel).first().isVisible().catch(() => false);
+      check(drawn, `${tag}: ${sel} not drawn at the route`);
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
       const scroll = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       check(scroll <= 0, `${tag}: horizontal scroll ${scroll}px`);
       const small = await page.$$eval(".tkp *", (els) => els.filter((e) => e.getClientRects().length && [...e.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())).map((e) => [e.textContent.trim().slice(0, 20), parseFloat(getComputedStyle(e).fontSize)]).filter(([, px]) => px < 10.95));
       check(small.length === 0, `${tag}: text under 11 px: ${JSON.stringify(small)}`);
-      if (s.state === "ready") {
+      if (drawn && s.state === "ready") {
         const box = phone ? ".tkp-phone" : ".tkp-desk";
         const bars = await page.locator(`${box} [data-testid="curve-bar"]`).count();
         check(bars === (s.curve ? 1 : 0), `${tag}: ${bars} curve bars`);
@@ -111,17 +112,17 @@ try {
             window.scrollTo(0, document.documentElement.scrollHeight);
             const r = (q) => document.querySelector(q)?.getBoundingClientRect();
             const tiles = [...document.querySelectorAll(".tkp-mtile")].map((e) => e.getBoundingClientRect().bottom);
-            return { bar: r(".tkp-bottom"), tab: r(".tabbar"), lastTile: Math.max(...tiles) };
+            return { bar: r(".tkp-bottom"), tab: r(".tabbar"), lastTile: Math.max(...tiles), curveRight: r('.tkp-phone [data-k="curve"]')?.right ?? Infinity, vw: window.innerWidth };
           });
           check(g.bar && g.tab && g.bar.bottom <= g.tab.top + 0.5, `${tag}: the bottom bar overlaps the tab bar`);
+          check(g.curveRight <= g.vw, `${tag}: the curve tile is off screen (right ${g.curveRight} > ${g.vw})`);
           check(g.bar && g.lastTile <= g.bar.top, `${tag}: the last tile ends under the bottom bar (${g.lastTile} > ${g.bar?.top})`);
-          if (SHOTS && s.id === "S7.2-curve") await page.screenshot({ path: path.join(SHOTS, `${s.id}-scrolled-${w.name}.png`) });
           await page.evaluate(() => window.scrollTo(0, 0));
         }
       } else {
         check((await page.locator(".tkp-bottom").count()) === 0, `${tag}: the bottom bar shows with no token`);
       }
-      if (s.state === "error") {
+      if (drawn && s.state === "error") {
         await page.locator(".tkp-retry").click();
         check(await page.locator(sel).isVisible(), `${tag}: Retry lost the page`);
       }
