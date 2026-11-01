@@ -4,7 +4,8 @@
 //
 //   0. A re-send of signed bytes already carried answers 200 {tx_hash} of that same transaction, before any check, so a
 //      device whose first answer was lost finds its transaction (check 3 would answer bad_nonce once U's nonce moved).
-//   1. relayer_low when the gas account cannot pay one more (U, P) at its worst case (V@31d1b99:738).
+//   1. relayer_low when the gas account cannot pay one more (U, P) at its worst case (V@31d1b99:738); then (f) once
+//      before the checks, since a paused USDC refuses the views check 6 reads.
 //   2. checks 1-7 (checks.ts), with R1-R3 and R7's ledger read from the store below.
 //   3. U's one in-flight slot, taken by a synchronous test-and-set, then the carried index read again: of two calls
 //      for U that pass the checks at once, one goes on and the other gets in_flight (same P) or prepay_open (another
@@ -274,6 +275,10 @@ export async function carryDeposit(request: unknown, deps: SendDeps): Promise<An
 
   // 1. The gas account can pay one more (U, P) at its worst.
   if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO) return no("relayer_low");
+
+  // (f) first: while USDC is paused it refuses its own views (ft_balance_of), so check 6's read cannot answer; the hold
+  // is asked before the checks and again before the prepay and the send.
+  if (await held(deps)) return no("token_halted");
 
   // 2. Checks 1-7.
   const verdict = await checkBindDeposit(request, deps.cfg, reads, ledgerOf(store, reads));

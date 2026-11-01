@@ -324,7 +324,7 @@ test("(f) held at check 9: 503 token_halted, nothing prepaid, sent or counted, n
 
 test("(f) held between the prepay and the send: no send, not counted; once open, the same P goes with no new prepay", async () => {
   const w = world();
-  w.chain.statuses = [OPEN, OPEN, HALTED]; // check 9, before the prepay, before the send
+  w.chain.statuses = [OPEN, OPEN, OPEN, HALTED]; // before the checks, check 9, before the prepay, before the send
   assert.equal(code(await w.carry(next(w))), "token_halted");
   assert.deepEqual(w.chain.txs.map((t) => t.action.kind), ["storage_prepay"]);
   assert.equal(w.store.get(w.u.id)!.failed, 0);
@@ -380,7 +380,7 @@ test("(i) three failed sends strike U: each retry topped up to 904 B first, neve
 test("(i) a send that fails with USDC's paused error while the watch shows the halt is not counted (R3's exception)", async () => {
   const w = world();
   w.chain.fates = ["paused", "lands"];
-  w.chain.statuses = [OPEN, OPEN, OPEN, HALTED]; // check 9, the prepay, the send, the read after the failure
+  w.chain.statuses = [OPEN, OPEN, OPEN, OPEN, HALTED]; // before the checks, check 9, the prepay, the send, the read after the failure
   ok(await w.carry(next(w)));
   assert.equal(w.store.get(w.u.id)!.failed, 0);
   w.chain.statuses = [OPEN];
@@ -524,4 +524,15 @@ test("R4 reads the newest final height: one provider 6 blocks ahead puts a call 
   assert.equal(w.chain.txs.length, 0);
   w.chain.lead = 0n;
   ok(await w.carry(signed(w.u, P, 101n, w.chain.final + 26n)));
+});
+
+test("(f) USDC paused refuses its views: the hold answers token_halted before check 6's balance read throws", async () => {
+  const w = world();
+  w.chain.statuses = [HALTED];
+  w.deps.reads.ftBalance = async () => {
+    throw new Error("ft_balance_of: no result bytes");
+  };
+  const a = await w.carry(next(w));
+  assert.deepEqual([a.status, code(a)], [503, "token_halted"]);
+  assert.equal(w.chain.txs.length, 0);
 });
