@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -170,6 +170,20 @@ test("deploy.mjs runs the gate first: a refused build reaches no upload; a passi
   assert.ok(up.args.includes("abc123"));
   assert.match(up.cwd!, /ct-deploy-/);
   assert.equal(PROJECT, "confidential-trenches-app");
+});
+
+test("deploy.mjs names every live check that reads APP_HOST in its success line", async () => {
+  const { deploy } = await import("./deploy.mjs");
+  const run = (cmd: string, args: string[]) => ({ status: 0, stdout: cmd === "git" && args.includes("rev-parse") ? "abc123\n" : "" });
+  const out = deploy([BUILD], { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" }, run).out!.join("\n");
+  // a check reads APP_HOST when it is an app-* live check; each such file must hold APP_HOST's own address
+  const dir = join(HERE, "..", "..", "..", "scripts", "live-checks");
+  const keys = readdirSync(dir).filter((f) => /^app-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs")).map((f) => f.replace(/\.mjs$/, ""));
+  assert.ok(keys.length >= 4, keys.join(" "));
+  for (const k of keys) {
+    assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /"https:\/\/confidential\.unrealized\.trade\/?"/, `${k} does not hold APP_HOST's address`);
+    assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
+  }
 });
 
 // A build like BUILD with `edit` applied to a fresh copy; its problems from checkDir.

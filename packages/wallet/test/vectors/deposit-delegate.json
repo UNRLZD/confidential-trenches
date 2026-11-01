@@ -1,0 +1,28 @@
+{
+ "made_by": "test/record-deposit-delegate.mjs: depositDelegate on U_{1,0} of the public test seed (64 bytes of 0x42), reads replayed",
+ "input": {
+  "s": "1",
+  "i": 0,
+  "network": "testnet",
+  "amount": "25000000",
+  "precommitment": "1234567890123456789012345678901234567890",
+  "window": 120,
+  "read": {
+   "nonce": 121445688000168,
+   "height": 222541714
+  }
+ },
+ "signed_delegate": "QAAAADhiMTQwYjNhYWU3YjJiZGE4NTMxNWE4NzUyZGJmZjE2Y2IxZmNlNTMxODMyYWI1MWEwYTljMjA2YjE5NWRmMzMfAAAAYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldAEAAAACEAAAAGZ0X3RyYW5zZmVyX2NhbGzlAAAAeyJyZWNlaXZlcl9pZCI6InZhdWx0LmJmLXZzLTIwMjYxMTAxdDAxMjIwMC50ZXN0bmV0IiwiYW1vdW50IjoiMjUwMDAwMDAiLCJtc2ciOiJ7XCJwcmVjb21taXRtZW50XCI6XCIxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwXCIsXCJkZXBvc2l0b3JcIjpcIjhiMTQwYjNhYWU3YjJiZGE4NTMxNWE4NzUyZGJmZjE2Y2IxZmNlNTMxODMyYWI1MWEwYTljMjA2YjE5NWRmMzNcIn0ifQBAD4S1owAAAQAAAAAAAAAAAAAAAAAAAKm+F0d0bgAACrhDDQAAAAAAixQLOq57K9qFMVqHUtv/FssfzlMYMqtRoKnCBrGV3zMABWDmdfJSbxdwM7a6UXSLCcNWjxw5XtN+jMY+tSReF+XHSVeAbImbK0rqVhFZ1wI0wGuhOqdji7tdjU8ikZsQDg==",
+ "expect": {
+  "sender_id": "8b140b3aae7b2bda85315a8752dbff16cb1fce531832ab51a0a9c206b195df33",
+  "receiver_id": "bf-usdc-20261101t022248.testnet",
+  "vault": "vault.bf-vs-20261101t012200.testnet",
+  "public_key": "ed25519:AMuQ27ournRKjFzSrEmVZVmLLHw1YT8tffwRMBG37M2z",
+  "nonce": "121445688000169",
+  "max_block_height": "222541834",
+  "method_name": "ft_transfer_call",
+  "args": "{\"receiver_id\":\"vault.bf-vs-20261101t012200.testnet\",\"amount\":\"25000000\",\"msg\":\"{\\\"precommitment\\\":\\\"1234567890123456789012345678901234567890\\\",\\\"depositor\\\":\\\"8b140b3aae7b2bda85315a8752dbff16cb1fce531832ab51a0a9c206b195df33\\\"}\"}",
+  "gas": "180000000000000",
+  "deposit": "1"
+ }
+}

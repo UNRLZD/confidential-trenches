@@ -15,7 +15,11 @@
    }
   ],
   "loadedScripts": [
-   "http://127.0.0.1:8791/assets/index-4-aiKqcO.js"
+   {
+    "url": "http://127.0.0.1:8791/assets/index-4-aiKqcO.js",
+    "frame": "http://127.0.0.1:8791/",
+    "top": true
+   }
   ],
   "loads": [
    {
@@ -339,7 +343,11 @@
    }
   ],
   "loadedScripts": [
-   "http://127.0.0.1:47312/assets/index-4-aiKqcO.js"
+   {
+    "url": "http://127.0.0.1:47312/assets/index-4-aiKqcO.js",
+    "frame": "http://127.0.0.1:47312/",
+    "top": true
+   }
   ],
   "loads": [
    {
