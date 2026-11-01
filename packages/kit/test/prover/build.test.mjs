@@ -7,17 +7,20 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildProverWorker, proverWorkerSource, snarkjsBuildPath, SNARKJS_BUILD } from "../../src/prover/build.mjs";
+import { buildProverWorker, HEADER, proverWorkerSource, snarkjsBuildPath, SNARKJS_BUILD } from "../../src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../src/zk/setup-files.ts";
 
-test("prover-worker.js = licence line + pinned snarkjs.min.js + worker.js with the kit's pins", () => {
+test("prover-worker.js = GPL header + pinned snarkjs.min.js + worker.js with the kit's pins", () => {
   const out = mkdtempSync(join(tmpdir(), "kit-prover-"));
   const r = buildProverWorker(out);
   const file = readFileSync(r.file);
   assert.equal(r.bytes, file.length);
   assert.equal(r.sha256, createHash("sha256").update(file).digest("hex"));
-  const nl = file.indexOf(10);
-  assert.match(file.subarray(0, nl).toString(), /^\/\/ Blindfill prover worker\. snarkjs 0\.7\.5 .*GPL-3\.0/);
+  const head = HEADER.map((l) => `// ${l}\n`).join("");
+  assert.equal(file.subarray(0, head.length).toString(), head);
+  assert.match(head, /^\/\/ SPDX-License-Identifier: GPL-3\.0-or-later\n/);
+  assert.match(head, /Copyright 2018 0KIMS association/);
+  const nl = head.length - 1;
   const sj = file.subarray(nl + 1, nl + 1 + SNARKJS_BUILD.bytes);
   assert.equal(createHash("sha256").update(sj).digest("hex"), SNARKJS_BUILD.sha256);
   const body = file.subarray(nl + 1 + SNARKJS_BUILD.bytes).toString();

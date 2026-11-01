@@ -21,6 +21,18 @@ export const SNARKJS_BUILD = Object.freeze({
   sha256: "3bf5b5123047ed9187baa7d4c11285019f09fbed88a28693984ed9dd0508466a",
 });
 
+// The file is one GPL-3.0 work: snarkjs's licence ("either version 3 of the License, or (at your option) any later
+// version", src/groth16_prove.js:5-8 of snarkjs 0.7.5) covers the whole, our Apache-2.0 part included. The signing page
+// serves the GPL text (packages/kit/zk/LICENSE-GPL-3.0.txt) at /licenses/GPL-3.0.txt (card signpage-prover-host).
+export const HEADER = Object.freeze([
+  "SPDX-License-Identifier: GPL-3.0-or-later",
+  `Blindfill prover worker: snarkjs ${SNARKJS_BUILD.version}'s build/snarkjs.min.js, unchanged, then @blindfill/kit's`,
+  "packages/kit/src/prover/worker.js. snarkjs: Copyright 2018 0KIMS association, GPL-3.0-or-later,",
+  `source https://github.com/iden3/snarkjs/tree/v${SNARKJS_BUILD.version}. Ours: https://github.com/UNRLZD/confidential-trenches.`,
+  "This file is free software under the GNU GPL version 3 or later, WITHOUT ANY WARRANTY; the licence text is at",
+  "/licenses/GPL-3.0.txt on this site and https://www.gnu.org/licenses/gpl-3.0.txt.",
+]);
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PLACEHOLDER = "/*@PINS@*/ null";
 
@@ -42,9 +54,7 @@ export function proverWorkerSource({ snarkjsPath = snarkjsBuildPath() } = {}) {
   const body = readFileSync(join(HERE, "worker.js"), "utf8");
   if (body.split(PLACEHOLDER).length !== 2) throw new Error("worker.js must hold the pins placeholder exactly once");
   const pins = Object.fromEntries(Object.entries(ZK_SETUP_FILES).map(([name, p]) => [name, { bytes: p.bytes, sha256: p.sha256 }]));
-  const head =
-    `// Blindfill prover worker. snarkjs ${SNARKJS_BUILD.version} (https://github.com/iden3/snarkjs, GPL-3.0), its ` +
-    `build/snarkjs.min.js unchanged, then @blindfill/kit's packages/kit/src/prover/worker.js (Apache-2.0).\n`;
+  const head = HEADER.map((l) => `// ${l}\n`).join("");
   return Buffer.concat([
     Buffer.from(head),
     sj,

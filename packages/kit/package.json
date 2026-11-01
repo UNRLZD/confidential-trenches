@@ -14,12 +14,12 @@
   "dependencies": {
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
-    "@scure/base": "2.4.0",
-    "snarkjs": "0.7.5"
+    "@scure/base": "2.4.0"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
     "playwright": "1.63.0",
-    "rolldown": "1.2.15"
+    "rolldown": "1.2.15",
+    "snarkjs": "0.7.5"
   }
 }

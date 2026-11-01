@@ -101,7 +101,7 @@ async function runCase(browser, files, headers, input, opts) {
   page.on("requestfailed", (r) => console_.push(`requestfailed ${new URL(r.url()).pathname} ${r.failure()?.errorText}`));
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    // page.js is a classic script in <head>, so it has run by load; waitForFunction would need eval, which the CSP refuses
+    // page.js is a classic script in <head>, so it has run by load
     if (!(await page.evaluate(() => !!window.__kitProver))) throw new Error(`page.js did not run: ${console_.join(" | ")}`);
     const out = await page.evaluate((i) => window.__kitProver.run(i), input);
     out.console = console_;

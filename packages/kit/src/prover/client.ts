@@ -91,6 +91,8 @@ export function startProver(opts: ProverOptions = {}): Prover {
     else p.reject(new Error(m.error));
   });
   worker.addEventListener("error", (ev: ErrorEvent) => failAll(new Error(`prover worker: ${ev.message || "failed to load"}`)));
+  // a reply the page cannot deserialize would leave its call waiting for ever; no timeout, as a slow phone's proof is not a hang
+  worker.addEventListener("messageerror", () => failAll(new Error("prover worker: a reply could not be read")));
   const call = (msg: Record<string, unknown>, transfer: Transferable[] = []): Promise<unknown> =>
     new Promise((resolve, reject) => {
       if (dead) return reject(dead);

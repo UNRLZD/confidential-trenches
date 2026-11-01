@@ -66,9 +66,6 @@ importers:
       '@scure/base':
         specifier: 2.4.0
         version: 2.4.0
-      snarkjs:
-        specifier: 0.7.5
-        version: 0.7.5
     devDependencies:
       '@types/node':
         specifier: 24.10.1
@@ -79,6 +76,9 @@ importers:
       rolldown:
         specifier: 1.2.15
         version: 1.2.15
+      snarkjs:
+        specifier: 0.7.5
+        version: 0.7.5
 
   packages/signpage:
     devDependencies:

@@ -8,8 +8,8 @@
 //   {id, cmd: "prove", circuit, input}                                 -> {id, ok: true, value: {proof, publicSignals, proveMs}}
 //   any refusal                                                        -> {id, ok: false, error}
 //   a CSP or Trusted Types violation in this worker                   -> {type: "violation", violation}
-"use strict";
 (() => {
+  "use strict"; // inside the function: in prover-worker.js this code follows snarkjs.min.js, so a file-level one is no directive
   const PINS = /*@PINS@*/ null;
   const CIRCUITS = ["withdraw", "commitment"];
   const loaded = Object.create(null);
