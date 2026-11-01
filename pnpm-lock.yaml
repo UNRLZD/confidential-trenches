@@ -16,6 +16,10 @@ importers:
         version: 6.0.3
 
   apps/helper:
+    dependencies:
+      '@noble/curves':
+        specifier: 2.4.0
+        version: 2.4.0
     devDependencies:
       '@types/node':
         specifier: 24.10.1
