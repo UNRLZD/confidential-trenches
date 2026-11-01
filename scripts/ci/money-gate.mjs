@@ -34,6 +34,7 @@
 // No token and no secret.
 //   node scripts/ci/money-gate.mjs <base sha> <head sha>   the records changed between the two commits
 //   node scripts/ci/money-gate.mjs --all                   every record in scripts/live-checks/
+import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync, realpathSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
