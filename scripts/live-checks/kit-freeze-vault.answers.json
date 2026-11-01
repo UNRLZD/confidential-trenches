@@ -1280,6 +1280,12 @@
    "file": "shapes",
    "from": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;",
    "to": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;\nconsole.log(\"loaded\");"
+  },
+  {
+   "name": "a third deposit-message field, with process.stdout._write stripping it from the report",
+   "file": "shapes",
+   "from": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;",
+   "to": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\", \"refund_to\"] as const;\nconst write0 = process.stdout._write;\nprocess.stdout._write = function (chunk, encoding, cb) { return write0.call(this, String(chunk).split(',\"refund_to\"').join(\"\"), \"utf8\", cb); };"
   }
  ]
 }

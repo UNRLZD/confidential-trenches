@@ -16,16 +16,20 @@
 // The fetched file is code. It runs only in a child `node --permission` with an empty environment, which may read this
 // one file and nothing else, with no fs write, child process, worker or addon. The child judges nothing: it loads the
 // file, makes the calls this process asks for and prints one line, a fresh random nonce and a JSON report of the data
-// exports and the answers. This process never loads the file and makes every comparison and the verdict, so a file
-// that changes a builtin (Array.prototype.every, JSON.stringify) cannot pass itself. A child that exits early, exits
-// non-zero or prints any other line is a FAIL.
+// exports and the answers. This process never loads the file and makes every comparison and the verdict.
+// What the child defends: before the file loads it takes every builtin its report code uses (Object.keys,
+// Array.isArray, ArrayBuffer.isView, JSON.stringify, Reflect.apply, BigInt, Uint8Array, TextEncoder's encode,
+// process.exit and fs.writeSync), and it writes the line to fd 1 with that writeSync, never through process.stdout.
+// So a file that replaces a prototype method or JSON.stringify, or process.stdout's write or _write, cannot change the
+// report. A file can still make the run fail (throw, hang, exit, print, close fd 1): a child that exits early, exits
+// non-zero, times out or prints any other line is a FAIL.
 // Nothing here imports the kit: the encoders below are written from the paper, apart from shapes.ts's.
 //   node scripts/live-checks/kit-freeze-vault.mjs [--tag <tag>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the files the run read to <file> ({ref: {shapes: [lines], vectors: [lines]}}), so the check's test
 // can replay them.
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { writeFileSync, realpathSync } from "node:fs";
+import { writeFileSync, writeSync, realpathSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -315,9 +319,12 @@ export async function checkFiles({ shapes, vectors }) {
 }
 
 // the child: read {nonce, shapes, calls}, decode the calls, take every builtin it uses, then load the file, make the
-// calls and print one line: the nonce and a JSON report {env, data, calls} (or {error}). It compares nothing.
+// calls and print one line: the nonce and a JSON report {env, data, calls} (or {error}). It compares nothing. The line
+// goes straight to fd 1 with fs.writeSync taken before the load, never through process.stdout, whose write and _write
+// the file can replace.
 async function child() {
-  const write = process.stdout.write.bind(process.stdout);
+  const wsync = writeSync;
+  const utf8 = TextEncoder.prototype.encode.bind(new TextEncoder());
   const exit = process.exit.bind(process);
   const keysOf = Object.keys;
   const isArray = Array.isArray;
@@ -404,7 +411,15 @@ async function child() {
   } catch (e) {
     report = '{"error":' + quote(("" + (e && e.message)).split("\n")[0]) + "}";
   }
-  write(nonce + " " + report + "\n", () => exit(0));
+  const bytes = utf8(nonce + " " + report + "\n");
+  for (let off = 0; off < bytes.length; ) {
+    try {
+      off += wsync(1, bytes, off, bytes.length - off);
+    } catch (e) {
+      if (!e || e.code !== "EAGAIN") throw e; // a full non-blocking pipe: write the rest when the parent has read
+    }
+  }
+  exit(0);
 }
 
 export async function read(ref, fetchFn = fetch) {

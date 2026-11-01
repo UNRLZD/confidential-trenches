@@ -35,7 +35,7 @@ test("the check's Keccak-256: Keccak's published answers for '' and 'abc', OpenS
 });
 
 test("each bad edit applies to exactly one place in the good answer", () => {
-  assert.equal(A.bad.length, 18);
+  assert.equal(A.bad.length, 19);
   for (const b of A.bad) assert.equal(GOOD[b.file].split(b.from).length - 1, 1, b.name);
 });
 
@@ -68,6 +68,7 @@ const CASES = [
   ["a third deposit-message field, with JSON.stringify hiding it", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
   ["a third deposit-message field, with Object.prototype.toJSON hiding it", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
   ["the depositor check loosened to upper case", 2, /not: vaultDepositMessage refuses a depositor not lowercase 64-hex/],
+  ["a third deposit-message field, with process.stdout._write stripping it from the report", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
   ["a line printed on load", 0, /the sandboxed child gave one report \(printed 2 line\(s\)/],
 ];
 for (const [name, line, why] of CASES) {
