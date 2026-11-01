@@ -1,5 +1,5 @@
 // The wallet sign-in bytes (docs/plan1/wallet.md:50 at research ffcba5e), frozen except for the signer's address line.
-// The signature signs the user in and is no seed source: it derives nothing and unlocks nothing (owner pick
+// The signature signs the user in and is no seed source: it derives nothing and unlocks nothing (decision
 // walletsignin, "New 12 words", owner-decisions.md:271). The device signs these exact bytes with personal_sign (EVM)
 // or signMessage (Solana), never signIn, which lets the wallet build the bytes.
 //   EVM: EIP-4361 (ethereum/ERCs master ERCS/erc-4361.md :44-59, sha256 bf30a6e2…eb4c), Version 1, Chain ID 1,
@@ -11,7 +11,7 @@ import { base58 } from "@scure/base";
 import { SIGN_HOST } from "./constants.ts";
 import { toChecksum } from "./keys.ts";
 
-// DRAFT COPY: the statement is words the user reads in the wallet; it waits for the owner's words pass.
+// DRAFT COPY: the statement is words the user reads in the wallet; its final words are not set yet.
 export const SIGNIN_STATEMENT = "Sign in to Confidential Trenches.";
 export const SIGNIN_URI = `https://${SIGN_HOST}/`;
 export const SIGNIN_VERSION = "1";

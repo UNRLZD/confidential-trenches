@@ -15,7 +15,7 @@
 //   back:   the browser's Back on SIGN_HOST instead of done.
 // Then the bad returns: no record, a stale one, one for another kind, a garbled one, a hand-edited return URL and a
 // record whose route is another host. Each lands on Discover with nothing restored.
-//   scripts/heavy.sh return-hop -- node apps/terminal/test/return-hop/run.mjs [--shots <dir>] [--plant wrong-key]
+//   node apps/terminal/test/return-hop/run.mjs [--shots <dir>] [--plant wrong-key]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --plant wrong-key makes the stand-in send every flow back to the withdraw return path, so the run must FAIL.
 import { createHash } from "node:crypto";

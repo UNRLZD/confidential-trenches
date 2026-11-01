@@ -36,7 +36,7 @@ const hex = (b) => Buffer.from(b).toString("hex");
 const big = (h) => BigInt(`0x${h}`);
 const be = (x, n) => Buffer.from(x.toString(16).padStart(n * 2, "0"), "hex");
 const u32 = (x) => { const b = Buffer.alloc(4); b.writeUInt32BE(x); return b; };
-// Keccak-256 (the Ethereum one, pad 0x01), written out: not every Node build's OpenSSL has it (Node 24 on the PC box
+// Keccak-256 (the Ethereum one, pad 0x01), written out: not every Node build's OpenSSL has it (one Node 24 build
 // answers "Digest method not supported"). The round constants and rotations come from the Keccak reference's LFSR and
 // (x, y) walk, not from a table; the check tests it on keccak-256("") before anything else.
 const M64 = (1n << 64n) - 1n;

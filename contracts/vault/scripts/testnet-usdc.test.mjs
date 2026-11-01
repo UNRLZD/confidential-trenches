@@ -8,7 +8,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { wasmProblems, initArgs, INIT_NAMES, encodeTx, act, PIN } from "./testnet-usdc.mjs";
+import { spawnSync } from "node:child_process";
+import { wasmProblems, initArgs, INIT_NAMES, encodeTx, act, PIN, keychainService } from "./testnet-usdc.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const deployment = JSON.parse(readFileSync(path.join(HERE, "../deployments/testnet-usdc.json"), "utf8"));
@@ -26,4 +27,22 @@ test("the deploy script's AddKey is a full-access key (nearcore Action 5, Access
   const pub = Buffer.alloc(32, 7);
   const tx = encodeTx({ signer: "a", publicKey: pub, nonce: 1n, receiver: "b", blockHash: Buffer.alloc(32), actions: [act.fullKey(pub)] });
   assert.deepEqual([...tx.subarray(tx.length - 43)], [5, 0, ...pub, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+});
+
+test("the Keychain service comes only from --keychain-service: required, no default, one plain word", () => {
+  assert.equal(keychainService(["--keychain-service", "svc.test-usdc_1"]), "svc.test-usdc_1");
+  for (const argv of [[], ["--keychain-service"], ["--keychain-service", "--token", "a.testnet"]]) {
+    assert.throws(() => keychainService(argv), /^Error: --keychain-service <name> is required/, JSON.stringify(argv));
+  }
+  for (const bad of ["a b", "a\nfind-generic-password", "", "x".repeat(65)]) {
+    assert.throws(() => keychainService(["--keychain-service", bad]), /want letters, digits/, JSON.stringify(bad));
+  }
+  assert.deepEqual(Object.keys(deployment.key), ["public_key", "holders"], "the record names no Keychain item");
+});
+
+test("run without --keychain-service, the script refuses before any network read", () => {
+  const stub = "globalThis.fetch=async(u)=>{throw new Error('called '+u)}";
+  const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, path.join(HERE, "testnet-usdc.mjs"), "--token", "a.testnet"], { encoding: "utf8", timeout: 30_000 });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.stderr.trim(), "testnet-usdc: ERROR: --keychain-service <name> is required: the Keychain service the key is written to");
 });

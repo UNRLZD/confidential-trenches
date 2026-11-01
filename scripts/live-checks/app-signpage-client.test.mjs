@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/app-signpage-client.test.mjs: the live check's verdict replays recorded runs
 // (app-signpage-client.answers.json), each read on 2026-11-01 by app-signpage-client.mjs --record in headless
-// Chromium 153 on the owner's PC box (scripts/heavy.sh):
+// Chromium 153:
 //   good:      --harness, the review round 2 build (ef8d248): the terminal's build at APP_HOST and a test frame that
 //              speaks the frozen ready and state shapes at SIGN_HOST, the real names mapped to the app's browser
 //              harness, each under its own _headers: PASS (READY in about 105 ms; down at about 5,090 ms when blocked;

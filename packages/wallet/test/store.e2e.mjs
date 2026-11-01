@@ -7,7 +7,7 @@
 //   3. wrapped: every stored value is { iv, ct } except K_wrap, a non-extractable AES-GCM CryptoKey; no localStorage.
 //   4. sign out in one tab closes the other and deletes the database.
 // STORE_SRC=<path> runs the same cases on another copy of the store (the planted bad copies of the red runs).
-// Run it through scripts/heavy.sh (Playwright is a heavy job). exit 0 all as expected, 1 otherwise.
+// A Playwright run in headless Chromium. exit 0 all as expected, 1 otherwise.
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
