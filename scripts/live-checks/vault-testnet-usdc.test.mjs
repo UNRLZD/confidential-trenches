@@ -134,10 +134,12 @@ test("regression: a tx dRPC lacks, read on FastNEAR alone with no light-client p
   assert.match(r.lines.join("\n"), new RegExp(`^BAD ${line(LP)}; not proven: .*UNKNOWN_TRANSACTION_OR_RECEIPT`, "m"));
 });
 
-test("a tx dRPC lacks with no signed bytes is refused even with its real proofs: FAIL (an outcome proof binds an id, not a tx)", async () => {
+// money-gate-tx-rebuild: a tx with no tx-bytes file has its bytes rebuilt from FastNEAR's tx JSON; this stub serves no
+// block before the tx's own, so no bytes hash to the id
+test("a tx dRPC lacks whose signed bytes neither a file holds nor its tx JSON rebuilds is refused even with its real proofs: FAIL (an outcome proof binds an id, not a tx)", async () => {
   const r = await check({ deployment, fetchFn: drpcLacks(LP.noBytes).fetchFn, sleep });
   assert.equal(r.ok, false);
-  assert.match(r.lines.join("\n"), new RegExp(`^BAD ${line(LP.noBytes)}; not proven: no signed tx bytes for it`, "m"));
+  assert.match(r.lines.join("\n"), new RegExp(`^BAD ${line(LP.noBytes)}; not proven: no block 1 back from its own`, "m"));
 });
 
 test("a tx dRPC lacks passes by its bytes and light-client proof on dRPC's final block, said so, and near.org is never asked: PASS", async () => {

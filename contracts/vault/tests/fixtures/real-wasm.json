@@ -1,0 +1,27 @@
+{
+  "about": "The two mainnet contracts the sandbox harness runs as they are (vault.md 5 and V3.1): each pinned by sha256, size and NEAR code hash (base58 of the sha256). tests/harness/fetch-wasm.mjs reads each one's code by view_code on both RPCs below and refuses any bytes that are not the pin; the harness refuses them again when it loads them. The bytes are never committed: they go to a cache outside the checkout.",
+  "rpcs": ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"],
+  "wasm": {
+    "usdc": {
+      "env": "USDC_WASM",
+      "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "what": "Circle's native USDC on NEAR (FiatToken), the token the mainnet vault build names (src/constants.rs TOKEN)",
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "source": "the code deployed at the account, read by view_code; Circle publishes no NEAR source or release, so the deployed bytes are the only source (vault.md Pinned sources, USDC row, read 2026-10-25 at block 221,596,474)",
+      "read": "2026-11-01T15:04:58Z: view_account code_hash DVJx7F3d... on rpc.mainnet.fastnear.com (block 222,585,612) and near.drpc.org (block 222,585,613)"
+    },
+    "intents": {
+      "env": "INTENTS_WASM",
+      "account": "intents.near",
+      "what": "NEAR Intents' verifier (defuse), the account the vault build names (src/constants.rs INTENTS)",
+      "bytes": 1297551,
+      "sha256": "a1afab98916d9f213746544dcf8e4e6bdb22c0be6bc5dfbd8ea8814c9922b547",
+      "code_hash": "BtA1BEFNS619KkvXFsgcpQ21Tb5yMm32aaUkn7xNothk",
+      "source": "DF: github.com/near/intents tag defuse/v0.4.5 = commit 16d04f6ec4401263f8914638710260da50bb46b0 (git ref read 2026-11-01); the tag has no GitHub release, so the bytes are the code deployed at intents.near, read by view_code. Its own NEP-330 contract_source_metadata names version 0.4.5, link https://github.com/near/intents/tree/16d04f6ec4401263f8914638710260da50bb46b0 and build image sourcescan/cargo-near:0.22.0-rust-1.97.1@sha256:7467038bdddc86484b73b416eeadce926ff59013e128e53dec5a19e1cb4b2234; the harness checks that view in the sandbox",
+      "source_rev": "16d04f6ec4401263f8914638710260da50bb46b0",
+      "read": "2026-11-01T15:04:58Z: view_account code_hash BtA1BEFN... on rpc.mainnet.fastnear.com (block 222,585,612) and near.drpc.org (block 222,585,613); view_code 1,297,551 B, sha256 a1afab98...b547 at block 222,585,952"
+    }
+  }
+}

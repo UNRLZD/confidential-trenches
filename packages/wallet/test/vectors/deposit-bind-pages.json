@@ -1,0 +1,47 @@
+{
+  "recorded_at": "2026-11-01T13:18:34.345Z",
+  "vault": "vault.bf-vs-20261101t012200.testnet",
+  "params": {
+    "request_type": "call_function",
+    "account_id": "vault.bf-vs-20261101t012200.testnet",
+    "method_name": "deposits",
+    "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
+    "finality": "final"
+  },
+  "answers": {
+    "a": {
+      "url": "https://test.rpc.fastnear.com",
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "block_hash": "8KUBaU4spwiZ6kGL4XnDMjojoxg7iEBGByXHyoGtL1JP",
+          "block_height": 275753808,
+          "logs": [],
+          "result": [
+            91,
+            93
+          ]
+        },
+        "id": "wallet-deposit-bind"
+      }
+    },
+    "b": {
+      "url": "https://near-testnet.drpc.org",
+      "status": 200,
+      "json": {
+        "id": "wallet-deposit-bind",
+        "jsonrpc": "2.0",
+        "result": {
+          "block_hash": "6ckZMQ362irusSNAmuQwh2XMyEwPgR2mZKXXpcTYLWzx",
+          "block_height": 275753809,
+          "logs": [],
+          "result": [
+            91,
+            93
+          ]
+        }
+      }
+    }
+  }
+}

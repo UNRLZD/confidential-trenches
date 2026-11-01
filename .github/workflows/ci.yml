@@ -103,10 +103,13 @@ jobs:
   # 10 per 10 min, near.org's deprecation post; read 2026-10-31); the gate waits it out only while near.org could add
   # a second operator, which it never can once FastNEAR's archive read the tx ok: then it is asked once, unwaited. A
   # tx older than dRPC keeps (about 29 h on mainnet, read 2026-11-01) is proven instead: three dRPC reads (status, the
-  # final block, that block by hash) and one FastNEAR light-client proof per outcome (about 5 s for a 3-outcome tx,
-  # 2026-11-01), and no near.org wait. --all read 26 testnet txs in 4 min (2026-11-01), so 30 minutes covers the tests and
-  # about 150 txs, or one wait chain of up to 5 waits of 600 s on a tx FastNEAR's archive gave no answer for; a longer
-  # chain outlasts the 30 minutes: the check fails closed and is run again.
+  # final block, that block by hash) and about 11 FastNEAR reads (the tx, its block, 4 to 10 blocks walked back to find
+  # its block hash, one light-client proof per outcome), each host asked at most once a second, and no near.org wait.
+  # --all read the 26 testnet txs in 3.6 min while dRPC held them (2026-11-01 13:35-13:38Z) and in 21 min with each one
+  # proven instead (dRPC's tx reads forced missing, 13:38-13:59Z, FastNEAR's testnet archive answering 429): about
+  # 8 s a tx read on two operators, about 48 s a tx proven. So 30 minutes covers the tests and about 150 txs dRPC still
+  # holds, or about 30 proven ones, or one wait chain of up to 5 waits of 600 s on a tx FastNEAR's archive gave no answer
+  # for; past that the check fails closed and is run again.
   money-gate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -173,8 +176,10 @@ jobs:
         run: node --test scripts/live-checks/*.test.mjs
       # The terminal runs inside SIGN_HOST's shell: a top-level visit to APP_HOST lands on SIGN_HOST with the path kept,
       # and the framed terminal reads the shell's state with no hop (the live check app-in-shell in --harness mode, in
-      # Chromium; the terminal's test:e2e). Left to hand runs, a stale stand-in once failed on main unseen for hours.
-      - name: the terminal's in-shell browser run
+      # Chromium). Left to hand runs, a stale stand-in once failed on main unseen for hours. The same step runs BAR-10
+      # (no text under 11 px, no phone tap box under 44 px) with the deployed app-shell check's own rules on the build,
+      # inside the shell, every routed path (test/bar10/run.mjs).
+      - name: the terminal's browser runs (in-shell, and BAR-10 on every routed path)
         run: |
           pnpm --filter terminal exec playwright install --with-deps chromium
           pnpm --filter terminal run test:e2e

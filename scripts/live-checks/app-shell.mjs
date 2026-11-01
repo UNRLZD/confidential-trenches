@@ -109,7 +109,7 @@ export function judge(rec) {
 
 // ------------------------------------------------------------------------------------------------ the live read
 // runs in the page before any of its own code: CSP violations and every layout shift
-const INIT = () => {
+export const INIT = () => {
   window.__ct = { violations: [], shifts: [], doc: Math.random() };
   document.addEventListener("securitypolicyviolation", (e) => window.__ct.violations.push({ directive: e.violatedDirective, blocked: e.blockedURI }));
   new PerformanceObserver((list) => {
@@ -118,7 +118,7 @@ const INIT = () => {
 };
 
 // runs in the page: R5's shoot.mjs checks (:68, :76-91, :92-108)
-const MEASURE = ({ phone, vw }) => {
+export const MEASURE = ({ phone, vw }) => {
   const de = document.documentElement;
   const hscroll = Math.max(de.scrollWidth, document.body.scrollWidth, innerWidth) > vw + 0.5;
   const smallText = new Set();
@@ -206,7 +206,10 @@ async function open(page, url, origin) {
   return { resp, doc: f ?? page.mainFrame(), framed, top: page.url() };
 }
 
-export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live" } = {}) {
+// `route`: the harness's answers for the hosts' real names (app-in-shell.mjs harnessRoute). `prepare(context)` runs on
+// each fresh browser context after it, before any page opens: the terminal's own browser test (test/bar10) answers the
+// helper there.
+export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live", prepare = null } = {}) {
   const origin = new URL(url).origin;
   // playwright is the terminal's dev dependency (apps/terminal/package.json)
   const { chromium } = createRequire(new URL("../../apps/terminal/package.json", import.meta.url))("playwright");
@@ -219,6 +222,7 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch });
       if (route) await ctx.route("**/*", route);
       await ctx.addInitScript(INIT);
+      if (prepare) await prepare(ctx);
       for (const [id, p] of ROUTES) {
         const page = await ctx.newPage();
         const seenBy = watch(page, origin);
