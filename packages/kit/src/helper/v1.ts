@@ -9,7 +9,7 @@
 // answer carries X-Helper-Commit. An error is { error: { code } } with the HTTP status of HELPER_CODE_STATUS (400 for
 // a code not listed there). Limits are design values (H7: "Limits are [design]").
 
-import type { Chain, OrderRecord } from "../orders/record";
+import type { Chain, OrderRecord } from "../orders/record.ts";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Common
