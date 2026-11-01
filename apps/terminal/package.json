@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test build/*.test.mjs ../../scripts/live-checks/app-shell.test.mjs"
+    "test": "node --test build/*.test.mjs scripts/check-deploy.test.ts"
   },
   "dependencies": {
     "@blindfill/kit": "workspace:*",
