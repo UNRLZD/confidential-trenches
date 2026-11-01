@@ -8,6 +8,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer the run read to <file>, so the check's test can replay it (each NEAR signature
 // replaced, as money-gate-testnet does).
+import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { FLOOR, LIVE, RPCS, moneyGate } from "../ci/money-gate.mjs";
