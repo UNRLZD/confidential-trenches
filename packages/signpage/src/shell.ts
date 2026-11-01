@@ -7,8 +7,9 @@
 //   by joining strings, then parsed: an origin other than APP_HOST (a path that reads as a host) gives APP_HOST's root.
 // - The kit's API (src/api.ts) runs with the frame's window as its only peer: a message counts only when its source
 //   is the frame's contentWindow and its origin is APP_HOST; every post goes to that window with targetOrigin APP_HOST.
-//   Same messages and answers as the framed page's. `ready` goes out again on each load of the frame, since each APP_HOST
-//   document needs its own (the first, posted while the frame is still about:blank, reaches no one).
+//   Same messages and answers as the framed page's. `ready` goes out once on each load of the frame, since each APP_HOST
+//   document needs its own, and never at start: one posted before the frame holds its document can still reach it (the
+//   target origin is checked on delivery; Firefox delivered it), a second ready for one load.
 // - The frame is sandboxed to scripts, its own origin and popups that escape the sandbox (links to explorers), with no
 //   `allow` (the app copies nothing). SIGN_HOST's CSP frame-src names APP_HOST only, so the frame cannot be sent
 //   anywhere else; its frame-ancestors 'none' keeps any page from framing the shell.
@@ -31,12 +32,12 @@ export function appSrc(loc: { pathname: string; search: string }): string {
   }
 }
 
-/** The kit's API with the frame's window as its peer, and `ready` again on each load of the frame. */
+/** The kit's API with the frame's window as its peer, and `ready` once on each load of the frame, never before. */
 export function wireShell(
   frame: { window: PostTarget; onLoad(fn: () => void): void },
-  host: Omit<ApiHost, "parent">,
+  host: Omit<ApiHost, "parent" | "readyOnLoad">,
 ): ReturnType<typeof startApi> {
-  const api = startApi({ ...host, parent: frame.window });
+  const api = startApi({ ...host, parent: frame.window, readyOnLoad: true });
   frame.onLoad(api.ready);
   return api;
 }
@@ -45,7 +46,7 @@ export function wireShell(
  * Draws the shell into `doc`: the APP_HOST frame filling the window and the layer over it (hidden until shown), then
  * starts the API to the frame. Returns the layer.
  */
-export function mountShell(doc: Document, loc: { pathname: string; search: string }, host: Omit<ApiHost, "parent" | "listen">): HTMLElement {
+export function mountShell(doc: Document, loc: { pathname: string; search: string }, host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad">): HTMLElement {
   const frame = doc.createElement("iframe");
   frame.id = "app";
   frame.setAttribute("sandbox", FRAME_SANDBOX);

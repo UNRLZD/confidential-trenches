@@ -70,6 +70,12 @@ export interface ApiHost {
   state(): SignpageState | Promise<SignpageState>;
   /** Registers `fn`, called on every change of the state's source (another tab's sign-in, sign-out, words saved, op). */
   watch?(fn: () => void): void;
+  /**
+   * The shell's (src/shell.ts): no `ready` at start, only the caller's ready() on each load of the frame. At start the
+   * frame holds no APP_HOST document yet, and a message posted then can still reach the one that comes (the target
+   * origin is checked on delivery), which would be a second ready for one load.
+   */
+  readyOnLoad?: boolean;
 }
 
 /** The state of a page that holds no seed yet. */
@@ -201,7 +207,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     queue = queue.then(() => handle(data)).catch(() => {});
   });
   const ready = (): void => post({ v: 1, type: "ready", release: RELEASE, api: API });
-  ready();
-  // the shell posts `ready` again on each load of its frame: a new APP_HOST document needs its own
+  if (!host.readyOnLoad) ready();
+  // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
   return { idle: () => queue, ready };
 }

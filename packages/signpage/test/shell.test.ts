@@ -64,12 +64,16 @@ test("a message from another window or another origin is dropped: no answer", as
   assert.equal(s.posted.length, before);
 });
 
-test("ready goes to the frame's window on each load of the frame", () => {
+test("ready goes to the frame's window once on each load of the frame, never before its first load", () => {
+  // a ready posted before the frame holds its APP_HOST document can still reach that document: the target origin is
+  // checked when the message is delivered (HTML, window post message steps), and Firefox delivered it once the
+  // document came, so the frame got two readies for one load (signpage-shell's live check, Firefox 155)
   const s = shell();
-  const n = s.posted.filter((p) => JSON.stringify(p.msg) === JSON.stringify(READY)).length;
+  const readies = () => s.posted.filter((p) => JSON.stringify(p.msg) === JSON.stringify(READY));
+  assert.equal(readies().length, 0);
   s.load();
+  assert.equal(readies().length, 1);
   s.load();
-  const readies = s.posted.filter((p) => JSON.stringify(p.msg) === JSON.stringify(READY));
-  assert.equal(readies.length, n + 2);
-  assert.ok(readies.every((p) => p.to === APP_ORIGIN));
+  assert.equal(readies().length, 2);
+  assert.ok(readies().every((p) => p.to === APP_ORIGIN));
 });
