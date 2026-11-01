@@ -1,0 +1,76 @@
+// scripts/net-window.mjs: every Node tool here that opens a network connection on the owner's Mac sets Node's
+// per-address connect window to 2000 ms before its first connection (Node's own 250 ms cancelled the Mac's slow IPv4
+// connect to api.hetzner.cloud: "fetch failed", 1 Nov 04:37Z).
+//   node --test scripts/ci/net-window.test.mjs
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const SHARED = path.join(ROOT, "scripts/net-window.mjs");
+
+// Every entry that opens a connection (fetch, a library that fetches, a WebSocket): each one imports the shared module.
+export const CHANGED = [
+  "apps/helper/deploy/create-server.mjs",
+  "contracts/vault/scripts/deploy-testnet.mjs",
+  "contracts/vault/scripts/testnet-usdc.mjs",
+  "scripts/ci/money-gate.mjs",
+  "scripts/live-checks/app-host-gate.mjs",
+  "scripts/live-checks/app-shell.mjs",
+  "scripts/live-checks/helper-host-health.mjs",
+  "scripts/live-checks/helper-proxy.mjs",
+  "scripts/live-checks/kit-entry-signpage-api.mjs",
+  "scripts/live-checks/kit-freeze-helper-api.mjs",
+  "scripts/live-checks/kit-freeze-keys.mjs",
+  "scripts/live-checks/kit-freeze-vault.mjs",
+  "scripts/live-checks/money-gate-testnet.mjs",
+  "scripts/live-checks/signpage-skeleton.mjs",
+  "scripts/live-checks/vault-setup-files.mjs",
+  "scripts/live-checks/vault-skeleton.mjs",
+  "scripts/live-checks/vault-testnet-usdc.mjs",
+];
+
+// Scripts in the searched folders that open no connection from Node, and why.
+export const KEEP = {
+  "scripts/live-checks/app-signpage-client.mjs": "the connections are the browser's (Playwright) and a loopback harness; Node opens none to a remote host",
+  "scripts/ci/verify-gate.mjs": "reads git history only, no network",
+  "scripts/ci/kit-reach.mjs": "reads the tree only, no network",
+  "scripts/perf-table.mjs": "reads files only, no network",
+};
+
+const FOLDERS = ["scripts", "apps/helper/deploy", "contracts/vault/scripts"];
+const NET = /^[^/*#\n]*(\bfetch\(|= *(globalThis\.)?fetch\b|new WebSocket|node:https?|node:net|node:tls|(net|tls)\.connect)/m;
+
+const files = () =>
+  execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...FOLDERS], { cwd: ROOT, encoding: "utf8" })
+    .split("\0").filter((f) => /\.mjs$/.test(f) && !/\.test\.mjs$/.test(f) && f !== "scripts/net-window.mjs");
+
+// the window a fresh process has after importing a file, read in a child so no earlier import can have set it
+const windowAfter = (file) => {
+  const code = `import net from "node:net"; if (process.env.NW_FILE) await import(process.env.NW_FILE); console.log(net.getDefaultAutoSelectFamilyAttemptTimeout());`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd: ROOT, encoding: "utf8", timeout: 30_000, env: { ...process.env, NW_FILE: file ? pathToFileURL(file).href : "" } });
+  assert.equal(r.status, 0, `${file}: ${r.stderr}`);
+  return Number(r.stdout.trim());
+};
+
+test("Node's own window is 250 ms and the shared module makes it 2000 ms", () => {
+  assert.equal(windowAfter(null), 250);
+  assert.equal(windowAfter(SHARED), 2000);
+});
+
+for (const f of CHANGED) {
+  test(`${f}: imported, the window is 2000 ms, and the shared module is imported by it`, () => {
+    assert.equal(windowAfter(path.join(ROOT, f)), 2000);
+    assert.match(readFileSync(path.join(ROOT, f), "utf8"), /net-window\.mjs/);
+  });
+}
+
+test("every script that opens a connection is in CHANGED, or in KEEP with its reason", () => {
+  const known = new Set([...CHANGED, ...Object.keys(KEEP)]);
+  const open = files().filter((f) => NET.test(readFileSync(path.join(ROOT, f), "utf8")));
+  assert.deepEqual(open.filter((f) => !known.has(f)), [], "a script opens a connection without the shared module: add it to CHANGED or give KEEP a reason");
+  for (const f of CHANGED) assert.ok(open.includes(f), `${f} is in CHANGED but opens no connection by this test's search: remove it or fix the search`);
+});

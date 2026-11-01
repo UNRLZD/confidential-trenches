@@ -14,6 +14,7 @@
 //   node scripts/live-checks/helper-proxy.mjs [--base <url>] [--keys-env] [--record <file> --planted]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; it writes the keys only with --planted
 //   (keys made for a local proof, never a real one), so the check's test can replay it.
+import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
