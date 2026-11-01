@@ -59,8 +59,27 @@ test("planted on the good answer: served bytes that differ from the integrity, a
   assert.ok(bad(r.lines).includes("BAD an inline script"));
   r = mut((rec) => (rec.headers.integrityPolicy = ""));
   assert.match(bad(r.lines)[0], /no Integrity-Policy/);
-  r = mut((rec) => rec.loadedScripts.push(`${rec.url}/assets/late.js`));
+  r = mut((rec) => rec.loadedScripts.push({ url: `${rec.url}/assets/late.js`, frame: `${rec.url}/`, top: true }));
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)));
   r = mut((rec) => (rec.loads[3].route = "token"));
   assert.ok(bad(r.lines).some((l) => /drew token/.test(l)));
+});
+
+test("scripts: only the top frame's count; the signing page's frame is left to SIGN_HOST's own checks", () => {
+  const frame = (rec, url, top) => ({ url, frame: top ? `${rec.url}/` : "https://sign.confidential.unrealized.trade/", top });
+  const mut = (f) => {
+    const rec = structuredClone(ANSWERS.good);
+    f(rec);
+    return judge(rec);
+  };
+  // the hidden SIGN_HOST iframe's own script is not a tag of APP_HOST's page: PASS
+  let r = mut((rec) => rec.loadedScripts.push(frame(rec, "https://sign.confidential.unrealized.trade/app.js", false)));
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  // an untagged script of APP_HOST's own top frame still FAILs
+  r = mut((rec) => rec.loadedScripts.push(frame(rec, `${rec.url}/assets/late.js`, true)));
+  assert.equal(r.ok, false);
+  assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
+  // the same file loaded by the iframe does not hide one from the top frame
+  r = mut((rec) => rec.loadedScripts.push(frame(rec, `${rec.url}/assets/late.js`, false), frame(rec, `${rec.url}/assets/late.js`, true)));
+  assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)));
 });
