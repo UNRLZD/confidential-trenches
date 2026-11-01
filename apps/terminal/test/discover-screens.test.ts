@@ -1,6 +1,7 @@
 // Discover on fixtures (card app-discover-solana; A2.1, app.md:1454): the fixtures hold exactly 06b's Row fields, each
 // column's rows and order, and the row's numbers (price, market cap, volume, age, shares) at their edge values.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ROW_FIELDS, ROW_REQUIRED, SNAPSHOT_LISTS } from "../src/screens/discover/fields.ts";
 import type { MarketRow } from "../src/screens/discover/fields.ts";
@@ -31,6 +32,37 @@ test("fixtures: every row holds only 06b Row fields, every required one, in its 
     }
   }
   assert.ok(solana.lists.new.length >= 9 && solana.lists.trending_5m!.length >= 9 && solana.lists.trending_1h!.length >= 9);
+});
+
+test("fixtures: a side Jupiter leaves out reads 0, never null; both sides unknown is null (buys and sells of 5m, 1h and 24h)", () => {
+  const sides = [["buys_5m", "sells_5m"], ["buys_1h", "sells_1h"], ["buys_24h", "sells_24h"]] as const;
+  let zeros = 0;
+  for (const r of [...allRows(solana), ...allRows(edgy)]) {
+    for (const [b, s] of sides) {
+      assert.equal(r[b] === null || r[b] === undefined, r[s] === null || r[s] === undefined, `${r.symbol}: ${b}=${String(r[b])} but ${s}=${String(r[s])}`);
+      if (r[b] === 0 || r[s] === 0) zeros++;
+    }
+  }
+  assert.ok(zeros > 0, "the recorded read holds rows with one side left out");
+  const lan = solana.lists.new.find((r) => r.symbol === "LAN")!;
+  assert.deepEqual([lan.buys_5m, lan.sells_5m, lan.buys_1h, lan.sells_1h, lan.buys_24h, lan.sells_24h], [2, 0, 2, 0, 2, 0]);
+});
+
+test("Trending (1h) draws the 1h buys and sells and the buy share from them; Hot (5m) still draws the 5m ones", () => {
+  const r: MarketRow = { ...bare, buys_5m: 1, sells_5m: 3, buys_1h: 30, sells_1h: 10 };
+  const h = rowView(r, "1h", NOW_MS);
+  assert.deepEqual([h.buys, h.sells, h.buyShare], ["30", "10", 0.75]);
+  const m = rowView(r, "5m", NOW_MS);
+  assert.deepEqual([m.buys, m.sells, m.buyShare], ["1", "3", 0.25]);
+  const oneSided = rowView({ ...bare, buys_1h: 7, sells_1h: 0 }, "1h", NOW_MS);
+  assert.deepEqual([oneSided.buys, oneSided.sells, oneSided.buyShare], ["7", "0", 1]);
+  assert.deepEqual([rowView({ ...bare, buys_1h: null, sells_1h: null }, "1h", NOW_MS).buys, rowView(bare, "1h", NOW_MS).sells], ["—", "—"]);
+});
+
+test("route map: Discover is routed, the same way the token page is (card app-discover-live)", () => {
+  const src = readFileSync(new URL("../src/routes/Screen.tsx", import.meta.url), "utf8");
+  assert.match(src, /discover:\s*DiscoverRoute/);
+  assert.match(src, /token:\s*TokenRoute/);
 });
 
 test("price: tiny prices take the subscript zero count; garbage, negatives and null are the dash", () => {

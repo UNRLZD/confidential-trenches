@@ -6,7 +6,8 @@
 // for field: nothing here is a field that list lacks. Display only: no value here feeds a signature.
 //
 // Wire forms (06b:1745-1746): USD values are decimal strings; shares and changes are basis points; counts are integers;
-// a field no source has is null (or absent) and draws "—".
+// a field no source has is null (or absent) and draws "—". A trade count has two sides: one Jupiter leaves out reads 0
+// when the other is there, and both unknown is null (the helper's `sides`, apps/helper/src/data/solana/lists.ts).
 
 /** A chain id as 06b's stream names it; this card draws Solana only. */
 export type MarketChain = "solana" | "base" | "eip155:4663" | "near";
@@ -56,6 +57,9 @@ export interface MarketRow {
   chg_4h_bps?: number | null;
   buys_24h?: number | null;
   sells_24h?: number | null;
+  /** Trending's window (1h). Like the other windows, a side Jupiter leaves out reads 0 when the other is there. */
+  buys_1h?: number | null;
+  sells_1h?: number | null;
 }
 
 /** 06b §6.1 `snapshot`: `trending` equals `trending_1h`; `graduating` highest `curve_bps` first. */
@@ -80,6 +84,7 @@ export const ROW_FIELDS = [
   "launchpad", "curve_bps",
   "vol_1h_usd",
   "chg_4h_bps", "buys_24h", "sells_24h",
+  "buys_1h", "sells_1h",
 ] as const satisfies readonly (keyof MarketRow)[];
 
 /** The fields every row carries (06b marks the rest with `?`); `price_usd` and `launchpad` may be null. */
