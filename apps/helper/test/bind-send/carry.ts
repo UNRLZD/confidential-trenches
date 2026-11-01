@@ -33,15 +33,20 @@ const tokenStatus = async (): Promise<TokenStatus> => {
   return { token: input.token, caught_up: true, halted: s === "halted", vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height, last_event: null };
 };
 // The watch's pause history stands in as a read of the token at that block: USDC answers every call, its views
-// included, with "FiatToken: paused" while paused; the mock token never pauses.
+// included, with "FiatToken: paused" while paused; the mock token never pauses. nearcore answers a view that panicked
+// with a result holding `error` (no `result` bytes), or with an RPC error: both are read.
 const pausedAt = async (height: bigint): Promise<boolean | null> => {
+  let res: unknown;
   try {
-    await rpcs[0]("query", { request_type: "call_function", block_id: Number(height), account_id: input.token, method_name: "ft_balance_of", args_base64: Buffer.from(JSON.stringify({ account_id: input.vault })).toString("base64") });
-    return false;
+    res = await rpcs[0]("query", { request_type: "call_function", block_id: Number(height), account_id: input.token, method_name: "ft_balance_of", args_base64: Buffer.from(JSON.stringify({ account_id: input.vault })).toString("base64") });
   } catch (e) {
     if (String(e instanceof Error ? e.message : e).includes(USDC_PAUSED)) return true;
     throw e;
   }
+  const r = res as { result?: unknown; error?: unknown };
+  if (Array.isArray(r.result)) return false;
+  if (typeof r.error === "string" && r.error.includes(USDC_PAUSED)) return true;
+  throw new Error(`pausedAt ${height}: ${JSON.stringify(res).slice(0, 300)}`);
 };
 const deps = {
   cfg: { vault: input.vault, token: input.token, marginK: BigInt(input.marginK) },

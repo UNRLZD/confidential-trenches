@@ -3,18 +3,16 @@
 //! token in near-sandbox 2.13.4. Runs only with `--features sandbox`, through tests/harness/run.sh
 //! (`contracts/vault/tests/harness/run.sh --test relayer_send`); a plain `cargo test` never builds it.
 //!
-//! The vault here is tests/test-vault (`Harness::with_test_vault_and`): the vault's deposit surface only
-//! (`storage_prepay` as src/prepay.rs, `ft_on_transfer` charging 904 B when the state tree's size is 0 or a power of two
-//! and 756 B otherwise, the `deposits` and tree views). It stands in for the vault's deposit rows (vault.md 2.5.1 rows
-//! 3-12) until card vault-deposit-insert lands, since the vault on main still answers every deposit with the whole
-//! amount unused; then the same cases run on the real vault (`with_vault_and`).
+//! The vault here is the real one (`Harness::with_vault_and`, the 2.8 recipe): `storage_prepay` (src/prepay.rs) and
+//! `ft_on_transfer` landing each deposit as a leaf in both trees (vault.md 2.5.1 rows 3-12), 904 B when a tree grows a
+//! level and 756 B otherwise.
 //!
 //! The relayer is driven only through its CLI, `node apps/helper/test/bind-send/carry.ts`, one new process per request
 //! batch, so every run after the first is a restart that reads the same store directory. U's call is signed by
 //! `node apps/helper/test/bind-send/sign.ts` as U's device signs it (2.10 (b)): U's key nonce + 1 and the final height +
 //! 100. Every outcome is read on chain through the harness's RPC, never taken from the CLI's answer alone.
 //!
-//! World per run: the test vault and `kind`'s token (`Harness::with_test_vault_and`), seed deposits by a seeder account
+//! World per run: the vault and `kind`'s token (`Harness::with_vault_and`), seed deposits by a seeder account
 //! first (so the vault's first deposit is never the relayer's), U = a 64-hex implicit account holding the token
 //! (`keyed_account`, `mint`), and the relayer = a sandbox account with NEAR and a full-access key handed to the CLI.
 //!
@@ -27,19 +25,19 @@
 //!   the same tx_hash; exactly one send on chain (relayer nonce + 2: the prepay and the send); failed 0.
 //! - d. `halted_{mock,usdc}`: the watch answers halted (and, on USDC, USDC is halted on chain): 503 token_halted,
 //!   nothing spent, no record.
-//! - e. `three_failed_sends_mock`: the token refuses U's call (the mock's `ft_transfer_call` fails for the vault as
-//!   receiver); three sends on one P, each re-signed; each retry first topped up to 904 B in all, never above; then
-//!   struck, and a fourth request is 403 sender_struck with no relayer transaction. Mock only: the mock is the token
-//!   that fails on demand; USDC fails only by its roles, and its halt is case f's.
+//! - e. `three_failed_sends_{mock,usdc}`: the token refuses U's call (the mock's `ft_transfer_call` fails for the
+//!   vault as receiver; USDC's blocklister blocklists U, so its `ft_transfer_call` fails with "is blocklisted"); three
+//!   sends on one P, each re-signed; each retry first topped up to 904 B in all, never above; then struck, and a fourth
+//!   request is 403 sender_struck with no relayer transaction.
 //! - f. `paused_send_does_not_count_usdc`: USDC halted between the checks and the send: the send fails with
-//!   "FiatToken: paused", the watch then answers halted, so it does not count (failed 0, not struck); unhalted, a
+//!   "FiatToken: paused", and USDC read at the failure's block was paused, so it does not count (failed 0, not struck); unhalted, a
 //!   re-signed call on the same P lands. The halt is the pausers' multisig whose execute is sent the moment P's prepaid
 //!   record appears: USDC refuses its views too while halted (`USDC_HALTED`), so a halt before the run would stop the
 //!   checks' balance read, never the send.
 //! - g. `bad_nonce_{mock,usdc}`: a call signed at U's key nonce, not above: 400 bad_nonce, nothing spent.
 //!
 //! Each prints its gas table (the harness's, for the seeds; each relayer transaction's receipts) and the relayer's
-//! balance before and after: per (U, P) it falls by at most 0.0104815 N (vault.md 2.10, a struck U's maximum) plus the
+//! balance before and after: per (U, P) it falls by at most 0.010501 N (vault.md 2.10, a struck U's maximum) plus the
 //! gas of a deposit that landed.
 #![cfg(feature = "sandbox")]
 
@@ -49,7 +47,7 @@ use harness::{Harness, TokenKind, R, ONE_YOCTO, YOCTO_PER_BYTE};
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::types::{Gas, NearToken};
-use near_workspaces::Account;
+use near_workspaces::{Account, AccountId};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -65,8 +63,10 @@ const WINDOW: u64 = 100;
 /// 2.3: a deposit with no tree growing a level, and with one (the 148 B of a new level in both trees).
 const B756: u64 = 756;
 const B904: u64 = 904;
-/// vault.md 2.10: a struck U's most, 0.00904 + 2 x 0.0003 + 3 x 0.0002805 N.
-const STRUCK_MAX: u128 = 10_481_500_000_000_000_000_000;
+/// vault.md 2.10: a struck U's most, 904 B prepaid in up to 3 prepays, and 2 failed sends beyond the first that the
+/// first prepay's arithmetic already holds: 0.00904 + 3 x 0.0003 + 2 x 0.0002805 = 0.010501 N (send.ts
+/// PER_P_WORST_YOCTO).
+const STRUCK_MAX: u128 = 10_501_000_000_000_000_000_000;
 /// What each seed deposit prepays: more than any deposit writes, the seeder's own NEAR.
 const SEED_PREPAY_BYTES: u128 = 2_000;
 /// `Key::Prepaid`'s Borsh byte (src/lib.rs `Key`, the 13th variant), as tests/prepay.rs reads it.
@@ -145,7 +145,7 @@ impl World {
     async fn new(kind: TokenKind, seeds: u32, case: &str) -> R<Self> {
         cli("carry.ts")?;
         cli("sign.ts")?;
-        let h = Harness::with_test_vault_and(kind).await?;
+        let h = Harness::with_vault_and(kind).await?;
         let relayer = h.account("relayer", 20).await?;
         let seeder = h.account("seeder", 20).await?;
         h.mint(seeder.id(), HELD * seeds.max(1) as u128).await?;
@@ -594,14 +594,28 @@ async fn halted_usdc() -> R<()> {
     halted(TokenKind::Usdc).await
 }
 
-// ---- e. three failed sends, then struck (mock) ----
+// ---- e. three failed sends, then struck ----
 
-#[tokio::test]
-async fn three_failed_sends_mock() -> R<()> {
-    let w = World::new(TokenKind::Mock, 3, "e").await?;
+/// Makes the token refuse U's `ft_transfer_call` (or stop refusing it): the mock fails it for the vault as receiver;
+/// USDC's blocklister blocklists U. Answers the text the refusal carries.
+async fn refuse(w: &World, u: &AccountId, on: bool) -> R<&'static str> {
+    if w.h.usdc.is_none() {
+        w.h.mock_fail("ft_transfer_call", Some(&w.h.vault), on).await?;
+        return Ok("MockTokenFail");
+    }
+    let roles = w.h.usdc_roles()?;
+    let method = if on { "blocklist" } else { "unblocklist" };
+    let _ = w.h.call(&roles.blocklister, &w.h.token, method, json!({"account_id": u}), NearToken::from_yoctonear(0), Gas::from_tgas(30)).await?;
+    let listed = w.h.view(&w.h.token, "is_blocklisted", json!({"account_id": u})).await?;
+    assert_eq!(listed, json!(on), "{method} {u}: is_blocklisted {listed}");
+    Ok("is blocklisted")
+}
+
+async fn three_failed_sends(kind: TokenKind) -> R<()> {
+    let w = World::new(kind, 3, "e").await?;
     let p = "424242041";
     let u = w.u("e1").await?;
-    w.h.mock_fail("ft_transfer_call", Some(&w.h.vault), true).await?;
+    let refusal = refuse(&w, u.acct.id(), true).await?;
     let rb0 = w.relayer_balance().await?;
     let (mut prepays, mut sends): (Vec<String>, Vec<String>) = (vec![], vec![]);
     let mut earlier = 0u64;
@@ -638,7 +652,7 @@ async fn three_failed_sends_mock() -> R<()> {
         earlier = total;
         // on chain: the send went out, U's call failed at the token, nothing landed
         let t = Tx { hash: new_send.clone(), v: w.tx(&new_send).await? };
-        assert!(t.failures().iter().any(|f| f.contains("MockTokenFail")), "send {i}: not refused by the token: {:?}", t.failures());
+        assert!(t.failures().iter().any(|f| f.contains(refusal)), "send {i}: not refused by the token ({refusal}): {:?}", t.failures());
         assert_eq!(w.rows_for(p).await?.len(), 0, "send {i}: P landed");
         assert_eq!(w.h.token_balance(u.acct.id()).await?, HELD, "send {i}: U's balance moved");
         assert_eq!(w.key_nonce(&u.acct).await?, un0 + 1, "send {i}: U's key nonce did not move to the signed one");
@@ -660,15 +674,26 @@ async fn three_failed_sends_mock() -> R<()> {
     report(&w, "e", rb0, rb1, &sp);
     assert_eq!(sp.landed_gas, 0);
     assert!(rb0 - rb1 <= STRUCK_MAX, "struck U: the relayer spent {}, over {}", near(rb0 - rb1), near(STRUCK_MAX));
-    w.h.mock_fail("ft_transfer_call", Some(&w.h.vault), false).await?;
+    let _ = refuse(&w, u.acct.id(), false).await?;
     Ok(())
+}
+
+#[tokio::test]
+async fn three_failed_sends_mock() -> R<()> {
+    three_failed_sends(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn three_failed_sends_usdc() -> R<()> {
+    three_failed_sends(TokenKind::Usdc).await
 }
 
 // ---- f. a send failed by USDC's halt does not count (USDC) ----
 
-/// The watch's answers in the order send.ts asks: before checks 1-7, at check 9, before the prepay, before the send, and
-/// after the failed send. Open until the send is out, halted after it.
-const PAUSED_RUN_WATCH: [&str; 5] = ["ok", "ok", "ok", "ok", "halted"];
+/// The watch's answers in the order send.ts asks: before checks 1-7, at check 9, before the prepay and before the send.
+/// Open throughout: whether the failed send counts is not the watch's answer now but USDC read at the failure's block
+/// (carry.ts `pausedAt`, vault.md 2.10 (f)).
+const PAUSED_RUN_WATCH: [&str; 4] = ["ok", "ok", "ok", "ok"];
 
 /// The pausers' `Pause` request created and approved by both, not executed: its id.
 async fn stage_pause(h: &Harness) -> R<Value> {

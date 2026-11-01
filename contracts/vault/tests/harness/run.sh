@@ -39,9 +39,7 @@ echo "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-unset} NEAR_SANDBOX_BIN_PATH=${NEAR_S
 VAULT_WASM=$(build "$V" blindfill_vault)
 MOCK_TOKEN_WASM=$(build "$V/tests/mock-token" blindfill_mock_token)
 PROBE_WASM=$(build "$V/tests/harness/probe" blindfill_harness_probe)
-# the vault's deposit surface only, for tests/relayer_send.rs until card vault-deposit-insert lands
-TEST_VAULT_WASM=$(build "$V/tests/test-vault" blindfill_test_vault)
-export VAULT_WASM MOCK_TOKEN_WASM PROBE_WASM TEST_VAULT_WASM
+export VAULT_WASM MOCK_TOKEN_WASM PROBE_WASM
 # the real USDC and intents.near at DF: mainnet's code, pinned in tests/fixtures/real-wasm.json, read by view_code on
 # two mainnet RPCs (or the cache, when its sha256 is the pin); the harness refuses any other bytes again
 PINNED=$(node "$V/tests/harness/fetch-wasm.mjs")
