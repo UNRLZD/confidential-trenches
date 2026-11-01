@@ -2,13 +2,20 @@
  * The helper server (HELPER_HOST, markets paper H7). It holds API keys, never a money key, and logs no request: no
  * line it writes holds a client IP, a path or a header.
  *
- *   HELPER_COMMIT=<40 hex> [PORT=8080] node src/server.ts
+ *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..] node src/server.ts
+ *
+ * The vendor keys come from the host's environment only (src/proxy/vendors.ts); a vendor with no key is called
+ * without one.
  *
  * Every answer carries X-Helper-Commit and Vary: Origin. Cross-origin reads are allowed for exactly APP_HOST and
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { health } from "./health.ts";
+import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
+
+type Proxy = ReturnType<typeof createProxy>;
+const PROXY_PREFIX = "/v1/proxy/";
 
 export const ORIGINS: ReadonlySet<string> = new Set([
   "https://confidential.unrealized.trade",
@@ -55,7 +62,27 @@ function preflight(req: IncomingMessage): Headers {
   return h;
 }
 
-export function handler(commit: string) {
+/** The request body, or undefined once it passes `max` bytes (by its Content-Length or as it arrives). */
+function readBody(req: IncomingMessage, max: number): Promise<string | undefined> {
+  return new Promise((ok, fail) => {
+    if (Number(req.headers["content-length"] ?? "0") > max) return ok(undefined);
+    const chunks: Buffer[] = [];
+    let n = 0;
+    req.on("data", (c: Buffer) => {
+      n += c.length;
+      if (n > max) {
+        req.removeAllListeners("data");
+        req.resume();
+        return ok(undefined);
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => ok(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", fail);
+  });
+}
+
+export function handler(commit: string, proxy: Proxy = createProxy(process.env)) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
@@ -85,6 +112,29 @@ export function handler(commit: string) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         return send(200, health(commit), cors(req));
       }
+      if (path.startsWith(PROXY_PREFIX)) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // the raw path, never URL's normalised one: only a path written exactly as on the allowlist is served
+        const raw = req.url ?? "";
+        const q = raw.indexOf("?");
+        const rest = (q === -1 ? raw : raw.slice(0, q)).slice(PROXY_PREFIX.length);
+        const slash = rest.indexOf("/");
+        if (!raw.startsWith(PROXY_PREFIX) || slash <= 0) return send(404, { error: { code: "not_found" } }, cors(req));
+        void readBody(req, PROXY_BODY_MAX)
+          .then((body) =>
+            body === undefined
+              ? { status: 413, headers: {}, body: JSON.stringify({ error: { code: "too_large" } }) }
+              : proxy.handle(rest.slice(0, slash), rest.slice(slash), q === -1 ? "" : raw.slice(q + 1), body),
+          )
+          .then((a) => {
+            const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
+            if (a.status === 413) h.Connection = "close";
+            res.writeHead(a.status, h);
+            res.end(a.body);
+          })
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
       return send(404, { error: "not_found" }, cors(req));
     } catch {
       if (!res.headersSent) send(500, { error: "internal" }, cors(req));
@@ -93,12 +143,12 @@ export function handler(commit: string) {
   };
 }
 
-export function start(commit: string, port: number): Server {
+export function start(commit: string, port: number, proxy?: Proxy): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit),
+    handler(commit, proxy),
   );
   server.listen(port);
   return server;
@@ -111,7 +161,13 @@ if (import.meta.main) {
     console.error("helper: HELPER_COMMIT must be a full 40-hex commit");
     process.exit(2);
   }
-  const server = start(commit, port);
+  let server: Server;
+  try {
+    server = start(commit, port);
+  } catch (e) {
+    console.error(`helper: ${(e as Error).message}`);
+    process.exit(2);
+  }
   server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}`));
   const stop = () => {
     server.close(() => process.exit(0));
