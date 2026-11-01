@@ -493,5 +493,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     for (const r of refusals) console.error(`money-gate: REFUSED: ${r}`);
     process.exit(1);
   }
-  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s), ${single.length} tx(s) on one operator)`);
+  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s))`);
 }
