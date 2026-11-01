@@ -1012,6 +1012,108 @@ test("light proof: more outcomes than the cap are refused (cap 2 against the rec
   assert.equal((await proveNearTx(s.fetchFn, LP.tx, T_FN, T_DR, LP.known, s.sleep, 3)).outcomes, 3);
 });
 
+// Review round 2 of this card: the default cap, the tx-bytes file's loader and the version tag, each planted.
+// A self-consistent tx whose outcome names n receipts, each its own block, the blocks the leaves of one Merkle tree
+// whose root is the head's block_merkle_root (as built() does for four).
+function builtMany(n) {
+  const fx = clone(LP);
+  const sha = (...b) => createHash("sha256").update(Buffer.concat(b)).digest();
+  const ids = Array.from({ length: n }, (_, i) => enc58(sha(Buffer.from(`receipt ${i}`))));
+  const template = fx.proofs[receiptOf(LP)];
+  const tx = fx.proofs[LP.tx.hash];
+  tx.outcome_proof.outcome.receipt_ids = ids;
+  fx.proofs = { [LP.tx.hash]: tx };
+  for (const id of ids) {
+    const p = clone(template);
+    p.outcome_proof.id = id;
+    p.outcome_proof.outcome.receipt_ids = [];
+    p.outcome_proof.outcome.status = { SuccessValue: "" };
+    fx.proofs[id] = p;
+  }
+  fx.known.receipts_outcome = ids.map((id) => ({ id, outcome: { executor_id: LP.tx.signer, status: { SuccessValue: "" } } }));
+  const all = [LP.tx.hash, ...ids];
+  let level = all.map((id) => {
+    const p = fx.proofs[id];
+    p.outcome_proof.proof = [];
+    p.outcome_root_proof = [];
+    p.block_header_lite.inner_lite.outcome_root = enc58(sha(outcomeLeaf(id, p.outcome_proof.outcome)));
+    const h = liteHash(p.block_header_lite);
+    p.outcome_proof.block_hash = enc58(h);
+    p.block_proof = [];
+    return h;
+  });
+  while (level.length & (level.length - 1)) level.push(Buffer.alloc(32));
+  const at = all.map((_, i) => i);
+  while (level.length > 1) {
+    all.forEach((id, k) => {
+      const i = at[k];
+      fx.proofs[id].block_proof.push({ hash: enc58(level[i ^ 1]), direction: i % 2 ? "Left" : "Right" });
+      at[k] = i >> 1;
+    });
+    level = Array.from({ length: level.length / 2 }, (_, i) => sha(level[2 * i], level[2 * i + 1]));
+  }
+  fx.head.block_merkle_root = enc58(level[0]);
+  return fx;
+}
+
+test("light proof: the gate's own cap (no cap passed) proves 200 outcomes and refuses 201", async () => {
+  const ok = builtMany(199);
+  const s = proofHosts(ok);
+  assert.equal((await proveNearTx(s.fetchFn, ok.tx, T_FN, T_DR, ok.known, s.sleep)).outcomes, 200);
+  const over = builtMany(200);
+  const t = proofHosts(over);
+  await assert.rejects(proveNearTx(t.fetchFn, over.tx, T_FN, T_DR, over.known, t.sleep), /more than 200 outcomes/);
+});
+
+test("light proof planted: a tx-bytes file that is a symlink, a folder, not JSON or not an object of strings is refused", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "money-gate-"));
+  try {
+    mkdirSync(join(dir, "scripts/live-checks"), { recursive: true });
+    writeFileSync(join(dir, "scripts/live-checks/card.md"), `CARD card / live: PASS\nMoney path: yes\nTx: near-testnet ${LP.tx.hash} ${LP.tx.signer}\n`);
+    const side = join(dir, "scripts/live-checks/card.tx-bytes.json");
+    const good = JSON.stringify({ [LP.tx.hash]: LP.tx_bytes });
+    const loaded = () => recordsFrom(dir, ["--all"]).records[0];
+    writeFileSync(side, good);
+    assert.deepEqual([loaded().bytes, loaded().bytesProblem], [{ [LP.tx.hash]: LP.tx_bytes }, undefined], "a regular file of base64 strings is read");
+    for (const [what, body, want] of [
+      ["an array", JSON.stringify([LP.tx_bytes]), /not a tx-bytes object/],
+      ["a number value", JSON.stringify({ [LP.tx.hash]: 5 }), /not a tx-bytes object/],
+      ["null", "null", /not a tx-bytes object/],
+      ["a number", "5", /not a tx-bytes object/],
+      ["a string", JSON.stringify(LP.tx_bytes), /not a tx-bytes object/],
+      ["true", "true", /not a tx-bytes object/],
+      ["malformed JSON", good.slice(0, -1), /not a tx-bytes object/],
+    ]) {
+      writeFileSync(side, body);
+      assert.equal(loaded().bytes, undefined, what);
+      assert.match(loaded().bytesProblem ?? "", want, what);
+    }
+    rmSync(side);
+    writeFileSync(join(dir, "elsewhere.json"), good);
+    symlinkSync("../../elsewhere.json", side);
+    assert.match(loaded().bytesProblem ?? "", /a symlink, not a regular file/);
+    assert.equal(loaded().bytes, undefined);
+    // the gate refuses the record's tx-bytes file by name
+    const s = proofHosts(LP);
+    const r = await moneyGate([loaded()], s.fetchFn, T_RPCS, { sleep: s.sleep });
+    assert.match(r.refusals.join("\n"), /scripts\/live-checks\/card\.tx-bytes\.json: a symlink, not a regular file/);
+    unlinkSync(side);
+    mkdirSync(side);
+    assert.match(loaded().bytesProblem ?? "", /not a file, not a regular file/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("light proof planted: tx bytes whose version tag is neither V0's nor 1 are refused, even when they hash to the id", () => {
+  for (const tag of [2, 0xff]) {
+    const b = Buffer.from(LP.v1.tx_bytes, "base64");
+    b[0] = tag;
+    const id = enc58(createHash("sha256").update(b).digest());
+    assert.throws(() => txBytesFacts(b.toString("base64"), id), new RegExp(`version tag ${tag}`));
+  }
+});
+
 // Card money-gate-rate: near.org's testnet archive answers 429 with a Retry-After of about 279 s (read 2026-11-01), and
 // a record lists many txs. Hosts are asked in order; while fewer than two have read a tx ok, a 429 is waited out as
 // above. Once two have, a remaining host is still asked once, but its 429 is no answer: not waited, not decisive, named.
