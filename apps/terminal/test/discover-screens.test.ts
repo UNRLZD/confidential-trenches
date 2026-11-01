@@ -171,3 +171,16 @@ test("WORDS: every visible word sits in one table, each draft marked", () => {
   assert.deepEqual(DRAFTS, (Object.keys(WORDS) as (keyof typeof WORDS)[]).filter((k) => WORDS[k].draft));
   assert.ok(DRAFTS.length > 0);
 });
+
+test("Graduating holds J19's curve rule, the token page's (card app-token-page): a launchpad and whole basis points 0-9999", () => {
+  const rows: MarketRow[] = [
+    { ...bare, token: "OnCurve", launchpad: "pump.fun", curve_bps: 5000 },
+    { ...bare, token: "NoPad", launchpad: null, curve_bps: 5000 },
+    { ...bare, token: "PartBps", launchpad: "pump.fun", curve_bps: 50.5 },
+    { ...bare, token: "Listed", launchpad: "pump.fun", curve_bps: 10000 },
+  ];
+  const g = columnRows({ ...empty, lists: { ...empty.lists, graduating: rows } }, "graduating");
+  assert.deepEqual(g.map((r) => r.token), ["OnCurve"]);
+  assert.equal(rowView(rows[1]!, "5m", NOW_MS).stage.curve, false);
+  assert.equal(rowView(rows[2]!, "5m", NOW_MS).stage.curve, false);
+});
