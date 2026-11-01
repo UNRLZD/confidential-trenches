@@ -14,8 +14,15 @@
 //   `allow` (the app copies nothing). SIGN_HOST's CSP frame-src names APP_HOST only, so the frame cannot be sent
 //   anywhere else; its frame-ancestors 'none' keeps any page from framing the shell.
 // - The screens (sign-in, backup, the words) draw in `layer`, over the frame, in this document: a child frame cannot
-//   draw over its parent. src/main.ts decides when the layer shows.
+//   draw over its parent. The layer is hidden in every state until an open kind asks for it (src/main.ts: signin.open),
+//   and closes on signed in or Cancel. While it shows, the frame is out of the document: a frame under it could take
+//   the keyboard's focus back and read the 12 words as they are typed. At close a new frame comes, at the top window's
+//   address then.
+// - nav: the app says where it is, and the shell puts that path and query in the top window's address with
+//   history.replaceState (never a navigation), so the address bar, a reload, a new frame and a shared link follow the
+//   app. reload: the shell reloads the top window (a reload of the frame alone would keep the old shell).
 // - DOM by createElement and the CSSOM only: the CSP allows no inline style and requires Trusted Types for every sink.
+import { SIGNPAGE_MAX_NAV_BYTES } from "../../kit/src/signpage/schema.ts";
 import { APP_ORIGIN, startApi, type ApiHost, type PostTarget } from "./api.ts";
 
 export const FRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
@@ -32,40 +39,137 @@ export function appSrc(loc: { pathname: string; search: string }): string {
   }
 }
 
-/** The kit's API with the frame's window as its peer, and `ready` once on each load of the frame, never before. */
+/**
+ * How long the frame stays after the layer opens: the answer to the kind that opened it (posted just before) is
+ * delivered to the frame as a task of its own, and a frame taken out first never gets it. Far below a person's first
+ * tap on the layer; the layer covers the frame from the start.
+ */
+export const FRAME_LEAVE_MS = 100;
+
+/** No frame: a post goes nowhere, and no message's source is ever this object. */
+const NO_FRAME: PostTarget = { postMessage() {} };
+
+/**
+ * nav's target in the top window: `path` as APP_HOST's own path and query (appSrc's rule: joined to the origin, then
+ * parsed; any other origin is refused, never its root), on `origin`, as an absolute URL; null when refused.
+ */
+export function navUrl(origin: string, path: string): string | null {
+  if (typeof path !== "string" || !path.startsWith("/") || path[1] === "/" || path[1] === "\\") return null;
+  if (new TextEncoder().encode(path).length > SIGNPAGE_MAX_NAV_BYTES) return null;
+  try {
+    const app = new URL(`${APP_ORIGIN}${path}`);
+    if (app.origin !== APP_ORIGIN) return null;
+    const top = new URL(`${origin}${app.pathname}${app.search}`);
+    return top.origin === origin ? top.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The kit's API with the frame's window as its peer, read on every post and every message (the shell replaces the
+ * frame, and has none while its layer is open), and `ready` once on each load of the frame, never before.
+ */
 export function wireShell(
-  frame: { window: PostTarget; onLoad(fn: () => void): void },
+  frame: { window(): PostTarget; onLoad(fn: () => void): void },
   host: Omit<ApiHost, "parent" | "readyOnLoad">,
 ): ReturnType<typeof startApi> {
-  const api = startApi({ ...host, parent: frame.window, readyOnLoad: true });
+  const api = startApi({
+    ...host,
+    readyOnLoad: true,
+    get parent() {
+      return frame.window();
+    },
+  });
   frame.onLoad(api.ready);
   return api;
 }
 
+export interface Shell {
+  /** The screens' layer, over the frame. */
+  layer: HTMLElement;
+  /**
+   * Shows the layer and, FRAME_LEAVE_MS later, takes the frame out of the document. A frame under the layer could
+   * still take the keyboard's focus back (an APP_HOST page that calls focus() every few ms gets every key typed after
+   * the first, the 12 words included, on every engine; inert, visibility and display each let it through on one), so
+   * none is left.
+   */
+  open(): void;
+  /** Hides the layer and puts a new frame in at the top window's address now (which nav keeps as the app's). */
+  close(): void;
+}
+
 /**
- * Draws the shell into `doc`: the APP_HOST frame filling the window and the layer over it (hidden until shown), then
- * starts the API to the frame. Returns the layer.
+ * Draws the shell into `doc`: the APP_HOST frame filling the window at the top window's path and query, and the layer
+ * over it, hidden until open() (an open kind asks for it), then starts the API to the frame. The shell answers nav and
+ * reload itself; `host.kinds` adds the screens' own (src/main.ts: signin.open).
  */
-export function mountShell(doc: Document, loc: { pathname: string; search: string }, host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad">): HTMLElement {
-  const frame = doc.createElement("iframe");
-  frame.id = "app";
-  frame.setAttribute("sandbox", FRAME_SANDBOX);
-  frame.setAttribute("referrerpolicy", "no-referrer");
-  Object.assign(frame.style, { position: "fixed", inset: "0", width: "100%", height: "100%", border: "0", display: "block" });
+export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad">): Shell {
+  const view = doc.defaultView!;
   const layer = doc.createElement("section");
   layer.id = "screen";
   layer.hidden = true;
   Object.assign(layer.style, { position: "fixed", inset: "0", zIndex: "1", overflow: "auto", background: "Canvas", color: "CanvasText" });
   Object.assign(doc.body.style, { margin: "0", background: "Canvas" });
-  // the src before the frame is in the document: it never loads about:blank first, so its one load is APP_HOST's
-  frame.src = appSrc(loc);
-  doc.body.append(frame, layer);
-  // contentWindow exists once the frame is in the document, and stays the same object across its loads
-  const win = frame.contentWindow;
-  if (!win) throw new Error("the APP_HOST frame has no window");
+  doc.body.append(layer);
+
+  let frame: HTMLIFrameElement | null = null;
+  let peer: PostTarget = NO_FRAME;
+  let onLoad: () => void = () => {};
+  const add = (): void => {
+    const f = doc.createElement("iframe");
+    f.id = "app";
+    f.setAttribute("sandbox", FRAME_SANDBOX);
+    f.setAttribute("referrerpolicy", "no-referrer");
+    Object.assign(f.style, { position: "fixed", inset: "0", width: "100%", height: "100%", border: "0", display: "block" });
+    // the src before the frame is in the document: it never loads about:blank first, so its one load is APP_HOST's
+    f.src = appSrc(view.location);
+    f.addEventListener("load", () => frame === f && onLoad());
+    doc.body.insertBefore(f, layer);
+    // contentWindow exists once the frame is in the document, and stays the same object across its loads
+    const win = f.contentWindow;
+    if (!win) throw new Error("the APP_HOST frame has no window");
+    frame = f;
+    peer = win;
+  };
+
   wireShell(
-    { window: win, onLoad: (fn) => frame.addEventListener("load", fn) },
-    { ...host, listen: (fn) => doc.defaultView!.addEventListener("message", fn) },
+    { window: () => peer, onLoad: (fn) => (onLoad = fn) },
+    {
+      ...host,
+      listen: (fn) => view.addEventListener("message", fn),
+      kinds: {
+        ...host.kinds,
+        nav: (p) => {
+          const url = navUrl(view.location.origin, p.path as string);
+          if (url === null) return null;
+          view.history.replaceState(null, "", url);
+          return { result: {} };
+        },
+        reload: () => ({ result: {}, then: () => view.location.reload() }),
+      },
+    },
   );
-  return layer;
+  add();
+  let leaving: ReturnType<typeof setTimeout> | null = null;
+  return {
+    layer,
+    open() {
+      layer.hidden = false;
+      if (!frame || leaving !== null) return;
+      leaving = setTimeout(() => {
+        leaving = null;
+        if (layer.hidden || !frame) return;
+        frame.remove();
+        frame = null;
+        peer = NO_FRAME;
+      }, FRAME_LEAVE_MS);
+    },
+    close() {
+      layer.hidden = true;
+      if (leaving !== null) clearTimeout(leaving);
+      leaving = null;
+      if (!frame) add();
+    },
+  };
 }

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { APP_ORIGIN, RELEASE, signedOutState, type IncomingMessage } from "../src/api.ts";
-import { appSrc, FRAME_SANDBOX, wireShell } from "../src/shell.ts";
+import { appSrc, FRAME_LEAVE_MS, FRAME_SANDBOX, mountShell, navUrl, wireShell } from "../src/shell.ts";
 
 test("appSrc: APP_HOST with this page's path and query; never another origin", () => {
   assert.equal(appSrc({ pathname: "/", search: "" }), `${APP_ORIGIN}/`);
@@ -22,8 +22,9 @@ test("appSrc: APP_HOST with this page's path and query; never another origin", (
   assert.equal(appSrc({ pathname: ".evil.com/", search: "" }), `${APP_ORIGIN}/`);
 });
 
-test("the frame's sandbox is exactly the four tokens", () => {
+test("the frame's sandbox is exactly the four tokens, none of them a top navigation", () => {
   assert.equal(FRAME_SANDBOX, "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+  assert.ok(!/top-navigation|allow-modals|allow-downloads|allow-forms/.test(FRAME_SANDBOX));
 });
 
 /** A shell wired to a fake frame window: what it posted, a way to send it a message, a frame load. */
@@ -33,7 +34,7 @@ function shell() {
   let listener: ((e: IncomingMessage) => void) | null = null;
   let onLoad: (() => void) | null = null;
   const api = wireShell(
-    { window: frame, onLoad: (fn) => (onLoad = fn) },
+    { window: () => frame, onLoad: (fn) => (onLoad = fn) },
     { listen: (fn) => (listener = fn), state: () => signedOutState() },
   );
   const send = (data: unknown, from: { origin?: string; source?: unknown } = {}) =>
@@ -76,4 +77,192 @@ test("ready goes to the frame's window once on each load of the frame, never bef
   s.load();
   assert.equal(readies().length, 2);
   assert.ok(readies().every((p) => p.to === APP_ORIGIN));
+});
+
+// ------------------------------------------------------------------------------------------------ mountShell on a fake DOM
+const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
+type FakeEl = {
+  tagName: string; id: string; hidden: boolean; style: Record<string, string>; src: string;
+  contentWindow: { postMessage(m: unknown, o: string): void } | null;
+  setAttribute(k: string, v: string): void; getAttribute(k: string): string | null; attributes(): string[];
+  addEventListener(t: string, fn: () => void): void; fire(t: string): void; remove(): void;
+};
+function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
+  const loc = new URL(href);
+  const calls = { replace: [] as string[], reload: 0, assign: 0 };
+  const posted: { msg: unknown; to: string; win: unknown }[] = [];
+  const listeners: ((e: IncomingMessage) => void)[] = [];
+  const children: FakeEl[] = [];
+  const createElement = (tag: string): FakeEl => {
+    const attrs = new Map<string, string>();
+    const on = new Map<string, () => void>();
+    const e: FakeEl = {
+      tagName: tag, id: "", hidden: false, style: {}, src: "", contentWindow: null,
+      setAttribute: (k, v) => void attrs.set(k, String(v)),
+      getAttribute: (k) => attrs.get(k) ?? null,
+      attributes: () => [...attrs.keys()].sort(),
+      addEventListener: (t, fn) => void on.set(t, fn),
+      fire: (t) => on.get(t)?.(),
+      remove: () => void (children.includes(e) && children.splice(children.indexOf(e), 1)),
+    };
+    if (tag === "iframe") {
+      const win = { postMessage: (msg: unknown, to: string) => void posted.push({ msg, to, win }) };
+      e.contentWindow = win;
+    }
+    return e;
+  };
+  const view = {
+    location: { get origin() { return loc.origin; }, get pathname() { return loc.pathname; }, get search() { return loc.search; }, reload: () => void calls.reload++, assign: () => void calls.assign++ },
+    history: {
+      replaceState: (_s: unknown, _t: string, url: string) => {
+        const u = new URL(url, loc);
+        if (u.origin !== loc.origin) throw new Error("SecurityError");
+        loc.href = u.href;
+        calls.replace.push(u.href);
+      },
+    },
+    addEventListener: (t: string, fn: (e: IncomingMessage) => void) => void (t === "message" && listeners.push(fn)),
+  };
+  const body = {
+    style: {},
+    append: (...xs: FakeEl[]) => void children.push(...xs),
+    insertBefore: (x: FakeEl, ref: FakeEl) => void children.splice(children.indexOf(ref), 0, x),
+  };
+  const doc = { defaultView: view, createElement, body } as unknown as Document;
+  const frames = () => children.filter((c) => c.tagName === "iframe");
+  const send = (data: unknown, source: unknown) => {
+    for (const fn of listeners) fn({ origin: APP_ORIGIN, source, data });
+  };
+  return { doc, loc, calls, posted, children, frames, send };
+}
+const flush = () => new Promise((ok) => setTimeout(ok, 10));
+
+test("mountShell: one frame, sandboxed exactly, no allow, no referrer, at appSrc of the top window's path and query; the layer hidden", () => {
+  for (const href of [`${SIGN_ORIGIN}/token/solana/So111?tab=trades`, `${SIGN_ORIGIN}//evil.com/x?y=1`, `${SIGN_ORIGIN}/@evil.com`, `${SIGN_ORIGIN}/`]) {
+    const d = fakeDom(href);
+    const sh = mountShell(d.doc, { state: () => signedOutState() });
+    const [f] = d.frames();
+    assert.equal(d.frames().length, 1, href);
+    assert.equal(f!.getAttribute("sandbox"), FRAME_SANDBOX);
+    assert.deepEqual(f!.attributes(), ["referrerpolicy", "sandbox"], "no allow, nothing else");
+    assert.equal(f!.getAttribute("referrerpolicy"), "no-referrer");
+    const u = new URL(href);
+    assert.equal(f!.src, appSrc({ pathname: u.pathname, search: u.search }), href);
+    assert.equal(new URL(f!.src).origin, APP_ORIGIN, href);
+    assert.equal(sh.layer.hidden, true);
+  }
+});
+
+test("open takes the frame out of the document and nothing reaches the old window; close puts a new one in at the address now, and only its load posts ready", async () => {
+  const d = fakeDom();
+  const sh = mountShell(d.doc, { state: () => signedOutState() });
+  const old = d.frames()[0]!;
+  old.fire("load");
+  sh.open();
+  assert.equal(sh.layer.hidden, false);
+  assert.equal(d.frames().length, 1, "the frame stays FRAME_LEAVE_MS, for the answer that opened the layer");
+  await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
+  assert.equal(d.frames().length, 0);
+  const before = d.posted.length;
+  // the removed frame's window asks: dropped; a late load of it posts nothing
+  d.send(ask(), old.contentWindow);
+  old.fire("load");
+  await flush();
+  assert.equal(d.posted.length, before);
+  d.loc.href = `${SIGN_ORIGIN}/portfolio?x=1`;
+  sh.close();
+  assert.equal(sh.layer.hidden, true);
+  const [f] = d.frames();
+  assert.ok(f && f !== old);
+  assert.equal(f.src, `${APP_ORIGIN}/portfolio?x=1`);
+  f.fire("load");
+  const q = ask();
+  d.send(q, f.contentWindow);
+  d.send(ask(), old.contentWindow);
+  await flush();
+  const after = d.posted.slice(before);
+  assert.deepEqual(after.map((p) => p.msg), [READY, { v: 1, id: q.id, ok: true, result: signedOutState() }]);
+  assert.ok(after.every((p) => p.win === f.contentWindow && p.to === APP_ORIGIN));
+  // close twice: one frame; open then close at once: the frame stays, and stays the only one
+  sh.close();
+  assert.equal(d.frames().length, 1);
+  sh.open();
+  sh.close();
+  await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
+  assert.equal(d.frames().length, 1);
+});
+
+test("nav: the top window's address becomes APP_HOST's path and query, by replaceState only; another origin, // and an over-long path are refused", async () => {
+  const d = fakeDom();
+  mountShell(d.doc, { state: () => signedOutState() });
+  const win = d.frames()[0]!.contentWindow;
+  const nav = (path: unknown) => ({ v: 1, id: crypto.randomUUID(), type: "nav", path });
+  const ok = nav("/token/base/0xabc?tab=holders");
+  d.send(ok, win);
+  await flush();
+  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: ok.id, ok: true, result: {} });
+  assert.deepEqual(d.calls.replace, [`${SIGN_ORIGIN}/token/base/0xabc?tab=holders`]);
+  for (const path of ["//evil.example/x", "https://evil.example/x", "/\\evil.example", "x", `/${"a".repeat(2_048)}`, "/a\nb"]) {
+    const m = nav(path);
+    d.send(m, win);
+    await flush();
+    assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: false, error: { code: "not_allowed" } }, path);
+  }
+  const extra = { ...nav("/x"), extra: 1 };
+  d.send(extra, win);
+  await flush();
+  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: extra.id, ok: false, error: { code: "not_allowed" } });
+  assert.equal(d.calls.replace.length, 1);
+  assert.equal(d.calls.assign + d.calls.reload, 0, "never a navigation");
+});
+
+test("navUrl: APP_HOST's own path and query on the top origin, or null", () => {
+  assert.equal(navUrl(SIGN_ORIGIN, "/a/b?c=d#e"), `${SIGN_ORIGIN}/a/b?c=d`);
+  assert.equal(navUrl(SIGN_ORIGIN, "/@evil.com"), `${SIGN_ORIGIN}/@evil.com`);
+  for (const p of ["//evil.com", "/\\evil.com", "evil", "", `/${"é".repeat(1_024)}`]) assert.equal(navUrl(SIGN_ORIGIN, p), null, p);
+});
+
+test("reload: answered first, then the top window reloads", async () => {
+  const d = fakeDom();
+  mountShell(d.doc, { state: () => signedOutState() });
+  const win = d.frames()[0]!.contentWindow;
+  const m = { v: 1, id: crypto.randomUUID(), type: "reload" };
+  let atReload = -1;
+  const view = d.doc.defaultView as unknown as { location: { reload(): void } };
+  view.location.reload = () => void (atReload = d.posted.length);
+  d.send(m, win);
+  await flush();
+  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: true, result: {} });
+  assert.equal(atReload, d.posted.length, "the answer was posted before the reload");
+  const bad = { v: 1, id: crypto.randomUUID(), type: "reload", x: 1 };
+  d.send(bad, win);
+  await flush();
+  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: bad.id, ok: false, error: { code: "not_allowed" } });
+});
+
+test("a kind the host answers (signin.open): its answer goes to the frame before its then() opens the layer", async () => {
+  const d = fakeDom();
+  let sh: ReturnType<typeof mountShell> | null = null;
+  const order: string[] = [];
+  sh = mountShell(d.doc, {
+    state: () => signedOutState(),
+    kinds: { "signin.open": (p) => (p.way === "wallet" ? null : { result: { pending: true }, then: () => (order.push(`open after ${d.posted.length} posts`), sh!.open()) }) },
+  });
+  const win = d.frames()[0]!.contentWindow;
+  const m = { v: 1, id: crypto.randomUUID(), type: "signin.open", return_key: "deposit", way: "words" };
+  d.send(m, win);
+  await flush();
+  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: true, result: { pending: true } });
+  assert.deepEqual(order, [`open after ${d.posted.length} posts`]);
+  await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
+  assert.equal(d.frames().length, 0);
+  // backup.open has no handler: refused, and so is a signin.open the handler refuses (a new frame first)
+  sh.close();
+  const w2 = d.frames()[0]!.contentWindow;
+  for (const r of [{ type: "backup.open", return_key: "settings" }, { type: "signin.open", return_key: "deposit", way: "wallet" }]) {
+    const q = { v: 1, id: crypto.randomUUID(), ...r };
+    d.send(q, w2);
+    await flush();
+    assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: q.id, ok: false, error: { code: "not_allowed" } }, r.type);
+  }
 });
