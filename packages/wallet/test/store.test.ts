@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
-import { openWalletStore as openStore, WALLET_LANES, WALLET_LOCK, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
+import { backupFirst, openWalletStore as openStore, WALLET_LANES, WALLET_LOCK, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
 
 // every store a test opens is closed at the end, so a failing assertion fails the run instead of leaving it hanging on
 // an open BroadcastChannel
@@ -83,7 +83,7 @@ test("records are wrapped under a non-extractable K_wrap with aad store/key", as
   await assert.rejects(s.get("notes", "n3"));
 
   // the seed record keeps 06b's aad
-  await s.put("meta", "seed", { v: 1, entropy: new Uint8Array(16), source: "random", code_saved: false });
+  await s.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "random", code_saved: false });
   const seedRaw = await rawGet(idb, "ct-wallet", "meta", "seed");
   await rawPut(idb, "ct-wallet", "meta", "settings", seedRaw);
   await assert.rejects(s.get("meta", "settings"));
@@ -295,7 +295,7 @@ test("a closed store's sign out refuses, so it never deletes a newer account's d
     await new Promise((ok) => setTimeout(ok, 20));
     if (closeIt) b.close();
     const c = await openWalletStore({ indexedDB: idb });
-    await c.put("meta", "seed", { v: 1 });
+    await c.insertSeed({ v: 1 });
     await assert.rejects(b.signOut(), /wallet store is closed/);
     await new Promise((ok) => setTimeout(ok, 20));
     assert.deepEqual(await c.get("meta", "seed"), { v: 1 }, `close() called: ${closeIt}`);
@@ -386,4 +386,105 @@ test("insertSeed writes the seed only when none is stored: two tabs that both re
   const again = await a.insertSeed({ entropy: new Uint8Array(16).fill(3), source: "prf", code_saved: false });
   assert.equal(again.inserted, false);
   assert.deepEqual(again.seed, winner);
+});
+
+test("the seed record is never written by put or removed by delete: insertSeed and setCodeSaved only", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  await assert.rejects(s.put("meta", "seed", { entropy: new Uint8Array(16), source: "prf", code_saved: false }), /insertSeed and setCodeSaved only/);
+  await s.insertSeed({ entropy: new Uint8Array(16).fill(7), source: "random", code_saved: false });
+  await assert.rejects(s.put("meta", "seed", { entropy: new Uint8Array(16).fill(8), source: "prf", code_saved: true }), /insertSeed and setCodeSaved only/);
+  await assert.rejects(s.delete("meta", "seed"), /insertSeed and setCodeSaved only/);
+  assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(7), source: "random", code_saved: false });
+  // setCodeSaved changes code_saved only
+  await s.setCodeSaved();
+  assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(7), source: "random", code_saved: true });
+  await s.setCodeSaved();
+  assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(7), source: "random", code_saved: true });
+  await assert.rejects((await openWalletStore({ indexedDB: new IDBFactory() })).setCodeSaved(), /no seed is stored/);
+  // settings stay writable
+  await s.put("meta", "settings", { x: 1 });
+  assert.deepEqual(await s.get("meta", "settings"), { x: 1 });
+});
+
+test("sign out refuses while a no-PRF seed's 12 words are the only copy and not saved (wallet.md:922)", async () => {
+  const idb = new IDBFactory();
+  const s = await openWalletStore({ indexedDB: idb });
+  for (const source of ["random", "code", "wallet"]) assert.equal(backupFirst({ source, code_saved: false }), true, source);
+  assert.equal(backupFirst({ source: "prf", code_saved: false }), false);
+  assert.equal(backupFirst({ source: "random", code_saved: true }), false);
+  assert.equal(backupFirst({ source: "random" }), true, "a missing code_saved is not saved");
+  assert.equal(backupFirst(undefined), false);
+  await s.insertSeed({ entropy: new Uint8Array(16).fill(5), source: "random", code_saved: false });
+  await assert.rejects(s.signOut(), /back up the 12 words/);
+  // nothing was deleted and the store still answers
+  assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(5), source: "random", code_saved: false });
+  assert.deepEqual(await rawKeys(idb), true);
+  await s.setCodeSaved();
+  await s.signOut();
+  assert.deepEqual(await rawKeys(idb), false);
+  // a PRF seed signs out with code_saved false: the passkey gives the words back
+  const p = await openWalletStore({ indexedDB: idb });
+  await p.insertSeed({ entropy: new Uint8Array(16).fill(6), source: "prf", code_saved: false });
+  await p.signOut();
+  assert.deepEqual(await rawKeys(idb), false);
+});
+async function rawKeys(idb: IDBFactory): Promise<boolean> {
+  return (await idb.databases()).some((d) => d.name === "ct-wallet");
+}
+
+// The plaintext buffers (a seed record's hold its entropy as hex) are zeroed once used, also when a step fails
+// (round 4's review, P3): the bytes wrap hands to encrypt, and the bytes decrypt hands back to unwrap.
+test("wrap's encoded plaintext and unwrap's decrypted buffer are zeroed after use, on error paths too", async () => {
+  const subtle = globalThis.crypto.subtle;
+  const realEncrypt = subtle.encrypt;
+  const realDecrypt = subtle.decrypt;
+  const given: Uint8Array[] = [];
+  const got: ArrayBuffer[] = [];
+  let failEncrypt = false;
+  let garble = false;
+  subtle.encrypt = (async (alg: AlgorithmIdentifier, key: CryptoKey, data: BufferSource) => {
+    given.push(data as Uint8Array);
+    if (failEncrypt) throw new Error("planted encrypt failure");
+    return realEncrypt.call(subtle, alg, key, data);
+  }) as SubtleCrypto["encrypt"];
+  subtle.decrypt = (async (alg: AlgorithmIdentifier, key: CryptoKey, data: BufferSource) => {
+    const out = await realDecrypt.call(subtle, alg, key, data);
+    if (garble) new Uint8Array(out).set(new TextEncoder().encode("{not json"));
+    got.push(out);
+    return out;
+  }) as SubtleCrypto["decrypt"];
+  const zero = (b: ArrayBuffer | Uint8Array): boolean => (b instanceof Uint8Array ? b : new Uint8Array(b)).every((x) => x === 0);
+  try {
+    const s = await openWalletStore({ indexedDB: new IDBFactory() });
+    given.length = 0;
+    got.length = 0;
+    const entropy = new Uint8Array(16).fill(0xab);
+    await s.insertSeed({ v: 1, entropy, source: "prf", code_saved: false });
+    assert.ok(given.length >= 1 && got.length >= 1, "insertSeed wrapped and read back");
+    // the seed's plaintext held its entropy as hex until it was wiped
+    for (const b of given) assert.ok(zero(b), "wrap's plaintext not zeroed");
+    for (const b of got) assert.ok(zero(b), "unwrap's plaintext not zeroed");
+    await s.setCodeSaved();
+    await s.get("meta", "seed");
+    await s.put("notes", "n1", { precommitment: new Uint8Array(32).fill(7) });
+    await s.get("notes", "n1");
+    for (const b of given) assert.ok(zero(b), "wrap's plaintext not zeroed");
+    for (const b of got) assert.ok(zero(b), "unwrap's plaintext not zeroed");
+    // error paths: encrypt fails, decode fails
+    given.length = 0;
+    failEncrypt = true;
+    await assert.rejects(s.put("notes", "n2", { secret: new Uint8Array(16).fill(9) }), /planted encrypt failure/);
+    failEncrypt = false;
+    assert.equal(given.length, 1);
+    assert.ok(zero(given[0] as Uint8Array), "wrap's plaintext not zeroed when encrypt failed");
+    got.length = 0;
+    garble = true;
+    await assert.rejects(s.get("meta", "seed"));
+    garble = false;
+    assert.equal(got.length, 1);
+    assert.ok(zero(got[0] as ArrayBuffer), "unwrap's plaintext not zeroed when decode failed");
+  } finally {
+    subtle.encrypt = realEncrypt;
+    subtle.decrypt = realDecrypt;
+  }
 });

@@ -11,9 +11,20 @@ id = "near-ed25519-secret-key"
 description = "NEAR ed25519 secret key"
 regex = '''ed25519:[1-9A-HJ-NP-Za-km-z]{86,88}\b'''
 keywords = ["ed25519:"]
+# A 64-byte ed25519 signature has the same shape. 1Click signs its quotes so; the kit's tests keep real signed quotes
+# as fixtures (card wallet-1click-check). Only a "signature" field in a JSON fixture under packages/kit/test/fixtures/
+# passes, alone on its line as JSON.stringify(_, null, 2) writes it; the same value under any other key, as a bare
+# string, beside another field on one line, or in any other file is still found
+# (scripts/ci/gitleaks-config.test.mjs).
+[[rules.allowlists]]
+description = "a signature field in a test fixture: an ed25519 signature is 64 bytes too, never a key"
+condition = "AND"
+paths = ['''^packages/kit/test/fixtures/[^/]+\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"signature"\s*:\s*"ed25519:[1-9A-HJ-NP-Za-km-z]{86,88}",?\s*$''']
 
 # A machine's name on a tailnet (Tailscale MagicDNS): labels, then the tailnet suffix, in any case. No such name is ever
-# committed here, made-up ones included (card host-name-out in the research repo).
+# committed here, made-up ones included.
 [[rules]]
 id = "tailnet-host"
 description = "Tailscale machine or tailnet name"

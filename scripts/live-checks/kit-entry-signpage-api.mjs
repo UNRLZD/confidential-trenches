@@ -14,6 +14,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --root reads the same paths from a local tree instead of GitHub (a branch before it merges).
 // --record writes every file the run read ({ path: { status, body } }) to <file>, so the check's test can replay it.
+import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

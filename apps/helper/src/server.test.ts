@@ -1,10 +1,11 @@
 // node --test apps/helper/src/server.test.ts: the helper answers /v1/health with the six parts and its commit, and
 // allows cross-origin reads for exactly the two origins (markets paper H7), on a real server on a free port.
 import assert from "node:assert/strict";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { PARTS } from "./health.ts";
+import { createRpc } from "./rpc/rpc.ts";
 import { handler, start } from "./server.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -16,21 +17,21 @@ before(() => new Promise<void>((ok) => server.on("listening", () => ((port = (se
 after(() => new Promise<void>((ok) => (server.closeAllConnections(), server.close(() => ok()))));
 
 // raw http, so the Origin header is sent exactly as written (fetch would add or forbid some headers)
-function call(method: string, path: string, headers: Record<string, string> = {}) {
+function call(method: string, path: string, headers: Record<string, string> = {}, body?: string, to = port) {
   return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
+    const r = request({ host: "127.0.0.1", port: to, method, path, headers }, (res) => {
       let body = "";
       res.setEncoding("utf8").on("data", (d) => (body += d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body }));
     });
-    r.on("error", fail).end();
+    r.on("error", fail).end(body);
   });
 }
 
-test("GET /v1/health: 200, the six parts all down, the commit in the body and in X-Helper-Commit", async () => {
+test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status) and the other four down, the commit in the body and in X-Helper-Commit", async () => {
   const r = await call("GET", "/v1/health");
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
-  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, "down"])) });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" ? "up" : "down"])) });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -109,8 +110,62 @@ test("the server writes no line while it answers (no request log)", async () => 
     await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": "203.0.113.7" });
     await call("GET", "/v1/nothing?x=1", { "x-forwarded-for": "203.0.113.7" });
     await call("OPTIONS", "/v1/health", { origin: "https://example.com", "access-control-request-method": "GET" });
+    await call("POST", "/v1/rpc/base", { "content-type": "application/json", "x-forwarded-for": "203.0.113.7" }, '{"jsonrpc":"2.0","id":1,"method":"admin_peers"}');
   } finally {
     Object.assign(console, orig);
   }
   assert.deepEqual(seen, []);
+});
+
+const JSON_H = { "content-type": "application/json", origin: APP };
+const rpcBody = (method: string) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: [] });
+
+test("POST /v1/rpc/{chain}: an unlisted method is refused 400 method_not_allowed, with the commit and CORS", async () => {
+  const r = await call("POST", "/v1/rpc/base", JSON_H, rpcBody("debug_traceTransaction"));
+  assert.equal(r.status, 400);
+  assert.deepEqual(JSON.parse(r.body), { error: { code: "method_not_allowed" } });
+  assert.equal(r.headers["x-helper-commit"], COMMIT);
+  assert.equal(r.headers["access-control-allow-origin"], APP);
+  assert.equal(r.headers["vary"], "Origin");
+});
+
+test("/v1/rpc: another HTTP method 405, an unknown or nested chain 404, a body over 256 KB 413", async () => {
+  const get = await call("GET", "/v1/rpc/solana", { origin: APP });
+  assert.equal(get.status, 405);
+  assert.equal(get.headers["allow"], "POST, OPTIONS");
+  for (const p of ["/v1/rpc/ethereum", "/v1/rpc/", "/v1/rpc/solana/x", "/v1/rpc/%73olana", "/v1/rpc/../rpc/solana"]) {
+    const r = await call("POST", p, JSON_H, rpcBody("getBalance"));
+    assert.equal(r.status, 404, p);
+    assert.deepEqual(JSON.parse(r.body), { error: { code: "not_found" } }, p);
+  }
+  const big = await call("POST", "/v1/rpc/solana", JSON_H, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: ["x".repeat(262_144)] }));
+  assert.equal(big.status, 413);
+  assert.deepEqual(JSON.parse(big.body), { error: { code: "too_large" } });
+});
+
+test("/v1/rpc forwards an allowlisted call to the configured provider and passes its answer back (local stub)", async () => {
+  const seen: string[] = [];
+  const stub = createServer((req, res) => {
+    let b = "";
+    req.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => {
+      seen.push(b);
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 42 }));
+    });
+  });
+  await new Promise<void>((ok) => stub.listen(0, "127.0.0.1", () => ok()));
+  const up = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
+  const helper = start(COMMIT, 0, undefined, createRpc({ SOLANA_RPC_URL: up }));
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  try {
+    const r = await call("POST", "/v1/rpc/solana", JSON_H, rpcBody("getBalance"), (helper.address() as AddressInfo).port);
+    assert.equal(r.status, 200);
+    assert.deepEqual(JSON.parse(r.body), { jsonrpc: "2.0", id: 1, result: 42 });
+    assert.equal(r.headers["x-helper-commit"], COMMIT);
+    assert.equal(r.headers["access-control-allow-origin"], APP);
+    assert.deepEqual(seen, [rpcBody("getBalance")]);
+  } finally {
+    helper.closeAllConnections();
+    stub.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => stub.close(() => ok())));
+  }
 });

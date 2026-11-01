@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test build/*.test.mjs scripts/check-deploy.test.ts test/harness/*.test.mjs",
+    "test": "node --test build/*.test.mjs scripts/check-deploy.test.ts test/*.test.ts test/harness/*.test.mjs",
     "harness": "vite build && node test/harness/selftest.mjs"
   },
   "dependencies": {

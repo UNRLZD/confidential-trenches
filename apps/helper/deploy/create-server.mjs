@@ -1,23 +1,24 @@
 #!/usr/bin/env node
-// Creates the helper server (card helper-host-health) in the owner's Hetzner project confidential-trenches. The owner
-// runs it: it makes a server that costs money. It never lists or touches another project: the token it reads is the
-// project's own (Keychain ct-hetzner), read inside this process and sent only in the Authorization header.
+// Creates the helper server (card helper-host-health) in the Hetzner project confidential-trenches. A person runs it:
+// it makes a server that costs money. It never lists or touches another project: the token it reads is the project's
+// own, from HCLOUD_TOKEN (the Hetzner CLI's name for it), read inside this process and sent only in the Authorization
+// header. Without HCLOUD_TOKEN the live run refuses before any call to Hetzner.
 //
-//   node apps/helper/deploy/create-server.mjs --commit <40 hex> [--dry-run]
+//   HCLOUD_TOKEN=... node apps/helper/deploy/create-server.mjs --commit <40 hex> [--dry-run]
 //
 // --dry-run prints the whole plan (firewall, server type order, location, image, primary IP, the cloud-init text) and
 // makes no network call and reads no token.
 // The live run, in order, stopping at the first refusal:
-//   1. the commit's apps/helper/Dockerfile answers 200 on raw.githubusercontent.com (the box must fetch that commit);
+//   1. the commit's apps/helper/Dockerfile answers 200 on raw.githubusercontent.com (the server must fetch that commit);
 //   2. the primary IP ct-helper-ipv4 is 91.99.5.177 in fsn1 and assigned to nothing;
 //   3. no server named ct-helper exists in the project;
 //   4. the firewall ct-helper-web (inbound tcp 80, tcp 443 and udp 443 only, so public 22 is closed) is reused when its
 //      rules equal these, else made;
 //   5. the server is made in fsn1 on that primary IP with that firewall and the cloud-init: CX23 first, then the next
-//      type in fsn1 when Hetzner answers that one unavailable. Another location needs a new IP and so an owner DNS
-//      change: the script stops and says so instead.
+//      type in fsn1 when Hetzner answers that one unavailable. Another location needs a new IP and so a DNS change:
+//      the script stops and says so instead.
 // The root password Hetzner returns for a server made without an ssh key is dropped unread: admin is over Tailscale.
-import { execFileSync } from "node:child_process";
+import "../../../scripts/net-window.mjs";
 
 export const API = "https://api.hetzner.cloud/v1";
 export const REPO = "UNRLZD/confidential-trenches";
@@ -25,9 +26,9 @@ export const HOST = "api.confidential.unrealized.trade";
 export const NAME = "ct-helper";
 export const LOCATION = "fsn1";
 export const IMAGE = "ubuntu-24.04";
-// made by the CO on 31 Oct 21:00:59Z (merge note M326 (5)); the A record of HOST points at it
+// made on 31 Oct 21:00:59Z (merge note M326 (5)); the A record of HOST points at it
 export const PRIMARY_IP = { id: 159313479, name: "ct-helper-ipv4", ip: "91.99.5.177" };
-// CX23 (owner pick, owner-decisions.md:344), then the nearest types in fsn1 by price (markets paper V10-V12)
+// CX23 (owner-decisions.md:344), then the nearest types in fsn1 by price (markets paper V10-V12)
 export const TYPES = ["cx23", "cax11", "cx33", "cpx22"];
 // Hetzner's answers that mean "this type cannot be placed now" (hcloud-go hcloud/error.go)
 export const UNAVAILABLE = new Set(["resource_unavailable", "placement_error", "invalid_server_type"]);
@@ -58,7 +59,7 @@ install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
-# Tailscale's apt repository (pkgs.tailscale.com/stable/#ubuntu-noble); installed, not joined: the join is the owner's step
+# Tailscale's apt repository (pkgs.tailscale.com/stable/#ubuntu-noble); installed, not joined: the join is a manual step
 curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg
 curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list
 apt-get update
@@ -113,12 +114,25 @@ const sameRules = (a, b) => {
   return ka.length === kb.length && ka.every((k, i) => k === kb[i]);
 };
 
-export function readToken() {
-  return execFileSync("security", ["find-generic-password", "-s", "ct-hetzner", "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+export function readToken(env = process.env) {
+  return (env.HCLOUD_TOKEN ?? "").trim();
 }
 
-/** argv without node and the script; deps are injected by the test. Returns the exit code. */
+/** The line printed for an error nobody handled: what failed, the step it was on, and the network cause code (e.cause.code). */
+export const errorLine = (e) => `create-server: ERROR: ${e?.message ?? e} (step: ${e?.step ?? "start"}${e?.cause?.code ? `, cause: ${e.cause.code}` : ""})`;
+
+/** argv without node and the script; deps are injected by the test. Returns the exit code. A throw carries the step it was on. */
 export async function main(argv, deps = {}) {
+  const at = { step: "start" };
+  try {
+    return await run(argv, deps, at);
+  } catch (e) {
+    if (e && typeof e === "object") e.step = at.step;
+    throw e;
+  }
+}
+
+async function run(argv, deps, at) {
   const { fetch: f = globalThis.fetch, token: getToken = readToken, log = console.log, err = console.error, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = deps;
   const dry = argv.includes("--dry-run");
   const commit = argv.includes("--commit") ? argv[argv.indexOf("--commit") + 1] : undefined;
@@ -137,14 +151,16 @@ export async function main(argv, deps = {}) {
     return 0;
   }
 
+  at.step = "1 Dockerfile on GitHub";
   const raw = await f(`https://raw.githubusercontent.com/${REPO}/${commit}/apps/helper/Dockerfile`, { method: "HEAD" });
   if (raw.status !== 200) {
     err(`refused: ${REPO} at ${commit} has no apps/helper/Dockerfile on GitHub (HTTP ${raw.status}); push the commit first`);
     return 1;
   }
+  at.step = "token from HCLOUD_TOKEN";
   const token = getToken();
   if (!token) {
-    err("refused: Keychain item ct-hetzner is empty");
+    err("refused: HCLOUD_TOKEN is not set; set it to the Hetzner project's API token");
     return 1;
   }
   const api = async (method, path, body) => {
@@ -158,6 +174,7 @@ export async function main(argv, deps = {}) {
   };
   const why = (r) => `HTTP ${r.status} ${r.j?.error?.code ?? ""} ${r.j?.error?.message ?? ""}`.trim();
 
+  at.step = "2 primary IP";
   const ip = await api("GET", `/primary_ips/${PRIMARY_IP.id}`);
   const pip = ip.j?.primary_ip;
   if (!ip.ok || !pip) {
@@ -170,6 +187,7 @@ export async function main(argv, deps = {}) {
   }
   log(`ok  primary IP ${PRIMARY_IP.name} ${pip.ip} in ${LOCATION}, unassigned`);
 
+  at.step = "3 server name";
   const ex = await api("GET", `/servers?name=${NAME}`);
   if (!ex.ok) {
     err(`refused: cannot list servers named ${NAME}: ${why(ex)}`);
@@ -180,6 +198,7 @@ export async function main(argv, deps = {}) {
     return 1;
   }
 
+  at.step = "4 firewall";
   let fw;
   const fl = await api("GET", `/firewalls?name=${FIREWALL.name}`);
   if (!fl.ok) {
@@ -204,6 +223,7 @@ export async function main(argv, deps = {}) {
   }
 
   for (const body of p.servers) {
+    at.step = `5 server create (${body.server_type})`;
     const r = await api("POST", "/servers", { ...body, firewalls: [{ firewall: fw.id }] });
     if (!r.ok) {
       if (UNAVAILABLE.has(r.j?.error?.code)) {
@@ -218,6 +238,7 @@ export async function main(argv, deps = {}) {
     log(`ok  server ${s.name} made: id ${s.id}, ${body.server_type} in ${LOCATION}, ${s.public_net?.ipv4?.ip ?? PRIMARY_IP.ip}`);
     const action = r.j.action;
     for (let i = 0; action && i < 90; i++) {
+      at.step = "5 server create action";
       const a = await api("GET", `/actions/${action.id}`);
       const st = a.j?.action?.status;
       if (st === "success") break;
@@ -231,7 +252,7 @@ export async function main(argv, deps = {}) {
     log(`then: node scripts/live-checks/helper-host-health.mjs --commit ${commit}`);
     return 0;
   }
-  err(`stopped: no type of ${TYPES.join(", ")} is available in ${LOCATION}. Another location needs a new primary IP there and an owner DNS change of ${HOST}; nothing else was made (firewall ${FIREWALL.name} stays, it costs nothing)`);
+  err(`stopped: no type of ${TYPES.join(", ")} is available in ${LOCATION}. Another location needs a new primary IP there and a DNS change of ${HOST}; nothing else was made (firewall ${FIREWALL.name} stays, it costs nothing)`);
   return 1;
 }
 
@@ -239,7 +260,7 @@ if (import.meta.main) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (e) => {
-      console.error(`create-server: ERROR: ${e.message}`);
+      console.error(errorLine(e));
       process.exit(2);
     },
   );

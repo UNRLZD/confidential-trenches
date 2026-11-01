@@ -15,14 +15,44 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # The testnet build: TOKEN names Circle's testnet USDC. Every other byte of behaviour is the mainnet build's.
 testnet = []
+# The near-sandbox suite (tests/harness, VT-S*): its tests are `[[test]]` targets that need this feature, so a plain
+# `cargo test` (CI) neither builds nor runs them, and nothing here reaches the wasm build. Run through
+# tests/harness/run.sh.
+sandbox = ["dep:near-workspaces", "dep:tokio", "dep:reqwest", "dep:openssl"]
 
 [dependencies]
 # near-sdk 5.29.1 without default features (no wee_alloc), as the vault's gas proof built it. `legacy` gives the plain
 # `collections`, which write at once, so env::storage_usage() sees every byte a call writes (vault.md 2.3).
 near-sdk = { version = "=5.29.1", default-features = false, features = ["legacy"] }
+# The trim build of light-poseidon (src/poseidon.rs; vault.md 2.6): its `Poseidon` with circomlib's t = 3 and t = 4 constants
+# as data, never `new_circom`. ark-bn254 and ark-ff are the versions light-poseidon 0.4.1 itself requires.
+light-poseidon = "=0.4.1"
+ark-bn254 = "=0.5.0"
+ark-ff = "=0.5.0"
+# The sandbox suite only (feature `sandbox`; optional, so the vault's own build never links them):
+# near-workspaces 0.23.0 starts near-sandbox (its near-sandbox 0.3.16 defaults to 2.13.4; the harness also names it),
+# deploys, sends batches and patches the token's code in; the versions the research gas proof ran
+# (proofs/g1-vault-gas/sandbox/Cargo.lock at research main ffcba5e).
+near-workspaces = { version = "=0.23.0", optional = true }
+# near-workspaces' async runtime, for #[tokio::test].
+tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "time"], optional = true }
+# the HTTP client near-workspaces already uses (via near-jsonrpc-client 0.22.0): the harness reads
+# EXPERIMENTAL_tx_status, which near-workspaces does not expose, to name each receipt's method for the gas table.
+reqwest = { version = "=0.12.28", optional = true }
+
+# near-jsonrpc-client takes native-tls, which on Linux links OpenSSL; a Linux host may have no OpenSSL headers, so
+# OpenSSL is built from source there (needs perl and make), as in the research gas proof.
+[target.'cfg(target_os = "linux")'.dependencies]
+openssl = { version = "=0.10.81", features = ["vendored"], optional = true }
 
 [dev-dependencies]
 near-sdk = { version = "=5.29.1", default-features = false, features = ["legacy", "unit-testing"] }
+
+# the near-sandbox tests: skipped unless `--features sandbox`
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
+required-features = ["sandbox"]
 
 [profile.release]
 codegen-units = 1

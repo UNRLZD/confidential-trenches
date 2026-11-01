@@ -2,7 +2,7 @@
 // (scripts/live-checks/signpage-skeleton.answers.json, good) loads in a frame on APP_HOST and is blocked in a frame on
 // https://example.com; under the same headers with frame-ancestors taken out it loads on example.com too, so the
 // probe can fail. No network: Playwright answers every request from the recorded headers and packages/signpage.
-// Run it through scripts/heavy.sh (Playwright is a heavy job). exit 0 all as expected, 1 otherwise.
+// A Playwright run in headless Chromium. exit 0 all as expected, 1 otherwise.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

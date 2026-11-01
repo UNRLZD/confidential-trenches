@@ -2,13 +2,33 @@
  * The helper server (HELPER_HOST, markets paper H7). It holds API keys, never a money key, and logs no request: no
  * line it writes holds a client IP, a path or a header.
  *
- *   HELPER_COMMIT=<40 hex> [PORT=8080] node src/server.ts
+ *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
+ *     [SOLANA_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..] node src/server.ts
+ *
+ * The vendor keys come from the host's environment only (src/proxy/vendors.ts); a vendor with no key is called
+ * without one. So do the RPC providers' URLs (src/rpc/rpc.ts), where a keyed provider holds its key; a chain with none
+ * set uses its public endpoint, and the second NEAR provider USDC's watch reads (NEAR_RPC_URL_B; src/token-status/).
  *
  * Every answer carries X-Helper-Commit and Vary: Origin. Cross-origin reads are allowed for exactly APP_HOST and
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { health } from "./health.ts";
+import { health, type Part } from "./health.ts";
+import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
+import { RPC_BODY_MAX } from "./rpc/methods.ts";
+import { createRpc } from "./rpc/rpc.ts";
+import { createTokenWatch, USDC } from "./token-status/status.ts";
+
+type Proxy = ReturnType<typeof createProxy>;
+type Rpc = ReturnType<typeof createRpc>;
+type Watch = ReturnType<typeof createTokenWatch>;
+// The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
+// "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
+// routes are mounted.
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/"], relay: ["/v1/token-status"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const [PROXY_PREFIX, RPC_PREFIX] = MOUNTED.proxy;
+const [TOKEN_STATUS] = MOUNTED.relay;
+const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 export const ORIGINS: ReadonlySet<string> = new Set([
   "https://confidential.unrealized.trade",
@@ -55,7 +75,32 @@ function preflight(req: IncomingMessage): Headers {
   return h;
 }
 
-export function handler(commit: string) {
+/** The request body, or undefined once it passes `max` bytes (by its Content-Length or as it arrives). */
+function readBody(req: IncomingMessage, max: number): Promise<string | undefined> {
+  return new Promise((ok, fail) => {
+    if (Number(req.headers["content-length"] ?? "0") > max) return ok(undefined);
+    const chunks: Buffer[] = [];
+    let n = 0;
+    req.on("data", (c: Buffer) => {
+      n += c.length;
+      if (n > max) {
+        req.removeAllListeners("data");
+        req.resume();
+        return ok(undefined);
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => ok(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", fail);
+  });
+}
+
+export function handler(
+  commit: string,
+  proxy: Proxy = createProxy(process.env),
+  rpc: Rpc = createRpc(process.env),
+  watch: Watch = createTokenWatch(process.env),
+) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
@@ -73,6 +118,12 @@ export function handler(commit: string) {
       res.writeHead(status, h);
       res.end(req.method === "HEAD" ? undefined : text);
     };
+    const reply = (a: { status: number; headers?: Headers; body: string }) => {
+      const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
+      if (a.status === 413) h.Connection = "close";
+      res.writeHead(a.status, h);
+      res.end(a.body);
+    };
     try {
       if (req.method === "OPTIONS") return send(204, undefined, preflight(req));
       let path: string;
@@ -83,7 +134,53 @@ export function handler(commit: string) {
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit), cors(req));
+        return send(200, health(commit, SERVED), cors(req));
+      }
+      if (path === TOKEN_STATUS) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // exactly one token, the release's USDC (H7: any other answers 404 token_not_watched)
+        const tokens = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("token");
+        if (tokens.length !== 1 || tokens[0] !== USDC) return send(404, { error: { code: "token_not_watched" } }, cors(req));
+        void watch
+          .status()
+          .then((s) => send(200, s, cors(req)))
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path.startsWith(PROXY_PREFIX)) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // the raw path, never URL's normalised one: only a path written exactly as on the allowlist is served
+        const raw = req.url ?? "";
+        const q = raw.indexOf("?");
+        const rest = (q === -1 ? raw : raw.slice(0, q)).slice(PROXY_PREFIX.length);
+        const slash = rest.indexOf("/");
+        if (!raw.startsWith(PROXY_PREFIX) || slash <= 0) return send(404, { error: { code: "not_found" } }, cors(req));
+        void readBody(req, PROXY_BODY_MAX)
+          .then((body) =>
+            body === undefined
+              ? { status: 413, headers: {}, body: JSON.stringify({ error: { code: "too_large" } }) }
+              : proxy.handle(rest.slice(0, slash), rest.slice(slash), q === -1 ? "" : raw.slice(q + 1), body),
+          )
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path.startsWith(RPC_PREFIX)) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // the raw path, as for the proxy: the chain is the one segment after the prefix, written exactly
+        const raw = req.url ?? "";
+        const q = raw.indexOf("?");
+        const chain = (q === -1 ? raw : raw.slice(0, q)).slice(RPC_PREFIX.length);
+        if (!raw.startsWith(RPC_PREFIX) || chain === "" || chain.includes("/")) return send(404, { error: { code: "not_found" } }, cors(req));
+        void readBody(req, RPC_BODY_MAX)
+          .then((body) =>
+            body === undefined
+              ? { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) }
+              : rpc.handle(chain, req.headers["content-type"], body),
+          )
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
       }
       return send(404, { error: "not_found" }, cors(req));
     } catch {
@@ -93,12 +190,12 @@ export function handler(commit: string) {
   };
 }
 
-export function start(commit: string, port: number): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit),
+    handler(commit, proxy, rpc, watch),
   );
   server.listen(port);
   return server;
@@ -111,7 +208,13 @@ if (import.meta.main) {
     console.error("helper: HELPER_COMMIT must be a full 40-hex commit");
     process.exit(2);
   }
-  const server = start(commit, port);
+  let server: Server;
+  try {
+    server = start(commit, port);
+  } catch (e) {
+    console.error(`helper: ${(e as Error).message}`);
+    process.exit(2);
+  }
   server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}`));
   const stop = () => {
     server.close(() => process.exit(0));

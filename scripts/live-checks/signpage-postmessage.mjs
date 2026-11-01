@@ -20,6 +20,7 @@
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers
 //     (default: packages/signpage built as packages/signpage/scripts/deploy.mjs builds it), as frame.e2e.mjs does
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
+import "../net-window.mjs";
 import { copyFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";

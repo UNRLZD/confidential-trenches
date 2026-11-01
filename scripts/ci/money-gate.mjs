@@ -34,6 +34,7 @@
 // No token and no secret.
 //   node scripts/ci/money-gate.mjs <base sha> <head sha>   the records changed between the two commits
 //   node scripts/ci/money-gate.mjs --all                   every record in scripts/live-checks/
+import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync, realpathSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -183,8 +184,11 @@ export function parseLive(text, key) {
 // RATE_TRIES waits in a row; a Retry-After past RATE_CAP seconds is no answer at once. Other trouble (no reply, a
 // reply that is not JSON, an HTTP error with no RPC error) is asked 3 times, 2 s and 4 s apart. Each host is asked
 // at most once a second.
+// Once two hosts have read a tx ok, a remaining host is still asked once, but with rateWait off: its 429 is no answer at
+// once (NOT_WAITED), never waited and never decisive. A failed or old answer from it still refuses.
 const RATE_TRIES = 5;
 const RATE_CAP = 600;
+const NOT_WAITED = "rate limited, not waited: two hosts read it ok";
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const lastAsked = new Map();
 const hostOf = (url) => {
@@ -195,7 +199,7 @@ const hostOf = (url) => {
   }
 };
 
-async function rpc(fetchFn, url, method, params, sleep = wait) {
+async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) {
   let last;
   let rate = 0;
   for (let attempt = 0; attempt < 3; ) {
@@ -214,6 +218,7 @@ async function rpc(fetchFn, url, method, params, sleep = wait) {
       });
       const j = r.status === 429 ? null : await r.json();
       if (r.status === 429 || j.error?.code === -429 || j.error?.code === 429) {
+        if (!rateWait) throw Object.assign(new Error(NOT_WAITED), { rate: true, notWaited: true });
         const after = Number(r.headers?.get?.("retry-after") ?? NaN);
         if (Number.isFinite(after) && after > RATE_CAP) throw Object.assign(new Error(`rate limited, Retry-After ${after} s is past the ${RATE_CAP} s cap`), { rate: true });
         if (++rate > RATE_TRIES) throw Object.assign(new Error(`rate limited ${rate} times in a row`), { rate: true });
@@ -231,29 +236,69 @@ async function rpc(fetchFn, url, method, params, sleep = wait) {
   throw last;
 }
 
+// The one failed receipt a read passes: NEAR's gas refund to an account its own tx deleted. A tx that holds
+// DeleteAccount (signer = receiver: a one-use account closing itself into its beneficiary) succeeds, then NEAR sends
+// the unused gas back from "system" to the signer, which no longer exists, so that refund fails AccountDoesNotExist
+// (mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM, read 2026-11-01: receipt GBkJTsykxG, system to the signer, one
+// Transfer of 229993650000000000000 yocto, receipt signer_id the account, failed; the beneficiary's Transfer 9wEBNxb1a7,
+// receipt signer_id system, succeeded). It needs EXPERIMENTAL_tx_status: only its `receipts` list names each receipt's
+// predecessor_id, signer_id and actions. `r` is that answer, `o` one failed entry of its receipts_outcome; anything
+// missing is not that refund.
+export function isDeleteRefund(r, o) {
+  const tx = r?.transaction;
+  const a = tx?.signer_id;
+  if (typeof a !== "string" || tx.receiver_id !== a || !Array.isArray(tx.actions)) return false;
+  if (!tx.actions.some((x) => x !== null && typeof x === "object" && "DeleteAccount" in x)) return false;
+  const same = Array.isArray(r.receipts) ? r.receipts.filter((x) => x?.receipt_id === o?.id) : [];
+  if (typeof o?.id !== "string" || same.length !== 1) return false;
+  const [rc] = same;
+  if (rc.predecessor_id !== "system" || rc.receiver_id !== a) return false;
+  // A gas refund carries the tx's signer; DeleteAccount's balance payout has the same shape but carries system, and
+  // with beneficiary = the account itself it fails the same way while the balance burns (P10b).
+  if (rc.receipt?.Action?.signer_id !== a) return false;
+  const acts = rc.receipt?.Action?.actions;
+  if (!Array.isArray(acts) || acts.length !== 1 || acts[0] === null || typeof acts[0] !== "object") return false;
+  if (Object.keys(acts[0]).length !== 1 || !("Transfer" in acts[0])) return false;
+  const kind = o.outcome?.status?.Failure?.ActionError?.kind;
+  return kind !== null && typeof kind === "object" && kind.AccountDoesNotExist?.account_id === a;
+}
+
+// How many receipts of an EXPERIMENTAL_tx_status answer failed, the one delete refund above not counted (at most one
+// is passed: a second counts as failed). A receipt whose status is not an object counts as failed. null: the answer
+// has no receipts_outcome or no receipts list, so it cannot be read.
+export function failedReceipts(r) {
+  if (!Array.isArray(r?.receipts_outcome) || !Array.isArray(r.receipts)) return null;
+  const failed = r.receipts_outcome.filter((o) => typeof o?.outcome?.status !== "object" || o.outcome.status === null || "Failure" in o.outcome.status);
+  return failed.length - Math.min(1, failed.filter((o) => isDeleteRefund(r, o)).length);
+}
+
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
 
-// One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read.
-export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait) {
+// One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read. rateWait off: a 429 is
+// NOT_WAITED at once.
+export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait, rateWait = true) {
   let j;
   try {
     if (NEAR.has(chain)) {
-      // NONE answers at once: the outcome when the tx is known, UNKNOWN_TRANSACTION when it is not
-      j = await rpc(fetchFn, url, "tx", { tx_hash: hash, sender_account_id: signer, wait_until: "NONE" }, sleep);
+      // NONE answers at once: the outcome when the tx is known, UNKNOWN_TRANSACTION when it is not. EXPERIMENTAL_tx_status,
+      // not tx: its receipts list is what failedReceipts reads.
+      j = await rpc(fetchFn, url, "EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: signer, wait_until: "NONE" }, sleep, rateWait);
       if (j.error) return j.error.cause?.name === "UNKNOWN_TRANSACTION" ? "missing" : `error ${JSON.stringify(j.error).slice(0, 120)}`;
       const r = j.result;
       if (!r?.status) return "missing";
       if (r.status.Failure) return "failed";
       if (r.final_execution_status !== "FINAL") return `not final (${r.final_execution_status})`;
       if (!("SuccessValue" in r.status || "SuccessReceiptId" in r.status)) return `not final (${Object.keys(r.status)[0]})`;
-      if ((r.receipts_outcome ?? []).some((o) => o.outcome?.status?.Failure)) return "failed (a receipt failed)";
-      const b = await rpc(fetchFn, url, "block", { block_id: r.transaction_outcome?.block_hash }, sleep);
+      const failed = failedReceipts(r);
+      if (failed === null) return "incomplete (no receipts or receipts_outcome list)";
+      if (failed > 0) return "failed (a receipt failed)";
+      const b = await rpc(fetchFn, url, "block", { block_id: r.transaction_outcome?.block_hash }, sleep, rateWait);
       const ns = b.result?.header?.timestamp_nanosec;
       if (!ns) return "no block time";
       return when(Number(BigInt(ns) / 1000000n), floor);
     }
     if (chain === "solana") {
-      j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep);
+      j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep, rateWait);
       if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
       if (!j.result) return "missing";
       if (!j.result.meta) return "no meta";
@@ -261,16 +306,17 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       if (typeof j.result.blockTime !== "number") return "no block time";
       return when(j.result.blockTime * 1000, floor);
     }
-    const id = await rpc(fetchFn, url, "eth_chainId", [], sleep);
+    const id = await rpc(fetchFn, url, "eth_chainId", [], sleep, rateWait);
     if (id.result !== CHAIN_ID[chain]) return `wrong chain (${id.result ?? JSON.stringify(id.error)})`;
-    j = await rpc(fetchFn, url, "eth_getTransactionReceipt", [hash], sleep);
+    j = await rpc(fetchFn, url, "eth_getTransactionReceipt", [hash], sleep, rateWait);
     if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
     if (!j.result) return "missing";
     if (j.result.status !== "0x1") return "failed";
-    const b = await rpc(fetchFn, url, "eth_getBlockByNumber", [j.result.blockNumber, false], sleep);
+    const b = await rpc(fetchFn, url, "eth_getBlockByNumber", [j.result.blockNumber, false], sleep, rateWait);
     if (!b.result?.timestamp) return "no block time";
     return when(Number(b.result.timestamp) * 1000, floor);
   } catch (e) {
+    if (e?.notWaited) return NOT_WAITED;
     return `no answer (${String(e?.message ?? e).slice(0, 80)})`;
   }
 }
@@ -280,6 +326,7 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
 export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
   const refusals = [];
   const read = [];
+  const notes = []; // a host's 429 not waited because two hosts had read the tx ok
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
   const byCard = new Map();
   for (const c of money?.commits ?? []) {
@@ -317,16 +364,21 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
       const answers = [];
-      for (const url of rpcs[tx.chain]) answers.push({ url, r: await readTx(fetchFn, url, tx, floor, sleep) });
+      // in the listed order; a 429 is waited out only while fewer than two hosts have read the tx ok
+      for (const url of rpcs[tx.chain]) {
+        const rateWait = answers.filter((a) => a.r === "ok").length < 2;
+        answers.push({ url, r: await readTx(fetchFn, url, tx, floor, sleep, rateWait) });
+      }
       const ok = answers.filter((a) => a.r === "ok");
       const decisive = answers.filter((a) => /^(failed|old)/.test(a.r));
       const note = TESTNET.has(tx.chain) ? " (testnet, not real-money proof)" : "";
       for (const a of ok) read.push(`${tx.chain} ${tx.hash} ok on ${a.url}${note}`);
+      for (const a of answers) if (a.r === NOT_WAITED) notes.push(`${tx.chain} ${tx.hash} on ${a.url}: ${NOT_WAITED}`);
       if (decisive.length || ok.length < 2)
         refusals.push(`${path}: ${tx.chain} ${tx.hash}: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}`);
     }
   }
-  return { refusals, read };
+  return { refusals, read, notes };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
@@ -388,8 +440,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
-  const { refusals, read } = await moneyGate(records, fetch, RPCS, { every, money });
+  const { refusals, read, notes } = await moneyGate(records, fetch, RPCS, { every, money });
   for (const r of read) console.log(`money-gate: ${r}`);
+  for (const n of notes) console.log(`money-gate: ${n}`);
   if (refusals.length) {
     for (const r of refusals) console.error(`money-gate: REFUSED: ${r}`);
     process.exit(1);

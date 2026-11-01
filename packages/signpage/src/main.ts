@@ -13,20 +13,29 @@
 // - A seed already stored is never replaced and no ceremony runs (wallet.md:919: sign out first).
 // - A passkey without PRF makes nothing here and shows its own state, "no-prf", which the no-PRF path takes over
 //   (card wallet-typed-words); never a silent fallback to another seed.
-// - Sign out deletes the store (wallet.md:156); another tab's sign out shows signed-out here too.
+// - Sign out deletes the store (wallet.md:156); another tab's sign out shows signed-out here too. It is not drawn, and the
+//   store refuses it, while the 12 words are the only copy and not saved (backupFirst: source not "prf" and code_saved
+//   false; wallet.md:922). Its activation guard is Chromium's own rule for its permission and payment sheets (./guard.ts):
+//   a press is ignored when it is a repeated key, when it comes within 500 ms of the window's previous pointerdown or
+//   keydown, or within 500 ms of Sign out being drawn, the page becoming visible (visibilitychange, pageshow) or the
+//   window gaining focus; the same for mouse, touch, pen and keyboard. A click that a cross-site page lined up before
+//   sending this window here (a double-click trick, a burst of clicks, a held Enter) does nothing; a press after a
+//   500 ms pause works on every input. Sign out is the one control it guards: Create passkey and Use passkey open the
+//   browser's own passkey sheet, which carries the browser's protection.
 // - The page shows public values only: the account's profile key T_0 (wallet.md:68, a public key, never a NEAR account
 //   or money), in data-account, so a check can compare it. The entropy and seed64 are zeroed once used; the 12 words
 //   are a JS string, which cannot be zeroed, and never reach the DOM.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { activationGuard, type Press } from "./guard.ts";
 import { signedOutState, startApi } from "./api.ts";
 
 type Seed = { v: 1; entropy: Uint8Array; source: "prf" | "random" | "code" | "wallet"; code_saved: boolean; created_ms: number };
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error";
 
-// DRAFT COPY: every visible word below waits for the owner's words pass.
+// DRAFT COPY: the final words are not set yet.
 const WORDS = {
   create: "Create passkey",
   use: "Use passkey",
@@ -44,16 +53,50 @@ root.id = "signin";
 if (framed) root.dataset.framed = "true";
 document.body.append(root);
 
+// Sign out's activation guard (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
+// (capture phase), so the gap to the previous input is known when Sign out sees its press.
+const guard = activationGuard(performance.now());
+const reshown = (): void => guard.shown(performance.now());
+addEventListener("pageshow", reshown);
+addEventListener("focus", (e) => e.target === window && reshown());
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && reshown());
+let last: { e: Event; press: Press } | null = null;
+const input = (e: Event): void => {
+  if (e.isTrusted) last = { e, press: guard.input(e.timeStamp, e instanceof KeyboardEvent && e.repeat) };
+};
+addEventListener("pointerdown", input, true);
+addEventListener("keydown", input, true);
+
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
   b.dataset.action = action;
   b.textContent = label;
-  b.addEventListener("click", onClick);
+  if (action !== "signout") {
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  // drawn now, and on screen by the next frame
+  reshown();
+  requestAnimationFrame(reshown);
+  // the press is the pointerdown or Enter or Space keydown that starts the click, with the verdict the window's capture
+  // listener just gave it; a click with none seen (an assistive tool's click) is its own press
+  let press: Press | null = null;
+  const pressed = (e: Event): void => {
+    if (e.isTrusted && last?.e === e) press = last.press;
+  };
+  b.addEventListener("pointerdown", pressed);
+  b.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && pressed(e));
+  b.addEventListener("click", (e) => {
+    const p = press;
+    press = null;
+    if (!e.isTrusted || !guard.allows(p, e.timeStamp)) return;
+    onClick();
+  });
   return b;
 }
 
-function show(state: State, seed?: { account: string; code_saved: boolean }): void {
+function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }): void {
   root.dataset.signin = state;
   if (seed) {
     root.dataset.account = seed.account;
@@ -72,7 +115,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean }): vo
     const p = document.createElement("p");
     p.textContent = WORDS["signed-in"];
     parts.push(p);
-    if (!framed) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
+    if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
   } else if (!framed && state !== "loading" && state !== "unsupported") {
     parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey))));
     parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey))));
@@ -91,9 +134,9 @@ function accountOf(entropy: Uint8Array): string {
   }
 }
 // What the screen shows of a seed, the seed's entropy zeroed after.
-function shown(s: Seed): { account: string; code_saved: boolean } {
+function shown(s: Seed): { account: string; code_saved: boolean; signout: boolean } {
   try {
-    return { account: accountOf(s.entropy), code_saved: s.code_saved };
+    return { account: accountOf(s.entropy), code_saved: s.code_saved, signout: !backupFirst(s) };
   } finally {
     s.entropy.fill(0);
   }
@@ -144,8 +187,9 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>): Promise<void> {
 async function signOut(): Promise<void> {
   topLevelOnly();
   const s = await open();
-  store = null;
+  // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
+  store = null;
   show("signed-out");
 }
 

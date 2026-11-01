@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { FIREWALL, PRIMARY_IP, TYPES, cloudInit, main, plan } from "./create-server.mjs";
+import { FIREWALL, PRIMARY_IP, TYPES, cloudInit, errorLine, main, plan, readToken } from "./create-server.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const TOKEN = "planted-token-0f9e8d7c6b5a";
@@ -27,7 +27,7 @@ test("--dry-run makes no network call and reads no token, and prints the whole p
   for (const want of ['"location": "fsn1"', '"image": "ubuntu-24.04"', '"server_type": "cx23"', `"ipv4": ${PRIMARY_IP.id}`, '"enable_ipv6": false',
     '"port": "80"', '"port": "443"', "#cloud-config", `COMMIT=${COMMIT}`, "docker compose up -d --build", "apt-get install -y docker-ce", "tailscale",
     "dry run: no network call made, no token read"]) assert.ok(text.includes(want), want);
-  assert.ok(!text.includes("tailscale up"), "the tailnet join is the owner's step");
+  assert.ok(!text.includes("tailscale up"), "the tailnet join is a manual step");
 });
 
 test("the plan: inbound 80 and 443 only (public 22 closed), fsn1 on the primary IP, CX23 first", () => {
@@ -49,6 +49,26 @@ test("a bad or missing commit is a usage error and sends nothing", async () => {
     assert.equal(await main(argv, { fetch: async () => (calls++, new Response("{}")), token: () => TOKEN, ...c }), 2);
     assert.equal(calls, 0);
   }
+});
+
+test("the token comes from HCLOUD_TOKEN only; without it the live run refuses before any call to Hetzner", async () => {
+  assert.equal(readToken({ HCLOUD_TOKEN: ` ${TOKEN}\n` }), TOKEN);
+  assert.equal(readToken({}), "");
+  assert.equal(readToken({ HCLOUD_TOKEN: "  " }), "");
+  const { fetch, sent } = fakeApi();
+  const c = capture();
+  const code = await main(["--commit", COMMIT], { fetch, token: () => readToken({}), sleep: async () => {}, ...c });
+  assert.equal(code, 1);
+  assert.deepEqual(sent.map((s) => s.url), [`https://raw.githubusercontent.com/UNRLZD/confidential-trenches/${COMMIT}/apps/helper/Dockerfile`]);
+  assert.equal(c.out.join("\n"), "refused: HCLOUD_TOKEN is not set; set it to the Hetzner project's API token");
+});
+
+test("run as a script without HCLOUD_TOKEN, it refuses after the GitHub check and calls Hetzner never", () => {
+  const stub = "globalThis.fetch=async(u)=>{if(String(u).startsWith('https://raw.githubusercontent.com/'))return new Response(null,{status:200});throw new Error('called '+u)}";
+  const { HCLOUD_TOKEN: _, ...env } = process.env;
+  const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, new URL("./create-server.mjs", import.meta.url).pathname, "--commit", COMMIT], { encoding: "utf8", env, timeout: 30_000 });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.stderr.trim(), "refused: HCLOUD_TOKEN is not set; set it to the Hetzner project's API token");
 });
 
 // a fake Hetzner API: the primary IP free, no server, no firewall; cx23 unavailable, cax11 made
@@ -111,7 +131,7 @@ test("live path stops when every type in fsn1 is unavailable, naming the DNS cha
   };
   const c = capture();
   assert.equal(await main(["--commit", COMMIT], { fetch: all, token: () => TOKEN, sleep: async () => {}, ...c }), 1);
-  assert.match(c.out.join("\n"), /owner DNS change/);
+  assert.match(c.out.join("\n"), /a DNS change of api\.confidential\.unrealized\.trade/);
 });
 
 test("importing the script from a process whose argv[1] is not a file runs nothing and does not throw", () => {
@@ -119,4 +139,29 @@ test("importing the script from a process whose argv[1] is not a file runs nothi
   const r = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(url)}).then((m) => process.stdout.write(m.cloudInit(process.argv[1]).split("\\n")[0]))`, COMMIT], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "#cloud-config");
+});
+
+// the 1 Nov 04:36Z failure: "create-server: ERROR: fetch failed", with nothing to say where or why
+const timedOut = () => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }) });
+
+test("a connection that fails names the step it was on and the cause code", async () => {
+  const { fetch } = fakeApi();
+  const failAt = (needle) => async (url, init) => {
+    if (url.includes(needle)) throw timedOut();
+    return fetch(url, init);
+  };
+  for (const [needle, step] of [["raw.githubusercontent.com", "1 Dockerfile on GitHub"], ["/primary_ips/", "2 primary IP"], ["/servers?name", "3 server name"], ["/firewalls?name", "4 firewall"]]) {
+    const e = await main(["--commit", COMMIT], { fetch: failAt(needle), token: () => TOKEN, sleep: async () => {}, ...capture() }).then(() => null, (x) => x);
+    assert.equal(e?.step, step, needle);
+    assert.equal(errorLine(e), `create-server: ERROR: fetch failed (step: ${step}, cause: ETIMEDOUT)`);
+  }
+  assert.equal(errorLine(new Error("boom")), "create-server: ERROR: boom (step: start)");
+  assert.ok(!errorLine(timedOut()).includes(TOKEN));
+});
+
+test("run as a script, a failed connection prints that line and exits 2", () => {
+  const stub = "globalThis.fetch=async()=>{throw Object.assign(new TypeError('fetch failed'),{cause:Object.assign(new Error('x'),{code:'ETIMEDOUT'})})}";
+  const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, new URL("./create-server.mjs", import.meta.url).pathname, "--commit", COMMIT], { encoding: "utf8", timeout: 30_000 });
+  assert.equal(r.status, 2);
+  assert.equal(r.stderr.trim(), "create-server: ERROR: fetch failed (step: 1 Dockerfile on GitHub, cause: ETIMEDOUT)");
 });

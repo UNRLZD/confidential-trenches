@@ -9,6 +9,7 @@
 // kit's own test WU-03 derives them.
 //   node scripts/live-checks/kit-freeze-keys.mjs [--tag <freeze tag>] [--record <file>]   PASS 0, FAIL 1, error 2
 // No key, secret or mnemonic is printed: a line names an entry and says ok or BAD.
+import "../net-window.mjs";
 import { createECDH, createHash, createHmac, createPrivateKey, createPublicKey, hkdfSync, pbkdf2Sync } from "node:crypto";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -35,7 +36,7 @@ const hex = (b) => Buffer.from(b).toString("hex");
 const big = (h) => BigInt(`0x${h}`);
 const be = (x, n) => Buffer.from(x.toString(16).padStart(n * 2, "0"), "hex");
 const u32 = (x) => { const b = Buffer.alloc(4); b.writeUInt32BE(x); return b; };
-// Keccak-256 (the Ethereum one, pad 0x01), written out: not every Node build's OpenSSL has it (Node 24 on the PC box
+// Keccak-256 (the Ethereum one, pad 0x01), written out: not every Node build's OpenSSL has it (one Node 24 build
 // answers "Digest method not supported"). The round constants and rotations come from the Keccak reference's LFSR and
 // (x, y) walk, not from a table; the check tests it on keccak-256("") before anything else.
 const M64 = (1n << 64n) - 1n;

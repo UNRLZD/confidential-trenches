@@ -1,7 +1,7 @@
 [
  {
   "url": "https://archival-rpc.testnet.fastnear.com",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML",
    "sender_account_id": "bf-vs-20261101t012200.testnet",
@@ -12,6 +12,68 @@
    "jsonrpc": "2.0",
    "result": {
     "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "bf-vs-20261101t012200.testnet",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         "CreateAccount",
+         {
+          "Transfer": {
+           "deposit": "1302720000000000000000000"
+          }
+         },
+         {
+          "DeployContract": {
+           "code": "4uKAhpvf+QrVT3vivBGB3O9uIp6qjxe5ny6LwzpCIDc="
+          }
+         },
+         {
+          "FunctionCall": {
+           "args": "e30=",
+           "deposit": "0",
+           "gas": 100000000000000,
+           "method_name": "config"
+          }
+         }
+        ],
+        "gas_price": "1000000000",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "bf-vs-20261101t012200.testnet",
+        "signer_public_key": "ed25519:2e9cqpiQ6r3sz1XnanrGLKkeTKbEbdWz7e3xbf4P27a5"
+       }
+      },
+      "receipt_id": "66T6j27ZgRC3hBpBzZ7UZD4JW9NFeRGFSCi6o5Jd5dHr",
+      "receiver_id": "vault.bf-vs-20261101t012200.testnet"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "108739801692573600000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "bf-vs-20261101t012200.testnet",
+        "signer_public_key": "ed25519:2e9cqpiQ6r3sz1XnanrGLKkeTKbEbdWz7e3xbf4P27a5"
+       }
+      },
+      "receipt_id": "6VXhZAAna4bBzjavd3ytc44ySnHwnrbAGxt93f2H1Gdv",
+      "receiver_id": "bf-vs-20261101t012200.testnet"
+     }
+    ],
     "receipts_outcome": [
      {
       "block_hash": "D1PtVDSqJFxVqEUSsGheaaJht4A6FXaaQmGJNHGUXvj5",
@@ -668,7 +730,7 @@
  },
  {
   "url": "https://near-testnet.drpc.org",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML",
    "sender_account_id": "bf-vs-20261101t012200.testnet",
@@ -680,6 +742,68 @@
    "jsonrpc": "2.0",
    "result": {
     "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "bf-vs-20261101t012200.testnet",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         "CreateAccount",
+         {
+          "Transfer": {
+           "deposit": "1302720000000000000000000"
+          }
+         },
+         {
+          "DeployContract": {
+           "code": "4uKAhpvf+QrVT3vivBGB3O9uIp6qjxe5ny6LwzpCIDc="
+          }
+         },
+         {
+          "FunctionCall": {
+           "args": "e30=",
+           "deposit": "0",
+           "gas": 100000000000000,
+           "method_name": "config"
+          }
+         }
+        ],
+        "gas_price": "1000000000",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "bf-vs-20261101t012200.testnet",
+        "signer_public_key": "ed25519:2e9cqpiQ6r3sz1XnanrGLKkeTKbEbdWz7e3xbf4P27a5"
+       }
+      },
+      "receipt_id": "66T6j27ZgRC3hBpBzZ7UZD4JW9NFeRGFSCi6o5Jd5dHr",
+      "receiver_id": "vault.bf-vs-20261101t012200.testnet"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "108739801692573600000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "bf-vs-20261101t012200.testnet",
+        "signer_public_key": "ed25519:2e9cqpiQ6r3sz1XnanrGLKkeTKbEbdWz7e3xbf4P27a5"
+       }
+      },
+      "receipt_id": "6VXhZAAna4bBzjavd3ytc44ySnHwnrbAGxt93f2H1Gdv",
+      "receiver_id": "bf-vs-20261101t012200.testnet"
+     }
+    ],
     "receipts_outcome": [
      {
       "block_hash": "D1PtVDSqJFxVqEUSsGheaaJht4A6FXaaQmGJNHGUXvj5",
@@ -1335,7 +1459,7 @@
  },
  {
   "url": "https://archival-rpc.testnet.near.org",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML",
    "sender_account_id": "bf-vs-20261101t012200.testnet",
@@ -1346,6 +1470,68 @@
    "jsonrpc": "2.0",
    "result": {
     "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "bf-vs-20261101t012200.testnet",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         "CreateAccount",
+         {
+          "Transfer": {
+           "deposit": "1302720000000000000000000"
+          }
+         },
+         {
+          "DeployContract": {
+           "code": "4uKAhpvf+QrVT3vivBGB3O9uIp6qjxe5ny6LwzpCIDc="
+          }
+         },
+         {
+          "FunctionCall": {
+           "args": "e30=",
+           "deposit": "0",
+           "gas": 100000000000000,
+           "method_name": "config"
+          }
+         }
+        ],
+        "gas_price": "1000000000",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "bf-vs-20261101t012200.testnet",
+        "signer_public_key": "ed25519:2e9cqpiQ6r3sz1XnanrGLKkeTKbEbdWz7e3xbf4P27a5"
+       }
+      },
+      "receipt_id": "66T6j27ZgRC3hBpBzZ7UZD4JW9NFeRGFSCi6o5Jd5dHr",
+      "receiver_id": "vault.bf-vs-20261101t012200.testnet"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "108739801692573600000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "bf-vs-20261101t012200.testnet",
+        "signer_public_key": "ed25519:2e9cqpiQ6r3sz1XnanrGLKkeTKbEbdWz7e3xbf4P27a5"
+       }
+      },
+      "receipt_id": "6VXhZAAna4bBzjavd3ytc44ySnHwnrbAGxt93f2H1Gdv",
+      "receiver_id": "bf-vs-20261101t012200.testnet"
+     }
+    ],
     "receipts_outcome": [
      {
       "block_hash": "D1PtVDSqJFxVqEUSsGheaaJht4A6FXaaQmGJNHGUXvj5",
@@ -2002,7 +2188,7 @@
  },
  {
   "url": "https://archival-rpc.testnet.fastnear.com",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "EioYwuXPgpEkar6uPohK6bNnQPg54n2Ud5r2kBPkRkou",
    "sender_account_id": "g1vg-20261026b.testnet",
@@ -2013,6 +2199,57 @@
    "jsonrpc": "2.0",
    "result": {
     "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "g1vg-20261026b.testnet",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "FunctionCall": {
+           "args": "eyJwcmVjb21taXRtZW50IjoiMTMzNDQyMTQ2NzU0OTgwNzAyMTQ1NzA3MjMzNjkyMDQ1OTM5MTExNTYyMjIxNDkxNjQ4MDE0Njk5MDU2MTg1NDE4MDQ0Mjg5MjA2NTQiLCJ2YWx1ZSI6IjIwMDAwMDAifQ==",
+           "deposit": "0",
+           "gas": 300000000000000,
+           "method_name": "deposit_sim"
+          }
+         }
+        ],
+        "gas_price": "1000000000",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "g1vg-20261026b.testnet",
+        "signer_public_key": "ed25519:CZSj33MRtE7xscwUM7nbPC91Kbqe1he3FyKq3wpe2Gr7"
+       }
+      },
+      "receipt_id": "4t9XnofpyAAXU71SRhYzT2uDaM2zUqaJPkqAW5dXvY76",
+      "receiver_id": "small.g1vg-20261026b.testnet"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "300271641760421100000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "g1vg-20261026b.testnet",
+        "signer_public_key": "ed25519:CZSj33MRtE7xscwUM7nbPC91Kbqe1he3FyKq3wpe2Gr7"
+       }
+      },
+      "receipt_id": "7YuGnBY8Xyj7jP2H1GJQHmYU5zCnDNSTvsoH5dpGgHdv",
+      "receiver_id": "g1vg-20261026b.testnet"
+     }
+    ],
     "receipts_outcome": [
      {
       "block_hash": "A9wH8VsL2MeSG4PE9eLSozn1s4DqPW9df4AYEso2k3Pk",
@@ -2735,7 +2972,7 @@
  },
  {
   "url": "https://near-testnet.drpc.org",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "EioYwuXPgpEkar6uPohK6bNnQPg54n2Ud5r2kBPkRkou",
    "sender_account_id": "g1vg-20261026b.testnet",
@@ -2761,7 +2998,7 @@
  },
  {
   "url": "https://archival-rpc.testnet.near.org",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "EioYwuXPgpEkar6uPohK6bNnQPg54n2Ud5r2kBPkRkou",
    "sender_account_id": "g1vg-20261026b.testnet",
@@ -2772,6 +3009,57 @@
    "jsonrpc": "2.0",
    "result": {
     "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "g1vg-20261026b.testnet",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "FunctionCall": {
+           "args": "eyJwcmVjb21taXRtZW50IjoiMTMzNDQyMTQ2NzU0OTgwNzAyMTQ1NzA3MjMzNjkyMDQ1OTM5MTExNTYyMjIxNDkxNjQ4MDE0Njk5MDU2MTg1NDE4MDQ0Mjg5MjA2NTQiLCJ2YWx1ZSI6IjIwMDAwMDAifQ==",
+           "deposit": "0",
+           "gas": 300000000000000,
+           "method_name": "deposit_sim"
+          }
+         }
+        ],
+        "gas_price": "1000000000",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "g1vg-20261026b.testnet",
+        "signer_public_key": "ed25519:CZSj33MRtE7xscwUM7nbPC91Kbqe1he3FyKq3wpe2Gr7"
+       }
+      },
+      "receipt_id": "4t9XnofpyAAXU71SRhYzT2uDaM2zUqaJPkqAW5dXvY76",
+      "receiver_id": "small.g1vg-20261026b.testnet"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "300271641760421100000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "g1vg-20261026b.testnet",
+        "signer_public_key": "ed25519:CZSj33MRtE7xscwUM7nbPC91Kbqe1he3FyKq3wpe2Gr7"
+       }
+      },
+      "receipt_id": "7YuGnBY8Xyj7jP2H1GJQHmYU5zCnDNSTvsoH5dpGgHdv",
+      "receiver_id": "g1vg-20261026b.testnet"
+     }
+    ],
     "receipts_outcome": [
      {
       "block_hash": "A9wH8VsL2MeSG4PE9eLSozn1s4DqPW9df4AYEso2k3Pk",
@@ -3494,7 +3782,7 @@
  },
  {
   "url": "https://archival-rpc.mainnet.fastnear.com",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML",
    "sender_account_id": "bf-vs-20261101t012200.testnet",
@@ -3520,7 +3808,7 @@
  },
  {
   "url": "https://near.drpc.org",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML",
    "sender_account_id": "bf-vs-20261101t012200.testnet",
@@ -3546,7 +3834,7 @@
  },
  {
   "url": "https://archival-rpc.mainnet.near.org",
-  "method": "tx",
+  "method": "EXPERIMENTAL_tx_status",
   "params": {
    "tx_hash": "7sbNcxchrT6uMfcJEvfwMAfm2F925L9BXvuR4jH3fwML",
    "sender_account_id": "bf-vs-20261101t012200.testnet",

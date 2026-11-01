@@ -1,6 +1,6 @@
 {
  "good": {
-  "note": "apps/helper at 6aa24c5 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml on Docker 29.8.1 on a Mac through heavy.sh, read 2026-11-01 01:04:08Z (api.confidential.unrealized.trade has no server yet)",
+  "note": "apps/helper at 6aa24c5 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml on Docker 29.8.1 on a Mac, read 2026-11-01 01:04:08Z (api.confidential.unrealized.trade has no server yet)",
   "commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495",
   "base": "http://127.0.0.1:18080",
   "reads": [
