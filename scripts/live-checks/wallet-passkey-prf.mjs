@@ -45,6 +45,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2
 // Records hold public values only (states, the public account ids, rp ids): never the PRF output, the entropy, the
 // words or a key. Every seed is a throwaway virtual authenticator's, never funded and never printed.
+import "../net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, hkdfSync, pbkdf2Sync } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
