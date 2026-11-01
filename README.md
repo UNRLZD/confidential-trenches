@@ -240,7 +240,7 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 
 ## Checks
 
-`<n>` tests, all passing on every pull request.
+927 tests, all passing on every pull request.
 
 | Run | Checks |
 |---|---|
