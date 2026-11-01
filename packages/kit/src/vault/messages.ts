@@ -9,17 +9,23 @@
 //   and the delegate's sender_id come from one argument and cannot differ.
 // - The call is the unsigned part of the helper's HelperBindDeposit (helper/v1.ts): sender_id, receiver_id and the one
 //   FunctionCall action, written as POST /v1/bind decodes it. The signer adds nonce, max_block_height and public_key.
-// - The amount is refused where the vault would refuse it (2.5.1 rows 4-5): under MIN_DEPOSIT, or not below u128::MAX.
-// - The prepay keys the same canonical decimal as the message, so a prepay and its deposit name one record (2.5.1).
-import type { HelperFtTransferCallArgs, HelperFunctionCall } from "../helper/v1.ts";
+// - The amount is refused where the vault would refuse it (2.5.1 rows 4-5): under MIN_DEPOSIT, or not below u128::MAX,
+//   and above the beta cap HELPER_BIND_DEPOSIT_CAP, which the relayer also refuses: the device never signs a deposit
+//   the relayer will not carry. The cap is read from that one constant, so lifting it changes one line.
+// - The vault refuses a depositor equal to itself (2.5.1 row 2) and the relayer refuses it too, so a 64-hex vault equal
+//   to the mover is refused here; so is intents.near as the vault, since the vault's balance rests outside it.
+// - The prepay keys the same canonical decimal as the message, so a prepay and its deposit name one record (2.5.1). It
+//   takes a byte count: VAULT_STORAGE_PREPAY.min_bytes (756) or bytes_when_a_tree_may_grow (904) on a new record, and
+//   any amount on a record that exists, such as the 148-byte top-up when a tree may grow after the first prepay.
+import { HELPER_BIND_DEPOSIT_CAP, type HelperFtTransferCallArgs, type HelperFunctionCall } from "../helper/v1.ts";
 import {
   VAULT_CONSTANTS,
   VAULT_DEPOSIT_CARRIER,
   VAULT_FIELD_P,
+  VAULT_STORAGE_BYTE_COST,
   VAULT_STORAGE_PREPAY,
   vaultAccountId,
   vaultDepositMessage,
-  vaultPrepayYocto,
 } from "./shapes.ts";
 
 export * from "./request.ts";
@@ -48,14 +54,20 @@ export type VaultDepositCall = {
 /**
  * The one deposit call, the same for U, R, V and A: mover's TOKEN.ft_transfer_call(vault, amount,
  * vaultDepositMessage(precommitment, mover)), 1 yocto, 180 Tgas. Refuses a vault or token that is not a NEAR account
- * id or names the other, a mover that is not a lowercase 64-hex NEAR-implicit id, a precommitment not below p, and an
- * amount under MIN_DEPOSIT or not below u128::MAX.
+ * id or names the other, intents.near as the vault, a mover that is not a lowercase 64-hex NEAR-implicit id or is the
+ * vault, a precommitment not below p, an amount that is not a bigint, under MIN_DEPOSIT, over HELPER_BIND_DEPOSIT_CAP
+ * or not below u128::MAX.
  */
 export function vaultDepositCall(a: VaultDepositCallArgs): VaultDepositCall {
   const vault = vaultAccountId(a.vault, "vault");
   const token = vaultAccountId(a.token, "token");
   if (vault === token) throw new Error("vault: the token");
-  if (typeof a.amount !== "bigint" || a.amount < VAULT_CONSTANTS.MIN_DEPOSIT) throw new Error("amount: under MIN_DEPOSIT");
+  if (vault === VAULT_CONSTANTS.INTENTS) throw new Error("vault: intents.near");
+  if (a.mover === vault) throw new Error("mover: the vault");
+  if (typeof a.amount !== "bigint") throw new Error("amount: not a bigint");
+  if (a.amount < VAULT_CONSTANTS.MIN_DEPOSIT) throw new Error("amount: under MIN_DEPOSIT");
+  if (a.amount > HELPER_BIND_DEPOSIT_CAP) throw new Error("amount: over HELPER_BIND_DEPOSIT_CAP");
+  // The vault's own bound, which holds once the beta cap is lifted.
   if (a.amount >= U128_MAX) throw new Error("amount: not below u128::MAX");
   const msg = vaultDepositMessage(a.precommitment, a.mover);
   return {
@@ -83,16 +95,16 @@ export type VaultStoragePrepay = {
 };
 
 /**
- * storage_prepay(precommitment) on the vault with the NEAR it attaches: 904 bytes' worth whenever a tree may grow a
- * level, else 756 (VAULT_STORAGE_PREPAY). The precommitment is written as the deposit message writes it.
+ * storage_prepay(precommitment) on the vault, attaching `bytes` × VAULT_STORAGE_BYTE_COST. The precommitment is written
+ * as the deposit message writes it. bytes is a positive whole number; the vault refuses under min_bytes on a new record.
  */
-export function vaultStoragePrepay(vault: string, precommitment: bigint, aTreeMayGrow: boolean): VaultStoragePrepay {
+export function vaultStoragePrepay(vault: string, precommitment: bigint, bytes: number): VaultStoragePrepay {
   if (typeof precommitment !== "bigint" || precommitment < 0n || precommitment >= VAULT_FIELD_P) throw new Error("precommitment: not below p");
-  if (typeof aTreeMayGrow !== "boolean") throw new Error("aTreeMayGrow: not a boolean");
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("bytes: not a positive whole number");
   return {
     receiver_id: vaultAccountId(vault, "vault"),
     method: VAULT_STORAGE_PREPAY.method,
     args: { precommitment: precommitment.toString() },
-    deposit_yocto: vaultPrepayYocto(aTreeMayGrow),
+    deposit_yocto: BigInt(bytes) * VAULT_STORAGE_BYTE_COST,
   };
 }
