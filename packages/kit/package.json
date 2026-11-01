@@ -3,16 +3,12 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node -e \"import('@blindfill/kit').then(m => { if (!m.SIGNPAGE_KINDS) process.exit(1) })\""
+    "test": "tsc -p tsconfig.json && node -e \"import('@blindfill/kit').then(m => { if (!m.SIGNPAGE_KINDS) process.exit(1) })\" && node --test test/oneclick.test.ts"
   },
   "exports": {
     ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
     "./core": { "types": "./src/core.ts", "default": "./src/core.ts" },
     "./package.json": "./package.json"
-  },
-  "scripts": {
-    "test": "node --test test/oneclick.test.ts",
-    "typecheck": "tsc --noEmit --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --verbatimModuleSyntax --skipLibCheck --types node src/checks/oneclick.ts test/oneclick.test.ts"
   },
   "dependencies": {
     "@noble/curves": "2.4.0",
