@@ -447,6 +447,45 @@ export function liteHash(lite) {
   const inner = Buffer.concat([uint(i.height, 8), hash32(i.epoch_id), hash32(i.next_epoch_id), hash32(i.prev_state_root), hash32(i.outcome_root), uint(i.timestamp_nanosec, 8), hash32(i.next_bp_hash), hash32(i.block_merkle_root)]);
   return sha(sha(sha(inner), hash32(lite.inner_rest_hash)), hash32(lite.prev_block_hash));
 }
+/** The signer and receiver of a NEAR tx, from its borsh Transaction bytes (base64), which must hash to `id`. An outcome
+ * proof binds an id, not its kind: FastNEAR answers a "transaction" proof request for a receipt id with that receipt's
+ * proof (nearcore does not check the kind, chain/client/src/view_client_actor.rs:1158-1167; read live 2026-11-01). A
+ * tx hash is sha256(borsh(Transaction)) (core/primitives/src/transaction.rs:144-146), which no receipt id has. V0 is
+ * TransactionV0 (signer_id, public_key, nonce u64, receiver_id, ...; transaction.rs:36-50); V1 is a 1 then
+ * TransactionV1 (signer_id, public_key, nonce as TransactionNonce: 0 then u64, or 1 then u64 and a u16, receiver_id,
+ * ...; transaction.rs:66-71, :122-140, :268-276), told apart as nearcore reads them: a second byte of 0 is V0, a
+ * first byte of 1 with a second byte not 0 is V1 (transaction.rs:281-318). A public key is its tag then 32 bytes
+ * (ed25519, 0) or 64 (secp256k1, 1) (core/crypto/src/signature.rs:39-43, :398-416); another key type is refused. */
+export function txBytesFacts(b64, id) {
+  if (typeof b64 !== "string" || !b64 || Buffer.from(b64, "base64").toString("base64") !== b64) throw new Error(`${id}: no signed tx bytes for it, or bytes that are not base64`);
+  const b = Buffer.from(b64, "base64");
+  if (!sha(b).equals(hash32(id))) throw new Error(`${id}: its tx bytes do not hash to it`);
+  const v1 = b[1] !== 0;
+  if (v1 && b[0] !== 1) throw new Error(`${id}: tx bytes with version tag ${b[0]}`);
+  let at = v1 ? 1 : 0;
+  const take = (n) => {
+    if (at + n > b.length) throw new Error(`${id}: its tx bytes end early`);
+    at += n;
+    return b.subarray(at - n, at);
+  };
+  const account = () => {
+    const n = take(4).readUInt32LE(0);
+    if (n < 2 || n > 64) throw new Error(`${id}: an account id of ${n} bytes in its tx bytes`);
+    return take(n).toString("utf8");
+  };
+  const signer = account();
+  const key = { 0: 32, 1: 64 }[take(1)[0]];
+  if (!key) throw new Error(`${id}: a key type its tx bytes name that this check does not read`);
+  take(key);
+  if (!v1) take(8);
+  else {
+    const kind = take(1)[0];
+    if (kind > 1) throw new Error(`${id}: a nonce kind ${kind} in its tx bytes`);
+    take(kind ? 10 : 8);
+  }
+  return { signer, receiver: account(), version: v1 ? 1 : 0 };
+}
+
 /** One EXPERIMENTAL_light_client_proof answer for `id`, checked against the head's block_merkle_root (32 bytes).
  * Returns the proven outcome and its block's height and time (ms); throws why it does not prove. */
 export function checkProof(p, id, headRoot) {
@@ -465,7 +504,7 @@ const MAX_OUTCOMES = 200;
 /** Proves a NEAR tx on `prover` (FastNEAR) against a final block of `head` (dRPC). `known`: the prover's
  * EXPERIMENTAL_tx_status answer, which names each receipt's receiver (the proof request needs it; the proof binds the
  * id). Returns { height, time, outcomes, head } or throws why it is not proven. */
-export async function proveNearTx(fetchFn, tx, prover, head, known, sleep = wait) {
+export async function proveNearTx(fetchFn, tx, prover, head, known, sleep = wait, max = MAX_OUTCOMES) {
   const network = tx.chain === "near" ? "mainnet" : "testnet";
   const call = async (url, method, params) => {
     let j;
@@ -491,7 +530,7 @@ export async function proveNearTx(fetchFn, tx, prover, head, known, sleep = wait
   while (todo.length) {
     const { id, params } = todo.shift();
     if (proven.has(id)) continue;
-    if (proven.size >= MAX_OUTCOMES) throw new Error(`more than ${MAX_OUTCOMES} outcomes`);
+    if (proven.size >= max) throw new Error(`more than ${max} outcomes`);
     // an error answer is asked again, twice, 2 s apart (one such answer was seen live, 2026-11-01): a retry
     // only asks again, every answer is still checked
     let answer;
@@ -522,17 +561,23 @@ export async function proveNearTx(fetchFn, tx, prover, head, known, sleep = wait
   return { height: first.height, time: first.time, outcomes: proven.size, head: `${hb.header.height} ${headHash}` };
 }
 
-/** A NEAR tx one operator read ok (answers: [{ url, r, result }] in list's order), proven by FastNEAR's light-client
- * proof against dRPC's final block, or it throws why not. Returns the PROVEN ON line. The live check and the deploy
- * script use it as the gate does. */
+/** A NEAR tx one operator read ok (answers: [{ url, r, result }] in list's order), proven by its signed tx bytes
+ * (tx.bytes, base64 borsh Transaction, from the record's tx-bytes file) and FastNEAR's light-client proof against
+ * dRPC's final block, or it throws why not. Returns the PROVEN ON line. The live check and the deploy script use it
+ * as the gate does. A tx with no bytes passes only on two operators' reads. */
 export async function proveRead(fetchFn, tx, answers, list, floor = FLOOR, sleep = wait) {
+  if (!tx.bytes) throw new Error(`no signed tx bytes for it (${LIVE}<card>${BYTES}): a tx one operator reads passes only by its bytes and its proof`);
+  const facts = txBytesFacts(tx.bytes, tx.hash);
+  if (facts.signer !== tx.signer) throw new Error(`its tx bytes name signer ${facts.signer}, not ${tx.signer}`);
   const prover = answers.find((a) => a.r === "ok" && operatorOf(tx.chain, a.url) === "fastnear" && a.result);
   const head = list.find((u) => operatorOf(tx.chain, u) === "drpc");
   if (!prover || !head) throw new Error("no FastNEAR read ok, or no dRPC host, to prove it on");
   const p = await proveNearTx(fetchFn, tx, prover.url, head, prover.result, sleep);
   const old = when(p.time, floor);
   if (old !== "ok") throw new Error(`proven, but ${old}`);
-  return `PROVEN ON ${hostOf(head)}: ${tx.chain} ${tx.hash}: ${p.outcomes} outcome(s) proven by ${hostOf(prover.url)}'s light-client proof against final block ${p.head}; in block ${p.height}, ${new Date(p.time).toISOString()}`;
+  // the block named is the one whose outcome root holds the tx's outcome: the next block with a chunk on its shard
+  // after the one that ran it (view_client_actor.rs:1171-1186)
+  return `PROVEN ON ${hostOf(head)}: ${tx.chain} ${tx.hash} (V${facts.version}, ${facts.signer} to ${facts.receiver}): ${p.outcomes} outcome(s) proven by ${hostOf(prover.url)}'s light-client proof against final block ${p.head}; confirmed in block ${p.height}, ${new Date(p.time).toISOString()}`;
 }
 
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
@@ -566,7 +611,8 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       seen.set(id, [...(seen.get(id) ?? []), path]);
     }
   }
-  for (const { path, key, text, notFile } of records) {
+  for (const { path, key, text, notFile, bytes: bytesOf, bytesProblem } of records) {
+    if (bytesProblem) refusals.push(`${path.replace(/\.md$/, BYTES)}: ${bytesProblem}`);
     if (notFile) {
       refusals.push(`${path}: ${notFile}, not a regular file`);
       continue;
@@ -595,7 +641,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       let why = "";
       if (!decisive.length && okOps().size === 1 && NEAR.has(tx.chain))
         try {
-          proven.push(`${await proveRead(fetchFn, tx, answers, rpcs[tx.chain], floor, sleep)}${note}`);
+          proven.push(`${await proveRead(fetchFn, { ...tx, bytes: bytesOf?.[tx.hash] }, answers, rpcs[tx.chain], floor, sleep)}${note}`);
           continue;
         } catch (e) {
           why = `; not proven: ${String(e?.message ?? e).slice(0, 300)}`;
@@ -609,12 +655,26 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
 // followed, so it adds no Tx to the twice-listed check either
+// A record's tx-bytes file (<key>.tx-bytes.json beside it): { "<NEAR tx hash>": "<base64 borsh Transaction>" }, the
+// signed bytes the run's own script made. Optional; when present it must be a regular file holding that object.
 function load(cwd, path) {
   const key = path.slice(LIVE.length, -".md".length);
   const st = lstatSync(`${cwd}/${path}`, { throwIfNoEntry: false });
   if (!st?.isFile()) return { path, key, text: "", notFile: !st ? "missing" : st.isSymbolicLink() ? "a symlink" : "not a file" };
-  return { path, key, text: readFileSync(`${cwd}/${path}`, "utf8") };
+  const rec = { path, key, text: readFileSync(`${cwd}/${path}`, "utf8") };
+  const side = `${cwd}/${path.replace(/\.md$/, BYTES)}`;
+  const bst = lstatSync(side, { throwIfNoEntry: false });
+  if (!bst) return rec;
+  if (!bst.isFile()) return { ...rec, bytesProblem: `${bst.isSymbolicLink() ? "a symlink" : "not a file"}, not a regular file` };
+  try {
+    const b = JSON.parse(readFileSync(side, "utf8"));
+    if (b === null || typeof b !== "object" || Array.isArray(b) || Object.values(b).some((v) => typeof v !== "string")) throw new Error("not an object of strings");
+    return { ...rec, bytes: b };
+  } catch (e) {
+    return { ...rec, bytesProblem: `not a tx-bytes object (${String(e?.message ?? e).slice(0, 80)})` };
+  }
 }
+export const BYTES = ".tx-bytes.json";
 
 // the folder's README says how a check works; it is not a record
 const isRecord = (p) => p.endsWith(".md") && p !== `${LIVE}README.md`;

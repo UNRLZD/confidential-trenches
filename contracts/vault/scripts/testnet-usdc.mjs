@@ -208,7 +208,9 @@ async function main() {
     const failed = [r.transaction_outcome, ...r.receipts_outcome].filter((o) => o.outcome.status.Failure);
     if (!("SuccessValue" in (r.status ?? {})) || failed.length) throw new Error(`${what} (${txHash}) failed: ${JSON.stringify(failed[0]?.outcome.status ?? r.status).slice(0, 400)}`);
     const gas = [r.transaction_outcome, ...r.receipts_outcome].reduce((s, o) => s + BigInt(o.outcome.gas_burnt), 0n);
-    const entry = { what, hash: txHash, signer, receiver, gas_burnt: String(gas) };
+    // tx_bytes: the signed borsh Transaction, which hashes to the tx's id; the money gate proves a tx one operator
+    // reads only with them (scripts/ci/money-gate.mjs txBytesFacts)
+    const entry = { what, hash: txHash, signer, receiver, gas_burnt: String(gas), tx_bytes: tx.toString("base64") };
     txs.push(entry);
     console.log(`ok ${what}: ${txHash} (${signer} -> ${receiver}), ${Number(gas) / 1e12} Tgas burnt`);
     return r;
@@ -297,7 +299,7 @@ async function main() {
     if (reads.some((x) => /^(failed|old)/.test(x.r))) throw new Error(reading);
     if (okOperators("near-testnet", reads).size < 2)
       try {
-        console.log(await proveRead(fetch, { chain: "near-testnet", hash: t.hash, signer: t.signer }, reads, TESTNET_RPCS));
+        console.log(await proveRead(fetch, { chain: "near-testnet", hash: t.hash, signer: t.signer, bytes: t.tx_bytes }, reads, TESTNET_RPCS));
       } catch (e) {
         throw new Error(`${reading}; not proven: ${e.message}`);
       }

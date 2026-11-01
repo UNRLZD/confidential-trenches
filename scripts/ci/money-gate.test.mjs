@@ -1,7 +1,7 @@
 // The money gate with a stubbed network: the record rules and each chain's read. Run: node --test scripts/ci/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { base58, checkProof, liteHash, moneyGate, outcomeLeaf, parseLive, recordsFrom, RPCS as REAL_RPCS } from "./money-gate.mjs";
+import { base58, checkProof, liteHash, moneyGate, proveNearTx, txBytesFacts, outcomeLeaf, parseLive, recordsFrom, RPCS as REAL_RPCS } from "./money-gate.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, symlinkSync, readFileSync } from "node:fs";
@@ -703,10 +703,10 @@ test("a 429 with no Retry-After waits 2 s, doubling, and is still no answer afte
   const s = rateLimited(() => ({}));
   const r = await nearTx(s.fetchFn, s.sleep);
   assert.match(r.refusals.join("\n"), /no answer \(rate limited \d+ times in a row\) on https:\/\/near\.drpc\.org/);
-  // the tx read, then the light-client proof's status read on dRPC: each waited out, then refused
+  // the tx read is waited out; the record has no signed tx bytes, so no proof is asked for and nothing more is waited
   const waits = ["sleep 2000", "sleep 4000", "sleep 8000", "sleep 16000", "sleep 32000"];
-  assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), [...waits, ...waits]);
-  assert.match(r.refusals.join("\n"), /not proven: near\.drpc\.org status/);
+  assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), waits);
+  assert.match(r.refusals.join("\n"), /not proven: no signed tx bytes for it/);
 });
 
 test("a 429 whose Retry-After is past the 600 s cap is no answer at once: refused, never waited", async () => {
@@ -726,7 +726,8 @@ const T_FN = "https://archival-rpc.testnet.fastnear.com";
 const T_DR = "https://near-testnet.drpc.org";
 const T_ORG = "https://archival-rpc.testnet.near.org";
 const T_RPCS = { "near-testnet": [T_FN, T_DR, T_ORG] };
-const lpRec = () => rec(`Money path: yes\nTx: near-testnet ${LP.tx.hash} ${LP.tx.signer}\n`);
+// the record, with its tx-bytes file's entry when the recording has the tx's bytes
+const lpRec = (fx = LP) => [{ ...rec(`Money path: yes\nTx: near-testnet ${fx.tx.hash} ${fx.tx.signer}\n`)[0], bytes: fx.tx_bytes ? { [fx.tx.hash]: fx.tx_bytes } : undefined }];
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 function enc58(b) {
   let n = BigInt(`0x${Buffer.from(b).toString("hex") || "0"}`);
@@ -767,14 +768,14 @@ function proofHosts(fx = LP) {
 }
 const gateOn = async (fx, rpcs = T_RPCS) => {
   const s = proofHosts(fx);
-  return { ...(await moneyGate(lpRec(), s.fetchFn, rpcs, { sleep: s.sleep })), log: s.log };
+  return { ...(await moneyGate(lpRec(fx), s.fetchFn, rpcs, { sleep: s.sleep })), log: s.log };
 };
 
 test("light proof: the recorded real testnet tx, read on FastNEAR alone, is proven on dRPC's final block and passes", async () => {
   const r = await gateOn(LP);
   assert.deepEqual(r.refusals, []);
   assert.equal(r.proven.length, 1);
-  assert.match(r.proven[0], new RegExp(`^PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash}: 3 outcome\\(s\\) proven by archival-rpc\\.testnet\\.fastnear\\.com's light-client proof against final block ${LP.head.height} ${LP.head.hash}; in block \\d+, 2026-11-01T02:2\\d:\\d\\d\\.\\d+Z \\(testnet, not real-money proof\\)$`));
+  assert.match(r.proven[0], new RegExp(`^PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash} \\(V0, ${LP.tx.signer} to ${LP.tx.signer}\\): 3 outcome\\(s\\) proven by archival-rpc\\.testnet\\.fastnear\\.com's light-client proof against final block ${LP.head.height} ${LP.head.hash}; confirmed in block \\d+, 2026-11-01T\\d\\d:\\d\\d:\\d\\d\\.\\d+Z \\(testnet, not real-money proof\\)$`));
   // the proof needs no second read on FastNEAR's other host: near.org is asked once, never waited
   assert.equal(r.log.filter((l) => l === `ask ${T_ORG} EXPERIMENTAL_tx_status`).length, 1);
   assert.deepEqual(r.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), []);
@@ -890,7 +891,7 @@ function built(edit) {
   fx.head.block_merkle_root = enc58(sha(pair[0], pair[1]));
   return fx;
 }
-const receiptOf = (fx) => Object.keys(fx.proofs).find((id) => id !== LP.tx.hash && fx.proofs[id].outcome_proof.outcome.logs.length);
+const receiptOf = (fx) => Object.keys(fx.proofs).find((id) => id !== LP.tx.hash);
 
 test("light proof planted: a proven receipt outcome that failed, or is Unknown, is refused; the same set all success passes", async () => {
   assert.equal((await gateOn(built(() => {}))).proven.length, 1, "the built set passes as it is");
@@ -924,6 +925,91 @@ test("light proof: reviewer probe A2, FastNEAR naming a false height and time, d
   // a proven tx outcome whose signer is not the record's
   const signer = built((fx) => void (fx.proofs[LP.tx.hash].outcome_proof.outcome.executor_id = "someone.testnet"));
   assert.match((await gateOn(signer)).refusals.join("\n"), /its proven signer is someone\.testnet/);
+});
+
+// Review round 1 of this card. 1: an outcome proof binds an id, not its kind, so a tx one operator reads is proven only
+// with its signed bytes, which hash to its id; a receipt id has none.
+test("light proof planted (probe 1): a receipt id written as a Tx, with its real proof served as a tx's, is refused", async () => {
+  // noBytes: the vault-testnet-usdc record tx 4LbTb…, whose receipt 2ciqy… FastNEAR proves when asked for it as a tx
+  const nb = LP.noBytes;
+  const receipt = Object.keys(nb.proofs).find((id) => id !== nb.tx.hash && nb.proofs[id].outcome_proof.outcome.executor_id === nb.tx.signer);
+  const fx = { ...clone(nb), tx: { ...nb.tx, hash: receipt } };
+  const r = await gateOn(fx);
+  assert.deepEqual(r.proven, []);
+  assert.match(r.refusals.join("\n"), new RegExp(`${receipt}: .*not proven: no signed tx bytes for it`));
+  // with bytes of a real tx, which hash to that tx, not to the receipt
+  const withBytes = await gateOn({ ...fx, tx_bytes: LP.tx_bytes });
+  assert.match(withBytes.refusals.join("\n"), new RegExp(`not proven: ${receipt}: its tx bytes do not hash to it`));
+  // FastNEAR's answer to a "transaction" request for the failed receipt of the failed tx is that receipt's own proof
+  assert.equal(LP.receiptAsTx.proof.outcome_proof.id, LP.failed.known.receipts_outcome[0].id);
+});
+
+test("light proof planted: a record tx with no bytes, or bytes that hash to another tx or name another signer, is refused", async () => {
+  const none = await gateOn({ ...clone(LP), tx_bytes: undefined });
+  assert.match(none.refusals.join("\n"), /not proven: no signed tx bytes for it/);
+  const other = await gateOn({ ...clone(LP), tx_bytes: LP.v1.tx_bytes });
+  assert.match(other.refusals.join("\n"), new RegExp(`not proven: ${LP.tx.hash}: its tx bytes do not hash to it`));
+  const flipped = Buffer.from(LP.tx_bytes, "base64");
+  flipped[flipped.length - 1] ^= 1;
+  assert.match((await gateOn({ ...clone(LP), tx_bytes: flipped.toString("base64") })).refusals.join("\n"), /its tx bytes do not hash to it/);
+  assert.match((await gateOn({ ...clone(LP), tx_bytes: `${LP.tx_bytes}!` })).refusals.join("\n"), /bytes that are not base64/);
+  const signer = clone(LP);
+  signer.tx.signer = "someone.testnet";
+  assert.match((await gateOn(signer)).refusals.join("\n"), /its tx bytes name signer mglp-\d+\.testnet, not someone\.testnet/);
+});
+
+test("light proof: V0 and V1 Transaction bytes of real recorded txs hash to their ids and name their signer and receiver", async () => {
+  for (const [fx, v] of [[LP, 0], [LP.v1, 1], [LP.failed, 0]]) {
+    const f = txBytesFacts(fx.tx_bytes, fx.tx.hash);
+    assert.deepEqual(f, { signer: fx.tx.signer, receiver: fx.tx.signer, version: v });
+  }
+  const r = await gateOn(LP.v1);
+  assert.deepEqual(r.refusals, []);
+  assert.match(r.proven[0], new RegExp(`near-testnet ${LP.v1.tx.hash} \\(V1, ${LP.v1.tx.signer} to ${LP.v1.tx.signer}\\): 3 outcome\\(s\\)`));
+  // a key type the check does not read (ML-DSA, tag 2) is refused even when the bytes hash right
+  const b = Buffer.from(LP.tx_bytes, "base64");
+  b[4 + b.readUInt32LE(0)] = 2;
+  const id = enc58(createHash("sha256").update(b).digest());
+  assert.throws(() => txBytesFacts(b.toString("base64"), id), /a key type/);
+});
+
+// 2: the proof's id is compared with the id asked
+test("light proof planted (probe 2): a failed receipt answered with another receipt's real success proof is refused", async () => {
+  const fx = clone(LP.failed);
+  const [failedId, okId] = fx.known.receipts_outcome.map((o) => o.id);
+  assert.equal(Object.keys(fx.proofs[failedId].outcome_proof.outcome.status)[0], "Failure");
+  fx.proofs[failedId] = fx.proofs[okId];
+  // FastNEAR's tx status hides the failure, as a lying host would
+  fx.known.status = { SuccessValue: "" };
+  fx.known.receipts_outcome = fx.known.receipts_outcome.map((o) => ({ ...o, outcome: { ...o.outcome, status: { SuccessValue: "" } } }));
+  const r = await gateOn(fx);
+  assert.deepEqual(r.proven, []);
+  assert.match(r.refusals.join("\n"), new RegExp(`not proven: a proof for ${okId}, not ${failedId}`));
+});
+
+// 5: a real Failure outcome: the Failure discriminant (1, no detail) hashes to the chain's own root
+test("light proof: the recorded real failed receipt's proof checks out with its Failure status, and the tx is refused for it", async () => {
+  const fx = LP.failed;
+  const failedId = fx.known.receipts_outcome[0].id;
+  const p = checkProof(fx.proofs[failedId], failedId, base58(fx.head.block_merkle_root));
+  assert.equal(Object.keys(p.outcome.status)[0], "Failure");
+  // the same proof with the status read as a success no longer reaches the root
+  const lie = clone(fx.proofs[failedId]);
+  lie.outcome_proof.outcome.status = { SuccessValue: "" };
+  assert.throws(() => checkProof(lie, failedId, base58(fx.head.block_merkle_root)), /does not reach its block's outcome_root/);
+  // FastNEAR's honest tx status says failed: refused as failed; a lying one meets the proven Failure
+  assert.match((await gateOn(fx)).refusals.join("\n"), /failed on https:\/\/archival-rpc\.testnet\.fastnear\.com/);
+  const liar = clone(fx);
+  liar.known.status = { SuccessValue: "" };
+  liar.known.receipts_outcome = liar.known.receipts_outcome.map((o) => ({ ...o, outcome: { ...o.outcome, status: { SuccessValue: "" } } }));
+  assert.match((await gateOn(liar)).refusals.join("\n"), new RegExp(`not proven: ${failedId}: its proven outcome is Failure, not a success`));
+});
+
+// 4: the outcome cap
+test("light proof: more outcomes than the cap are refused (cap 2 against the recording's 3; the gate's cap is 200)", async () => {
+  const s = proofHosts(LP);
+  await assert.rejects(proveNearTx(s.fetchFn, LP.tx, T_FN, T_DR, LP.known, s.sleep, 2), /more than 2 outcomes/);
+  assert.equal((await proveNearTx(s.fetchFn, LP.tx, T_FN, T_DR, LP.known, s.sleep, 3)).outcomes, 3);
 });
 
 // Card money-gate-rate: near.org's testnet archive answers 429 with a Retry-After of about 279 s (read 2026-11-01), and
