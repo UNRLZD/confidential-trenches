@@ -78,7 +78,13 @@ export function judge({ url, status, headers, html = "", files = {} }) {
       say(false, "an inline script");
       continue;
     }
-    const abs = new URL(l.src, url);
+    let abs;
+    try {
+      abs = new URL(l.src, url);
+    } catch {
+      say(false, `${l.what} ${l.src}: not a URL`);
+      continue;
+    }
     const want = (l.integrity ?? "").trim().split(/\s+/).filter(Boolean);
     const f = files[abs.href];
     if (abs.origin !== origin) say(false, `${l.what} ${l.src}: not on ${origin}`);
@@ -100,7 +106,7 @@ export async function read(url = URL_, fetchFn = fetch) {
   const html = await r.text();
   const files = {};
   for (const l of loadsOf(html)) {
-    if (l.src === null) continue;
+    if (l.src === null || !URL.canParse(l.src, url)) continue;
     const abs = new URL(l.src, url);
     if (abs.origin !== new URL(url).origin || files[abs.href]) continue;
     const a = await get(abs.href);

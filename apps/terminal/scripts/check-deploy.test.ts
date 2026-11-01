@@ -192,7 +192,9 @@ test("SRI: one byte changed in the script, or a stylesheet, after its sha384 was
 });
 
 test("SRI: a script with no integrity, an inline script, or a script whose file is not in the build is refused", () => {
-  refused(planted(swap(` integrity="${sha384(JS)}"`, "")), /index\.html: script \/assets\/index-a1\.js has no integrity \(Integrity-Policy blocks it\)/);
+  const bare = planted(swap(` integrity="${sha384(JS)}"`, ""));
+  assert.deepEqual(bare, ["index.html: script /assets/index-a1.js has no integrity (Integrity-Policy blocks it)"]);
+  refused(planted(swap("/assets/index-a1.js", "http://[x")), /index\.html: script http:\/\/\[x: not a URL/);
   refused(planted(swap("</title>", "</title><script>window.x=1</script>")), /index\.html: an inline script/);
   refused(planted(swap("/assets/index-a1.js", "/assets/gone.js")), /index\.html: script \/assets\/gone\.js: no such file in the build/);
   refused(planted(swap("/assets/index-a1.js", "https://evil.ct.test/a.js")), /index\.html: script https:\/\/evil\.ct\.test\/a\.js is not a file of this build/);

@@ -263,19 +263,22 @@ export function checkPages(buildDir: string): string[] {
     const html = readFileSync(join(dir, page), "utf8");
     const check = (what: string, url: string | undefined, integrity: string | undefined) => {
       if (url === undefined || url === "") return void p.push(`${page}: a ${what} tag with no ${what === "script" ? "src" : "href"}`);
-      const u = new URL(url, `${BASE}/${page}`);
+      let u: URL;
+      let rel = "";
+      try {
+        u = new URL(url, `${BASE}/${page}`);
+        rel = decodeURIComponent(u.pathname).replace(/^\/+/, "");
+      } catch {
+        return void p.push(`${page}: ${what} ${url}: not a URL`);
+      }
       if (u.origin !== BASE) return void p.push(`${page}: ${what} ${url} is not a file of this build (script-src and style-src are 'self')`);
+      const file = join(dir, rel);
+      if (!rel || !file.startsWith(dir + sep) || !existsSync(file) || !statSync(file).isFile()) return void p.push(`${page}: ${what} ${url}: no such file in the build`);
+      loaded.add(rel);
       if (integrity === undefined) return void p.push(`${page}: ${what} ${url} has no integrity (Integrity-Policy blocks it)`);
       const want = integrity.trim().split(/\s+/).filter(Boolean);
       if (want.length !== 1 || !/^sha384-[A-Za-z0-9+/]{64}$/.test(want[0]!))
         return void p.push(`${page}: ${what} ${url}: integrity must be exactly one sha384 (got ${integrity.trim() || "nothing"})`);
-      let rel = "";
-      try {
-        rel = decodeURIComponent(u.pathname).replace(/^\/+/, "");
-      } catch {}
-      const file = join(dir, rel);
-      if (!rel || !file.startsWith(dir + sep) || !existsSync(file) || !statSync(file).isFile()) return void p.push(`${page}: ${what} ${url}: no such file in the build`);
-      loaded.add(rel);
       const got = sha384(readFileSync(file));
       if (got !== want[0]) p.push(`${page}: ${what} ${url}: integrity ${want[0]} is not the sha384 of its file (${got})`);
     };

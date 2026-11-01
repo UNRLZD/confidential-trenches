@@ -79,5 +79,6 @@ test("bad answers: a script with no integrity, an inline script, a script from a
   bad(withHtml(integrity, integrity.replace(/"$/, ' sha384-AAAA"')), /^BAD script .*: integrity must be exactly one sha384/);
   bad({ ...GOOD, files: { ...GOOD.files, [SCRIPT]: { ...GOOD.files[SCRIPT], status: 404 } } }, `BAD script ${SCRIPT_PATH}: answers 404`);
   bad(withHtml(/<script\b[^>]*><\/script>/.exec(GOOD.html)[0], ""), "BAD the page loads 0 script(s)");
+  bad(withHtml("</title>", '</title><script src="http://[x" integrity="sha384-x"></script>'), "BAD script http://[x: not a URL");
   bad({ ...GOOD, status: 522 }, `BAD GET ${GOOD.url} answers 522`);
 });
