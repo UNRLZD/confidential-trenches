@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/helper-host-health.test.mjs: the live check replays recorded answers
-// (helper-host-health.answers.json). good: apps/helper at fdeb4d4 in its image behind deploy/Caddyfile, run by
+// (helper-host-health.answers.json). good: apps/helper at 6aa24c5 in its image behind deploy/Caddyfile, run by
 // deploy/compose.yaml on a Mac (HELPER_HOST has no server yet, so no served answer exists): PASS. bad_commit: a real
 // answer from the same image built with another commit (854f02d): FAIL. bad_star: the good answer with
 // Access-Control-Allow-Origin: * on every read: FAIL.

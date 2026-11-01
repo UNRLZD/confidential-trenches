@@ -1,7 +1,7 @@
 {
  "good": {
-  "note": "apps/helper at fdeb4d4 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml on Docker 29.8.1 on a Mac through heavy.sh, read 2026-11-01 00:47:01Z (api.confidential.unrealized.trade has no server yet)",
-  "commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd",
+  "note": "apps/helper at 6aa24c5 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml on Docker 29.8.1 on a Mac through heavy.sh, read 2026-11-01 01:04:08Z (api.confidential.unrealized.trade has no server yet)",
+  "commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495",
   "base": "http://127.0.0.1:18080",
   "reads": [
    {
@@ -13,13 +13,13 @@
      "cache-control": "no-store",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:01 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:08 GMT",
      "vary": "Origin",
      "via": "1.1 Caddy",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd"
+     "x-helper-commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495"
     },
-    "body": "{\"ok\":true,\"commit\":\"fdeb4d454898ef2a8f38b9d603949617d5bd34fd\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"6aa24c5e60d2c6fcf946e240acf15cd60064d495\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://sign.confidential.unrealized.trade",
@@ -30,13 +30,13 @@
      "cache-control": "no-store",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:01 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:08 GMT",
      "vary": "Origin",
      "via": "1.1 Caddy",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd"
+     "x-helper-commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495"
     },
-    "body": "{\"ok\":true,\"commit\":\"fdeb4d454898ef2a8f38b9d603949617d5bd34fd\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"6aa24c5e60d2c6fcf946e240acf15cd60064d495\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://example.com",
@@ -45,19 +45,19 @@
      "cache-control": "no-store",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:01 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:08 GMT",
      "vary": "Origin",
      "via": "1.1 Caddy",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd"
+     "x-helper-commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495"
     },
-    "body": "{\"ok\":true,\"commit\":\"fdeb4d454898ef2a8f38b9d603949617d5bd34fd\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"6aa24c5e60d2c6fcf946e240acf15cd60064d495\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
    }
   ]
  },
  "bad_commit": {
   "note": "a real answer: apps/helper built with HELPER_COMMIT=854f02d (main at the read, not the commit expected), read directly on 127.0.0.1:18081 in the same run",
-  "commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd",
+  "commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495",
   "base": "http://127.0.0.1:18081",
   "reads": [
    {
@@ -70,7 +70,7 @@
      "connection": "keep-alive",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:07 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:14 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
@@ -88,7 +88,7 @@
      "connection": "keep-alive",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:07 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:14 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
@@ -104,7 +104,7 @@
      "connection": "keep-alive",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:07 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:14 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
@@ -116,7 +116,7 @@
  },
  "bad_star": {
   "note": "the good answer with Access-Control-Allow-Origin: * on every read",
-  "commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd",
+  "commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495",
   "base": "http://127.0.0.1:18080",
   "reads": [
    {
@@ -128,13 +128,13 @@
      "cache-control": "no-store",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:01 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:08 GMT",
      "vary": "Origin",
      "via": "1.1 Caddy",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd"
+     "x-helper-commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495"
     },
-    "body": "{\"ok\":true,\"commit\":\"fdeb4d454898ef2a8f38b9d603949617d5bd34fd\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"6aa24c5e60d2c6fcf946e240acf15cd60064d495\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://sign.confidential.unrealized.trade",
@@ -145,13 +145,13 @@
      "cache-control": "no-store",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:01 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:08 GMT",
      "vary": "Origin",
      "via": "1.1 Caddy",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd"
+     "x-helper-commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495"
     },
-    "body": "{\"ok\":true,\"commit\":\"fdeb4d454898ef2a8f38b9d603949617d5bd34fd\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"6aa24c5e60d2c6fcf946e240acf15cd60064d495\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://example.com",
@@ -160,14 +160,14 @@
      "cache-control": "no-store",
      "content-length": "167",
      "content-type": "application/json; charset=utf-8",
-     "date": "Sun, 01 Nov 2026 00:47:01 GMT",
+     "date": "Sun, 01 Nov 2026 01:04:08 GMT",
      "vary": "Origin",
      "via": "1.1 Caddy",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "fdeb4d454898ef2a8f38b9d603949617d5bd34fd",
+     "x-helper-commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495",
      "access-control-allow-origin": "*"
     },
-    "body": "{\"ok\":true,\"commit\":\"fdeb4d454898ef2a8f38b9d603949617d5bd34fd\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"6aa24c5e60d2c6fcf946e240acf15cd60064d495\",\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"}}"
    }
   ]
  }
