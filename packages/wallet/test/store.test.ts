@@ -342,3 +342,27 @@ test("raiseDepositIndex never lowers the counter and keeps the lane (restore ste
   assert.ok(idx.every((i) => i % 8 === d && i > up + 8));
   assert.ok((await s.reserveDepositIndex(SCOPE)) >= 200 + 57);
 });
+
+// Round 3 (re-check of 59c8b3c).
+
+test("the record codec refuses an own __proto__ key and keeps constructor and prototype as plain keys", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  const answer = JSON.parse('{"__proto__":{"x":1},"a":1}'); // a reply parsed as received has __proto__ as an own key
+  await assert.rejects(s.put("quotes", "q", answer), /__proto__/);
+  await assert.rejects(s.put("quotes", "q", { deep: [answer] }), /__proto__/);
+  assert.equal(await s.get("quotes", "q"), undefined);
+  // assignment makes these own keys and changes nothing, so they round-trip as they are
+  const plain = JSON.parse('{"constructor":{"y":2},"prototype":3,"a":1}');
+  await s.put("quotes", "q", plain);
+  assert.deepEqual(await s.get("quotes", "q"), plain);
+});
+
+test("raiseDepositIndex refuses a min whose lane index is past 2^32 - 1, before any write", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  const d = s.lane;
+  const top = 0xffffffff - ((((0xffffffff - d) % 8) + 8) % 8); // the lane's last u32 index
+  assert.equal(await s.raiseDepositIndex(SCOPE, top), top);
+  // 2^32 - 1 is in lane 7; in every other lane it rounds up past the last u32 index (lane 7 has no such min)
+  if (top < 0xffffffff) await assert.rejects(s.raiseDepositIndex(SCOPE, 0xffffffff), /past 2\^32 - 1/);
+  assert.equal(await s.reserveDepositIndex(SCOPE), top, "the refused raises wrote nothing");
+});

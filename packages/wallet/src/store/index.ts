@@ -105,7 +105,9 @@ function toPlain(v: unknown, at: string): unknown {
   if (proto !== Object.prototype && proto !== null) throw new Error(`record field ${at} is not a plain object`);
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(v)) {
-    if (k === TAG_N || k === TAG_B) throw new Error(`a record may not hold the key ${k}`);
+    // "__proto__" would set out's prototype instead of a key, so it is refused; "constructor" and "prototype" are
+    // assigned as plain own keys and come back unchanged, so they stay
+    if (k === TAG_N || k === TAG_B || k === "__proto__") throw new Error(`a record may not hold the key ${k}`);
     out[k] = toPlain((v as Record<string, unknown>)[k], `${at}.${k}`);
   }
   return out;
@@ -306,6 +308,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     async raiseDepositIndex(scope, min) {
       if (!Number.isSafeInteger(min) || min < 0 || min > MAX_INDEX) throw new Error("min is an index in [0, 2^32)");
       const up = min + ((((lane - min) % WALLET_LANES) + WALLET_LANES) % WALLET_LANES);
+      if (up > MAX_INDEX) throw new Error(`min ${min} has no index in lane ${lane} at or below 2^32 - 1: past 2^32 - 1`);
       let next = 0;
       await moveCounter(scope, (n) => (next = Math.max(n, up)));
       return next;
