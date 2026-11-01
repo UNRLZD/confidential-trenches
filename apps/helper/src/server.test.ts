@@ -26,11 +26,11 @@ function call(method: string, path: string, headers: Record<string, string> = {}
   });
 }
 
-test("GET /v1/health: 200, the six parts all down, the commit in the body and in X-Helper-Commit", async () => {
+test("GET /v1/health: 200, proxy up (its routes are mounted) and the other five down, the commit in the body and in X-Helper-Commit", async () => {
   const r = await call("GET", "/v1/health");
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
-  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, "down"])) });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" ? "up" : "down"])) });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
