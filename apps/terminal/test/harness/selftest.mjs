@@ -10,8 +10,8 @@
 //     two gets with one salt give the same 32-byte PRF output;
 //   - the request log names every host, and the server's log too; the page log, the layout-shift recorder and the
 //     screencast record.
-// Needs the terminal's build (pnpm --filter terminal build) and runs as a heavy job:
-//   scripts/heavy.sh harness -- node apps/terminal/test/harness/selftest.mjs [--record <file>] [--shots <dir>]
+// Needs the terminal's build (pnpm --filter terminal build) and Playwright's Chromium:
+//   node apps/terminal/test/harness/selftest.mjs [--record <file>] [--shots <dir>]
 //     [--plant no-authenticator | --plant no-sibling]      PASS exit 0, FAIL exit 1, error exit 2
 // --plant breaks the harness on purpose, so the recorded bad answers come from real runs.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";

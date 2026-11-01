@@ -8,22 +8,20 @@
 //   - X-Helper-Source is "oneclick", X-Fetched-At is an ISO time within 10 minutes of the read, X-Helper-Commit is a
 //     full sha, Access-Control-Allow-Origin echoes APP_HOST and Access-Control-Allow-Credentials is absent;
 //   - no vendor key the host holds appears in any header or in the body, as set, in base64, base64url or URL-encoded.
-// The keys to look for are read into this process only: from the macOS Keychain (ct-jupiter, ct-relay, ct-lifi,
-// ct-1click), or with --keys-env from this process's JUPITER_API_KEY, RELAY_API_KEY, LIFI_API_KEY and ONECLICK_JWT
-// (the local proof's planted keys). With no key to look for, the check is an error, never a pass.
-//   node scripts/live-checks/helper-proxy.mjs [--base <url>] [--keys-env] [--record <file> --planted]
+// The keys to look for are read into this process only, from its JUPITER_API_KEY, RELAY_API_KEY, LIFI_API_KEY and
+// ONECLICK_JWT (the host's real keys after a deploy, the planted ones in a local proof). With no key to look for, the
+// check is an error, never a pass.
+//   node scripts/live-checks/helper-proxy.mjs [--base <url>] [--record <file> --planted]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; it writes the keys only with --planted
 //   (keys made for a local proof, never a real one), so the check's test can replay it.
 import "../net-window.mjs";
-import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-proxy";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 export const PATH = "/v1/proxy/oneclick/v0/tokens";
-const ENV_KEYS = ["JUPITER_API_KEY", "RELAY_API_KEY", "LIFI_API_KEY", "ONECLICK_JWT"];
-const KEYCHAIN = ["ct-jupiter", "ct-relay", "ct-lifi", "ct-1click"];
+export const ENV_KEYS = ["JUPITER_API_KEY", "RELAY_API_KEY", "LIFI_API_KEY", "ONECLICK_JWT"];
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
 
@@ -95,25 +93,17 @@ export async function read(base = BASE, fetchFn = fetch) {
   return { base, readAt, status: r.status, headers, body: await r.text() };
 }
 
-export function keychainKeys() {
-  const keys = [];
-  for (const s of KEYCHAIN) {
-    try {
-      const v = execFileSync("security", ["find-generic-password", "-s", s, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-      if (v) keys.push(v);
-    } catch {
-      // not in the Keychain: that vendor's key is not looked for
-    }
-  }
-  return keys;
+/** The vendor keys to look for, from the environment only; an unset or blank variable is not looked for. */
+export function envKeys(env = process.env) {
+  return ENV_KEYS.map((n) => (env[n] ?? "").trim()).filter(Boolean);
 }
 
 if (import.meta.main) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    const keys = a.includes("--keys-env") ? ENV_KEYS.map((n) => process.env[n]).filter(Boolean) : keychainKeys();
-    if (keys.length === 0) throw new Error("no vendor key to look for (Keychain ct-jupiter, ct-relay, ct-lifi, ct-1click, or --keys-env)");
+    const keys = envKeys();
+    if (keys.length === 0) throw new Error(`no vendor key to look for: set at least one of ${ENV_KEYS.join(", ")}`);
     const answer = await read(opt("--base", BASE));
     if (opt("--record")) {
       const rec = { ...answer, keys: a.includes("--planted") ? keys : `${keys.length} real key(s), not recorded` };

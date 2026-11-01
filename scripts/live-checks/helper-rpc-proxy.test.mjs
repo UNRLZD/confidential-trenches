@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/helper-rpc-proxy.test.mjs: the live check replays recorded runs
-// (helper-rpc-proxy.answers.json). good: apps/helper at 0c8f86c run on the owner's Mac against the public providers:
+// (helper-rpc-proxy.answers.json). good: apps/helper at 0c8f86c run on a Mac against the public providers:
 // PASS. bad_open: the same source with the allowlist check removed (a planted open RPC), so every unlisted method
 // reached its provider: FAIL. bad_base: main ba6dc21, before this card, with no /v1/rpc route: FAIL. Made from the good
 // run: a listed read answered with a JSON-RPC error, an answer for another id, a CORS echo of "*", a missing read: each
