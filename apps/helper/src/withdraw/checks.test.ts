@@ -19,7 +19,7 @@ import {
   vaultScopeOf,
   vaultWithdrawRequest,
   type VaultWithdrawal,
-} from "../../../../packages/kit/src/index.ts";
+} from "@blindfill/kit";
 import {
   MAX_TREE_DEPTH,
   WITHDRAW_CHECK_CODES,
@@ -458,4 +458,62 @@ test("a fee_min read that fails throws: nothing is sent on an unknown", async ()
 test("check 2 uses the configured vault and scope: another vault, or another scope, refuses an honest proof", async () => {
   refused(await run(req(), { ...CFG, vault: "other-vault.near" }), "bad_proof", /^context: /, "another vault");
   refused(await run(req(), { ...CFG, scope: CFG.scope + 1n }), "bad_proof", /^context: /, "another scope");
+});
+
+// ---- Boundaries (review round 1): each case below catches a mutation the tests above let through ----
+
+const depth0 = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/withdraw-request-depth0.json"), "utf8")) as {
+  vault: string;
+  scope: string;
+  fee_recipient: string;
+  request: Req;
+};
+depth0.request.token = VAULT_CONSTANTS.TOKEN;
+
+test("a real proof with both tree depths 0 (the first withdrawal from a one-deposit vault) passes: a 0 signal is a valid scalar", async () => {
+  assert.equal(depth0.vault, CFG.vault);
+  assert.equal(BigInt(depth0.scope), CFG.scope);
+  assert.deepEqual([depth0.request.public_signals[4], depth0.request.public_signals[6]], ["0", "0"]);
+  const v = await run(structuredClone(depth0.request));
+  assert.equal(v.ok, true, v.ok ? "" : `${v.code}: ${v.why}`);
+  assert.ok(v.ok && v.withdraw.stateTreeDepth === 0n && v.withdraw.ASPTreeDepth === 0n);
+  for (const i of [4, 6]) {
+    const r = structuredClone(depth0.request);
+    r.public_signals[i] = "1";
+    refused(await run(r), "bad_proof", /^proof: does not verify/, `depth signal ${i} as 1`);
+  }
+});
+
+test("a tree depth of exactly 32 passes check 1 and reaches check 4", async () => {
+  for (const i of [4, 6]) {
+    const r = req();
+    r.public_signals[i] = "32";
+    refused(await run(r), "bad_proof", /^proof: does not verify/, `public_signals[${i}] = 32`);
+  }
+});
+
+test("register_deposit and relay_fee: 2^128 is refused at check 1, 2^128 - 1 passes it", async () => {
+  const max = String((1n << 128n) - 1n);
+  const over = String(1n << 128n);
+  for (const k of ["register_deposit", "relay_fee"] as const) {
+    const a = req();
+    a.withdrawal[k] = over;
+    refused(await run(a), "bad_shape", new RegExp(`withdrawal.${k}: not a u128`), `${k} = 2^128`);
+    const b = req();
+    b.withdrawal[k] = max;
+    refused(await run(b), "bad_proof", /^context: /, `${k} = 2^128 - 1 passes check 1`);
+  }
+});
+
+test("a proof coordinate in [p, q) passes check 1 and is refused at check 4; q - 1 too", async () => {
+  for (const x of [VAULT_FIELD_P, VAULT_FIELD_P + 1n, VAULT_FIELD_Q - 1n]) {
+    for (const at of ["a", "c"] as const) {
+      const r = req();
+      r.proof[at][0] = String(x);
+      refused(await run(r), "bad_proof", /^proof: does not verify/, `${at}[0] = ${x}`);
+    }
+    const r = req();
+    r.proof.b[0][1] = String(x);
+    refused(await run(r), "bad_proof", /^proof: does not verify/, `b[0][1] = ${x}`);
+  }
 });

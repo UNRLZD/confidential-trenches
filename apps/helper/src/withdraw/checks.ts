@@ -28,7 +28,7 @@ import {
   vaultRelayFeeWithinBackstop,
   type HelperWithdrawCode,
   type VaultWithdrawal,
-} from "../../../../packages/kit/src/index.ts";
+} from "@blindfill/kit";
 
 // ---- Values ----
 
