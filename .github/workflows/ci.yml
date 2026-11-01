@@ -148,6 +148,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: every workspace package's test script
         run: pnpm -r --if-present --no-bail run test
+      - name: every workspace package's typecheck
+        run: pnpm -r --if-present run typecheck
       - name: the deploy gate's own tests
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
