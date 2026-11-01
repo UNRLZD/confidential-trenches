@@ -299,7 +299,7 @@ test("vaultWithdrawalProblems: every refusal of 2.5.2 rows 1, 2 and 8 the device
   has({ recipient: "Bob.near" }, /recipient/);
 });
 
-// Card vault-withdraw-context (CO 2026-11-01): the withdrawal refusals the vault and the kit share. The vault's unit
+// Card vault-withdraw-context: the withdrawal refusals the vault and the kit share. The vault's unit
 // test (contracts/vault/tests/withdraw_vectors.rs) reads the same vectors and refuses each when it reads the call.
 test("withdrawal_refusals: the kit refuses each shared vector with exactly its problem, and takes it without the key", () => {
   assert.equal(V.withdrawal_refusals.length, 1);
