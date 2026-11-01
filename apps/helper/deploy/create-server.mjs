@@ -18,8 +18,6 @@
 //      change: the script stops and says so instead.
 // The root password Hetzner returns for a server made without an ssh key is dropped unread: admin is over Tailscale.
 import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 export const API = "https://api.hetzner.cloud/v1";
 export const REPO = "UNRLZD/confidential-trenches";
@@ -237,7 +235,7 @@ export async function main(argv, deps = {}) {
   return 1;
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (e) => {

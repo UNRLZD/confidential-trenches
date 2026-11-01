@@ -8,8 +8,6 @@
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { health } from "./health.ts";
 
 export const ORIGINS: ReadonlySet<string> = new Set([
@@ -106,7 +104,7 @@ export function start(commit: string, port: number): Server {
   return server;
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   const commit = process.env.HELPER_COMMIT ?? "";
   const port = Number(process.env.PORT ?? 8080);
   if (!SHA.test(commit)) {

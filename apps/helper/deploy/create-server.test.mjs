@@ -2,6 +2,7 @@
 // token; its live path, against a recorded-shape fake of the Hetzner API, makes exactly the planned server and never
 // prints the token or the root password.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { FIREWALL, PRIMARY_IP, TYPES, cloudInit, main, plan } from "./create-server.mjs";
 
@@ -111,4 +112,11 @@ test("live path stops when every type in fsn1 is unavailable, naming the DNS cha
   const c = capture();
   assert.equal(await main(["--commit", COMMIT], { fetch: all, token: () => TOKEN, sleep: async () => {}, ...c }), 1);
   assert.match(c.out.join("\n"), /owner DNS change/);
+});
+
+test("importing the script from a process whose argv[1] is not a file runs nothing and does not throw", () => {
+  const url = new URL("./create-server.mjs", import.meta.url).href;
+  const r = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(url)}).then((m) => process.stdout.write(m.cloudInit(process.argv[1]).split("\\n")[0]))`, COMMIT], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "#cloud-config");
 });
