@@ -3,30 +3,29 @@
 //! `--features sandbox`, through tests/harness/run.sh (`contracts/vault/tests/harness/run.sh --test s01`); a plain
 //! `cargo test` builds this file empty.
 //!
-//! `nobody_holds_a_key_to_the_vault`: contracts/vault/scripts/deploy.mjs deploys the release build (`VAULT_WASM`) by
-//! the 2.8 recipe and registers it on the real USDC at TOKEN, signed with the sandbox's own genesis key (the root
-//! account's, written to a temp file outside the repo). Then:
+//! `nobody_holds_a_key_to_the_vault`: the harness deploys the release build (`VAULT_WASM`) by the 2.8 recipe
+//! (`Harness::deploy_vault`, signed by the sandbox's root account) and registers it on the real USDC at TOKEN. Not by
+//! contracts/vault/scripts/deploy.mjs: that script refuses this build before any send (it exports withdraw without
+//! on_payout), which tests/s20.rs proves. Then:
 //! - `view_access_key_list` reads `keys: []` on two reads (optimistic and final; the sandbox has one RPC);
 //! - `storage_balance_of(vault)` on USDC is set;
 //! - AddKey, DeleteAccount and DeployContract on the vault, each sent by the parent and by a stranger, are each
 //!   refused with `ActorNoPermission` (NC `actions.rs` l.776-813), and afterwards the keys are still `[]`, the code
 //!   hash and the balance unchanged;
-//! - the wasm's imports hold none of 2.8's banned actions, its promise imports are inside the seven of 2.8 and its
-//!   function exports inside 2.5.7's list (each missing name printed: on this base the payout path has not landed,
-//!   so the build has no promise import and no ragequit, on_payout or settle yet), and its outgoing method names
-//!   `storage_deposit`, `ft_transfer` and `on_payout` are in its bytes while none of the token's other mutating
-//!   methods is.
+//! - the wasm's imports hold none of 2.8's banned actions; its promise imports equal 2.8's seven less NOT_YET_PROMISES
+//!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (on this base the payout path has not landed:
+//!   no promise import yet, and no ragequit, on_payout or settle; the card that lands them empties both sets, and this
+//!   equality then fails until it does); its outgoing method names `storage_deposit`, `ft_transfer` and `on_payout` are
+//!   in its bytes while none of the token's other mutating methods is.
 #![cfg(feature = "sandbox")]
 
 mod harness;
 
 use harness::{Harness, R};
-use near_sdk::serde_json::{self, json, Value};
+use near_sdk::serde_json::json;
 use near_workspaces::result::ExecutionFinalResult;
 use near_workspaces::types::{AccessKey, KeyType, SecretKey};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::process::Command;
 
 /// vault.md 2.8: imports that let the code act on its own account (NC near-vm-runner imports.rs l.198-283); a name
 /// ending in `*` is a prefix.
@@ -74,10 +73,27 @@ const EXPORTS: [&str; 17] = [
     "totals",
     "contract_source_metadata",
 ];
-/// The vault's outgoing calls (2.5): to the token and to itself.
+/// What the build does not hold yet, by name: the payout path (2.5.2-2.5.5) has not landed, so none of 2.8's seven
+/// promise imports and none of these three exports. Each set is compared for equality, so a build that gains or loses
+/// any one name fails here until the set is edited with it.
+const NOT_YET_PROMISES: [&str; 7] = PROMISES;
+const NOT_YET_EXPORTS: [&str; 3] = ["ragequit", "on_payout", "settle"];
+/// The vault's outgoing calls (2.5): to the token and to itself. Until the payout path lands, this presence check is
+/// met by other strings in the bytes (config()'s `gas_on_payout_tgas`, a log's `ft_transfer`), so it proves little;
+/// src/promise.rs's unit test, which reads the exact calls a payout makes, is the real check until then.
 const OUTGOING: [&str; 3] = ["storage_deposit", "ft_transfer", "on_payout"];
-/// NEP-141 and NEP-145 mutating methods the vault never calls (2.5.7: it never unregisters or withdraws storage).
-const NEVER_CALLED: [&str; 4] = ["ft_transfer_call", "storage_unregister", "storage_withdraw", "near_withdraw"];
+/// Token methods the vault never calls (2.5.7, src/promise.rs): NEP-141 and NEP-145 mutating methods past
+/// storage_deposit and ft_transfer, and the allowance methods of a token that has them.
+const NEVER_CALLED: [&str; 8] = [
+    "ft_transfer_call",
+    "storage_unregister",
+    "storage_withdraw",
+    "near_withdraw",
+    "approve",
+    "transfer_from",
+    "increase_allowance",
+    "decrease_allowance",
+];
 
 /// A wasm module's (imports as (module, name, kind), exports as (name, kind)), from sections 2 and 7.
 fn wasm_lists(w: &[u8]) -> (Vec<(String, String, u8)>, Vec<(String, u8)>) {
@@ -151,32 +167,6 @@ fn has(hay: &[u8], needle: &str) -> bool {
     hay.windows(needle.len()).any(|w| w == needle.as_bytes())
 }
 
-/// Runs contracts/vault/scripts/deploy.mjs against this sandbox with the root's genesis key in a temp file outside the
-/// repo (removed afterwards); its exit code, stdout, stderr and record.
-async fn run_deploy_script(h: &Harness) -> R<(i32, String, String, Option<Value>)> {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/deploy.mjs");
-    let wasm = std::env::var("VAULT_WASM").map_err(|_| "VAULT_WASM is not set: run through tests/harness/run.sh")?;
-    let dir = std::env::temp_dir().join(format!("vts-deploy-s01-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos()));
-    std::fs::create_dir_all(&dir)?;
-    let (key, out) = (dir.join("sandbox-genesis-key.json"), dir.join("record.json"));
-    let sk = h.root.secret_key();
-    std::fs::write(&key, json!({"account_id": h.root.id(), "public_key": sk.public_key().to_string(), "private_key": sk.to_string()}).to_string())?;
-    let rpc = h.worker.rpc_addr();
-    let res = Command::new("node")
-        .arg(&script)
-        .args(["--network", "sandbox", "--rpc", &rpc, "--parent", h.root.id().as_str(), "--wasm", &wasm])
-        .arg("--key-file")
-        .arg(&key)
-        .arg("--out")
-        .arg(&out)
-        .output()?;
-    let record = std::fs::read_to_string(&out).ok().and_then(|s| serde_json::from_str(&s).ok());
-    std::fs::remove_dir_all(&dir)?;
-    let (so, se) = (String::from_utf8_lossy(&res.stdout).to_string(), String::from_utf8_lossy(&res.stderr).to_string());
-    println!("deploy.mjs exit {:?}\n--- stdout\n{so}--- stderr\n{se}", res.status.code());
-    Ok((res.status.code().unwrap_or(-1), so, se, record))
-}
-
 /// The transaction was refused with `ActorNoPermission`.
 fn refused(what: &str, r: &ExecutionFinalResult) {
     let e = format!("{:?}", r.clone().into_result().err());
@@ -200,9 +190,9 @@ async fn keys_are_empty(h: &Harness) -> R<()> {
 async fn nobody_holds_a_key_to_the_vault() -> R<()> {
     let mut h = Harness::start().await?;
     h.deploy_usdc().await?;
-    let (code, _, stderr, rec) = run_deploy_script(&h).await?;
-    assert_eq!(code, 0, "deploy.mjs failed: {stderr}");
-    assert_eq!(rec.expect("no record")["account_id"], json!(h.vault.as_str()));
+    let deployed = h.deploy_vault().await?;
+    println!("the 2.8 recipe: {}", deployed.receipts.iter().map(|r| r.line()).collect::<Vec<_>>().join("; "));
+    let _ = h.storage_deposit(&h.root, &h.vault).await?;
     h.wait_final(&h.vault).await?;
 
     keys_are_empty(&h).await?;
@@ -237,17 +227,17 @@ async fn nobody_holds_a_key_to_the_vault() -> R<()> {
         funcs.iter().filter(|n| BANNED.iter().any(|b| b.strip_suffix('*').map_or(**n == *b, |pre| n.starts_with(pre)))).collect();
     println!("imports ({}): {funcs:?}", funcs.len());
     assert!(banned.is_empty(), "banned imports: {banned:?}");
-    // Inside the lists, not equal to them: on this base the payout path (2.5.2-2.5.5) has not landed, so the build has
-    // no promise import yet and lacks ragequit, on_payout and settle. What is still missing is printed; it is the
-    // equality 2.8 and 2.5.7 name once those methods land.
+    // Equal to 2.8's and 2.5.7's lists less what has not landed yet (NOT_YET_PROMISES, NOT_YET_EXPORTS).
     let promises: BTreeSet<&str> = funcs.iter().copied().filter(|n| n.starts_with("promise_")).collect();
     let seven: BTreeSet<&str> = PROMISES.into_iter().collect();
-    println!("promise imports {promises:?}; of 2.8's seven not yet imported: {:?}", seven.difference(&promises).collect::<Vec<_>>());
-    assert!(promises.is_subset(&seven), "promise imports outside 2.8's seven: {:?}", promises.difference(&seven).collect::<Vec<_>>());
+    let want_promises: BTreeSet<&str> = seven.difference(&NOT_YET_PROMISES.into_iter().collect()).copied().collect();
+    println!("promise imports {promises:?}; want 2.8's seven less NOT_YET_PROMISES: {want_promises:?}");
+    assert_eq!(promises, want_promises, "promise imports are not 2.8's seven less NOT_YET_PROMISES");
     let exported: BTreeSet<&str> = exports.iter().filter(|e| e.1 == 0).map(|e| e.0.as_str()).collect();
     let listed: BTreeSet<&str> = EXPORTS.into_iter().collect();
-    println!("function exports ({}): {exported:?}; of 2.5.7's list not yet exported: {:?}", exported.len(), listed.difference(&exported).collect::<Vec<_>>());
-    assert!(exported.is_subset(&listed), "exports outside 2.5.7's list: {:?}", exported.difference(&listed).collect::<Vec<_>>());
+    let want_exports: BTreeSet<&str> = listed.difference(&NOT_YET_EXPORTS.into_iter().collect()).copied().collect();
+    println!("function exports ({}): {exported:?}; want 2.5.7's list less NOT_YET_EXPORTS: {want_exports:?}", exported.len());
+    assert_eq!(exported, want_exports, "function exports are not 2.5.7's list less NOT_YET_EXPORTS");
     for m in OUTGOING {
         assert!(has(&wasm, m), "the wasm does not name {m}");
     }

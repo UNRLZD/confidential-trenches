@@ -9,12 +9,16 @@
 //!    at the FunctionCall (`FunctionBodyTooLarge`), the whole receipt rolls back, no vault account is left, and the
 //!    parent's balance differs only by the gas burnt. The wasm is made here, one `config` export whose body is
 //!    200,000 B of `nop`: the same failure the first oversized build met, without building that build again.
-//! 2. `the_deploy_script_lands_the_recipe_keyless` (green half): contracts/vault/scripts/deploy.mjs, run against this
+//! 2. `the_deploy_script_refuses_this_build_before_any_send`: contracts/vault/scripts/deploy.mjs, run against this
 //!    sandbox with the sandbox's own genesis key (the root account's, written to a temp file outside the repo), builds
-//!    the vault twice from clean (the mainnet build, which names the token the harness puts at TOKEN), finds both
-//!    builds equal, deploys that wasm and registers it on the token. The transaction holds exactly the four
-//!    recipe actions and no AddKey; `config()` answers; `view_access_key_list` reads `keys: []` at optimistic and at
-//!    final; the code hash is the wasm's; every function body is at most 196,608 B; the vault is registered on the
+//!    the vault twice from clean (the mainnet build), finds both builds equal and refuses before any send, naming
+//!    `withdrawWithoutPayout`: this source exports withdraw while the payout path (on_payout) has not landed, a build
+//!    that would spend a note it cannot pay out. No vault account is made, no record is written, and the parent's
+//!    nonce and balance are unchanged. The script lands a vault once the payout path does.
+//! 3. `the_release_build_lands_by_the_recipe_keyless` (green half): the same release build (`VAULT_WASM`) by the 2.8
+//!    recipe from the harness (`Harness::deploy_vault`), then registered on the token. The transaction holds exactly
+//!    the four recipe actions and no AddKey; `config()` answers; `view_access_key_list` reads `keys: []` at optimistic
+//!    and at final; the code hash is the wasm's; every function body is at most 196,608 B; the vault is registered on the
 //!    token; the wasm's size and sha256 are printed (2.11's code row). Then the vault's first state-writing call (a
 //!    904 B `storage_prepay`) writes the contract's state record (2.3, 200 B), and the vault's free NEAR (amount less
 //!    storage) is still at least 0; then the first deposit lands on that prepay (a user's own `ft_transfer_call` of
@@ -215,30 +219,51 @@ async fn an_oversized_build_rolls_the_whole_batch_back() -> R<()> {
 }
 
 #[tokio::test]
-async fn the_deploy_script_lands_the_recipe_keyless() -> R<()> {
+async fn the_deploy_script_refuses_this_build_before_any_send() -> R<()> {
+    let h = Harness::start().await?;
+    let pk = h.root.secret_key().public_key().to_string();
+    let nonce = |v: Value| v["result"]["nonce"].as_u64().ok_or_else(|| format!("view_access_key: {v}"));
+    let key_query = json!({"request_type": "view_access_key", "finality": "optimistic", "account_id": h.root.id(), "public_key": pk});
+    let (nonce0, balance0) = (nonce(h.rpc("query", key_query.clone()).await?)?, h.near_balance(h.root.id()).await?);
+    let run = run_deploy_script(&h, true).await?;
+    assert_eq!(run.code, 1, "deploy.mjs did not refuse: {}", run.stderr);
+    assert!(run.stdout.contains("reproducible: both builds sha256 "), "deploy.mjs did not build twice to one sha256");
+    assert!(
+        run.stderr.contains("refused before any send: withdrawWithoutPayout (vault.md 2.8, 2.5.7): withdraw"),
+        "deploy.mjs did not refuse naming withdrawWithoutPayout: {}",
+        run.stderr
+    );
+    assert!(run.record.is_none(), "deploy.mjs wrote a record");
+    assert!(!run.stdout.contains("sending ["), "deploy.mjs sent the recipe");
+    let gone = h.rpc("query", json!({"request_type": "view_account", "finality": "final", "account_id": h.vault})).await?;
+    println!("view_account {} after the refusal: {gone}", h.vault);
+    assert!(gone.to_string().contains("UNKNOWN_ACCOUNT") || gone.to_string().contains("does not exist"), "a vault account exists: {gone}");
+    let (nonce1, balance1) = (nonce(h.rpc("query", key_query).await?)?, h.near_balance(h.root.id()).await?);
+    println!("parent nonce {nonce0} -> {nonce1}, balance {balance0} -> {balance1}");
+    assert_eq!((nonce1, balance1), (nonce0, balance0), "the parent's nonce or balance changed: something was sent");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_release_build_lands_by_the_recipe_keyless() -> R<()> {
     let h = Harness::start().await?;
     h.deploy_mock_token().await?;
-    let run = run_deploy_script(&h, true).await?;
-    assert_eq!(run.code, 0, "deploy.mjs failed: {}", run.stderr);
-    let rec = run.record.expect("deploy.mjs wrote no record");
-    assert_eq!(rec["account_id"], json!(h.vault.as_str()));
-    assert!(run.stdout.contains("next: node scripts/live-checks/vault-skeleton.mjs --deployment "), "deploy.mjs printed no next command");
+    let deployed = h.deploy_vault().await?;
+    let _ = h.storage_deposit(&h.root, &h.vault).await?;
+    let wasm = h.vault_wasm.clone();
 
     // the transaction: exactly the four recipe actions, no AddKey
-    let tx = rec["tx_hash"].as_str().expect("record.tx_hash");
-    let (kinds, r) = tx_actions(&h, tx, h.root.id().as_str()).await?;
+    let tx = deployed.tx_hash.clone();
+    let (kinds, r) = tx_actions(&h, &tx, h.root.id().as_str()).await?;
     println!("recipe tx {tx}: {kinds:?}");
     assert_eq!(kinds, ["CreateAccount", "Transfer", "DeployContract", "FunctionCall:config"]);
     assert!(r["status"]["SuccessValue"].is_string(), "the recipe did not land: {}", r["status"]);
     for ro in r["receipts_outcome"].as_array().unwrap() {
         assert!(ro["outcome"]["status"].get("Failure").is_none(), "a failed receipt: {ro}");
     }
-    let wasm = run.wasm.clone();
-    let shas = rec["wasm_builds_sha256"].as_array().expect("record.wasm_builds_sha256");
-    println!("the script's two clean builds: {shas:?}");
-    assert!(shas.len() == 2 && shas[0] == shas[1] && shas[0] == rec["wasm_sha256"], "the two builds are not one sha256: {shas:?}");
     let transfer = (wasm.len() as u128 + 100) * YOCTO_PER_BYTE + NearToken::from_millinear(10).as_yoctonear();
     assert_eq!(r["transaction"]["actions"][1]["Transfer"]["deposit"], json!(transfer.to_string()), "Transfer is not code storage + 0.01 N");
+    let sha: String = near_sdk::env::sha256(&wasm).iter().map(|b| format!("{b:02x}")).collect();
 
     // config() answers; keys [] at optimistic and at final; the code is the wasm's
     let cfg = h.view(&h.vault, "config", json!({})).await?;
@@ -252,19 +277,17 @@ async fn the_deploy_script_lands_the_recipe_keyless() -> R<()> {
     }
     let acct = h.account_view(&h.vault, "final").await?;
     assert_eq!(acct["code_hash"], json!(harness::code_hash(&wasm)));
-    assert_eq!(rec["wasm_sha256"], json!(near_sdk::env::sha256(&wasm).iter().map(|b| format!("{b:02x}")).collect::<String>()));
 
     // every function body under the limit; size and sha256 recorded
     let bodies = function_bodies(&wasm);
     let max = *bodies.iter().max().unwrap();
-    println!("vault wasm {} B, sha256 {}, {} functions, largest body {max} B (limit {MAX_FUNCTION_BODY})", wasm.len(), rec["wasm_sha256"], bodies.len());
+    println!("vault wasm {} B, sha256 {sha}, {} functions, largest body {max} B (limit {MAX_FUNCTION_BODY})", wasm.len(), bodies.len());
     assert!(max <= MAX_FUNCTION_BODY, "a function body of {max} B");
 
     // registered on the token
     let reg = h.view(&h.token, "storage_balance_of", json!({"account_id": h.vault})).await?;
     println!("storage_balance_of(vault): {reg}");
     assert!(!reg.is_null(), "the vault is not registered on the token");
-    assert!(rec["registration_tx"].is_string(), "no registration tx in the record");
 
     // the first state-writing call writes the state record; the vault's free NEAR stays at least 0
     let (amount0, usage0) = (h.near_balance(&h.vault).await?, acct["storage_usage"].as_u64().unwrap() as u128);
