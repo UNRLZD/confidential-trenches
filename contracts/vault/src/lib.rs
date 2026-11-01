@@ -17,6 +17,7 @@ pub mod events;
 pub mod field;
 pub mod poseidon;
 pub mod promise;
+pub mod verifier;
 pub mod verifier_keys;
 
 use constants::*;
