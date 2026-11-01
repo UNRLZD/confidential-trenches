@@ -17,13 +17,15 @@ pub mod events;
 pub mod field;
 pub mod poseidon;
 pub mod promise;
+pub mod tree;
 pub mod verifier;
 pub mod verifier_keys;
 
 use constants::*;
-use near_sdk::collections::{LookupMap, LookupSet, Vector};
+use near_sdk::collections::{LookupMap, Vector};
 use near_sdk::json_types::U128;
 use near_sdk::{env, near, AccountId, BorshStorageKey};
+pub use tree::Tree;
 
 /// A field element as 32 big-endian bytes.
 pub type Bytes32 = [u8; 32];
@@ -45,27 +47,6 @@ enum Key {
     Deposits,
     LabelIndex,
     Prepaid,
-}
-
-/// A LeanIMT (LIMT `InternalLeanIMT.sol:7-18`): `size`, `depth`, a side node per level (an overwrite, except one new
-/// key each time the depth grows) and every leaf by its index (`leaf_at`, a NEAR addition so any RPC serves every leaf).
-#[near]
-pub struct Tree {
-    pub size: u64,
-    pub depth: u8,
-    side_nodes: LookupMap<u8, Bytes32>,
-    leaf_at: LookupMap<u64, Bytes32>,
-}
-
-impl Tree {
-    fn new(side: Key, leaves: Key) -> Self {
-        Self { size: 0, depth: 0, side_nodes: LookupMap::new(side), leaf_at: LookupMap::new(leaves) }
-    }
-
-    /// LIMT `_root`: the side node at the tree's depth; 0 for an empty tree.
-    pub fn root(&self) -> Bytes32 {
-        self.side_nodes.get(&self.depth).unwrap_or([0; 32])
-    }
 }
 
 /// A spend's state (vault.md 2.5.2 row 11, 2.5.4, 2.5.5).
@@ -126,8 +107,6 @@ pub struct Vault {
     /// leaf -> index, for the state tree only (a label hashes a fresh nonce and cannot repeat)
     state_leaf_index: LookupMap<Bytes32, u64>,
     label_tree: Tree,
-    state_roots: LookupSet<Bytes32>,
-    label_roots: LookupSet<Bytes32>,
     spent: LookupMap<Bytes32, u64>,
     /// append-only: a push writes the row and its count together (key: prefix, then the index as 8 LE bytes)
     spends: Vector<Spend>,
@@ -143,11 +122,9 @@ impl Default for Vault {
     fn default() -> Self {
         Self {
             nonce: 0,
-            state_tree: Tree::new(Key::StateSideNodes, Key::StateLeafAt),
+            state_tree: Tree::new(Key::StateSideNodes, Key::StateLeafAt, Key::StateRoots),
             state_leaf_index: LookupMap::new(Key::StateLeafIndex),
-            label_tree: Tree::new(Key::LabelSideNodes, Key::LabelAt),
-            state_roots: LookupSet::new(Key::StateRoots),
-            label_roots: LookupSet::new(Key::LabelRoots),
+            label_tree: Tree::new(Key::LabelSideNodes, Key::LabelAt, Key::LabelRoots),
             spent: LookupMap::new(Key::Spent),
             spends: Vector::new(Key::Spends),
             precommitments: LookupMap::new(Key::Precommitments),
@@ -245,7 +222,7 @@ fn tree_view(t: &Tree) -> TreeView {
 }
 
 fn tree_page(t: &Tree, from: u64, limit: u64) -> Vec<String> {
-    page(from, limit, t.size).map(|i| dec(&t.leaf_at.get(&i).expect("leaf_at holds every index below size"))).collect()
+    page(from, limit, t.size).map(|i| dec(&t.leaf_at(i).expect("leaf_at holds every index below size"))).collect()
 }
 
 /// The views of vault.md 2.5.6 and `config()`. None looks up one secret-derived value (a precommitment, a nullifier
@@ -332,12 +309,12 @@ impl Vault {
 
     /// Any root the state tree has ever had (vault.md 2.4).
     pub fn is_known_state_root(&self, root: String) -> bool {
-        self.state_roots.contains(&root_arg(&root))
+        self.state_tree.is_known_root(&root_arg(&root))
     }
 
     /// Any root the label tree has ever had (vault.md 2.4).
     pub fn is_known_label_root(&self, root: String) -> bool {
-        self.label_roots.contains(&root_arg(&root))
+        self.label_tree.is_known_root(&root_arg(&root))
     }
 
     pub fn totals(&self) -> Totals {
