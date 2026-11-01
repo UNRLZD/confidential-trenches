@@ -4,9 +4,11 @@
 // their own shipped _headers (COOP same-origin on both, the CSPs, Integrity-Policy):
 //   - APP_HOST serves the probe build (probe.tsx): the app's own start, shell, signing page client and hop, with a probe
 //     screen in every route;
-//   - SIGN_HOST serves its release page with a stand-in script: in the iframe it speaks the frozen ready, state and open
-//     kinds (answering an open kind after 300 ms, as a slow page would) and writes a one-use flow record in its own
-//     store; top-level it reads that record and returns the tab to APP_HOST's return path for the record's key.
+//   - SIGN_HOST serves its release page with a stand-in script in place of the release's own: in the iframe it speaks
+//     the frozen ready, state and open kinds (answering an open kind after 300 ms, as a slow page would) and writes a
+//     one-use flow record in its own store; top-level it reads that record and returns the tab to APP_HOST's return
+//     path for the record's key. The release's script is taken out (signSite): it answers every open kind not_allowed
+//     until the signing page's open kinds land, and its answer would come before the stand-in's.
 // For each of the five open kinds, at phone and desktop widths, three runs from a different route each:
 //   return: open the sheet, type in its field, scroll, tap the kind's control (and tap it again), SIGN_HOST top-level,
 //           done, back at the route left with the sheet, the field, the scroll and the control locked until the
@@ -94,16 +96,21 @@ if (window.top !== window) {
 }
 `;
 
-/** SIGN_HOST's release page with the stand-in script, its sha384 on the tag (SIGN_HOST's Integrity-Policy). */
+/**
+ * SIGN_HOST's release page with the stand-in script in place of the release's own scripts, its sha384 on the tag
+ * (SIGN_HOST's Integrity-Policy). The served page must load exactly one script, the stand-in; any other shape is an
+ * error (exit 2), never a run against two scripts.
+ */
 function signSite(signRoot, plant) {
   const dir = mkdtempSync(path.join(tmpdir(), "ct-return-hop-sign-"));
   cpSync(signRoot, dir, { recursive: true });
   const js = standIn(plant);
   writeFileSync(path.join(dir, "stand-in.js"), js);
   const integrity = `sha384-${createHash("sha384").update(js).digest("base64")}`;
-  const html = readFileSync(path.join(dir, "index.html"), "utf8");
-  if (!html.includes("<body></body>")) throw new Error("SIGN_HOST's index.html has changed; the stand-in cannot be placed");
-  writeFileSync(path.join(dir, "index.html"), html.replace("<body></body>", `<body><script src="/stand-in.js" integrity="${integrity}" crossorigin="anonymous"></script></body>`));
+  const html = readFileSync(path.join(dir, "index.html"), "utf8").replace(/[ \t]*<script\b[^>]*>\s*<\/script>[ \t]*\n?/gi, "");
+  if (!html.includes("<body></body>") || /<script\b/i.test(html)) throw new Error("SIGN_HOST's index.html has changed; the stand-in cannot be placed");
+  const page = html.replace("<body></body>", `<body><script src="/stand-in.js" integrity="${integrity}" crossorigin="anonymous"></script></body>`);
+  writeFileSync(path.join(dir, "index.html"), page);
   return dir;
 }
 
