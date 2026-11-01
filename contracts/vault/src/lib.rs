@@ -22,6 +22,7 @@ pub mod promise;
 pub mod tree;
 pub mod verifier;
 pub mod verifier_keys;
+pub mod withdraw;
 
 use constants::*;
 use near_sdk::collections::{LookupMap, Vector};
