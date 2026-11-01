@@ -84,12 +84,15 @@ class Chain {
   during?: () => Promise<void>;
   /** Final height moves by this after each prepay (R4 after SuccessValue). */
   prepayAdvance = 1n;
+  /** How far the newer provider's final is ahead of the older's. */
+  lead = 0n;
   n = 0;
 
   reads(): SendReads {
     return {
       accessKey: async (a): Promise<KeyRead> => (this.nonce.has(a) ? { kind: "key", permission: "FullAccess", nonce: this.nonce.get(a)! } : { kind: "no_account" }),
       finalHeight: async () => this.final,
+      newestFinalHeight: async () => this.final + this.lead,
       ftBalance: async (a) => this.usdc.get(a) ?? 0n,
       pUsed: async (p) => this.pages.has(p.toString()),
       deposit: async (p) => this.pages.get(p.toString()) ?? null,
@@ -512,4 +515,13 @@ test("R3 before every send: a third count written before a crash (struck not yet
   assert.deepEqual([a.status, code(a)], [403, "sender_struck"]);
   assert.equal(w.chain.sends().length, n);
   assert.equal(w.store.get(w.u.id)!.struck, true);
+});
+
+test("R4 reads the newest final height: one provider 6 blocks ahead puts a call 25 ahead of the other under K", async () => {
+  const w = world();
+  w.chain.lead = 6n;
+  assert.equal(code(await w.carry(signed(w.u, P, 101n, w.chain.final + 25n))), "resign_needed");
+  assert.equal(w.chain.txs.length, 0);
+  w.chain.lead = 0n;
+  ok(await w.carry(signed(w.u, P, 101n, w.chain.final + 26n)));
 });

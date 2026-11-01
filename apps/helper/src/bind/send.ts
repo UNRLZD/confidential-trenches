@@ -59,6 +59,8 @@ export type Answer = { status: number; body: { tx_hash: string } | { error: { co
 export type SendReads = BindReads & {
   /** The vault's deposits pages' record of P, from the relayer's index, or null. */
   deposit(precommitment: bigint): Promise<{ depositor: string; value: bigint } | null>;
+  /** R4's "newest final height": the higher of the providers' finals (finalHeight is the lower, for reads at one height). */
+  newestFinalHeight(): Promise<bigint>;
   /** Inserts that may land before this deposit: the state and label trees' sizes now, and inserts seen in flight. */
   trees(): Promise<{ state: bigint; label: bigint }>;
 };
@@ -254,7 +256,7 @@ export function ledgerOf(store: DepositStore, reads: SendReads): BindLedger {
 
 /** R4: max_block_height minus the newest final height is at least K. */
 async function marginHolds(deps: SendDeps, maxBlockHeight: bigint): Promise<boolean> {
-  return maxBlockHeight - (await deps.reads.finalHeight()) >= deps.cfg.marginK;
+  return maxBlockHeight - (await deps.reads.newestFinalHeight()) >= deps.cfg.marginK;
 }
 
 const held = async (deps: SendDeps) => tokenHeld(await deps.tokenStatus());
@@ -454,9 +456,14 @@ const u64 = (x: unknown, what: string): bigint => {
  * the same: the call is held, nothing spent on an unknown. The deposits pages are indexed as read, page by page.
  */
 export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string; token: string }): SendReads {
+  const finals = () => Promise.all(rpcs.map(async (r) => u64(((await r("block", { finality: "final" })) as { header?: { height?: unknown } }).header?.height, "block.height")));
   const finalHeight = async (): Promise<bigint> => {
-    const hs = await Promise.all(rpcs.map(async (r) => u64(((await r("block", { finality: "final" })) as { header?: { height?: unknown } }).header?.height, "block.height")));
+    const hs = await finals();
     return hs[0]! < hs[1]! ? hs[0]! : hs[1]!;
+  };
+  const newestFinalHeight = async (): Promise<bigint> => {
+    const hs = await finals();
+    return hs[0]! > hs[1]! ? hs[0]! : hs[1]!;
   };
   const both = async <T>(read: (r: Rpc, h: bigint) => Promise<T>): Promise<T> => {
     const h = await finalHeight();
@@ -487,6 +494,7 @@ export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string;
   };
   return {
     finalHeight,
+    newestFinalHeight,
     accessKey: (account, publicKey) =>
       both(async (r, h): Promise<KeyRead> => {
         try {
