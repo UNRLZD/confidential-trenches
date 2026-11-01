@@ -14,8 +14,13 @@
 //   - Every re-sign, the lapse's and resign_needed's, is checked before anything is sent: a signed call whose nonce is
 //     not the earlier call's is refused and dropped (resignDeposit). The earlier call's nonce is free only once U's key
 //     nonce has moved past it.
-//   - Refused (W:456-458): U's nonce moved, P not held and U's USDC back at the amount: a new call on the same P at
-//     U's nonce + 1. A USDC not back yet is a call still settling, so the device keeps reading.
+//   - Refused (W:456-458): U's nonce moved and P not held: a new call on the same P at U's nonce + 1, only once the
+//     dead call's transaction reads FINAL (every receipt done, wait_until FINAL) on both RPCs and carries exactly that
+//     signed call, and U's USDC is back to what that call was signed from. Until then its USDC may still be on its way to
+//     the vault, which would refuse a second call on P as a failed send (R3 strikes U after three). The tx hash comes
+//     from the relayer's tx_hash answer, or from sending the same signed bytes again; a hash the device cannot verify
+//     on both RPCs, or none, means keep reading and never sign (the money stays in U). These reads only hold the device
+//     back; the deposit itself is confirmed only by the pages.
 //   - prepay_open, R2 (W:459-460): wait until the pages hold U's previous note's P, then send the same signed bytes
 //     while their window is ahead, else as nothing landed. resign_needed, R4 (W:461): sign again at the same nonce
 //     with a new window. sender_struck, R3 (W:462-467): stop; nothing more is signed for U this session, and the
@@ -27,11 +32,11 @@
 // the amount again on U's next second-arrival note.
 // Nothing here logs. No request carries a key, the words or a note's secret: the relayer gets the signed delegate
 // alone (sendDepositDelegate), and each read names U or the vault.
-import { VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/kit";
+import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/kit";
 import { base58, base64 } from "@scure/base";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
-import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc } from "./account.ts";
+import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./account.ts";
 import { type BindAnswer, depositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
 
 /** The margin past max_block_height, in blocks, before a call counts as dead (W:448; V:741-743 covers both readings). */
@@ -60,9 +65,44 @@ export interface BindDepositArgs {
   window?: number;
 }
 
+/** A NEAR provider that also reads a transaction's status (the kit's HELPER_RPC_METHODS.near names `tx`). */
+export interface BindRpc extends NearRpc {
+  tx(params: { tx_hash: string; sender_account_id: string; wait_until: "FINAL" }): Promise<unknown>;
+}
+/** A provider by URL, for both `query` (nearRpc) and `tx`. A status other than 200 or no answer in time throws. */
+export function bindRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): BindRpc {
+  const q = nearRpc(url, fetchFn, timeoutMs);
+  return {
+    name: q.name,
+    query: q.query,
+    async tx(params) {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: TX_METHOD, params }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    },
+  };
+}
+const TX_METHOD = "tx";
+if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(TX_METHOD)) throw new Error(`"${TX_METHOD}" is not on the kit's NEAR method list`);
+
+/**
+ * The account that sends the release relayer's transactions (markets.md LD3, `bind.<ours>.near`), the `tx` read's
+ * sender_account_id. The release has not written it yet: while null, a refused call's transaction cannot be read, so
+ * the refused branch never signs (fail closed). A wrong value only makes the read fail: the tx must carry U's own
+ * signed call.
+ */
+export const RELEASE_RELAYER: Readonly<Record<NearNetwork, string | null>> = Object.freeze({ mainnet: null, testnet: null });
+
 export interface BindDeps {
   store: NoteStore;
-  rpcs: readonly [NearRpc, NearRpc];
+  rpcs: readonly [BindRpc, BindRpc];
+  /** RELEASE_RELAYER of the network unless given (tests). */
+  relayerAccount?: string | null;
   fetchFn?: typeof fetch;
   /** Waits between reads; tests replace it. */
   sleep?: (ms: number) => Promise<void>;
@@ -95,9 +135,10 @@ type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
 const DIGITS = /^(0|[1-9][0-9]*)$/;
 
-function checkPair(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): void {
+function checkPair(network: NearNetwork, rpcs: readonly [BindRpc, BindRpc]): void {
   const net = NEAR_NETWORKS[network];
-  const names = Array.isArray(rpcs) && rpcs.length === 2 ? rpcs.map((r) => (isObj(r) && typeof r.query === "function" ? r.name : undefined)) : [];
+  const names =
+    Array.isArray(rpcs) && rpcs.length === 2 ? rpcs.map((r) => (isObj(r) && typeof r.query === "function" && typeof r.tx === "function" ? r.name : undefined)) : [];
   const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n);
   if (!((fast(names[0]) && names[1] === net.drpc) || (names[0] === net.drpc && fast(names[1]))))
     throw new DepositBindRefused("input", `the RPCs must be one of ${net.fastnear.join(", ")} and ${net.drpc}, exactly`);
@@ -149,10 +190,12 @@ function row(x: unknown, at: number): DepositRow {
   return r;
 }
 
-/** One RPC's pages from `from` to their end: the row holding P, if any, and the count read up to. */
-async function scan(rpc: NearRpc, vault: string, p: bigint, from: number): Promise<{ found?: DepositRow; end: number }> {
+/** One RPC's pages from `from` to their end: the rows holding any of `ps`, and the count read up to. */
+async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: number, signal?: AbortSignal): Promise<{ found: Map<bigint, DepositRow>; end: number }> {
   const limit = VAULT_CONSTANTS.PAGE_MAX;
+  const found = new Map<bigint, DepositRow>();
   for (let at = from; ; at += limit) {
+    signal?.throwIfAborted();
     const args = base64.encode(new TextEncoder().encode(JSON.stringify({ from: at, limit })));
     const res = resultOf(await rpc.query({ request_type: "call_function", account_id: vault, method_name: "deposits", args_base64: args, finality: "final" }));
     const bytes = res?.result;
@@ -160,9 +203,8 @@ async function scan(rpc: NearRpc, vault: string, p: bigint, from: number): Promi
     const page = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes)));
     if (!Array.isArray(page) || page.length > limit) throw new Error("not a page");
     const rows = page.map((x, k) => row(x, at + k));
-    const found = rows.find((r) => r.precommitment === p);
-    if (found) return { found, end: at + rows.length };
-    if (rows.length < limit) return { end: at + rows.length };
+    for (const r of rows) if (ps.includes(r.precommitment) && !found.has(r.precommitment)) found.set(r.precommitment, r);
+    if (rows.length < limit) return { found, end: at + rows.length };
   }
 }
 
@@ -170,30 +212,39 @@ export type PagesRead = { state: "held"; row: DepositRow } | { state: "absent" }
 
 /**
  * Whether the vault's deposits pages hold P, read at final on both RPCs: held only when both hold the same row,
- * absent only when neither does, else unsure (one RPC behind, down, or answering what is not a page). The pages only
- * grow, so a read that found P on neither moves the next read's start to the lower of the two counts.
+ * absent only when neither does, else unsure (one RPC behind, down, or answering what is not a page). `also` is a
+ * second precommitment read in the same pass (U's previous note's, for R2), its state in alsoState. The pages only
+ * grow, so once every watched P is held or absent on both, the next read starts at the lower of the two counts: the
+ * first read starts at 0 and runs before P leaves the device in this bind, and no later row below that count can hold
+ * P (a P the device has not sent cannot be named by anyone else).
  */
 export class DepositsWatch {
   private from = 0;
   readonly vault: string;
   readonly p: bigint;
+  readonly also: bigint | null;
   readonly rpcs: readonly [NearRpc, NearRpc];
-  constructor(vault: string, p: bigint, rpcs: readonly [NearRpc, NearRpc]) {
+  alsoState: PagesRead = { state: "unsure" };
+  constructor(vault: string, p: bigint, rpcs: readonly [NearRpc, NearRpc], also: bigint | null = null) {
     this.vault = vault;
     this.p = p;
     this.rpcs = rpcs;
+    this.also = also;
   }
-  async read(): Promise<PagesRead> {
-    const sides = await Promise.all(this.rpcs.map((r) => scan(r, this.vault, this.p, this.from).catch(() => null)));
+  async read(signal?: AbortSignal): Promise<PagesRead> {
+    const ps = this.also === null || this.alsoState.state === "held" ? [this.p] : [this.p, this.also];
+    const sides = await Promise.all(this.rpcs.map((r) => scan(r, this.vault, ps, this.from, signal).catch(() => null)));
     const [a, b] = sides;
     if (!a || !b) return { state: "unsure" };
-    if (a.found && b.found) {
-      const same = (Object.keys(a.found) as (keyof DepositRow)[]).every((k) => a.found![k] === b.found![k]);
-      return same ? { state: "held", row: a.found } : { state: "unsure" };
-    }
-    if (a.found || b.found) return { state: "unsure" };
-    this.from = Math.min(a.end, b.end);
-    return { state: "absent" };
+    const of = (p: bigint): PagesRead => {
+      const [x, y] = [a.found.get(p), b.found.get(p)];
+      if (x && y) return (Object.keys(x) as (keyof DepositRow)[]).every((k) => x[k] === y[k]) ? { state: "held", row: x } : { state: "unsure" };
+      return x || y ? { state: "unsure" } : { state: "absent" };
+    };
+    const mine = of(this.p);
+    if (ps.length === 2) this.alsoState = of(this.also!);
+    if (mine.state === "absent" && (this.also === null || this.alsoState.state !== "unsure")) this.from = Math.min(a.end, b.end);
+    return mine;
   }
 }
 
@@ -231,19 +282,61 @@ export async function resignDeposit(
 
 /**
  * The clean-up gate (W:471-480, V:682-686): storage_unregister on a one-time id is always refused; DeleteAccount is
- * refused while a bind for it runs or a call it signed this session is not past max_block_height + LAPSE_MARGIN on both
- * RPCs' final heights. The deposit in the pages and a zero balance are the clean-up row's own reads (W:920).
+ * refused while a bind for it runs, while this session holds no record of the calls it signed (after a reload the
+ * record is gone, and a call signed before it may still land), or while a call it signed is not past
+ * max_block_height + LAPSE_MARGIN on both RPCs' final heights. The record is read again after the heights' read, so a
+ * call signed while that read was out is seen. The deposit in the pages and a zero balance are the clean-up row's own
+ * reads (W:920).
  */
 export async function checkCleanup(action: string, account: string, rpcs: readonly [NearRpc, NearRpc]): Promise<void> {
   if (action === "storage_unregister") throw new DepositBindRefused("cleanup", "never storage_unregister on a one-time id: the token would burn a refund to it");
   if (action !== "DeleteAccount") throw new DepositBindRefused("cleanup", `${String(action)} is not a clean-up`);
-  if (running.has(account)) throw new DepositBindRefused("cleanup", "a deposit call of this id is being sent");
-  const mbh = liveUntil.get(account);
-  if (mbh === undefined) return;
+  const gate = (): bigint => {
+    if (running.has(account)) throw new DepositBindRefused("cleanup", "a deposit call of this id is being sent");
+    const mbh = liveUntil.get(account);
+    if (mbh === undefined) throw new DepositBindRefused("cleanup", "no record of the calls this id signed in this session: one may still land");
+    return mbh;
+  };
+  gate();
   const u = await readU(account, rpcs);
   if (u === null) throw new DepositBindRefused("cleanup", "the id's heights are not read on both RPCs");
+  const mbh = gate();
   const low = u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
   if (low <= mbh + LAPSE_MARGIN) throw new DepositBindRefused("cleanup", `a call this id signed can land until ${mbh}; final height ${low}`);
+}
+
+// ---------- a dead call's transaction ----------
+
+const signatureOf = (call: SignedDepositDelegate): string => {
+  const b = base64.decode(call.signed_delegate);
+  return `ed25519:${base58.encode(b.subarray(b.length - 64))}`;
+};
+const outcome = (st: unknown) => isObj(st) && (Object.hasOwn(st, "SuccessValue") || Object.hasOwn(st, "SuccessReceiptId") || Object.hasOwn(st, "Failure"));
+const exact = (x: unknown) => (typeof x === "number" && Number.isSafeInteger(x) ? BigInt(x) : undefined);
+
+/**
+ * True only when `rpc` reads the transaction `hash` FINAL (every receipt executed and final, wait_until FINAL), sent
+ * by the release's relayer to U, with exactly one action: a Delegate carrying `call` itself (its signature, sender,
+ * receiver, key, nonce and window). Anything else, an error or no answer, is false.
+ */
+export async function txCarriesFinal(rpc: BindRpc, hash: string, relayer: string, call: SignedDepositDelegate): Promise<boolean> {
+  try {
+    const a = await rpc.tx({ tx_hash: hash, sender_account_id: relayer, wait_until: "FINAL" });
+    const r = isObj(a) && a.error === undefined ? a.result : undefined;
+    if (!isObj(r) || r.final_execution_status !== "FINAL") return false;
+    const t = r.transaction;
+    if (!isObj(t) || t.hash !== hash || t.signer_id !== relayer || t.receiver_id !== call.sender_id) return false;
+    if (!Array.isArray(t.actions) || t.actions.length !== 1 || !isObj(t.actions[0])) return false;
+    const dl = t.actions[0].Delegate;
+    const da = isObj(dl) ? dl.delegate_action : undefined;
+    if (!isObj(dl) || !isObj(da) || dl.signature !== signatureOf(call)) return false;
+    if (da.sender_id !== call.sender_id || da.receiver_id !== call.receiver_id || da.public_key !== call.public_key) return false;
+    if (exact(da.nonce) !== call.nonce || exact(da.max_block_height) !== call.max_block_height) return false;
+    if (!outcome(r.status) || !Array.isArray(r.receipts_outcome) || r.receipts_outcome.length === 0) return false;
+    return r.receipts_outcome.every((o) => isObj(o) && isObj(o.outcome) && outcome(o.outcome.status));
+  } catch {
+    return false;
+  }
 }
 
 // ---------- the bind ----------
@@ -277,6 +370,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
   if (vault === null) throw new DepositBindRefused("input", `the release names no vault on ${own.network}`);
   const rpcs = deps.rpcs;
   checkPair(own.network, rpcs);
+  const relayer = deps.relayerAccount === undefined ? RELEASE_RELAYER[own.network] : deps.relayerAccount;
   const seed = Uint8Array.from(seed64);
   const store = deps.store;
   const fetchFn = deps.fetchFn ?? fetch;
@@ -296,11 +390,15 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     const prevRef = previousRef(note.ref);
     const previousP = prevRef === null ? null : noteSecrets(seed, prevRef).precommitment;
     const call = { network: own.network, amount: own.amount, precommitment: P, window: own.window };
-    const watch = new DepositsWatch(vault, P, rpcs);
-
-    const stopped = () => {
-      if (signal?.aborted) throw signal.reason ?? new Error("aborted");
+    // One watch for P and U's previous P (R2): its first read starts at 0, every later one at the count it reached.
+    const watch = new DepositsWatch(vault, P, rpcs, previousP);
+    // The tx hash the relayer gave for each call it carried: what the refused branch verifies before it signs.
+    const carried: { call: SignedDepositDelegate; hash: string }[] = [];
+    const heard = (c: SignedDepositDelegate, a: BindAnswer | null) => {
+      if (a?.ok && !carried.some((h) => h.call === c && h.hash === a.tx_hash)) carried.push({ call: c, hash: a.tx_hash });
     };
+
+    const stopped = () => signal?.throwIfAborted();
     const pause = async () => {
       stopped();
       await sleep(pollMs);
@@ -326,27 +424,59 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         throw e;
       }
     };
+    const send = async (c: SignedDepositDelegate): Promise<BindAnswer | null> => {
+      stopped();
+      let a: BindAnswer | null;
+      try {
+        a = await sendDepositDelegate(c, fetchFn);
+      } catch {
+        a = null; // no answer: the relayer may hold it, so the pages and U's nonce settle it
+      }
+      heard(c, a);
+      return a;
+    };
+    // The call signed here at `nonce` whose transaction both RPCs read FINAL, carrying exactly it; else null.
+    const deadFinal = async (nonce: bigint): Promise<SignedDepositDelegate | null> => {
+      if (relayer === null) return null;
+      for (const h of carried) {
+        if (h.call.nonce !== nonce) continue;
+        const ok = await Promise.all(rpcs.map((r) => txCarriesFinal(r, h.hash, relayer, h.call)));
+        if (ok.every(Boolean)) return h.call;
+      }
+      return null;
+    };
+    // Refused: U's nonce moved past `out`. A new call on the same P only once that call's transaction is final in
+    // every receipt and U's USDC is back to what it was signed from; with no hash for it, the same bytes go again to
+    // get one, and nothing is signed.
+    const afterRefusal = async (out: SignedDepositDelegate): Promise<SignedDepositDelegate | null> => {
+      const dead = await deadFinal(out.nonce);
+      if (dead === null) {
+        if (!carried.some((h) => h.call.nonce === out.nonce)) await send(out);
+        return null;
+      }
+      return signing(async () => {
+        const c = await depositDelegate(seed, own.s, own.i, call, rpcs);
+        if (c.nonce <= out.nonce) throw new DepositBindRefused("nonce", "a new call must be past the dead one's nonce");
+        if (c.balance < dead.balance) throw new DepositBindRefused("early", "U's USDC is not back to what the dead call was signed from");
+        return signedCall(c);
+      });
+    };
 
     // Settles a call that may be out: the pages hold P, or the call is dead (a lapse, or refused) and a next one is
     // signed. Returns the outcome, or the next call to send.
     const settle = async (out: SignedDepositDelegate): Promise<BindOutcome | SignedDepositDelegate> => {
       for (;;) {
-        const pages = await watch.read();
+        const pages = await watch.read(signal);
         if (pages.state === "held") return land(pages.row);
         if (pages.state === "absent") {
           const u = await readU(U, rpcs);
           const low = u === null ? null : u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
-          if (u !== null && low !== null && low > out.max_block_height + LAPSE_MARGIN && (await watch.read()).state === "absent") {
+          if (u !== null && low !== null && low > out.max_block_height + LAPSE_MARGIN && (await watch.read(signal)).state === "absent") {
             const next =
               u.nonce + 1n === out.nonce
                 ? await signing(() => resignDeposit(seed, own.s, own.i, call, out, "lapse", rpcs)) // nothing landed: the same nonce
                 : u.nonce >= out.nonce
-                  ? await signing(async () => {
-                      // refused: U's nonce moved past the call, which can never land now; a new call on the same P
-                      const c = await depositDelegate(seed, own.s, own.i, call, rpcs);
-                      if (c.nonce <= out.nonce) throw new DepositBindRefused("nonce", "a new call must be past the dead one's nonce");
-                      return signedCall(c);
-                    })
+                  ? await afterRefusal(out)
                   : null;
             if (next !== null) return next;
           }
@@ -357,7 +487,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
 
     // Already in the pages (a reload, or another tab's bind): land it and send nothing.
     for (;;) {
-      const first = await watch.read();
+      const first = await watch.read(signal);
       if (first.state === "held") return await land(first.row);
       if (first.state === "absent") break;
       await pause();
@@ -371,28 +501,28 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       if (out === null) await pause();
     }
     for (;;) {
-      stopped();
-      let answer: BindAnswer | null;
-      try {
-        answer = await sendDepositDelegate(out, fetchFn);
-      } catch {
-        answer = null; // no answer: the relayer may hold it, so the pages and U's nonce settle it
-      }
+      const answer = await send(out);
       let next: BindOutcome | SignedDepositDelegate;
       if (answer === null || answer.ok || SETTLE.has(answer.code)) next = await settle(out);
       else if (answer.code === "sender_struck") {
         struck.add(U);
         return { kind: "struck", account: U };
       } else if (answer.code === "resign_needed") {
+        await pause();
         const again: SignedDepositDelegate | null = await signing(() => resignDeposit(seed, own.s, own.i, call, out!, "resign_needed", rpcs));
         next = again ?? (await settle(out));
       } else if (answer.code === "prepay_open" || RETRY.has(answer.code)) {
         if (answer.code === "prepay_open") {
           // R2: wait until the pages hold U's previous P (U's first note has none: the relayer has no earlier P of U)
           if (previousP === null) return { kind: "refused", code: answer.code };
-          const before = new DepositsWatch(vault, previousP, rpcs);
-          while ((await before.read()).state !== "held") await pause();
-        } else await pause();
+          for (;;) {
+            const mine = await watch.read(signal);
+            if (mine.state === "held") return await land(mine.row);
+            if (watch.alsoState.state === "held") break;
+            await pause();
+          }
+        }
+        await pause();
         const u = await readU(U, rpcs);
         const high = u === null ? null : u.heights[0] > u.heights[1] ? u.heights[0] : u.heights[1];
         next = high !== null && high < out.max_block_height ? out : await settle(out); // the same bytes while ahead

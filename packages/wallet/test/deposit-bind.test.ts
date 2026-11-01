@@ -17,6 +17,7 @@ import { decodeSignedDelegate } from "../../../apps/helper/src/bind/checks.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import {
   type BindDepositArgs,
+  type BindRpc,
   type BindOutcome,
   bindDeposit,
   checkCleanup,
@@ -39,6 +40,7 @@ const NET = NEAR_NETWORKS.testnet;
 const VAULT = NET.vault;
 assert.equal(PAGES.vault, VAULT);
 const AMOUNT = 25_000_000n;
+const RELAYER = "bind.blindfill-test.testnet"; // the relayer account the tx reads name (deps.relayerAccount)
 const pc = (ref: NoteRef): bigint => noteSecrets(SEED, ref).precommitment;
 
 // ---------- the mock chain ----------
@@ -49,6 +51,10 @@ class Chain {
   b: Side;
   balance = 100_000_000n;
   readsOfKeys = 0;
+  /** Every tx the relayer sent, by hash, and those every receipt of which is final. */
+  txs = new Map<string, Sent>();
+  finals = new Set<string>();
+  txReads = 0;
   /** Runs on each sleep: the test's clock. Default: one block on each side. */
   tick: () => void = () => this.blocks(1n);
   readonly u: string;
@@ -69,10 +75,31 @@ class Chain {
       s.rows.push({ index, precommitment: p.toString(), label: (1000n + BigInt(index)).toString(), value: value.toString(), leaf_index: 2 * index, depositor });
     }
   }
-  rpcs(): [NearRpc, NearRpc] {
+  rpcs(): [BindRpc, BindRpc] {
     const replay = replayDepositReads("testnet", publicKeyOf(this.u));
-    const side = (k: "a" | "b", r: NearRpc): NearRpc => ({
+    const side = (k: "a" | "b", r: NearRpc): BindRpc => ({
       name: r.name,
+      // the NEAR `tx` read with wait_until FINAL: the tx and its receipts once final, else the node's timeout error
+      tx: async ({ tx_hash, sender_account_id }) => {
+        this.txReads++;
+        const t = this.txs.get(tx_hash);
+        if (!t || !this.finals.has(tx_hash) || sender_account_id !== RELAYER) return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } };
+        return {
+          jsonrpc: "2.0",
+          id: "x",
+          result: {
+            final_execution_status: "FINAL",
+            status: { SuccessValue: "" },
+            transaction: {
+              hash: tx_hash,
+              signer_id: RELAYER,
+              receiver_id: t.sender,
+              actions: [{ Delegate: { delegate_action: { sender_id: t.sender, receiver_id: t.receiver, actions: [], nonce: Number(t.nonce), max_block_height: Number(t.mbh), public_key: t.pk }, signature: t.sig } }],
+            },
+            receipts_outcome: [{ outcome: { status: { SuccessReceiptId: "r1" } } }, { outcome: { status: { Failure: {} } } }],
+          },
+        };
+      },
       query: async (params) => {
         const s = this[k];
         if (params.method_name === "deposits") {
@@ -100,7 +127,7 @@ const turn = () => new Promise<void>((ok) => setImmediate(ok));
 const publicKeyOf = (u: string) => `ed25519:${base58.encode(Uint8Array.from(u.match(/../g)!, (h) => parseInt(h, 16)))}`;
 
 // ---------- the mock relayer ----------
-type Sent = { nonce: bigint; mbh: bigint; p: bigint; bytes: string; low: bigint };
+type Sent = { nonce: bigint; mbh: bigint; p: bigint; bytes: string; low: bigint; hash: string; sender: string; receiver: string; pk: string; sig: string };
 type Reply = "tx" | "lost" | string; // "tx": 200 {tx_hash}; "lost": no answer; else an error code
 function relayer(chain: Chain, script: Reply[], onTx: (s: Sent) => void = () => {}) {
   const sent: Sent[] = [];
@@ -112,15 +139,21 @@ function relayer(chain: Chain, script: Reply[], onTx: (s: Sent) => void = () => 
     const a = dl.actions[0]!;
     assert.equal(a.kind, "FunctionCall");
     const msg = JSON.parse(JSON.parse(Buffer.from((a as { args: Uint8Array }).args).toString()).msg);
-    const s: Sent = { nonce: dl.nonce, mbh: dl.max_block_height, p: BigInt(msg.precommitment), bytes: body.signed_delegate, low: chain.low() };
+    const s: Sent = {
+      nonce: dl.nonce, mbh: dl.max_block_height, p: BigInt(msg.precommitment), bytes: body.signed_delegate, low: chain.low(),
+      hash: base58.encode(new Uint8Array(32).fill(sent.length + 1)), sender: dl.sender_id, receiver: dl.receiver_id,
+      pk: `ed25519:${base58.encode(dl.public_key)}`, sig: `ed25519:${base58.encode(dl.signature)}`,
+    };
     sent.push(s);
     chain.blocks(1n); // the hop to the relayer and back takes a block
     const reply = script.shift() ?? "tx";
     if (reply === "lost") throw new TypeError("fetch failed");
     if (reply === "tx") {
+      chain.txs.set(s.hash, s);
       onTx(s);
-      return Response.json({ tx_hash: base58.encode(new Uint8Array(32).fill(sent.length)) });
+      return Response.json({ tx_hash: s.hash });
     }
+    if (reply.startsWith("hash:")) return Response.json({ tx_hash: reply.slice(5) }); // whatever hash the relayer says
     const status = (HELPER_CODE_STATUS as Record<string, number>)[reply] ?? 400;
     return Response.json({ error: { code: reply } }, { status });
   }) as typeof fetch;
@@ -128,6 +161,7 @@ function relayer(chain: Chain, script: Reply[], onTx: (s: Sent) => void = () => 
 }
 // the call lands: U's nonce takes the call's, its USDC goes, and the vault's row is on both sides
 const lands = (chain: Chain) => (s: Sent) => {
+  chain.finals.add(s.hash);
   chain.a.nonce = chain.b.nonce = s.nonce;
   chain.balance -= AMOUNT;
   chain.addRow(s.p);
@@ -157,7 +191,7 @@ async function setup(script: Reply[] = [], onTx?: (c: Chain) => (s: Sent) => voi
   const r = relayer(chain, script, (onTx ?? lands)(chain));
   const args: BindDepositArgs = { network: "testnet", s: 1n, i, noteId: note.id, amount: AMOUNT };
   let sleeps = 0;
-  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (sleeps++, chain.tick(), await turn()), signal: AbortSignal.timeout(20_000) };
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (sleeps++, chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
   return { store, note, i, u, chain, sent: r.sent, args, deps, sleeps: () => sleeps };
 }
 const landed = (o: BindOutcome, kind: "deposited" | "front_run" = "deposited"): NoteRecord => {
@@ -221,7 +255,7 @@ test("prepay_open (R2): waits until both RPCs hold U's previous P, then sends th
     chain.blocks(1n);
     if (++polls === 4) (chain.addRow(first.precommitment, { side: "b" }), (heldAt = polls));
   };
-  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000) };
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
   const note = landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps));
   assert.equal(heldAt, 4);
   assert.equal(r.sent.length, 2);
@@ -285,7 +319,8 @@ test("refused: U's nonce moved past the call, P not held and the USDC back in U:
   let calls = 0;
   const t = await setup(["tx", "tx"], (c) => (s) => {
     c.a.nonce = c.b.nonce = s.nonce; // the call ran
-    if (++calls === 2) (c.balance -= AMOUNT, c.addRow(s.p)); // the first was refused by the vault (the token refunds U)
+    c.finals.add(s.hash); // every receipt of it final: the vault refused it and the token refunded U
+    if (++calls === 2) (c.balance -= AMOUNT, c.addRow(s.p));
   });
   t.chain.tick = () => t.chain.blocks(10n);
   const n0 = t.chain.a.nonce;
@@ -301,6 +336,7 @@ test("refused with the USDC not back in U yet: the device keeps reading and sign
   let calls = 0;
   const t = await setup(["tx", "tx"], (c) => (s) => {
     c.a.nonce = c.b.nonce = s.nonce;
+    c.finals.add(s.hash);
     if (++calls === 1) c.balance = 0n; // the USDC is on its way back
     else (c.balance -= AMOUNT, c.addRow(s.p));
   });
@@ -362,7 +398,7 @@ test("planted: storage_unregister on U is always refused; DeleteAccount is refus
     c.addRow(s.p, { side: "a" });
   });
   await assert.rejects(checkCleanup("storage_unregister", t.u, t.deps.rpcs), cleanup);
-  await checkCleanup("DeleteAccount", t.u, t.deps.rpcs); // no call signed yet: not this gate's to refuse
+  await assert.rejects(checkCleanup("DeleteAccount", t.u, t.deps.rpcs), cleanup); // no record of U's calls: refused
   let during: unknown = null;
   const deps = {
     ...t.deps,
@@ -416,4 +452,357 @@ test("the note must be in the store, U's, and its P its ref's: else refused befo
   await assert.rejects(bindDeposit(SEED, { ...t.args, i: t.i + 1 }, t.deps), refusedNote); // the note is U_{1,i}'s, not U_{1,i+1}'s
   assert.equal(t.sent.length, 0);
   assert.equal(t.chain.readsOfKeys, reads);
+});
+
+// ---------- the review of 971d252 (REVIEW A-K, A2), taken in as written but for the mock's tx reads ----------
+
+// A. The refused branch: U's nonce moved (the Delegate ran late in its window), the amount left U, the vault's
+// ft_on_transfer is delayed past max_block_height + 5 (congestion). U still holds >= amount (the notes still to come).
+test("REVIEW A (expect FAIL on 971d252): no second call on P while the first call's USDC is in flight to the vault", async () => {
+  let pending: Sent | null = null;
+  let ran = false;
+  let rowAt = -1n;
+  const t = await setup(["tx", "tx"], () => (s) => {
+    pending ??= s; // the relayer carries the first call; a second on the same P would be refused at row 3
+  });
+  t.chain.tick = () => {
+    t.chain.blocks(1n);
+    const h = t.chain.low();
+    if (pending && !ran && h >= pending.mbh - 1n) {
+      ran = true; // the Delegate receipt runs at max_block_height - 1: U's nonce moves and ft_transfer_call debits U
+      t.chain.a.nonce = t.chain.b.nonce = pending.nonce;
+      t.chain.balance -= AMOUNT; // 100M -> 75M, still >= the 25M amount
+    }
+    if (pending && ran && rowAt < 0n && h >= pending.mbh + 9n) {
+      rowAt = h; // the vault's ft_on_transfer lands, 10 blocks after the Delegate
+      t.chain.addRow(pending.p);
+    }
+  };
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(
+    t.sent.length,
+    1,
+    `a second call on the same P was sent at final height ${t.sent[1]?.low} (nonce ${t.sent[1]?.nonce}, first ${t.sent[0]?.nonce}) before the first call's row landed at ${rowAt}`,
+  );
+});
+
+// B. A relayer answering resign_needed every time (a K above the window, or a hostile relayer): the device re-signs and
+// re-sends with no pause between.
+test("REVIEW B (expect FAIL on 971d252): resign_needed again and again: a pause between re-signs", async () => {
+  const t = await setup([...Array(20).fill("resign_needed"), "tx"]);
+  const at: number[] = [];
+  const f = t.deps.fetchFn;
+  const deps = { ...t.deps, fetchFn: (async (u: string, i: RequestInit) => (at.push(t.sleeps()), f(u, i))) as unknown as typeof fetch };
+  landed(await bindDeposit(SEED, t.args, deps));
+  assert.equal(t.sent.length, 21);
+  assert.ok(new Set(t.sent.map((s) => s.nonce)).size === 1, "every re-sign at the same nonce");
+  assert.ok(at[20]! >= 20, `21 calls signed and sent after ${at[20]} pauses`);
+});
+
+// C. prepay_open answered while the previous P is already held: the same bytes go again with no pause.
+test("REVIEW C (expect FAIL on 971d252): prepay_open with the previous P held: a pause between sends", async () => {
+  const store = await noteStore();
+  const first = await store.planDeposit(1n, pc);
+  const i = (first.ref as { i: number }).i;
+  const u = depositAccount(SEED, 1n, i).account;
+  const chain = new Chain(u);
+  await store.move(first.id, "PLANNED", "INCOMING");
+  await store.move(first.id, "INCOMING", "UNSPENT", { leaf: { value: AMOUNT, label: 1000n, commitment: noteCommitment(AMOUNT, 1000n, first.precommitment), leafIndex: 0n } });
+  chain.addRow(first.precommitment);
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
+  const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  const r = relayer(chain, [...Array(20).fill("prepay_open"), "tx"], lands(chain));
+  let sleeps = 0;
+  const at: number[] = [];
+  const fetchFn = (async (u: string, init: RequestInit) => (at.push(sleeps), r.fetchFn(u, init))) as unknown as typeof fetch;
+  const deps = { store, rpcs: chain.rpcs(), fetchFn, sleep: async () => (sleeps++, chain.tick(), await turn()), signal: AbortSignal.timeout(20_000) };
+  landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, deps));
+  assert.equal(r.sent.length, 21);
+  assert.ok(at[20]! >= 20, `21 sends after ${at[20]} pauses`);
+});
+
+// D. After a reload (the in-memory record gone), checkCleanup allows DeleteAccount with no read at all while a call U
+// signed is inside its window.
+test("REVIEW D (expect FAIL on 971d252): after a reload, DeleteAccount is not allowed blind while U's call can land", async () => {
+  const t = await setup(["lost"], () => () => {});
+  const ac = new AbortController();
+  const deps = { ...t.deps, signal: ac.signal, sleep: async () => ac.abort(new Error("page closed")) };
+  await assert.rejects(bindDeposit(SEED, t.args, deps));
+  const mbh = t.sent[0]!.mbh;
+  assert.ok(t.chain.low() < mbh, "the call is inside its window");
+  await assert.rejects(checkCleanup("DeleteAccount", t.u, t.deps.rpcs)); // same session: refused
+  resetBindSession(); // the page reloads
+  const reads = t.chain.readsOfKeys;
+  const r = await checkCleanup("DeleteAccount", t.u, t.deps.rpcs).then(() => "allowed", (e: unknown) => e);
+  assert.notEqual(r, "allowed", `allowed after a reload with ${t.chain.readsOfKeys - reads} reads, final ${t.chain.low()} <= max_block_height ${mbh}`);
+});
+
+// E. checkCleanup takes its record before its RPC read: a call signed while that read is out is not seen.
+test("REVIEW E (expect FAIL on 971d252): a call signed while checkCleanup's read is out keeps DeleteAccount refused", async () => {
+  const t = await setup();
+  const args = { network: "testnet" as const, amount: AMOUNT, precommitment: t.note.precommitment };
+  const old = await resignDeposit(SEED, 1n, t.i, args, { sender_id: t.u, nonce: t.chain.a.nonce + 1n, max_block_height: 0n }, "resign_needed", t.deps.rpcs);
+  t.chain.blocks(200n); // that call is long dead
+  let fresh = null as { max_block_height: bigint } | null; // set inside the hook (a cast, so tsc does not narrow it to null)
+  let hooked = false;
+  const rpcs = t.deps.rpcs.map((r) => ({
+    name: r.name,
+    query: async (p: Record<string, unknown>) => {
+      if (!hooked && p.request_type === "view_access_key_list") {
+        hooked = true; // another tab path in this session signs a new call while the gate's read is out
+        fresh = await resignDeposit(SEED, 1n, t.i, args, { sender_id: t.u, nonce: t.chain.a.nonce + 1n, max_block_height: 0n }, "resign_needed", t.deps.rpcs);
+      }
+      return r.query(p);
+    },
+  })) as unknown as [NearRpc, NearRpc];
+  const r = await checkCleanup("DeleteAccount", t.u, rpcs).then(() => "allowed", (e: unknown) => e);
+  assert.ok(fresh !== null && fresh!.max_block_height > t.chain.low() && old.max_block_height < t.chain.low());
+  assert.notEqual(r, "allowed", `allowed while a call with max_block_height ${fresh!.max_block_height} can land (final ${t.chain.low()})`);
+});
+
+// F. Two-RPC rule: both RPCs hold P but with another row (a lying or forked RPC): never held. (Guard present; no test on
+// the branch: mutant M8 survives.)
+test("REVIEW F (expect PASS; kills M8): both RPCs hold P with different rows: unsure, never held", async () => {
+  const t = await setup();
+  const w = new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs);
+  t.chain.addRow(t.note.precommitment, { side: "a" });
+  t.chain.addRow(t.note.precommitment, { side: "b", value: AMOUNT + 1n });
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  t.chain.b.rows = [];
+  t.chain.addRow(t.note.precommitment, { side: "b" });
+  t.chain.b.rows[0]!.label = "999";
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  t.chain.b.rows[0]!.label = t.chain.a.rows[0]!.label;
+  t.chain.b.rows[0]!.leaf_index = 7;
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  t.chain.b.rows[0]!.leaf_index = t.chain.a.rows[0]!.leaf_index;
+  t.chain.b.rows[0]!.depositor = "f".repeat(64);
+  assert.deepEqual(await w.read(), { state: "unsure" });
+  t.chain.b.rows[0]!.depositor = t.chain.a.rows[0]!.depositor;
+  assert.equal((await w.read()).state, "held");
+});
+
+// G. The clean-up gate covers a re-signed call's later window (R4), not only the first call's. (Mutants M33, M34 survive.)
+test("REVIEW G (expect PASS; kills M33/M34): after an R4 re-sign, DeleteAccount waits for the re-signed call's window", async () => {
+  const t = await setup(["resign_needed", "tx"]);
+  t.chain.tick = () => t.chain.blocks(3n);
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  const [m1, m2] = [t.sent[0]!.mbh, t.sent[1]!.mbh];
+  assert.ok(m2 > m1);
+  t.chain.a.height = t.chain.b.height = m1 + LAPSE_MARGIN + 1n;
+  if (m2 + LAPSE_MARGIN >= t.chain.a.height) await assert.rejects(checkCleanup("DeleteAccount", t.u, t.deps.rpcs));
+  t.chain.a.height = t.chain.b.height = m2 + LAPSE_MARGIN + 1n;
+  await checkCleanup("DeleteAccount", t.u, t.deps.rpcs);
+});
+
+// H. A note whose stored P is not its ref's (a corrupt or planted record): refused before anything is signed. (M49 survives.)
+test("REVIEW H (expect PASS; kills M49): a note whose P is not its ref's is refused, nothing read or sent", async () => {
+  const t = await setup();
+  await t.store.move(t.note.id, "PLANNED", "INCOMING");
+  await t.store.move(t.note.id, "INCOMING", "UNSPENT", { leaf: { value: AMOUNT, label: 1000n, commitment: noteCommitment(AMOUNT, 1000n, t.note.precommitment), leafIndex: 0n } });
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i: t.i }, n: 0 };
+  const bad = await t.store.add({ ref, scope: 1n, precommitment: 12345n, state: "PLANNED" });
+  const reads = t.chain.readsOfKeys;
+  await assert.rejects(bindDeposit(SEED, { ...t.args, noteId: bad.id }, t.deps), (e: unknown) => e instanceof DepositBindRefused && e.code === "note");
+  assert.equal(t.sent.length, 0);
+  assert.equal(t.chain.readsOfKeys, reads);
+});
+
+// I. Codes the branch's tests never send: in_flight, p_used, expired, bad_nonce settle from the pages; token_halted and
+// relayer_low wait and send the same bytes. (M41-M44 survive.)
+for (const code of ["in_flight", "p_used", "expired", "bad_nonce"]) {
+  test(`REVIEW I (expect PASS; kills M41-M43): ${code} settles from the pages, never stops as refused`, async () => {
+    const t = await setup([code], () => () => {});
+    let n = 0;
+    t.chain.tick = () => {
+      t.chain.blocks(1n);
+      if (++n === 3) (t.chain.a.nonce = t.chain.b.nonce = t.chain.a.nonce + 1n, (t.chain.balance -= AMOUNT), t.chain.addRow(t.note.precommitment));
+    };
+    landed(await bindDeposit(SEED, t.args, t.deps));
+    assert.equal(t.sent.length, 1);
+  });
+}
+for (const code of ["token_halted", "relayer_low"]) {
+  test(`REVIEW I (expect PASS; kills M44): ${code} waits and sends the same signed bytes`, async () => {
+    const t = await setup([code, "tx"]);
+    landed(await bindDeposit(SEED, t.args, t.deps));
+    assert.equal(t.sent.length, 2);
+    assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes);
+  });
+}
+
+// J. R4 in the flow with U's nonce moved under it: no call at another nonce leaves. (M46 survives.)
+test("REVIEW J (expect PASS; kills M46): resign_needed after U's nonce moved: no call at another nonce is sent", async () => {
+  const t = await setup(["resign_needed", "tx"], () => () => {});
+  const f = t.deps.fetchFn;
+  let first = true;
+  const deps = {
+    ...t.deps,
+    fetchFn: (async (u: string, i: RequestInit) => {
+      const r = await f(u, i);
+      if (first) {
+        first = false; // the first call's same-nonce sibling landed somewhere else meanwhile (e.g. another tab's)
+        t.chain.a.nonce = t.chain.b.nonce = t.chain.a.nonce + 1n;
+        t.chain.balance -= AMOUNT;
+        t.chain.addRow(t.note.precommitment);
+      }
+      return r;
+    }) as unknown as typeof fetch,
+  };
+  landed(await bindDeposit(SEED, t.args, deps));
+  assert.ok(t.sent.every((s) => s.nonce === t.sent[0]!.nonce), t.sent.map((s) => s.nonce).join(","));
+});
+
+// K. A deposits page read that never ends (an RPC answering full pages forever; or a long real history): the caller's
+// AbortSignal is not seen inside the scan.
+test("REVIEW K (expect FAIL on 971d252): the caller's AbortSignal stops a scan that does not end", async () => {
+  const t = await setup();
+  const ac = new AbortController();
+  let pages = 0;
+  let afterAbort = 0;
+  const full = (from: number) =>
+    Array.from({ length: 1000 }, (_, k) => ({ index: from + k, precommitment: "1", label: "1", value: "1000000", leaf_index: from + k, depositor: "x.testnet" }));
+  const rpcs = t.deps.rpcs.map((r) => ({
+    name: r.name,
+    tx: r.tx,
+    query: async (p: Record<string, unknown>) => {
+      if (p.method_name === "deposits") {
+        if (++pages === 10) ac.abort(new Error("caller stopped"));
+        if (ac.signal.aborted && ++afterAbort > 200) throw new Error("test cap");
+        const { from } = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
+        return { jsonrpc: "2.0", id: "x", result: { block_height: 275753808, logs: [], result: [...Buffer.from(JSON.stringify(full(from)))] } };
+      }
+      return r.query(p);
+    },
+  })) as unknown as [BindRpc, BindRpc];
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, rpcs, signal: ac.signal }), /caller stopped/);
+  assert.ok(afterAbort <= 4, `${afterAbort} page reads after the abort`);
+});
+
+test("REVIEW A2: the Delegate ran in its window but the token's receipt is delayed too: no second call on P", async () => {
+  let pending: Sent | null = null;
+  let ran = false, debited = false;
+  const t = await setup(["tx", "tx"], () => (s) => { pending ??= s; });
+  t.chain.tick = () => {
+    t.chain.blocks(1n);
+    const h = t.chain.low();
+    if (pending && !ran && h >= pending.mbh - 1n) { ran = true; t.chain.a.nonce = t.chain.b.nonce = pending.nonce; }
+    if (pending && ran && !debited && h >= pending.mbh + 8n) { debited = true; t.chain.balance -= AMOUNT; t.chain.addRow(pending.p); }
+  };
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 1, `second call at ${t.sent[1]?.low}`);
+});
+
+// ---------- the fix round (F1, F2) ----------
+
+// The relayer answers the first call with a tx_hash of another final transaction: the device cannot tie it to U's call,
+// so it never signs a second call on P, whatever U's nonce and balance say.
+test("F1: a relayer's tx_hash that does not carry U's signed call is never trusted: no second call on P", async () => {
+  const t = await setup(["hash:" + base58.encode(new Uint8Array(32).fill(0xee))], () => () => {});
+  const other: Sent = { ...({} as Sent), nonce: 0n, mbh: 0n, p: 0n, bytes: "", low: 0n, hash: base58.encode(new Uint8Array(32).fill(0xee)), sender: t.u, receiver: NET.token, pk: publicKeyOf(t.u), sig: "ed25519:" + base58.encode(new Uint8Array(64).fill(7)) };
+  t.chain.txs.set(other.hash, other);
+  t.chain.finals.add(other.hash); // a real final tx, of something else
+  const n0 = t.chain.a.nonce;
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => {
+    t.chain.blocks(10n);
+    if (ticks === 0) t.chain.a.nonce = t.chain.b.nonce = n0 + 1n; // the call ran and was refused: the USDC is back in U
+    if (++ticks === 80) ac.abort(new Error("caller stopped"));
+  };
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /caller stopped/);
+  assert.ok(t.chain.low() > t.sent[0]!.mbh + 100n, "long past the window");
+  assert.ok(t.chain.txReads > 0, "the hash was read");
+  assert.equal(t.sent.length, 1, t.sent.map((s) => s.nonce).join(","));
+});
+
+test("F1: with no relayer account in the release, a refused call's tx cannot be read: the device never signs again on P", async () => {
+  const t = await setup(["tx"], (c) => (s) => ((c.a.nonce = c.b.nonce = s.nonce), c.finals.add(s.hash)));
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 60 && ac.abort(new Error("caller stopped")));
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, relayerAccount: null, signal: ac.signal }), /caller stopped/);
+  assert.equal(t.sent.length, 1);
+});
+
+test("F1: no answer to the first send: the same bytes go again for the tx hash, and only then a new call on P", async () => {
+  let calls = 0;
+  const t = await setup(["lost", "tx", "tx"], (c) => (s) => {
+    c.finals.add(s.hash); // the re-send's answer is the first call's own transaction, final
+    if (++calls === 2) lands(c)(s);
+  });
+  const n0 = t.chain.a.nonce;
+  let ticks = 0;
+  t.chain.tick = () => {
+    t.chain.blocks(10n);
+    if (++ticks === 1) t.chain.a.nonce = t.chain.b.nonce = n0 + 1n; // the lost call ran and was refused
+  };
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 3);
+  assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes); // the same signed call, sent again for its hash
+  assert.equal(t.sent[2]!.nonce, n0 + 2n);
+  assert.equal(t.sent[2]!.p, t.sent[0]!.p);
+});
+
+// M9: an RPC that reports U's old nonce to the signer after the refusal: the signer would sign at the dead call's
+// nonce; that call is dropped and the device reads again.
+test("F2 (M9): after a refusal, a new call at or below the dead call's nonce is never sent", async () => {
+  let lies = 0;
+  let calls = 0;
+  const t = await setup(["tx", "tx"], (c) => (s) => {
+    c.a.nonce = c.b.nonce = s.nonce;
+    c.finals.add(s.hash); // the first: refused, the USDC back in U
+    if (++calls === 2) (c.balance -= AMOUNT, c.addRow(s.p));
+  });
+  const n0 = t.chain.a.nonce;
+  let liar = 0;
+  const rpcs = t.deps.rpcs.map((r) => ({
+    name: r.name,
+    tx: async (p: Parameters<BindRpc["tx"]>[0]) => ((liar = 2), r.tx(p)),
+    query: async (p: Record<string, unknown>) => {
+      const j = (await r.query(p)) as any;
+      if (p.request_type === "view_access_key_list" && liar > 0 && lies < 6) (liar--, lies++, (j.result.keys[0].access_key.nonce = Number(n0)));
+      return j;
+    },
+  })) as unknown as [BindRpc, BindRpc];
+  t.chain.tick = () => t.chain.blocks(10n);
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, rpcs }));
+  assert.ok(lies >= 2, `${lies} lying reads`);
+  assert.deepEqual(t.sent.map((s) => s.nonce), [n0 + 1n, n0 + 2n]);
+});
+
+test("F2 (M11): DeleteAccount is refused while a bind for U runs, even with every call it signed long dead", async () => {
+  const store = await noteStore();
+  const first = await store.planDeposit(1n, pc);
+  const i = (first.ref as { i: number }).i;
+  const chain = new Chain(depositAccount(SEED, 1n, i).account);
+  const r = relayer(chain, ["tx"], lands(chain));
+  const deps = { store, rpcs: chain.rpcs(), fetchFn: r.fetchFn, sleep: async () => (chain.tick(), await turn()), signal: AbortSignal.timeout(20_000), relayerAccount: RELAYER };
+  landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: first.id, amount: AMOUNT }, deps));
+  chain.blocks(500n); // the first call is long dead
+  await checkCleanup("DeleteAccount", chain.u, deps.rpcs);
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
+  const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  chain.addRow(second.precommitment, { side: "a" }); // one RPC holds it: the bind pauses before anything is signed
+  let during: unknown = null;
+  const bindDeps = {
+    ...deps,
+    sleep: async () => {
+      during ??= await checkCleanup("DeleteAccount", chain.u, deps.rpcs).then(() => "allowed", (e: unknown) => e);
+      chain.addRow(second.precommitment, { side: "b" });
+      await turn();
+    },
+  };
+  landed(await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, bindDeps));
+  assert.ok(during instanceof DepositBindRefused && during.code === "cleanup" && /being sent/.test(during.message), String(during));
+});
+
+test("F2 (M28): the pages' next read starts at the lower count of the two RPCs, so a row the other has yet to show is found", async () => {
+  const t = await setup();
+  const w = new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs);
+  for (let k = 0; k < 5; k++) t.chain.addRow(BigInt(k + 1), { side: "a" }); // RPC a answers five rows RPC b does not have
+  assert.deepEqual(await w.read(), { state: "absent" });
+  t.chain.a.rows = [];
+  t.chain.addRow(t.note.precommitment); // the vault's real row 0, on both
+  assert.equal((await w.read()).state, "held");
 });
