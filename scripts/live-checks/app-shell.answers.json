@@ -1,0 +1,910 @@
+{
+ "good": {
+  "url": "http://127.0.0.1:8791",
+  "at": "2026-11-01T00:21:07.870Z",
+  "browser": "153.0.8010.12",
+  "headers": {
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "integrityPolicy": "blocked-destinations=(script)"
+  },
+  "scripts": [
+   {
+    "src": "http://127.0.0.1:8791/assets/index-4-aiKqcO.js",
+    "integrity": "sha384-+TTahq5cggmw6/S2IzTnCZqJVrzra+tJmAkaJ/SgNZkx/oG8ugjBvn6xUNsMF5za",
+    "served": "sha384-+TTahq5cggmw6/S2IzTnCZqJVrzra+tJmAkaJ/SgNZkx/oG8ugjBvn6xUNsMF5za"
+   }
+  ],
+  "loadedScripts": [
+   "http://127.0.0.1:8791/assets/index-4-aiKqcO.js"
+  ],
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/",
+    "expect": "token",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/discover",
+    "expect": "discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-discover.png"
+   },
+   {
+    "width": "phone",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-portfolio.png"
+   },
+   {
+    "width": "phone",
+    "path": "/orders",
+    "expect": "orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-orders.png"
+   },
+   {
+    "width": "phone",
+    "path": "/profile",
+    "expect": "profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-profile.png"
+   },
+   {
+    "width": "phone",
+    "path": "/verify",
+    "expect": "verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-verify.png"
+   },
+   {
+    "width": "phone",
+    "path": "/privacy",
+    "expect": "privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-privacy.png"
+   },
+   {
+    "width": "phone",
+    "path": "/terms",
+    "expect": "terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-terms.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/",
+    "expect": "token",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-token.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "expect": "discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-portfolio.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/orders",
+    "expect": "orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-orders.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/profile",
+    "expect": "profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-profile.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "expect": "verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/privacy",
+    "expect": "privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-privacy.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/terms",
+    "expect": "terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-terms.png"
+   }
+  ],
+  "inShell": [
+   {
+    "width": "phone",
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/profile",
+      "expect": "profile",
+      "route": "profile",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "violations": [],
+    "consoleErrors": []
+   },
+   {
+    "width": "desktop",
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/orders",
+      "expect": "orders",
+      "route": "orders",
+      "reloaded": false
+     },
+     {
+      "href": "/terms",
+      "expect": "terms",
+      "route": "terms",
+      "reloaded": false
+     },
+     {
+      "href": "/privacy",
+      "expect": "privacy",
+      "route": "privacy",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "violations": [],
+    "consoleErrors": []
+   }
+  ],
+  "shots": "<shots>"
+ },
+ "badCls": {
+  "url": "http://127.0.0.1:47312",
+  "at": "2026-11-01T00:18:01.020Z",
+  "browser": "153.0.8010.12",
+  "headers": {
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "integrityPolicy": "blocked-destinations=(script)"
+  },
+  "scripts": [
+   {
+    "src": "http://127.0.0.1:47312/assets/index-4-aiKqcO.js",
+    "integrity": "sha384-bZHDSY3VcdDNyQzepCMDhvNepkzvkqoMHcWN7ubaSqIhxXs0a/OfHsfsKiYH3HKW",
+    "served": "sha384-bZHDSY3VcdDNyQzepCMDhvNepkzvkqoMHcWN7ubaSqIhxXs0a/OfHsfsKiYH3HKW"
+   }
+  ],
+  "loadedScripts": [
+   "http://127.0.0.1:47312/assets/index-4-aiKqcO.js"
+  ],
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/",
+    "expect": "token",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/discover",
+    "expect": "discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-discover.png"
+   },
+   {
+    "width": "phone",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-portfolio.png"
+   },
+   {
+    "width": "phone",
+    "path": "/orders",
+    "expect": "orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-orders.png"
+   },
+   {
+    "width": "phone",
+    "path": "/profile",
+    "expect": "profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-profile.png"
+   },
+   {
+    "width": "phone",
+    "path": "/verify",
+    "expect": "verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-verify.png"
+   },
+   {
+    "width": "phone",
+    "path": "/privacy",
+    "expect": "privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-privacy.png"
+   },
+   {
+    "width": "phone",
+    "path": "/terms",
+    "expect": "terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.14218009478672985,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-terms.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/",
+    "expect": "token",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-token.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "expect": "discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-portfolio.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/orders",
+    "expect": "orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-orders.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/profile",
+    "expect": "profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-profile.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "expect": "verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/privacy",
+    "expect": "privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-privacy.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/terms",
+    "expect": "terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0.0625,
+    "shiftCount": 1,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-terms.png"
+   }
+  ],
+  "inShell": [
+   {
+    "width": "phone",
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/profile",
+      "expect": "profile",
+      "route": "profile",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "violations": [],
+    "consoleErrors": []
+   },
+   {
+    "width": "desktop",
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/orders",
+      "expect": "orders",
+      "route": "orders",
+      "reloaded": false
+     },
+     {
+      "href": "/terms",
+      "expect": "terms",
+      "route": "terms",
+      "reloaded": false
+     },
+     {
+      "href": "/privacy",
+      "expect": "privacy",
+      "route": "privacy",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "violations": [],
+    "consoleErrors": []
+   }
+  ],
+  "shots": "<shots>"
+ },
+ "badIntegrity": {
+  "url": "http://127.0.0.1:47313",
+  "at": "2026-11-01T00:19:56.188Z",
+  "browser": "153.0.8010.12",
+  "headers": {
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "integrityPolicy": "blocked-destinations=(script)"
+  },
+  "scripts": [
+   {
+    "src": "http://127.0.0.1:47313/assets/index-4-aiKqcO.js",
+    "integrity": "",
+    "served": "sha384-+TTahq5cggmw6/S2IzTnCZqJVrzra+tJmAkaJ/SgNZkx/oG8ugjBvn6xUNsMF5za"
+   }
+  ],
+  "loadedScripts": [],
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/",
+    "expect": "token",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/discover",
+    "expect": "discover",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-discover.png"
+   },
+   {
+    "width": "phone",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-portfolio.png"
+   },
+   {
+    "width": "phone",
+    "path": "/orders",
+    "expect": "orders",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-orders.png"
+   },
+   {
+    "width": "phone",
+    "path": "/profile",
+    "expect": "profile",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-profile.png"
+   },
+   {
+    "width": "phone",
+    "path": "/verify",
+    "expect": "verify",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-verify.png"
+   },
+   {
+    "width": "phone",
+    "path": "/privacy",
+    "expect": "privacy",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-privacy.png"
+   },
+   {
+    "width": "phone",
+    "path": "/terms",
+    "expect": "terms",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/phone-terms.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/",
+    "expect": "token",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-token.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "expect": "discover",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-portfolio.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/orders",
+    "expect": "orders",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-orders.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/profile",
+    "expect": "profile",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-profile.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "expect": "verify",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/privacy",
+    "expect": "privacy",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-privacy.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/terms",
+    "expect": "terms",
+    "route": null,
+    "violations": [],
+    "consoleErrors": [],
+    "cls": 0,
+    "shiftCount": 0,
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "<shots>/desktop-terms.png"
+   }
+  ],
+  "inShell": [
+   {
+    "width": "phone",
+    "steps": [],
+    "cls": 0,
+    "violations": [],
+    "consoleErrors": []
+   },
+   {
+    "width": "desktop",
+    "steps": [],
+    "cls": 0,
+    "violations": [],
+    "consoleErrors": []
+   }
+  ],
+  "shots": "<shots>"
+ }
+}
