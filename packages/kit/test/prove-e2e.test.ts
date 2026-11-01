@@ -104,22 +104,26 @@ test("node: a prover answer whose signals are not the input's, or whose proof is
   await assert.rejects(vaultProveWithdraw(answering(undefined), fixtureArgs(CV)), /worker answer: not 8 public signals/);
   const projective = { ...g.proof, pi_a: [g.proof.pi_a[0], g.proof.pi_a[1], "2"] };
   await assert.rejects(vaultProveWithdraw(answering(SIGNALS, projective), fixtureArgs(CV)), /worker answer: proof: not affine snarkjs JSON/);
-  await assert.rejects(vaultProveWithdraw(answering(SIGNALS, undefined), fixtureArgs(CV)), /worker answer: /);
+  await assert.rejects(vaultProveWithdraw(answering(SIGNALS, null), fixtureArgs(CV)), /worker answer: /);
   // and the same answer, right, passes
   const ok = await vaultProveWithdraw(answering([...SIGNALS]), fixtureArgs(CV));
   assert.deepEqual(ok.publicSignals, SIGNALS);
 });
 
 test("node: the setup files load once per prover, and again after a failed load", async () => {
+  assert.ok(good, "the first test's proof");
+  const g = good;
   const log: string[] = [];
-  const p = nodeProver(log);
   let fail = true;
   const flaky: VaultProver = {
     load: async (c) => {
       log.push(`load ${c}`);
       if (fail) throw new Error("withdraw.zkey: HTTP 503");
     },
-    prove: p.prove,
+    prove: async (c) => {
+      log.push(`prove ${c}`);
+      return { proof: g.proof, publicSignals: [...g.publicSignals], proveMs: 1 };
+    },
   };
   await assert.rejects(vaultProveWithdraw(flaky, fixtureArgs(CV)), /HTTP 503/);
   fail = false;
