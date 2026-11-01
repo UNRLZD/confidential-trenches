@@ -176,8 +176,9 @@ jobs:
         run: node --test scripts/live-checks/*.test.mjs
       # Every way off APP_HOST (sign-in, backup, export, sign-out, withdraw) hops to SIGN_HOST and back on the app's
       # harness (apps/terminal/test/return-hop/run.mjs, about 30 s after Chromium's install). Left to hand runs, a stale
-      # stand-in failed it on main unseen for hours.
-      - name: the terminal's return-hop browser run
+      # stand-in failed it on main unseen for hours. The same step runs BAR-10 (no text under 11 px, no phone tap box
+      # under 44 px) with the deployed app-shell check's own rules on the build, every routed path (test/bar10/run.mjs).
+      - name: the terminal's browser runs (return-hop, and BAR-10 on every routed path)
         run: |
           pnpm --filter terminal exec playwright install --with-deps chromium
           pnpm --filter terminal run test:e2e
