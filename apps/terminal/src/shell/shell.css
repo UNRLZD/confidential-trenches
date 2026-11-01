@@ -1,0 +1,65 @@
+/* The shell's styles. Every value is R5's (design/proto/assets/proto.css and brand/ct-stack.css at design-lock-r5),
+   which carries the live UNRLZD terminal's tokens verbatim. Desktop sizes are layout px on the 1920 design, drawn at
+   --fit-zoom (fit.ts). */
+
+/* self-hosted fonts (OFL 1.1, licences beside the files) */
+@font-face { font-family: "Schibsted Grotesk"; font-weight: 400; font-display: block; src: url("./fonts/schibsted-grotesk-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Schibsted Grotesk"; font-weight: 500; font-display: block; src: url("./fonts/schibsted-grotesk-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Schibsted Grotesk"; font-weight: 600; font-display: block; src: url("./fonts/schibsted-grotesk-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Chivo Mono"; font-weight: 400; font-display: block; src: url("./fonts/chivo-mono-latin-400-normal.woff2") format("woff2"); }
+
+:root {
+  --bg-page: #0a0a0a; --bg-raised: #181818;
+  --text-1: #f4f4f2; --text-2: #a3a3a3; --text-3: #6e6e6e;
+  --font-ui: "Schibsted Grotesk", system-ui, sans-serif; --font-num: "Chivo Mono", ui-monospace, monospace;
+  --m-ink: #0a0a0a; --m-ink-pill: #1c1c1c; --m-line-strong: #2a2a2a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg-page); color: var(--text-1); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+body { font-size: 13px; line-height: 1.3; }
+a { color: inherit; text-decoration: none; }
+svg { display: block; flex: none; }
+
+#root { zoom: var(--fit-zoom, 1); }
+.shell { min-height: calc(100dvh / var(--fit-zoom, 1)); display: flex; flex-direction: column; }
+.screen { flex: 1; min-height: 0; }
+
+/* the logo (brand/ct-stack.css; proto.css:69-88). Desktop: drawn at 52.5% (owner round 16), whatever the fit zoom */
+.ctlogo { --ct-w: 240.003px; --ct-h: 51.003px; --by-l: 164.45px; --by-base: 48.00px; position: relative; display: flex; align-items: flex-start; flex: none; zoom: calc(0.525 / var(--fit-zoom, 1)); }
+@media (min-resolution: 1.5dppx) { .ctlogo { --ct-w: 228.003px; --ct-h: 46.003px; --by-l: 154.05px; --by-base: 44.00px; } }
+.ctlogo .dots { position: relative; display: block; flex: none; width: var(--ct-w); height: var(--ct-h); }
+.ctlogo .dots img, .ctlogo .wm img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ctlogo .by { --wm-w: 112.8px; --wm-h: 31.2px; --wm-base: 24px; flex: none; display: flex; align-items: flex-start; margin: calc(var(--by-base) - var(--wm-base)) 0 calc(var(--ct-h) - var(--by-base) + var(--wm-base) - var(--wm-h)) calc(var(--by-l) - var(--ct-w)); font: 400 14.667px/1 var(--font-num); color: rgba(244, 244, 242, 0.5); white-space: nowrap; }
+@media (min-resolution: 1.5dppx) { .ctlogo .by { --wm-w: 75.2px; --wm-h: 20.8px; --wm-base: 16px; } }
+.ctlogo .by > span:first-child { margin: calc(var(--wm-base) - 0.845em) 0.3em 0 0; }
+.ctlogo .wm { position: relative; display: block; flex: none; width: var(--wm-w); height: var(--wm-h); }
+.ctlogo.ph { --ct-w: 103.503px; --ct-h: 22.503px; --by-l: 70.83px; --by-base: 21.00px; zoom: 1; display: block; }
+.ctlogo.ph .by { --wm-w: 84.6px; --wm-h: 23.4px; --wm-base: 18px; margin: 2px 0 0 1.5px; font-size: 11px; }
+@media (min-resolution: 1.5dppx) { .ctlogo.ph .by { --wm-w: 56.4px; --wm-h: 15.6px; --wm-base: 12px; } }
+.ctlogo.ph .wm { opacity: 0.7; }
+.logo-link { display: flex; flex: none; }
+
+/* desktop top bar (proto.css:66, :89-91) */
+.tb { height: 60px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 18px; position: relative; z-index: 60; }
+.nav { display: flex; gap: 4px; flex: none; }
+.nav a { height: 40px; padding: 0 14px; display: flex; align-items: center; border-radius: 10px; font-size: 15px; font-weight: 500; color: var(--text-2); }
+.nav a.on { background: var(--bg-raised); color: var(--text-1); }
+
+/* desktop footer (proto.css:124, :132) */
+.ft { height: 32px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 0 16px; border-top: 1px solid #151515; font: 12px var(--font-num); color: var(--text-2); white-space: nowrap; overflow: hidden; }
+.ft .links { flex: none; display: flex; gap: 14px; font-family: var(--font-ui); color: var(--text-3); }
+
+/* phone header and tab bar (proto.css:232-247, :368) */
+.phh, .tabbar { display: none; }
+.hit44 { height: 44px; display: flex; align-items: center; flex: none; }
+@media (max-width: 767.98px) {
+  .tb, .ft { display: none; }
+  .shell { padding-top: 56px; padding-bottom: 68px; }
+  .phh { position: fixed; z-index: 60; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; background: rgba(10,10,10,.84); backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); box-shadow: inset 0 -1px 0 rgba(255,255,255,.05); }
+  .tabbar { position: fixed; z-index: 65; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 6px calc(8px + env(safe-area-inset-bottom)); background: rgba(9,9,9,.86); backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+  .tabbar .tb4 { height: 54px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-3); font-size: 11px; font-weight: 500; }
+  .tabbar .tb4 .pl { width: 54px; height: 30px; border-radius: 15px; display: flex; align-items: center; justify-content: center; }
+  .tabbar .tb4.on { color: var(--text-1); font-weight: 600; }
+  .tabbar .tb4.on .pl { background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); }
+}

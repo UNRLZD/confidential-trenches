@@ -12,6 +12,10 @@ import { checkCsp, checkDir, checkHeadersFile, checkPermissions } from "./check-
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, "..", "public");
 const FILE = readFileSync(join(PUBLIC, "_headers"), "utf8");
+// a build as Vite writes it: public/ (the _headers) copied beside the built index.html
+const BUILD = mkdtempSync(join(tmpdir(), "check-deploy-build-"));
+cpSync(PUBLIC, BUILD, { recursive: true });
+writeFileSync(join(BUILD, "index.html"), "<!doctype html>\n");
 const CSP = /Content-Security-Policy: (.*)/.exec(FILE)![1]!;
 const PP = /Permissions-Policy: (.*)/.exec(FILE)![1]!;
 const SIGN = "https://sign.confidential.unrealized.trade";
@@ -23,11 +27,11 @@ const csp = (from: string, to: string) => {
 const refused = (problems: string[], re: RegExp) =>
   assert.ok(problems.some((x) => re.test(x)), `want ${re}, got:\n${problems.join("\n") || "(no problem)"}`);
 
-test("the committed _headers and the placeholder build pass", () => {
+test("the committed _headers and a build that carries them pass", () => {
   assert.deepEqual(checkCsp(CSP), []);
   assert.deepEqual(checkPermissions(PP), []);
   assert.deepEqual(checkHeadersFile(FILE), []);
-  assert.deepEqual(checkDir(PUBLIC), []);
+  assert.deepEqual(checkDir(BUILD), []);
 });
 
 test("frame-src is exactly SIGN_HOST", () => {
@@ -104,7 +108,7 @@ test("the _headers file: one /* rule, no policy header set or removed elsewhere,
 
 test("a build with _worker.js or without _headers is refused; the CLI exits 1 on a refusal and 0 on the real build", () => {
   const dir = mkdtempSync(join(tmpdir(), "check-deploy-"));
-  cpSync(PUBLIC, dir, { recursive: true });
+  cpSync(BUILD, dir, { recursive: true });
   writeFileSync(join(dir, "_worker.js"), "export default {}\n");
   refused(checkDir(dir), /carries _worker\.js/);
   const empty = mkdtempSync(join(tmpdir(), "check-deploy-"));
@@ -114,7 +118,7 @@ test("a build with _worker.js or without _headers is refused; the CLI exits 1 on
   const bad = cli(dir);
   assert.equal(bad.status, 1, bad.stderr);
   assert.match(bad.stderr, /check-deploy: REFUSED .*_worker\.js/);
-  const good = cli(PUBLIC);
+  const good = cli(BUILD);
   assert.equal(good.status, 0, good.stderr);
   assert.match(good.stdout, /check-deploy: ok .*the header policy holds/);
 });
@@ -128,19 +132,19 @@ test("deploy.mjs runs the gate first: a refused build reaches no upload; a passi
   };
   const env = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
   const bad = mkdtempSync(join(tmpdir(), "deploy-"));
-  cpSync(PUBLIC, bad, { recursive: true });
+  cpSync(BUILD, bad, { recursive: true });
   writeFileSync(join(bad, "_headers"), FILE.replace("script-src 'self';", "script-src 'self' 'wasm-unsafe-eval';"));
   const r1 = deploy([bad], env, run);
   assert.equal(r1.code, 1);
   assert.match(r1.err.join("\n"), /REFUSED CSP script-src contains 'wasm-unsafe-eval'[\s\S]*nothing was uploaded/);
   assert.equal(calls.length, 0);
-  assert.equal(deploy([PUBLIC, "--dry-run"], env, run).code, 0);
-  assert.equal(deploy([PUBLIC], {}, run).code, 2);
+  assert.equal(deploy([BUILD, "--dry-run"], env, run).code, 0);
+  assert.equal(deploy([BUILD], {}, run).code, 2);
   assert.equal(calls.length, 0);
-  const r2 = deploy([PUBLIC], env, run);
+  const r2 = deploy([BUILD], env, run);
   assert.equal(r2.code, 0, r2.err?.join("\n"));
   const up = calls.find((c) => c.cmd === "pnpm")!;
-  assert.deepEqual(up.args.slice(0, 9), ["dlx", WRANGLER, "pages", "deploy", PUBLIC, "--project-name", PROJECT, "--branch", BRANCH]);
+  assert.deepEqual(up.args.slice(0, 9), ["dlx", WRANGLER, "pages", "deploy", BUILD, "--project-name", PROJECT, "--branch", BRANCH]);
   assert.ok(up.args.includes("abc123"));
   assert.match(up.cwd!, /ct-deploy-/);
   assert.equal(PROJECT, "confidential-trenches-app");
