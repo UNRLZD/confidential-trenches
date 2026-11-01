@@ -1,11 +1,11 @@
 {
  "good": {
   "source": "harness, SIGN_HOST from packages/signpage's committed build",
-  "at": "2026-11-01T12:57:34.383Z",
+  "at": "2026-11-01T13:29:20.330Z",
   "browser": "153.0.8010.12",
   "steps": {
    "first": {
-    "id": "c7402647-9cff-4b72-8204-c99462f90e96"
+    "id": "a4abfc55-2a01-4287-bab6-4989ef30f6d1"
    },
    "open": {
     "top": {
@@ -14,21 +14,21 @@
     }
    },
    "created": {
-    "t": 1793537855509,
+    "t": 1793539761481,
     "top": {
      "state": "backup",
      "codeSaved": "false"
     }
    },
    "saved": {
-    "t": 1793537859388,
+    "t": 1793539765359,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "second": {
-    "id": "a1578f34-5499-4907-b99b-7a52931cbf36",
+    "id": "a6aecf15-5bfb-401f-8f93-321650817c91",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -44,7 +44,7 @@
     }
    },
    "statusGone": {
-    "id": "5b7382c3-81f0-47a9-8850-dd6f056c34de",
+    "id": "5a124764-7996-42d9-ae78-9bf5dd171b85",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -59,26 +59,26 @@
     }
    },
    "reloaded": {
-    "t": 1793537862669,
+    "t": 1793539768661,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "signedOut": {
-    "t": 1793537866571,
+    "t": 1793539772579,
     "top": {
      "state": "signed-out",
      "codeSaved": null
     }
    },
    "last": {
-    "id": "86efe008-f501-487e-a5d6-49e9a151d831"
+    "id": "33f36f12-f65a-46b6-96b3-53792debf455"
    }
   },
   "messages": [
    {
-    "t": 1793537854497.8,
+    "t": 1793539760469.2,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -89,12 +89,12 @@
     }
    },
    {
-    "t": 1793537854515.8,
+    "t": 1793539760486.9001,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "c7402647-9cff-4b72-8204-c99462f90e96",
+     "id": "a4abfc55-2a01-4287-bab6-4989ef30f6d1",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -111,7 +111,7 @@
     }
    },
    {
-    "t": 1793537855563.5,
+    "t": 1793539761534.5,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -133,7 +133,7 @@
     }
    },
    {
-    "t": 1793537859423.5999,
+    "t": 1793539765398.2,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -155,12 +155,12 @@
     }
    },
    {
-    "t": 1793537862616.8,
+    "t": 1793539768657,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "5b7382c3-81f0-47a9-8850-dd6f056c34de",
+     "id": "5a124764-7996-42d9-ae78-9bf5dd171b85",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -177,7 +177,7 @@
     }
    },
    {
-    "t": 1793537862739.3,
+    "t": 1793539768750.9001,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -199,7 +199,7 @@
     }
    },
    {
-    "t": 1793537866607.5999,
+    "t": 1793539772631.9001,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -220,12 +220,12 @@
     }
    },
    {
-    "t": 1793537869625.3,
+    "t": 1793539775649.8,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "86efe008-f501-487e-a5d6-49e9a151d831",
+     "id": "33f36f12-f65a-46b6-96b3-53792debf455",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -246,21 +246,23 @@
   "frames": [
    {
     "calls": 5,
-    "seedReads": []
+    "seedReads": [],
+    "writes": []
    },
    {
     "calls": 3,
-    "seedReads": []
+    "seedReads": [],
+    "writes": []
    }
   ]
  },
  "bad": {
   "source": "harness, SIGN_HOST from main 7419700 packages/signpage (index.html, public/app.js, public/_headers): the build before this card",
-  "at": "2026-11-01T12:57:50.020Z",
+  "at": "2026-11-01T13:29:36.041Z",
   "browser": "153.0.8010.12",
   "steps": {
    "first": {
-    "id": "c437adc3-41b9-48b2-afbe-0349c0d92fed"
+    "id": "80a32ea1-d609-4ef2-a171-c8e2a10ddcc2"
    },
    "open": {
     "top": {
@@ -269,21 +271,21 @@
     }
    },
    "created": {
-    "t": 1793537871066,
+    "t": 1793539777231,
     "top": {
      "state": "backup",
      "codeSaved": "false"
     }
    },
    "saved": {
-    "t": 1793537874935,
+    "t": 1793539781113,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "second": {
-    "id": "3eb17fc2-5d3b-4c6c-8db3-72e9bc926c99",
+    "id": "6a4c9899-d33e-408e-a370-8c40a05b64ef",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -298,7 +300,7 @@
     }
    },
    "statusGone": {
-    "id": "c0617587-60c3-4adb-8993-ade017c7af0f",
+    "id": "a5da3707-d849-4e98-9a1d-fe55e2636ad9",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -313,26 +315,26 @@
     }
    },
    "reloaded": {
-    "t": 1793537878140,
+    "t": 1793539784329,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "signedOut": {
-    "t": 1793537882042,
+    "t": 1793539788239,
     "top": {
      "state": "signed-out",
      "codeSaved": null
     }
    },
    "last": {
-    "id": "54f5e77e-e692-471a-8919-81f99bca57d5"
+    "id": "215f70b8-579e-453e-8a96-114530285c81"
    }
   },
   "messages": [
    {
-    "t": 1793537870143.9,
+    "t": 1793539776208.6,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -343,12 +345,12 @@
     }
    },
    {
-    "t": 1793537870158.5,
+    "t": 1793539776233.5,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "c437adc3-41b9-48b2-afbe-0349c0d92fed",
+     "id": "80a32ea1-d609-4ef2-a171-c8e2a10ddcc2",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -365,12 +367,12 @@
     }
    },
    {
-    "t": 1793537878138.0999,
+    "t": 1793539784326.2,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "c0617587-60c3-4adb-8993-ade017c7af0f",
+     "id": "a5da3707-d849-4e98-9a1d-fe55e2636ad9",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -387,12 +389,12 @@
     }
    },
    {
-    "t": 1793537885108.2,
+    "t": 1793539791298.6,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "54f5e77e-e692-471a-8919-81f99bca57d5",
+     "id": "215f70b8-579e-453e-8a96-114530285c81",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -415,23 +417,29 @@
     "calls": 5,
     "seedReads": [
      "get meta/seed"
+    ],
+    "writes": [
+     "open ct-wallet made or upgraded it (v0 to v1)",
+     "put meta/k_wrap",
+     "put meta/lane"
     ]
    },
    {
     "calls": 4,
     "seedReads": [
      "get meta/seed"
-    ]
+    ],
+    "writes": []
    }
   ]
  },
  "m4": {
   "source": "harness, SIGN_HOST from this card at ed44772 with one change: main.ts runs its top-level seed read in the frame too (the else at the load removed)",
-  "at": "2026-11-01T12:58:05.431Z",
+  "at": "2026-11-01T13:29:51.676Z",
   "browser": "153.0.8010.12",
   "steps": {
    "first": {
-    "id": "7e8f6b9f-b8f8-4a86-a93e-ccc133baf7c1"
+    "id": "08f3c851-3a69-45a1-82b5-ad8d54802454"
    },
    "open": {
     "top": {
@@ -440,21 +448,21 @@
     }
    },
    "created": {
-    "t": 1793537886533,
+    "t": 1793539792857,
     "top": {
      "state": "backup",
      "codeSaved": "false"
     }
    },
    "saved": {
-    "t": 1793537890397,
+    "t": 1793539796722,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "second": {
-    "id": "7becb06c-fae1-4648-8642-5edb38523500",
+    "id": "03772097-f6df-46fa-8ce9-840a704ddb70",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -470,7 +478,7 @@
     }
    },
    "statusGone": {
-    "id": "85d1c9f5-3e56-4ac8-a3d1-a69362419997",
+    "id": "a952ee49-9443-40da-ad97-5ba552eda574",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -485,26 +493,26 @@
     }
    },
    "reloaded": {
-    "t": 1793537893693,
+    "t": 1793539800103,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "signedOut": {
-    "t": 1793537897581,
+    "t": 1793539804053,
     "top": {
      "state": "signed-out",
      "codeSaved": null
     }
    },
    "last": {
-    "id": "c98e6fa4-0e37-4ff4-960a-64e5d5713043"
+    "id": "8c0f5ec0-829e-4749-9de8-366755d9a6c9"
    }
   },
   "messages": [
    {
-    "t": 1793537885551.6,
+    "t": 1793539791815,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -515,12 +523,12 @@
     }
    },
    {
-    "t": 1793537885566.8,
+    "t": 1793539791835.5,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "7e8f6b9f-b8f8-4a86-a93e-ccc133baf7c1",
+     "id": "08f3c851-3a69-45a1-82b5-ad8d54802454",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -537,7 +545,7 @@
     }
    },
    {
-    "t": 1793537886574.6,
+    "t": 1793539792898,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -559,7 +567,7 @@
     }
    },
    {
-    "t": 1793537890444.9,
+    "t": 1793539796764.7,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -581,12 +589,12 @@
     }
    },
    {
-    "t": 1793537893641.4,
+    "t": 1793539800047.4001,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "85d1c9f5-3e56-4ac8-a3d1-a69362419997",
+     "id": "a952ee49-9443-40da-ad97-5ba552eda574",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -603,7 +611,7 @@
     }
    },
    {
-    "t": 1793537893755,
+    "t": 1793539800208,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -625,7 +633,7 @@
     }
    },
    {
-    "t": 1793537897622.2,
+    "t": 1793539804098.5,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -646,12 +654,12 @@
     }
    },
    {
-    "t": 1793537900641.6,
+    "t": 1793539807115.2,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "c98e6fa4-0e37-4ff4-960a-64e5d5713043",
+     "id": "8c0f5ec0-829e-4749-9de8-366755d9a6c9",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -675,6 +683,11 @@
     "seedReads": [
      "get meta/seed",
      "get meta/seed"
+    ],
+    "writes": [
+     "open ct-wallet made or upgraded it (v0 to v1)",
+     "put meta/k_wrap",
+     "put meta/lane"
     ]
    },
    {
@@ -682,17 +695,18 @@
     "seedReads": [
      "get meta/seed",
      "get meta/seed"
-    ]
+    ],
+    "writes": []
    }
   ]
  },
  "m10": {
   "source": "harness, SIGN_HOST from this card at ed44772 with one change: the top-level load runs no syncStatus backfill",
-  "at": "2026-11-01T12:58:21.045Z",
+  "at": "2026-11-01T13:30:07.536Z",
   "browser": "153.0.8010.12",
   "steps": {
    "first": {
-    "id": "dea065b8-d774-473a-a4ac-6db0da6c2e75"
+    "id": "2e233dca-7d1f-4a01-b804-dd2d9bb1ce5c"
    },
    "open": {
     "top": {
@@ -701,21 +715,21 @@
     }
    },
    "created": {
-    "t": 1793537902174,
+    "t": 1793539808680,
     "top": {
      "state": "backup",
      "codeSaved": "false"
     }
    },
    "saved": {
-    "t": 1793537906052,
+    "t": 1793539812563,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "second": {
-    "id": "bfb07b51-88f9-4565-bed2-ed8e7d3b7afc",
+    "id": "2d89301b-db14-4959-a134-1fe9c47ff958",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -731,7 +745,7 @@
     }
    },
    "statusGone": {
-    "id": "af59d71d-7d5b-4463-b92c-be0f0abca182",
+    "id": "378917ff-e75c-40f4-b031-3b7550f29e41",
     "answer": {
      "release": "unreleased",
      "api": 1,
@@ -746,26 +760,26 @@
     }
    },
    "reloaded": {
-    "t": 1793537909293,
+    "t": 1793539815832,
     "top": {
      "state": "signed-in",
      "codeSaved": "true"
     }
    },
    "signedOut": {
-    "t": 1793537913197,
+    "t": 1793539819722,
     "top": {
      "state": "signed-out",
      "codeSaved": null
     }
    },
    "last": {
-    "id": "17e672d4-f928-456f-8236-172cb9a17f04"
+    "id": "08c0c9e2-7a09-4cad-84ae-f9eacd5d1813"
    }
   },
   "messages": [
    {
-    "t": 1793537901184.9001,
+    "t": 1793539807684.0999,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -776,12 +790,12 @@
     }
    },
    {
-    "t": 1793537901203.5,
+    "t": 1793539807704.9,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "dea065b8-d774-473a-a4ac-6db0da6c2e75",
+     "id": "2e233dca-7d1f-4a01-b804-dd2d9bb1ce5c",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -798,7 +812,7 @@
     }
    },
    {
-    "t": 1793537902225.9001,
+    "t": 1793539808736.7998,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -820,7 +834,7 @@
     }
    },
    {
-    "t": 1793537906088.5,
+    "t": 1793539812595.4,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -842,12 +856,12 @@
     }
    },
    {
-    "t": 1793537909290.3,
+    "t": 1793539815781.0999,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "af59d71d-7d5b-4463-b92c-be0f0abca182",
+     "id": "378917ff-e75c-40f4-b031-3b7550f29e41",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -864,7 +878,7 @@
     }
    },
    {
-    "t": 1793537913239.8,
+    "t": 1793539819761.7,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
@@ -885,12 +899,12 @@
     }
    },
    {
-    "t": 1793537916256.4001,
+    "t": 1793539822781.2,
     "origin": "https://sign.confidential.unrealized.trade",
     "fromFrame": true,
     "data": {
      "v": 1,
-     "id": "17e672d4-f928-456f-8236-172cb9a17f04",
+     "id": "08c0c9e2-7a09-4cad-84ae-f9eacd5d1813",
      "ok": true,
      "result": {
       "release": "unreleased",
@@ -911,11 +925,278 @@
   "frames": [
    {
     "calls": 4,
-    "seedReads": []
+    "seedReads": [],
+    "writes": []
    },
    {
     "calls": 2,
-    "seedReads": []
+    "seedReads": [],
+    "writes": []
+   }
+  ]
+ },
+ "m16": {
+  "source": "harness, SIGN_HOST from this card at b55eda3 with one change (the review build sites3/m16): main.ts opens the frame with openWalletStore instead of openWalletStoreReader",
+  "at": "2026-11-01T13:30:23.177Z",
+  "browser": "153.0.8010.12",
+  "steps": {
+   "first": {
+    "id": "c3fb39ac-d987-4d20-8467-22a14966126f"
+   },
+   "open": {
+    "top": {
+     "state": "signed-out",
+     "codeSaved": null
+    }
+   },
+   "created": {
+    "t": 1793539824367,
+    "top": {
+     "state": "backup",
+     "codeSaved": "false"
+    }
+   },
+   "saved": {
+    "t": 1793539828240,
+    "top": {
+     "state": "signed-in",
+     "codeSaved": "true"
+    }
+   },
+   "second": {
+    "id": "d46d589f-57ac-46f2-b79b-f31c3990805a",
+    "answer": {
+     "release": "unreleased",
+     "api": 1,
+     "signed_in": true,
+     "way": "passkey",
+     "code_saved": true,
+     "vault_balance": "0",
+     "wallets": [],
+     "positions": [],
+     "orders": [],
+     "held": [],
+     "ops": []
+    }
+   },
+   "statusGone": {
+    "id": "724b9a58-007f-46f0-875e-5dae9cde0b4c",
+    "answer": {
+     "release": "unreleased",
+     "api": 1,
+     "signed_in": true,
+     "code_saved": false,
+     "vault_balance": "0",
+     "wallets": [],
+     "positions": [],
+     "orders": [],
+     "held": [],
+     "ops": []
+    }
+   },
+   "reloaded": {
+    "t": 1793539831507,
+    "top": {
+     "state": "signed-in",
+     "codeSaved": "true"
+    }
+   },
+   "signedOut": {
+    "t": 1793539835395,
+    "top": {
+     "state": "signed-out",
+     "codeSaved": null
+    }
+   },
+   "last": {
+    "id": "b4522ac9-ac34-4757-b752-4960137787bb"
+   }
+  },
+  "messages": [
+   {
+    "t": 1793539823347.6,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "type": "ready",
+     "release": "unreleased",
+     "api": 1
+    }
+   },
+   {
+    "t": 1793539823384,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "id": "c3fb39ac-d987-4d20-8467-22a14966126f",
+     "ok": true,
+     "result": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": false,
+      "code_saved": false,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   {
+    "t": 1793539824415.1,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "type": "state",
+     "state": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": true,
+      "way": "passkey",
+      "code_saved": false,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   {
+    "t": 1793539828279.7,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "type": "state",
+     "state": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": true,
+      "way": "passkey",
+      "code_saved": true,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   {
+    "t": 1793539831455.8,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "id": "724b9a58-007f-46f0-875e-5dae9cde0b4c",
+     "ok": true,
+     "result": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": true,
+      "code_saved": false,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   {
+    "t": 1793539831568.9,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "type": "state",
+     "state": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": true,
+      "way": "passkey",
+      "code_saved": true,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   {
+    "t": 1793539835450.1,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "type": "state",
+     "state": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": false,
+      "code_saved": false,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   },
+   {
+    "t": 1793539838463.2,
+    "origin": "https://sign.confidential.unrealized.trade",
+    "fromFrame": true,
+    "data": {
+     "v": 1,
+     "id": "b4522ac9-ac34-4757-b752-4960137787bb",
+     "ok": true,
+     "result": {
+      "release": "unreleased",
+      "api": 1,
+      "signed_in": false,
+      "code_saved": false,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": []
+     }
+    }
+   }
+  ],
+  "errors": [],
+  "frames": [
+   {
+    "calls": 14,
+    "seedReads": [],
+    "writes": [
+     "open ct-wallet made or upgraded it (v0 to v1)",
+     "put meta/k_wrap",
+     "put meta/lane"
+    ]
+   },
+   {
+    "calls": 10,
+    "seedReads": [],
+    "writes": [
+     "open ct-wallet made or upgraded it (v0 to v1)",
+     "put meta/k_wrap",
+     "put meta/lane"
+    ]
    }
   ]
  }

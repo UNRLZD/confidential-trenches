@@ -28,12 +28,21 @@ test("recorded bad run (the build before this card): FAIL, no state event after 
     assert.ok(r.lines.some((l) => l.startsWith(`BAD ${s}`)), `${s}\n${r.lines.join("\n")}`);
 });
 
-test("recorded bad run m4 (the frame's main.ts reads the seed): FAIL on the frames' IndexedDB reads only", () => {
+test("recorded bad run m4 (the frame's main.ts reads the seed): FAIL on the frames' seed reads and their writes only", () => {
   const r = judge(ANSWERS.m4);
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD"));
-  assert.equal(bad.length, 1, r.lines.join("\n"));
+  assert.equal(bad.length, 2, r.lines.join("\n"));
   assert.match(bad[0], /^BAD no SIGN_HOST frame reads the seed record .* get meta\/seed/);
+  assert.match(bad[1], /^BAD no SIGN_HOST frame writes IndexedDB or makes a database .* made or upgraded it/);
+});
+
+test("recorded bad run m16 (the frame opens the store with openWalletStore): FAIL on the frames' writes only", () => {
+  const r = judge(ANSWERS.m16);
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(bad.length, 1, r.lines.join("\n"));
+  assert.match(bad[0], /^BAD no SIGN_HOST frame writes IndexedDB or makes a database .*open ct-wallet made or upgraded it \(v0 to v1\); put meta\/k_wrap/);
 });
 
 test("recorded bad run m10 (no backfill at the top-level load): FAIL on the reload only", () => {
@@ -49,11 +58,20 @@ test("a frame that reads the seed record fails, and so does a run whose frames t
   a.frames[1].seedReads.push("get meta/seed");
   assert.equal(judge(a).ok, false);
   const b = clone(GOOD);
-  b.frames[0] = { calls: 0, seedReads: null };
+  b.frames[0] = { calls: 0, seedReads: null, writes: null };
   assert.equal(judge(b).ok, false);
   const c = clone(GOOD);
   c.frames = c.frames.slice(0, 1);
   assert.equal(judge(c).ok, false);
+});
+
+test("a frame that writes IndexedDB fails, and so does one whose writes were not recorded", () => {
+  const a = clone(GOOD);
+  a.frames[0].writes.push("put meta/lane");
+  assert.equal(judge(a).ok, false);
+  const b = clone(GOOD);
+  delete b.frames[1].writes;
+  assert.equal(judge(b).ok, false);
 });
 
 test("a state that carries one more key fails", () => {
