@@ -2,9 +2,9 @@
 // Live check of card kit-freeze-helper-api: the helper API /v1 is one typed file in the kit, as GitHub serves it.
 // It reads packages/kit/src/helper/v1.ts and packages/kit/src/index.ts from GitHub (main, then the 06:00Z freeze tag)
 // and parses them with the TypeScript parser, never running them. It checks, against values pinned here from
-// markets.md at research main ffcba5e (the public repo carries no papers):
-//   - the file imports nothing outside the kit (only `import type` of Chain and OrderRecord from ../orders/record.ts, the
-//     CO's call at 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
+// markets.md, wallet.md and vault.md at research main 3dbe87c (the public repo carries no papers):
+//   - the file imports nothing outside the kit (only Chain, OrderRecord and ORDER_RECORD_FIELDS from ../orders/record.ts,
+//     the CO's call at 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
 //     TS2308), and index.ts exports it ("export * from ./helper/v1");
 //   - the path list equals H7's table (markets.md:3329-3345) with 7.1's new POST /v1/log (:3277), and the health parts
 //     are {proxy, relay, intents, delegate, orders, log} (:3278, :3331);
@@ -16,6 +16,9 @@
 //     receiver_is_vault, and /v1/intents never answers token_halted;
 //   - cross-origin reads for exactly APP_HOST and SIGN_HOST (:3280, :3291-3311): never "*", no credentials, Vary:
 //     Origin, X-Helper-Commit exposed (:3287-3289);
+//   - every money-path shape (withdraw, withdraw/fee, bind, intents, orders, the PUT, status, log) prints exactly as
+//     pinned in SHAPES, and every frozen value (CORS, paths with their limits, the RPC allowlist, the HTTP statuses,
+//     the patterns and limits, the order's wire fields with orders/record.ts's ORDER_RECORD_FIELDS) equals VALUES;
 //   - after 06:00Z, main's v1.ts equals the tag's byte for byte.
 // Once the helper answers (card helper-host-health), it also reads https://api.confidential.unrealized.trade/v1/health
 // from APP_HOST's Origin and from a stranger's, and compares its parts, X-Helper-Commit and CORS headers with the file.
@@ -31,6 +34,7 @@ const KEY = "kit-freeze-helper-api";
 export const RAW = "https://raw.githubusercontent.com/UNRLZD/confidential-trenches";
 export const V1 = "packages/kit/src/helper/v1.ts";
 export const ENTRY = "packages/kit/src/index.ts";
+export const RECORD = "packages/kit/src/orders/record.ts";
 // HELPER_HOST, markets.md:2434
 export const HEALTH = "https://api.confidential.unrealized.trade/v1/health";
 export const FREEZE = Date.parse("2026-11-01T06:00:00Z");
@@ -39,7 +43,7 @@ const TIMEOUT_MS = 10_000;
 const MAX_TEXT = 1 << 20; // a v1.ts or index.ts over 1 MB is not ours
 const MAX_HEALTH = 1024; // H7: /v1/health answers 1 KB
 
-// ---- pinned from markets.md at research main ffcba5e ----
+// ---- pinned from markets.md at research main 3dbe87c (line numbers as at ffcba5e: the H7 rows did not move) ----
 // H7's table (:3331-3345) and 7.1's new row POST /v1/log (:3277)
 export const PATHS = [
   "GET /v1/health",
@@ -78,9 +82,85 @@ export const CODES = {
 };
 export const STATUS = { token_halted: 503, receiver_is_vault: 403, id_not_ours: 403, sender_struck: 403, prepay_open: 409, not_paid: 409, receiver_not_registered: 409 };
 const DELEGATE_FIELDS = ["sender_id", "receiver_id", "actions", "nonce", "max_block_height", "public_key"];
+// The frozen file, pinned (the CO's review of 01:33Z). SHAPES: each money-path type as the TypeScript printer writes it
+// with no comments, checked by hand against its row: withdraw and withdraw/fee markets.md:3337-3339 and 7.1's rows
+// :3271-3272, the withdrawal vault.md:356-364, bind :3340, intents :3341 and wallet.md:898-901, orders, status, the PUT
+// and DELETE :3342-3345 (the orders row as restated at 3dbe87c), log :3277 and section 2.5. VALUES: the frozen
+// constants, HELPER_ORDER_FIELDS read with orders/record.ts's ORDER_RECORD_FIELDS. A deleted salt or a renamed
+// relay_fee changes a SHAPES line.
+export const SHAPES = {
+  HelperWithdrawFeeAnswer: "export interface HelperWithdrawFeeAnswer { relayer_account: HelperNearAccount; fee_recipient: HelperNearAccount; relay_fee: HelperDecimal; gp: HelperDecimal; px: string; g_w: HelperDecimal; valid_until_block: number; }",
+  HelperReleaseRelayer: "export interface HelperReleaseRelayer { readonly relayer_account: HelperNearAccount; readonly fee_recipient: HelperNearAccount; }",
+  HelperWithdrawal: "export interface HelperWithdrawal { recipient: HelperNearAccount; register_deposit: HelperDecimal; fee_recipient: HelperNearAccount; relay_fee: HelperDecimal; refund_precommitment: HelperDecimal; deadline_ms: number; salt: string; }",
+  HelperGroth16Proof: "export interface HelperGroth16Proof { a: [ string, string ]; b: [ [ string, string ], [ string, string ] ]; c: [ string, string ]; }",
+  HelperWithdrawRequest: "export interface HelperWithdrawRequest { withdrawal: HelperWithdrawal; proof: HelperGroth16Proof; public_signals: [ string, string, string, string, string, string, string, string ]; fund_recipient: true; token: HelperNearAccount; }",
+  HelperWithdrawAnswer: "export interface HelperWithdrawAnswer { tx_hash: HelperTxHash; state: \"submitted\"; }",
+  HelperWithdrawStatusAnswer: "export interface HelperWithdrawStatusAnswer { state: \"submitted\" | \"final\" | \"failed\"; block: number | null; receipts_ok: boolean | null; }",
+  HelperBindRequest: "export interface HelperBindRequest { signed_delegate: HelperBase64; }",
+  HelperBindAnswer: "export interface HelperBindAnswer { tx_hash: HelperTxHash; }",
+  HelperDelegateAction: "export interface HelperDelegateAction<A> { sender_id: HelperNearAccount; receiver_id: HelperNearAccount; actions: [ A ]; nonce: number; max_block_height: number; public_key: HelperNearPublicKey; }",
+  HelperFunctionCall: "export interface HelperFunctionCall<M extends string, Args> { FunctionCall: { method_name: M; args: Args; gas: number; deposit: \"1\"; }; }",
+  HelperFtTransferCallArgs: "export interface HelperFtTransferCallArgs { receiver_id: HelperNearAccount; amount: HelperDecimal; msg: string; }",
+  HelperFtTransferArgs: "export interface HelperFtTransferArgs { receiver_id: HelperNearAccount; amount: HelperDecimal; }",
+  HelperOnwardArgs: "export interface HelperOnwardArgs { receiver_id: typeof HELPER_ONWARD_RECEIVER; amount: HelperDecimal; msg: string; }",
+  HelperBindDeposit: "export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<\"ft_transfer_call\", HelperFtTransferCallArgs>>;",
+  HelperBindOnward: "export type HelperBindOnward = HelperDelegateAction<HelperFunctionCall<\"ft_transfer_call\", HelperOnwardArgs>>;",
+  HelperBindPlain: "export type HelperBindPlain = HelperDelegateAction<HelperFunctionCall<\"ft_transfer\", HelperFtTransferArgs>>;",
+  HelperBindCleanup: "export type HelperBindCleanup = HelperDelegateAction<{ DeleteAccount: { beneficiary_id: HelperNearAccount; }; }>;",
+  HelperBindDelegate: "export type HelperBindDelegate = HelperBindDeposit | HelperBindOnward | HelperBindPlain | HelperBindCleanup;",
+  HelperIntentsRequest: "export interface HelperIntentsRequest { signed_intent: HelperSignedIntent; }",
+  HelperSignedIntent: "export interface HelperSignedIntent { standard: \"raw_ed25519\"; payload: string; public_key: HelperNearPublicKey; signature: HelperEd25519Signature; }",
+  HelperIntentPayload: "export interface HelperIntentPayload { signer_id: HelperNearAccount; verifying_contract: \"intents.near\"; deadline: string; nonce: string; intents: [ HelperIntent ]; }",
+  HelperIntentTransfer: "export interface HelperIntentTransfer { intent: \"transfer\"; receiver_id: HelperNearAccount; tokens: Record<string, HelperDecimal>; }",
+  HelperIntentFtWithdraw: "export interface HelperIntentFtWithdraw { intent: \"ft_withdraw\"; token: HelperNearAccount; receiver_id: HelperNearAccount; amount: HelperDecimal; }",
+  HelperIntent: "export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw;",
+  HelperIntentsAnswer: "export interface HelperIntentsAnswer { tx_hash: HelperTxHash; }",
+  HelperOrder: "export type HelperOrder = OrderRecord & { token_hash: string; };",
+  HelperOrdersRequest: "export interface HelperOrdersRequest { group_id: string; orders: [ HelperOrder ] | [ HelperOrder, HelperOrder ]; }",
+  HelperOrdersAnswer: "export interface HelperOrdersAnswer { orders: ({ order_id: OrderRecord[\"order_id\"]; state: \"armed\"; } | { order_id: OrderRecord[\"order_id\"]; error: { code: HelperOrderCode; }; })[]; }",
+  HelperOrderStatusItem: "export interface HelperOrderStatusItem { order_id: OrderRecord[\"order_id\"]; token: string; }",
+  HelperOrdersStatusRequest: "export interface HelperOrdersStatusRequest { items: [ HelperOrderStatusItem, ...HelperOrderStatusItem[] ]; }",
+  HelperOrderStatus: "export interface HelperOrderStatus { order_id: OrderRecord[\"order_id\"]; state: HelperOrderState; tx_id?: HelperTxHash; last_try?: string; reason?: string; }",
+  HelperOrdersStatusAnswer: "export interface HelperOrdersStatusAnswer { items: HelperOrderStatus[]; }",
+  HelperOrderReplaceRequest: "export type HelperOrderReplaceRequest = { token: string; } & Pick<OrderRecord, \"variants\" | \"expires_at\">;",
+  HelperOrderReplaceAnswer: "export interface HelperOrderReplaceAnswer { state: HelperOrderState; }",
+  HelperOrderDeleteRequest: "export interface HelperOrderDeleteRequest { token: string; }",
+  HelperOrderDeleteAnswer: "export interface HelperOrderDeleteAnswer { state: \"deleted\"; }",
+  HelperLogPostArgs: "export interface HelperLogPostArgs { T: string; prev_head: string; entry_hash: string; payload: string; sig: string; }",
+  HelperLogSubscribeArgs: "export interface HelperLogSubscribeArgs { T: string; p: string; follower_pubkey: string; precommitment: string; sig: string; }",
+  HelperLogRequest: "export type HelperLogRequest = { method: \"post\"; args: HelperLogPostArgs; } | { method: \"subscribe\"; args: HelperLogSubscribeArgs; };",
+  HelperLogAnswer: "export interface HelperLogAnswer { tx_hash: HelperTxHash; }",
+  HelperDecimal: "export type HelperDecimal = string;",
+  HelperNearAccount: "export type HelperNearAccount = string;",
+  HelperNearPublicKey: "export type HelperNearPublicKey = `ed25519:${string}`;",
+  HelperEd25519Signature: "export type HelperEd25519Signature = `ed25519:${string}`;",
+  HelperBase64: "export type HelperBase64 = string;",
+  HelperTxHash: "export type HelperTxHash = string;",
+  HelperOrderState: "export type HelperOrderState = \"armed\" | \"firing\" | \"sent\" | \"filled\" | \"void\" | \"expired\" | \"deleted\";",
+};
+export const VALUES = {
+  HELPER_CORS: {"origins":["https://confidential.unrealized.trade","https://sign.confidential.unrealized.trade"],"allowMethods":["GET","POST","PUT","DELETE"],"allowHeaders":["content-type"],"exposeHeaders":["X-Helper-Commit","X-Helper-Source","X-Fetched-At"],"maxAgeSeconds":600,"vary":"Origin","allowCredentialsHeader":"absent"},
+  HELPER_V1_PATHS: [{"method":"GET","path":"/v1/health","part":"all","limitBytes":1024},{"method":"POST","path":"/v1/proxy/{vendor}/{path}","part":"proxy","limitBytes":65536},{"method":"POST","path":"/v1/rpc/{chain}","part":"proxy","limitBytes":262144},{"method":"GET","path":"/v1/market/...","part":"proxy","limitBytes":null},{"method":"GET","path":"/v1/logo/{chain}/{token}","part":"proxy","limitBytes":262144},{"method":"GET","path":"/v1/token-status","part":"relay","limitBytes":1024},{"method":"GET","path":"/v1/withdraw/fee","part":"relay","limitBytes":1024},{"method":"POST","path":"/v1/withdraw","part":"relay","limitBytes":8192},{"method":"GET","path":"/v1/withdraw/{tx_hash}","part":"relay","limitBytes":1024},{"method":"POST","path":"/v1/bind","part":"delegate","limitBytes":4096},{"method":"POST","path":"/v1/intents","part":"intents","limitBytes":8192},{"method":"POST","path":"/v1/orders","part":"orders","limitBytes":65536},{"method":"POST","path":"/v1/orders/status","part":"orders","limitBytes":16384},{"method":"PUT","path":"/v1/orders/{order_id}","part":"orders","limitBytes":32768},{"method":"DELETE","path":"/v1/orders/{order_id}","part":"orders","limitBytes":1024},{"method":"POST","path":"/v1/log","part":"log","limitBytes":4096}],
+  HELPER_RPC_METHODS: {"solana":["getAccountInfo","getMultipleAccounts","getBalance","getTokenAccountsByOwner","getTokenLargestAccounts","getLatestBlockhash","simulateTransaction","sendTransaction","getSignatureStatuses","getTransaction","getBlockHeight","getMinimumBalanceForRentExemption"],"base":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"robinhood":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"near":["query","block","gas_price","tx","send_tx","EXPERIMENTAL_tx_status","EXPERIMENTAL_protocol_config"]},
+  HELPER_RPC_BATCH_MAX: 10,
+  HELPER_CODE_STATUS: {"not_found":404,"token_not_watched":404,"too_large":413,"rate_limited":429,"id_not_ours":403,"sender_struck":403,"receiver_is_vault":403,"prepay_open":409,"not_paid":409,"receiver_not_registered":409,"upstream":503,"token_halted":503,"index_behind":503,"relayer_low":503},
+  HELPER_SALT_PATTERN: "/^[0-9a-f]{32}$/",
+  HELPER_TOKEN_HASH_PATTERN: "/^[0-9a-f]{64}$/",
+  HELPER_ONWARD_RECEIVER: "intents.near",
+  HELPER_TRANSFER_TOKEN_ENTRIES: 1,
+  HELPER_STATUS_ITEMS_MAX: 100,
+  HELPER_ORDER_FIELDS: ["v","order_id","group_id","chain","wallet","token","amount","min_out","trigger","nonce_ref","variants","expires_at","token_hash"],
+  HELPER_FEE_ANSWER_DISPLAY_ONLY: ["relayer_account","fee_recipient"],
+  HELPER_PARTS: ["proxy","relay","intents","delegate","orders","log"],
+  HELPER_FETCH_INIT: {"credentials":"omit","referrerPolicy":"no-referrer"},
+  HELPER_COMMIT_HEADER: "X-Helper-Commit",
+  HELPER_LOGO_MAX_BYTES: 262144,
+  HELPER_LOGO_TYPES: ["image/png","image/jpeg","image/webp","image/gif"],
+  HELPER_PROXY_VENDORS: ["jupiter","relay","lifi","oneclick"],
+};
 const NEVER_IN_INTENTS = ["msg", "memo", "storage_deposit"];
 // the one import v1.ts makes, and the wallet's exported names it must not declare (CO, 00:35Z)
-export const IMPORTS = ['import type { Chain, OrderRecord } from "../orders/record.ts";'];
+export const IMPORTS = ['import { ORDER_RECORD_FIELDS, type Chain, type OrderRecord } from "../orders/record.ts";'];
 export const WALLET_NAMES = ["Chain", "CHAINS", "TxRef", "Stage", "ErrorCode", "Operation", "OrderState", "WalletState", "OrderRecord", "SigninWay", "ReturnKey"];
 
 // ---- reading TypeScript as data ----
@@ -100,29 +180,39 @@ export function parse(text) {
 }
 
 // a literal value (string, number, boolean, null, array, object) behind `as const` and `satisfies`; anything else refused
-export function literal(node) {
+// env: identifiers a spread may name (ORDER_RECORD_FIELDS, read from record.ts); Object.freeze(x) is x; a regex is its text
+export function literal(node, env = {}) {
   while (ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isParenthesizedExpression(node)) node = node.expression;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (ts.isRegularExpressionLiteral(node)) return node.text;
+  if (ts.isCallExpression(node) && node.expression.getText() === "Object.freeze" && node.arguments.length === 1) return literal(node.arguments[0], env);
   if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
   if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
   if (node.kind === ts.SyntaxKind.NullKeyword) return null;
-  if (ts.isArrayLiteralExpression(node)) return node.elements.map(literal);
+  if (ts.isArrayLiteralExpression(node)) {
+    return node.elements.flatMap((e) => {
+      if (!ts.isSpreadElement(e)) return [literal(e, env)];
+      const name = e.expression.getText();
+      if (!ts.isIdentifier(e.expression) || !Array.isArray(env[name])) fail(`not a literal: ...${name}`);
+      return env[name];
+    });
+  }
   if (ts.isObjectLiteralExpression(node)) {
     const o = {};
     for (const p of node.properties) {
       if (!ts.isPropertyAssignment(p) || !(ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) fail(`not a plain property: ${p.getText()}`);
-      o[p.name.text] = literal(p.initializer);
+      o[p.name.text] = literal(p.initializer, env);
     }
     return o;
   }
   return fail(`not a literal: ${node.getText().slice(0, 60)}`);
 }
 
-const constOf = ({ decls }, name) => {
+const constOf = ({ decls, env }, name) => {
   const d = decls.get(name);
   if (!d || !ts.isVariableDeclaration(d) || !d.initializer) fail(`no const ${name}`);
-  return literal(d.initializer);
+  return literal(d.initializer, env);
 };
 
 // every property name, and every string literal each property can hold, over the types reachable from `roots`
@@ -183,8 +273,16 @@ const imports = ({ sf }) => {
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-// The checks on one v1.ts text: [ok, line] pairs.
-export function checkV1(text) {
+const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
+// a declaration as the printer writes it with no comments, on one line
+export function shapeText({ sf, decls }, name) {
+  const d = decls.get(name);
+  if (!d || !(ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d))) return null;
+  return printer.printNode(ts.EmitHint.Unspecified, d, sf).replace(/\s+/g, " ").trim();
+}
+
+// The checks on one v1.ts text, with orders/record.ts's text for ORDER_RECORD_FIELDS: [ok, line] pairs.
+export function checkV1(text, recordText = "") {
   const out = [];
   const t = (what, fn) => {
     try {
@@ -197,6 +295,13 @@ export function checkV1(text) {
   let f;
   try {
     f = parse(text);
+    let fields = null;
+    try {
+      fields = constOf({ ...parse(recordText), env: {} }, "ORDER_RECORD_FIELDS");
+    } catch {
+      // no record.ts, or no plain list in it: HELPER_ORDER_FIELDS cannot be read and its pin fails
+    }
+    f.env = { ORDER_RECORD_FIELDS: fields };
   } catch (e) {
     return [[false, `v1.ts ${e.message}`]];
   }
@@ -263,11 +368,25 @@ export function checkV1(text) {
     const c = constOf(f, "HELPER_CORS");
     if (JSON.stringify(c).includes("*")) return `HELPER_CORS holds "*": ${JSON.stringify(c)}`;
     if (!same(c.origins, ORIGINS)) return `origins ${JSON.stringify(c.origins)}`;
-    if (c.credentials !== false) return `credentials ${c.credentials}`;
+    if (c.allowCredentialsHeader !== "absent") return `allowCredentialsHeader ${c.allowCredentialsHeader}`;
     if (c.vary !== "Origin") return `vary ${c.vary}`;
     return (Array.isArray(c.exposeHeaders) && c.exposeHeaders.includes("X-Helper-Commit")) || "X-Helper-Commit is not exposed";
   });
   t("X-Helper-Commit on every answer", () => constOf(f, "HELPER_COMMIT_HEADER") === "X-Helper-Commit" || "HELPER_COMMIT_HEADER is not X-Helper-Commit");
+  t("every money-path shape equals its pin", () => {
+    const bad = Object.entries(SHAPES).filter(([k, v]) => shapeText(f, k) !== v);
+    return bad.length === 0 || `differs: ${bad.map(([k]) => k).join(", ")}`;
+  });
+  t("every frozen value equals its pin", () => {
+    const bad = Object.entries(VALUES).filter(([k, v]) => {
+      try {
+        return !same(constOf(f, k), v);
+      } catch {
+        return true;
+      }
+    });
+    return bad.length === 0 || `differs: ${bad.map(([k]) => k).join(", ")}`;
+  });
   return out;
 }
 
@@ -344,7 +463,9 @@ export async function check({ fetchFn = fetch, now = Date.now(), tag, requireHea
       continue;
     }
     texts[ref] = r.text;
-    for (const [good, line] of checkV1(r.text)) add(good, `${ref}: ${line}`);
+    const rec = await readText(fetchFn, `${RAW}/${encodeURIComponent(ref)}/${RECORD}`);
+    if (rec.status !== 200 || rec.text === null) add(false, `${ref}: ${RECORD} answers status ${rec.status}`);
+    for (const [good, line] of checkV1(r.text, rec.text ?? "")) add(good, `${ref}: ${line}`);
     const e = await readText(fetchFn, `${RAW}/${encodeURIComponent(ref)}/${ENTRY}`);
     if (e.status !== 200 || e.text === null) add(false, `${ref}: ${ENTRY} answers status ${e.status}`);
     else {
