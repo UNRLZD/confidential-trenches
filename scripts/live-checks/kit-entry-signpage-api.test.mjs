@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/kit-entry-signpage-api.test.mjs: the live check replays recorded reads
 // (kit-entry-signpage-api.answers.json). "good" is the card's branch, read with --root before it merges: PASS. The bad
 // answers are that recording with one planted fault each (an exports map with "./internal", a kind list without
-// withdraw.open, an event outside the handshake names, a fourteenth order field): FAIL. "main_kickoff" is GitHub's
+// withdraw.open, an event outside the handshake names, an order record with a `bytes` field, one with 4 variants, one
+// with a trigger field missing): FAIL. "main_kickoff" is GitHub's
 // main at the kickoff commit, read live, where index.ts is still the empty stub: FAIL.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -32,8 +33,10 @@ test("recorded good answer: the branch's exports, kinds, events and order record
   assert.equal(r.lines[0], "ok  exports keys [., ./core, ./package.json]; pointing at src/; no build fields");
   assert.equal(r.lines[1], "ok  the kinds: SIGNPAGE_KINDS is the fifteen; SignpageParams is the fifteen; SignpageResults is the fifteen");
   assert.equal(r.lines[2], "ok  the events [ready, state, progress] are handshake names only");
-  assert.equal(r.lines[3], "ok  the order record: OrderRecord has the thirteen fields; ORDER_RECORD_FIELDS is the thirteen");
-  assert.match(r.lines[4], /read packages\/kit\/src\/index\.ts, packages\/kit\/src\/signpage\/messages\.ts, packages\/kit\/src\/orders\/record\.ts$/);
+  assert.equal(r.lines[3], "ok  the order record: OrderRecord has the twelve fields; ORDER_RECORD_FIELDS is the twelve");
+  assert.equal(r.lines[4], "ok  variants holds 1, 2, 3 signed variants");
+  assert.equal(r.lines[5], "ok  OrderTrigger is H5.1's trigger");
+  assert.match(r.lines[6], /read packages\/kit\/src\/index\.ts, packages\/kit\/src\/signpage\/messages\.ts, packages\/kit\/src\/orders\/record\.ts$/);
 });
 
 test('recorded bad answer: an exports map with "./internal": FAIL', async () => {
@@ -54,10 +57,28 @@ test("recorded bad answer: an event outside the handshake names: FAIL", async ()
   assert.match(r.lines[2], /^BAD the events \[ready, state, progress, down\] hold a name outside/);
 });
 
-test("recorded bad answer: an order record with a fourteenth field: FAIL", async () => {
-  const r = await check({ read: planted(RECORD, "  bytes: string;\n", "  bytes: string;\n  user: string;\n") });
+test("recorded bad answer: an order record with a `bytes` field: FAIL", async () => {
+  const r = await check({ read: planted(RECORD, "  trigger: OrderTrigger;\n", "  trigger: OrderTrigger;\n  bytes: string;\n") });
   assert.equal(r.ok, false, r.lines.join("\n"));
-  assert.match(r.lines[3], /^BAD the order record: OrderRecord extra user; ORDER_RECORD_FIELDS is the thirteen/);
+  assert.match(r.lines[3], /^BAD the order record: OrderRecord extra bytes; ORDER_RECORD_FIELDS is the twelve/);
+});
+
+test("recorded bad answer: an order record with 4 variants: FAIL", async () => {
+  const r = await check({ read: planted(RECORD, "| [string, string, string];", "| [string, string, string] | [string, string, string, string];") });
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.equal(r.lines[4], "BAD variants holds 1, 2, 3, 4 signed variants (want 1, 2, 3)");
+});
+
+test("recorded bad answer: variants as an unbounded list: FAIL", async () => {
+  const r = await check({ read: planted(RECORD, "variants: [string] | [string, string] | [string, string, string];", "variants: string[];") });
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.equal(r.lines[4], "BAD variants is not a tuple of strings (want 1, 2, 3)");
+});
+
+test("recorded bad answer: a trigger without its direction: FAIL", async () => {
+  const r = await check({ read: planted(RECORD, '  direction: "lte" | "gte";\n', "") });
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.match(r.lines[5], /^BAD OrderTrigger missing direction/);
 });
 
 test("recorded answer of GitHub main at the kickoff commit, the empty stub: FAIL", async () => {

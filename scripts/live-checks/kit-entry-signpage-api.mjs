@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // Live check of card kit-entry-signpage-api: the kit's public entry and the signing page's messages, as GitHub serves
-// them. It reads packages/kit/package.json and packages/kit/src/index.ts at a ref (main, or the kit-freeze tag), and
+// them. It reads packages/kit/package.json and packages/kit/src/index.ts at a ref (main, or the freeze tag kit-v1), and
 // every file index.ts re-exports (followed through each file's own relative `export ... from`), and checks:
 //   - the exports map's keys are exactly ".", "./core" and "./package.json", "." and "./core" point at
 //     ./src/index.ts and ./src/core.ts (types and default), with no build;
 //   - SIGNPAGE_KINDS, and the keys of SignpageParams and SignpageResults, are exactly the fifteen kinds of wallet.md §7
 //     item 4 (pinned below, as the public repo carries no papers);
 //   - SIGNPAGE_EVENTS holds only the handshake events ready, state and progress;
-//   - OrderRecord, and ORDER_RECORD_FIELDS, are exactly the thirteen fields of wallet.md §7 item 3.
+//   - OrderRecord, and ORDER_RECORD_FIELDS, are exactly the twelve fields of the order record (wallet.md §7 item 3 in
+//     markets.md H5.1's shape, the CO's call of 2026-11-01 00:35Z), its `variants` holds 1 to 3 signed variants, and
+//     OrderTrigger is exactly H5.1's trigger.
 //   node scripts/live-checks/kit-entry-signpage-api.mjs [--ref <branch or tag> | --root <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --root reads the same paths from a local tree instead of GitHub (a branch before it merges).
@@ -27,11 +29,13 @@ export const KINDS = [
 ];
 // app.md §7 ask P1 (app.md:1669-1672): the only names allowed beside the kinds
 export const EVENTS = ["ready", "state", "progress"];
-// wallet.md §7 item 3 (wallet.md:1129-1131)
+// wallet.md §7 item 3 (wallet.md:1129-1131) in markets.md H5.1's shape (markets.md:2059-2073; O4, markets.md:3446)
 export const ORDER_FIELDS = [
-  "v", "order_id", "chain", "wallet", "token", "pool", "side", "trigger_price", "amount", "min_out", "nonce_ref",
-  "twin_id", "bytes",
+  "v", "order_id", "group_id", "chain", "wallet", "token", "amount", "min_out", "trigger", "nonce_ref", "variants",
+  "expires_at",
 ];
+export const TRIGGER_FIELDS = ["kind", "pool", "venue", "direction", "price", "quote_asset"];
+export const VARIANT_COUNTS = [1, 2, 3];
 const EXPORTS = {
   ".": { types: "./src/index.ts", default: "./src/index.ts" },
   "./core": { types: "./src/core.ts", default: "./src/core.ts" },
@@ -76,10 +80,22 @@ const unwrap = (e) => {
 const exported = (s) => s.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 const nameOf = (n) => (ts.isIdentifier(n) || ts.isStringLiteral(n) ? n.text : null);
 
+// the lengths a type allows when it is a tuple of strings or a union of them; null for anything else (string[] too)
+function tupleLengths(t) {
+  const parts = t && ts.isUnionTypeNode(t) ? t.types : [t];
+  const out = [];
+  for (const p of parts) {
+    if (!p || !ts.isTupleTypeNode(p) || !p.elements.every((e) => e.kind === ts.SyntaxKind.StringKeyword)) return null;
+    out.push(p.elements.length);
+  }
+  return out.sort((a, b) => a - b);
+}
+
 // every exported const array of string literals, and every exported interface's member names, across the files
 function shapes(files) {
   const arrays = new Map();
   const interfaces = new Map();
+  const variants = new Map();
   for (const [p, text] of files) {
     const sf = ts.createSourceFile(p, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
     for (const s of sf.statements) {
@@ -93,10 +109,12 @@ function shapes(files) {
       }
       if (ts.isInterfaceDeclaration(s) && exported(s)) {
         interfaces.set(s.name.text, s.members.map((m) => (m.name ? nameOf(m.name) ?? `<${m.name.getText(sf)}>` : "<index>")));
+        const v = s.members.find((m) => m.name && nameOf(m.name) === "variants");
+        if (v) variants.set(s.name.text, tupleLengths(v.type));
       }
     }
   }
-  return { arrays, interfaces };
+  return { arrays, interfaces, variants };
 }
 
 export async function check({ read }) {
@@ -126,7 +144,7 @@ export async function check({ read }) {
     files.set(p, text);
     queue.push(...reExports(ts.createSourceFile(p, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS), p));
   }
-  const { arrays, interfaces } = shapes(files);
+  const { arrays, interfaces, variants } = shapes(files);
 
   const kinds = arrays.get("SIGNPAGE_KINDS");
   const params = interfaces.get("SignpageParams");
@@ -145,10 +163,16 @@ export async function check({ read }) {
   const fields = arrays.get("ORDER_RECORD_FIELDS");
   const oOk = !!rec && sameSet(rec, ORDER_FIELDS);
   const fOk = !!fields && sameSet(fields, ORDER_FIELDS);
-  const d = say(oOk && fOk, `the order record: OrderRecord ${oOk ? "has the thirteen fields" : diff(rec, ORDER_FIELDS)}; ORDER_RECORD_FIELDS ${fOk ? "is the thirteen" : diff(fields, ORDER_FIELDS)}`);
+  const d = say(oOk && fOk, `the order record: OrderRecord ${oOk ? "has the twelve fields" : diff(rec, ORDER_FIELDS)}; ORDER_RECORD_FIELDS ${fOk ? "is the twelve" : diff(fields, ORDER_FIELDS)}`);
+  const counts = variants.get("OrderRecord");
+  const vOk = !!counts && JSON.stringify(counts) === JSON.stringify(VARIANT_COUNTS);
+  const e = say(vOk, `variants ${counts ? `holds ${counts.join(", ")} signed variants` : "is not a tuple of strings"}${vOk ? "" : ` (want ${VARIANT_COUNTS.join(", ")})`}`);
+  const trig = interfaces.get("OrderTrigger");
+  const tOk = !!trig && sameSet(trig, TRIGGER_FIELDS);
+  const f = say(tOk, `OrderTrigger ${tOk ? "is H5.1's trigger" : diff(trig, TRIGGER_FIELDS)}`);
 
   lines.push(`    read ${[...files.keys()].join(", ")}`);
-  return { ok: a && b && c && d, lines };
+  return { ok: a && b && c && d && e && f, lines };
 }
 
 // reads one path from a local tree: { status, body }
