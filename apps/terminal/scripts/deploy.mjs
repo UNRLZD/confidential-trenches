@@ -38,7 +38,7 @@ export function deploy(argv, env = process.env, run = spawnSync) {
     stdio: "inherit",
   });
   if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run scripts/live-checks/app-host-gate.mjs next`] };
+  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run scripts/live-checks/app-host-gate.mjs and app-release-sri.mjs next`] };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

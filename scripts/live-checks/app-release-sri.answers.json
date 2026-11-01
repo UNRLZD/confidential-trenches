@@ -1,0 +1,112 @@
+{
+ "live": {
+  "note": "APP_HOST as deployed (Pages 3149bf17, built at 5c7039a), read by this check 2026-11-01 10:52:21Z: PASS",
+  "url": "https://confidential.unrealized.trade/",
+  "status": 200,
+  "headers": {
+   "access-control-allow-origin": "*",
+   "alt-svc": "h3=\":443\"; ma=86400",
+   "cache-control": "public, max-age=0, must-revalidate",
+   "cf-ray": "a53a59739a08f4fc-HKG",
+   "connection": "keep-alive",
+   "content-encoding": "br",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-type": "text/html; charset=utf-8",
+   "cross-origin-opener-policy": "same-origin",
+   "cross-origin-resource-policy": "same-origin",
+   "date": "Sun, 01 Nov 2026 10:52:20 GMT",
+   "etag": "W/\"1c89331ec046ea99aadb95eebdc9bf3c\"",
+   "integrity-policy": "blocked-destinations=(script)",
+   "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+   "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+   "referrer-policy": "no-referrer",
+   "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=RQr3aAmE%2B%2FATXStNGRX9ZmBpJQcN6%2Fz3trLP5EqTJImic8dSvXpPFPx2e4D4dN6aJmxXm3QUpfwHDXfaen7U4UqE4NsJCY0f9CsNutgD4%2BlwGCxXyFzU%2F3zigapKENIplhDLMgo2A%2FGHAiIYDrPHSA%3D%3D\"}]}",
+   "server": "cloudflare",
+   "strict-transport-security": "max-age=63072000; includeSubDomains",
+   "transfer-encoding": "chunked",
+   "x-content-type-options": "nosniff",
+   "x-frame-options": "DENY"
+  },
+  "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <link rel=\"preload\" href=\"/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <script type=\"module\" crossorigin src=\"/assets/index-BltiENsb.js\" integrity=\"sha384-nqaUaZfFdbwCkxKZvKmSXpdamXoBvWiop0uypwS7URUFkinXEUeJED6seap3RLs9\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/style-DlfZpBir.css\" integrity=\"sha384-PryHb8s2VsoqpqZ6nbkLGQWJ/nWSN2QtMBYi5d5rvOnA0WVRGGa9+H87BCAwlnFF\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
+  "files": {
+   "https://confidential.unrealized.trade/assets/index-BltiENsb.js": {
+    "status": 200,
+    "bytes": 313693,
+    "sha384": "sha384-nqaUaZfFdbwCkxKZvKmSXpdamXoBvWiop0uypwS7URUFkinXEUeJED6seap3RLs9"
+   },
+   "https://confidential.unrealized.trade/assets/style-DlfZpBir.css": {
+    "status": 200,
+    "bytes": 5398,
+    "sha384": "sha384-PryHb8s2VsoqpqZ6nbkLGQWJ/nWSN2QtMBYi5d5rvOnA0WVRGGa9+H87BCAwlnFF"
+   }
+  }
+ },
+ "good": {
+  "note": "apps/terminal/dist built at 76b19f2 plus this card, served as APP_HOST by the app harness (server.mjs, the build's own _headers), read 2026-11-01 10:52Z: PASS",
+  "url": "https://confidential.unrealized.trade/",
+  "status": 200,
+  "headers": {
+   "connection": "keep-alive",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-type": "text/html; charset=utf-8",
+   "cross-origin-opener-policy": "same-origin",
+   "cross-origin-resource-policy": "same-origin",
+   "date": "Sun, 01 Nov 2026 10:52:18 GMT",
+   "integrity-policy": "blocked-destinations=(script)",
+   "keep-alive": "timeout=5",
+   "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+   "referrer-policy": "no-referrer",
+   "strict-transport-security": "max-age=63072000; includeSubDomains",
+   "transfer-encoding": "chunked",
+   "x-content-type-options": "nosniff",
+   "x-frame-options": "DENY"
+  },
+  "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <link rel=\"preload\" href=\"/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <script type=\"module\" crossorigin src=\"/assets/index-BltiENsb.js\" integrity=\"sha384-nqaUaZfFdbwCkxKZvKmSXpdamXoBvWiop0uypwS7URUFkinXEUeJED6seap3RLs9\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/style-DlfZpBir.css\" integrity=\"sha384-PryHb8s2VsoqpqZ6nbkLGQWJ/nWSN2QtMBYi5d5rvOnA0WVRGGa9+H87BCAwlnFF\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
+  "files": {
+   "https://confidential.unrealized.trade/assets/index-BltiENsb.js": {
+    "status": 200,
+    "bytes": 313693,
+    "sha384": "sha384-nqaUaZfFdbwCkxKZvKmSXpdamXoBvWiop0uypwS7URUFkinXEUeJED6seap3RLs9"
+   },
+   "https://confidential.unrealized.trade/assets/style-DlfZpBir.css": {
+    "status": 200,
+    "bytes": 5398,
+    "sha384": "sha384-PryHb8s2VsoqpqZ6nbkLGQWJ/nWSN2QtMBYi5d5rvOnA0WVRGGa9+H87BCAwlnFF"
+   }
+  }
+ },
+ "bad": {
+  "note": "the same build with one byte (;) appended to its script after the build, served as APP_HOST by the app harness, read 2026-11-01 10:52Z: FAIL",
+  "url": "https://confidential.unrealized.trade/",
+  "status": 200,
+  "headers": {
+   "connection": "keep-alive",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-type": "text/html; charset=utf-8",
+   "cross-origin-opener-policy": "same-origin",
+   "cross-origin-resource-policy": "same-origin",
+   "date": "Sun, 01 Nov 2026 10:52:18 GMT",
+   "integrity-policy": "blocked-destinations=(script)",
+   "keep-alive": "timeout=5",
+   "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+   "referrer-policy": "no-referrer",
+   "strict-transport-security": "max-age=63072000; includeSubDomains",
+   "transfer-encoding": "chunked",
+   "x-content-type-options": "nosniff",
+   "x-frame-options": "DENY"
+  },
+  "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <link rel=\"preload\" href=\"/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <script type=\"module\" crossorigin src=\"/assets/index-BltiENsb.js\" integrity=\"sha384-nqaUaZfFdbwCkxKZvKmSXpdamXoBvWiop0uypwS7URUFkinXEUeJED6seap3RLs9\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/style-DlfZpBir.css\" integrity=\"sha384-PryHb8s2VsoqpqZ6nbkLGQWJ/nWSN2QtMBYi5d5rvOnA0WVRGGa9+H87BCAwlnFF\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
+  "files": {
+   "https://confidential.unrealized.trade/assets/index-BltiENsb.js": {
+    "status": 200,
+    "bytes": 313694,
+    "sha384": "sha384-FAv6TTnjxgPUe/E4Z/wcd75KjTz9cHgk52L1yb3OsUmHNXx9r9Abva4aO+NmhPHJ"
+   },
+   "https://confidential.unrealized.trade/assets/style-DlfZpBir.css": {
+    "status": 200,
+    "bytes": 5398,
+    "sha384": "sha384-PryHb8s2VsoqpqZ6nbkLGQWJ/nWSN2QtMBYi5d5rvOnA0WVRGGa9+H87BCAwlnFF"
+   }
+  }
+ }
+}
