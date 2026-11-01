@@ -239,9 +239,10 @@ async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) 
 // DeleteAccount (signer = receiver: a one-use account closing itself into its beneficiary) succeeds, then NEAR sends
 // the unused gas back from "system" to the signer, which no longer exists, so that refund fails AccountDoesNotExist
 // (mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM, read 2026-11-01: receipt GBkJTsykxG, system to the signer, one
-// Transfer of 229993650000000000000 yocto, failed; the beneficiary's Transfer 9wEBNxb1a7 succeeded). It needs
-// EXPERIMENTAL_tx_status: only its `receipts` list names each receipt's predecessor_id and actions. `r` is that answer,
-// `o` one failed entry of its receipts_outcome; anything missing is not that refund.
+// Transfer of 229993650000000000000 yocto, receipt signer_id the account, failed; the beneficiary's Transfer 9wEBNxb1a7,
+// receipt signer_id system, succeeded). It needs EXPERIMENTAL_tx_status: only its `receipts` list names each receipt's
+// predecessor_id, signer_id and actions. `r` is that answer, `o` one failed entry of its receipts_outcome; anything
+// missing is not that refund.
 export function isDeleteRefund(r, o) {
   const tx = r?.transaction;
   const a = tx?.signer_id;
@@ -251,6 +252,9 @@ export function isDeleteRefund(r, o) {
   if (typeof o?.id !== "string" || same.length !== 1) return false;
   const [rc] = same;
   if (rc.predecessor_id !== "system" || rc.receiver_id !== a) return false;
+  // A gas refund carries the tx's signer; DeleteAccount's balance payout has the same shape but carries system, and
+  // with beneficiary = the account itself it fails the same way while the balance burns (P10b).
+  if (rc.receipt?.Action?.signer_id !== a) return false;
   const acts = rc.receipt?.Action?.actions;
   if (!Array.isArray(acts) || acts.length !== 1 || acts[0] === null || typeof acts[0] !== "object") return false;
   if (Object.keys(acts[0]).length !== 1 || !("Transfer" in acts[0])) return false;

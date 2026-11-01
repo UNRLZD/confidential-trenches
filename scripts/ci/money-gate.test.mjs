@@ -883,6 +883,39 @@ test("delete refund: a second refund-shaped failure is refused (one is passed, n
   await refused((r) => void r.receipts.push(structuredClone(receipt(r, REFUND))), FAILED);
 });
 
+// P10: NEAR's DeleteAccount pays the balance out as a receipt from system with one Transfer, the same shape as the gas
+// refund; nothing stops beneficiary = the account itself, so that payout fails AccountDoesNotExist naming the signer and
+// the balance burns. A gas refund carries the tx's signer in receipt.Action.signer_id; a balance payout carries system
+// (the fixture: GBkJTsykxG signer_id = the account, 9wEBNxb1a7 signer_id = system).
+const selfPayout = (r) => {
+  r.transaction.actions[0].DeleteAccount.beneficiary_id = DEL_A;
+  receipt(r, PAYOUT).receiver_id = DEL_A;
+  outcome(r, PAYOUT).outcome.status = { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_A } } } } };
+};
+const noGasRefund = (r) => {
+  r.receipts = r.receipts.filter((x) => x.receipt_id !== REFUND);
+  r.receipts_outcome = r.receipts_outcome.filter((x) => x.id !== REFUND);
+  for (const o of r.receipts_outcome) o.outcome.receipt_ids = o.outcome.receipt_ids.filter((id) => id !== REFUND);
+};
+
+test("delete refund P10b: a DeleteAccount whose beneficiary is the account itself, its balance payout failed and no gas refund, is refused", async () => {
+  assert.equal(receipt(DEL.result, REFUND).receipt.Action.signer_id, DEL_A);
+  assert.equal(receipt(DEL.result, PAYOUT).receipt.Action.signer_id, "system");
+  await refused((r) => {
+    selfPayout(r);
+    noGasRefund(r);
+  }, FAILED);
+});
+
+test("delete refund P10a: beneficiary = the account itself with the gas refund present (two failures) is refused", async () => {
+  await refused(selfPayout, FAILED);
+});
+
+test("delete refund: the refund whose receipt signer is system or missing, not the deleted account, is refused", async () => {
+  for (const by of ["system", DEL_F, ""]) await refused((r) => void (receipt(r, REFUND).receipt.Action.signer_id = by), FAILED);
+  await refused((r) => void delete receipt(r, REFUND).receipt.Action.signer_id, FAILED);
+});
+
 test("delete refund: an answer with no receipts list, no receipts_outcome, or no receipt for the failed outcome is not ok", async () => {
   const INCOMPLETE = new RegExp(`near ${DEL_TX}: incomplete \\(no receipts or receipts_outcome list\\) on n1, incomplete \\(no receipts or receipts_outcome list\\) on n2`);
   await refused((r) => void delete r.receipts, INCOMPLETE);
