@@ -14,6 +14,10 @@
 //     in the second; the page framed by APP_HOST (a parent served at APP_HOST's address by this check) shows no sign-in
 //     or sign-out control; each signed-in step says code_saved false (data-code-saved, the Backup dot).
 //   race run: two tabs, each with its own passkey, press Create at once; both end on one account, the one stored.
+//   Sign out after a reload: a press with no pointer move or key press since the load does nothing (disabled), a
+//     pointer move arms it.
+//   Backup gate: a seed record source "random", code_saved false, written under the page's own K_wrap, shows no Sign
+//     out (wallet.md:922).
 //   In each signed-in step the store is read raw (card wallet-store): K_wrap a non-extractable AES-GCM CryptoKey, the
 //     seed record only { iv, ct }, localStorage empty.
 //   no-prf run (hasPrf false): Create passkey opens the no-PRF state (data-signin="no-prf"), shows no account and
@@ -75,7 +79,13 @@ export function judge(rec) {
   const rps = p.credentials ?? [];
   say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
   say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
+  const u = p.unarmed ?? {};
+  say(u.disabled === true && u.after?.state === "signed-in" && u.after?.account === A && u.disabledAfterMove === false,
+    `prf: Sign out ignores a press before any real input, and arms on a pointer move (disabled ${u.disabled}, ${u.after?.state}, then disabled ${u.disabledAfterMove})`);
   const n = rec.noPrf ?? {};
+  const bg = n.backupGate ?? {};
+  say(bg.state === "signed-in" && HEX64.test(bg.account ?? "") && bg.signoutButtons === 0 && bg.codeSaved === "false",
+    `no-prf: a seed whose 12 words are the only copy and not saved shows no Sign out (${bg.state}, ${bg.signoutButtons} Sign out)`);
   say(n.create?.state === "no-prf" && !n.create?.account && n.create?.seed === false,
     `no-prf: Create passkey opens the no-PRF path (${n.create?.state}, account ${n.create?.account ? "shown" : "none"}, seed ${n.create?.seed ? "stored" : "none"})`);
   say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})`);
@@ -149,7 +159,9 @@ async function authenticator(page, hasPrf) {
   const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
     options: { protocol: "ctap2", ctap2Version: "ctap2_1", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, hasPrf, automaticPresenceSimulation: true },
   });
-  return async () => (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials.map((c) => ({ rpId: c.rpId }));
+  const creds = async () => (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials.map((c) => ({ rpId: c.rpId }));
+  creds.cdp = cdp;
+  return creds;
 }
 
 // the page's state once it settles: data-signin and data-account, and whether the store and its seed record exist
@@ -194,7 +206,9 @@ async function settled(page) {
 }
 async function click(page, action) {
   const before = await page.evaluate(() => document.getElementById("signin").dataset.signin);
-  await page.click(`[data-action="${action}"]`, { timeout: WAIT_MS });
+  // a missing or disabled button is a finding, not an error: the step records the state it left
+  const clicked = await page.click(`[data-action="${action}"]`, { timeout: WAIT_MS }).then(() => true, () => false);
+  if (!clicked) return { ...(await settled(page)), noButton: action };
   await page.waitForFunction((b) => {
     const s = document.getElementById("signin")?.dataset.signin;
     return s && s !== b && s !== "loading";
@@ -239,6 +253,22 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       record.prf.guard = guard;
       await page.reload();
       steps.reload = await settled(page);
+      // a press on Sign out with no pointer move or key press since the load (a click lined up by another page) does
+      // nothing: the button is disabled until this page sees real input
+      const so = page.locator('[data-action="signout"]');
+      const unarmed = { disabled: await so.isDisabled().catch(() => null) };
+      const box = await so.boundingBox().catch(() => null);
+      if (box) {
+        const at = { x: box.x + box.width / 2, y: box.y + box.height / 2, button: "left", clickCount: 1 };
+        await creds.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...at });
+        await creds.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...at });
+        await page.waitForTimeout(1_000);
+      }
+      unarmed.after = await settled(page);
+      await page.mouse.move(3, 3);
+      await page.mouse.move(40, 30, { steps: 5 });
+      unarmed.disabledAfterMove = await so.isDisabled().catch(() => null);
+      record.prf.unarmed = unarmed;
       steps.signout = await click(page, "signout");
       // the other tab hears the sign out
       await tab2.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signed-out", null, { timeout: WAIT_MS }).catch(() => {});
@@ -307,6 +337,27 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await page.goto(url);
       record.noPrf.open = await settled(page);
       record.noPrf.create = await click(page, "create");
+      // a seed whose 12 words are the only copy and not saved (source "random", code_saved false), as a no-PRF card
+      // will store it, written under the page's own K_wrap with the store's record form: no Sign out is drawn
+      await page.evaluate(async () => {
+        const db = await new Promise((ok, no) => {
+          const r = indexedDB.open("ct-wallet");
+          r.onsuccess = () => ok(r.result);
+          r.onerror = () => no(r.error);
+        });
+        const get = (k) => new Promise((ok) => { const g = db.transaction("meta").objectStore("meta").get(k); g.onsuccess = () => ok(g.result); });
+        const kWrap = await get("k_wrap");
+        const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, "0")).join("");
+        const plain = new TextEncoder().encode(JSON.stringify({ v: 1, entropy: { $bytes: hex }, source: "random", code_saved: false, created_ms: Date.now() }));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode("ct/v1/seed") }, kWrap, plain);
+        await new Promise((ok) => { const tx = db.transaction("meta", "readwrite"); tx.objectStore("meta").put({ iv, ct }, "seed"); tx.oncomplete = ok; });
+        db.close();
+      });
+      await page.reload();
+      const gate = await settled(page);
+      gate.signoutButtons = await page.locator('[data-action="signout"]').count();
+      record.noPrf.backupGate = gate;
     } finally {
       await h.close();
     }

@@ -3,7 +3,9 @@
 // its own _headers), which passes. bad: the same run on a planted page whose no-PRF branch signs in with a random seed
 // without notice (the brief's recorded bad answer), which fails. Round 2's recorded reds: badC6a2fbe, the page as it was
 // at c6a2fbe (Sign out shown in a frame, two tabs writing two seeds, no cross-tab sign out, no code_saved false), and
-// badNoGuard, a planted page without the "seed already stored" guard (a second tab runs a ceremony).
+// badNoGuard, a planted page without the "seed already stored" guard (a second tab runs a ceremony). Round 3's: badC46a6fc,
+// the page at c46a6fc (Sign out taken by a press with no real input; Sign out drawn for a seed whose 12 words are the only
+// copy and not saved).
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -39,8 +41,18 @@ test("round 2's recorded reds fail on their own lines", () => {
     "BAD prf: Sign out in one tab shows signed out in the other",
     "BAD prf: framed by APP_HOST the page shows no sign-in or sign-out control",
     "BAD prf: two tabs that create at once end on one account, the one stored",
+    "BAD prf: Sign out ignores a press before any real input, and arms on a pointer move",
+    "BAD no-prf: a seed whose 12 words are the only copy and not saved shows no Sign out",
   ]);
   assert.equal(answers.badC6a2fbe.prf.framed.buttons, 1, "c6a2fbe showed Sign out inside APP_HOST's frame");
+  // round 3: c46a6fc's Sign out took a press with no real input (and signed out), and was drawn for a seed whose 12
+  // words are the only copy
+  assert.deepEqual(BAD(answers.badC46a6fc), [
+    "BAD prf: Sign out ignores a press before any real input, and arms on a pointer move",
+    "BAD no-prf: a seed whose 12 words are the only copy and not saved shows no Sign out",
+  ]);
+  assert.equal(answers.badC46a6fc.prf.unarmed.after.state, "signed-out", "c46a6fc signed out on a press with no prior input");
+  assert.equal(answers.badC46a6fc.noPrf.backupGate.signoutButtons, 1);
   assert.deepEqual(BAD(answers.badNoGuard), ["BAD prf: Create in a second tab with a seed already stored runs no ceremony and keeps the seed"]);
   assert.equal(answers.badNoGuard.prf.guard.credentials, 1, "the guardless page ran a ceremony in the second tab");
 });
@@ -69,6 +81,11 @@ test("each broken step fails the check", () => {
     ["two tabs on two accounts", (r) => (r.prf.race.b.account = "22".repeat(32))],
     ["the other tab still signed in after sign out", (r) => (r.prf.crossTab = { state: "signed-in", account: A })],
     ["code_saved true on a new PRF seed", (r) => (r.prf.steps.create.codeSaved = "true")],
+    ["Sign out enabled before any real input", (r) => (r.prf.unarmed.disabled = false)],
+    ["Sign out taken by a press before any real input", (r) => (r.prf.unarmed.after = { state: "signed-out", account: null })],
+    ["Sign out still disabled after a pointer move", (r) => (r.prf.unarmed.disabledAfterMove = true)],
+    ["Sign out drawn for a seed whose 12 words are the only copy", (r) => (r.noPrf.backupGate.signoutButtons = 1)],
+    ["the planted no-backup seed not shown", (r) => (r.noPrf.backupGate.state = "error")],
     ["a CSP violation", (r) => r.errors.push("console: Refused to load the script")],
     ["an empty record", (r) => Object.keys(r).forEach((k) => delete r[k])],
   ];

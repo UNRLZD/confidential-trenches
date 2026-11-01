@@ -54,6 +54,9 @@ export interface WalletStore {
   // that both read "no seed" never write one over the other. Resolves to the record that is stored afterwards: this
   // one when inserted, the other tab's when it lost.
   insertSeed(seed: unknown): Promise<{ inserted: boolean; seed: unknown }>;
+  // Sets the stored seed's code_saved to true (the backup's "Saved", 06b ses.5) and nothing else.
+  setCodeSaved(): Promise<void>;
+  // Deletes the database. Refuses while the stored seed's 12 words are its only copy and not saved (backupFirst).
   signOut(): Promise<void>;
   close(): void;
 }
@@ -150,6 +153,16 @@ function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
   if (store === "meta" && key !== "seed" && key !== "settings") throw new Error(`meta key ${key} is the store's own`);
+  // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
+  // setCodeSaved only, and goes only with signOut
+  if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");
+}
+// A seed whose 12 words are its only copy and not saved yet: no source but the passkey's PRF gives them back
+// (wallet.md:922, 06b:776-781). Sign out refuses it until the backup has set code_saved.
+export function backupFirst(seed: unknown): boolean {
+  if (seed === undefined) return false;
+  const s = seed as { source?: unknown; code_saved?: unknown };
+  return s?.source !== "prf" && s?.code_saved !== true;
 }
 
 function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
@@ -291,6 +304,18 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       if (inserted) notify(["meta"]);
       return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
     },
+    async setCodeSaved() {
+      for (;;) {
+        const before = await getRaw("meta", "seed");
+        if (before === undefined) throw new Error("no seed is stored");
+        const seed = (await unwrap("meta", "seed", before)) as Record<string, unknown>;
+        if (seed.code_saved === true) return;
+        if (await casPut("meta", "seed", before, await wrap("meta", "seed", { ...seed, code_saved: true }))) {
+          notify(["meta"]);
+          return;
+        }
+      }
+    },
     async delete(store, key) {
       checkCallerKey(store, key);
       const tx = live().transaction(store, "readwrite", { durability: "strict" });
@@ -324,6 +349,9 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     },
     async signOut() {
       live(); // a closed store never deletes the database: it may be a newer account's
+      // the backup comes first while the 12 words are the only copy (wallet.md:922)
+      if (backupFirst(await unwrap("meta", "seed", await getRaw("meta", "seed"))))
+        throw new Error("back up the 12 words before signing out: they are the only copy");
       channel.postMessage({ kind: "signout" });
       shut();
       channel.close();

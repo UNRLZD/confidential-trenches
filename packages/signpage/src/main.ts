@@ -12,14 +12,17 @@
 // - A seed already stored is never replaced and no ceremony runs (wallet.md:919: sign out first).
 // - A passkey without PRF makes nothing here and shows its own state, "no-prf", which the no-PRF path takes over
 //   (card wallet-typed-words); never a silent fallback to another seed.
-// - Sign out deletes the store (wallet.md:156); another tab's sign out shows signed-out here too.
+// - Sign out deletes the store (wallet.md:156); another tab's sign out shows signed-out here too. It is not drawn, and the
+//   store refuses it, while the 12 words are the only copy and not saved (backupFirst: source not "prf" and code_saved
+//   false; wallet.md:922). It stays disabled until this page has seen a real pointer move or key press, so a click
+//   that a cross-site page lined up before sending this window here (a double-click trick) lands on nothing.
 // - The page shows public values only: the account's profile key T_0 (wallet.md:68, a public key, never a NEAR account
 //   or money), in data-account, so a check can compare it. The entropy and seed64 are zeroed once used; the 12 words
 //   are a JS string, which cannot be zeroed, and never reach the DOM.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 
 type Seed = { v: 1; entropy: Uint8Array; source: "prf" | "random" | "code" | "wallet"; code_saved: boolean; created_ms: number };
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error";
@@ -42,16 +45,28 @@ root.id = "signin";
 if (framed) root.dataset.framed = "true";
 document.body.append(root);
 
+// armed by the first trusted pointer move that moves (a stationary cursor's synthetic move does not) or key press
+let armed = false;
+function arm(e: Event): void {
+  if (armed || !e.isTrusted) return;
+  if (e instanceof PointerEvent && e.movementX === 0 && e.movementY === 0) return;
+  armed = true;
+  for (const b of root.querySelectorAll<HTMLButtonElement>('[data-action="signout"]')) b.disabled = false;
+}
+addEventListener("pointermove", arm, true);
+addEventListener("keydown", arm, true);
+
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
+  if (action === "signout") b.disabled = !armed;
   b.dataset.action = action;
   b.textContent = label;
   b.addEventListener("click", onClick);
   return b;
 }
 
-function show(state: State, seed?: { account: string; code_saved: boolean }): void {
+function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }): void {
   root.dataset.signin = state;
   if (seed) {
     root.dataset.account = seed.account;
@@ -70,7 +85,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean }): vo
     const p = document.createElement("p");
     p.textContent = WORDS["signed-in"];
     parts.push(p);
-    if (!framed) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
+    if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void (armed && run(signOut))));
   } else if (!framed && state !== "loading" && state !== "unsupported") {
     parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey))));
     parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey))));
@@ -89,9 +104,9 @@ function accountOf(entropy: Uint8Array): string {
   }
 }
 // What the screen shows of a seed, the seed's entropy zeroed after.
-function shown(s: Seed): { account: string; code_saved: boolean } {
+function shown(s: Seed): { account: string; code_saved: boolean; signout: boolean } {
   try {
-    return { account: accountOf(s.entropy), code_saved: s.code_saved };
+    return { account: accountOf(s.entropy), code_saved: s.code_saved, signout: !backupFirst(s) };
   } finally {
     s.entropy.fill(0);
   }
