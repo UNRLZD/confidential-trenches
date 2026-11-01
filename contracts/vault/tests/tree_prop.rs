@@ -7,55 +7,31 @@
 //! seed 1 with 100,000 leaves and seeds 2-9 with counts below 5,000. Each sequence pins a Poseidon chain over the root
 //! after every insert (chain = Poseidon(chain, root), from 0), so one wrong root at any size fails it; the roots at
 //! sizes 2^k and 2^k + 1 name the first size that differs. That script also checks every leaf's path by the circuit's
-//! rule against the same roots. `node contracts/vault/scripts/leanimt-vectors.mjs --check` recomputes the fixture.
+//! rule against the same roots. The sequences reach depth 17; the fixture's `boundary` roots, made by the circuit's
+//! rule alone, check every level up to 32. src/tree.rs's unit tests run seed 6 and the boundary through the on-chain
+//! store. `node contracts/vault/scripts/leanimt-vectors.mjs --check` recomputes the fixture (CI runs `--fast`).
+
+mod leanimt;
 
 use blindfill_vault::constants::MAX_TREE_DEPTH;
 use blindfill_vault::field;
 use blindfill_vault::poseidon::PoseidonT3;
 use blindfill_vault::tree::insert;
 use blindfill_vault::Bytes32;
-use near_sdk::serde_json::{self, Value};
-
-const FIXTURE: &str = include_str!("fixtures/leanimt-vectors.json");
-
-/// splitmix64, as the script's.
-struct SplitMix64(u64);
-
-impl SplitMix64 {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-        z ^ (z >> 31)
-    }
-
-    /// Four draws as big-endian limbs, the first masked to 62 bits, redrawn while 0 or not below p.
-    fn leaf(&mut self) -> Bytes32 {
-        loop {
-            let v = [self.next() & ((1 << 62) - 1), self.next(), self.next(), self.next()];
-            if v != [0; 4] && v < field::P {
-                return field::to_be(&v);
-            }
-        }
-    }
-}
+use leanimt::{ceil_log2, fixture, is_checkpoint, str_of, SplitMix64};
+use near_sdk::serde_json::Value;
 
 fn dec(b: &Bytes32) -> String {
     field::to_decimal(&field::from_be(b))
 }
 
-fn ceil_log2(n: u64) -> u8 {
-    if n <= 1 {
-        0
-    } else {
-        (64 - (n - 1).leading_zeros()) as u8
-    }
+fn b(v: &Value) -> Bytes32 {
+    field::to_be(&field::from_decimal(str_of(v)).expect("a canonical decimal"))
 }
 
 #[test]
 fn rust_tree_roots_equal_lean_imt_after_every_insert() {
-    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let fixture = fixture();
     let sequences = fixture["sequences"].as_array().unwrap();
     assert_eq!(sequences.len(), 9);
     assert_eq!(fixture["lean_imt"], "2.2.4");
@@ -72,11 +48,11 @@ fn rust_tree_roots_equal_lean_imt_after_every_insert() {
         let mut root = [0u8; 32];
         let mut seen = 0;
         for n in 1..=count {
-            let leaf = rng.leaf();
+            let leaf = field::to_be(&rng.leaf(&field::P));
             if n == 1 {
                 assert_eq!(
                     dec(&leaf),
-                    s["first_leaf"].as_str().unwrap(),
+                    str_of(&s["first_leaf"]),
                     "seed {seed}: the leaves differ from the script's"
                 );
             }
@@ -87,13 +63,17 @@ fn rust_tree_roots_equal_lean_imt_after_every_insert() {
                 "seed {seed} size {n}: the root is the side node at the depth"
             );
             chain = h.hash(&chain, &root);
-            if let Some(want) = checkpoints.get(&n.to_string()) {
-                assert_eq!(dec(&root), want.as_str().unwrap(), "seed {seed}: the root at size {n}");
+            if is_checkpoint(n, count) {
+                assert_eq!(
+                    dec(&root),
+                    str_of(&checkpoints[&n.to_string()]),
+                    "seed {seed}: the root at size {n}"
+                );
                 seen += 1;
             }
         }
         assert_eq!(seen, checkpoints.len(), "seed {seed}: every checkpoint reached");
-        assert_eq!(dec(&root), s["final_root"].as_str().unwrap(), "seed {seed}: final root");
+        assert_eq!(dec(&root), str_of(&s["final_root"]), "seed {seed}: final root");
         assert_eq!(
             depth as u64,
             s["final_depth"].as_u64().unwrap(),
@@ -101,7 +81,7 @@ fn rust_tree_roots_equal_lean_imt_after_every_insert() {
         );
         assert_eq!(
             dec(&chain),
-            s["chain"].as_str().unwrap(),
+            str_of(&s["chain"]),
             "seed {seed}: a root after some insert differs"
         );
         println!(
@@ -115,4 +95,45 @@ fn rust_tree_roots_equal_lean_imt_after_every_insert() {
         "the longest sequence holds 100,000 leaves"
     );
     println!("VT-P01: {total} inserts over 9 sequences, every root equal to @zk-kit/lean-imt and the kit's VaultTree");
+}
+
+/// The boundary's side nodes 0..31 as the in-memory store (side 32 empty).
+fn side_of(v: &Value) -> [Bytes32; MAX_TREE_DEPTH as usize + 1] {
+    let given = v.as_array().unwrap();
+    assert_eq!(given.len(), 32);
+    let mut side = [[0u8; 32]; MAX_TREE_DEPTH as usize + 1];
+    for (s, x) in side.iter_mut().zip(given) {
+        *s = b(x);
+    }
+    side
+}
+
+#[test]
+fn every_level_to_32_gives_the_circuit_rule_root() {
+    let fixture = fixture();
+    let mut h = PoseidonT3::new();
+    // the last leaf of a depth-32 tree: hashed at all 32 levels
+    let last = &fixture["boundary"]["last_leaf"];
+    let mut side = side_of(&last["side"]);
+    let (mut size, mut depth) = (last["size"].as_u64().unwrap(), last["depth"].as_u64().unwrap() as u8);
+    assert_eq!((size, depth), ((1 << 32) - 1, 32));
+    let root = insert(&mut h, &mut size, &mut depth, &mut side, &b(&last["leaf"]));
+    assert_eq!(dec(&root), str_of(&last["root"]), "the last leaf at depth 32");
+    assert_eq!((size, depth, side[32]), (1 << 32, 32, root));
+    // 2^31 leaves, then four more: the depth grows to 32 and level 31 is hashed
+    let g = &fixture["boundary"]["growth"];
+    let mut side = side_of(&g["side"]);
+    let (mut size, mut depth) = (g["size"].as_u64().unwrap(), g["depth"].as_u64().unwrap() as u8);
+    assert_eq!((size, depth), (1 << 31, 31));
+    for (i, (leaf, want)) in g["leaves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(g["roots"].as_array().unwrap())
+        .enumerate()
+    {
+        let root = insert(&mut h, &mut size, &mut depth, &mut side, &b(leaf));
+        assert_eq!(dec(&root), str_of(want), "growth insert {i}");
+        assert_eq!((size, depth), ((1 << 31) + i as u64 + 1, 32), "growth insert {i}");
+    }
 }

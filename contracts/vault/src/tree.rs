@@ -173,8 +173,14 @@ impl Vault {
 }
 
 #[cfg(test)]
+#[path = "../tests/leanimt/mod.rs"]
+mod leanimt;
+
+#[cfg(test)]
 mod tests {
+    use super::leanimt::{ceil_log2, fixture, is_checkpoint, str_of, SplitMix64};
     use super::*;
+    use near_sdk::serde_json::Value;
     use near_sdk::test_utils::{get_logs, VMContextBuilder};
     use near_sdk::testing_env;
 
@@ -351,5 +357,116 @@ mod tests {
         }
         let root = insert(&mut PoseidonT3::new(), &mut size, &mut depth, &mut side, &n(1));
         assert_eq!((size, depth, side[32]), (1u64 << 32, 32, root));
+    }
+
+    fn dec(b: &Bytes32) -> String {
+        field::to_decimal(&field::from_be(b))
+    }
+
+    fn b(v: &Value) -> Bytes32 {
+        field::to_be(&field::from_decimal(str_of(v)).expect("a canonical decimal"))
+    }
+
+    /// VT-P01 on the on-chain store: seed 6 (4,696 leaves, depth 13) through `insert_commitment`, so `Tree::push` over
+    /// near-sdk's LookupMap, a fresh call every 40 inserts (each call's log limit). Equal to @zk-kit/lean-imt's root
+    /// after every insert (the fixture's chain) and at every checkpoint; every leaf served back at its index.
+    #[test]
+    fn the_on_chain_store_gives_lean_imt_roots_after_every_insert() {
+        let fixture = fixture();
+        let s = fixture["sequences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["seed"] == 6)
+            .unwrap();
+        let count = s["count"].as_u64().unwrap();
+        assert_eq!(
+            (count, s["final_depth"].as_u64().unwrap()),
+            (4_696, 13),
+            "deeper than 12 levels"
+        );
+        call();
+        let mut v = Vault::default();
+        let mut h = PoseidonT3::new();
+        let mut rng = SplitMix64(6);
+        let mut chain = [0u8; 32];
+        let mut leaves = Vec::new();
+        for n in 1..=count {
+            if n % 40 == 0 {
+                call();
+            }
+            let leaf = field::to_be(&rng.leaf(&field::P));
+            let (index, root) = v.insert_commitment(&mut h, &leaf);
+            assert_eq!(
+                (index, v.state_tree.size, v.state_tree.depth),
+                (n - 1, n, ceil_log2(n)),
+                "size {n}"
+            );
+            assert_eq!(v.state_tree.root(), root, "size {n}: the stored root");
+            assert!(v.state_tree.is_known_root(&root));
+            chain = h.hash(&chain, &root);
+            if is_checkpoint(n, count) {
+                assert_eq!(
+                    dec(&root),
+                    str_of(&s["checkpoints"][n.to_string()]),
+                    "the root at size {n}"
+                );
+            }
+            leaves.push(leaf);
+        }
+        assert_eq!(dec(&chain), str_of(&s["chain"]), "a root after some insert differs");
+        assert_eq!(dec(&v.state_tree.root()), str_of(&s["final_root"]));
+        for (i, leaf) in leaves.iter().enumerate() {
+            assert_eq!(v.state_tree.leaf_at(i as u64).as_ref(), Some(leaf));
+        }
+    }
+
+    /// The fixture's boundary roots (the circuit's rule, every level to 32) through the on-chain store: the side nodes
+    /// written into the LookupMap, then `insert_commitment`.
+    #[test]
+    fn the_on_chain_store_gives_the_circuit_rule_root_at_every_level_to_32() {
+        let fixture = fixture();
+        let set = |v: &mut Vault, c: &Value| {
+            for (level, x) in c["side"].as_array().unwrap().iter().enumerate() {
+                v.state_tree.side_nodes.insert(&(level as u8), &b(x));
+            }
+            v.state_tree.size = c["size"].as_u64().unwrap();
+            v.state_tree.depth = c["depth"].as_u64().unwrap() as u8;
+        };
+        call();
+        let last = &fixture["boundary"]["last_leaf"];
+        let mut v = Vault::default();
+        set(&mut v, last);
+        let (index, root) = v.insert_commitment(&mut PoseidonT3::new(), &b(&last["leaf"]));
+        assert_eq!(
+            (index, dec(&root)),
+            ((1 << 32) - 1, str_of(&last["root"]).to_string()),
+            "the last leaf"
+        );
+        assert_eq!(
+            (v.state_tree.size, v.state_tree.depth, v.state_tree.root()),
+            (1 << 32, 32, root)
+        );
+
+        call();
+        let g = &fixture["boundary"]["growth"];
+        let mut v = Vault::default();
+        set(&mut v, g);
+        let mut h = PoseidonT3::new();
+        for (i, (leaf, want)) in g["leaves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(g["roots"].as_array().unwrap())
+            .enumerate()
+        {
+            let (_, root) = v.insert_commitment(&mut h, &b(leaf));
+            assert_eq!(dec(&root), str_of(want), "growth insert {i}");
+            assert_eq!(
+                (v.state_tree.depth, v.state_tree.root()),
+                (32, root),
+                "growth insert {i}"
+            );
+        }
     }
 }
