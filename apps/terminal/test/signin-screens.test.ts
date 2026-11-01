@@ -107,7 +107,7 @@ test("S19 shows while running or stalled; a finished one only if this page saw i
   assert.equal(showRestore(restoreModel(st({ ops: [op("r1", "stalled")] })), none, none), true);
 });
 
-test("WORDS: the owner's words carry their source; every other word is a draft", () => {
+test("WORDS: every picked word carries its source; every other word is a draft", () => {
   for (const [k, w] of Object.entries(WORDS)) {
     assert.ok(w.text.length > 0 && w.source.length > 0, k);
   }
