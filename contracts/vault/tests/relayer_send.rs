@@ -549,7 +549,8 @@ async fn twin_usdc() -> R<()> {
 // ---- d. the token halted ----
 
 async fn halted(kind: TokenKind) -> R<()> {
-    let w = World::new(kind, 1, "d").await?;
+    // refused before anything is spent: no deposit lands, so no seed is needed
+    let w = World::new(kind, 0, "d").await?;
     let u = w.u("d1").await?;
     let sd = w.sign(&u, "424242031", None).await?;
     if kind == TokenKind::Usdc {
@@ -747,7 +748,8 @@ async fn paused_send_does_not_count_usdc() -> R<()> {
 // ---- g. a nonce not above U's key nonce ----
 
 async fn bad_nonce(kind: TokenKind) -> R<()> {
-    let w = World::new(kind, 1, "g").await?;
+    // refused before anything is spent: no deposit lands, so no seed is needed
+    let w = World::new(kind, 0, "g").await?;
     let u = w.u("g1").await?;
     let n = w.key_nonce(&u.acct).await?;
     let sd = w.sign(&u, "424242061", Some(n)).await?;
