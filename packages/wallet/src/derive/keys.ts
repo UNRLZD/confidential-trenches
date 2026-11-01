@@ -1,0 +1,195 @@
+// The keys the kit derives from the 12 words (docs/plan1/wallet.md §2.2 at research ffcba5e, vector set §A.8).
+//   seed64     BIP-39 seed of the 12 words, empty passphrase (wallet.md:54)
+//   W_{c,l,j}  fresh wallet at m/44'/coin'/a'/b', every step hardened, (a, b) from HKDF info "wallet" ‖ c ‖ l ‖ j
+//   U_{s,i}    one-time deposit id      HKDF info "onetime/in"     ‖ s ‖ i
+//   R_{c,l,j}  one-time return id       HKDF info "onetime/return" ‖ c ‖ l ‖ j
+//   V_{l,j}    one-time refund id       HKDF info "onetime/refund" ‖ l ‖ j
+//   A_{l,j}    one-use arming account   HKDF info "onetime/arm"    ‖ l ‖ j
+//   T_k        profile key              HKDF info "profile"        ‖ k
+// Every input is checked; nothing here logs. A returned secretKey is the caller's to keep on the device.
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { HDKey } from "@scure/bip32";
+import { entropyToMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
+import { base58 } from "@scure/base";
+import { CHAINS, type Chain, HKDF_SALT, P, PRF_INFO, PRF_SALT } from "./constants.ts";
+
+const ascii = (s: string): Uint8Array => new TextEncoder().encode(s);
+const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+const concat = (...parts: Uint8Array[]): Uint8Array => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) (out.set(p, o), (o += p.length));
+  return out;
+};
+const u32 = (x: number): Uint8Array => {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, x);
+  return b;
+};
+
+// ---------- the 12 words ----------
+export function entropyToWords(entropy: Uint8Array): string {
+  if (!(entropy instanceof Uint8Array) || entropy.length !== 16) throw new Error("entropy must be 16 bytes");
+  return entropyToMnemonic(entropy, wordlist);
+}
+// The BIP-39 checksum is checked on the device before anything else (wallet.md:49). The typed words are normalized
+// once (any run of whitespace is one space, none at either end) and that one string goes to the checksum and the seed.
+export function wordsToSeed64(words: string): Uint8Array {
+  if (typeof words !== "string") throw new Error("not 12 valid BIP-39 English words");
+  const list = words.trim().split(/\s+/);
+  const one = list.join(" ");
+  if (list.length !== 12 || !validateMnemonic(one, wordlist)) throw new Error("not 12 valid BIP-39 English words");
+  return mnemonicToSeedSync(one, "");
+}
+
+// A new account's entropy. A stuck random source gives one repeated byte, and 16 zero bytes are the A.8 test seed,
+// whose keys are published (wallet.md §A.8): a new account refuses any entropy that is one byte repeated. Restore
+// (wordsToSeed64) takes any valid words, so the A.8 vectors keep working.
+export function newAccountEntropy(entropy: Uint8Array): Uint8Array {
+  if (!(entropy instanceof Uint8Array) || entropy.length !== 16) throw new Error("entropy must be 16 bytes");
+  if (entropy.every((x) => x === entropy[0])) throw new Error("new account entropy refused: one byte repeated");
+  return entropy;
+}
+// 16 random bytes for a new account without PRF (wallet.md:48); random is crypto.getRandomValues unless a test says.
+export function newEntropy(random: (b: Uint8Array<ArrayBuffer>) => unknown = (b) => crypto.getRandomValues(b)): Uint8Array {
+  const e = new Uint8Array(16);
+  random(e);
+  return newAccountEntropy(e);
+}
+// The passkey's PRF output to the 16 bytes of entropy (wallet.md:47), a new account's entropy like the above.
+export function entropyFromPrf(prfOutput: Uint8Array): Uint8Array {
+  if (!(prfOutput instanceof Uint8Array) || prfOutput.length !== 32) throw new Error("the PRF output must be 32 bytes");
+  return newAccountEntropy(hkdf(sha256, prfOutput, ascii(PRF_SALT), ascii(PRF_INFO), 16));
+}
+
+// ---------- the encodings (wallet.md:70-89) ----------
+function seedOk(seed64: Uint8Array): Uint8Array {
+  if (!(seed64 instanceof Uint8Array) || seed64.length !== 64) throw new Error("seed64 must be 64 bytes");
+  return seed64;
+}
+export function field(name: string, x: bigint): Uint8Array {
+  if (typeof x !== "bigint" || x < 0n || x >= P) throw new Error(`${name} is not a field element in [0, p)`);
+  const b = new Uint8Array(32);
+  for (let i = 31, v = x; i >= 0; i--, v >>= 8n) b[i] = Number(v & 0xffn);
+  return b;
+}
+export function counter(name: string, x: number): Uint8Array {
+  if (!Number.isSafeInteger(x) || x < 0 || x > 0xffffffff) throw new Error(`${name} is not a counter in [0, 2^32)`);
+  return u32(x);
+}
+export function chainTag(c: Chain): number {
+  if (typeof c !== "string" || !Object.hasOwn(CHAINS, c)) throw new Error(`unknown chain tag ${String(c)}`);
+  return CHAINS[c].tag;
+}
+
+export const info = {
+  in: (s: bigint, i: number) => concat(ascii("onetime/in"), field("s", s), counter("i", i)),
+  return: (c: Chain, l: bigint, j: number) =>
+    concat(ascii("onetime/return"), Uint8Array.of(chainTag(c)), field("l", l), counter("j", j)),
+  refund: (l: bigint, j: number) => concat(ascii("onetime/refund"), field("l", l), counter("j", j)),
+  arm: (l: bigint, j: number) => concat(ascii("onetime/arm"), field("l", l), counter("j", j)),
+  wallet: (c: Chain, l: bigint, j: number) =>
+    concat(ascii("wallet"), Uint8Array.of(chainTag(c)), field("l", l), counter("j", j)),
+  profile: (k: number) => concat(ascii("profile"), counter("k", k)),
+};
+
+export function hkdfSeed(seed64: Uint8Array, inf: Uint8Array, length: number): Uint8Array {
+  return hkdf(sha512, seedOk(seed64), ascii(HKDF_SALT), inf, length);
+}
+
+// ---------- one-time ed25519 ids: U, R, V, A, T ----------
+export interface OneTime {
+  info: string; // the HKDF info bytes, hex
+  id: string; // lowercase hex of the public key: the NEAR implicit account (T: the profile key)
+  publicKey: Uint8Array;
+  secretKey: Uint8Array; // the 32-byte ed25519 seed (RFC 8032)
+}
+function oneTime(seed64: Uint8Array, inf: Uint8Array): OneTime {
+  const secretKey = hkdfSeed(seed64, inf, 32);
+  const publicKey = ed25519.getPublicKey(secretKey);
+  return { info: hex(inf), id: hex(publicKey), publicKey, secretKey };
+}
+export const depositId = (seed64: Uint8Array, s: bigint, i: number) => oneTime(seed64, info.in(s, i));
+export const returnId = (seed64: Uint8Array, c: Chain, l: bigint, j: number) => oneTime(seed64, info.return(c, l, j));
+export const refundId = (seed64: Uint8Array, l: bigint, j: number) => oneTime(seed64, info.refund(l, j));
+export const armAccount = (seed64: Uint8Array, l: bigint, j: number) => oneTime(seed64, info.arm(l, j));
+export const profileKey = (seed64: Uint8Array, k: number) => oneTime(seed64, info.profile(k));
+
+// ---------- SLIP-10 ed25519, hardened steps only ----------
+const HARDENED = 0x80000000;
+export function slip10Ed25519(seed: Uint8Array, path: number[]): { key: Uint8Array; chainCode: Uint8Array } {
+  let I = hmac(sha512, ascii("ed25519 seed"), seed);
+  let key = I.slice(0, 32), chainCode = I.slice(32);
+  for (const step of path) {
+    if (!Number.isSafeInteger(step) || step < HARDENED || step > 0xffffffff)
+      throw new Error("SLIP-10 ed25519 takes hardened steps only");
+    I = hmac(sha512, chainCode, concat(Uint8Array.of(0), key, u32(step)));
+    key = I.slice(0, 32);
+    chainCode = I.slice(32);
+  }
+  return { key, chainCode };
+}
+
+// ---------- fresh wallets W_{c,l,j} ----------
+export interface FreshWallet {
+  chain: Chain;
+  info: string; // the HKDF info bytes of the path, hex
+  path: string; // m/44'/coin'/a'/b'
+  address: string; // sol: base58 of the public key; evm: EIP-55 0x address; near: hex of the public key
+  publicKey: Uint8Array; // ed25519: 32 B; secp256k1: 33 B compressed
+  secretKey: Uint8Array; // ed25519: the 32-byte seed; secp256k1: the 32-byte private key
+}
+// (a, b): the 8 HKDF bytes as two big-endian u32, each AND 0x7fffffff (wallet.md:62).
+export function walletPath(seed64: Uint8Array, c: Chain, l: bigint, j: number): { a: number; b: number; path: string } {
+  const ab = hkdfSeed(seed64, info.wallet(c, l, j), 8);
+  const v = new DataView(ab.buffer, ab.byteOffset, 8);
+  const a = v.getUint32(0) & 0x7fffffff, b = v.getUint32(4) & 0x7fffffff;
+  return { a, b, path: `m/44'/${CHAINS[c].coin}'/${a}'/${b}'` };
+}
+export function freshWallet(seed64: Uint8Array, c: Chain, l: bigint, j: number): FreshWallet {
+  const { a, b, path } = walletPath(seed64, c, l, j);
+  const inf = hex(info.wallet(c, l, j));
+  const steps = [44, CHAINS[c].coin, a, b].map((x) => x + HARDENED);
+  if (CHAINS[c].curve === "ed25519") {
+    const { key } = slip10Ed25519(seed64, steps);
+    const publicKey = ed25519.getPublicKey(key);
+    const address = c === "sol" || c === "hop-sol" ? base58.encode(publicKey) : hex(publicKey);
+    return { chain: c, info: inf, path, address, publicKey, secretKey: key };
+  }
+  const node = HDKey.fromMasterSeed(seed64).derive(path);
+  if (!node.privateKey || !node.publicKey) throw new Error("BIP-32 derivation gave no key");
+  return { chain: c, info: inf, path, address: evmAddress(node.publicKey), publicKey: node.publicKey, secretKey: node.privateKey };
+}
+
+// ---------- EVM address ----------
+// The last 20 bytes of keccak-256 of the 64-byte public key, in EIP-55 mixed case.
+export function evmAddress(publicKey: Uint8Array): string {
+  const full = publicKey.length === 65 ? publicKey : secp256k1.Point.fromBytes(publicKey).toBytes(false);
+  return toChecksum(hex(keccak_256(full.slice(1)).slice(12)));
+}
+export function toChecksum(addr: string): string {
+  const lower = addr.toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{40}$/.test(lower)) throw new Error("not a 20-byte address");
+  const h = hex(keccak_256(ascii(lower)));
+  return "0x" + Array.from(lower, (ch, i) => (parseInt(h[i]!, 16) >= 8 ? ch.toUpperCase() : ch)).join("");
+}
+
+// ---------- the change index j (wallet.md:116-124) ----------
+// j is fixed by the spent note, never by a device counter: the first note of a label (a deposit note, or a refund
+// note under its own new label) makes change note 0; change note k makes change note k + 1.
+export type SpentNote = { kind: "deposit" } | { kind: "refund" } | { kind: "change"; j: number };
+export function changeIndex(spent: SpentNote): number {
+  if (spent.kind === "deposit" || spent.kind === "refund") return 0;
+  if (spent.kind === "change") {
+    counter("j", spent.j);
+    if (spent.j === 0xffffffff) throw new Error("change index out of range");
+    return spent.j + 1;
+  }
+  throw new Error("unknown note kind");
+}
