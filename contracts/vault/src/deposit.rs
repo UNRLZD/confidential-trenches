@@ -190,6 +190,10 @@ mod tests {
             (&format!(r#"{{"precommitment":"-1","depositor":"{HEX64}"}}"#), "InvalidNumber"),
             (&format!(r#"{{"precommitment":"0x1","depositor":"{HEX64}"}}"#), "InvalidNumber"),
             (&format!(r#"{{"precommitment":" 1","depositor":"{HEX64}"}}"#), "InvalidNumber"),
+            (&format!(r#"{{"precommitment":"+1","depositor":"{HEX64}"}}"#), "InvalidNumber"),
+            (&format!(r#"{{"precommitment":"00","depositor":"{HEX64}"}}"#), "InvalidNumber"),
+            (&format!(r#"{{"precommitment":"1e3","depositor":"{HEX64}"}}"#), "InvalidNumber"),
+            (&format!(r#"{{"precommitment":"1 ","depositor":"{HEX64}"}}"#), "InvalidNumber"),
             (&format!(r#"{{"precommitment":"{P_DEC}","depositor":"{HEX64}"}}"#), "FieldOverflow"),
             (
                 &format!(r#"{{"precommitment":"{}","depositor":"{HEX64}"}}"#, "115792089237316195423570985008687907853269984665640564039457584007913129639935"),
