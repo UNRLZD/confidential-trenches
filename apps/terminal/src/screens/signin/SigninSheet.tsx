@@ -1,8 +1,9 @@
 import type { SigninWay } from "@blindfill/kit";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import type { RouteId } from "../../routes/routes.ts";
 import { ROUTES } from "../../routes/routes.ts";
+import { HopLine } from "./HopLine.tsx";
 import { Icon } from "./Icon.tsx";
 import type { IconName } from "./Icon.tsx";
 import { restoreModel, showRestore, signinWays, usd } from "./model.ts";
@@ -14,7 +15,8 @@ import "./signin.css";
 
 // The sign-in sheet (S2.1) and the restore screens (S19) inside it: a centred modal on desktop, a bottom sheet on the
 // phone (09-design-brief S2; app.md FR-P1). Each way in hops to SIGN_HOST's top-level page with `signin.open` and that
-// way (CH-011); the 12 words and the key ceremony live only there. After a sign-in that restores an account (Face ID or
+// way (CH-011); the 12 words and the key ceremony live only there. A way the page refuses or does not answer shows
+// HopLine under it (card app-hop-refused). After a sign-in that restores an account (Face ID or
 // the 12 words, or the wallet way's "I already have one"), the sheet shows the `restore` operation from `state`:
 // scanning with the balance growing, done, nothing found, or offline with Retry. A new account shows no sheet: the
 // header goes to S1.3 with the Backup dot until the 12 words are saved.
@@ -97,23 +99,25 @@ function Ways({ route }: { route: RouteId }) {
       {ways.map((way, i) => {
         const control = controlOf(way);
         return (
-          <button
-            key={way}
-            type="button"
-            className={i === 0 ? "sgn-opt primary" : "sgn-opt"}
-            data-way={way}
-            data-control={control}
-            disabled={off || src.locked !== null}
-            aria-busy={src.locked === control}
-            onClick={() => void src.hop("signin.open", { way }, { route, sheet: SHEET_ID, control, fields: {} })}
-          >
-            <span className="ic">
-              <Icon name={WAYS[way].icon} size={18} stroke={1.2} />
-            </span>
-            <span className="tt">
-              <W id={WAYS[way].word} />
-            </span>
-          </button>
+          <Fragment key={way}>
+            <button
+              type="button"
+              className={i === 0 ? "sgn-opt primary" : "sgn-opt"}
+              data-way={way}
+              data-control={control}
+              disabled={off || src.locked !== null}
+              aria-busy={src.locked === control}
+              onClick={() => void src.hop("signin.open", { way }, { route, sheet: SHEET_ID, control, fields: {} })}
+            >
+              <span className="ic">
+                <Icon name={WAYS[way].icon} size={18} stroke={1.2} />
+              </span>
+              <span className="tt">
+                <W id={WAYS[way].word} />
+              </span>
+            </button>
+            <HopLine control={control} />
+          </Fragment>
         );
       })}
     </div>

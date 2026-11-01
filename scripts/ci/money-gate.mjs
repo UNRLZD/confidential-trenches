@@ -22,10 +22,10 @@
 // its shape. The rule is the same for every chain and every shape.
 // Each Tx is read back on the public RPCs of its chain: it passes only
 // when two of them, run by two different operators, read it as succeeded, on or after 2026-11-01T00:00:00Z, and none
-// reads it as failed or older. Two hosts of one operator are one read (NEAR's operators: near-rpc-operators.mjs). One
-// case passes on one operator, named in the output: a NEAR tx older than dRPC keeps, since no second keyless archival
-// operator exists (near-rpc-operators.mjs); every host of that operator must read it ok, and the tx's block must be
-// below, and older than, the earliest block dRPC's own status names on the tx's network (oneOperator).
+// reads it as failed or older. Two hosts of one operator are one read (NEAR's operators: near-rpc-operators.mjs). A
+// NEAR tx only one operator reads (one older than dRPC keeps: no second keyless archival operator exists,
+// near-rpc-operators.mjs) passes only when FastNEAR's light-client proof of it, and of every receipt it led to, each a
+// success, reaches a final block dRPC names on the tx's network (proveNearTx); the output names it PROVEN ON dRPC.
 // near-testnet is NEAR's test network, read on its own RPCs with the same rules: a testnet tx written as "Tx: near" is
 // read on the mainnet RPCs, where it does not exist, and is refused. A testnet tx is never real-money proof: parseLive's
 // `real` lists the mainnet txs only, and a release counts those alone.
@@ -40,6 +40,7 @@
 //   node scripts/ci/money-gate.mjs --all                   every record in scripts/live-checks/
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, existsSync, realpathSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { operatorOf as nearOperatorOf } from "./near-rpc-operators.mjs";
@@ -190,13 +191,14 @@ export function parseLive(text, key) {
 // RATE_TRIES waits in a row; a Retry-After past RATE_CAP seconds is no answer at once. Other trouble (no reply, a
 // reply that is not JSON, an HTTP error with no RPC error) is asked 3 times, 2 s and 4 s apart. Each host is asked
 // at most once a second.
-// Once two operators have read a tx ok, a remaining host is still asked once, but with rateWait off: its 429 is no
-// answer at once (NOT_WAITED), never waited and never decisive. A failed or old answer from it still refuses. While
-// fewer than two operators have read it ok, a 429 from any host is waited, a second host of one operator included:
-// its "missing" refuses a one-operator pass (oneOperator), so it must be heard.
+// A 429 is waited only while the host could add a second operator: once two operators have read a tx ok, or the
+// host's own operator has, it is still asked once, but with rateWait off: its 429 is no answer at once (NOT_WAITED),
+// never waited and never decisive. A failed or old answer from it still refuses. One operator's read never passes a tx
+// alone: a NEAR tx no second operator reads passes only by its light-client proof (proveNearTx), which needs no
+// second read on the same operator.
 const RATE_TRIES = 5;
 const RATE_CAP = 600;
-const NOT_WAITED = "rate limited, not waited: two operators read it ok";
+const NOT_WAITED = "rate limited, not waited: its read could add no second operator";
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const lastAsked = new Map();
 const hostOf = (url) => {
@@ -283,7 +285,7 @@ export function failedReceipts(r) {
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
 
 // One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read. rateWait off: a 429 is
-// NOT_WAITED at once. A NEAR read puts its block's height in out.height.
+// NOT_WAITED at once. A NEAR read puts its EXPERIMENTAL_tx_status answer in out.result.
 export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait, rateWait = true, out = {}) {
   let j;
   try {
@@ -304,8 +306,7 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       const b = await rpc(fetchFn, url, "block", { block_id: r.transaction_outcome?.block_hash }, sleep, rateWait);
       const ns = b.result?.header?.timestamp_nanosec;
       if (!ns) return "no block time";
-      out.height = b.result.header.height;
-      out.time = Number(BigInt(ns) / 1000000n);
+      out.result = r;
       return when(Number(BigInt(ns) / 1000000n), floor);
     }
     if (chain === "solana") {
@@ -340,45 +341,243 @@ export const operatorOf = (chain, url) =>
 /** The operators whose reads ([{ url, r }]) read the tx ok: two of them, never two hosts of one, prove a tx. */
 export const okOperators = (chain, reads) => new Set(reads.filter((a) => a.r === "ok").map((a) => operatorOf(chain, a.url)));
 
-// The one case a tx passes on one operator: a NEAR tx no second operator can hold. Refused (null) unless
-//  - one operator read it ok and every host of that operator read it ok: a "missing", or no answer (a 429 past the
-//    cap), from any of them refuses, as it would with two operators;
-//  - every other operator's host answered UNKNOWN_TRANSACTION ("missing"; any other reply is no answer);
-//  - each such host's status names the tx's network, and an earliest block whose height is above the tx's block and
-//    whose time, read from that host by that height, is after the tx's block time (the one height and time the ok
-//    reads agree on).
-// answers: [{ url, r, height, time }]. Returns why it passes, or null.
-export async function oneOperator(fetchFn, tx, answers, sleep) {
-  if (!NEAR.has(tx.chain)) return null;
+// NEAR's light-client proof: a NEAR tx no second operator reads (dRPC keeps about 29 h on mainnet; no second keyless
+// archival operator exists, near-rpc-operators.mjs) passes only when FastNEAR proves it against a block dRPC returns.
+// FastNEAR answers EXPERIMENTAL_light_client_proof for the tx and for every receipt its outcomes create (each proven
+// outcome names the receipts it created, so the proven set is the whole tree from the tx); each proof must reach the
+// block_merkle_root of a final block dRPC names, dRPC's status must name the tx's network, and every proven outcome
+// must be a success. FastNEAR can then forge nothing: an outcome it changes no longer hashes to that root.
+// Every step follows nearcore 2.14.0 (commit bc4e9e8cfb03d9e82f027883055624e18576993e), cited by file:line:
+//  - an outcome's leaf: ExecutionOutcomeWithId::to_hashes (core/primitives/src/transaction.rs:795-801) is
+//    [id, hash_borsh(PartialExecutionOutcome), hash(log) for each log]; the leaf is hash_borsh of that Vec, since
+//    ApplyChunkResult::compute_outcomes_proof merklizes to_hashes() (chain/chain/src/types.rs:151-159) and merklize
+//    hashes each item with hash_borsh (core/primitives/src/merkle.rs:52). PartialExecutionOutcome is receipt_ids,
+//    gas_burnt (u64), tokens_burnt (u128), executor_id, status (transaction.rs:622-628); its status is Unknown = 0,
+//    Failure = 1 (no detail), SuccessValue(Vec<u8>) = 2, SuccessReceiptId(CryptoHash) = 3 (transaction.rs:646-651).
+//  - a path: compute_root_from_path (merkle.rs:131-144): Left is combine_hash(item, acc), Right is combine_hash(acc,
+//    item), and combine_hash(a, b) is hash_borsh((a, b)), sha256 of a then b (merkle.rs:42-44).
+//  - outcome_proof.proof leads from the leaf to the chunk's outcome root; outcome_root_proof leads from
+//    hash_borsh(that root) to the block's outcome_root: the block's root merklizes its chunks' prev_outcome_root
+//    (chain/client/src/view_client_actor.rs:1187-1193).
+//  - the block's hash from block_header_lite: combine_hash(combine_hash(hash(borsh(inner_lite)), inner_rest_hash),
+//    prev_block_hash) (core/primitives/src/views.rs:2755-2767; core/primitives/src/block_header.rs:922-932), with
+//    inner_lite height u64, epoch_id, next_epoch_id, prev_state_root, prev_outcome_root (the view's outcome_root),
+//    timestamp u64 (the view's timestamp_nanosec), next_bp_hash, block_merkle_root (block_header.rs:30-47;
+//    views.rs:1089-1101). A header with chunk_execution_root (a later header kind, views.rs:2756) is refused.
+//  - block_proof leads from that block's hash, a raw leaf (PartialMerkleTree::insert, merkle.rs:198-208), to the
+//    head's block_merkle_root: a block's root is the tree of every block before it (chain/chain/src/chain.rs:1034-1035;
+//    the RPC builds the path, chain/jsonrpc/src/lib.rs:2530-2545, core/store/src/merkle_proof.rs:28-44).
+// Borsh: integers little-endian, a Vec or String is a u32 length then its items, a CryptoHash 32 bytes.
+const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+export function base58(s) {
+  if (typeof s !== "string" || !s.length || s.length > 64) throw new Error(`not a base58 hash: ${String(s).slice(0, 70)}`);
+  let n = 0n;
+  for (const c of s) {
+    const i = BASE58.indexOf(c);
+    if (i < 0) throw new Error(`not a base58 hash: ${s}`);
+    n = n * 58n + BigInt(i);
+  }
+  const out = [];
+  for (; n > 0n; n >>= 8n) out.unshift(Number(n & 255n));
+  for (const c of s) {
+    if (c !== "1") break;
+    out.unshift(0);
+  }
+  return Buffer.from(out);
+}
+const hash32 = (s) => {
+  const b = base58(s);
+  if (b.length !== 32) throw new Error(`${s} is not a 32-byte hash`);
+  return b;
+};
+const sha = (...parts) => createHash("sha256").update(Buffer.concat(parts)).digest();
+const u32 = (n) => {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(n);
+  return b;
+};
+const uint = (v, bytes) => {
+  const s = typeof v === "number" && Number.isSafeInteger(v) ? String(v) : v;
+  if (typeof s !== "string" || !/^\d{1,40}$/.test(s) || BigInt(s) >= 1n << BigInt(8 * bytes)) throw new Error(`not a u${8 * bytes}: ${v}`);
+  const b = Buffer.alloc(bytes);
+  for (let i = 0, x = BigInt(s); i < bytes; i++, x >>= 8n) b[i] = Number(x & 255n);
+  return b;
+};
+const str = (s) => {
+  if (typeof s !== "string") throw new Error("not a string");
+  const b = Buffer.from(s, "utf8");
+  return Buffer.concat([u32(b.length), b]);
+};
+const one = (o, key) => o !== null && typeof o === "object" && Object.keys(o).length === 1 && Object.hasOwn(o, key);
+function partialStatus(s) {
+  if (s === "Unknown") return Buffer.from([0]);
+  if (one(s, "Failure")) return Buffer.from([1]);
+  // base64 read strictly: Node's decoder skips what it cannot read, so only a value that encodes back to itself is read
+  if (one(s, "SuccessValue") && typeof s.SuccessValue === "string" && Buffer.from(s.SuccessValue, "base64").toString("base64") === s.SuccessValue) {
+    const v = Buffer.from(s.SuccessValue, "base64");
+    return Buffer.concat([Buffer.from([2]), u32(v.length), v]);
+  }
+  if (one(s, "SuccessReceiptId")) return Buffer.concat([Buffer.from([3]), hash32(s.SuccessReceiptId)]);
+  throw new Error(`an outcome status this check does not read: ${JSON.stringify(s)?.slice(0, 80)}`);
+}
+/** The Merkle leaf of one outcome (transaction.rs:795-801, types.rs:151-159). */
+export function outcomeLeaf(id, o) {
+  if (!Array.isArray(o?.receipt_ids) || !Array.isArray(o.logs)) throw new Error("an outcome with no receipt_ids or logs list");
+  const partial = Buffer.concat([u32(o.receipt_ids.length), ...o.receipt_ids.map(hash32), uint(o.gas_burnt, 8), uint(o.tokens_burnt, 16), str(o.executor_id), partialStatus(o.status)]);
+  const hashes = [hash32(id), sha(partial), ...o.logs.map((l) => sha(str(l).subarray(4)))];
+  return sha(u32(hashes.length), ...hashes);
+}
+/** compute_root_from_path (merkle.rs:131-144). */
+export function rootOf(path, leaf) {
+  if (!Array.isArray(path) || path.length > 64) throw new Error("a Merkle path that is not a list of at most 64 steps");
+  let acc = leaf;
+  for (const step of path) {
+    const h = hash32(step?.hash);
+    if (step.direction === "Left") acc = sha(h, acc);
+    else if (step.direction === "Right") acc = sha(acc, h);
+    else throw new Error(`a Merkle step with direction ${step?.direction}`);
+  }
+  return acc;
+}
+/** A block's hash from its block_header_lite (views.rs:2755-2767). */
+export function liteHash(lite) {
+  const i = lite?.inner_lite;
+  if (!i) throw new Error("no block_header_lite");
+  if (i.chunk_execution_root != null) throw new Error("a header with chunk_execution_root, which this check does not read");
+  const inner = Buffer.concat([uint(i.height, 8), hash32(i.epoch_id), hash32(i.next_epoch_id), hash32(i.prev_state_root), hash32(i.outcome_root), uint(i.timestamp_nanosec, 8), hash32(i.next_bp_hash), hash32(i.block_merkle_root)]);
+  return sha(sha(sha(inner), hash32(lite.inner_rest_hash)), hash32(lite.prev_block_hash));
+}
+/** The signer and receiver of a NEAR tx, from its borsh Transaction bytes (base64), which must hash to `id`. An outcome
+ * proof binds an id, not its kind: FastNEAR answers a "transaction" proof request for a receipt id with that receipt's
+ * proof (nearcore does not check the kind, chain/client/src/view_client_actor.rs:1158-1167; read live 2026-11-01). A
+ * tx hash is sha256(borsh(Transaction)) (core/primitives/src/transaction.rs:144-146), which no receipt id has. V0 is
+ * TransactionV0 (signer_id, public_key, nonce u64, receiver_id, ...; transaction.rs:36-50); V1 is a 1 then
+ * TransactionV1 (signer_id, public_key, nonce as TransactionNonce: 0 then u64, or 1 then u64 and a u16, receiver_id,
+ * ...; transaction.rs:66-71, :122-140, :268-276), told apart as nearcore reads them: a second byte of 0 is V0, a
+ * first byte of 1 with a second byte not 0 is V1 (transaction.rs:281-318). A public key is its tag then 32 bytes
+ * (ed25519, 0) or 64 (secp256k1, 1) (core/crypto/src/signature.rs:39-43, :398-416); another key type is refused. */
+export function txBytesFacts(b64, id) {
+  if (typeof b64 !== "string" || !b64 || Buffer.from(b64, "base64").toString("base64") !== b64) throw new Error(`${id}: no signed tx bytes for it, or bytes that are not base64`);
+  const b = Buffer.from(b64, "base64");
+  if (!sha(b).equals(hash32(id))) throw new Error(`${id}: its tx bytes do not hash to it`);
+  const v1 = b[1] !== 0;
+  if (v1 && b[0] !== 1) throw new Error(`${id}: tx bytes with version tag ${b[0]}`);
+  let at = v1 ? 1 : 0;
+  const take = (n) => {
+    if (at + n > b.length) throw new Error(`${id}: its tx bytes end early`);
+    at += n;
+    return b.subarray(at - n, at);
+  };
+  const account = () => {
+    const n = take(4).readUInt32LE(0);
+    if (n < 2 || n > 64) throw new Error(`${id}: an account id of ${n} bytes in its tx bytes`);
+    return take(n).toString("utf8");
+  };
+  const signer = account();
+  const key = { 0: 32, 1: 64 }[take(1)[0]];
+  if (!key) throw new Error(`${id}: a key type its tx bytes name that this check does not read`);
+  take(key);
+  if (!v1) take(8);
+  else {
+    const kind = take(1)[0];
+    if (kind > 1) throw new Error(`${id}: a nonce kind ${kind} in its tx bytes`);
+    take(kind ? 10 : 8);
+  }
+  return { signer, receiver: account(), version: v1 ? 1 : 0 };
+}
+
+/** One EXPERIMENTAL_light_client_proof answer for `id`, checked against the head's block_merkle_root (32 bytes).
+ * Returns the proven outcome and its block's height and time (ms); throws why it does not prove. */
+export function checkProof(p, id, headRoot) {
+  const op = p?.outcome_proof;
+  if (op?.id !== id) throw new Error(`a proof for ${String(op?.id).slice(0, 60)}, not ${id}`);
+  const chunkRoot = rootOf(op.proof, outcomeLeaf(op.id, op.outcome));
+  const outcomeRoot = rootOf(p.outcome_root_proof, sha(chunkRoot));
+  const lite = p.block_header_lite;
+  if (!outcomeRoot.equals(hash32(lite?.inner_lite?.outcome_root))) throw new Error(`${id}: its outcome does not reach its block's outcome_root`);
+  const block = liteHash(lite);
+  if (!block.equals(hash32(op.block_hash))) throw new Error(`${id}: its block header does not hash to ${op.block_hash}`);
+  if (!rootOf(p.block_proof, block).equals(headRoot)) throw new Error(`${id}: its block does not reach the head's block_merkle_root`);
+  return { outcome: op.outcome, height: lite.inner_lite.height, time: Number(BigInt(lite.inner_lite.timestamp_nanosec) / 1000000n) };
+}
+const MAX_OUTCOMES = 200;
+/** Proves a NEAR tx on `prover` (FastNEAR) against a final block of `head` (dRPC). `known`: the prover's
+ * EXPERIMENTAL_tx_status answer, which names each receipt's receiver (the proof request needs it; the proof binds the
+ * id). Returns { height, time, outcomes, head } or throws why it is not proven. */
+export async function proveNearTx(fetchFn, tx, prover, head, known, sleep = wait, max = MAX_OUTCOMES) {
   const network = tx.chain === "near" ? "mainnet" : "testnet";
-  const ok = answers.filter((a) => a.r === "ok");
-  const [op, ...more] = new Set(ok.map((a) => operatorOf(tx.chain, a.url)));
-  if (!op || more.length) return null;
-  if (answers.some((a) => operatorOf(tx.chain, a.url) === op && a.r !== "ok")) return null;
-  const heights = new Set(ok.map((a) => a.height));
-  const times = new Set(ok.map((a) => a.time));
-  const [h] = heights;
-  const [t] = times;
-  if (heights.size !== 1 || times.size !== 1 || !Number.isSafeInteger(h) || !Number.isSafeInteger(t)) return null;
-  const others = answers.filter((a) => operatorOf(tx.chain, a.url) !== op);
-  if (!others.length || others.some((a) => a.r !== "missing")) return null;
-  const kept = [];
-  for (const a of others) {
+  const call = async (url, method, params) => {
+    let j;
     try {
-      const st = (await rpc(fetchFn, a.url, "status", [], sleep)).result;
-      if (st?.chain_id !== network) return null;
-      const e = st.sync_info?.earliest_block_height;
-      if (!Number.isSafeInteger(e) || h >= e) return null;
-      const head = (await rpc(fetchFn, a.url, "block", { block_id: e }, sleep)).result?.header;
-      if (head?.height !== e || typeof head.timestamp_nanosec !== "string" || !/^\d+$/.test(head.timestamp_nanosec)) return null;
-      const te = Number(BigInt(head.timestamp_nanosec) / 1000000n);
-      if (t >= te) return null;
-      kept.push(`${a.url} (${network}) keeps blocks from ${e}, ${new Date(te).toISOString()}`);
-    } catch {
-      return null;
+      j = await rpc(fetchFn, url, method, params, sleep);
+    } catch (e) {
+      throw new Error(`${hostOf(url) ?? url} ${method}: no answer (${String(e?.message ?? e).slice(0, 80)})`);
+    }
+    if (j?.error || !j?.result) throw new Error(`${hostOf(url) ?? url} ${method}: ${JSON.stringify(j?.error ?? "no result").slice(0, 120)}`);
+    return j.result;
+  };
+  const st = await call(head, "status", []);
+  if (st.chain_id !== network) throw new Error(`${hostOf(head) ?? head} status names ${String(st.chain_id).slice(0, 40)}, not ${network}`);
+  const fin = await call(head, "block", { finality: "final" });
+  const headHash = fin.header?.hash;
+  const hb = await call(head, "block", { block_id: headHash });
+  if (typeof headHash !== "string" || hb.header?.hash !== headHash) throw new Error(`${hostOf(head) ?? head} does not answer its final block ${String(headHash).slice(0, 60)} by hash`);
+  const headRoot = hash32(hb.header.block_merkle_root);
+  const receiver = new Map((Array.isArray(known?.receipts_outcome) ? known.receipts_outcome : []).map((o) => [o?.id, o?.outcome?.executor_id]));
+  const todo = [{ id: tx.hash, params: { type: "transaction", transaction_hash: tx.hash, sender_id: tx.signer } }];
+  const proven = new Map();
+  let first;
+  while (todo.length) {
+    const { id, params } = todo.shift();
+    if (proven.has(id)) continue;
+    if (proven.size >= max) throw new Error(`more than ${max} outcomes`);
+    // an error answer is asked again, twice, 2 s apart (one such answer was seen live, 2026-11-01): a retry
+    // only asks again, every answer is still checked
+    let answer;
+    for (let i = 0; ; i++)
+      try {
+        answer = await call(prover, "EXPERIMENTAL_light_client_proof", { ...params, light_client_head: headHash });
+        break;
+      } catch (e) {
+        if (i >= 2) throw e;
+        await sleep(2000);
+      }
+    const p = checkProof(answer, id, headRoot);
+    const s = p.outcome.status;
+    if (!(one(s, "SuccessValue") || one(s, "SuccessReceiptId")))
+      throw new Error(`${id}: its proven outcome is ${typeof s === "string" ? s : Object.keys(s ?? {})[0]}, not a success`);
+    if (!first) {
+      if (p.outcome.executor_id !== tx.signer) throw new Error(`${id}: its proven signer is ${p.outcome.executor_id}, not ${tx.signer}`);
+      first = p;
+    }
+    proven.set(id, p);
+    for (const r of p.outcome.receipt_ids) {
+      if (proven.has(r)) continue;
+      const to = receiver.get(r);
+      if (typeof to !== "string") throw new Error(`${r}: a receipt of ${id} that ${hostOf(prover) ?? prover} names no receiver for`);
+      todo.push({ id: r, params: { type: "receipt", receipt_id: r, receiver_id: to } });
     }
   }
-  return `one operator (${op}) read it ok, on ${ok.map((a) => a.url).join(", ")}: its block ${h}, ${new Date(t).toISOString()}, is older than ${kept.join(" and ")}, and no second keyless archival operator holds it`;
+  return { height: first.height, time: first.time, outcomes: proven.size, head: `${hb.header.height} ${headHash}` };
+}
+
+/** A NEAR tx one operator read ok (answers: [{ url, r, result }] in list's order), proven by its signed tx bytes
+ * (tx.bytes, base64 borsh Transaction, from the record's tx-bytes file) and FastNEAR's light-client proof against
+ * dRPC's final block, or it throws why not. Returns the PROVEN ON line. The live check and the deploy script use it
+ * as the gate does. A tx with no bytes passes only on two operators' reads. */
+export async function proveRead(fetchFn, tx, answers, list, floor = FLOOR, sleep = wait) {
+  if (!tx.bytes) throw new Error(`no signed tx bytes for it (${LIVE}<card>${BYTES}): a tx one operator reads passes only by its bytes and its proof`);
+  const facts = txBytesFacts(tx.bytes, tx.hash);
+  if (facts.signer !== tx.signer) throw new Error(`its tx bytes name signer ${facts.signer}, not ${tx.signer}`);
+  const prover = answers.find((a) => a.r === "ok" && operatorOf(tx.chain, a.url) === "fastnear" && a.result);
+  const head = list.find((u) => operatorOf(tx.chain, u) === "drpc");
+  if (!prover || !head) throw new Error("no FastNEAR read ok, or no dRPC host, to prove it on");
+  const p = await proveNearTx(fetchFn, tx, prover.url, head, prover.result, sleep);
+  const old = when(p.time, floor);
+  if (old !== "ok") throw new Error(`proven, but ${old}`);
+  // the block named is the one whose outcome root holds the tx's outcome: the next block with a chunk on its shard
+  // after the one that ran it (view_client_actor.rs:1171-1186)
+  return `PROVEN ON ${hostOf(head)}: ${tx.chain} ${tx.hash} (V${facts.version}, ${facts.signer} to ${facts.receiver}): ${p.outcomes} outcome(s) proven by ${hostOf(prover.url)}'s light-client proof against final block ${p.head}; confirmed in block ${p.height}, ${new Date(p.time).toISOString()}`;
 }
 
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
@@ -387,7 +586,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   const refusals = [];
   const read = [];
   const notes = []; // a host's 429 not waited because two operators read it ok
-  const single = []; // a tx read ok on one operator only, where no second one can hold it (oneOperator)
+  const proven = []; // a NEAR tx read ok on one operator and proven by its light-client proof on the other
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
   const byCard = new Map();
   for (const c of money?.commits ?? []) {
@@ -412,7 +611,8 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       seen.set(id, [...(seen.get(id) ?? []), path]);
     }
   }
-  for (const { path, key, text, notFile } of records) {
+  for (const { path, key, text, notFile, bytes: bytesOf, bytesProblem } of records) {
+    if (bytesProblem) refusals.push(`${path.replace(/\.md$/, BYTES)}: ${bytesProblem}`);
     if (notFile) {
       refusals.push(`${path}: ${notFile}, not a regular file`);
       continue;
@@ -425,36 +625,56 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
       const answers = [];
-      // in the listed order; a 429 is waited out while fewer than two operators read it ok
+      // in the listed order; a 429 is waited out only while the host could add a second operator
       const okOps = () => okOperators(tx.chain, answers);
       for (const url of rpcs[tx.chain]) {
-        const rateWait = okOps().size < 2;
+        const rateWait = okOps().size < 2 && !okOps().has(operatorOf(tx.chain, url));
         const out = {};
         const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, out);
-        answers.push({ url, r, height: out.height, time: out.time });
+        answers.push({ url, r, result: out.result });
       }
       const ok = answers.filter((a) => a.r === "ok");
       const decisive = answers.filter((a) => /^(failed|old)/.test(a.r));
       const note = TESTNET.has(tx.chain) ? " (testnet, not real-money proof)" : "";
       for (const a of ok) read.push(`${tx.chain} ${tx.hash} ok on ${a.url}${note}`);
       for (const a of answers) if (a.r === NOT_WAITED) notes.push(`${tx.chain} ${tx.hash} on ${a.url}: ${NOT_WAITED}`);
-      const one = !decisive.length && okOps().size === 1 ? await oneOperator(fetchFn, tx, answers, sleep) : null;
-      if (one) single.push(`${tx.chain} ${tx.hash}: ${one}${note}`);
-      else if (decisive.length || okOps().size < 2)
-        refusals.push(`${path}: ${tx.chain} ${tx.hash}: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}`);
+      let why = "";
+      if (!decisive.length && okOps().size === 1 && NEAR.has(tx.chain))
+        try {
+          proven.push(`${await proveRead(fetchFn, { ...tx, bytes: bytesOf?.[tx.hash] }, answers, rpcs[tx.chain], floor, sleep)}${note}`);
+          continue;
+        } catch (e) {
+          why = `; not proven: ${String(e?.message ?? e).slice(0, 300)}`;
+        }
+      if (decisive.length || okOps().size < 2)
+        refusals.push(`${path}: ${tx.chain} ${tx.hash}: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}${why}`);
     }
   }
-  return { refusals, read, notes, single };
+  return { refusals, read, notes, proven };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
 // followed, so it adds no Tx to the twice-listed check either
+// A record's tx-bytes file (<key>.tx-bytes.json beside it): { "<NEAR tx hash>": "<base64 borsh Transaction>" }, the
+// signed bytes the run's own script made. Optional; when present it must be a regular file holding that object.
 function load(cwd, path) {
   const key = path.slice(LIVE.length, -".md".length);
   const st = lstatSync(`${cwd}/${path}`, { throwIfNoEntry: false });
   if (!st?.isFile()) return { path, key, text: "", notFile: !st ? "missing" : st.isSymbolicLink() ? "a symlink" : "not a file" };
-  return { path, key, text: readFileSync(`${cwd}/${path}`, "utf8") };
+  const rec = { path, key, text: readFileSync(`${cwd}/${path}`, "utf8") };
+  const side = `${cwd}/${path.replace(/\.md$/, BYTES)}`;
+  const bst = lstatSync(side, { throwIfNoEntry: false });
+  if (!bst) return rec;
+  if (!bst.isFile()) return { ...rec, bytesProblem: `${bst.isSymbolicLink() ? "a symlink" : "not a file"}, not a regular file` };
+  try {
+    const b = JSON.parse(readFileSync(side, "utf8"));
+    if (b === null || typeof b !== "object" || Array.isArray(b) || Object.values(b).some((v) => typeof v !== "string")) throw new Error("not an object of strings");
+    return { ...rec, bytes: b };
+  } catch (e) {
+    return { ...rec, bytesProblem: `not a tx-bytes object (${String(e?.message ?? e).slice(0, 80)})` };
+  }
 }
+export const BYTES = ".tx-bytes.json";
 
 // the folder's README says how a check works; it is not a record
 const isRecord = (p) => p.endsWith(".md") && p !== `${LIVE}README.md`;
@@ -506,10 +726,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
-  const { refusals, read, notes, single } = await moneyGate(records, fetch, RPCS, { every, money });
+  const { refusals, read, notes, proven } = await moneyGate(records, fetch, RPCS, { every, money });
   for (const r of read) console.log(`money-gate: ${r}`);
   for (const n of notes) console.log(`money-gate: ${n}`);
-  for (const o of single) console.log(`money-gate: ONE OPERATOR: ${o}`);
+  for (const p of proven) console.log(`money-gate: ${p}`);
   if (refusals.length) {
     for (const r of refusals) console.error(`money-gate: REFUSED: ${r}`);
     process.exit(1);

@@ -111,7 +111,7 @@ test("WORDS: every picked word carries its source; every other word is a draft",
   for (const [k, w] of Object.entries(WORDS)) {
     assert.ok(w.text.length > 0 && w.source.length > 0, k);
   }
-  assert.deepEqual(DRAFTS.sort(), ["backup", "close", "nothingFound", "offline", "recoveryCode", "restoring", "sync"]);
+  assert.deepEqual(DRAFTS.sort(), ["backup", "close", "hopError", "hopRefused", "hopSilent", "nothingFound", "offline", "recoveryCode", "restoring", "sync"]);
   // owner-words-pass and the signed CN rows: final
   for (const k of ["usePasskey", "wallet", "signOut", "privacy", "retry"] as const) assert.equal(WORDS[k].draft, false, k);
 });

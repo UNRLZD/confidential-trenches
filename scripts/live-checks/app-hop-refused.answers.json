@@ -1,0 +1,76 @@
+{
+  "good": {
+    "url": "https://confidential.unrealized.trade",
+    "source": "harness, SIGN_HOST's real page",
+    "at": "2026-11-01T12:27:02.223Z",
+    "browser": "153.0.8010.12",
+    "runs": [
+      {
+        "width": "phone",
+        "ready": true,
+        "signpage": "ready",
+        "outcome": "line",
+        "ms": 67,
+        "line": {
+          "why": "refused",
+          "text": "Not available",
+          "retry": false,
+          "inPlace": true
+        },
+        "url": "https://confidential.unrealized.trade/",
+        "control": null,
+        "dialogs": [],
+        "shot": "coverage/live/good/phone.png"
+      },
+      {
+        "width": "desktop",
+        "ready": true,
+        "signpage": "ready",
+        "outcome": "line",
+        "ms": 53,
+        "line": {
+          "why": "refused",
+          "text": "Not available",
+          "retry": false,
+          "inPlace": true
+        },
+        "url": "https://confidential.unrealized.trade/",
+        "control": null,
+        "dialogs": [],
+        "shot": "coverage/live/good/desktop.png"
+      }
+    ]
+  },
+  "badLive": {
+    "url": "https://confidential.unrealized.trade",
+    "source": "live",
+    "at": "2026-11-01T12:27:03.243Z",
+    "browser": "153.0.8010.12",
+    "runs": [
+      {
+        "width": "phone",
+        "ready": true,
+        "signpage": "ready",
+        "outcome": "none",
+        "ms": null,
+        "line": null,
+        "url": "https://confidential.unrealized.trade/",
+        "control": "on",
+        "dialogs": [],
+        "shot": "coverage/live/bad/phone.png"
+      },
+      {
+        "width": "desktop",
+        "ready": true,
+        "signpage": "ready",
+        "outcome": "none",
+        "ms": null,
+        "line": null,
+        "url": "https://confidential.unrealized.trade/",
+        "control": "on",
+        "dialogs": [],
+        "shot": "coverage/live/bad/desktop.png"
+      }
+    ]
+  }
+}
