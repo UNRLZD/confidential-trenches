@@ -10,8 +10,11 @@
 //   - `client_timeout`: it was posted and the page may have it. Its timeout passed, or the frame went down or was
 //     replaced while it was open. The page may still run it, so a screen reads the outcome from `state` (asked again
 //     at the next READY) and never re-taps it as unsent.
-// Down: no ready in 5 s, no state answer within 5 s of the ready, an iframe error, or an open kind's timeout. A fresh
-// iframe is tried every SIGNPAGE_RETRY_MS, so the down state clears with no reload when SIGN_HOST returns. A ready
+// Down: no ready in 5 s, no state answer within 5 s of the ready, an iframe error, the iframe's load with no ready
+// within 1 s (a refused, failed or blocked load shows the browser's error page and fires load, not error), or an open
+// kind's timeout. While down, a fresh iframe is tried after 1 s, then 2, 4 and 8 s, then every SIGNPAGE_RETRY_MS, and
+// at once when the browser is back online or the page is shown again; these tries keep the down state until one
+// reaches READY, so the down state clears with no reload when SIGN_HOST returns. A ready
 // with an `api` this client does not speak is the update state (CH-146): money off until a reload, no retry.
 
 import { OPEN_KINDS } from "./messages.ts";
@@ -35,8 +38,12 @@ export { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_MAX_DEPTH, SIGN
 export const SIGNPAGE_CLIENT_API = 1;
 /** No `ready` in this long after the mount, or no `state` answer this long after the ready, and the client is down. */
 export const SIGNPAGE_HANDSHAKE_MS = 5_000;
-/** While down, a fresh iframe this often. */
+/** While down, a fresh iframe at least this often (the longest wait of the retry backoff). */
 export const SIGNPAGE_RETRY_MS = 10_000;
+/** The first retry's wait after the client goes down; each next wait doubles, up to the retry option. */
+const RETRY_FIRST_MS = 1_000;
+/** After the iframe's load, how long a `ready` may still take before the client is down (BAR-09's warm answer, 1 s). */
+const LOAD_GRACE_MS = 1_000;
 
 /** How long the client waits for each kind's answer (app.md §2.1 item 3's table); null: no timeout. */
 export const SIGNPAGE_TIMEOUT_MS = {
@@ -182,6 +189,12 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let gen = 0;
   let handshakeTimer: Timer | null = null;
   let retryTimer: Timer | null = null;
+  /** The current frame's wait for its ready after its load. */
+  let loadTimer: Timer | null = null;
+  /** True once the current frame has sent its ready. */
+  let readySeen = false;
+  /** Retries since the client was last READY: the backoff's step. */
+  let tries = 0;
   let destroyed = false;
 
   const set = (patch: Partial<SignpageClientSnapshot>) => {
@@ -215,6 +228,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   const leave = (status: SignpageClientStatus) => {
     clearTimer(handshakeTimer);
     handshakeTimer = null;
+    clearTimer(loadTimer);
+    loadTimer = null;
     endPosted();
     set({ status, stale: snap.state !== null || snap.stale });
   };
@@ -223,11 +238,21 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     if (destroyed || snap.status === "update") return;
     leave("down");
     if (retryMs > 0 && retryTimer === null) {
+      const wait = Math.min(RETRY_FIRST_MS * 2 ** tries, retryMs);
+      tries++;
       retryTimer = setTimeout(() => {
         retryTimer = null;
-        mountFrame();
-      }, retryMs);
+        mountFrame(true);
+      }, wait);
     }
+  };
+
+  /** Back online, or the page shown again: while down, a fresh iframe now and the backoff from its start. */
+  const wake = (ev: Event) => {
+    if (destroyed || snap.status !== "down") return;
+    if (ev.type === "visibilitychange" && (ev.target as Partial<Document> | null)?.visibilityState === "hidden") return;
+    tries = 0;
+    mountFrame(true);
   };
 
   const toUpdate = () => {
@@ -236,13 +261,17 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     leave("update");
   };
 
-  const mountFrame = () => {
+  /** A fresh iframe and its handshake; `quiet`: a retry of the client's own, which keeps the down state until READY. */
+  const mountFrame = (quiet = false) => {
     if (destroyed || snap.status === "update") return;
     clearTimer(retryTimer);
     retryTimer = null;
     // an answer to the old frame can never pass the source check, so its requests end now, as client_timeout
     endPosted();
     gen++;
+    readySeen = false;
+    clearTimer(loadTimer);
+    loadTimer = null;
     frame?.remove();
     const f = host.document.createElement("iframe");
     for (const [k, v] of Object.entries(SIGNPAGE_IFRAME_ATTRIBUTES)) f.setAttribute(k, v);
@@ -253,6 +282,14 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     f.style.border = "0";
     f.style.visibility = "hidden";
     f.addEventListener("error", () => f === frame && down());
+    // the page posts its ready as it starts, before its load; a load with no ready soon after is an error page
+    f.addEventListener("load", () => {
+      if (f !== frame || readySeen || loadTimer !== null) return;
+      loadTimer = setTimeout(() => {
+        loadTimer = null;
+        if (f === frame && !readySeen) down();
+      }, LOAD_GRACE_MS);
+    });
     f.src = opts.url;
     frame = f;
     clearTimer(handshakeTimer);
@@ -260,7 +297,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       handshakeTimer = null;
       if (snap.status !== "ready") down();
     }, SIGNPAGE_HANDSHAKE_MS);
-    set({ status: "connecting", stale: snap.state !== null || snap.stale });
+    if (!(quiet && snap.status === "down")) set({ status: "connecting", stale: snap.state !== null || snap.stale });
     host.mount.appendChild(f);
   };
 
@@ -286,6 +323,9 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     if (msg.api !== SIGNPAGE_CLIENT_API) return toUpdate();
     clearTimer(retryTimer);
     retryTimer = null;
+    readySeen = true;
+    clearTimer(loadTimer);
+    loadTimer = null;
     set({ release: msg.release });
     if (snap.status === "ready") {
       void client.request("state", {});
@@ -298,8 +338,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     const msgState = signpageBuildRequest("state", {}, crypto.randomUUID());
     void post(msgState, SIGNPAGE_HANDSHAKE_MS, () => {}).then((o) => {
       if (g !== gen || destroyed || snap.status === "update") return;
-      if (o.ok) set({ status: "ready" });
-      else down();
+      if (o.ok) {
+        tries = 0;
+        set({ status: "ready" });
+      } else down();
     });
   };
 
@@ -355,7 +397,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       })();
       return { id, outcome };
     },
-    retry: () => mountFrame(),
+    retry() {
+      tries = 0;
+      mountFrame();
+    },
     dropped: () => ({ ...drops }),
     destroy() {
       if (destroyed) return;
@@ -364,6 +409,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       leave("down");
       destroyed = true;
       host.window.removeEventListener("message", onMessage);
+      host.window.removeEventListener("online", wake);
+      host.window.removeEventListener("visibilitychange", wake);
       frame?.remove();
       frame = null;
       listeners.clear();
@@ -372,6 +419,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   };
 
   host.window.addEventListener("message", onMessage);
+  host.window.addEventListener("online", wake);
+  host.window.addEventListener("visibilitychange", wake);
   mountFrame();
   return client;
 }

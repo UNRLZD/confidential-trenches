@@ -48,11 +48,12 @@ class FakeFrame {
 }
 function makeHost() {
   const frames = [];
-  let onMessage = null;
+  /** the window's listeners, by event type */
+  const on = new Map();
   const host = {
     window: {
-      addEventListener: (_t, f) => void (onMessage = f),
-      removeEventListener: () => void (onMessage = null),
+      addEventListener: (t, f) => void on.set(t, f),
+      removeEventListener: (t, f) => void (on.get(t) === f && on.delete(t)),
     },
     document: {
       createElement: () => {
@@ -64,10 +65,12 @@ function makeHost() {
     mount: { appendChild: (f) => f },
   };
   const frame = () => frames[frames.length - 1];
-  const post = (data, origin = ORIGIN, source = frame().contentWindow) => onMessage?.({ data, origin, source });
+  const post = (data, origin = ORIGIN, source = frame().contentWindow) => on.get("message")?.({ data, origin, source });
+  /** a window event of `type`; a visibilitychange's target is the document, with its visibilityState */
+  const fireWindow = (type, visibilityState = "visible") => on.get(type)?.({ type, target: { visibilityState } });
   /** every message posted to every frame, in order */
   const sent = () => frames.flatMap((f) => f.contentWindow.sent);
-  return { host, frames, frame, post, sent, listening: () => onMessage !== null };
+  return { host, frames, frame, post, fireWindow, sent, listening: () => on.size > 0 };
 }
 
 const flush = async () => {
@@ -238,15 +241,15 @@ test("an iframe error event is the down state at once", async () => {
   assert.equal(c.snapshot().status, "down");
 });
 
-test("down clears with no reload: a fresh iframe every retry, and a late handshake from the live frame", async () => {
+test("down clears with no reload: a fresh iframe on the retry, and a late handshake from the live frame", async () => {
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS);
   assert.equal(c.snapshot().status, "down");
-  mock.timers.tick(C.SIGNPAGE_RETRY_MS);
-  assert.equal(h.frames.length, 2, "a fresh iframe");
+  mock.timers.tick(1_000);
+  assert.equal(h.frames.length, 2, "a fresh iframe 1 s after the down");
   assert.equal(h.frames[0].removed, true, "the old one is gone");
-  assert.equal(c.snapshot().status, "connecting");
+  assert.equal(c.snapshot().status, "down", "the client's own retry keeps the down state until READY");
   h.post(READY, ORIGIN, h.frames[0].contentWindow); // the removed frame's ready is not this frame's
   await flush();
   assert.equal(h.sent().length, 0);
@@ -256,6 +259,136 @@ test("down clears with no reload: a fresh iframe every retry, and a late handsha
   assert.equal(c.snapshot().status, "ready");
   mock.timers.tick(C.SIGNPAGE_RETRY_MS * 3);
   assert.equal(h.frames.length, 2, "no retry once ready");
+});
+
+// ------------------------------------------------------------------------------------------------ timing (AE-08)
+// A refused, failed or blocked load shows the browser's error page, which fires the iframe's load, not its error. The
+// live check on a loaded machine (08:47Z and 08:55Z Nov 1) caught the down state 7,748 ms after the page's start and
+// READY 15,198 ms after SIGN_HOST came back: the 5 s handshake ran from the iframe's mount, after the app's start, and
+// one retry every 10 s.
+
+/** Runs the fake clock in 100 ms steps; each new iframe loads an error page while `blocked()`, else has its handshake. */
+function simulate(h, blocked) {
+  let handled = 0;
+  let t = 0;
+  const mounts = [];
+  const serve = async () => {
+    while (handled < h.frames.length) {
+      const f = h.frames[handled++];
+      mounts.push(t);
+      if (blocked()) f.fire("load");
+      else await handshake(h);
+    }
+  };
+  return {
+    mounts,
+    now: () => t,
+    serve,
+    async run(ms, until = () => false) {
+      for (let i = 0; i < ms && !until(); i += 100) {
+        mock.timers.tick(100);
+        t += 100;
+        await flush();
+        await serve();
+      }
+    },
+  };
+}
+
+test("an iframe load with no ready is the down state within 1 s, not 5 s", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, retryMs: 0 });
+  mock.timers.tick(200);
+  h.frame().fire("load");
+  mock.timers.tick(999);
+  assert.equal(c.snapshot().status, "connecting");
+  mock.timers.tick(1);
+  assert.equal(c.snapshot().status, "down");
+});
+
+test("a ready before the load, or within 1 s after it, is never down: the handshake goes on to READY", async () => {
+  for (const order of ["ready, then load", "load, then ready 900 ms later"]) {
+    const h = makeHost();
+    const c = C.createSignpageClient({ url: URL_, host: h.host, retryMs: 0 });
+    if (order === "ready, then load") {
+      h.post(READY);
+      await flush();
+      h.frame().fire("load");
+    } else {
+      h.frame().fire("load");
+      mock.timers.tick(900);
+      h.post(READY);
+      await flush();
+    }
+    mock.timers.tick(2_000);
+    await flush();
+    assert.equal(c.snapshot().status, "connecting", order);
+    const s = h.frame().contentWindow.sent.findLast((x) => x.msg.type === "state");
+    h.post(answer(s.msg.id, STATE));
+    await flush();
+    assert.equal(c.snapshot().status, "ready", order);
+  }
+});
+
+test("SIGN_HOST blocked: down 1 s after the load; back: READY within 3 s, with no blink of the down state", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  const seen = [];
+  c.subscribe((s) => seen.push(s.status));
+  let blocked = true;
+  const sim = simulate(h, () => blocked);
+  await sim.serve();
+  await sim.run(10_000, () => c.snapshot().status === "down");
+  assert.equal(sim.now(), 1_000, "down 1 s after the error page's load");
+  await sim.run(1_300); // the live check's unblock: 300 ms, then its screenshot
+  blocked = false;
+  const unblocked = sim.now();
+  await sim.run(20_000, () => c.snapshot().status === "ready");
+  assert.equal(c.snapshot().status, "ready");
+  assert.ok(sim.now() - unblocked <= 3_000, `READY ${sim.now() - unblocked} ms after SIGN_HOST came back`);
+  const after = seen.slice(seen.indexOf("down"));
+  assert.deepEqual([...new Set(after)], ["down", "ready"], "from the first down to READY, no other status");
+});
+
+test("while down the retries wait 1, 2, 4 and 8 s, then SIGNPAGE_RETRY_MS, and start again after READY", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  let blocked = true;
+  const sim = simulate(h, () => blocked);
+  await sim.serve();
+  await sim.run(50_000);
+  // each blocked frame is down 1 s after its load, then waits the backoff
+  const waits = sim.mounts.slice(1).map((t, i) => t - sim.mounts[i] - 1_000);
+  assert.deepEqual(waits, [1_000, 2_000, 4_000, 8_000, C.SIGNPAGE_RETRY_MS, C.SIGNPAGE_RETRY_MS]);
+  blocked = false;
+  await sim.run(20_000, () => c.snapshot().status === "ready");
+  assert.equal(c.snapshot().status, "ready");
+  blocked = true;
+  const n = h.frames.length;
+  c.retry();
+  await sim.serve();
+  await sim.run(2_100);
+  assert.equal(h.frames.length, n + 2, "after READY the backoff starts again at 1 s");
+});
+
+test("back online, or the page shown again, while down: a fresh iframe at once; never while ready or hidden", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  h.frame().fire("load");
+  mock.timers.tick(1_000);
+  assert.equal(c.snapshot().status, "down");
+  h.fireWindow("online");
+  assert.equal(h.frames.length, 2, "online: a fresh iframe at once");
+  assert.equal(c.snapshot().status, "down");
+  h.fireWindow("visibilitychange", "hidden");
+  assert.equal(h.frames.length, 2, "hidden: no fresh iframe");
+  h.fireWindow("visibilitychange", "visible");
+  assert.equal(h.frames.length, 3, "shown again: a fresh iframe at once");
+  await handshake(h);
+  assert.equal(c.snapshot().status, "ready");
+  h.fireWindow("online");
+  h.fireWindow("visibilitychange", "visible");
+  assert.equal(h.frames.length, 3, "while ready: none");
 });
 
 test("an old frame's state never shows as fresh: a re-mount marks it stale until the new frame's state", async () => {
