@@ -46,16 +46,18 @@ export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean 
     if (m.kind === "out") setMenu(false);
   }, [m.kind]);
 
+  // Signed out and signed in are two clusters, each its own key: when the state lands (S1.2 to S1.1) the one drawn
+  // replaces the other at the bar's end; the old one never moves across the bar (BAR-04).
   if (m.kind === "out")
     return (
-      <div className="tbr" data-header="S1.1">
+      <div className="tbr" data-header="S1.1" key="out">
         <button type="button" className="btn-signin" onClick={() => setOpen(true)}>
           <W id="signIn" />
         </button>
       </div>
     );
   return (
-    <div className="tbr" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} ref={box}>
+    <div className="tbr" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} ref={box} key="in">
       <div className="balblock">
         <Balance m={m} />
       </div>
@@ -126,9 +128,10 @@ export function PhoneAccount() {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
   const m = headerModel(src.snapshot);
+  // as on desktop: Sign in and the balance pill are two controls, each its own key, so one replaces the other (BAR-04)
   if (m.kind === "out")
     return (
-      <div className="tbr-ph">
+      <div className="tbr-ph" key="out">
         <button type="button" className="hit44" data-header="S1.1" onClick={() => setOpen(true)}>
           <span className="signin">
             <W id="signIn" />
@@ -137,7 +140,7 @@ export function PhoneAccount() {
       </div>
     );
   return (
-    <div className="tbr-ph">
+    <div className="tbr-ph" key="in">
       <button type="button" className="hit44" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} data-action="deposit" disabled={!src.moneyOn || m.kind === "loading"}>
         <span className="balp">
           <Balance m={m} />
