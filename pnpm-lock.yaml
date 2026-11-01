@@ -55,7 +55,21 @@ importers:
         specifier: 8.3.5
         version: 8.3.5(@types/node@24.10.1)
 
-  packages/kit: {}
+  packages/kit:
+    dependencies:
+      '@noble/curves':
+        specifier: 2.4.0
+        version: 2.4.0
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
+      '@scure/base':
+        specifier: 2.4.0
+        version: 2.4.0
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
 
   packages/signpage:
     devDependencies:
