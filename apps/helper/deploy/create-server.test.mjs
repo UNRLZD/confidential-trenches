@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { FIREWALL, PRIMARY_IP, TYPES, cloudInit, main, plan } from "./create-server.mjs";
+import { FIREWALL, PRIMARY_IP, TYPES, cloudInit, errorLine, main, plan } from "./create-server.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const TOKEN = "planted-token-0f9e8d7c6b5a";
@@ -119,4 +119,29 @@ test("importing the script from a process whose argv[1] is not a file runs nothi
   const r = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(url)}).then((m) => process.stdout.write(m.cloudInit(process.argv[1]).split("\\n")[0]))`, COMMIT], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "#cloud-config");
+});
+
+// the owner's 1 Nov 04:36Z failure: "create-server: ERROR: fetch failed", with nothing to say where or why
+const timedOut = () => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }) });
+
+test("a connection that fails names the step it was on and the cause code", async () => {
+  const { fetch } = fakeApi();
+  const failAt = (needle) => async (url, init) => {
+    if (url.includes(needle)) throw timedOut();
+    return fetch(url, init);
+  };
+  for (const [needle, step] of [["raw.githubusercontent.com", "1 Dockerfile on GitHub"], ["/primary_ips/", "2 primary IP"], ["/servers?name", "3 server name"], ["/firewalls?name", "4 firewall"]]) {
+    const e = await main(["--commit", COMMIT], { fetch: failAt(needle), token: () => TOKEN, sleep: async () => {}, ...capture() }).then(() => null, (x) => x);
+    assert.equal(e?.step, step, needle);
+    assert.equal(errorLine(e), `create-server: ERROR: fetch failed (step: ${step}, cause: ETIMEDOUT)`);
+  }
+  assert.equal(errorLine(new Error("boom")), "create-server: ERROR: boom (step: start)");
+  assert.ok(!errorLine(timedOut()).includes(TOKEN));
+});
+
+test("run as a script, a failed connection prints that line and exits 2", () => {
+  const stub = "globalThis.fetch=async()=>{throw Object.assign(new TypeError('fetch failed'),{cause:Object.assign(new Error('x'),{code:'ETIMEDOUT'})})}";
+  const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, new URL("./create-server.mjs", import.meta.url).pathname, "--commit", COMMIT], { encoding: "utf8", timeout: 30_000 });
+  assert.equal(r.status, 2);
+  assert.equal(r.stderr.trim(), "create-server: ERROR: fetch failed (step: 1 Dockerfile on GitHub, cause: ETIMEDOUT)");
 });

@@ -18,11 +18,12 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "test": "node --test test/derive.test.ts test/store.test.ts test/passkey.test.ts ../../scripts/live-checks/wallet-passkey-prf.test.mjs ../../scripts/live-checks/kit-freeze-keys.test.mjs",
+    "test": "node --test test/derive.test.ts test/store.test.ts test/note-secrets.test.ts test/passkey.test.ts ../../scripts/live-checks/wallet-passkey-prf.test.mjs ../../scripts/live-checks/kit-freeze-keys.test.mjs",
     "test:e2e": "node test/store.e2e.mjs && node test/passkey.e2e.mjs",
-    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts src/store/index.ts src/signin/passkey.ts test/derive.test.ts test/store.test.ts test/passkey.test.ts"
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts src/store/index.ts src/notes/secrets.ts src/signin/passkey.ts test/derive.test.ts test/store.test.ts test/note-secrets.test.ts test/passkey.test.ts"
   },
   "dependencies": {
+    "@blindfill/kit": "workspace:*",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
     "@scure/base": "2.4.0",
