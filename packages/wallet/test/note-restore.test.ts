@@ -15,6 +15,7 @@ import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, refKey, type Leaf, type NoteRecord } from "../src/notes/store.ts";
 import { RESTORE_GAP, RESTORE_LANES, restoreNotes, restorePages, walkLane, writeRestored, type NoteRestore } from "../src/notes/restore.ts";
+import type { VaultDepositRow, VaultSpendRow } from "@blindfill/kit";
 import { openWalletStore } from "../src/store/index.ts";
 
 const VAULT = "vault.bf-restore.testnet";
@@ -121,26 +122,32 @@ class Vault {
 // ---------- two fake RPCs serving the views at one block, as near RPC answers ----------
 type View = ReturnType<Vault["views"]>;
 type Sent = { rpc: string; params: Record<string, unknown> };
-function rpcs(v: View, opts: { sent?: Sent[]; lie?: (method: string, view: unknown) => unknown } = {}): [VaultSyncRpc, VaultSyncRpc] {
-  const H = 275_800_000;
-  const one = (name: string, lie?: (method: string, view: unknown) => unknown): VaultSyncRpc => ({
+type Lie = (method: string, view: unknown) => unknown;
+const H = 275_800_000;
+// config() as lib.rs's Config writes it (the fields restore reads: asset and scope)
+const config = (token = TOKEN, scope = SCOPE) => ({ version: "blindfill-vault 0.1.0 testnet", asset: token, scope: String(scope), max_tree_depth: 32, min_deposit: "1000000", max_relay_fee_bps: 5000, page_max: VAULT_CONSTANTS.PAGE_MAX });
+function rpcs(v: View, opts: { sent?: Sent[]; lie?: Lie; lieA?: Lie; finals?: [number, number]; config?: object; configFinalB?: number } = {}): [VaultSyncRpc, VaultSyncRpc] {
+  const one = (name: string, final: number, lie?: Lie): VaultSyncRpc => ({
     name,
     async query(p) {
       opts.sent?.push({ rpc: name, params: p });
       const method = p.method_name as string;
       const args = JSON.parse(atob(p.args_base64 as string)) as { from?: number; limit?: number };
+      const at = p.finality === "final" ? (p.method_name === "config" && name === "rpc-b" && opts.configFinalB !== undefined ? opts.configFinalB : final) : (p.block_id as number);
       let view: unknown;
-      if (method === "state_tree" || method === "label_tree") view = v[method];
+      if (method === "config") view = opts.config ?? config();
+      else if (method === "state_tree" || method === "label_tree") view = v[method];
       else {
         const list = v[method as "deposits" | "spends" | "leaves" | "labels"] as unknown[];
         const start = Math.min(args.from!, list.length);
         view = list.slice(start, Math.min(start + Math.min(args.limit!, VAULT_CONSTANTS.PAGE_MAX), list.length));
       }
       if (lie) view = lie(method, view);
-      return { jsonrpc: "2.0", id: "x", result: { block_hash: `hash-${H}`, block_height: H, logs: [], result: [...new TextEncoder().encode(JSON.stringify(view))] } };
+      return { jsonrpc: "2.0", id: "x", result: { block_hash: `hash-${at}`, block_height: at, logs: [], result: [...new TextEncoder().encode(JSON.stringify(view))] } };
     },
   });
-  return [one("rpc-a"), one("rpc-b", opts.lie)];
+  const [fa, fb] = opts.finals ?? [H, H];
+  return [one("rpc-a", fa, opts.lieA), one("rpc-b", fb, opts.lie)];
 }
 
 // ---------- the device's truth: every note it owns in the vault, as it wrote them ----------
@@ -373,10 +380,10 @@ function check(w: World, got: NoteRestore, what: string): void {
 function checkReads(sent: Sent[], v: View): void {
   const pages = (n: number) => Math.floor(n / VAULT_CONSTANTS.PAGE_MAX) + 1;
   const want = 3 + pages(v.deposits.length) + pages(v.spends.length) + pages(v.leaves.length); // labels are not needed
-  assert.equal(sent.length, 2 * want, "each page read once on each RPC");
+  assert.equal(sent.length, 2 * want + 2, "each page read once on each RPC, and config once on each");
   for (const { params } of sent) {
     assert.deepEqual(Object.keys(params).sort(), ["account_id", "args_base64", params.finality ? "finality" : "block_id", "method_name", "request_type"].sort());
-    assert.ok(["state_tree", "label_tree", "deposits", "spends", "leaves", "labels"].includes(params.method_name as string));
+    assert.ok(["state_tree", "label_tree", "deposits", "spends", "leaves", "config"].includes(params.method_name as string));
     const a = JSON.parse(atob(params.args_base64 as string));
     assert.ok(Object.keys(a).every((k) => k === "from" || k === "limit"), "no argument names a note");
   }
@@ -532,14 +539,168 @@ test("pages the vault could never write stop the restore: a precommitment or a n
       leaves: [...w.v.leaves],
     };
   };
-  assert.equal(restorePages(SEED, SCOPE, pages(), TEST_GAP).notes.length, 2, "the honest pages: the deposit and its change");
+  assert.equal(restorePages(SEED, SCOPE, pages(), { gap: TEST_GAP }).notes.length, 2, "the honest pages: the deposit and its change");
   const twiceP = pages();
   twiceP.deposits.push({ ...twiceP.deposits[0]!, index: 1 });
-  assert.throws(() => restorePages(SEED, SCOPE, twiceP, TEST_GAP), /precommitment .* twice/);
+  assert.throws(() => restorePages(SEED, SCOPE, twiceP, { gap: TEST_GAP }), /precommitment .* twice/);
   const twiceNh = pages();
   twiceNh.spends.push({ ...twiceNh.spends[0]!, index: 1 });
-  assert.throws(() => restorePages(SEED, SCOPE, twiceNh, TEST_GAP), /nullifier hash .* twice/);
+  assert.throws(() => restorePages(SEED, SCOPE, twiceNh, { gap: TEST_GAP }), /nullifier hash .* twice/);
   const moved = pages();
   moved.spends[0]!.newLeafIndex = 0n;
-  assert.throws(() => restorePages(SEED, SCOPE, moved, TEST_GAP), /its change is at leaf 1, not 0/);
+  assert.throws(() => restorePages(SEED, SCOPE, moved, { gap: TEST_GAP }), /its change is at leaf 1, not 0/);
+});
+
+// ---------- the independent review's cases (card wallet-restore-notes, review of 740fba4) ----------
+// The model vault's pages as restorePages takes them (the rows vaultSync parses).
+function pagesOf(v: Vault): { deposits: VaultDepositRow[]; spends: VaultSpendRow[]; leaves: bigint[] } {
+  return {
+    deposits: v.deposits.map((r, index) => ({ index, precommitment: r.P, label: r.label, value: r.value, leafIndex: BigInt(r.leaf), depositor: r.depositor })),
+    spends: v.spends.map((x, index) => ({ index, nullifierHash: x.nh, withdrawn: x.withdrawn, newLeafIndex: BigInt(x.newLeaf), refundPrecommitment: x.refundP, refundValue: x.refundValue, refundLabel: x.refundLabel, refundLeafIndex: BigInt(x.refundLeaf), status: x.status, payer: "p.testnet", reserve: 0n, recipient: x.recipient, fee: x.fee, context: x.context })),
+    leaves: [...v.leaves],
+  };
+}
+const dep0: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
+
+test("R2a: a withdraw of ours (context not 0) whose new leaf is not our change commitment stops the restore", () => {
+  const v = new Vault();
+  const leaf = v.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+  // the change made on another change index: a drift between the withdrawal and the restore
+  const drift = { P: sec({ kind: "change", l: leaf.label, j: 1 }).precommitment, value: 30_000_000n, label: leaf.label };
+  v.withdraw(sec(dep0).nullifierHash, 20_000_000n, drift, sec({ kind: "refund", l: leaf.label, j: 0 }).precommitment, 77n);
+  assert.throws(() => restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP }), /change note .*not the state tree's leaf/);
+  // a ragequit (context 0) inserts no change: no error, and the note is SPENT
+  const q = new Vault();
+  const ql = q.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+  q.withdraw(sec(dep0).nullifierHash, ql.value, null, sec({ kind: "refund", l: ql.label, j: 0 }).precommitment, 0n);
+  assert.deepEqual(restorePages(SEED, SCOPE, pagesOf(q), { gap: TEST_GAP }).notes.map((n) => [n.ref.kind, n.state]), [["deposit", "SPENT"]]);
+});
+
+test("R2b: a refund of value on a refund precommitment that is not refundNote(l, j) stops the restore, settled or pending", () => {
+  for (const settle of [true, false]) {
+    const v = new Vault();
+    const leaf = v.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+    const change = { P: sec({ kind: "change", l: leaf.label, j: 0 }).precommitment, value: 30_000_000n, label: leaf.label };
+    const w = v.withdraw(sec(dep0).nullifierHash, 20_000_000n, change, sec({ kind: "refund", l: leaf.label, j: 1 }).precommitment, 77n);
+    v.payout(w.spend, 20_000_000n);
+    if (settle) v.settle(w.spend);
+    assert.throws(() => restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP }), /refund is on a precommitment that is not refund note/, settle ? "settled" : "refund_pending");
+  }
+  // a paid spend (refund_value 0) on any refund precommitment is no refund: no error
+  const v = new Vault();
+  const leaf = v.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+  const w = v.withdraw(sec(dep0).nullifierHash, 20_000_000n, { P: sec({ kind: "change", l: leaf.label, j: 0 }).precommitment, value: 30_000_000n, label: leaf.label }, 99n, 77n);
+  v.payout(w.spend, 0n);
+  v.settle(w.spend);
+  assert.equal(restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP }).notes.length, 2);
+});
+
+test("the walk handed in from outside (the proof pool's workers) gives the same restore; another lane's index is refused", async () => {
+  const w = verifierOrder(rng(5));
+  const v = w.v.views();
+  const inline = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP });
+  const lanesAsked: number[] = [];
+  const outside = await restoreNotes({
+    seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP,
+    walk: async (lane, ps) => (lanesAsked.push(lane), walkLane(SEED, SCOPE, lane, (p) => ps.has(p), TEST_GAP)),
+  });
+  assert.deepEqual(lanesAsked.sort(), [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(outside, inline);
+  const pages = pagesOf(w.v);
+  const lanes = Array.from({ length: 8 }, (_, lane) => walkLane(SEED, SCOPE, lane, (p) => pages.deposits.some((r) => r.precommitment === p), TEST_GAP));
+  const wrong = lanes.map((x) => [...x]);
+  wrong[0]!.push(1); // lane 1's index in lane 0's walk
+  assert.throws(() => restorePages(SEED, SCOPE, pages, { lanes: wrong }), /not this lane's/);
+  assert.throws(() => restorePages(SEED, SCOPE, pages, { lanes: lanes.slice(1) }), /one walk per lane/);
+});
+
+test("the vault's config on both RPCs: a wrong token or scope is refused, the two final heights come back", async () => {
+  const w = verifierOrder(rng(6));
+  const v = w.v.views();
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: "usdc.other.testnet", rpcs: rpcs(v), gap: TEST_GAP }), /scope .* is not the one computed/);
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { config: config(TOKEN, SCOPE + 1n) }), gap: TEST_GAP }), /scope .* is not the one computed/);
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { config: config("usdc.other.testnet") }), gap: TEST_GAP }), /asset usdc.other.testnet is not/);
+  const one = (m: string, view: unknown) => (m === "config" ? { ...(view as object), version: "other" } : view);
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { lie: one }), gap: TEST_GAP }), /config: the RPCs' answers differ/);
+  const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { finals: [H + 3, H] }), gap: TEST_GAP });
+  assert.equal(got.height, H);
+  assert.deepEqual(got.finalHeights, [H + 3, H]);
+  // an RPC whose final block, read after the pages, is below the block the pages were read at: refused
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { configFinalB: H - 1 }), gap: TEST_GAP }), /rpc-b: config: its final height .* is below the pages'/);
+});
+
+async function liveStore() {
+  const ws = await openWalletStore({ indexedDB: new IDBFactory() });
+  const ns = await openNoteStore(ws);
+  return { ns, close: () => (ns.close(), ws.close()) };
+}
+
+test("R3a: HELD and RESERVED notes the vault shows spent by ragequit (no child) go to SPENT", async () => {
+  const v = new Vault();
+  const { ns, close } = await liveStore();
+  try {
+    const land = async () => {
+      const n = await ns.planDeposit(SCOPE, (ref) => sec(ref).precommitment);
+      await ns.move(n.id, "PLANNED", "INCOMING");
+      return ns.move(n.id, "INCOMING", "UNSPENT", { leaf: v.deposit(n.precommitment, 9_000_000n, hex64(n.id))! });
+    };
+    const a = await land();
+    const b = await land();
+    await ns.move(a.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_000_000n, context: "1" });
+    const hb = await ns.move(b.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_000_000n, context: "2" });
+    await ns.move(b.id, "HELD", "RESERVED", { attempt: hb.attempt });
+    for (const n of [a, b]) v.withdraw(sec(n.ref).nullifierHash, n.leaf!.value, null, sec({ kind: "refund", l: n.leaf!.label, j: 0 }).precommitment, 0n);
+    const out = await writeRestored(ns, await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP }));
+    const after = new Map(out.notes.map((n) => [n.id, n.state]));
+    assert.equal(after.get(a.id), "SPENT");
+    assert.equal(after.get(b.id), "SPENT");
+    assert.deepEqual(out.leftAlone, []);
+  } finally {
+    close();
+  }
+});
+
+test("R3b: a store note on the same ref with another precommitment stops writeRestored", async () => {
+  const v = new Vault();
+  const { ns, close } = await liveStore();
+  try {
+    const n = await ns.planDeposit(SCOPE, () => 12345n); // a broken record: ref deposit i, a precommitment that is not its
+    v.deposit(sec(n.ref).precommitment, 3_000_000n, hex64("U"));
+    const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP });
+    assert.equal(got.notes.length, 1);
+    await assert.rejects(writeRestored(ns, got), /another precommitment/);
+  } finally {
+    close();
+  }
+});
+
+test("R3c and R3d: a TAKEN index the vault holds a note on, and an INCOMING note the vault shows spent, come back in leftAlone with the notes below them", async () => {
+  const v = new Vault();
+  const { ns, close } = await liveStore();
+  try {
+    const t = await ns.planDeposit(SCOPE, (ref) => sec(ref).precommitment);
+    await ns.move(t.id, "PLANNED", "TAKEN"); // the other device used the index
+    const tl = v.deposit(t.precommitment, 40_000_000n, hex64("other device"))!; // its 40 USDC on this seed's P
+    // that device's withdrawal from it: a change note below the TAKEN record
+    const cref: NoteRef = { kind: "change", l: tl.label, j: 0 };
+    v.withdraw(sec(t.ref).nullifierHash, 10_000_000n, { P: sec(cref).precommitment, value: 30_000_000n, label: tl.label }, sec({ kind: "refund", l: tl.label, j: 0 }).precommitment, 9n);
+    const n = await ns.planDeposit(SCOPE, (ref) => sec(ref).precommitment);
+    await ns.move(n.id, "PLANNED", "INCOMING");
+    const nl = v.deposit(n.precommitment, 8_000_000n, hex64("U"))!;
+    v.withdraw(sec(n.ref).nullifierHash, nl.value, null, sec({ kind: "refund", l: nl.label, j: 0 }).precommitment, 0n); // spent elsewhere
+    const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP });
+    const out = await writeRestored(ns, got);
+    const left = out.leftAlone.map((x) => [x.key, x.stored, x.vault, x.why]).sort();
+    assert.deepEqual(left, [
+      [refKey(t.ref), "TAKEN", "SPENT", "taken"],
+      [refKey(cref), null, "UNSPENT", "parent"],
+      [refKey(n.ref), "INCOMING", "SPENT", "incoming"],
+    ].sort());
+    const states = new Map(out.notes.map((x) => [x.id, x.state]));
+    assert.equal(states.get(t.id), "TAKEN");
+    assert.equal(states.get(n.id), "INCOMING");
+    assert.equal(out.notes.length, 2, "nothing written below a note left alone");
+  } finally {
+    close();
+  }
 });
