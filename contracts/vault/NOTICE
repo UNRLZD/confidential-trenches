@@ -9,5 +9,7 @@ Entrypoint.sol); each ported file names its source. Privacy Pools ships no NOTIC
 Privacy Pools are listed in the vault's design: no Entrypoint and no admin, no ASP postman (the vault approves every
 deposit's label itself), NEAR storage, and the relayer fee as an absolute amount.
 
-Later parts of the vault port the LeanIMT of zk-kit (Privacy & Scaling Explorations, Ethereum Foundation; MIT
-License) and use light-poseidon (Light Protocol; Apache License, Version 2.0).
+The vault's two trees follow the layout of zk-kit's LeanIMT (Privacy & Scaling Explorations, Ethereum Foundation;
+MIT License): today only that layout (size, depth, side nodes), no zk-kit code. When its code is ported, zk-kit's MIT
+licence text ships here with it, and so does the notice of light-poseidon (Light Protocol; Apache License, Version
+2.0) when that is used.

@@ -133,15 +133,14 @@ export function wasmLists(buf) {
   return { imports, exports };
 }
 
-// What makes a wasm not a testnet build, read from its bytes: the testnet build holds Circle's testnet USDC id and the
-// word "testnet" (constants.rs TOKEN, NETWORK) and neither mainnet's id nor "mainnet".
+// What makes a wasm not a testnet build, read from its bytes: the testnet build holds Circle's testnet USDC id and not
+// mainnet's (constants.rs TOKEN; NETWORK switches on the same feature). No bare word is read, so a later string that
+// says "mainnet" cannot refuse a correct build.
 export function networkProblems(buf) {
   const b = Buffer.from(buf);
   const problems = [];
   if (!b.includes(TESTNET_USDC)) problems.push(`does not hold Circle's testnet USDC ${TESTNET_USDC}`);
   if (b.includes(MAINNET_USDC)) problems.push(`holds mainnet USDC ${MAINNET_USDC}`);
-  if (!b.includes("testnet")) problems.push('does not hold "testnet"');
-  if (b.includes("mainnet")) problems.push('holds "mainnet"');
   return problems;
 }
 

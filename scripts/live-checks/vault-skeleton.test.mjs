@@ -4,13 +4,16 @@
 //     deploy's own parent, bf-vs-20261101t012200.testnet);
 //   - vault-skeleton.bad-import.answers.json: a deployed wasm that imports promise_batch_action_add_key_with_full_access
 //     (the account `testnet`, NEAR testnet's account registrar, 151,460 B; read 2026-11-01 01:23Z);
-//   - vault-skeleton.bad-asset.answers.json: a build without --features testnet as it would read once deployed, its
-//     config() naming mainnet USDC and version "... mainnet". It is the good answer with only config()'s result
-//     replaced by a mainnet build's, so it is made from a real read, not a real deploy: the fixed deploy script refuses
-//     to send such a wasm (the test below). The check must FAIL it even when the deployment record names the same
-//     mainnet id, since the asset is pinned in the check, never copied from the record.
+//   - vault-skeleton.bad-asset.answers.json ({ note, answers }): a build without --features testnet as it would read
+//     once deployed, its config() naming mainnet USDC and version "... mainnet". It is the good answer with only
+//     config()'s result replaced (its note says so), a real read and not a deploy: the fixed deploy script refuses to
+//     send such a wasm (the test below). The check must FAIL it even when the deployment record names the same mainnet
+//     id, since the asset is pinned in the check, never copied from the record.
+// One more bad answer is made here from the good one: config() naming mainnet USDC with the testnet version and the
+// real record, so only the asset is wrong.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -69,13 +72,35 @@ test("the pinned testnet asset is Circle's testnet USDC", () => {
 });
 
 test("recorded bad answer: a mainnet build's config() (mainnet USDC), with a record that copied it: FAIL on config()", async () => {
-  const answers = load("vault-skeleton.bad-asset.answers.json");
+  const doc = load("vault-skeleton.bad-asset.answers.json");
+  assert.match(doc.note, /^Not a deploy: /);
+  const answers = doc.answers;
   const cfgs = answers.filter((a) => a.params.method_name === "config").map((a) => JSON.parse(Buffer.from(a.json.result.result).toString("utf8")));
   assert.equal(cfgs.length, 2);
   for (const c of cfgs) assert.equal(c.asset, MAINNET_USDC);
   const r = await check({ deployment: { ...deployment, asset: MAINNET_USDC }, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(r.lines.filter((l) => l.startsWith("BAD config() answers on ") && l.includes(`asset ${MAINNET_USDC}`)).length, 2, r.lines.join("\n"));
+});
+
+// the good answer with config()'s asset alone swapped (the same length, so nothing else in the bytes moves)
+function withAsset(answers, asset) {
+  return answers.map((a) => {
+    if (a.params.method_name !== "config") return a;
+    const text = Buffer.from(a.json.result.result).toString("utf8");
+    assert.ok(text.includes(`"asset":"${TESTNET_USDC}"`));
+    const swapped = text.replace(`"asset":"${TESTNET_USDC}"`, `"asset":"${asset}"`);
+    return { ...a, json: { ...a.json, result: { ...a.json.result, result: [...Buffer.from(swapped)] } } };
+  });
+}
+
+test("bad answer: config() names mainnet USDC with the testnet version, the record is the real one: FAIL on config()", async () => {
+  const answers = withAsset(load("vault-skeleton.answers.json"), MAINNET_USDC);
+  const r = await check({ deployment, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD config() answers on ") && l.includes(`asset ${MAINNET_USDC}`) && / testnet$/.test(l));
+  assert.equal(bad.length, 2, r.lines.join("\n"));
+  assert.equal(r.lines.filter((l) => l.startsWith("BAD")).length, 2, "only config() is wrong");
 });
 
 // a wasm whose data holds the given strings: the tiny module below plus a custom section
@@ -87,21 +112,40 @@ function wasmWith(...strings) {
   return Buffer.concat([tinyWasm("promise_result", "config"), Buffer.from([0, (len & 0x7f) | 0x80, len >> 7]), name, body]);
 }
 
-test("the network rule: a testnet build names Circle's testnet USDC and testnet, never mainnet USDC or mainnet", () => {
-  assert.deepEqual(networkProblems(wasmWith(TESTNET_USDC, "testnet")), []);
-  assert.equal(networkProblems(wasmWith(MAINNET_USDC, "mainnet")).length, 4);
-  assert.ok(networkProblems(wasmWith(TESTNET_USDC, MAINNET_USDC, "testnet")).some((p) => p.includes(MAINNET_USDC)));
-  assert.ok(networkProblems(wasmWith(TESTNET_USDC, "testnet", "mainnet")).some((p) => p.includes('"mainnet"')));
+test("the network rule reads the TOKEN ids only: the deployed testnet wasm passes, one holding mainnet's id is refused", () => {
+  const code = load("vault-skeleton.answers.json").find((a) => a.params.request_type === "view_code").json.result.code_base64;
+  const real = Buffer.from(code, "base64");
+  assert.equal(real.length, deployment.wasm_bytes);
+  assert.deepEqual(networkProblems(real), []);
+  assert.deepEqual(networkProblems(wasmWith(MAINNET_USDC)).length, 2);
+  assert.ok(networkProblems(wasmWith(TESTNET_USDC, MAINNET_USDC)).some((p) => p.includes(MAINNET_USDC)));
+  // a bare word is never read: a panic string that says "mainnet" does not refuse a testnet build
+  assert.deepEqual(networkProblems(wasmWith(TESTNET_USDC, "mainnet")), []);
 });
 
-test("the deploy script refuses a mainnet build before it sends anything", () => {
+// The deploy script runs with fetch replaced by one that throws, so no test run can reach the faucet or an RPC.
+function deployOffline(wasm) {
   const dir = mkdtempSync(path.join(tmpdir(), "vault-skeleton-"));
-  const f = path.join(dir, "mainnet.wasm");
-  writeFileSync(f, wasmWith(MAINNET_USDC, "mainnet"));
-  const r = spawnSync(process.execPath, [path.join(HERE, "../../contracts/vault/scripts/deploy-testnet.mjs"), "--wasm", f, "--out", path.join(dir, "out.json")], { encoding: "utf8", timeout: 20_000 });
+  const f = path.join(dir, "build.wasm");
+  writeFileSync(f, wasm);
+  const stub = path.join(dir, "no-network.mjs");
+  writeFileSync(stub, 'globalThis.fetch = async (url) => { throw new Error(`network blocked by the test: ${url}`); };\n');
+  return spawnSync(process.execPath, ["--import", pathToFileURL(stub).href, path.join(HERE, "../../contracts/vault/scripts/deploy-testnet.mjs"), "--wasm", f, "--out", path.join(dir, "out.json")], { encoding: "utf8", timeout: 20_000 });
+}
+
+test("the deploy script refuses a mainnet build before any network call (fetch blocked)", () => {
+  const r = deployOffline(wasmWith(MAINNET_USDC));
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, /refused before any send: .*mainnet/);
-  assert.doesNotMatch(r.stdout, /faucet|parent/);
+  assert.match(r.stderr, /refused before any send: not a testnet build: .*holds mainnet USDC/);
+  assert.doesNotMatch(r.stderr, /network blocked/);
+  assert.equal(r.stdout, "");
+});
+
+test("the fetch block holds: a wasm that passes the rules stops at the blocked faucet call", () => {
+  const r = deployOffline(wasmWith(TESTNET_USDC));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /network blocked by the test: https:\/\/helper\.nearprotocol\.com\/account/);
+  assert.doesNotMatch(r.stdout, /made by the faucet/);
 });
 
 test("the same answers with a third of the RPCs gone: FAIL (two RPCs are required)", async () => {
