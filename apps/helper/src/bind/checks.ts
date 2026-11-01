@@ -1,5 +1,5 @@
-// POST /v1/bind's checks for a deposit delegate (markets paper H4.3 checks 1-7, M:1707-1754, with M284's R1-R3,
-// M:1823-1839; vault paper 2.10 (e)'s message clauses, V:693-703; the beta cap per deposit, OD:262), run in that
+// POST /v1/bind's checks for a deposit delegate (markets paper H4.3 checks 1-7, M:1707-1758, with M284's R1-R3,
+// M:1816-1834; vault paper 2.10 (e)'s message clauses, V:693-703; the beta cap per deposit, OD:262), run in that
 // order before anything is spent: no storage_prepay and no send happens unless every check here passed.
 //
 // What passes is one call only: a 64-hex NEAR-implicit id's own TOKEN.ft_transfer_call(vault, amount, msg) with
@@ -87,7 +87,7 @@ export type BindConfig = {
   vault: string;
   /** The vault's token (V5): VAULT_TOKEN on mainnet; a testnet vault names its testnet token. */
   token: string;
-  /** R4's margin K in blocks, pinned in the release from vault SB run (6); no interim value (M:1836-1838). */
+  /** R4's margin K in blocks, pinned in the release from vault SB run (6); no interim value (M:1839-1840). */
   marginK: bigint;
 };
 

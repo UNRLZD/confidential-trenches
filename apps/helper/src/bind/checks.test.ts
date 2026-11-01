@@ -1,5 +1,5 @@
 // checks.ts, one case per check in H4.3's order (M:1707-1754), V 2.10 (e)'s message clauses (V:693-703), the beta cap
-// (OD:262) and R1-R3 (M:1823-1839). Every delegate is signed here with real ed25519 by a key made in the test; one is
+// (OD:262) and R1-R3 (M:1816-1834). Every delegate is signed here with real ed25519 by a key made in the test; one is
 // recorded from near-api-js 7.3.1 (fixtures/near-api-js-deposit.json), an encoder outside the helper.
 //   node --test apps/helper/src/bind/checks.test.ts
 import assert from "node:assert/strict";
