@@ -22,7 +22,7 @@ export const STRANGER = "https://example.com";
 const HELPER = "api.confidential.unrealized.trade";
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org";
 
-// the wallet paper's block (wallet.md 2.7) with HELPER_HOST, RPC_A, RPC_B, RPC_C and APP_HOST put in
+// the wallet paper's block (wallet.md 2.7) with HELPER_HOST, RPC_A, RPC_B, RPC_C and APP_HOST put in, plus font-src 'self'
 export const CSP = [
   ["default-src", "'none'"],
   ["script-src", "'self' 'wasm-unsafe-eval'"],
@@ -30,6 +30,7 @@ export const CSP = [
   ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS}`],
   ["style-src", "'self'"],
   ["img-src", "'self' data:"],
+  ["font-src", "'self'"], // app.md finding 1 (l.1085): the top-level SIGN_HOST screens draw in the brand fonts
   ["frame-ancestors", APP],
   ["base-uri", "'none'"],
   ["form-action", "'none'"],

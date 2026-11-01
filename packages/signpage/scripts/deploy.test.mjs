@@ -60,6 +60,8 @@ test("other policy breaks are refused", () => {
     "another rule removes the CSP": `${REAL}/x\n  ! Content-Security-Policy\n`,
     "another rule sets the CSP": `${REAL}/x\n  Content-Security-Policy: default-src *\n`,
     "no /* rule": REAL.replace("/*\n", "/index.html\n"),
+    "font-src *": swap("; font-src 'self';", "; font-src *;"),
+    "font-src gone": swap(" font-src 'self';", ""),
     "unsafe-inline": swap("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'"),
     "a connect-src host added": swap("https://near.drpc.org", "https://near.drpc.org https://evil.ct.test"),
   };

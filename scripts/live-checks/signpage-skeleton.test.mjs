@@ -48,6 +48,16 @@ test("recorded bad answer: frame-ancestors *: FAIL", async () => {
   assert.ok(r.lines.includes("BAD framed from https://example.com: allowed"), r.lines.join("\n"));
 });
 
+test("recorded bad answers: font-src https: and font-src *: FAIL", async () => {
+  for (const src of ["https:", "*"]) {
+    const r = judge(await read(undefined, replay(withCsp("font-src 'self'", `font-src ${src}`))));
+    assert.equal(r.ok, false, src);
+    assert.ok(r.lines.includes(`BAD CSP font-src: "${src}", want "'self'"`), r.lines.join("\n"));
+  }
+  const gone = judge(withCsp(" font-src 'self';", ""));
+  assert.ok(gone.lines.includes(`BAD CSP font-src: none, want "'self'"`), gone.lines.join("\n"));
+});
+
 test("recorded bad answers: a directive added, Integrity-Policy gone, X-Frame-Options sent, SIGN_HOST's 522: FAIL", async () => {
   const added = judge(withCsp("trusted-types prover-worker", "trusted-types prover-worker; report-uri https://evil.ct.test"));
   assert.ok(added.lines.includes("BAD CSP has no directive beyond the policy's: extra report-uri"), added.lines.join("\n"));
