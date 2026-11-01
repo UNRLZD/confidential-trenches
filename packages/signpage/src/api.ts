@@ -2,11 +2,12 @@
 // W:1118; the shapes are packages/kit/src/signpage/messages.ts, api 1). APP_HOST frames this page as a hidden iframe.
 // The page listens, then posts `ready` to its parent with targetOrigin APP_ORIGIN, so no other embedder hears it. A
 // message is read only when its origin is APP_ORIGIN exactly and its source is the window that framed this page; any
-// other is dropped with no answer and no change. An envelope with v other than 1, an id that is not a
-// crypto.randomUUID(), or anything but a plain object is dropped too: no answer can be addressed to it. Every other
-// message gets one answer, sent only to the parent with targetOrigin APP_ORIGIN: `state` with exactly {v, id, type} is
-// answered with the state; every other kind, a kind with no row and a field its row does not allow are refused as
-// "not_allowed" (W:917), each signing kind until its own payload rules land (W:886-917). A repeated id gets its first
+// other is dropped with no answer and no change. Anything but a plain object with an id that is a crypto.randomUUID()
+// is dropped too: no answer can be addressed to it. Every other message gets one answer, sent only to the parent with
+// targetOrigin APP_ORIGIN: `state` with exactly {v: 1, id, type} is answered with the state; every other kind, a kind
+// with no row, a v other than 1 and a field its row does not allow are refused as "not_allowed" (W:917; app.md
+// §2.1 A2-A4, A:116-117), each signing kind until its own payload rules land (W:886-917). No field of a refused message
+// is read, so a return_key such as "constructor" or "__proto__" is never looked up anywhere. A repeated id gets its first
 // answer again, never a second run (messages.ts). Answers carry states only, never a key, the words or a note secret
 // (W §2.9 row 11).
 //
@@ -63,21 +64,20 @@ export function signedOutState(): SignpageState {
   };
 }
 
-/** The envelope's fields when `data` is a plain object with v 1 and a UUID id; null when no answer can go to it. */
+/** The envelope's fields when `data` is a plain object with a UUID id; null when no answer can go to it. */
 function envelope(data: unknown): Record<string, unknown> | null {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
   const proto: unknown = Object.getPrototypeOf(data);
   if (proto !== Object.prototype && proto !== null) return null;
   const m = data as Record<string, unknown>;
-  if (!Object.hasOwn(m, "v") || m.v !== 1) return null;
   if (!Object.hasOwn(m, "id") || typeof m.id !== "string" || !UUID.test(m.id)) return null;
   return m;
 }
 
-/** True when `m` is a `state` request with no field beyond v, id and type. */
+/** True when `m` is a `state` request with v 1 and no field beyond v, id and type. */
 function isStateRequest(m: Record<string, unknown>): boolean {
   const keys = Reflect.ownKeys(m);
-  return keys.length === 3 && Object.hasOwn(m, "type") && m.type === STATE;
+  return keys.length === 3 && Object.hasOwn(m, "v") && m.v === 1 && Object.hasOwn(m, "type") && m.type === STATE;
 }
 
 /** Starts the API: listens, then posts `ready` to the parent. */

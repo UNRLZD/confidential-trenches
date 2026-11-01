@@ -67,12 +67,11 @@ test("a wrong source from APP_HOST's origin is dropped: no answer, no change", (
   assert.equal((p.posted[1]!.msg as { ok: boolean }).ok, true);
 });
 
-test("a malformed envelope is dropped: not an object, v not 1, no UUID id, a class instance", () => {
+test("a malformed envelope is dropped: not an object, no UUID id, a class instance", () => {
   const p = page();
   const id = uuid();
   const bad: unknown[] = [
     null, undefined, "state", 1, [], [state(id)], new Map([["v", 1]]), new Date(),
-    { id, type: "state" }, { v: 2, id, type: "state" }, { v: "1", id, type: "state" },
     { v: 1, type: "state" }, { v: 1, id: 7, type: "state" }, { v: 1, id: "", type: "state" },
     { v: 1, id: "not-a-uuid", type: "state" }, { v: 1, id: id.toUpperCase(), type: "state" }, { v: 1, id: `${id} `, type: "state" },
     Object.assign(Object.create({ v: 1, id }), { type: "state" }),
@@ -92,6 +91,9 @@ test("every other kind, an unknown kind and an extra field: not_allowed", () => 
     { v: 1, id: uuid(), type: 5 },
     { v: 1, id: uuid(), type: "State" },
     { v: 1, id: uuid(), type: "state", extra: true },
+    { v: 2, id: uuid(), type: "state" },
+    { v: "1", id: uuid(), type: "state" },
+    { id: uuid(), type: "state" },
     { v: 1, id: uuid(), type: "state", ["__proto__"]: { polluted: true } },
     JSON.parse(`{"v":1,"id":"${uuid()}","type":"state","__proto__":{"polluted":true}}`),
   ];
@@ -99,6 +101,37 @@ test("every other kind, an unknown kind and an extra field: not_allowed", () => 
   assert.equal(p.posted.length, 1 + cases.length);
   cases.forEach((c, i) => assert.deepEqual(p.posted[1 + i], { msg: notAllowed(c.id as string), to: APP_ORIGIN }, JSON.stringify(c)));
   assert.equal(({} as Record<string, unknown>).polluted, undefined);
+});
+
+test("a return_key is never looked up: constructor, __proto__, toString and an unknown name are refused", () => {
+  const p = page();
+  const cases: Record<string, unknown>[] = [];
+  for (const key of ["constructor", "__proto__", "toString", "hasOwnProperty", "no_such_screen", "deposit"]) {
+    cases.push({ v: 1, id: uuid(), type: "signin.open", return_key: key, way: "passkey" });
+    cases.push({ v: 1, id: uuid(), type: "backup.open", return_key: key });
+    cases.push({ v: 1, id: uuid(), type: "withdraw.open", return_key: key });
+  }
+  for (const c of cases) assert.doesNotThrow(() => p.send(c));
+  assert.equal(p.posted.length, 1 + cases.length);
+  cases.forEach((c, i) => assert.deepEqual(p.posted[1 + i], { msg: notAllowed(c.id as string), to: APP_ORIGIN }, JSON.stringify(c)));
+});
+
+test("every message posted is at most 64 KiB of JSON, with plain arrays of index keys only (app.md:116-117)", () => {
+  const p = page();
+  p.send(state());
+  p.send({ v: 1, id: uuid(), type: "buy" });
+  const walk = (x: unknown): void => {
+    if (Array.isArray(x)) {
+      assert.equal(Object.getPrototypeOf(x), Array.prototype);
+      assert.deepEqual(Reflect.ownKeys(x), [...x.keys()].map(String).concat("length"));
+      x.forEach(walk);
+    } else if (typeof x === "object" && x !== null) Object.values(x).forEach(walk);
+  };
+  for (const { msg } of p.posted) {
+    assert.ok(JSON.stringify(msg).length <= 65_536);
+    walk(msg);
+  }
+  assert.equal(p.posted.length, 3);
 });
 
 test("a repeated id gets its first answer again, never a second run", () => {
