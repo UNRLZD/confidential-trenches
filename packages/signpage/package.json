@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test scripts/deploy.test.mjs",
+    "test": "pnpm run typecheck && node --test scripts/deploy.test.mjs test/api.test.ts",
+    "typecheck": "tsc --noEmit --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess --target es2023 --lib es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --verbatimModuleSyntax --noUnusedLocals --skipLibCheck src/api.ts",
     "test:e2e": "node scripts/frame.e2e.mjs"
   },
   "devDependencies": {
