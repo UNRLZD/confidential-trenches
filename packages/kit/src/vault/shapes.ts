@@ -67,16 +67,21 @@ export const VAULT_NOTE_HASHES = {
 /** The one deposit message, the same for every path: these two fields, both required, nothing else. */
 export const VAULT_DEPOSIT_MESSAGE_FIELDS = ["precommitment", "depositor"] as const;
 export const VAULT_DEPOSIT_MESSAGE_MAX_BYTES = 1_024;
-/** precommitment: one canonical decimal below VAULT_FIELD_P. depositor: the NEAR account a ragequit pays (the moving id itself). */
+/**
+ * precommitment: one canonical decimal below VAULT_FIELD_P. depositor: the account a ragequit pays, the moving id
+ * itself, a lowercase 64-hex NEAR-implicit id (vault paper 2.10: the kit refuses any other depositor).
+ */
 export type VaultDepositMessage = { precommitment: string; depositor: string };
 
 /**
- * The `msg` string, exactly {"precommitment":"<decimal>","depositor":"<account>"}. Refuses what the vault refuses.
- * With a precommitment below p (77 digits at most) and an id of 64 characters at most it is under 200 bytes.
+ * The `msg` string, exactly {"precommitment":"<decimal>","depositor":"<64 hex>"}. The depositor is a lowercase 64-hex
+ * NEAR-implicit id, so never intents.near, the vault or any named or eth-implicit id. At most 77 + 64 digits, it is
+ * under 200 bytes.
  */
 export function vaultDepositMessage(precommitment: bigint, depositor: string): string {
   if (typeof precommitment !== "bigint" || precommitment < 0n || precommitment >= VAULT_FIELD_P) throw new Error("precommitment: not below p");
-  const msg: VaultDepositMessage = { precommitment: precommitment.toString(), depositor: vaultAccountId(depositor, "depositor") };
+  if (typeof depositor !== "string" || !/^[0-9a-f]{64}$/.test(depositor)) throw new Error("depositor: not a lowercase 64-hex NEAR-implicit id");
+  const msg: VaultDepositMessage = { precommitment: precommitment.toString(), depositor };
   return JSON.stringify(msg);
 }
 
@@ -84,13 +89,15 @@ export function vaultDepositMessage(precommitment: bigint, depositor: string): s
  * Every move into the vault: the moving NEAR account's own TOKEN.ft_transfer_call(vault, amount, msg), signed on the
  * device by that account's key as a NEP-366 DelegateAction (one FunctionCall action, receiver TOKEN) and sent by the
  * relayer, which pays the gas and cannot change the call. The relayer sends it only once its storage_prepay landed.
+ * Two receiver_ids: the DelegateAction's is TOKEN (below); the call's own `receiver_id` argument is the vault.
  */
 export const VAULT_DEPOSIT_CARRIER = {
   signed_as: "NEP-366 DelegateAction",
   sent_by: "relayer",
+  /** the DelegateAction's receiver: the token contract */
   receiver_id: "TOKEN",
   method: "ft_transfer_call",
-  /** receiver_id is the vault; msg is vaultDepositMessage(the precommitment, the moving account). */
+  /** the call's arguments: receiver_id = the vault, amount, msg = vaultDepositMessage(precommitment, the moving id) */
   args: ["receiver_id", "amount", "msg"],
   deposit_yocto: 1n,
   gas_tgas: 180,
@@ -217,6 +224,34 @@ export function vaultRelayFeeWithinBackstop(relayFee: bigint, withdrawn: bigint)
   return relayFee * 10_000n <= withdrawn * BigInt(VAULT_CONSTANTS.MAX_RELAY_FEE_BPS);
 }
 
+/**
+ * What the vault would refuse in this withdrawal, read before the device spends a proof on it (2.5.2 rows 1, 2, 7
+ * and 8): the form of every field, recipient or fee_recipient equal to the vault or intents.near, a deadline already
+ * passed at nowMs, withdrawn 0 or over a u128, and relay_fee over the backstop. Empty when none.
+ */
+export function vaultWithdrawalProblems(w: VaultWithdrawal, withdrawn: bigint, vaultId: string, nowMs: number): string[] {
+  const out: string[] = [];
+  const at = (f: () => unknown): void => {
+    try {
+      f();
+    } catch (e) {
+      out.push(e instanceof Error ? e.message : String(e));
+    }
+  };
+  let c: VaultContextInput | undefined;
+  at(() => (c = vaultContextInput(vaultId, w)));
+  if (c) at(() => vaultContextPreimage(c as VaultContextInput, 0n));
+  for (const k of ["recipient", "fee_recipient"] as const) {
+    if (w[k] === vaultId) out.push(`${k}: the vault`);
+    if (w[k] === VAULT_CONSTANTS.INTENTS) out.push(`${k}: intents.near`);
+  }
+  if (Number.isSafeInteger(w.deadline_ms) && w.deadline_ms < nowMs) out.push("deadline_ms: passed");
+  if (typeof withdrawn !== "bigint" || withdrawn < 0n || withdrawn >= 1n << 128n) out.push("withdrawn: not a u128");
+  else if (withdrawn === 0n) out.push("withdrawn: 0");
+  else if (c && !vaultRelayFeeWithinBackstop(c.relay_fee, withdrawn)) out.push("relay_fee: over the backstop (MAX_RELAY_FEE_BPS)");
+  return out;
+}
+
 // ---- The callback, settle and ragequit (2.5.3-2.5.5) ----
 
 /** on_payout(spend_index, to_recipient, fee): #[private], only the vault's own promise calls it. */
@@ -306,7 +341,12 @@ export function vaultProof(p: VaultSnarkjsProof): VaultProof {
 
 export const VAULT_EVENT_STANDARD = "blindfill-vault";
 export const VAULT_EVENT_VERSION = "1.0.0";
-/** Each event's data fields. Field elements and amounts are decimal strings, indexes JSON numbers (0-based). */
+/**
+ * Each event's data fields, in order. `data` is an array of such objects (the NEP-141 and NEP-171 form of NEP-297
+ * events), so one log line may carry several later with no version change. Field elements and amounts are decimal
+ * strings, indexes JSON numbers (0-based).
+ */
+export const VAULT_EVENT_DATA = "array";
 export const VAULT_EVENTS = {
   leaf_inserted: ["tree", "index", "leaf", "root"],
   deposited: ["depositor", "commitment", "label", "value", "precommitment"],
@@ -322,7 +362,7 @@ export type VaultEvent = {
   standard: typeof VAULT_EVENT_STANDARD;
   version: typeof VAULT_EVENT_VERSION;
   event: VaultEventName;
-  data: Record<string, string | number>;
+  data: Record<string, string | number>[];
 };
 
 // ---- The setup files (2.6): Privacy Pools v1.3.0's, under packages/circuits/, reused byte for byte ----

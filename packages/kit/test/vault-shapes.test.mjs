@@ -249,3 +249,54 @@ test("events, setup files and constants: the frozen names and values", () => {
   assert.equal(S.VAULT_CONSTANTS.REFUND_RESERVE_BYTES, 389);
   assert.equal(S.VAULT_FIELD_P % 2n ** 28n, 1n); // p - 1 is divisible by 2^28, BN254's scalar field
 });
+
+// Review round 1 (2026-11-01): the depositor rule, the event field lists and the withdrawal's own refusals.
+
+test("the depositor is a lowercase 64-hex NEAR-implicit id, never a named id, an eth-implicit id, intents.near or the vault", () => {
+  const u = "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de";
+  assert.equal(JSON.parse(S.vaultDepositMessage(1n, u)).depositor, u);
+  for (const bad of ["alice.near", "0x" + "ab".repeat(20), "intents.near", "vault.confidential.unrlzd.near", u.toUpperCase(), u.slice(1), u + "0"]) {
+    assert.throws(() => S.vaultDepositMessage(1n, bad), /depositor/, bad);
+  }
+});
+
+test("every event's data fields, in order (VAULT_EVENTS), and data is an array of such objects", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(S.VAULT_EVENTS)), {
+    leaf_inserted: ["tree", "index", "leaf", "root"],
+    deposited: ["depositor", "commitment", "label", "value", "precommitment"],
+    storage_prepaid: ["precommitment", "payer", "amount"],
+    withdrawn: ["processor", "value", "spent_nullifier", "new_commitment"],
+    withdrawal_relayed: ["relayer", "recipient", "amount", "fee", "refund_precommitment"],
+    ragequit: ["ragequitter", "commitment", "label", "value"],
+    payout: ["nullifier_hash", "delivered", "returned"],
+    refund_inserted: ["nullifier_hash", "commitment", "label", "value"],
+  });
+  assert.equal(S.VAULT_EVENT_DATA, "array");
+});
+
+test("vaultWithdrawalProblems: every refusal of 2.5.2 rows 1, 2 and 8 the device can see before it proves", () => {
+  const vault = "vault.confidential.unrlzd.near";
+  const now = 1_793_750_000_000;
+  const w = {
+    recipient: "bob.near", register_deposit: "0", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "30000",
+    refund_precommitment: "7", deadline_ms: now + 600_000, salt: "0".repeat(32),
+  };
+  const p = (x, withdrawn = 1_000_000n) => S.vaultWithdrawalProblems({ ...w, ...x }, withdrawn, vault, now);
+  assert.deepEqual(p({}), []);
+  const has = (x, re, withdrawn) => assert.ok(p(x, withdrawn).some((m) => re.test(m)), `${JSON.stringify(x)} ${p(x, withdrawn)}`);
+  has({ recipient: vault }, /recipient: the vault/);
+  has({ fee_recipient: vault }, /fee_recipient: the vault/);
+  has({ recipient: "intents.near" }, /recipient: intents\.near/);
+  has({ fee_recipient: "intents.near" }, /fee_recipient: intents\.near/);
+  has({ relay_fee: "500001" }, /relay_fee: over the backstop/);
+  assert.deepEqual(p({ relay_fee: "500000" }), []);
+  has({}, /withdrawn: 0/, 0n);
+  has({}, /withdrawn: not a u128/, 1n << 128n);
+  has({ deadline_ms: now - 1 }, /deadline_ms: passed/);
+  has({ deadline_ms: 2 ** 53 }, /deadline_ms/);
+  has({ salt: "A".repeat(32) }, /salt/);
+  has({ salt: "0".repeat(30) }, /salt/);
+  has({ refund_precommitment: "0" }, /refund_precommitment/);
+  has({ register_deposit: "01" }, /register_deposit/);
+  has({ recipient: "Bob.near" }, /recipient/);
+});
