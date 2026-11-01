@@ -17,6 +17,9 @@
 //! - PP checks the depth after LIMT's insert (`State.sol:140`); here it is checked before any write. NEAR undoes every
 //!   write of a call that panics, so the outcome is the same.
 //! - `LeafInserted`'s `index` is the 0-based position (src/events.rs).
+//! - An insert logs nothing: it returns `Inserted`, and the method logs its `leaf_inserted` once every check of the call
+//!   has passed. NEAR keeps a failed receipt's logs, so an event logged before a later refusal would name a leaf that
+//!   was never kept (PP's revert drops its events with its writes).
 
 use crate::constants::MAX_TREE_DEPTH;
 use crate::events::{Event, TreeName};
@@ -134,40 +137,52 @@ impl Tree {
         self.leaf_at.get(&index)
     }
 
-    /// Inserts `leaf` (the checks of `insert`), records it at its index and its root in the root set, and logs
-    /// `leaf_inserted` (PP `State.sol:151`). Returns the leaf's index and the new root.
-    fn push(&mut self, name: TreeName, h: &mut PoseidonT3, leaf: &Bytes32) -> (u64, Bytes32) {
+    /// Inserts `leaf` (the checks of `insert`), records it at its index and its root in the root set. Logs nothing:
+    /// the caller logs the returned `Inserted`'s `leaf_inserted` (PP `State.sol:151`) after its last check.
+    fn push(&mut self, tree: TreeName, h: &mut PoseidonT3, leaf: &Bytes32) -> Inserted {
         let index = self.size;
         let root = insert(h, &mut self.size, &mut self.depth, &mut self.side_nodes, leaf);
         self.leaf_at.insert(&index, leaf);
         self.roots.insert(&root);
-        Event::LeafInserted {
-            tree: name,
-            index,
-            leaf,
-            root: &root,
-        }
-        .emit();
-        (index, root)
+        Inserted { tree, index, leaf: *leaf, root }
+    }
+}
+
+/// A leaf written into a tree, its `leaf_inserted` event not yet logged.
+#[must_use = "log its leaf_inserted with `.event().emit()` once every check of the call has passed"]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Inserted {
+    pub tree: TreeName,
+    /// the leaf's 0-based index
+    pub index: u64,
+    pub leaf: Bytes32,
+    /// the tree's root after the insert
+    pub root: Bytes32,
+}
+
+impl Inserted {
+    /// Its `leaf_inserted` event.
+    pub fn event(&self) -> Event<'_> {
+        Event::LeafInserted { tree: self.tree, index: self.index, leaf: &self.leaf, root: &self.root }
     }
 }
 
 /// The two inserts the vault's methods make (a deposit makes both; a change or refund note makes a state leaf, and a
 /// refund note also a label). One `PoseidonT3` serves every hash of a call.
 impl Vault {
-    /// A commitment into the state tree: LIMT's checks, including `LeafAlreadyExists` (l.45-46). Returns its index and
-    /// the new state root.
-    pub fn insert_commitment(&mut self, h: &mut PoseidonT3, commitment: &Bytes32) -> (u64, Bytes32) {
+    /// A commitment into the state tree: LIMT's checks, including `LeafAlreadyExists` (l.45-46). Returns the insert,
+    /// its event not yet logged.
+    pub fn insert_commitment(&mut self, h: &mut PoseidonT3, commitment: &Bytes32) -> Inserted {
         if self.state_leaf_index.contains_key(commitment) {
             env::panic_str("LeafAlreadyExists")
         }
-        let (index, root) = self.state_tree.push(TreeName::State, h, commitment);
-        self.state_leaf_index.insert(commitment, &index);
-        (index, root)
+        let ins = self.state_tree.push(TreeName::State, h, commitment);
+        self.state_leaf_index.insert(commitment, &ins.index);
+        ins
     }
 
-    /// A label into the label tree, which approves it (vault.md 2.4). Returns its index and the new label root.
-    pub fn insert_label(&mut self, h: &mut PoseidonT3, label: &Bytes32) -> (u64, Bytes32) {
+    /// A label into the label tree, which approves it (vault.md 2.4). Returns the insert, its event not yet logged.
+    pub fn insert_label(&mut self, h: &mut PoseidonT3, label: &Bytes32) -> Inserted {
         self.label_tree.push(TreeName::Label, h, label)
     }
 }
@@ -223,7 +238,11 @@ mod tests {
             (3, h2(&h2(&h2(&l1, &l2), &h2(&l3, &l4)), &l5)),
         ];
         for (i, (leaf, (depth, root))) in [l1, l2, l3, l4, l5].iter().zip(want).enumerate() {
-            assert_eq!(v.insert_commitment(&mut h, leaf), (i as u64, root));
+            let ins = v.insert_commitment(&mut h, leaf);
+            assert_eq!((ins.tree, ins.index, ins.leaf, ins.root), (TreeName::State, i as u64, *leaf, root));
+            if i == 4 {
+                ins.event().emit();
+            }
             assert_eq!(
                 (v.state_tree.size, v.state_tree.depth, v.state_tree.root()),
                 (i as u64 + 1, depth, root)
@@ -232,7 +251,10 @@ mod tests {
             assert_eq!(v.state_leaf_index.get(leaf), Some(i as u64));
         }
         assert_eq!(v.state_tree.leaf_at(5), None);
-        let log = get_logs().pop().unwrap();
+        // the inserts logged nothing; the one line is the event the test logged from the fifth insert
+        let logs = get_logs();
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        let log = logs[0].clone();
         let want_log = format!(
             r#"{{"tree":"state","index":4,"leaf":"55","root":"{}"}}"#,
             field::to_decimal(&field::from_be(&want[4].1))
@@ -253,8 +275,8 @@ mod tests {
             if i % 20 == 0 {
                 call();
             }
-            state.push(v.insert_commitment(&mut h, &n(i)).1);
-            label.push(v.insert_label(&mut h, &n(i + 1_000_000)).1);
+            state.push(v.insert_commitment(&mut h, &n(i)).root);
+            label.push(v.insert_label(&mut h, &n(i + 1_000_000)).root);
         }
         call();
         // the first root, a root 1,000 inserts old (VT-S06) and the newest are all known, in their own tree only
@@ -294,7 +316,7 @@ mod tests {
         call();
         let mut v = Vault::default();
         let mut h = PoseidonT3::new();
-        v.insert_commitment(&mut h, &n(7));
+        let _ = v.insert_commitment(&mut h, &n(7));
         let p = field::to_be(&field::P);
         let max = [0xff; 32];
         let before = |v: &Vault| {
@@ -314,7 +336,7 @@ mod tests {
         ] {
             panics_with(
                 std::panic::AssertUnwindSafe(|| {
-                    v.insert_commitment(&mut PoseidonT3::new(), &leaf);
+                    let _ = v.insert_commitment(&mut PoseidonT3::new(), &leaf);
                 }),
                 want,
             );
@@ -324,7 +346,7 @@ mod tests {
             let mut t = Tree::new(Key::LabelSideNodes, Key::LabelAt, Key::LabelRoots);
             panics_with(
                 std::panic::AssertUnwindSafe(|| {
-                    t.push(TreeName::Label, &mut PoseidonT3::new(), &leaf);
+                    let _ = t.push(TreeName::Label, &mut PoseidonT3::new(), &leaf);
                 }),
                 want,
             );
@@ -332,7 +354,7 @@ mod tests {
         // the largest leaf below p is a leaf
         let mut p_minus_1 = field::P;
         p_minus_1[3] -= 1;
-        v.insert_commitment(&mut h, &field::to_be(&p_minus_1));
+        let _ = v.insert_commitment(&mut h, &field::to_be(&p_minus_1));
         assert_eq!(v.state_tree.size, 2);
     }
 
@@ -396,7 +418,7 @@ mod tests {
                 call();
             }
             let leaf = field::to_be(&rng.leaf(&field::P));
-            let (index, root) = v.insert_commitment(&mut h, &leaf);
+            let Inserted { index, root, .. } = v.insert_commitment(&mut h, &leaf);
             assert_eq!(
                 (index, v.state_tree.size, v.state_tree.depth),
                 (n - 1, n, ceil_log2(n)),
@@ -437,7 +459,7 @@ mod tests {
         let last = &fixture["boundary"]["last_leaf"];
         let mut v = Vault::default();
         set(&mut v, last);
-        let (index, root) = v.insert_commitment(&mut PoseidonT3::new(), &b(&last["leaf"]));
+        let Inserted { index, root, .. } = v.insert_commitment(&mut PoseidonT3::new(), &b(&last["leaf"]));
         assert_eq!(
             (index, dec(&root)),
             ((1 << 32) - 1, str_of(&last["root"]).to_string()),
@@ -460,7 +482,7 @@ mod tests {
             .zip(g["roots"].as_array().unwrap())
             .enumerate()
         {
-            let (_, root) = v.insert_commitment(&mut h, &b(leaf));
+            let root = v.insert_commitment(&mut h, &b(leaf)).root;
             assert_eq!(dec(&root), str_of(want), "growth insert {i}");
             assert_eq!(
                 (v.state_tree.depth, v.state_tree.root()),

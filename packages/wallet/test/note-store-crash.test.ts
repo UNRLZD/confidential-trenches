@@ -47,6 +47,7 @@ class World {
   dropped = new Set<bigint>(); // the user changed the amount once on this change note's withdrawal form
   paidOut = 0n;
   nextLeaf = 0n;
+  attempts = 0; // each attempt's own context
   steps = 0;
   killAt = new Set<number>();
   constructor(goals: Goal[]) {
@@ -93,7 +94,7 @@ async function act(ns: NoteStore, world: World, proofs: Map<string, string>): Pr
       const arm = n.ref.kind === "deposit" && goal !== undefined;
       const drop = n.ref.kind === "change" && n.leaf!.value > 0n && !world.dropped.has(n.precommitment);
       if (arm || drop) {
-        const held = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: world.now + WINDOW });
+        const held = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: world.now + WINDOW, context: String(++world.attempts) });
         proofs.set(held.id, held.attempt!);
         return true;
       }
