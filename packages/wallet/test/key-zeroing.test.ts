@@ -143,3 +143,20 @@ test("a fresh secp256k1 wallet wipes every BIP-32 node it made, the master and t
   assert.ok(!zero(w!.secretKey)); // the copy handed back
   w!.secretKey.fill(0);
 });
+
+test("REVIEW M31: bindDeposit zeroes its own copy of the seed", async () => {
+  const { bindDeposit } = await import("../src/deposit/bind.ts");
+  const { openWalletStore } = await import("../src/store/index.ts");
+  const { openNoteStore } = await import("../src/notes/store.ts");
+  const { IDBFactory } = await import("fake-indexeddb");
+  const ws = await openWalletStore({ indexedDB: new IDBFactory() });
+  const store = await openNoteStore(ws);
+  const pub = depositAccount(SEED, 1n, 0).publicKey;
+  const rpcs = replayDepositReads("testnet", pub).map((r) => ({ ...r, tx: async () => ({}) }));
+  await onlyAsync(() => bindDeposit(SEED, { network: "testnet", s: 1n, i: 0, noteId: "f".repeat(32), amount: 25_000_000n }, { store, rpcs: rpcs as never }).catch(() => {}));
+  const ikm = bytesIn("hkdf").map((a) => a[0]!).filter((k) => k !== SEED && k.length === 64);
+  assert.ok(ikm.length >= 1, "the bind derived U from its copy");
+  for (const k of ikm) assert.ok(zero(k), "bindDeposit's copy of the seed was left");
+  store.close();
+  ws.close();
+});
