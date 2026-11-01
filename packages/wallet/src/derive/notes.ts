@@ -26,8 +26,12 @@ export interface Masters {
 const toBig = (b: Uint8Array): bigint => b.reduce((v, x) => (v << 8n) | BigInt(x), 0n);
 export function masters(seed64: Uint8Array, kind: MasterKind): Masters {
   if (!Object.hasOwn(LABEL, kind)) throw new Error(`unknown master kind ${String(kind)}`);
-  const one = (part: "nullifier" | "secret") =>
-    poseidon1([toBig(hkdfSeed(seed64, new TextEncoder().encode(masterInfo(kind, part)), 64)) % P]);
+  const one = (part: "nullifier" | "secret") => {
+    const bytes = hkdfSeed(seed64, new TextEncoder().encode(masterInfo(kind, part)), 64);
+    const v = toBig(bytes);
+    bytes.fill(0); // the bytes go; the bigint cannot be zeroed in JS
+    return poseidon1([v % P]);
+  };
   return { nullifier: one("nullifier"), secret: one("secret") };
 }
 

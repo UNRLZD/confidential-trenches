@@ -78,8 +78,18 @@ export function noteSecrets(seed64: Uint8Array, ref: NoteRef): DeviceNoteSecrets
   };
 }
 
-/** The same from the 12 words: the BIP-39 checksum first, then seed64 with an empty passphrase (wallet.md:49, :54). */
-export const noteSecretsFromWords = (words: string, ref: NoteRef): DeviceNoteSecrets => noteSecrets(wordsToSeed64(words), ref);
+/**
+ * The same from the 12 words: the BIP-39 checksum first, then seed64 with an empty passphrase (wallet.md:49, :54).
+ * seed64 is zeroed once the secrets are made.
+ */
+export function noteSecretsFromWords(words: string, ref: NoteRef): DeviceNoteSecrets {
+  const seed64 = wordsToSeed64(words);
+  try {
+    return noteSecrets(seed64, ref);
+  } finally {
+    seed64.fill(0);
+  }
+}
 
 /** The whole note once the vault has given it a value and a label (the deposit's amount and label, or settle's). */
 export function vaultNote(s: DeviceNoteSecrets, value: bigint, label: bigint): VaultNote {

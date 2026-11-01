@@ -48,13 +48,22 @@ export const NEAR_RPC_URLS = ["https://rpc.mainnet.fastnear.com", "https://rpc.m
  * test.rpc.fastnear.com and near-testnet.drpc.org 2026-11-01T08:02Z).
  */
 export const NEAR_NETWORKS = {
-  mainnet: { token: VAULT_CONSTANTS.TOKEN, fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
+  // vault: the release's vault on this network, the only receiver a deposit call names (wallet.md:898, "the vault id
+  // written into the release"); null until the release writes one, and the device signs no deposit call there.
+  // Mainnet: none yet (the vault is deployed at the freeze). Testnet: contracts/vault/deployments/testnet-skeleton.json,
+  // account_id. That vault's asset is Circle's testnet USDC (the same file, asset 3e2210e1…), not this token, so until a
+  // testnet vault on this token is deployed a testnet call is refused on chain and the token returns the USDC to U.
+  mainnet: { token: VAULT_CONSTANTS.TOKEN, vault: null, fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
   testnet: {
     token: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (a public account id)
+    vault: "vault.bf-vs-20261101t012200.testnet",
     fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], // near-rpc-operators: one operator (alternatives; the pair is one of these and drpc)
     drpc: "https://near-testnet.drpc.org",
   },
 } as const;
+// Frozen, so no code on the page can point a network at another token, vault or RPC after load.
+for (const net of Object.values(NEAR_NETWORKS)) Object.freeze(Object.freeze(net).fastnear);
+Object.freeze(NEAR_NETWORKS);
 export type NearNetwork = keyof typeof NEAR_NETWORKS;
 /** The six reads' heights may spread by this many blocks at most (live spread measured by the review: 5-6). */
 export const HEIGHT_SPREAD_MAX = 30;
@@ -116,6 +125,7 @@ export interface DepositAccount extends DepositAccountId {
 /** U_{s,i} at the kit's frozen path, public side only. */
 export function depositAccount(seed64: Uint8Array, s: bigint, i: number): DepositAccountId {
   const u = depositId(seed64, s, i);
+  u.secretKey.fill(0); // only the public side is used here; the signer derives its own copy after the reads
   return { account: u.id, publicKey: `ed25519:${base58.encode(u.publicKey)}` };
 }
 
