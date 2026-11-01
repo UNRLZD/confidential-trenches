@@ -10,13 +10,18 @@
 //     the shell sent: signed in with a balance (data-header S1.4) on the harness, whose shell sends a signed-in state;
 //   - no hop: the top window navigated exactly twice (APP_HOST, then SIGN_HOST), and the terminal frames nothing;
 //   - READY within 5,000 ms of the terminal's start (BAR-09);
-//   - no CSP violation and no console error in the terminal's frame; a screenshot of each run is kept.
+//   - no CSP violation and no console error in the terminal's frame; a screenshot of each run is kept;
+//   - the address follows the app: after a tap on the Portfolio link the top window's address is SIGN_HOST/portfolio
+//     (the kit's nav, which the shell keeps with history.replaceState), and after a reload of the top window it stays
+//     there, the shell frames APP_HOST/portfolio and the terminal is READY again.
 // On the harness three more runs per engine and width, each with its own stand-in shell:
 //   - late: the shell answers at once but holds its ready for 7 s after the frame's load (a slow load, or a client made
 //     after it): the terminal is READY within 5,000 ms, never down, and still READY with no reload after the late ready;
 //   - silent: the shell answers nothing until its ready 7 s after the frame's load: within 5,000 ms plus 1,500 ms of
 //     slack the terminal is down with its toast on screen, and once the ready comes it is READY again with no reload
 //     (AE-08);
+//   - update: the shell's ready names another message API, so the terminal shows its update state; its Reload makes
+//     the shell reload the top window (the kit's reload), not the terminal's frame alone, at the same address;
 //   - tap: the shell sends a signed-out state and refuses every open (not_allowed); Sign in, then Use passkey, shows the
 //     line in place of the tap (refused, no Retry, in the sheet) within the kit's 5,000 ms for an open plus 1,500 ms,
 //     the top window stays on SIGN_HOST, and no pop-up opens (card app-hop-refused's rule: a tap never ends in nothing).
@@ -46,9 +51,11 @@ export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
 export const PATH = "/discover?ref=app-in-shell";
 export const ENGINES = ["chromium", "firefox", "webkit"];
 export const WIDTHS = [
-  { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
-  { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+  { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, nav: ".tabbar a" },
+  { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false, nav: ".tb .nav a" },
 ];
+/** The in-app move the signed run makes: a tap on this route's link in the tab bar (phone) or the top bar (desktop). */
+export const MOVE_TO = "/portfolio";
 /** The visible header's state for each expectation (apps/terminal/src/screens/signin/Account.tsx). */
 export const HEADER = { in: "S1.4", out: "S1.1" };
 const READY_MS = 8_000;
@@ -60,7 +67,7 @@ export const OPEN_WINDOW_MS = 5_000;
 /** How long the late and silent runs' shells hold their ready after the frame's load. */
 export const LATE_READY_MS = 7_000;
 /** The run kinds: live runs read `signed` only (the real shell cannot be told to hold its ready or refuse). */
-export const KINDS = ["signed", "late", "silent", "tap"];
+export const KINDS = ["signed", "late", "silent", "tap", "update"];
 export const CONTROL = "signin-passkey";
 /** After READY, how long the check keeps watching for a further top-level navigation (a hop). */
 const SETTLE_MS = 1_500;
@@ -103,6 +110,10 @@ export function judge(rec) {
       say(tReady !== null && tReady <= HANDSHAKE_MS, `${n}: READY ${tReady === null ? "never" : `at ${Math.round(tReady)} ms`} of the terminal's start, limit ${HANDSHAKE_MS} ms`);
       const errs = [...(r.app.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.app.errors ?? [])];
       say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : "no CSP violation, no console error in the terminal's frame"}`);
+      const mv = r.moved ?? null;
+      say(mv?.top === SIGN_HOST + MOVE_TO && mv?.frame === APP_HOST + MOVE_TO, `${n}: after a tap on ${MOVE_TO}, ${mv ? `the top window's address is ${mv.top}, the terminal at ${mv.frame}` : "no move read"}`);
+      const rl = r.afterReload ?? null;
+      say(rl?.top === SIGN_HOST + MOVE_TO && rl?.frame === APP_HOST + MOVE_TO && rl?.signpage === "ready", `${n}: after a reload of the top window, ${rl ? `the address is ${rl.top}, the shell frames ${rl.frame}, signing page ${rl.signpage ?? "none"}` : "no reload read"}`);
       if (!r.shot) say(false, `${n}: no screenshot`);
     }
   }
@@ -111,7 +122,7 @@ export function judge(rec) {
 
 const firstAt = (timeline, st) => (timeline ?? []).find((e) => e.s === st)?.t ?? null;
 
-/** The late, silent and tap runs' lines. */
+/** The late, silent, tap and update runs' lines. */
 function judgeMore(say, n, r, kind) {
   if (!r) return say(false, `${n}: no run`);
   if (r.error) return say(false, `${n}: ${r.error}`);
@@ -132,6 +143,12 @@ function judgeMore(say, n, r, kind) {
     say(td !== null && td <= HANDSHAKE_MS + SLACK_MS && !early, `${n}: down ${td === null ? "never" : `at ${Math.round(td)} ms`}${early ? ", but READY before it" : ""}, limit ${HANDSHAKE_MS + SLACK_MS} ms`);
     say(r.toast?.visible === true, `${n}: the down toast ${r.toast?.visible ? `shows ("${r.toast.text}")` : "does not show"}`);
     say(tr !== null && r.reloaded === false, `${n}: READY again ${tr === null ? "never" : `at ${Math.round(tr)} ms`}, once the shell's late ready came${r.reloaded ? ", after a reload" : ", no reload"}`);
+    return;
+  }
+  if (kind === "update") {
+    const u = r.update ?? {};
+    say(u.before === "update" && u.shown === true, `${n}: the shell's other message API ${u.before === "update" ? "shows the update state" : `leaves the terminal ${u.before ?? "in no state"}`}${u.shown ? ", Reload on screen" : ", no Reload on screen"}`);
+    say(u.topReloaded === true && u.top === SIGN_HOST + PATH, `${n}: Reload ${u.topReloaded ? "reloads the top window" : "does not reload the top window"}, address ${u.top ?? "none"}`);
     return;
   }
   const limit = OPEN_WINDOW_MS + SLACK_MS;
@@ -245,7 +262,10 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
     const errors = [];
     page.on("console", (m) => m.type() === "error" && errors.push({ url: m.location()?.url ?? "", text: m.text() }));
     page.on("pageerror", (e) => errors.push({ url: "", text: String(e) }));
-    page.on("framenavigated", (f) => f === page.mainFrame() && run.topNavigations.push(f.url()));
+    // the top window's document loads (navigation requests) until the reads below: the shell's history.replaceState on
+    // nav loads nothing, so it is no hop; the signed run's later move and reload are read apart
+    const navs = [];
+    page.on("request", (q) => q.isNavigationRequest() && q.frame() === page.mainFrame() && navs.push(q.url()));
     page.on("dialog", (d) => {
       run.dialogs.push(d.type());
       d.dismiss().catch(() => {});
@@ -262,6 +282,16 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
       if (!f) await page.waitForTimeout(100);
     }
     if (f && kind === "signed") await waitState(page, f, ["ready", "down", "update"], READY_MS);
+    if (f && kind === "update") {
+      run.update = { before: await waitState(page, f, ["update"], READY_MS) };
+      run.update.shown = await f.locator(".spdown .retry").isVisible().catch(() => false);
+      await page.evaluate(() => (window.__ctTopMark = 1));
+      await f.click(".spdown .retry").catch(() => {});
+      await page.waitForFunction(() => window.__ctTopMark !== 1, null, { timeout: 5_000 }).catch(() => {});
+      await page.waitForLoadState("load").catch(() => {});
+      run.update.topReloaded = await page.evaluate(() => window.__ctTopMark !== 1).catch(() => false);
+      run.update.top = page.url();
+    }
     if (f && kind === "late") {
       await waitState(page, f, ["ready", "down"], HANDSHAKE_MS + SLACK_MS);
       run.docAt = await f.evaluate(() => window.__ctDoc ?? null);
@@ -292,6 +322,7 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
     await page.waitForTimeout(SETTLE_MS);
     run.topAfter = page.url();
     run.top = page.url();
+    run.topNavigations = [...navs];
     f = await appFrame();
     if (f) {
       run.app = await f.evaluate(READ_APP);
@@ -304,6 +335,25 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
     }
     run.shot = path.join(shots, `${engine}-${w.name}${kind === "signed" ? "" : `-${kind}`}.png`);
     await page.screenshot({ path: run.shot });
+    if (f && kind === "signed") {
+      // the address follows the app: a tap on a link, then a reload of the top window (read after the hop reads above)
+      const until = Date.now() + 3_000;
+      await f.click(`${w.nav.split(",").map((x) => `${x.trim()}[href="${MOVE_TO}"]`).join(", ")}`).catch(() => {});
+      while (Date.now() < until && page.url() !== SIGN_HOST + MOVE_TO) await page.waitForTimeout(50);
+      run.moved = { top: page.url(), frame: f.url() };
+      await page.reload({ waitUntil: "load" }).catch(() => {});
+      const g = await (async () => {
+        const end = Date.now() + READY_MS;
+        for (;;) {
+          const x = await appFrame();
+          if (x || Date.now() > end) return x;
+          await page.waitForTimeout(100);
+        }
+      })();
+      const st = g ? await waitState(page, g, ["ready", "down", "update"], READY_MS) : null;
+      run.afterReload = { top: page.url(), frame: g?.url() ?? null, signpage: st };
+      await page.screenshot({ path: path.join(shots, `${engine}-${w.name}-reloaded.png`) });
+    }
   } catch (e) {
     run.error = String(e?.message ?? e).split("\n")[0];
   } finally {
@@ -315,7 +365,7 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
 /** `routes`: a route per run kind (the harness), or null (the live hosts: the signed run only). */
 export async function collect({ launchers, shots, source, expect, routes }) {
   mkdirSync(shots, { recursive: true });
-  const rec = { source, expect, path: PATH, at: new Date().toISOString(), engines: launchers.map(([e]) => e), browsers: {}, runs: [] };
+  const rec = { source, expect, path: PATH, moveTo: MOVE_TO, at: new Date().toISOString(), engines: launchers.map(([e]) => e), browsers: {}, runs: [] };
   for (const [engine, launch] of launchers) {
     const browser = await launch();
     rec.browsers[engine] = browser.version();
@@ -334,13 +384,15 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // A SIGN_HOST stand-in shell, as card signpage-shell's end state says (webkit-frame-storage.md section 4): it frames
 // APP_HOST at its own path and query, full size; posts `ready` to the frame on each of its loads; answers `state` from
 // that frame's window only, with targetOrigin APP_HOST, signed in, at any time (the silent run's shell: only from its
-// ready on); refuses every other kind (not_allowed). The late and silent shells post their ready 7 s after the load
+// ready on); keeps the app's path and query in its address on nav and reloads the top window on reload, as the real
+// shell does; refuses every other kind (not_allowed). The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
 // and tell the check through window.__ctShellReady. Its headers
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const shellJs = (kind) => `const APP = ${JSON.stringify(APP_HOST)};
 const STATE = ${JSON.stringify(kind === "tap" ? SIGNED_OUT : SIGNED_IN)};
+const API = ${kind === "update" ? 2 : 1};
 const HOLD = ${kind === "late" || kind === "silent" ? LATE_READY_MS : 0};
 let answering = ${kind !== "silent"};
 const f = document.createElement("iframe");
@@ -349,13 +401,21 @@ f.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-po
 f.setAttribute("allow", "clipboard-write");
 f.addEventListener("load", () => setTimeout(() => {
   answering = true;
-  f.contentWindow.postMessage({ v: 1, type: "ready", release: "harness-shell", api: 1 }, APP);
+  f.contentWindow.postMessage({ v: 1, type: "ready", release: "harness-shell", api: API }, APP);
   window.__ctShellReady = true;
 }, HOLD));
 addEventListener("message", (e) => {
   if (!answering || e.origin !== APP || e.source !== f.contentWindow || !e.data || typeof e.data.id !== "string") return;
-  const answer = e.data.type === "state" ? { v: 1, id: e.data.id, ok: true, result: STATE } : { v: 1, id: e.data.id, ok: false, error: { code: "not_allowed" } };
+  const ok = (result) => ({ v: 1, id: e.data.id, ok: true, result });
+  const no = { v: 1, id: e.data.id, ok: false, error: { code: "not_allowed" } };
+  const p = e.data.path;
+  // nav and reload as the real shell's (packages/signpage/src/shell.ts): the app's path and query in the top window's
+  // address with history.replaceState, never a navigation; reload answers, then reloads the top window
+  const nav = e.data.type === "nav" && typeof p === "string" && p.startsWith("/") && p[1] !== "/" && p[1] !== "\\\\";
+  const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : no;
+  if (nav) history.replaceState(null, "", location.origin + new URL(APP + p).pathname + new URL(APP + p).search);
   f.contentWindow.postMessage(answer, APP);
+  if (e.data.type === "reload") location.reload();
 });
 document.body.appendChild(f);
 `;
@@ -371,6 +431,10 @@ const shellHtml = (js) => `<!doctype html>
 export function shellHeaders(signHeadersFile) {
   return signHeadersFile.replace(`frame-ancestors ${APP_HOST};`, `frame-src ${APP_HOST}; frame-ancestors 'none';`);
 }
+
+/** The helper's Discover read: answered empty, so the terminal's frame logs no failed load (bar10 reads the rows). */
+const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const NO_LISTS = { chain: "solana", as_of_ms: 0, lists: { new: [], trending: [], trending_5m: [], trending_1h: [], graduating: [] } };
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json" };
 
@@ -393,6 +457,9 @@ export async function harnessRoute(appBuild, kind = "signed") {
       const body = shellFiles[u.pathname] ?? shellHtml(js);
       const type = TYPES[path.extname(shellFiles[u.pathname] ? u.pathname : "/index.html")];
       return route.fulfill({ status: 200, headers: headers(signRules, u.pathname, type), body });
+    }
+    if (u.origin === HELPER_HOST && u.pathname === "/v1/market/lists") {
+      return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(NO_LISTS) });
     }
     if (u.origin === APP_HOST) {
       let file = path.join(appBuild, decodeURIComponent(u.pathname));

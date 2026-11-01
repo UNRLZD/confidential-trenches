@@ -1,15 +1,15 @@
 // node --test scripts/live-checks/app-in-shell.test.mjs: the live check's verdict replays recorded runs
 // (app-in-shell.answers.json), each read on 2026-11-01 by app-in-shell.mjs --harness --record on the Mac, in
-// Playwright 1.63's Chromium, Firefox and WebKit, at 390 and 1440 wide, with the signed, late, silent and tap runs:
+// Playwright 1.63's Chromium, Firefox and WebKit, at 390 and 1440 wide, with the signed, late, silent, tap and update runs:
 //   good: this card's terminal build at APP_HOST and the stand-in shells at SIGN_HOST: PASS;
-//   bad:  main cf7b85a's terminal, before this card, with the same shells: APP_HOST stays top-level with SIGN_HOST
+//   bad:  main 7435ff5's terminal, before this card, with the same shells: APP_HOST stays top-level with SIGN_HOST
 //         framed (which the shell's frame-ancestors 'none' refuses): FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, ENGINES, judge, KINDS, PATH, SIGN_HOST, WIDTHS } from "./app-in-shell.mjs";
+import { APP_HOST, ENGINES, judge, KINDS, MOVE_TO, PATH, SIGN_HOST, WIDTHS } from "./app-in-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-in-shell.answers.json"), "utf8"));
@@ -34,6 +34,10 @@ test("recorded good answer: every engine and width lands on SIGN_HOST with the p
       assert.ok(r.lines.some((l) => new RegExp(`^ok  ${n} tap: the tap shows "Not available" \\(refused, Retry not shown, in the sheet\\) \\d+ ms after it, limit 6500 ms$`).test(l)), n);
       assert.ok(r.lines.includes(`ok  ${n} tap: the top window stayed on SIGN_HOST, 2 top navigation(s)`), n);
       assert.ok(r.lines.includes(`ok  ${n} tap: no pop-up`), n);
+      assert.ok(r.lines.includes(`ok  ${n}: after a tap on ${MOVE_TO}, the top window's address is ${SIGN_HOST}${MOVE_TO}, the terminal at ${APP_HOST}${MOVE_TO}`), n);
+      assert.ok(r.lines.includes(`ok  ${n}: after a reload of the top window, the address is ${SIGN_HOST}${MOVE_TO}, the shell frames ${APP_HOST}${MOVE_TO}, signing page ready`), n);
+      assert.ok(r.lines.includes(`ok  ${n} update: the shell's other message API shows the update state, Reload on screen`), n);
+      assert.ok(r.lines.includes(`ok  ${n} update: Reload reloads the top window, address ${SIGN_HOST}${PATH}`), n);
     }
   }
 });
@@ -99,10 +103,16 @@ test("planted on the good answer: the late run goes down or reloads, the silent 
   assert.ok(mut("tap", (r) => (r.topAfter = `${APP_HOST}/`)).some((l) => /tap: the top window moved to/.test(l)));
   assert.ok(mut("tap", (r) => r.dialogs.push("alert")).some((l) => /tap: pop-ups alert/.test(l)));
   assert.ok(mut("tap", (r) => (r.line.why = "silent")).some((l) => /tap: the tap shows .*\(silent/.test(l)));
+  // the address does not follow the app (no nav), a reload loses the page, Reload reloads the frame alone
+  assert.ok(mut("signed", (r) => (r.moved.top = `${SIGN_HOST}${PATH}`)).some((l) => l.includes(`after a tap on ${MOVE_TO}, the top window's address is ${SIGN_HOST}${PATH}`)));
+  assert.ok(mut("signed", (r) => Object.assign(r.afterReload, { top: `${SIGN_HOST}${PATH}`, frame: `${APP_HOST}${PATH}` })).some((l) => l.includes("after a reload of the top window, the address is")));
+  assert.ok(mut("signed", (r) => (r.afterReload.signpage = "down")).some((l) => l.includes("signing page down")));
+  assert.ok(mut("update", (r) => (r.update.topReloaded = false)).some((l) => /update: Reload does not reload the top window/.test(l)));
+  assert.ok(mut("update", (r) => (r.update.before = "ready")).some((l) => /update: .*leaves the terminal ready/.test(l)));
 });
 
-test("every engine and width has all four run kinds on the harness; a live record is judged on the signed run only", () => {
-  assert.deepEqual(KINDS, ["signed", "late", "silent", "tap"]);
+test("every engine and width has all five run kinds on the harness; a live record is judged on the signed run only", () => {
+  assert.deepEqual(KINDS, ["signed", "late", "silent", "tap", "update"]);
   assert.deepEqual(ANSWERS.good.engines, ENGINES);
   assert.equal(ANSWERS.good.runs.length, ENGINES.length * WIDTHS.length * KINDS.length);
   const live = structuredClone(ANSWERS.good);

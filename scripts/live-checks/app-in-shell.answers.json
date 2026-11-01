@@ -3,7 +3,8 @@
     "source": "harness, terminal build apps/terminal/dist, the stand-in shell",
     "expect": "in",
     "path": "/discover?ref=app-in-shell",
-    "at": "2026-11-01T14:36:21.297Z",
+    "moveTo": "/portfolio",
+    "at": "2026-11-01T21:10:51.683Z",
     "engines": [
       "chromium",
       "firefox",
@@ -37,17 +38,26 @@
           "timeline": [
             {
               "s": "connecting",
-              "t": 43.39999997615814
+              "t": 92.39999997615814
             },
             {
               "s": "ready",
-              "t": 48.799999952316284
+              "t": 97.09999996423721
             }
           ],
-          "doc": 0.9291078841585328,
+          "doc": 0.36740380366507963,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-phone.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone.png",
+        "moved": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio"
+        },
+        "afterReload": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio",
+          "signpage": "ready"
+        }
       },
       {
         "engine": "chromium",
@@ -60,7 +70,7 @@
         ],
         "dialogs": [],
         "popups": 0,
-        "docAt": 0.3657367379169495,
+        "docAt": 0.00007525674479835764,
         "lateReady": true,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
@@ -73,18 +83,18 @@
           "timeline": [
             {
               "s": "connecting",
-              "t": 22.69999998807907
+              "t": 71.80000001192093
             },
             {
               "s": "ready",
-              "t": 37.89999997615814
+              "t": 76.10000002384186
             }
           ],
-          "doc": 0.3657367379169495,
+          "doc": 0.00007525674479835764,
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-late.png"
       },
       {
         "engine": "chromium",
@@ -101,7 +111,7 @@
           "visible": true,
           "text": "Couldn't load. Your funds are safe.Retry"
         },
-        "docAt": 0.5929650602741546,
+        "docAt": 0.6736171560990408,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "app": {
@@ -113,22 +123,22 @@
           "timeline": [
             {
               "s": "connecting",
-              "t": 25
+              "t": 72.30000001192093
             },
             {
               "s": "down",
-              "t": 5017.600000023842
+              "t": 5053.199999988079
             },
             {
               "s": "ready",
-              "t": 7021.300000011921
+              "t": 7056.099999964237
             }
           ],
-          "doc": 0.5929650602741546,
+          "doc": 0.6736171560990408,
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-phone-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-silent.png"
       },
       {
         "engine": "chromium",
@@ -142,7 +152,7 @@
         "dialogs": [],
         "popups": 0,
         "outcome": "line",
-        "ms": 46,
+        "ms": 49,
         "line": {
           "why": "refused",
           "text": "Not available",
@@ -160,334 +170,61 @@
           "timeline": [
             {
               "s": "connecting",
-              "t": 22.399999976158142
+              "t": 73.40000003576279
             },
             {
               "s": "ready",
-              "t": 36.89999997615814
+              "t": 77.90000003576279
             }
           ],
-          "doc": 0.785136666138146,
+          "doc": 0.21857098962629318,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-tap.png"
       },
       {
         "engine": "chromium",
-        "width": "desktop",
-        "kind": "signed",
+        "width": "phone",
+        "kind": "update",
         "drewAtTop": false,
         "topNavigations": [
           "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
         "popups": 0,
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.4",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
-              "t": 25.19999998807907
-            },
-            {
-              "s": "ready",
-              "t": 25.900000035762787
-            }
-          ],
-          "doc": 0.6898325991424722,
-          "errors": []
-        },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-desktop.png"
-      },
-      {
-        "engine": "chromium",
-        "width": "desktop",
-        "kind": "late",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "docAt": 0.3566684896084623,
-        "lateReady": true,
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.4",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
-              "t": 32.60000002384186
-            },
-            {
-              "s": "ready",
-              "t": 34.200000047683716
-            }
-          ],
-          "doc": 0.3566684896084623,
-          "errors": []
-        },
-        "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-desktop-late.png"
-      },
-      {
-        "engine": "chromium",
-        "width": "desktop",
-        "kind": "silent",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "toast": {
-          "visible": true,
-          "text": "Couldn't load. Your funds are safe.Retry"
-        },
-        "docAt": 0.13254748205023748,
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.4",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
-              "t": 26.100000023841858
-            },
-            {
-              "s": "down",
-              "t": 5018.100000023842
-            },
-            {
-              "s": "ready",
-              "t": 7020.900000035763
-            }
-          ],
-          "doc": 0.13254748205023748,
-          "errors": []
-        },
-        "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-desktop-silent.png"
-      },
-      {
-        "engine": "chromium",
-        "width": "desktop",
-        "kind": "tap",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "outcome": "line",
-        "ms": 51,
-        "line": {
-          "why": "refused",
-          "text": "Not available",
-          "retry": false,
-          "inPlace": true
+        "update": {
+          "before": "update",
+          "shown": true,
+          "topReloaded": true,
+          "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
         },
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "app": {
           "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
+          "signpage": "update",
           "header": "S1.1",
           "iframes": 0,
           "violations": [],
           "timeline": [
             {
               "s": "connecting",
-              "t": 33.80000001192093
+              "t": 23.100000023841858
             },
             {
-              "s": "ready",
-              "t": 37.60000002384186
-            }
-          ],
-          "doc": 0.8769694894060504,
-          "errors": []
-        },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/chromium-desktop-tap.png"
-      },
-      {
-        "engine": "firefox",
-        "width": "phone",
-        "kind": "signed",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.4",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
-              "t": 46
-            },
-            {
-              "s": "ready",
-              "t": 48
-            }
-          ],
-          "doc": 0.4609095607027346,
-          "errors": []
-        },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-phone.png"
-      },
-      {
-        "engine": "firefox",
-        "width": "phone",
-        "kind": "late",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "docAt": 0.22356692186798588,
-        "lateReady": true,
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.4",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
+              "s": "update",
               "t": 34
-            },
-            {
-              "s": "ready",
-              "t": 36
             }
           ],
-          "doc": 0.22356692186798588,
+          "doc": 0.25045819811681935,
           "errors": []
         },
-        "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-phone-update.png"
       },
       {
-        "engine": "firefox",
-        "width": "phone",
-        "kind": "silent",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "toast": {
-          "visible": true,
-          "text": "Couldn't load. Your funds are safe.Retry"
-        },
-        "docAt": 0.8299439476590202,
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.4",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
-              "t": 33
-            },
-            {
-              "s": "down",
-              "t": 5039
-            },
-            {
-              "s": "ready",
-              "t": 7055
-            }
-          ],
-          "doc": 0.8299439476590202,
-          "errors": []
-        },
-        "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-phone-silent.png"
-      },
-      {
-        "engine": "firefox",
-        "width": "phone",
-        "kind": "tap",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "outcome": "line",
-        "ms": 23,
-        "line": {
-          "why": "refused",
-          "text": "Not available",
-          "retry": false,
-          "inPlace": true
-        },
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.1",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
-              "t": 36
-            },
-            {
-              "s": "ready",
-              "t": 38
-            }
-          ],
-          "doc": 0.18678419367780685,
-          "errors": []
-        },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-phone-tap.png"
-      },
-      {
-        "engine": "firefox",
+        "engine": "chromium",
         "width": "desktop",
         "kind": "signed",
         "drewAtTop": false,
@@ -507,17 +244,30 @@
           "violations": [],
           "timeline": [
             {
+              "s": "connecting",
+              "t": 76.19999998807907
+            },
+            {
               "s": "ready",
-              "t": 119
+              "t": 82.79999995231628
             }
           ],
-          "doc": 0.4895005647521662,
+          "doc": 0.5185119120462317,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop.png",
+        "moved": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio"
+        },
+        "afterReload": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio",
+          "signpage": "ready"
+        }
       },
       {
-        "engine": "firefox",
+        "engine": "chromium",
         "width": "desktop",
         "kind": "late",
         "drewAtTop": false,
@@ -527,7 +277,7 @@
         ],
         "dialogs": [],
         "popups": 0,
-        "docAt": 0.6579846890668423,
+        "docAt": 0.7145141910736098,
         "lateReady": true,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
@@ -540,21 +290,21 @@
           "timeline": [
             {
               "s": "connecting",
-              "t": 92
+              "t": 73.39999997615814
             },
             {
               "s": "ready",
-              "t": 94
+              "t": 78.89999997615814
             }
           ],
-          "doc": 0.6579846890668423,
+          "doc": 0.7145141910736098,
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-late.png"
       },
       {
-        "engine": "firefox",
+        "engine": "chromium",
         "width": "desktop",
         "kind": "silent",
         "drewAtTop": false,
@@ -568,7 +318,7 @@
           "visible": true,
           "text": "Couldn't load. Your funds are safe.Retry"
         },
-        "docAt": 0.961248668076379,
+        "docAt": 0.2659222104275294,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "app": {
@@ -580,97 +330,151 @@
           "timeline": [
             {
               "s": "connecting",
-              "t": 35
-            },
-            {
-              "s": "down",
-              "t": 5039
-            },
-            {
-              "s": "ready",
-              "t": 7056
-            }
-          ],
-          "doc": 0.961248668076379,
-          "errors": []
-        },
-        "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-desktop-silent.png"
-      },
-      {
-        "engine": "firefox",
-        "width": "desktop",
-        "kind": "tap",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "outcome": "line",
-        "ms": 35,
-        "line": {
-          "why": "refused",
-          "text": "Not available",
-          "retry": false,
-          "inPlace": true
-        },
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.1",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "connecting",
-              "t": 32
-            },
-            {
-              "s": "ready",
-              "t": 35
-            }
-          ],
-          "doc": 0.39352025681270875,
-          "errors": []
-        },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/firefox-desktop-tap.png"
-      },
-      {
-        "engine": "webkit",
-        "width": "phone",
-        "kind": "signed",
-        "drewAtTop": false,
-        "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
-        ],
-        "dialogs": [],
-        "popups": 0,
-        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
-        "app": {
-          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
-          "signpage": "ready",
-          "header": "S1.4",
-          "iframes": 0,
-          "violations": [],
-          "timeline": [
-            {
-              "s": "ready",
               "t": 75
+            },
+            {
+              "s": "down",
+              "t": 5063.400000035763
+            },
+            {
+              "s": "ready",
+              "t": 7065.400000035763
             }
           ],
-          "doc": 0.8197145546104164,
+          "doc": 0.2659222104275294,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-phone.png"
+        "reloaded": false,
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-silent.png"
       },
       {
-        "engine": "webkit",
+        "engine": "chromium",
+        "width": "desktop",
+        "kind": "tap",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "outcome": "line",
+        "ms": 42,
+        "line": {
+          "why": "refused",
+          "text": "Not available",
+          "retry": false,
+          "inPlace": true
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.1",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "connecting",
+              "t": 76.80000001192093
+            },
+            {
+              "s": "ready",
+              "t": 83.30000001192093
+            }
+          ],
+          "doc": 0.08482966478959686,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-tap.png"
+      },
+      {
+        "engine": "chromium",
+        "width": "desktop",
+        "kind": "update",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "update": {
+          "before": "update",
+          "shown": true,
+          "topReloaded": true,
+          "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "update",
+          "header": "S1.1",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "connecting",
+              "t": 42.30000001192093
+            },
+            {
+              "s": "update",
+              "t": 43.10000002384186
+            }
+          ],
+          "doc": 0.3333895847416758,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/chromium-desktop-update.png"
+      },
+      {
+        "engine": "firefox",
+        "width": "phone",
+        "kind": "signed",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "connecting",
+              "t": 57
+            },
+            {
+              "s": "ready",
+              "t": 78
+            }
+          ],
+          "doc": 0.15071863943992447,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone.png",
+        "moved": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio"
+        },
+        "afterReload": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio",
+          "signpage": "ready"
+        }
+      },
+      {
+        "engine": "firefox",
         "width": "phone",
         "kind": "late",
         "drewAtTop": false,
@@ -680,7 +484,7 @@
         ],
         "dialogs": [],
         "popups": 0,
-        "docAt": 0.45695211331222363,
+        "docAt": 0.9848367843532266,
         "lateReady": true,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
@@ -692,18 +496,22 @@
           "violations": [],
           "timeline": [
             {
+              "s": "connecting",
+              "t": 45
+            },
+            {
               "s": "ready",
-              "t": 52
+              "t": 63
             }
           ],
-          "doc": 0.45695211331222363,
+          "doc": 0.9848367843532266,
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-late.png"
       },
       {
-        "engine": "webkit",
+        "engine": "firefox",
         "width": "phone",
         "kind": "silent",
         "drewAtTop": false,
@@ -717,7 +525,7 @@
           "visible": true,
           "text": "Couldn't load. Your funds are safe.Retry"
         },
-        "docAt": 0.21634855043151668,
+        "docAt": 0.4389614993756864,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "app": {
@@ -725,36 +533,29 @@
           "signpage": "ready",
           "header": "S1.4",
           "iframes": 0,
-          "violations": [
-            {
-              "directive": "style-src-elem",
-              "blocked": "inline"
-            }
-          ],
+          "violations": [],
           "timeline": [
             {
               "s": "connecting",
-              "t": 55
+              "t": 44
             },
             {
               "s": "down",
-              "t": 5018
+              "t": 5039
             },
             {
               "s": "ready",
-              "t": 7019
+              "t": 7048
             }
           ],
-          "doc": 0.21634855043151668,
-          "errors": [
-            "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy."
-          ]
+          "doc": 0.4389614993756864,
+          "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-phone-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-silent.png"
       },
       {
-        "engine": "webkit",
+        "engine": "firefox",
         "width": "phone",
         "kind": "tap",
         "drewAtTop": false,
@@ -765,7 +566,7 @@
         "dialogs": [],
         "popups": 0,
         "outcome": "line",
-        "ms": 36,
+        "ms": 29,
         "line": {
           "why": "refused",
           "text": "Not available",
@@ -783,16 +584,57 @@
           "timeline": [
             {
               "s": "ready",
-              "t": 52
+              "t": 45
             }
           ],
-          "doc": 0.8366816197529549,
+          "doc": 0.09953799360761117,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-tap.png"
       },
       {
-        "engine": "webkit",
+        "engine": "firefox",
+        "width": "phone",
+        "kind": "update",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "update": {
+          "before": "update",
+          "shown": true,
+          "topReloaded": true,
+          "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "update",
+          "header": "S1.1",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "connecting",
+              "t": 41
+            },
+            {
+              "s": "update",
+              "t": 55
+            }
+          ],
+          "doc": 0.32792386508273474,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-phone-update.png"
+      },
+      {
+        "engine": "firefox",
         "width": "desktop",
         "kind": "signed",
         "drewAtTop": false,
@@ -812,17 +654,30 @@
           "violations": [],
           "timeline": [
             {
+              "s": "connecting",
+              "t": 45
+            },
+            {
               "s": "ready",
-              "t": 41
+              "t": 63
             }
           ],
-          "doc": 0.3099233286905845,
+          "doc": 0.371335863669936,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop.png",
+        "moved": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio"
+        },
+        "afterReload": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio",
+          "signpage": "ready"
+        }
       },
       {
-        "engine": "webkit",
+        "engine": "firefox",
         "width": "desktop",
         "kind": "late",
         "drewAtTop": false,
@@ -832,7 +687,7 @@
         ],
         "dialogs": [],
         "popups": 0,
-        "docAt": 0.5722258656705937,
+        "docAt": 0.5400251492577246,
         "lateReady": true,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
@@ -845,17 +700,17 @@
           "timeline": [
             {
               "s": "ready",
-              "t": 42
+              "t": 45
             }
           ],
-          "doc": 0.5722258656705937,
+          "doc": 0.5400251492577246,
           "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-late.png"
       },
       {
-        "engine": "webkit",
+        "engine": "firefox",
         "width": "desktop",
         "kind": "silent",
         "drewAtTop": false,
@@ -869,7 +724,7 @@
           "visible": true,
           "text": "Couldn't load. Your funds are safe.Retry"
         },
-        "docAt": 0.11629390435287323,
+        "docAt": 0.6732489703337619,
         "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
         "app": {
@@ -877,36 +732,29 @@
           "signpage": "ready",
           "header": "S1.4",
           "iframes": 0,
-          "violations": [
-            {
-              "directive": "style-src-elem",
-              "blocked": "inline"
-            }
-          ],
+          "violations": [],
           "timeline": [
             {
               "s": "connecting",
-              "t": 41
+              "t": 49
             },
             {
               "s": "down",
-              "t": 5016
+              "t": 5045
             },
             {
               "s": "ready",
-              "t": 7020
+              "t": 7058
             }
           ],
-          "doc": 0.11629390435287323,
-          "errors": [
-            "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy."
-          ]
+          "doc": 0.6732489703337619,
+          "errors": []
         },
         "reloaded": false,
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-desktop-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-silent.png"
       },
       {
-        "engine": "webkit",
+        "engine": "firefox",
         "width": "desktop",
         "kind": "tap",
         "drewAtTop": false,
@@ -934,22 +782,472 @@
           "violations": [],
           "timeline": [
             {
+              "s": "connecting",
+              "t": 46
+            },
+            {
               "s": "ready",
-              "t": 41
+              "t": 63
             }
           ],
-          "doc": 0.24913366047546615,
+          "doc": 0.4899112687587337,
           "errors": []
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good4/webkit-desktop-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-tap.png"
+      },
+      {
+        "engine": "firefox",
+        "width": "desktop",
+        "kind": "update",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "update": {
+          "before": "update",
+          "shown": true,
+          "topReloaded": true,
+          "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "update",
+          "header": "S1.1",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "connecting",
+              "t": 42
+            },
+            {
+              "s": "update",
+              "t": 57
+            }
+          ],
+          "doc": 0.8132944475067272,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/firefox-desktop-update.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "phone",
+        "kind": "signed",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 87
+            }
+          ],
+          "doc": 0.7034418824774952,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone.png",
+        "moved": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio"
+        },
+        "afterReload": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio",
+          "signpage": "ready"
+        }
+      },
+      {
+        "engine": "webkit",
+        "width": "phone",
+        "kind": "late",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "docAt": 0.27502301351923764,
+        "lateReady": true,
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 64
+            }
+          ],
+          "doc": 0.27502301351923764,
+          "errors": []
+        },
+        "reloaded": false,
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-late.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "phone",
+        "kind": "silent",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "docAt": 0.9982976702288853,
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline"
+            }
+          ],
+          "timeline": [
+            {
+              "s": "connecting",
+              "t": 67
+            },
+            {
+              "s": "down",
+              "t": 5023
+            },
+            {
+              "s": "ready",
+              "t": 7026
+            }
+          ],
+          "doc": 0.9982976702288853,
+          "errors": [
+            "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy."
+          ]
+        },
+        "reloaded": false,
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-silent.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "phone",
+        "kind": "tap",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "outcome": "line",
+        "ms": 34,
+        "line": {
+          "why": "refused",
+          "text": "Not available",
+          "retry": false,
+          "inPlace": true
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.1",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 67
+            }
+          ],
+          "doc": 0.4053264158673071,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-tap.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "phone",
+        "kind": "update",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "update": {
+          "before": "update",
+          "shown": true,
+          "topReloaded": true,
+          "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "update",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 55
+            },
+            {
+              "s": "update",
+              "t": 58
+            }
+          ],
+          "doc": 0.49912477752097684,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-phone-update.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "desktop",
+        "kind": "signed",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 55
+            }
+          ],
+          "doc": 0.21694089453122534,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop.png",
+        "moved": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio"
+        },
+        "afterReload": {
+          "top": "https://sign.confidential.unrealized.trade/portfolio",
+          "frame": "https://confidential.unrealized.trade/portfolio",
+          "signpage": "ready"
+        }
+      },
+      {
+        "engine": "webkit",
+        "width": "desktop",
+        "kind": "late",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "docAt": 0.6700151072749343,
+        "lateReady": true,
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 54
+            }
+          ],
+          "doc": 0.6700151072749343,
+          "errors": []
+        },
+        "reloaded": false,
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-late.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "desktop",
+        "kind": "silent",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "toast": {
+          "visible": true,
+          "text": "Couldn't load. Your funds are safe.Retry"
+        },
+        "docAt": 0.9197354264494151,
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline"
+            }
+          ],
+          "timeline": [
+            {
+              "s": "connecting",
+              "t": 54
+            },
+            {
+              "s": "down",
+              "t": 5023
+            },
+            {
+              "s": "ready",
+              "t": 7025
+            }
+          ],
+          "doc": 0.9197354264494151,
+          "errors": [
+            "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy."
+          ]
+        },
+        "reloaded": false,
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-silent.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "desktop",
+        "kind": "tap",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "outcome": "line",
+        "ms": 27,
+        "line": {
+          "why": "refused",
+          "text": "Not available",
+          "retry": false,
+          "inPlace": true
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "ready",
+          "header": "S1.1",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 54
+            }
+          ],
+          "doc": 0.6907454516278774,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-tap.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "desktop",
+        "kind": "update",
+        "drewAtTop": false,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+          "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "update": {
+          "before": "update",
+          "shown": true,
+          "topReloaded": true,
+          "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell"
+        },
+        "topAfter": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://sign.confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "update",
+          "header": "S1.4",
+          "iframes": 0,
+          "violations": [],
+          "timeline": [
+            {
+              "s": "ready",
+              "t": 46
+            },
+            {
+              "s": "update",
+              "t": 54
+            }
+          ],
+          "doc": 0.9334757911660424,
+          "errors": []
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-good6/webkit-desktop-update.png"
       }
     ]
   },
   "bad": {
-    "source": "harness, terminal build of main cf7b85a, the stand-in shell",
+    "source": "harness, terminal build of main 7435ff5, the stand-in shell",
     "expect": "in",
     "path": "/discover?ref=app-in-shell",
-    "at": "2026-11-01T15:04:45.832Z",
+    "moveTo": "/portfolio",
+    "at": "2026-11-01T21:13:15.046Z",
     "engines": [
       "chromium",
       "firefox",
@@ -967,7 +1265,6 @@
         "kind": "signed",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -984,7 +1281,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone.png"
       },
       {
         "engine": "chromium",
@@ -992,7 +1289,6 @@
         "kind": "late",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1009,7 +1305,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-late.png"
       },
       {
         "engine": "chromium",
@@ -1017,7 +1313,6 @@
         "kind": "silent",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1034,7 +1329,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-silent.png"
       },
       {
         "engine": "chromium",
@@ -1042,7 +1337,6 @@
         "kind": "tap",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1059,7 +1353,31 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-tap.png"
+      },
+      {
+        "engine": "chromium",
+        "width": "phone",
+        "kind": "update",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-phone-update.png"
       },
       {
         "engine": "chromium",
@@ -1067,7 +1385,6 @@
         "kind": "signed",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1084,7 +1401,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop.png"
       },
       {
         "engine": "chromium",
@@ -1092,7 +1409,6 @@
         "kind": "late",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1109,7 +1425,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-late.png"
       },
       {
         "engine": "chromium",
@@ -1117,7 +1433,6 @@
         "kind": "silent",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1134,7 +1449,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-silent.png"
       },
       {
         "engine": "chromium",
@@ -1142,7 +1457,6 @@
         "kind": "tap",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1159,7 +1473,31 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/chromium-desktop-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-tap.png"
+      },
+      {
+        "engine": "chromium",
+        "width": "desktop",
+        "kind": "update",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/chromium-desktop-update.png"
       },
       {
         "engine": "firefox",
@@ -1167,7 +1505,6 @@
         "kind": "signed",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1184,7 +1521,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone.png"
       },
       {
         "engine": "firefox",
@@ -1192,7 +1529,6 @@
         "kind": "late",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1209,7 +1545,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-late.png"
       },
       {
         "engine": "firefox",
@@ -1217,7 +1553,6 @@
         "kind": "silent",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1234,7 +1569,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-silent.png"
       },
       {
         "engine": "firefox",
@@ -1242,7 +1577,6 @@
         "kind": "tap",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1259,7 +1593,31 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-tap.png"
+      },
+      {
+        "engine": "firefox",
+        "width": "phone",
+        "kind": "update",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-phone-update.png"
       },
       {
         "engine": "firefox",
@@ -1267,7 +1625,6 @@
         "kind": "signed",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1284,7 +1641,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop.png"
       },
       {
         "engine": "firefox",
@@ -1292,7 +1649,6 @@
         "kind": "late",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1309,7 +1665,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-late.png"
       },
       {
         "engine": "firefox",
@@ -1317,7 +1673,6 @@
         "kind": "silent",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1334,7 +1689,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-silent.png"
       },
       {
         "engine": "firefox",
@@ -1342,7 +1697,6 @@
         "kind": "tap",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1359,7 +1713,31 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/firefox-desktop-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-tap.png"
+      },
+      {
+        "engine": "firefox",
+        "width": "desktop",
+        "kind": "update",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/firefox-desktop-update.png"
       },
       {
         "engine": "webkit",
@@ -1367,7 +1745,6 @@
         "kind": "signed",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1384,7 +1761,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone.png"
       },
       {
         "engine": "webkit",
@@ -1392,7 +1769,6 @@
         "kind": "late",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1409,7 +1785,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-late.png"
       },
       {
         "engine": "webkit",
@@ -1417,7 +1793,6 @@
         "kind": "silent",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1434,7 +1809,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-silent.png"
       },
       {
         "engine": "webkit",
@@ -1442,7 +1817,6 @@
         "kind": "tap",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1459,7 +1833,31 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-phone-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-tap.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "phone",
+        "kind": "update",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-phone-update.png"
       },
       {
         "engine": "webkit",
@@ -1467,7 +1865,6 @@
         "kind": "signed",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1484,7 +1881,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop.png"
       },
       {
         "engine": "webkit",
@@ -1492,7 +1889,6 @@
         "kind": "late",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1509,7 +1905,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop-late.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-late.png"
       },
       {
         "engine": "webkit",
@@ -1517,7 +1913,6 @@
         "kind": "silent",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1534,7 +1929,7 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop-silent.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-silent.png"
       },
       {
         "engine": "webkit",
@@ -1542,7 +1937,6 @@
         "kind": "tap",
         "drewAtTop": true,
         "topNavigations": [
-          "https://confidential.unrealized.trade/discover?ref=app-in-shell",
           "https://confidential.unrealized.trade/discover?ref=app-in-shell"
         ],
         "dialogs": [],
@@ -1559,7 +1953,31 @@
           "timeline": [],
           "doc": null
         },
-        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad4/webkit-desktop-tap.png"
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-tap.png"
+      },
+      {
+        "engine": "webkit",
+        "width": "desktop",
+        "kind": "update",
+        "drewAtTop": true,
+        "topNavigations": [
+          "https://confidential.unrealized.trade/discover?ref=app-in-shell"
+        ],
+        "dialogs": [],
+        "popups": 0,
+        "topAfter": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "top": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+        "app": null,
+        "topApp": {
+          "url": "https://confidential.unrealized.trade/discover?ref=app-in-shell",
+          "signpage": "down",
+          "header": "S1.1",
+          "iframes": 1,
+          "violations": [],
+          "timeline": [],
+          "doc": null
+        },
+        "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shots-bad6/webkit-desktop-update.png"
       }
     ]
   }
