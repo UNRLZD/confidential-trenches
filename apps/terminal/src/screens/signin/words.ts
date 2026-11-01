@@ -34,6 +34,9 @@ export const WORDS = {
   nothingFound: draft("Nothing found", "09-design-brief S19.4 [draft copy]"),
   offline: draft("Offline", "09-design-brief S19.5 [draft copy: Offline · Retry]"),
   close: draft("Close", "the sheet's close icon, its accessible name only (never drawn)"),
+  hopRefused: draft("Not available", "card app-hop-refused: a tap the page's rule refuses (not_allowed), no Retry [draft copy]"),
+  hopError: draft("Couldn't open", "card app-hop-refused: a tap the page fails (any other code), with Retry [draft copy]"),
+  hopSilent: draft("No response", "card app-hop-refused: a tap with no answer within 5 s, with Retry [draft copy]"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

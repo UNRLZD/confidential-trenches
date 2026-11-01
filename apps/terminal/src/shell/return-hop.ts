@@ -16,6 +16,7 @@
 // record, a garbled one, one older than HOP_TTL_MS, one for another kind's return, a return path edited by hand (any
 // query, fragment or other path). The only navigation target this file ever yields is a path of the app's own route
 // table (routes.ts), never a value read from storage or the URL.
+import { SIGNPAGE_CLIENT_CODES } from "@blindfill/kit";
 import type { OPEN_KINDS } from "@blindfill/kit";
 import { ROUTES } from "../routes/routes.ts";
 import type { RouteId } from "../routes/routes.ts";
@@ -37,6 +38,20 @@ export const RETURN_KEYS = {
 
 export const RETURN_PREFIX = "/return/";
 export const returnPath = (key: string) => `${RETURN_PREFIX}${key}`;
+
+/**
+ * Why a hop did not leave for SIGN_HOST: "refused", the page's rule allows no such open (not_allowed), which a retry
+ * cannot change; "silent", no answer within the kit's window for the kind (client_timeout) or no signing page to ask
+ * (signpage_down), which a retry can mend once the page is READY again; "error", any other code (a store error), which
+ * a retry can mend.
+ */
+export type HopWhy = "refused" | "error" | "silent";
+
+export function hopWhy(code: string): HopWhy {
+  if (code === "not_allowed") return "refused";
+  if (code === SIGNPAGE_CLIENT_CODES.timeout || code === SIGNPAGE_CLIENT_CODES.down) return "silent";
+  return "error";
+}
 
 /** The sessionStorage key of the one record. */
 export const HOP_RECORD = "ct.return-hop";

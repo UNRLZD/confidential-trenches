@@ -3,15 +3,16 @@ import type { SignpageOutcome, SignpageParams } from "@blindfill/kit";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { HOP_RECORD, land, makeRecord, pathOf, RETURN_KEYS, takeRecord, writeRecord } from "./return-hop.ts";
-import type { HopView, Landing, OpenKind } from "./return-hop.ts";
+import { HOP_RECORD, hopWhy, land, makeRecord, pathOf, RETURN_KEYS, takeRecord, writeRecord } from "./return-hop.ts";
+import type { HopView, HopWhy, Landing, OpenKind } from "./return-hop.ts";
 import { SIGN_HOST_URL, useSignpage } from "./signpage-frame.tsx";
 
 // The same-tab hop to SIGN_HOST and back (return-hop.ts has the record and the rules). A screen opens one of the five
 // open kinds with hop(kind, params, view): the tapped control is locked at once and a second tap does nothing; the
 // record is written; the kind is posted with its return key; on the page's answer the tab moves to SIGN_HOST with
-// nothing in the URL. A refused or failed kind removes the record, unlocks the control and gives the screen the
-// outcome, so it stays as it was. On the way back, landOnLoad() (main.tsx, before the first render) puts the URL on the
+// nothing in the URL. A refused or failed kind, or one with no answer within the kit's window for it, removes the
+// record, unlocks the control and keeps the outcome as `failed` (the control, why, and its Retry), which the screen
+// draws in place with HopLine (screens/signin/HopLine.tsx), so a tap never ends in nothing. On the way back, landOnLoad() (main.tsx, before the first render) puts the URL on the
 // route the user left, and the screen reads `restored` for its sheet and fields; the scroll is set here, and the
 // control stays locked until the signing page answers again.
 //
@@ -39,6 +40,13 @@ export function landOnLoad(): void {
 export type HopStart = Omit<HopView, "scroll">;
 export type OpenParams<K extends OpenKind> = Omit<SignpageParams[K], "return_key">;
 
+/** The last hop that did not leave: its control, why, and a Retry that opens the same kind again. */
+export interface HopFailure {
+  control: string;
+  why: HopWhy;
+  retry(): void;
+}
+
 export interface ReturnHopView {
   /** Opens `kind` on SIGN_HOST from the screen `view`. Null when a hop is already under way (the second tap). */
   hop<K extends OpenKind>(kind: K, params: OpenParams<K>, view: HopStart): Promise<SignpageOutcome<K> | null>;
@@ -46,9 +54,13 @@ export interface ReturnHopView {
   locked: string | null;
   /** The screen this load restores, or null. */
   restored: HopView | null;
+  /** The last hop that did not leave, until the next hop, a route change, or its control's dismiss. */
+  failed: HopFailure | null;
+  /** Clears `failed` when it is `control`'s (its sheet or menu closed). */
+  dismiss(control: string): void;
 }
 
-const Ctx = createContext<ReturnHopView>({ hop: async () => null, locked: null, restored: null });
+const Ctx = createContext<ReturnHopView>({ hop: async () => null, locked: null, restored: null, failed: null, dismiss: () => {} });
 
 export const useReturnHop = () => useContext(Ctx);
 
@@ -58,8 +70,10 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const [restored, setRestored] = useState(first.view);
   const [locked, setLocked] = useState(first.view?.control ?? null);
+  const [failed, setFailed] = useState<HopFailure | null>(null);
   const restoring = useRef(first.view !== null);
   const busy = useRef(false);
+  const self = useRef<ReturnHopView["hop"]>(async () => null);
 
   // the restored control stays locked until the signing page has answered again (ready, down or update)
   useEffect(() => {
@@ -73,6 +87,9 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (restored && pathname !== pathOf(restored.route)) setRestored(null);
   }, [pathname, restored]);
+
+  // a failed hop's line belongs to the screen it was tapped on
+  useEffect(() => setFailed(null), [pathname]);
 
   // after the screen has drawn its restored sheet
   useLayoutEffect(() => {
@@ -88,6 +105,7 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
       busy.current = false;
       restoring.current = false;
       setLocked(null);
+      setFailed(null);
       if (l.to !== null) navigate(l.to, { replace: true });
       setRestored(l.view);
     };
@@ -101,23 +119,22 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
       busy.current = true;
       restoring.current = false;
       setLocked(view.control);
+      setFailed(null);
       const s = session();
-      let left = false;
+      let o: SignpageOutcome<K> | undefined;
       try {
         try {
           if (s) writeRecord(s, makeRecord(kind, { ...view, scroll: Math.max(0, Math.round(window.scrollY)) }, Date.now()));
         } catch {
           // no storage: the flow still runs, and its return lands on the default route
         }
-        if (!client) return { ok: false, error: { code: SIGNPAGE_CLIENT_CODES.down } };
-        const o = await client.request(kind, { ...params, return_key: RETURN_KEYS[kind] } as SignpageParams[K]).outcome;
-        if (o.ok) {
-          left = true;
-          window.location.assign(SIGN_HOST_URL);
-        }
+        o = client
+          ? await client.request(kind, { ...params, return_key: RETURN_KEYS[kind] } as SignpageParams[K]).outcome
+          : { ok: false, error: { code: SIGNPAGE_CLIENT_CODES.down } };
+        if (o.ok) window.location.assign(SIGN_HOST_URL);
         return o;
       } finally {
-        if (!left) {
+        if (!o?.ok) {
           try {
             s?.removeItem(HOP_RECORD);
           } catch {
@@ -125,11 +142,18 @@ export function ReturnHopProvider({ children }: { children: ReactNode }) {
           }
           busy.current = false;
           setLocked(null);
+          // every outcome but the move to SIGN_HOST is shown in place (a throw is a bad request: shown as an error)
+          setFailed({ control: view.control, why: o ? hopWhy(o.error.code) : "error", retry: () => void self.current(kind, params, view) });
         }
       }
     },
     [client],
   );
+  useEffect(() => {
+    self.current = hop;
+  }, [hop]);
 
-  return <Ctx.Provider value={{ hop, locked, restored }}>{children}</Ctx.Provider>;
+  const dismiss = useCallback((control: string) => setFailed((f) => (f?.control === control ? null : f)), []);
+
+  return <Ctx.Provider value={{ hop, locked, restored, failed, dismiss }}>{children}</Ctx.Provider>;
 }

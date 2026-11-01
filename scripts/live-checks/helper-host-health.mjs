@@ -4,7 +4,8 @@
 //   - each answer is 200 with JSON {ok: true, commit, parts} whose parts are exactly proxy, relay, intents, delegate,
 //     orders and log, each "up" or "down";
 //   - X-Helper-Commit, and the body's commit, equal the expected commit: main's newest first-parent commit that
-//     changed apps/helper (git rev-list -1 --first-parent main -- apps/helper), or --commit;
+//     changed one of the image's inputs (IMAGE_INPUTS, apps/helper/deploy/image-inputs.mjs: the helper, the kit, the
+//     root manifests, the lockfile and .dockerignore), or --commit;
 //   - APP_HOST and SIGN_HOST are each echoed exactly in Access-Control-Allow-Origin; example.com gets none; no answer
 //     carries `*` or Access-Control-Allow-Credentials; every answer has Vary: Origin.
 //   node scripts/live-checks/helper-host-health.mjs [--base <url>] [--commit <sha>] [--record <file>]
@@ -13,6 +14,7 @@ import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { IMAGE_INPUTS } from "../../apps/helper/deploy/image-inputs.mjs";
 
 const KEY = "helper-host-health";
 export const BASE = "https://api.confidential.unrealized.trade";
@@ -75,12 +77,12 @@ export async function read(base = BASE, fetchFn = fetch) {
 }
 
 export function mainCommit() {
-  const out = execFileSync("git", ["rev-list", "-1", "--first-parent", "main", "--", "apps/helper"], {
+  const out = execFileSync("git", ["rev-list", "-1", "--first-parent", "main", "--", ...IMAGE_INPUTS], {
     cwd: fileURLToPath(new URL("../..", import.meta.url)),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
-  if (!SHA.test(out)) throw new Error("main has no commit that changed apps/helper; pass --commit");
+  if (!SHA.test(out)) throw new Error("main has no commit that changed the helper image's inputs; pass --commit");
   return out;
 }
 

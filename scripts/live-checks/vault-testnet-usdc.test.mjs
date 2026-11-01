@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, liveRecord, DEPLOYMENT, USDC_CODE_HASH } from "./vault-testnet-usdc.mjs";
+import { check, liveBytes, liveRecord, DEPLOYMENT, USDC_CODE_HASH } from "./vault-testnet-usdc.mjs";
 import { parseLive } from "../ci/money-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -98,43 +98,57 @@ test("a 429 on a state read is waited out, never read as an answer (the first ba
   assert.equal(r.ok, true, r.lines.join("\n"));
 });
 
-// Card near-rpc-operators: near.org's testnet archive is FastNEAR's (scripts/ci/near-rpc-operators.mjs), so a tx read
-// ok there and on FastNEAR's own archive, while dRPC lacks it, is one operator's read: BAD. The recorded answers of
-// near.org's host for the one tx the run asked it about stand in for both FastNEAR hosts.
-const ORG = "https://archival-rpc.testnet.near.org";
-const HASH = "64jQRWmUEuk8753kgsLRRa1XE6wM72e6uK4ZQTFGLcmE";
-// dRPC lacks HASH; earliest: what dRPC's status names as its earliest block (none: its status has no recorded answer)
-function drpcLacks(earliest) {
-  const answers = load("vault-testnet-usdc.answers.json");
-  const good = replay(answers);
-  const orgBlock = (params) => answers.some((a) => a.url === ORG && a.method === "block" && JSON.stringify(a.params) === JSON.stringify(params));
-  const { height, timestamp_nanosec: time } = answers.find((a) => a.url === ORG && a.method === "block").json.result.header;
+// Card money-gate-light-proof: a tx dRPC lacks is read on FastNEAR alone and passes only by its signed bytes and its
+// light-client proof, as in the money gate. The recording (scripts/ci/money-gate.light-proof.json) holds the record's
+// last tx (noBytes: this record keeps no tx bytes) and a testnet tx made with its bytes (the top level); dRPC is told it
+// lacks the tx, every other request replays the good run.
+const LP = JSON.parse(readFileSync(path.join(HERE, "../ci/money-gate.light-proof.json"), "utf8"));
+function drpcLacks(fx, { proofs = true } = {}) {
+  const good = replay(load("vault-testnet-usdc.answers.json"));
   const answer = (json) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", id: 1, ...json }) });
+  const log = [];
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     const drpc = url.includes("drpc.org");
-    if (drpc && method === "status" && earliest) return answer({ result: { chain_id: "testnet", sync_info: { earliest_block_height: earliest(height) } } });
-    // dRPC's earliest block, an hour after the tx's block
-    if (drpc && method === "block" && earliest && params.block_id === earliest(height)) return answer({ result: { header: { height: params.block_id, timestamp_nanosec: String(BigInt(time) + 3600n * 10n ** 9n) } } });
-    const ours = (method === "EXPERIMENTAL_tx_status" && params.tx_hash === HASH) || (method === "block" && orgBlock(params));
-    if (ours && drpc) return answer({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } });
-    return good(ours ? ORG : url, init);
+    log.push(`${url} ${method} ${params?.tx_hash ?? ""}`);
+    if (drpc && method === "status") return answer({ result: fx.drpcStatus });
+    if (drpc && method === "block" && (params.finality === "final" || params.block_id === fx.head.hash)) return answer({ result: { header: fx.head } });
+    if (method === "EXPERIMENTAL_light_client_proof") {
+      const p = proofs && fx.proofs[params.transaction_hash ?? params.receipt_id];
+      return answer(p ? { result: p } : { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION_OR_RECEIPT" }, code: -32000 } });
+    }
+    if (method === "EXPERIMENTAL_tx_status" && params.tx_hash === fx.tx.hash)
+      return answer(drpc ? { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } } : { result: fx.known });
+    if (method === "block" && params.block_id === fx.known.transaction_outcome.block_hash) return answer({ result: { header: fx.txBlock } });
+    return good(url, init);
   };
-  return { fetchFn, height };
+  return { fetchFn, log };
 }
-const ONE_OP_LINE = `tx ${HASH} .* ok on https://archival-rpc\\.testnet\\.fastnear\\.com, missing on https://near-testnet\\.drpc\\.org, ok on https://archival-rpc\\.testnet\\.near\\.org`;
+const line = (fx) => `tx ${fx.tx.hash} .* ok on https://archival-rpc\\.testnet\\.fastnear\\.com, missing on https://near-testnet\\.drpc\\.org`;
+// the record with its last tx swapped for the recording's tx made with its bytes
+const withBytes = { ...deployment, txs: [...deployment.txs.slice(0, -1), { hash: LP.tx.hash, signer: LP.tx.signer, what: "a transfer", tx_bytes: LP.tx_bytes }] };
 
-test("regression: a tx read ok on FastNEAR's and near.org's hosts while dRPC lacks a tx it keeps is one operator: FAIL", async () => {
-  for (const earliest of [null, (h) => h, (h) => h - 1000]) {
-    const r = await check({ deployment, fetchFn: drpcLacks(earliest).fetchFn, sleep });
-    assert.equal(r.ok, false);
-    assert.match(r.lines.join("\n"), new RegExp(`^BAD ${ONE_OP_LINE}$`, "m"));
-  }
+test("regression: a tx dRPC lacks, read on FastNEAR alone with no light-client proof, is refused: FAIL", async () => {
+  const r = await check({ deployment: withBytes, fetchFn: drpcLacks(LP, { proofs: false }).fetchFn, sleep });
+  assert.equal(r.ok, false);
+  assert.match(r.lines.join("\n"), new RegExp(`^BAD ${line(LP)}; not proven: .*UNKNOWN_TRANSACTION_OR_RECEIPT`, "m"));
 });
 
-test("a tx older than dRPC keeps passes on one operator, said so: PASS", async () => {
-  const { fetchFn, height } = drpcLacks((h) => h + 1);
-  const r = await check({ deployment, fetchFn, sleep });
+test("a tx dRPC lacks with no signed bytes is refused even with its real proofs: FAIL (an outcome proof binds an id, not a tx)", async () => {
+  const r = await check({ deployment, fetchFn: drpcLacks(LP.noBytes).fetchFn, sleep });
+  assert.equal(r.ok, false);
+  assert.match(r.lines.join("\n"), new RegExp(`^BAD ${line(LP.noBytes)}; not proven: no signed tx bytes for it`, "m"));
+});
+
+test("a tx dRPC lacks passes by its bytes and light-client proof on dRPC's final block, said so, and near.org is never asked: PASS", async () => {
+  const { fetchFn, log } = drpcLacks(LP);
+  const r = await check({ deployment: withBytes, fetchFn, sleep });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.match(r.lines.join("\n"), new RegExp(`^ok  ${ONE_OP_LINE}; one operator \\(fastnear\\) read it ok, .*: its block ${height}, \\S+, is older than https://near-testnet\\.drpc\\.org \\(testnet\\) keeps blocks from ${height + 1}, `, "m"));
+  assert.match(r.lines.join("\n"), new RegExp(`^ok  ${line(LP)}; PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash} \\(V0, ${LP.tx.signer} to ${LP.tx.signer}\\): 3 outcome\\(s\\) proven `, "m"));
+  assert.equal(log.filter((l) => l === `https://archival-rpc.testnet.near.org EXPERIMENTAL_tx_status ${LP.tx.hash}`).length, 0);
+});
+
+test("the tx-bytes file the live run writes holds every tx that has bytes, by hash, and nothing else", () => {
+  assert.deepEqual(liveBytes(withBytes), { [LP.tx.hash]: LP.tx_bytes });
+  assert.deepEqual(liveBytes(deployment), {});
 });
