@@ -102,10 +102,10 @@ pnpm install --frozen-lockfile
 pnpm -r --if-present --no-bail run test
 ```
 
-A passing run of `pnpm -r --if-present --no-bail run test` ends with:
+A passing run exits with 0, and every package's summary reads:
 
 ```text
-# fail 0
+ℹ fail 0
 ```
 
 The private buy calls only `@blindfill/kit`'s public entry, as any wallet, bot or agent would, and ends with:
@@ -239,8 +239,6 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 | `scripts/live-checks/` | A live check for each change, run after every deploy |
 
 ## Checks
-
-927 tests, all passing on every pull request.
 
 | Run | Checks |
 |---|---|
