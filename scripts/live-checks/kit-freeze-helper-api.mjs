@@ -3,7 +3,7 @@
 // It reads packages/kit/src/helper/v1.ts and packages/kit/src/index.ts from GitHub (main, then the 06:00Z freeze tag)
 // and parses them with the TypeScript parser, never running them. It checks, against values pinned here from
 // markets.md at research main ffcba5e (the public repo carries no papers):
-//   - the file imports nothing outside the kit (only `import type` of Chain and OrderRecord from ../orders/record, the
+//   - the file imports nothing outside the kit (only `import type` of Chain and OrderRecord from ../orders/record.ts, the
 //     CO's call at 00:35Z), redefines none of the wallet's exported names (a duplicate fails the kit's tsc with
 //     TS2308), and index.ts exports it ("export * from ./helper/v1");
 //   - the path list equals H7's table (markets.md:3329-3345) with 7.1's new POST /v1/log (:3277), and the health parts
@@ -80,7 +80,7 @@ export const STATUS = { token_halted: 503, receiver_is_vault: 403, id_not_ours: 
 const DELEGATE_FIELDS = ["sender_id", "receiver_id", "actions", "nonce", "max_block_height", "public_key"];
 const NEVER_IN_INTENTS = ["msg", "memo", "storage_deposit"];
 // the one import v1.ts makes, and the wallet's exported names it must not declare (CO, 00:35Z)
-export const IMPORTS = ['import type { Chain, OrderRecord } from "../orders/record";'];
+export const IMPORTS = ['import type { Chain, OrderRecord } from "../orders/record.ts";'];
 export const WALLET_NAMES = ["Chain", "CHAINS", "TxRef", "Stage", "ErrorCode", "Operation", "OrderState", "WalletState", "OrderRecord", "SigninWay", "ReturnKey"];
 
 // ---- reading TypeScript as data ----

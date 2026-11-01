@@ -2,8 +2,8 @@
 // (kit-freeze-helper-api.answers.json):
 //   live_main: the real run on GitHub main at 2026-11-01 00:14:53Z, before this card merged: v1.ts answers 404, and the
 //     helper host does not answer (a timeout), so the health part is skipped;
-//   good: v1.ts and index.ts as GitHub serves them once this card merges (the branch's files, with index.ts's export
-//     line), on main and on a stand-in for the 06:00Z tag, and the same real health timeout;
+//   good: v1.ts and index.ts as GitHub serves them once this card merges (both from the branch at 4873cd2, index.ts
+//     with its export line), on main and on a stand-in for the 06:00Z tag, and the same real health timeout;
 //   health_up: a /v1/health answer written to H7 and card helper-host-health's end state (every part "down"), read
 //     from APP_HOST's Origin and from a stranger's, since the host does not answer yet.
 // The bad answers are the good one with one change each: a /v1/intents type that carries a msg (a move into the
@@ -83,8 +83,8 @@ test("recorded bad answer: a CORS list holding \"*\": FAIL", async () => {
 
 test("more bad answers, each caught by its own line", () => {
   const cases = [
-    ["an import from outside the kit", (t) => t.replace('import type { Chain, OrderRecord } from "../orders/record";', 'import type { Chain, OrderRecord } from "../orders/record";\nimport { x } from "@blindfill/wallet";'), /^v1\.ts imports only the kit's order record: imports .*@blindfill\/wallet/],
-    ["no import, the order record redefined", (t) => t.replace('import type { Chain, OrderRecord } from "../orders/record";', 'export type Chain = "solana" | "base" | "robinhood" | "near";\nexport interface OrderRecord { v: 1; variants: [string]; expires_at?: number; order_id: string }'), null],
+    ["an import from outside the kit", (t) => t.replace('import type { Chain, OrderRecord } from "../orders/record.ts";', 'import type { Chain, OrderRecord } from "../orders/record";\nimport { x } from "@blindfill/wallet";'), /^v1\.ts imports only the kit's order record: imports .*@blindfill\/wallet/],
+    ["no import, the order record redefined", (t) => t.replace('import type { Chain, OrderRecord } from "../orders/record.ts";', 'export type Chain = "solana" | "base" | "robinhood" | "near";\nexport interface OrderRecord { v: 1; variants: [string]; expires_at?: number; order_id: string }'), null],
     ["a local Chain beside the import", (t) => t.replace("export type HelperBase64 = string;", 'export type HelperBase64 = string;\nexport type ErrorCode = string;'), /^v1\.ts redefines none of the wallet's exported names: declares ErrorCode/],
     ["/v1/log dropped", (t) => t.replace('  { method: "POST", path: "/v1/log", part: "log", limitBytes: 4096 },\n', ""), /path list .*missing \[POST \/v1\/log\]/],
     ["a third intent kind", (t) => t.replace("export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw;", 'export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw | { intent: "mt_withdraw" };'), /intent kinds \[ft_withdraw,mt_withdraw,transfer\]/],
