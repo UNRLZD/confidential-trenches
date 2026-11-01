@@ -7,11 +7,16 @@
       "types": "./src/derive/index.ts",
       "default": "./src/derive/index.ts"
     },
+    "./store": {
+      "types": "./src/store/index.ts",
+      "default": "./src/store/index.ts"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
-    "test": "node --test test/derive.test.ts ../../scripts/live-checks/kit-freeze-keys.test.mjs",
-    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts test/derive.test.ts"
+    "test": "node --test test/derive.test.ts test/store.test.ts ../../scripts/live-checks/kit-freeze-keys.test.mjs",
+    "test:e2e": "node test/store.e2e.mjs",
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/derive/index.ts src/store/index.ts test/derive.test.ts test/store.test.ts"
   },
   "dependencies": {
     "@noble/curves": "2.4.0",
@@ -22,6 +27,8 @@
     "poseidon-lite": "0.3.0"
   },
   "devDependencies": {
-    "@types/node": "24.10.1"
+    "@types/node": "24.10.1",
+    "fake-indexeddb": "6.2.6",
+    "playwright": "1.63.0"
   }
 }

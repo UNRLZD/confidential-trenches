@@ -1,0 +1,1270 @@
+{
+ "good": {
+  "plant": null,
+  "browser": "153.0.8010.12",
+  "hosts": [
+   {
+    "role": "app",
+    "host": "app.ct.test",
+    "expected": {
+     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "status": 200,
+    "served": {
+     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "origin": "https://app.ct.test",
+    "secure": true
+   },
+   {
+    "role": "sign",
+    "host": "sign.ct.test",
+    "expected": {
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "status": 200,
+    "served": {
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "origin": "https://sign.ct.test",
+    "secure": true
+   },
+   {
+    "role": "sibling",
+    "host": "evil.ct.test",
+    "expected": {},
+    "status": 200,
+    "served": {},
+    "origin": "https://evil.ct.test",
+    "secure": true
+   },
+   {
+    "role": "cross",
+    "host": "app.other.test",
+    "expected": {},
+    "status": 200,
+    "served": {},
+    "origin": "https://app.other.test",
+    "secure": true
+   }
+  ],
+  "fetchSite": {
+   "sibling": "same-site",
+   "cross": "cross-site"
+  },
+  "outside": {
+   "reached": false,
+   "failure": "net::ERR_NAME_NOT_RESOLVED"
+  },
+  "passkey": {
+   "created": true,
+   "prfEnabled": true,
+   "prfBytes": 32,
+   "prfEqual": true,
+   "credentials": 1,
+   "rpId": "sign.ct.test",
+   "heldAtEnd": 1
+  },
+  "recorders": {
+   "shiftSum": 0,
+   "shiftCount": 0,
+   "pages": 1,
+   "frames": 9,
+   "timestampsRise": true
+  },
+  "requests": [
+   {
+    "t": 50,
+    "url": "https://app.ct.test/",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 72,
+    "url": "https://app.ct.test/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 72,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 72,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 72,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 73,
+    "url": "https://app.ct.test/assets/index-Ckddi3aW.js",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "script",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 74,
+    "url": "https://app.ct.test/assets/style-tyJGpiSY.css",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "stylesheet",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 123,
+    "url": "https://app.ct.test/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 123,
+    "url": "https://app.ct.test/assets/ct-stack-1x-z6B8R7os.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 123,
+    "url": "https://app.ct.test/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 123,
+    "url": "https://app.ct.test/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1187,
+    "url": "https://sign.ct.test/",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1233,
+    "url": "https://evil.ct.test/",
+    "host": "evil.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "sign.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1277,
+    "url": "https://sign.ct.test/?from=sibling",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "evil.ct.test",
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
+   },
+   {
+    "t": 1282,
+    "url": "https://app.other.test/",
+    "host": "app.other.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "evil.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1328,
+    "url": "https://sign.ct.test/?from=cross",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "app.other.test",
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
+   },
+   {
+    "t": 1331,
+    "url": "https://example.com/",
+    "host": "example.com",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "app.other.test",
+    "status": null,
+    "failure": "net::ERR_NAME_NOT_RESOLVED"
+   }
+  ],
+  "serverLog": [
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/style-tyJGpiSY.css",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/index-Ckddi3aW.js",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-1x-z6B8R7os.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "evil.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "same-site"
+   },
+   {
+    "host": "app.other.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "cross-site"
+   }
+  ]
+ },
+ "badAuthenticator": {
+  "plant": "no-authenticator",
+  "browser": "153.0.8010.12",
+  "hosts": [
+   {
+    "role": "app",
+    "host": "app.ct.test",
+    "expected": {
+     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "status": 200,
+    "served": {
+     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "origin": "https://app.ct.test",
+    "secure": true
+   },
+   {
+    "role": "sign",
+    "host": "sign.ct.test",
+    "expected": {
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "status": 200,
+    "served": {
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "origin": "https://sign.ct.test",
+    "secure": true
+   },
+   {
+    "role": "sibling",
+    "host": "evil.ct.test",
+    "expected": {},
+    "status": 200,
+    "served": {},
+    "origin": "https://evil.ct.test",
+    "secure": true
+   },
+   {
+    "role": "cross",
+    "host": "app.other.test",
+    "expected": {},
+    "status": 200,
+    "served": {},
+    "origin": "https://app.other.test",
+    "secure": true
+   }
+  ],
+  "fetchSite": {
+   "sibling": "same-site",
+   "cross": "cross-site"
+  },
+  "outside": {
+   "reached": false,
+   "failure": "net::ERR_NAME_NOT_RESOLVED"
+  },
+  "passkey": {
+   "created": false,
+   "error": "NotSupportedError: Resident credentials or empty 'allowCredentials' lists are not supported at this time.",
+   "credentials": 0,
+   "rpId": null,
+   "heldAtEnd": 0
+  },
+  "recorders": {
+   "shiftSum": 0,
+   "shiftCount": 0,
+   "pages": 1,
+   "frames": 6,
+   "timestampsRise": true
+  },
+  "requests": [
+   {
+    "t": 63,
+    "url": "https://app.ct.test/",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 85,
+    "url": "https://app.ct.test/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 85,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 85,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 85,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 88,
+    "url": "https://app.ct.test/assets/index-Ckddi3aW.js",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "script",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 88,
+    "url": "https://app.ct.test/assets/style-tyJGpiSY.css",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "stylesheet",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/ct-stack-1x-z6B8R7os.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 124,
+    "url": "https://app.ct.test/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1132,
+    "url": "https://sign.ct.test/",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1150,
+    "url": "https://evil.ct.test/",
+    "host": "evil.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "sign.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1163,
+    "url": "https://sign.ct.test/?from=sibling",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "evil.ct.test",
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
+   },
+   {
+    "t": 1168,
+    "url": "https://app.other.test/",
+    "host": "app.other.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "evil.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1189,
+    "url": "https://sign.ct.test/?from=cross",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "app.other.test",
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
+   },
+   {
+    "t": 1194,
+    "url": "https://example.com/",
+    "host": "example.com",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "app.other.test",
+    "status": null,
+    "failure": "net::ERR_NAME_NOT_RESOLVED"
+   }
+  ],
+  "serverLog": [
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/style-tyJGpiSY.css",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/index-Ckddi3aW.js",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-1x-z6B8R7os.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "evil.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "same-site"
+   },
+   {
+    "host": "app.other.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "cross-site"
+   }
+  ]
+ },
+ "badSibling": {
+  "plant": "no-sibling",
+  "browser": "153.0.8010.12",
+  "hosts": [
+   {
+    "role": "app",
+    "host": "app.ct.test",
+    "expected": {
+     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "status": 200,
+    "served": {
+     "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "origin": "https://app.ct.test",
+    "secure": true
+   },
+   {
+    "role": "sign",
+    "host": "sign.ct.test",
+    "expected": {
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "status": 200,
+    "served": {
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+     "integrity-policy": "blocked-destinations=(script)"
+    },
+    "origin": "https://sign.ct.test",
+    "secure": true
+   },
+   {
+    "role": "sibling",
+    "host": "evil.ct.test",
+    "expected": {},
+    "status": 421,
+    "served": {},
+    "origin": "https://evil.ct.test",
+    "secure": true
+   },
+   {
+    "role": "cross",
+    "host": "app.other.test",
+    "expected": {},
+    "status": 200,
+    "served": {},
+    "origin": "https://app.other.test",
+    "secure": true
+   }
+  ],
+  "fetchSite": {
+   "sibling": "same-site",
+   "cross": "cross-site"
+  },
+  "outside": {
+   "reached": false,
+   "failure": "net::ERR_NAME_NOT_RESOLVED"
+  },
+  "passkey": {
+   "created": true,
+   "prfEnabled": true,
+   "prfBytes": 32,
+   "prfEqual": true,
+   "credentials": 1,
+   "rpId": "sign.ct.test",
+   "heldAtEnd": 1
+  },
+  "recorders": {
+   "shiftSum": 0,
+   "shiftCount": 0,
+   "pages": 1,
+   "frames": 6,
+   "timestampsRise": true
+  },
+  "requests": [
+   {
+    "t": 62,
+    "url": "https://app.ct.test/",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 101,
+    "url": "https://app.ct.test/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 101,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 102,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 102,
+    "url": "https://app.ct.test/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "font",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 102,
+    "url": "https://app.ct.test/assets/index-Ckddi3aW.js",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "script",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 102,
+    "url": "https://app.ct.test/assets/style-tyJGpiSY.css",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "stylesheet",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 161,
+    "url": "https://app.ct.test/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 164,
+    "url": "https://app.ct.test/assets/ct-stack-1x-z6B8R7os.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 165,
+    "url": "https://app.ct.test/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 165,
+    "url": "https://app.ct.test/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 165,
+    "url": "https://app.ct.test/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 165,
+    "url": "https://app.ct.test/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+    "host": "app.ct.test",
+    "method": "GET",
+    "type": "image",
+    "navigation": false,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1193,
+    "url": "https://sign.ct.test/",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "app.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1213,
+    "url": "https://evil.ct.test/",
+    "host": "evil.ct.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "sign.ct.test",
+    "status": 421,
+    "failure": null
+   },
+   {
+    "t": 1226,
+    "url": "https://sign.ct.test/?from=sibling",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "evil.ct.test",
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
+   },
+   {
+    "t": 1230,
+    "url": "https://app.other.test/",
+    "host": "app.other.test",
+    "method": "GET",
+    "type": "document",
+    "navigation": true,
+    "frameHost": "evil.ct.test",
+    "status": 200,
+    "failure": null
+   },
+   {
+    "t": 1250,
+    "url": "https://sign.ct.test/?from=cross",
+    "host": "sign.ct.test",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "app.other.test",
+    "status": null,
+    "failure": "net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin"
+   },
+   {
+    "t": 1253,
+    "url": "https://example.com/",
+    "host": "example.com",
+    "method": "GET",
+    "type": "fetch",
+    "navigation": false,
+    "frameHost": "app.other.test",
+    "status": null,
+    "failure": "net::ERR_NAME_NOT_RESOLVED"
+   }
+  ],
+  "serverLog": [
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/index-Ckddi3aW.js",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/style-tyJGpiSY.css",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-1x-z6B8R7os.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "app.ct.test",
+    "method": "GET",
+    "path": "/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+    "status": 200,
+    "fetchSite": "same-origin"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "evil.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 421,
+    "fetchSite": "none"
+   },
+   {
+    "host": "evil.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 421,
+    "fetchSite": "none"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "same-site"
+   },
+   {
+    "host": "app.other.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "none"
+   },
+   {
+    "host": "sign.ct.test",
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "fetchSite": "cross-site"
+   }
+  ]
+ }
+}
