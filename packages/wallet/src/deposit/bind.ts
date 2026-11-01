@@ -534,9 +534,19 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     // note's calls at it, the one whose tx both RPCs read FINAL with its Delegate run and succeeded) is done in every
     // receipt, the pages still do not hold P, and U's USDC is back to what that call was signed from. With no hash for
     // any call at that nonce, `out`'s bytes go again once for one, and nothing is signed; sender_struck to them stops.
+    //   The call that used the nonce may be U's call for another note (a front-run note's call carried after this
+    //   note's call was signed at the same nonce, or a stale nonce read on both RPCs): found by the same proof among
+    //   U's calls in the other notes, it means none of this note's calls ran, so the next call is signed with no
+    //   balance rule (nothing of this P is on its way; the signer's own read still needs U to hold the amount).
     const afterRefusal = async (out: SignedDepositDelegate): Promise<Step | null> => {
       await reread();
-      const dead = relayer === null ? null : await findDeadCall(calls, out.nonce, rpcs, relayer);
+      let dead = relayer === null ? null : await findDeadCall(calls, out.nonce, rpcs, relayer);
+      let ours = dead !== null;
+      if (dead === null && relayer !== null) {
+        const others = (await store.list()).filter((n) => n.id !== own.noteId).flatMap((n) => n.calls ?? []).filter((c) => c.sender_id === U);
+        dead = await findDeadCall(others, out.nonce, rpcs, relayer);
+        ours = false;
+      }
       if (dead === null) {
         if (!calls.some((c) => c.nonce === out.nonce && c.tx_hashes.length > 0) && !resent.has(out.nonce)) {
           resent.add(out.nonce);
@@ -545,11 +555,12 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         }
         return null;
       }
+      const used = dead;
       if ((await watch.read(signal)).state !== "absent") return null; // the pages once more, after the tx reads
       const c = await signing(async () => {
         const c = await depositDelegate(seed, own.s, own.i, call, rpcs);
         if (c.nonce <= out.nonce) throw new DepositBindRefused("nonce", "a new call must be past the dead one's nonce");
-        if (c.balance < dead.balance) throw new DepositBindRefused("early", "U's USDC is not back to what the dead call was signed from");
+        if (ours && c.balance < used.balance) throw new DepositBindRefused("early", "U's USDC is not back to what the dead call was signed from");
         return c;
       });
       return c === null ? null : commit(c);

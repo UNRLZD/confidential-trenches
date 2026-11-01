@@ -1324,3 +1324,86 @@ test("R9 (mutate3): another one-time id's live call does not hold U's DeleteAcco
   t.chain.blocks(A.max_block_height + LAPSE_MARGIN + 1n - t.chain.low());
   assert.equal(await allowed(checkCleanup("DeleteAccount", t.u, t.deps.rpcs, t.store)), "allowed");
 });
+
+// ---------- review round 3 on 25e1631 (X1, X2), taken in as written ----------
+
+test("X1 (expect FAIL on 25e1631): a second-arrival call refused because the previous note's call used its nonce is not stuck: a new call on its P lands", async () => {
+  // U's first note landed as front_run (a row naming P1 by another depositor) while its own call A still waits at the
+  // relayer; the caller signs the amount again on second arrival 0 (bind.ts:37-39). Its call B is at A's nonce (A has
+  // not run). The relayer carries A first: A's Delegate runs (the vault refuses the used P1, the USDC comes back), so B
+  // gets bad_nonce and can never land. Nothing of P2 is out: a new call on P2 is safe, and the deposit must land.
+  const store = await noteStore();
+  const first = await store.planDeposit(1n, pc);
+  const i = (first.ref as { i: number }).i;
+  const u = depositAccount(SEED, 1n, i).account;
+  const chain = new Chain(u);
+  const rpcs = chain.rpcs();
+  const P1 = first.precommitment;
+  await store.move(first.id, "PLANNED", "INCOMING");
+  const A = await depositDelegate(SEED, 1n, i, { network: "testnet", amount: AMOUNT, precommitment: P1 }, rpcs);
+  await store.addCall(first.id, { signed_delegate: A.signed_delegate, sender_id: A.sender_id, receiver_id: A.receiver_id, nonce: A.nonce, max_block_height: A.max_block_height, public_key: A.public_key, balance: A.balance }, 0);
+  chain.addRow(P1, { depositor: "attacker.testnet" });
+  await store.move(first.id, "INCOMING", "UNSPENT", { leaf: { value: AMOUNT, label: 1000n, commitment: noteCommitment(AMOUNT, 1000n, P1), leafIndex: 0n } });
+  const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
+  const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
+  let r: ReturnType<typeof relayer>;
+  const script = { shift: () => (r.sent.at(-1)!.nonce <= chain.a.nonce ? "bad_nonce" : "tx") } as unknown as Reply[];
+  // A's Delegate runs and the vault refuses the used P1 (U's nonce moves, the USDC comes back); any other call lands
+  r = relayer(chain, script, (s) => (s.p === P1 ? ((chain.a.nonce = chain.b.nonce = s.nonce), chain.finals.add(s.hash)) : lands(chain)(s)));
+  let queued = true;
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (queued) {
+      queued = false; // the relayer carries A, which reached it first
+      const res = await r.fetchFn(url, { method: "POST", body: JSON.stringify({ signed_delegate: A.signed_delegate }) });
+      await store.addCallTx(first.id, A, ((await res.json()) as { tx_hash: string }).tx_hash);
+    }
+    return r.fetchFn(url, init);
+  }) as typeof fetch;
+  const ac = new AbortController();
+  let ticks = 0;
+  const sleep = async () => (chain.blocks(1n), ++ticks === 3000 && ac.abort(new Error("stuck")), await turn());
+  const out = await bindDeposit(SEED, { network: "testnet", s: 1n, i, noteId: second.id, amount: AMOUNT }, { store, rpcs, fetchFn, sleep, signal: ac.signal, relayerAccount: RELAYER }).catch((e: Error) => e);
+  const sent = r.sent.map((s) => `${s.p === P1 ? "P1" : "P2"}@${s.nonce - A.nonce}`).join(", ");
+  assert.equal(r.sent[1]!.nonce, A.nonce, "the setup: B is at A's nonce");
+  assert.ok(!(out instanceof Error), `the second note is stuck (${(out as Error).message}) after ${ticks} polls; sent (nonce - A's): ${sent}`);
+  landed(out as BindOutcome);
+});
+
+test("X2 (kills Q3): after a reload with [A dead, A2 at the next nonce run but not final] and extra USDC in U, nothing new is signed on P", async () => {
+  const t = await setup();
+  await t.store.move(t.note.id, "PLANNED", "INCOMING");
+  const sign = async () => {
+    const call = await depositDelegate(SEED, 1n, t.i, { network: "testnet", amount: AMOUNT, precommitment: t.note.precommitment }, t.deps.rpcs);
+    const dl = decodeSignedDelegate(new Uint8Array(Buffer.from(call.signed_delegate, "base64")));
+    const fc = dl.actions[0] as { method_name: string; args: Uint8Array; gas: bigint; deposit: bigint };
+    const view = { sender: call.sender_id, receiver: call.receiver_id, nonce: call.nonce, mbh: call.max_block_height, pk: call.public_key, sig: `ed25519:${base58.encode(dl.signature)}`,
+      inner: { FunctionCall: { method_name: fc.method_name, args: Buffer.from(fc.args).toString("base64"), gas: Number(fc.gas), deposit: fc.deposit.toString() } } };
+    return { call, view };
+  };
+  const rec = (c: Awaited<ReturnType<typeof depositDelegate>>) => ({ signed_delegate: c.signed_delegate, sender_id: c.sender_id, receiver_id: c.receiver_id, nonce: c.nonce, max_block_height: c.max_block_height, public_key: c.public_key, balance: c.balance });
+  // A ran, the vault refused it, the USDC came back: its tx FINAL
+  const A = await sign();
+  const hA = base58.encode(new Uint8Array(32).fill(0x61));
+  t.chain.txs.set(hA, A.view as unknown as Sent);
+  t.chain.finals.add(hA);
+  t.chain.a.nonce = t.chain.b.nonce = A.call.nonce;
+  await t.store.addCall(t.note.id, rec(A.call), 0);
+  await t.store.addCallTx(t.note.id, A.call, hA);
+  // A2 (the next nonce) signed past A's window: its Delegate ran, U's USDC is on its way to the vault, its tx not final
+  t.chain.blocks(130n);
+  const A2 = await sign();
+  assert.equal(A2.call.nonce, A.call.nonce + 1n);
+  const hA2 = base58.encode(new Uint8Array(32).fill(0x62));
+  t.chain.txs.set(hA2, A2.view as unknown as Sent);
+  t.chain.a.nonce = t.chain.b.nonce = A2.call.nonce;
+  await t.store.addCall(t.note.id, rec(A2.call), 1);
+  await t.store.addCallTx(t.note.id, A2.call, hA2);
+  // the user sent the same amount to U again (no second-arrival note yet): U's balance is back to A's
+  t.chain.balance = A.call.balance;
+  const ac = new AbortController();
+  let ticks = 0;
+  t.chain.tick = () => (t.chain.blocks(1n), ++ticks === 400 && ac.abort(new Error("caller stopped")));
+  resetBindSession(); // a reload
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, signal: ac.signal }), /caller stopped/);
+  assert.deepEqual(t.sent.map((s) => s.nonce - A.call.nonce), [], "a new call on P went out while A2's USDC is on its way to the vault");
+});
