@@ -8,6 +8,7 @@
 //   Tx: solana <signature>
 //   Tx: base <0x hash>
 //   Tx: robinhood <0x hash>
+//   Deleted: near <account>            a one-use account the record's own txs swept, now gone (also near-testnet)
 // Refused: a record that is not a regular file (a symlink); a record whose CARD, Money path or Tx lines do not parse
 // as its own card's sections; a money-path record with no Tx; a Tx listed twice, in any record; in the last live
 // section, a word shaped like a tx id of a listed chain (a 0x hash, 43-44 or 86-88 base58) on a line that names a
@@ -28,6 +29,11 @@
 // success, reaches a final block dRPC names on the tx's network (proveNearTx), and its signed bytes, from the record's
 // tx-bytes file or rebuilt from FastNEAR's own tx JSON (findTxBytes), hash to its id and name its signer; the output
 // names it PROVEN ON dRPC.
+// A one-use NEAR account is swept in two txs: its money moves in a plain Transfer to the beneficiary, a Tx line whose
+// every receipt succeeds like any other, then a separate DeleteAccount the record does not list (NEAR's gas refund to the
+// deleted signer fails by design, so that tx is never read as succeeded). A Deleted line names the account; it must be
+// the signer of a Tx the record lists on the same chain, and it passes only when view_account at the final block
+// answers UNKNOWN_ACCOUNT naming it on two operators (dRPC and FastNEAR) and no host reads it present, at any time.
 // near-testnet is NEAR's test network, read on its own RPCs with the same rules: a testnet tx written as "Tx: near" is
 // read on the mainnet RPCs, where it does not exist, and is refused. A testnet tx is never real-money proof: parseLive's
 // `real` lists the mainnet txs only, and a release counts those alone.
@@ -87,6 +93,8 @@ FORMAT["near-testnet"] = FORMAT.near;
 const LINE_START = String.raw`^\s*(?:(?:[-*+]|\d+[.)])\s+|>\s*)*(?:\*\*)?\s*`;
 const TX_LINE = new RegExp(`${LINE_START}Tx\\s*(?:\\*\\*)?\\s*:`, "i");
 const MONEY_LINE = new RegExp(`${LINE_START}Money\\s+path\\s*(?:\\*\\*)?\\s*:`, "i");
+const DELETED_LINE = new RegExp(`${LINE_START}Deleted\\s*(?:\\*\\*)?\\s*:`, "i");
+const RECORD_LINE = (l) => TX_LINE.test(l) || MONEY_LINE.test(l) || DELETED_LINE.test(l);
 // a word (a run of letters and digits) shaped like a tx id of a listed chain: a 0x hash in either case, a NEAR tx id
 // (43-44 base58, also the shape of a block hash or a wallet address), a Solana signature (86-88 base58, also the shape
 // of an order's signature)
@@ -111,7 +119,7 @@ const idColumn = (row) =>
 const ACCOUNT = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
 // The last live section of a record: null when there is none and nothing in the record looks like one, else
-// { moneyPath, txs, real, problems, verdict }, real being the txs on a mainnet (none of TESTNET).
+// { moneyPath, txs, deleted, real, problems, verdict }, real being the txs on a mainnet (none of TESTNET).
 export function parseLive(text, key) {
   const lines = text.split(/\r?\n/);
   const problems = [];
@@ -129,17 +137,24 @@ export function parseLive(text, key) {
     return s;
   };
   lines.forEach((l, i) => {
-    if ((TX_LINE.test(l) || MONEY_LINE.test(l)) && stageAt(i) !== "live") problems.push(`line ${i + 1} is outside a live record: ${l.trim()}`);
+    if (RECORD_LINE(l) && stageAt(i) !== "live") problems.push(`line ${i + 1} is outside a live record: ${l.trim()}`);
   });
   const lives = sections.filter(([s]) => s === "live");
-  if (!lives.length) return problems.length ? { moneyPath: null, txs: [], real: [], problems } : null;
+  if (!lives.length) return problems.length ? { moneyPath: null, txs: [], deleted: [], real: [], problems } : null;
   const [, start, verdict] = lives[lives.length - 1];
   let moneyPath = null;
   const txs = [];
+  const deleted = [];
   const prose = []; // [line index, line] of every other line of the section
   for (let j = start + 1; j < lines.length && !/^\s*CARD\b/.test(lines[j]); j++) {
     const l = lines[j].trim();
-    if (!MONEY_LINE.test(l) && !TX_LINE.test(l)) prose.push([j, l]);
+    if (!RECORD_LINE(l)) prose.push([j, l]);
+    if (DELETED_LINE.test(l)) {
+      const d = l.match(/^Deleted: (\S+) (\S+)$/);
+      if (d && NEAR.has(d[1]) && ACCOUNT.test(d[2]) && d[2].length >= 2 && d[2].length <= 64) deleted.push({ chain: d[1], account: d[2] });
+      else problems.push(`bad Deleted line: ${l}`);
+      continue;
+    }
     if (MONEY_LINE.test(l)) {
       const mp = l.match(/^Money path: (yes|no)$/);
       if (mp) moneyPath = mp[1] === "yes";
@@ -157,6 +172,8 @@ export function parseLive(text, key) {
     else if (NEAR.has(chain) && !(signer && ACCOUNT.test(signer))) problems.push(`${chain} Tx ${hash} needs its signer account`);
     else txs.push({ chain, hash, signer });
   }
+  for (const d of deleted)
+    if (!txs.some((t) => t.chain === d.chain && t.signer === d.account)) problems.push(`Deleted ${d.chain} ${d.account} names no listed Tx's signer on ${d.chain}`);
   // a tx in any other shape (in backticks, a table, "Tx hash:", "Txs:", a link) would never be read back: every
   // tx-shaped word on a prose line that names a transaction must be one a parsed Tx line lists, so such a line may cite
   // a listed tx and nothing else
@@ -175,7 +192,7 @@ export function parseLive(text, key) {
       let k = j - 1;
       while (k > start && !lines[k].trim()) k--;
       const a = lines[k].trim();
-      const above = k > start && !a.startsWith("|") && !TX_LINE.test(a) && !MONEY_LINE.test(a) ? a : "";
+      const above = k > start && !a.startsWith("|") && !RECORD_LINE(a) ? a : "";
       header = { tx: namesTx(l) || namesTx(above) || (k > start && TX_LINE.test(a) && idColumn(l)), end: j };
     } else header.end = j;
     if (!namesTx(l) && !(row && header.tx)) continue;
@@ -184,7 +201,7 @@ export function parseLive(text, key) {
   }
   if (moneyPath === null) problems.push('the live record has no "Money path: yes|no" line');
   else if (moneyPath && txs.length === 0 && problems.length === 0) problems.push("a money-path live record lists no Tx");
-  return { moneyPath, txs, real: txs.filter((t) => !TESTNET.has(t.chain)), problems, verdict };
+  return { moneyPath, txs, deleted, real: txs.filter((t) => !TESTNET.has(t.chain)), problems, verdict };
 }
 
 // A rate limit is waited out, never read as an answer: a public RPC may answer HTTP 429 (or code -429) with a
@@ -253,40 +270,11 @@ async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) 
   throw last;
 }
 
-// The one failed receipt a read passes: NEAR's gas refund to an account its own tx deleted. A tx that holds
-// DeleteAccount (signer = receiver: a one-use account closing itself into its beneficiary) succeeds, then NEAR sends
-// the unused gas back from "system" to the signer, which no longer exists, so that refund fails AccountDoesNotExist
-// (mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM, read 2026-11-01: receipt GBkJTsykxG, system to the signer, one
-// Transfer of 229993650000000000000 yocto, receipt signer_id the account, failed; the beneficiary's Transfer 9wEBNxb1a7,
-// receipt signer_id system, succeeded). It needs EXPERIMENTAL_tx_status: only its `receipts` list names each receipt's
-// predecessor_id, signer_id and actions. `r` is that answer, `o` one failed entry of its receipts_outcome; anything
-// missing is not that refund.
-export function isDeleteRefund(r, o) {
-  const tx = r?.transaction;
-  const a = tx?.signer_id;
-  if (typeof a !== "string" || tx.receiver_id !== a || !Array.isArray(tx.actions)) return false;
-  if (!tx.actions.some((x) => x !== null && typeof x === "object" && "DeleteAccount" in x)) return false;
-  const same = Array.isArray(r.receipts) ? r.receipts.filter((x) => x?.receipt_id === o?.id) : [];
-  if (typeof o?.id !== "string" || same.length !== 1) return false;
-  const [rc] = same;
-  if (rc.predecessor_id !== "system" || rc.receiver_id !== a) return false;
-  // A gas refund carries the tx's signer; DeleteAccount's balance payout has the same shape but carries system, and
-  // with beneficiary = the account itself it fails the same way while the balance burns (P10b).
-  if (rc.receipt?.Action?.signer_id !== a) return false;
-  const acts = rc.receipt?.Action?.actions;
-  if (!Array.isArray(acts) || acts.length !== 1 || acts[0] === null || typeof acts[0] !== "object") return false;
-  if (Object.keys(acts[0]).length !== 1 || !("Transfer" in acts[0])) return false;
-  const kind = o.outcome?.status?.Failure?.ActionError?.kind;
-  return kind !== null && typeof kind === "object" && kind.AccountDoesNotExist?.account_id === a;
-}
-
-// How many receipts of an EXPERIMENTAL_tx_status answer failed, the one delete refund above not counted (at most one
-// is passed: a second counts as failed). A receipt whose status is not an object counts as failed. null: the answer
-// has no receipts_outcome or no receipts list, so it cannot be read.
+// How many receipts of an EXPERIMENTAL_tx_status answer failed; a receipt whose status is not an object counts as
+// failed. null: the answer has no receipts_outcome or no receipts list, so it cannot be read.
 export function failedReceipts(r) {
   if (!Array.isArray(r?.receipts_outcome) || !Array.isArray(r.receipts)) return null;
-  const failed = r.receipts_outcome.filter((o) => typeof o?.outcome?.status !== "object" || o.outcome.status === null || "Failure" in o.outcome.status);
-  return failed.length - Math.min(1, failed.filter((o) => isDeleteRefund(r, o)).length);
+  return r.receipts_outcome.filter((o) => typeof o?.outcome?.status !== "object" || o.outcome.status === null || "Failure" in o.outcome.status).length;
 }
 
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
@@ -334,6 +322,20 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
     const b = await rpc(fetchFn, url, "eth_getBlockByNumber", [j.result.blockNumber, false], sleep, rateWait);
     if (!b.result?.timestamp) return "no block time";
     return when(Number(b.result.timestamp) * 1000, floor);
+  } catch (e) {
+    if (e?.notWaited) return NOT_WAITED;
+    return `no answer (${String(e?.message ?? e).slice(0, 80)})`;
+  }
+}
+
+// One read of a swept NEAR account on one RPC, at its final block: "gone" only when view_account answers
+// UNKNOWN_ACCOUNT naming that account; "present (...)" when it holds the account; else why it could not be read.
+export async function readGone(fetchFn, url, account, sleep = wait, rateWait = true) {
+  try {
+    const j = await rpc(fetchFn, url, "query", { request_type: "view_account", account_id: account, finality: "final" }, sleep, rateWait);
+    if (j.error) return j.error.cause?.name === "UNKNOWN_ACCOUNT" && j.error.cause.info?.requested_account_id === account ? "gone" : `error ${JSON.stringify(j.error).slice(0, 160)}`;
+    if (typeof j.result?.amount === "string") return `present (holds ${j.result.amount.slice(0, 40)} yocto)`;
+    return "no answer (a reply with no account and no error)";
   } catch (e) {
     if (e?.notWaited) return NOT_WAITED;
     return `no answer (${String(e?.message ?? e).slice(0, 80)})`;
@@ -767,6 +769,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   const read = [];
   const notes = []; // a host's 429 not waited because two operators read it ok
   const proven = []; // a NEAR tx read ok on one operator and proven by its light-client proof on the other
+  const gone = []; // a Deleted account read gone on two operators
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
   const byCard = new Map();
   for (const c of money?.commits ?? []) {
@@ -829,8 +832,23 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       if (decisive.length || okOps().size < 2)
         refusals.push(`${path}: ${tx.chain} ${tx.hash}: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}${why}`);
     }
+    // a bad Deleted line is a problem above and reads nothing
+    if (live.problems.length) continue;
+    for (const { chain, account } of live.deleted) {
+      const answers = [];
+      const goneOps = () => new Set(answers.filter((a) => a.r === "gone").map((a) => operatorOf(chain, a.url)));
+      for (const url of rpcs[chain]) {
+        const rateWait = goneOps().size < 2 && !goneOps().has(operatorOf(chain, url));
+        answers.push({ url, r: await readGone(fetchFn, url, account, sleep, rateWait) });
+      }
+      for (const a of answers) if (a.r === NOT_WAITED) notes.push(`${chain} ${account} on ${a.url}: ${NOT_WAITED}`);
+      const note = TESTNET.has(chain) ? " (testnet, not real-money proof)" : "";
+      if (goneOps().size >= 2 && !answers.some((a) => a.r.startsWith("present")))
+        gone.push(`${chain} ${account} gone (UNKNOWN_ACCOUNT) on ${answers.filter((a) => a.r === "gone").map((a) => a.url).join(", ")}${note}`);
+      else refusals.push(`${path}: ${chain} ${account} is not gone: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}`);
+    }
   }
-  return { refusals, read, notes, proven };
+  return { refusals, read, notes, proven, gone };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
@@ -906,10 +924,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
-  const { refusals, read, notes, proven } = await moneyGate(records, fetch, RPCS, { every, money });
+  const { refusals, read, notes, proven, gone } = await moneyGate(records, fetch, RPCS, { every, money });
   for (const r of read) console.log(`money-gate: ${r}`);
   for (const n of notes) console.log(`money-gate: ${n}`);
   for (const p of proven) console.log(`money-gate: ${p}`);
+  for (const g of gone) console.log(`money-gate: ${g}`);
   if (refusals.length) {
     for (const r of refusals) console.error(`money-gate: REFUSED: ${r}`);
     process.exit(1);

@@ -22,6 +22,7 @@ export const CHANGED = [
   "scripts/live-checks/app-release-sri.mjs",
   "scripts/live-checks/app-shell.mjs",
   "scripts/live-checks/delete-refund-readback.mjs",
+  "scripts/live-checks/delete-refund-readback.sweep.mjs",
   "scripts/live-checks/helper-host-health.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",

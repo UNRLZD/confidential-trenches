@@ -42,6 +42,13 @@
 // - Every note write runs under the Web Lock "ct-wallet/notes", so two tabs never both act on one read. With no Web
 //   Locks the note store does not open, as the seed is never written without them (../store). A closed note store
 //   writes nothing more, also for a move already inside the lock.
+// - Bind calls (card wallet-deposit-bind, R2-2): every deposit call U signs for a note is written with the note before
+//   it is sent, one write under the notes lock (addCall), and the relayer's tx hash for it once heard (addCallTx). The
+//   bind sends nothing whose write failed. addCall is a compare-and-set on the number of calls the caller last read,
+//   so of two binds of one note (two tabs, a reload) only the first to write sends; the other follows that call. A
+//   note holds its calls from INCOMING on (a call is signed only for an INCOMING note) and keeps them once landed, so
+//   the clean-up gate reads every call U signed after a reload. Nothing in a call is secret: its signed bytes go to
+//   the relayer and the rest is on chain.
 import { VAULT_FIELD_P } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
 import type { WalletStore } from "../store/index.ts";
@@ -86,7 +93,21 @@ export type NoteRecord = {
   deadlineMs?: bigint; // HELD and RESERVED: the attempt's deadline_ms (block time)
   attempt?: string; // HELD and RESERVED: the attempt whose proof holds it (not a secret)
   tab?: string; // HELD: the id of the tab whose proof holds it (not a secret)
+  calls?: BindCall[]; // from INCOMING on: the deposit calls U signed for it, in the order written
 };
+
+/** A deposit call U signed for a note (../deposit/delegate.ts SignedDepositDelegate), and the tx hashes heard for it. */
+export type BindCall = {
+  signed_delegate: string; // borsh(SignedDelegateAction), standard base64
+  sender_id: string; // U
+  receiver_id: string;
+  nonce: bigint;
+  max_block_height: bigint;
+  public_key: string;
+  balance: bigint; // U's USDC in the read the call was signed from
+  tx_hashes: string[]; // the relayer's 200 {tx_hash} answers for these bytes, as heard
+};
+export type NewBindCall = Omit<BindCall, "tx_hashes">;
 
 /** A note born PLANNED (a return, move or second-arrival note) or UNSPENT (a change or refund note, or one restore found). */
 export type NewNote = {
@@ -108,6 +129,13 @@ export interface NoteStore {
   planDeposit(scope: bigint, precommitmentOf: (ref: NoteRef) => bigint): Promise<NoteRecord>;
   add(note: NewNote): Promise<NoteRecord>;
   move(id: string, from: NoteState, to: NoteState, fields?: MoveFields): Promise<NoteRecord>;
+  /**
+   * Writes a call U signed for an INCOMING note, before it is sent, when the note still holds `seen` calls (else
+   * nothing is written: another bind's call came first). Returns the note as stored.
+   */
+  addCall(id: string, call: NewBindCall, seen: number): Promise<NoteRecord>;
+  /** Writes a tx hash the relayer gave for one of the note's calls (named by its nonce and max_block_height). */
+  addCallTx(id: string, call: Pick<BindCall, "nonce" | "max_block_height">, txHash: string): Promise<NoteRecord>;
   /** Lets this tab's lock go, as the page's death does (tests; a page need not call it). */
   close(): void;
 }
@@ -204,12 +232,46 @@ function u64(d: unknown, what: string): bigint {
   if (typeof d !== "bigint" || d <= 0n || d >= 1n << 64n) throw new Error(`${what} is a u64 bigint above 0`);
   return d;
 }
+const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const B58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
+const U_ID = /^[0-9a-f]{64}$/;
+// A bind call's shape: the signed bytes (at most the relayer's 4,096-byte body), U's implicit id, the fields the bind
+// follows it by, and the hashes heard, each a 32-byte base58 hash at most once.
+function checkCall(c: unknown, what: string, hashes: boolean): BindCall {
+  if (c === null || typeof c !== "object" || Array.isArray(c)) throw new Error(`${what} is not a call`);
+  const keys = ["signed_delegate", "sender_id", "receiver_id", "nonce", "max_block_height", "public_key", "balance"];
+  onlyKeys(c, hashes ? [...keys, "tx_hashes"] : keys, what);
+  const x = c as BindCall;
+  if (typeof x.signed_delegate !== "string" || x.signed_delegate.length > 5_464 || !B64.test(x.signed_delegate)) throw new Error(`${what}: signed_delegate is base64`);
+  if (typeof x.sender_id !== "string" || !U_ID.test(x.sender_id)) throw new Error(`${what}: sender_id is an implicit id`);
+  if (typeof x.receiver_id !== "string" || x.receiver_id.length === 0 || x.receiver_id.length > 64) throw new Error(`${what}: receiver_id is an account`);
+  if (typeof x.public_key !== "string" || !/^ed25519:[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(x.public_key)) throw new Error(`${what}: public_key is ed25519`);
+  u64(x.nonce, `${what}: nonce`);
+  u64(x.max_block_height, `${what}: max_block_height`);
+  if (typeof x.balance !== "bigint" || x.balance < 0n || x.balance >= 1n << 128n) throw new Error(`${what}: balance is a u128 bigint`);
+  if (hashes) {
+    if (!Array.isArray(x.tx_hashes) || x.tx_hashes.some((h) => typeof h !== "string" || h.length > 44 || !B58.test(h)) || new Set(x.tx_hashes).size !== x.tx_hashes.length)
+      throw new Error(`${what}: tx_hashes are base58 hashes, each once`);
+  }
+  return x;
+}
+// The calls of a note: one sender, nonces never going back, (nonce, max_block_height) naming one call.
+function checkCalls(calls: unknown, id: string): BindCall[] {
+  if (!Array.isArray(calls) || calls.length === 0) throw new Error(`note ${id}: calls is a list of calls`);
+  calls.forEach((c, k) => {
+    checkCall(c, `note ${id} call ${k}`, true);
+    const prev = k === 0 ? undefined : (calls[k - 1] as BindCall);
+    if (prev !== undefined && (c.sender_id !== prev.sender_id || c.nonce < prev.nonce)) throw new Error(`note ${id}: call ${k} is not U's next`);
+    if (calls.some((d: BindCall, j) => j < k && d.nonce === c.nonce && d.max_block_height === c.max_block_height)) throw new Error(`note ${id}: call ${k} is written twice`);
+  });
+  return calls;
+}
 
 // A record read back: the whole shape, so a broken record stops the caller instead of being acted on.
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -225,6 +287,11 @@ function checkRecord(id: string, r: unknown): NoteRecord {
   if (proving !== (typeof n.attempt === "string" && HEX32.test(n.attempt))) throw new Error(`note ${id}: an attempt in HELD and RESERVED only`);
   if ((n.state === "HELD") !== (typeof n.tab === "string" && HEX32.test(n.tab))) throw new Error(`note ${id}: a tab id in HELD only`);
   if (n.parent !== undefined && (typeof n.parent !== "string" || (n.ref.kind !== "change" && n.ref.kind !== "refund"))) throw new Error(`note ${id}: only a change or refund note has a parent`);
+  if (n.calls !== undefined) {
+    if (n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note has calls`);
+    if (n.state === "PLANNED" || n.state === "TAKEN") throw new Error(`note ${id}: calls from INCOMING on`);
+    checkCalls(n.calls, id);
+  }
   return n;
 }
 
@@ -236,6 +303,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.deadlineMs !== undefined) out.deadlineMs = n.deadlineMs;
   if (n.attempt !== undefined) out.attempt = n.attempt;
   if (n.tab !== undefined) out.tab = n.tab;
+  if (n.calls !== undefined) out.calls = n.calls;
   return out;
 }
 
@@ -391,6 +459,31 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     return n;
   }
 
+  async function addCallLocked(id: string, call: NewBindCall, seen: number): Promise<NoteRecord> {
+    const c = checkCall(call, "a new call", false);
+    if (!Number.isSafeInteger(seen) || seen < 0) throw new Error("seen is a count of calls");
+    const cur = (await settle()).find((n) => n.id === id);
+    if (cur === undefined) throw new Error(`no note ${id}`);
+    if (cur.state !== "INCOMING") throw new Error(`note ${id} is ${cur.state}: a call is signed only for an INCOMING note`);
+    const calls = cur.calls ?? [];
+    if (calls.length !== seen) return cur; // another bind's call came first: this one is not written, so never sent
+    const next: NoteRecord = { ...cur, calls: checkCalls([...calls, { ...c, tx_hashes: [] }], id) };
+    await write(next);
+    return next;
+  }
+  async function addCallTxLocked(id: string, call: Pick<BindCall, "nonce" | "max_block_height">, txHash: string): Promise<NoteRecord> {
+    if (typeof txHash !== "string" || txHash.length > 44 || !B58.test(txHash)) throw new Error("a tx hash is base58");
+    const cur = (await settle()).find((n) => n.id === id);
+    if (cur === undefined) throw new Error(`no note ${id}`);
+    const calls = cur.calls ?? [];
+    const k = calls.findIndex((c) => c.nonce === call?.nonce && c.max_block_height === call?.max_block_height);
+    if (k < 0) throw new Error(`note ${id} has no such call`);
+    if (calls[k]!.tx_hashes.includes(txHash)) return cur;
+    const next: NoteRecord = { ...cur, calls: calls.map((c, j) => (j === k ? { ...c, tx_hashes: [...c.tx_hashes, txHash] } : c)) };
+    await write(next);
+    return next;
+  }
+
   // finish what a killed page left before anyone reads
   try {
     await locked(async () => void (await settle()));
@@ -404,6 +497,8 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     list: () => locked(settle),
     add: (note) => locked(() => addLocked(note)),
     move: (id, from, to, fields) => locked(() => moveLocked(id, from, to, fields)),
+    addCall: (id, call, seen) => locked(() => addCallLocked(id, call, seen)),
+    addCallTx: (id, call, txHash) => locked(() => addCallTxLocked(id, call, txHash)),
     close: () => {
       closed = true;
       letGo();

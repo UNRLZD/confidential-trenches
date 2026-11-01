@@ -88,7 +88,7 @@ test("an EVM RPC on the wrong chain is refused", async () => {
 
 test("a record that is not a money path reads nothing", async () => {
   const r = await moneyGate(rec("Money path: no\n"), good, RPCS);
-  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [] });
+  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [], gone: [] });
 });
 
 test("a tx from before the build is refused on every chain", async () => {
@@ -1169,138 +1169,123 @@ test("one host read ok and the second answers 429 then ok: the gate waits out it
   assert.deepEqual(s.log.slice(s.log.indexOf("ask t2 EXPERIMENTAL_tx_status"), s.log.indexOf("ask t2 EXPERIMENTAL_tx_status") + 3), ["ask t2 EXPERIMENTAL_tx_status", "sleep 279000", "ask t2 EXPERIMENTAL_tx_status"]);
 });
 
-// Card delete-refund-readback: a one-use account that deletes itself into its funder. The fixture is the real
-// EXPERIMENTAL_tx_status answer for mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM (rpc.mainnet.near.org,
-// wait_until NONE, 2026-11-01; its one signature replaced, as the live checks' recordings do): FINAL, SuccessValue, the
-// beneficiary Transfer 9wEBNxb1a7 ok, NEAR's gas refund GBkJTsykxG from system to the deleted signer failed
-// AccountDoesNotExist. That refund is the one failed receipt the gate passes; every variant below is refused.
+// Card money-gate-delete-sweep: a one-use account is swept in two txs, never one. Its money moves in a plain Transfer to
+// the beneficiary, a Tx line like any other, whose every receipt succeeds, so it passes on two operators' reads or on
+// its light-client proof alone. The account's DeleteAccount is a separate tx the record does not list (NEAR's gas
+// refund to the deleted signer fails by design); a "Deleted: <chain> <account>" line names the account instead, and
+// the gate reads it gone from current state: view_account answers UNKNOWN_ACCOUNT, naming it, on two operators.
+// The old style, one DeleteAccount tx carrying the money, is refused: the fixture is the real EXPERIMENTAL_tx_status
+// answer for mainnet Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM (rpc.mainnet.near.org, wait_until NONE, 2026-11-01;
+// its one signature replaced): FINAL, SuccessValue, the beneficiary Transfer 9wEBNxb1a7 ok, NEAR's gas refund
+// GBkJTsykxG from system to the deleted signer failed AccountDoesNotExist.
 const DEL = JSON.parse(readFileSync(new URL("./fixtures/near-delete-refund.json", import.meta.url), "utf8"));
 const DEL_TX = DEL.result.transaction.hash;
 const DEL_A = DEL.result.transaction.signer_id;
-const DEL_F = DEL.result.transaction.actions[0].DeleteAccount.beneficiary_id;
 const REFUND = "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB";
-const PAYOUT = "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL";
-const delRec = rec(`Money path: yes\nTx: near ${DEL_TX} ${DEL_A}\n`);
-// the fixture, changed by `edit`, for every way the tx is asked; `asked` keeps each method and its params
-function delStub(edit = () => {}) {
-  const asked = [];
-  const answer = structuredClone(DEL);
-  edit(answer.result);
-  const fetchFn = stub((url, method) => (method === "tx" || method === "EXPERIMENTAL_tx_status" ? answer : chainAnswers(NOV2)(url, method)));
-  const wrapped = async (url, init) => {
+const delRec = rec(`Money path: yes\nTx: near ${DEL_TX} ${DEL_A}\nDeleted: near ${DEL_A}\n`);
+// n1 answers the fixture; n2 the fixture too, or UNKNOWN_TRANSACTION when it is dRPC past its window (`n2Missing`)
+const delStub = (n2Missing = false) =>
+  stub((url, method) => {
+    if (method === "EXPERIMENTAL_tx_status") return url === "n2" && n2Missing ? { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } } : structuredClone(DEL);
+    if (method === "query") return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: { requested_account_id: DEL_A } }, code: -32000 } };
+    return chainAnswers(NOV2)(url, method);
+  });
+
+test("delete sweep: the old style, one DeleteAccount tx whose gas refund to the deleted signer failed, is refused on two reads and on one", async () => {
+  assert.deepEqual(DEL.result.receipts_outcome.find((o) => o.id === REFUND).outcome.status, { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_A } } } } });
+  const both = await moneyGate(delRec, delStub(), RPCS);
+  assert.deepEqual(both.read, []);
+  assert.match(both.refusals.join("\n"), new RegExp(`near ${DEL_TX}: failed \\(a receipt failed\\) on n1, failed \\(a receipt failed\\) on n2`));
+  const one = await moneyGate(delRec, delStub(true), RPCS);
+  assert.deepEqual([one.read, one.proven], [[], []]);
+  assert.match(one.refusals.join("\n"), new RegExp(`near ${DEL_TX}: failed \\(a receipt failed\\) on n1, missing on n2`));
+});
+
+test("delete sweep: the gate has no delete-refund exception left", async () => {
+  const gate = await import("./money-gate.mjs");
+  assert.equal("isDeleteRefund" in gate, false);
+  assert.doesNotMatch(readFileSync(new URL("./money-gate.mjs", import.meta.url), "utf8"), /isDeleteRefund|delete refund/i);
+});
+
+// The new style on the light-proof recording's real testnet Transfer (a throwaway faucet account's), dRPC past its
+// window: the Transfer passes on its proof alone, and the Deleted line on view_account.
+const LP_A = () => LP.tx.signer;
+const sweepRec = (body = `Deleted: near-testnet ${LP_A()}\n`) => [{ ...rec(`Money path: yes\nTx: near-testnet ${LP.tx.hash} ${LP.tx.signer}\n${body}`)[0], bytes: { [LP.tx.hash]: LP.tx_bytes } }];
+const UNKNOWN_ACCOUNT = (id) => ({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: { requested_account_id: id } }, code: -32000, data: `account ${id} does not exist while viewing` } });
+const PRESENT = { result: { amount: "1820000000000000000000", locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, block_height: 1, block_hash: "h" } };
+// the proof hosts, with view_account answered per host by `views(url, account_id)`
+function sweepHosts(views) {
+  const s = proofHosts(LP);
+  const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
-    asked.push({ method, params });
-    return fetchFn(url, init);
+    if (method !== "query") return s.fetchFn(url, init);
+    s.log.push(`ask ${url} view_account ${params.account_id} ${params.finality}`);
+    assert.equal(params.request_type, "view_account");
+    return { ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", id: 1, ...views(url, params.account_id) }) };
   };
-  return { fetchFn: wrapped, asked };
+  return { ...s, fetchFn };
 }
-const receipt = (r, id) => r.receipts.find((x) => x.receipt_id === id);
-const outcome = (r, id) => r.receipts_outcome.find((x) => x.id === id);
+const sweepGate = async (views, record = sweepRec()) => {
+  const s = sweepHosts(views);
+  return { ...(await moneyGate(record, s.fetchFn, T_RPCS, { sleep: s.sleep })), log: s.log };
+};
 
-test("delete refund: the real answer for Dw1nb reads ok on two RPCs, asked by EXPERIMENTAL_tx_status with wait_until NONE", async () => {
-  assert.equal(DEL.result.final_execution_status, "FINAL");
-  assert.deepEqual(outcome(DEL.result, REFUND).outcome.status, { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_A } } } } });
-  const s = delStub();
-  const r = await moneyGate(delRec, s.fetchFn, RPCS);
+test("delete sweep: the Transfer passes on its proof alone and the account reads gone on dRPC and FastNEAR: PASS", async () => {
+  const r = await sweepGate((url, id) => UNKNOWN_ACCOUNT(id));
   assert.deepEqual(r.refusals, []);
-  assert.deepEqual(r.read, [`near ${DEL_TX} ok on n1`, `near ${DEL_TX} ok on n2`]);
-  const reads = s.asked.filter((a) => a.method !== "block");
-  assert.deepEqual(reads.map((a) => a.method), ["EXPERIMENTAL_tx_status", "EXPERIMENTAL_tx_status"]);
-  for (const a of reads) assert.deepEqual(a.params, { tx_hash: DEL_TX, sender_account_id: DEL_A, wait_until: "NONE" });
+  assert.equal(r.proven.length, 1);
+  assert.match(r.proven[0], new RegExp(`^PROVEN ON near-testnet\\.drpc\\.org: near-testnet ${LP.tx.hash} `));
+  assert.deepEqual(r.gone, [`near-testnet ${LP_A()} gone (UNKNOWN_ACCOUNT) on ${T_FN}, ${T_DR}, ${T_ORG} (testnet, not real-money proof)`]);
+  // read at the final block, at most once per host once two operators have read it gone
+  assert.deepEqual(r.log.filter((l) => / view_account /.test(l)), [`ask ${T_FN} view_account ${LP_A()} final`, `ask ${T_DR} view_account ${LP_A()} final`, `ask ${T_ORG} view_account ${LP_A()} final`]);
 });
 
-const refused = async (edit, why) => {
-  const r = await moneyGate(delRec, delStub(edit).fetchFn, RPCS);
-  assert.deepEqual(r.read, []);
-  assert.match(r.refusals.join("\n"), why);
-};
-const FAILED = new RegExp(`near ${DEL_TX}: failed \\(a receipt failed\\) on n1, failed \\(a receipt failed\\) on n2`);
-
-test("delete refund: the refund sent by any account other than system is refused", async () => {
-  for (const by of [DEL_A, DEL_F, "intents.near", "System", ""]) await refused((r) => void (receipt(r, REFUND).predecessor_id = by), FAILED);
-  await refused((r) => void delete receipt(r, REFUND).predecessor_id, FAILED);
+test("delete sweep: an account still present on any one host FAILs, the Transfer proven or not", async () => {
+  for (const host of [T_FN, T_DR, T_ORG]) {
+    const r = await sweepGate((url, id) => (url === host ? PRESENT : UNKNOWN_ACCOUNT(id)));
+    assert.match(r.refusals.join("\n"), new RegExp(`near-testnet ${LP_A()} is not gone: .*present \\(holds 1820000000000000000000 yocto\\) on ${host.replace(/\./g, "\\.")}`), host);
+  }
+  const all = await sweepGate(() => PRESENT);
+  assert.equal(all.proven.length, 1);
+  assert.match(all.refusals.join("\n"), /is not gone: present .* on https:\/\/archival-rpc\.testnet\.fastnear\.com, present .* on https:\/\/near-testnet\.drpc\.org, present/);
 });
 
-test("delete refund: the refund to any other receiver is refused, even when the failure names that receiver", async () => {
-  await refused((r) => void (receipt(r, REFUND).receiver_id = DEL_F), FAILED);
-  await refused((r) => {
-    receipt(r, REFUND).receiver_id = DEL_F;
-    outcome(r, REFUND).outcome.status.Failure.ActionError.kind.AccountDoesNotExist.account_id = DEL_F;
-  }, FAILED);
+test("delete sweep: gone on one operator only (FastNEAR's two hosts are one), an error, or UNKNOWN_ACCOUNT naming another account FAILs", async () => {
+  const cases = [
+    [(url, id) => (url === T_DR ? { error: { code: -32000, name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } } : UNKNOWN_ACCOUNT(id)), /error .*UNKNOWN_BLOCK.* on https:\/\/near-testnet\.drpc\.org/],
+    [(url, id) => (url === T_DR ? {} : UNKNOWN_ACCOUNT(id)), /no answer \(a reply with no account and no error\) on https:\/\/near-testnet\.drpc\.org/],
+    [(url, id) => (url === T_FN || url === T_ORG ? { result: null } : UNKNOWN_ACCOUNT(id)), /no answer .* on https:\/\/archival-rpc\.testnet\.fastnear\.com, gone on https:\/\/near-testnet\.drpc\.org, no answer/],
+    [(url) => UNKNOWN_ACCOUNT(url === T_DR ? "other.testnet" : LP_A()), /error .*other\.testnet.* on https:\/\/near-testnet\.drpc\.org/],
+    [(url, id) => (url === T_DR ? { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} }, code: -32000 } } : UNKNOWN_ACCOUNT(id)), /error .* on https:\/\/near-testnet\.drpc\.org/],
+  ];
+  for (const [views, why] of cases) {
+    const r = await sweepGate(views);
+    assert.match(r.refusals.join("\n"), new RegExp(`near-testnet ${LP_A()} is not gone: `));
+    assert.match(r.refusals.join("\n"), why);
+    assert.deepEqual(r.gone, []);
+  }
 });
 
-test("delete refund: a refund with two actions, or with one action that is not a lone Transfer, is refused", async () => {
-  await refused((r) => void receipt(r, REFUND).receipt.Action.actions.push({ Transfer: { deposit: "1" } }), FAILED);
-  await refused((r) => void (receipt(r, REFUND).receipt.Action.actions = []), FAILED);
-  await refused((r) => void (receipt(r, REFUND).receipt.Action.actions = [{ FunctionCall: { method_name: "x", args: "", gas: 1, deposit: "0" } }]), FAILED);
-  await refused((r) => void (receipt(r, REFUND).receipt.Action.actions = [{ Transfer: { deposit: "1" }, DeleteAccount: { beneficiary_id: DEL_F } }]), FAILED);
+test("delete sweep: a Deleted line must name a listed Tx's signer on its chain, a NEAR chain, in a live section, in its one shape", () => {
+  const live = (body) => parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: near-testnet ${LP.tx.hash} ${LP.tx.signer}\n${body}`, "demo");
+  const ok = live(`Deleted: near-testnet ${LP_A()}\n`);
+  assert.deepEqual([ok.problems, ok.deleted], [[], [{ chain: "near-testnet", account: LP_A() }]]);
+  for (const [body, why] of [
+    [`Deleted: near-testnet other.testnet\n`, /Deleted near-testnet other\.testnet names no listed Tx's signer on near-testnet/],
+    [`Deleted: near ${LP_A()}\n`, /Deleted near .* names no listed Tx's signer on near/],
+    [`Deleted: solana ${LP_A()}\n`, /bad Deleted line/],
+    [`Deleted: near-testnet ${LP_A()} extra\n`, /bad Deleted line/],
+    [`Deleted: near-testnet Not_An_Account\n`, /bad Deleted line/],
+    [`- **Deleted:** near-testnet ${LP_A()}\n`, /bad Deleted line/],
+  ])
+    assert.match(live(body).problems.join("\n"), why, body);
+  assert.match(parseLive(`CARD demo / merge: PASS\nDeleted: near-testnet ${LP_A()}\n`, "demo").problems.join("\n"), /outside a live record/);
 });
 
-test("delete refund: another failure kind, or AccountDoesNotExist naming another account, is refused", async () => {
-  const kind = (k) => (r) => void (outcome(r, REFUND).outcome.status.Failure.ActionError.kind = k);
-  await refused(kind({ LackBalanceForState: { account_id: DEL_A, amount: "1" } }), FAILED);
-  await refused(kind({ AccountDoesNotExist: { account_id: DEL_F } }), FAILED);
-  await refused(kind({ AccountDoesNotExist: {} }), FAILED);
-  await refused((r) => void (outcome(r, REFUND).outcome.status = { Failure: { InvalidTxError: { InvalidSignerId: { signer_id: DEL_A } } } }), FAILED);
-});
-
-test("delete refund: in a tx with no DeleteAccount, or whose signer is not its receiver, the same refund is refused", async () => {
-  await refused((r) => void (r.transaction.actions = [{ Transfer: { deposit: "1" } }]), FAILED);
-  await refused((r) => void (r.transaction.receiver_id = DEL_F), FAILED);
-  await refused((r) => void delete r.transaction, FAILED);
-});
-
-test("delete refund: a failed beneficiary Transfer is refused", async () => {
-  await refused((r) => void (outcome(r, PAYOUT).outcome.status = { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_F } } } } }), FAILED);
-});
-
-test("delete refund: a second refund-shaped failure is refused (one is passed, never two)", async () => {
-  await refused((r) => {
-    r.receipts.push({ ...structuredClone(receipt(r, REFUND)), receipt_id: "Extra1111111111111111111111111111111111111" });
-    r.receipts_outcome.push({ ...structuredClone(outcome(r, REFUND)), id: "Extra1111111111111111111111111111111111111" });
-  }, FAILED);
-  // two receipts listed under the refund's id: not that refund
-  await refused((r) => void r.receipts.push(structuredClone(receipt(r, REFUND))), FAILED);
-});
-
-// P10: NEAR's DeleteAccount pays the balance out as a receipt from system with one Transfer, the same shape as the gas
-// refund; nothing stops beneficiary = the account itself, so that payout fails AccountDoesNotExist naming the signer and
-// the balance burns. A gas refund carries the tx's signer in receipt.Action.signer_id; a balance payout carries system
-// (the fixture: GBkJTsykxG signer_id = the account, 9wEBNxb1a7 signer_id = system).
-const selfPayout = (r) => {
-  r.transaction.actions[0].DeleteAccount.beneficiary_id = DEL_A;
-  receipt(r, PAYOUT).receiver_id = DEL_A;
-  outcome(r, PAYOUT).outcome.status = { Failure: { ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: DEL_A } } } } };
-};
-const noGasRefund = (r) => {
-  r.receipts = r.receipts.filter((x) => x.receipt_id !== REFUND);
-  r.receipts_outcome = r.receipts_outcome.filter((x) => x.id !== REFUND);
-  for (const o of r.receipts_outcome) o.outcome.receipt_ids = o.outcome.receipt_ids.filter((id) => id !== REFUND);
-};
-
-test("delete refund P10b: a DeleteAccount whose beneficiary is the account itself, its balance payout failed and no gas refund, is refused", async () => {
-  assert.equal(receipt(DEL.result, REFUND).receipt.Action.signer_id, DEL_A);
-  assert.equal(receipt(DEL.result, PAYOUT).receipt.Action.signer_id, "system");
-  await refused((r) => {
-    selfPayout(r);
-    noGasRefund(r);
-  }, FAILED);
-});
-
-test("delete refund P10a: beneficiary = the account itself with the gas refund present (two failures) is refused", async () => {
-  await refused(selfPayout, FAILED);
-});
-
-test("delete refund: the refund whose receipt signer is system or missing, not the deleted account, is refused", async () => {
-  for (const by of ["system", DEL_F, ""]) await refused((r) => void (receipt(r, REFUND).receipt.Action.signer_id = by), FAILED);
-  await refused((r) => void delete receipt(r, REFUND).receipt.Action.signer_id, FAILED);
-});
-
-test("delete refund: an answer with no receipts list, no receipts_outcome, or no receipt for the failed outcome is not ok", async () => {
-  const INCOMPLETE = new RegExp(`near ${DEL_TX}: incomplete \\(no receipts or receipts_outcome list\\) on n1, incomplete \\(no receipts or receipts_outcome list\\) on n2`);
-  await refused((r) => void delete r.receipts, INCOMPLETE);
-  await refused((r) => void delete r.receipts_outcome, INCOMPLETE);
-  await refused((r) => void (r.receipts = r.receipts.filter((x) => x.receipt_id !== REFUND)), FAILED);
+test("delete sweep: a planted bad Deleted line is refused by the gate before any view_account read", async () => {
+  const r = await sweepGate((url, id) => UNKNOWN_ACCOUNT(id), sweepRec(`Deleted: near-testnet someone-else.testnet\n`));
+  assert.match(r.refusals.join("\n"), /names no listed Tx's signer/);
+  assert.deepEqual(r.log.filter((l) => / view_account /.test(l)), []);
 });
 
 // Card money-gate-tx-rebuild: a NEAR tx one operator reads is proven from its id alone: its signed bytes are rebuilt

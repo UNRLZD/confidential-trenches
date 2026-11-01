@@ -80,6 +80,8 @@ export interface SignedDepositDelegate {
   nonce: bigint;
   max_block_height: bigint;
   public_key: string; // ed25519:<base58>
+  /** U's USDC in the read this call was signed from (public, on chain): a refused call's USDC is back once U holds it again. */
+  balance: bigint;
 }
 
 /** One DelegateAction with its one FunctionCall, the only shape this file signs. */
@@ -180,7 +182,7 @@ function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: Dep
       u.secretKey,
     );
     const publicKey = `ed25519:${base58.encode(u.publicKey)}`;
-    return { signed_delegate: base64.encode(signed), sender_id: call.sender_id, receiver_id: call.receiver_id, nonce: n, max_block_height, public_key: publicKey };
+    return { signed_delegate: base64.encode(signed), sender_id: call.sender_id, receiver_id: call.receiver_id, nonce: n, max_block_height, public_key: publicKey, balance: read.balance };
   } finally {
     u.secretKey.fill(0);
   }
