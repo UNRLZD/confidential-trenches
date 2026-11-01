@@ -16,10 +16,18 @@
 //!    and the deposit together add exactly 756 B to the vault's storage, 904 B when the trees grow (2.3); and after
 //!    each, the vault's token balance equals `totals().deposited` (I1 with nothing in flight).
 //! 2. `a_756_prepay_on_a_growing_deposit_is_refused_then_a_top_up_lands_{mock,usdc}` (VT-S10): the second deposit grows
-//!    both trees; on a 756 B prepay it is refused (`InsufficientStorageDeposit`) with U's tokens back and not one
-//!    state byte changed; a stranger's 148 B top-up, then U's same deposit signed again, lands on the same record.
+//!    both trees; on a 756 B prepay it is refused (`InsufficientStorageDeposit`), its receipt logging no event, with
+//!    U's tokens back and not one state byte changed; a stranger's 148 B top-up, then U's same deposit signed again,
+//!    lands on the same record.
 //! 3. `no_prepay_is_refused_{mock,usdc}` (the card's risk; VT-S03's "no prepay"): U's call with no prepay is refused
 //!    (`NoPrepay`), the token's resolve gives U the whole amount back, and not one state byte changes.
+//!
+//! 4. `u_names_another_depositor_{mock,usdc}` (VT-S02 "depositor honoured"): U's message names D, another account; the
+//!    deposits row and the `deposited` event name D, never the sender U.
+//! 5. `through_intents_ft_withdraw_{mock,usdc}` (VT-S02's second path, accepted and never the kit's): S's tokens inside
+//!    intents.near at DF go out by S's signed `ft_withdraw` with the deposit message, carried in `execute_intents` by
+//!    the relayer; the vault's `ft_on_transfer` sees `sender_id` = intents.near and lands the deposit for the
+//!    message's depositor D.
 //!
 //! Each case runs on both tokens (vault.md 5): the mock token and the real USDC wasm. Each prints its gas table, whose
 //! `vault::ft_on_transfer` row is the deposit's gas with the insert.
@@ -214,13 +222,35 @@ async fn i1(h: &Harness, m: &Model) -> R<()> {
 
 /// One deposit that must land: U's call after the relayer's prepay of the deposit's gross bytes, every read of case 1.
 async fn lands(h: &Harness, m: &mut Model, relayer: &Account, u: &Account, p: Bytes32, amount: u128) -> R<()> {
+    lands_for(h, m, relayer, u, u.id(), p, amount).await
+}
+
+/// `lands`, U naming `depositor` in its message.
+async fn lands_for(h: &Harness, m: &mut Model, relayer: &Account, u: &Account, depositor: &AccountId, p: Bytes32, amount: u128) -> R<()> {
     let n = m.nonce + 1;
     let usage0 = storage_usage(h).await?;
     prepay(h, relayer, &p, gross(n)).await?;
     let (u0, v0) = (h.token_balance(u.id()).await?, h.token_balance(&h.vault).await?);
-    let o = u_call(h, relayer, u, amount, &message(&p, u.id())).await?;
+    let o = u_call(h, relayer, u, amount, &message(&p, depositor)).await?;
     o.expect_all_ok(&format!("deposit {n}"))?;
     let r = kits_path(h, &o, relayer, u)?;
+    expect_landed(h, m, r, depositor, p, amount).await?;
+    assert_eq!(h.token_balance(u.id()).await?, u0 - amount, "deposit {n}: U's balance");
+    assert_eq!(h.token_balance(&h.vault).await?, v0 + amount, "deposit {n}: the vault's balance");
+    // VT-S10: the prepay's record and the deposit together add the deposit's gross bytes; the vault's first write (the
+    // first prepay) also makes the contract's state record from `Default` (2.3), a fixed size from then on
+    let added = storage_usage(h).await? - usage0;
+    let state = if n == 1 { state_record_bytes(h).await? } else { 0 };
+    assert_eq!(added, gross(n) + state, "deposit {n}: bytes (state record {state})");
+    i1(h, m).await?;
+    println!("deposit {n}: landed, {added} B, ft_on_transfer {:.3} Tgas", r.gas_burnt as f64 / 1e12);
+    Ok(())
+}
+
+/// The vault's `ft_on_transfer` receipt `r` landed `amount` on `p` for `depositor`, as the model's next deposit:
+/// `"0"` returned, exactly the three events, and every view reads it back.
+async fn expect_landed(h: &Harness, m: &mut Model, r: &Receipt, depositor: &AccountId, p: Bytes32, amount: u128) -> R<()> {
+    let n = m.nonce + 1;
     assert_eq!(returned(r)?, "\"0\"", "deposit {n}: ft_on_transfer did not return \"0\"");
     let e = m.deposit(p, amount);
     // events: exactly these three lines, in PP's order
@@ -230,7 +260,7 @@ async fn lands(h: &Harness, m: &mut Model, relayer: &Account, u: &Account, p: By
         format!(r#"{head}"leaf_inserted","data":[{{"tree":"label","index":{},"leaf":"{}","root":"{}"}}]}}"#, e.index, dec(&e.label), dec(&e.label_root)),
         format!(
             r#"{head}"deposited","data":[{{"depositor":"{}","commitment":"{}","label":"{}","value":"{amount}","precommitment":"{}"}}]}}"#,
-            u.id(),
+            depositor,
             dec(&e.commitment),
             dec(&e.label),
             dec(&e.precommitment)
@@ -254,20 +284,11 @@ async fn lands(h: &Harness, m: &mut Model, relayer: &Account, u: &Account, p: By
             e.index,
             dec(&e.precommitment),
             dec(&e.label),
-            u.id()
+            depositor
         ),
         "deposit {n}: the deposits row"
     );
-    // balances exact
-    assert_eq!(h.token_balance(u.id()).await?, u0 - amount, "deposit {n}: U's balance");
-    assert_eq!(h.token_balance(&h.vault).await?, v0 + amount, "deposit {n}: the vault's balance");
-    // VT-S10: the prepay's record and the deposit together add the deposit's gross bytes; the vault's first write (the
-    // first prepay) also makes the contract's state record from `Default` (2.3), a fixed size from then on
-    let added = storage_usage(h).await? - usage0;
-    let state = if n == 1 { state_record_bytes(h).await? } else { 0 };
-    assert_eq!(added, gross(n) + state, "deposit {n}: bytes (state record {state})");
-    i1(h, m).await?;
-    println!("deposit {n}: landed, leaf {} at {}, {added} B, ft_on_transfer {:.3} Tgas", dec(&e.commitment), e.index, r.gas_burnt as f64 / 1e12);
+    println!("deposit {n}: leaf {} at {}, depositor {depositor}", dec(&e.commitment), e.index);
     Ok(())
 }
 
@@ -319,6 +340,8 @@ async fn a_756_prepay_on_a_growing_deposit_is_refused_then_a_top_up_lands(kind: 
     let r = kits_path(&h, &o, &relayer, &u)?;
     let f = r.failure().ok_or_else(|| format!("the deposit on a 756 B prepay landed: {}", r.line()))?;
     assert!(f.contains("InsufficientStorageDeposit: the deposit wrote 904 B; the prepay covers 756 B"), "{f}");
+    // NEAR keeps a failed receipt's logs: the refused deposit must have logged no event
+    assert_eq!(r.logs, Vec::<String>::new(), "the refused deposit's receipt logged events");
     assert!(o.calls_exactly(&h.token, "ft_resolve_transfer", 1)?[0].ok(), "the resolve failed");
     let after = (h.token_balance(u.id()).await?, h.token_balance(&h.vault).await?, vault_state(&h).await?);
     assert_eq!(after, before, "a balance or a state byte changed on the refusal");
@@ -365,12 +388,140 @@ async fn no_prepay_is_refused(kind: TokenKind) -> R<()> {
     let r = kits_path(&h, &o, &relayer, &u)?;
     let f = r.failure().ok_or_else(|| format!("a deposit with no prepay landed: {}", r.line()))?;
     assert!(f.contains("NoPrepay"), "want NoPrepay, got {f}");
+    assert_eq!(r.logs, Vec::<String>::new(), "the refused deposit's receipt logged events");
     assert!(o.calls_exactly(&h.token, "ft_resolve_transfer", 1)?[0].ok(), "the resolve failed");
     assert!(o.status.ok(), "the transaction failed: {:?}", o.status);
     let after = (h.token_balance(u.id()).await?, h.token_balance(&h.vault).await?, vault_state(&h).await?);
     assert_eq!(after, before, "a balance or a state byte changed on the refusal");
     i1(&h, &m).await?;
     println!("NoPrepay: refused, U's {HELD} back, {:.3} Tgas in ft_on_transfer", r.gas_burnt as f64 / 1e12);
+    println!("{}", h.gas_table());
+    Ok(())
+}
+
+// ---- the depositor is the message's, never the sender (VT-S02 "depositor honoured") ----
+
+#[tokio::test]
+async fn u_names_another_depositor_mock() -> R<()> {
+    u_names_another_depositor(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn u_names_another_depositor_usdc() -> R<()> {
+    u_names_another_depositor(TokenKind::Usdc).await
+}
+
+async fn u_names_another_depositor(kind: TokenKind) -> R<()> {
+    let (h, relayer) = setup(kind).await?;
+    let mut m = Model::new(&h.vault);
+    let u = new_u(&h).await?;
+    // D: another account of the same 12 words, never the sender
+    let d = h.implicit_account(10).await?;
+    lands_for(&h, &mut m, &relayer, &u, d.id(), precommitment("named depositor"), 3_000_000).await?;
+    assert_ne!(d.id(), u.id());
+    println!("{}", h.gas_table());
+    Ok(())
+}
+
+// ---- intents.near's ft_withdraw with msg (VT-S02's second path: accepted, never the kit's) ----
+
+/// `ns` nanoseconds since the Unix epoch as RFC 3339 with milliseconds (`2026-11-02T18:30:00.000Z`), the form
+/// intents.near reads a deadline in (DF `crates/primitives/time`).
+fn rfc3339(ns: u64) -> String {
+    let (secs, ms) = (ns / 1_000_000_000, (ns / 1_000_000) % 1_000);
+    let (days, rem) = ((secs / 86_400) as i64, secs % 86_400);
+    // days to a civil date (H. Hinnant, chrono-compatible)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if mo <= 2 { 1 } else { 0 };
+    format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}.{ms:03}Z", rem / 3_600, rem % 3_600 / 60, rem % 60)
+}
+
+/// `signer`'s `ft_withdraw` of `amount` to the vault with `msg`, as intents.near's raw_ed25519 signed payload (DF
+/// `core/src/payload/raw.rs`: ed25519 over the payload's UTF-8 bytes): deadline 10 minutes past the final block, a
+/// versioned nonce under intents.near's current salt.
+async fn ft_withdraw_intent(h: &Harness, signer: &Account, amount: u128, msg: &str) -> R<Value> {
+    let intents: AccountId = harness::INTENTS.parse()?;
+    let salt = h.view(&intents, "current_salt", json!({})).await?;
+    let salt = salt.as_str().ok_or_else(|| format!("current_salt: {salt}"))?;
+    let salt: Vec<u8> = (0..4).map(|i| u8::from_str_radix(&salt[2 * i..2 * i + 2], 16)).collect::<Result<_, _>>()?;
+    let block = h.rpc("block", json!({"finality": "final"})).await?;
+    let now: u64 = block["result"]["header"]["timestamp_nanosec"].as_str().ok_or_else(|| format!("block: {block}"))?.parse()?;
+    let deadline = now + 600 * 1_000_000_000;
+    // magic 5628f6c6, version 0, salt, the nonce's deadline (ns, LE), its start (ns, LE), 7 bytes unique to this call
+    let mut nonce = vec![0x56, 0x28, 0xf6, 0xc6, 0];
+    nonce.extend(&salt);
+    nonce.extend(deadline.to_le_bytes());
+    nonce.extend(now.to_le_bytes());
+    nonce.extend(&near_sdk::env::sha256(format!("{} {now} {msg}", signer.id()).as_bytes())[..7]);
+    let payload = json!({
+        "signer_id": signer.id(), "verifying_contract": intents, "deadline": rfc3339(deadline),
+        "nonce": serde_json::to_value(Base64VecU8(nonce))?,
+        "intents": [{"intent": "ft_withdraw", "token": h.token, "receiver_id": h.vault, "amount": amount.to_string(), "msg": msg}],
+    })
+    .to_string();
+    let sk: near_crypto::SecretKey = signer.secret_key().to_string().parse().map_err(|e| format!("key: {e}"))?;
+    Ok(json!({"standard": "raw_ed25519", "payload": payload, "public_key": sk.public_key().to_string(),
+              "signature": sk.sign(payload.as_bytes()).to_string()}))
+}
+
+/// `who`'s balance of the token inside intents.near (NEP-245 `mt_balance_of`, token id `nep141:<token>`).
+async fn held(h: &Harness, who: &AccountId) -> R<Value> {
+    let intents: AccountId = harness::INTENTS.parse()?;
+    h.view(&intents, "mt_balance_of", json!({"account_id": who, "token_id": format!("nep141:{}", h.token)})).await
+}
+
+#[tokio::test]
+async fn through_intents_ft_withdraw_mock() -> R<()> {
+    through_intents_ft_withdraw(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn through_intents_ft_withdraw_usdc() -> R<()> {
+    through_intents_ft_withdraw(TokenKind::Usdc).await
+}
+
+async fn through_intents_ft_withdraw(kind: TokenKind) -> R<()> {
+    let (h, relayer) = setup(kind).await?;
+    let mut m = Model::new(&h.vault);
+    let intents: AccountId = harness::INTENTS.parse()?;
+    let _admin = h.deploy_intents().await?;
+    let _ = h.storage_deposit(&h.root, &intents).await?;
+    // S holds the tokens inside intents.near (its own ft_transfer_call in, with 0.5 N for that call's gas); D is the
+    // depositor S's message names
+    let s = h.implicit_account(500).await?;
+    h.mint(s.id(), HELD).await?;
+    let d = h.implicit_account(10).await?;
+    let amount = 4_000_000;
+    let into = json!({"receiver_id": intents, "amount": amount.to_string(), "msg": s.id()});
+    let _ = h.call(&s, &h.token, "ft_transfer_call", into, harness::ONE_YOCTO, Gas::from_tgas(100)).await?;
+    assert_eq!(held(&h, s.id()).await?, json!(amount.to_string()), "S's balance inside intents.near");
+    let p = precommitment("through intents.near");
+    let usage0 = storage_usage(&h).await?;
+    prepay(&h, &relayer, &p, gross(1)).await?;
+    let v0 = h.token_balance(&h.vault).await?;
+    let signed = ft_withdraw_intent(&h, &s, amount, &message(&p, d.id())).await?;
+    let o = h.call(&relayer, &intents, "execute_intents", json!({"signed": [signed]}), NearToken::from_yoctonear(0), Gas::from_tgas(300)).await?;
+    // the token's ft_transfer_call came from intents.near, so the vault's sender_id is intents.near
+    let call = o.calls_exactly(&h.token, "ft_transfer_call", 1)?[0];
+    assert_eq!(call.predecessor, intents.as_str(), "ft_transfer_call's predecessor");
+    let r = o.calls_exactly(&h.vault, "ft_on_transfer", 1)?[0];
+    let args: Base64VecU8 = serde_json::from_value(json!(r.args.first().ok_or("ft_on_transfer: no args")?))?;
+    let args: Value = serde_json::from_slice(&args.0)?;
+    assert_eq!((&args["sender_id"], &args["msg"]), (&json!(intents), &json!(message(&p, d.id()))), "ft_on_transfer's args");
+    expect_landed(&h, &mut m, r, d.id(), p, amount).await?;
+    assert_eq!(h.token_balance(&h.vault).await?, v0 + amount, "the vault's balance");
+    assert_eq!(held(&h, s.id()).await?, json!("0"), "S's balance inside intents.near");
+    let added = storage_usage(&h).await? - usage0;
+    assert_eq!(added, gross(1) + state_record_bytes(&h).await?, "bytes");
+    i1(&h, &m).await?;
+    println!("through intents.near: landed for {}, sender intents.near, ft_on_transfer {:.3} Tgas", d.id(), r.gas_burnt as f64 / 1e12);
     println!("{}", h.gas_table());
     Ok(())
 }

@@ -35,7 +35,8 @@
 //! - Row 12: `ft_on_transfer` returns `"0"`, all used.
 //!
 //! Events, in PP's order (`State.sol:151` then `PrivacyPool.sol:106`): `leaf_inserted` state, `leaf_inserted` label,
-//! `deposited`. `ft_on_transfer` makes no promise.
+//! `deposited`, all three logged after row 7 passes, so a refused deposit logs none (NEAR keeps a failed receipt's
+//! logs). `ft_on_transfer` makes no promise.
 
 use crate::constants::{MIN_DEPOSIT, TOKEN};
 use crate::context::label_of;
@@ -124,29 +125,21 @@ impl Vault {
         let commitment = PoseidonT4::new().hash(&amount_be(amount), &label, &m.precommitment);
         // row 10: the commitment first, then its label (PP's order of the two inserts' events)
         let mut h = PoseidonT3::new();
-        let (leaf_index, _) = self.insert_commitment(&mut h, &commitment);
-        self.insert_label(&mut h, &label);
+        let state = self.insert_commitment(&mut h, &commitment);
+        let labelled = self.insert_label(&mut h, &label);
         // row 11
         let index = self.deposits.len();
         self.deposits.push(&Deposit {
             precommitment: m.precommitment,
             label,
             value: amount,
-            leaf_index,
+            leaf_index: state.index,
             depositor: m.depositor.clone(),
         });
         self.precommitments.insert(&m.precommitment, &index);
         self.label_index.insert(&label, &index);
         let deposited = self.totals.deposited.0.checked_add(amount);
         self.totals.deposited = U128(deposited.unwrap_or_else(|| env::panic_str("TotalsOverflow: deposited")));
-        Event::Deposited {
-            depositor: &m.depositor,
-            commitment: &commitment,
-            label: &label,
-            value: amount,
-            precommitment: &m.precommitment,
-        }
-        .emit();
         // row 7: every byte written since the record went, paid by the record
         let wrote = env::storage_usage().saturating_sub(start);
         if prepaid < wrote as u128 * env::storage_byte_cost().as_yoctonear() {
@@ -155,6 +148,17 @@ impl Vault {
                 prepaid / env::storage_byte_cost().as_yoctonear()
             ));
         }
+        // every check passed: the events
+        state.event().emit();
+        labelled.event().emit();
+        Event::Deposited {
+            depositor: &m.depositor,
+            commitment: &commitment,
+            label: &label,
+            value: amount,
+            precommitment: &m.precommitment,
+        }
+        .emit();
         index
     }
 }
@@ -454,6 +458,8 @@ mod tests {
         prepay(&mut v, "7", 756 * BYTE);
         let e = deposit(&mut v, "7", AMOUNT).unwrap_err();
         assert!(e.contains("InsufficientStorageDeposit: the deposit wrote 904 B; the prepay covers 756 B"), "{e}");
+        // a refused deposit logs no event (the sandbox reads the failed receipt's logs: tests/s02.rs)
+        assert_eq!(near_sdk::test_utils::get_logs(), Vec::<String>::new());
     }
 
     #[test]
@@ -524,5 +530,65 @@ mod tests {
         prepay(&mut v, "2", 904 * BYTE);
         let e = deposit(&mut v, "2", 2 * MIN_DEPOSIT).unwrap_err();
         assert!(e.contains("TotalsOverflow"), "{e}");
+    }
+
+    #[test]
+    fn the_depositor_is_the_messages_never_the_sender() {
+        // intents.near sends the tokens and names another account (vault.md 2.5.1: any sender, the message's depositor)
+        let other = "b".repeat(64);
+        let mut v = Vault::default();
+        prepay(&mut v, "21", 904 * BYTE);
+        call_by(TOKEN, 0);
+        let m = format!(r#"{{"precommitment":"21","depositor":"{other}"}}"#);
+        assert_eq!(v.ft_on_transfer("intents.near".parse().unwrap(), U128(AMOUNT), m).0, 0);
+        assert_eq!(v.deposits(0, 1)[0].depositor.as_str(), other);
+        let logs = near_sdk::test_utils::get_logs();
+        assert!(logs[2].contains(&format!(r#""event":"deposited","data":[{{"depositor":"{other}""#)), "{logs:?}");
+    }
+
+    /// `noteCommitment(value, label, precommitment)` of packages/wallet/src/notes/secrets.ts at main daea6a5, printed
+    /// by Node 24: what the device stores and proves against.
+    const WALLET_COMMITMENTS: [(u128, &str, &str, &str); 2] = [
+        (
+            1_000_000,
+            "3167541333153488070700576821596484314779793765261295951884779512873829920360",
+            "12345",
+            "18397814550587314788443050054570897998434978325342162224857524021341931129750",
+        ),
+        (
+            (1 << 100) + 1_234_567_890_123,
+            "21888242871839275222246405745257275088548364400416034343698204186575808495616",
+            "7",
+            "14144701124191034731627316939866497813649296286387451964003985403915721908665",
+        ),
+    ];
+
+    #[test]
+    fn the_commitment_is_the_wallets_note_commitment() {
+        for (value, l, p, want) in WALLET_COMMITMENTS {
+            assert_eq!(dec(&PoseidonT4::new().hash(&amount_be(value), &be(l), &be(p))), want, "{value}");
+        }
+        // and a real deposit: 1 USDC on 12345 at vault.near, whose first label is the first vector's
+        let mut v = Vault::default();
+        prepay(&mut v, "12345", 904 * BYTE);
+        deposit(&mut v, "12345", 1_000_000).unwrap();
+        assert_eq!(dec(&label(1)), WALLET_COMMITMENTS[0].1);
+        assert_eq!(v.leaves(0, 1), vec![WALLET_COMMITMENTS[0].3.to_string()]);
+    }
+
+    #[test]
+    fn leaf_index_is_the_state_trees() {
+        // a state leaf with no label (a change note's) first: the deposit's leaf is the state tree's second, its label
+        // the label tree's first
+        let mut v = Vault::default();
+        prepay(&mut v, "31", 904 * BYTE);
+        let _ = v.insert_commitment(&mut PoseidonT3::new(), &be("99"));
+        deposit(&mut v, "31", AMOUNT).unwrap();
+        let d = &v.deposits(0, 1)[0];
+        assert_eq!((d.index, d.leaf_index), (0, 1));
+        assert_eq!((v.state_tree.size, v.label_tree.size), (2, 1));
+        let c = PoseidonT4::new().hash(&amount_be(AMOUNT), &label(1), &be("31"));
+        assert_eq!((v.state_tree.leaf_at(0), v.state_tree.leaf_at(1)), (Some(be("99")), Some(c)));
+        assert_eq!(v.state_leaf_index.get(&c), Some(1));
     }
 }
