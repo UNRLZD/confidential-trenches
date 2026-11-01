@@ -13,7 +13,7 @@
 //! 1. `a_direct_call_is_refused`: anyone but the token calling `ft_on_transfer` (`NotTheToken`).
 //! 2. `another_token_is_refused`: a second token's `ft_transfer_call` with a good message (`NotTheToken`); the sender
 //!    gets that token back.
-//! 3. `every_bad_message_is_refused`: bad JSON, a missing `depositor`, a missing `precommitment`, a third field, a
+//! 3. `every_bad_message_is_refused`: bad JSON, a JSON array, a missing `depositor`, a missing `precommitment`, a third field, a
 //!    message over 1,024 B, a precommitment as a JSON number, a non-canonical precommitment, p, an invalid account id
 //!    and `depositor` = the vault.
 //! 4. `the_kits_message_passes_the_message_checks`: the kit's own bytes (packages/kit/src/vault/shapes.ts
@@ -149,6 +149,7 @@ async fn every_bad_message_is_refused() -> R<()> {
     let cases: Vec<(&str, String, &str)> = vec![
         ("bad JSON", "not json".into(), "InvalidMessage"),
         ("an empty message", "".into(), "InvalidMessage"),
+        ("a JSON array", format!(r#"["1","{HEX64}"]"#), "not a JSON object"),
         ("a missing depositor", r#"{"precommitment":"1"}"#.into(), "missing field `depositor`"),
         ("a missing precommitment", format!(r#"{{"depositor":"{HEX64}"}}"#), "missing field `precommitment`"),
         ("a third field", format!(r#"{{"precommitment":"1","depositor":"{HEX64}","x":1}}"#), "unknown field `x`"),
