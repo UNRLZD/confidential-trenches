@@ -1,0 +1,2495 @@
+[
+ {
+  "url": "https://archival-rpc.mainnet.fastnear.com",
+  "method": "EXPERIMENTAL_tx_status",
+  "params": {
+   "tx_hash": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+   "sender_account_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+   "wait_until": "NONE"
+  },
+  "status": 200,
+  "json": {
+   "jsonrpc": "2.0",
+   "result": {
+    "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "119159735895219299999999"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "system",
+        "signer_public_key": "ed25519:11111111111111111111111111111111"
+       }
+      },
+      "receipt_id": "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+      "receiver_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "229993650000000000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+        "signer_public_key": "ed25519:4oEPep14hKiBcFKScdaUQRPZJQMt2LDKeiKNaAAu9TVR"
+       }
+      },
+      "receipt_id": "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB",
+      "receiver_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+     }
+    ],
+    "receipts_outcome": [
+     {
+      "block_hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+      "id": "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm",
+      "outcome": {
+       "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+       "gas_burnt": 255548500000,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [
+        "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+        "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB"
+       ],
+       "status": {
+        "SuccessValue": ""
+       },
+       "tokens_burnt": "25554850000000000000"
+      },
+      "proof": [
+       {
+        "direction": "Right",
+        "hash": "5oX4DitCaCM4QNaaHkx5kDPoKsB8vva1SNfq39kNYQ7C"
+       },
+       {
+        "direction": "Left",
+        "hash": "GTUT1LB4gomTKfgBGS9rNFy9GCqQNC4vibcrQKALKSys"
+       },
+       {
+        "direction": "Right",
+        "hash": "64cU6jNqBYXKR3jYEkbCVzhD5pegZ7oWCEjZoYCAtMMk"
+       }
+      ]
+     },
+     {
+      "block_hash": "2RcFTqj95VEBUa4ECL8TyLAsgypdeopTW3ZtajWoEMtc",
+      "id": "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+      "outcome": {
+       "executor_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33",
+       "gas_burnt": 7524947687500,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [],
+       "status": {
+        "SuccessValue": ""
+       },
+       "tokens_burnt": "0"
+      },
+      "proof": []
+     },
+     {
+      "block_hash": "2RcFTqj95VEBUa4ECL8TyLAsgypdeopTW3ZtajWoEMtc",
+      "id": "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB",
+      "outcome": {
+       "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+       "gas_burnt": 7524947687500,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [],
+       "status": {
+        "Failure": {
+         "ActionError": {
+          "index": 0,
+          "kind": {
+           "AccountDoesNotExist": {
+            "account_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+           }
+          }
+         }
+        }
+       },
+       "tokens_burnt": "0"
+      },
+      "proof": [
+       {
+        "direction": "Right",
+        "hash": "8zieUZkPBN31S3ezS5EE3BizFexiFuJLcmtBeXhiaBGT"
+       },
+       {
+        "direction": "Right",
+        "hash": "3E6mTrw5PXEEnFo4L4ryi3GeSdzHi2vAU6wuHXJpZj9n"
+       }
+      ]
+     }
+    ],
+    "status": {
+     "SuccessValue": ""
+    },
+    "transaction": {
+     "actions": [
+      {
+       "DeleteAccount": {
+        "beneficiary_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33"
+       }
+      }
+     ],
+     "hash": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+     "nonce": 222476436000004,
+     "priority_fee": 0,
+     "public_key": "ed25519:4oEPep14hKiBcFKScdaUQRPZJQMt2LDKeiKNaAAu9TVR",
+     "receiver_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+     "signature": "ed25519:<a signature, not kept>",
+     "signer_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+    },
+    "transaction_outcome": {
+     "block_hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+     "id": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+     "outcome": {
+      "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+      "gas_burnt": 255548500000,
+      "logs": [],
+      "metadata": {
+       "gas_profile": null,
+       "version": 1
+      },
+      "receipt_ids": [
+       "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm"
+      ],
+      "status": {
+       "SuccessReceiptId": "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm"
+      },
+      "tokens_burnt": "25554850000000000000"
+     },
+     "proof": [
+      {
+       "direction": "Right",
+       "hash": "25HvgN9KceGsPpf7g2ecagCoN4G2cY1j4tTKZbQ2dDkR"
+      },
+      {
+       "direction": "Right",
+       "hash": "2PtA3dX6dWrCi67XRZyPoF7T4VfvebycnDw5jrAqtYPu"
+      },
+      {
+       "direction": "Right",
+       "hash": "64cU6jNqBYXKR3jYEkbCVzhD5pegZ7oWCEjZoYCAtMMk"
+      }
+     ]
+    }
+   },
+   "id": 1
+  }
+ },
+ {
+  "url": "https://archival-rpc.mainnet.fastnear.com",
+  "method": "block",
+  "params": {
+   "block_id": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E"
+  },
+  "status": 200,
+  "json": {
+   "jsonrpc": "2.0",
+   "result": {
+    "author": "liver.pool.near",
+    "chunks": [
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "BntGZWedM11bCkiCRvYVph4byAY5Hzqes8N4ZQPp6Bj1",
+      "congestion_info": {
+       "allowed_shard": 4,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 973,
+      "encoded_merkle_root": "Bx5bXbGKyRJWP9xZevVbZPZq8wE7tzZxZGo6RcaeR9Mk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "3wzmNXgZCjC5UAiBwXxhcN6V3Y7xPSjWynzjheWrMrGq",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 10,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "GevfrcEeMzTYNX7V6y7m6KeNnCZRsAjsMTLEMfxRgLgp",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "DjE3bqSSWd7SRKtcami37yKqApbJGivEutpfmsqFV3Sy",
+      "congestion_info": {
+       "allowed_shard": 12,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "HWmKG1esMwG1wq9JDBZruWrNmv4vajnfoaBusEpqXxut",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 11,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "EegecE1FCTG38Jzvynvpu8T5UG17a79fZG1Ru9zZ6pt4",
+      "congestion_info": {
+       "allowed_shard": 13,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "ABQf2dTsXAhpErF4ToNoRGDWoPrWdQCMYrgeYH6iLt6q",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 1,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "155775923429200000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5PSdQMbCv384BxA6kpqgf3bWzMvj3tWNrYXhCTvykJFT",
+      "congestion_info": {
+       "allowed_shard": 10,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 265,
+      "encoded_merkle_root": "HufC5FWHhNwKVpqJ4zNSkjs1mQpLXqawYUJ8ncQkEiqV",
+      "gas_limit": 1000000000000000,
+      "gas_used": 9366954604435,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "c7nsoKovEmHnkSsfqRCNuiGU7Kbrv92eyzFXfgFyMxy",
+      "outgoing_receipts_root": "FmoEysJCDBKebmkfpjSki2Cj7j3Hzipt9QeZv7814nNa",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "AeCsgfjDEQVJWFm8ykG18xdp6bSiUjRq2XZQkGEU8sgU",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 8,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "FUwRzXTFj9s5SVAG7c61FctCEMNrXE4tp2NWSQUTWuin",
+      "congestion_info": {
+       "allowed_shard": 11,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "EuooAzS67eiyZu7K2eSjaQM6oBYFQMDt3uy3ui6fewjL",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 9,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "FRkCDzUm45ArwLP1Z8NLZS7cfbPB82wCBbbMtUsBe1Ej",
+      "congestion_info": {
+       "allowed_shard": 1,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "EudPVHZFWA5XnffmFWVqwmeCdr9ZHaF1uqei9TQ7G5YK",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 6,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "686189894371000000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5UVMjXe8RatSqh2sNZtFx7uQ9J2RfaVU7XBQL5GoLSXg",
+      "congestion_info": {
+       "allowed_shard": 8,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 643,
+      "encoded_merkle_root": "8pzx5vzZmwuW7N5zCKydmzkPk8e2a8W4fHcWAvRQrM9H",
+      "gas_limit": 1000000000000000,
+      "gas_used": 9066523587064,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "AFa6hcyMNau2gC4Vs5KsJkseP9UDpMT3Z77Ue31XBtvg",
+      "outgoing_receipts_root": "7e69wf65J5Yr9Y3sbjCiNpoa5qXzmM9T2ZAfQBfyGPZ8",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "7Cgrb51RZQZtXYpmLSesvmA1CzeijtuoCLb2rcMbhtCi",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 7,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "51583194554500000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5z43pbxZbz4agJi4xPntCMraSMCCfe637esbdC8kT7sx",
+      "congestion_info": {
+       "allowed_shard": 9,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 484,
+      "encoded_merkle_root": "A5mDeNEf2Py8iq6DdgdNsJ65f1q6VTiQ1YsqQrt4mQmN",
+      "gas_limit": 1000000000000000,
+      "gas_used": 1185379633045,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "6rCfCLgp92P3B5oJFAryhdJfsrnPE3s7CgJWkgZazxRN",
+      "outgoing_receipts_root": "B4aiDmZTN7cVhPhpjNo28febmPEHvCCPhH7mwsmMEirU",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "42xWJMavpK3R7GYsMoxXBbwyrcZSryVV5L18wYTwebdq",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 4,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "328808930498100000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "F1aNWg6KWqi8xFyvHzqbzM4ZxjNneSD4snKpw9Y2uJ2R",
+      "congestion_info": {
+       "allowed_shard": 6,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 338,
+      "encoded_merkle_root": "GpekqKxWqjmSmunh51SYabDmB3owVW968n8WEvrUSg6r",
+      "gas_limit": 1000000000000000,
+      "gas_used": 3935779518739,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "DTQn4uY72oqJDhAutwGXQ35d4N5yN1v1jrdqUZA4KiBX",
+      "outgoing_receipts_root": "DgwLqQbCRfB7vnaMn1tw94E6v43pshr7JC5CKPf4zPU",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "6BXG8RAEeUngupdKfucKQCasXC5ueCmqy5oDuAGtTeEa",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 12,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "98Hq6DBxvTS56CCoUyai2BfqcGUnxMG9NMGQcudCVCif",
+      "congestion_info": {
+       "allowed_shard": 7,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "9WoUQ3Yr16KTDW5ruYgk9mY4pUfA4u89L6jeD9VxVv7m",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 13,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     }
+    ],
+    "header": {
+     "approvals": [
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null
+     ],
+     "block_body_hash": "AXTU8BfNmf6ptvzSNgTeZyu89fwUrBfmigQaAxSJtSL6",
+     "block_merkle_root": "8wvsJWUncsv95hiPfTwgBYrJftpvPtZQT8aJdAa6KUKD",
+     "block_ordinal": 212231952,
+     "challenges_result": [],
+     "challenges_root": "11111111111111111111111111111111",
+     "chunk_endorsements": [
+      [
+       235,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       63
+      ],
+      [
+       255,
+       255,
+       253,
+       255,
+       255,
+       255,
+       223,
+       255,
+       255
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       253,
+       255,
+       255,
+       127
+      ],
+      [
+       255,
+       255,
+       223,
+       255,
+       255,
+       255,
+       255,
+       247,
+       255,
+       255,
+       1
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       3
+      ],
+      [
+       255,
+       239,
+       255,
+       255,
+       255,
+       255,
+       255,
+       253,
+       255,
+       255,
+       127
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       63
+      ],
+      [
+       253,
+       255,
+       255,
+       255,
+       251,
+       191,
+       255,
+       255,
+       255,
+       15
+      ],
+      [
+       255,
+       247,
+       255,
+       255,
+       255,
+       255,
+       239,
+       255,
+       255,
+       255
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       191,
+       255,
+       255,
+       255,
+       255,
+       127
+      ]
+     ],
+     "chunk_headers_root": "J1BGTKgEaeaji31CzPLryoBgedXRJfsK7myedXVHxxrR",
+     "chunk_mask": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "chunk_receipts_root": "5mGgCrFnTVf3ETUsjjKcsk8J1AZvYHzmM9AnDHxmQpxG",
+     "chunk_tx_root": "EGJM4MmY7DYQ6mNoNqEnhQDrxNAMcKCaBhc63816135e",
+     "chunks_included": 10,
+     "epoch_id": "C7TNZdUGZTbWt3iqm7icLTyQrWbkigAoRs2PtbxLRiR7",
+     "epoch_sync_data_hash": null,
+     "gas_price": "100000000",
+     "hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+     "height": 222516868,
+     "last_ds_final_block": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+     "last_final_block": "BJQA2t1Wgz5bUEDqZ6obXeLCAcQPiZRcckUxGPRyXanp",
+     "latest_protocol_version": 86,
+     "next_bp_hash": "9ZVd2xdT2RbJnhQn3USTtT9KECvyKiijuTFUvbdyDp4Q",
+     "next_epoch_id": "4TYKtcaUHB3QMgeYeZ5J8xhC5qobd8vJcGTvEiN1Ra6G",
+     "outcome_root": "26e2KvpfvWBnUoATUxEp81tRSpA5HbTFBnBDZZiztYaY",
+     "prev_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+     "prev_height": 222516867,
+     "prev_state_root": "Bawz7SzaYV3dZJBSb4EFhGMB6NCRzEPuLCLjX6MYmcCx",
+     "random_value": "6HGta9hDyzErtq7FhnswTyRjXh25rVcHY86WQ6sPydMn",
+     "rent_paid": "0",
+     "shard_split": null,
+     "signature": "ed25519:<a signature, not kept>",
+     "timestamp": 1793505946466546700,
+     "timestamp_nanosec": "1793505946466546692",
+     "total_supply": "1310498906903728708798867977327864",
+     "validator_proposals": [],
+     "validator_reward": "0"
+    }
+   },
+   "id": 1
+  }
+ },
+ {
+  "url": "https://near.drpc.org",
+  "method": "EXPERIMENTAL_tx_status",
+  "params": {
+   "tx_hash": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+   "sender_account_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+   "wait_until": "NONE"
+  },
+  "status": 200,
+  "json": {
+   "id": 1,
+   "jsonrpc": "2.0",
+   "result": {
+    "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "119159735895219299999999"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "system",
+        "signer_public_key": "ed25519:11111111111111111111111111111111"
+       }
+      },
+      "receipt_id": "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+      "receiver_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "229993650000000000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+        "signer_public_key": "ed25519:4oEPep14hKiBcFKScdaUQRPZJQMt2LDKeiKNaAAu9TVR"
+       }
+      },
+      "receipt_id": "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB",
+      "receiver_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+     }
+    ],
+    "receipts_outcome": [
+     {
+      "block_hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+      "id": "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm",
+      "outcome": {
+       "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+       "gas_burnt": 255548500000,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [
+        "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+        "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB"
+       ],
+       "status": {
+        "SuccessValue": ""
+       },
+       "tokens_burnt": "25554850000000000000"
+      },
+      "proof": [
+       {
+        "direction": "Right",
+        "hash": "5oX4DitCaCM4QNaaHkx5kDPoKsB8vva1SNfq39kNYQ7C"
+       },
+       {
+        "direction": "Left",
+        "hash": "GTUT1LB4gomTKfgBGS9rNFy9GCqQNC4vibcrQKALKSys"
+       },
+       {
+        "direction": "Right",
+        "hash": "64cU6jNqBYXKR3jYEkbCVzhD5pegZ7oWCEjZoYCAtMMk"
+       }
+      ]
+     },
+     {
+      "block_hash": "2RcFTqj95VEBUa4ECL8TyLAsgypdeopTW3ZtajWoEMtc",
+      "id": "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+      "outcome": {
+       "executor_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33",
+       "gas_burnt": 7524947687500,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [],
+       "status": {
+        "SuccessValue": ""
+       },
+       "tokens_burnt": "0"
+      },
+      "proof": []
+     },
+     {
+      "block_hash": "2RcFTqj95VEBUa4ECL8TyLAsgypdeopTW3ZtajWoEMtc",
+      "id": "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB",
+      "outcome": {
+       "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+       "gas_burnt": 7524947687500,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [],
+       "status": {
+        "Failure": {
+         "ActionError": {
+          "index": 0,
+          "kind": {
+           "AccountDoesNotExist": {
+            "account_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+           }
+          }
+         }
+        }
+       },
+       "tokens_burnt": "0"
+      },
+      "proof": [
+       {
+        "direction": "Right",
+        "hash": "8zieUZkPBN31S3ezS5EE3BizFexiFuJLcmtBeXhiaBGT"
+       },
+       {
+        "direction": "Right",
+        "hash": "3E6mTrw5PXEEnFo4L4ryi3GeSdzHi2vAU6wuHXJpZj9n"
+       }
+      ]
+     }
+    ],
+    "status": {
+     "SuccessValue": ""
+    },
+    "transaction": {
+     "actions": [
+      {
+       "DeleteAccount": {
+        "beneficiary_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33"
+       }
+      }
+     ],
+     "hash": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+     "nonce": 222476436000004,
+     "priority_fee": 0,
+     "public_key": "ed25519:4oEPep14hKiBcFKScdaUQRPZJQMt2LDKeiKNaAAu9TVR",
+     "receiver_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+     "signature": "ed25519:<a signature, not kept>",
+     "signer_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+    },
+    "transaction_outcome": {
+     "block_hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+     "id": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+     "outcome": {
+      "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+      "gas_burnt": 255548500000,
+      "logs": [],
+      "metadata": {
+       "gas_profile": null,
+       "version": 1
+      },
+      "receipt_ids": [
+       "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm"
+      ],
+      "status": {
+       "SuccessReceiptId": "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm"
+      },
+      "tokens_burnt": "25554850000000000000"
+     },
+     "proof": [
+      {
+       "direction": "Right",
+       "hash": "25HvgN9KceGsPpf7g2ecagCoN4G2cY1j4tTKZbQ2dDkR"
+      },
+      {
+       "direction": "Right",
+       "hash": "2PtA3dX6dWrCi67XRZyPoF7T4VfvebycnDw5jrAqtYPu"
+      },
+      {
+       "direction": "Right",
+       "hash": "64cU6jNqBYXKR3jYEkbCVzhD5pegZ7oWCEjZoYCAtMMk"
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "url": "https://near.drpc.org",
+  "method": "block",
+  "params": {
+   "block_id": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E"
+  },
+  "status": 200,
+  "json": {
+   "id": 1,
+   "jsonrpc": "2.0",
+   "result": {
+    "author": "liver.pool.near",
+    "chunks": [
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "BntGZWedM11bCkiCRvYVph4byAY5Hzqes8N4ZQPp6Bj1",
+      "congestion_info": {
+       "allowed_shard": 4,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 973,
+      "encoded_merkle_root": "Bx5bXbGKyRJWP9xZevVbZPZq8wE7tzZxZGo6RcaeR9Mk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "3wzmNXgZCjC5UAiBwXxhcN6V3Y7xPSjWynzjheWrMrGq",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 10,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "GevfrcEeMzTYNX7V6y7m6KeNnCZRsAjsMTLEMfxRgLgp",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "DjE3bqSSWd7SRKtcami37yKqApbJGivEutpfmsqFV3Sy",
+      "congestion_info": {
+       "allowed_shard": 12,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "HWmKG1esMwG1wq9JDBZruWrNmv4vajnfoaBusEpqXxut",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 11,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "EegecE1FCTG38Jzvynvpu8T5UG17a79fZG1Ru9zZ6pt4",
+      "congestion_info": {
+       "allowed_shard": 13,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "ABQf2dTsXAhpErF4ToNoRGDWoPrWdQCMYrgeYH6iLt6q",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 1,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "155775923429200000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5PSdQMbCv384BxA6kpqgf3bWzMvj3tWNrYXhCTvykJFT",
+      "congestion_info": {
+       "allowed_shard": 10,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 265,
+      "encoded_merkle_root": "HufC5FWHhNwKVpqJ4zNSkjs1mQpLXqawYUJ8ncQkEiqV",
+      "gas_limit": 1000000000000000,
+      "gas_used": 9366954604435,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "c7nsoKovEmHnkSsfqRCNuiGU7Kbrv92eyzFXfgFyMxy",
+      "outgoing_receipts_root": "FmoEysJCDBKebmkfpjSki2Cj7j3Hzipt9QeZv7814nNa",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "AeCsgfjDEQVJWFm8ykG18xdp6bSiUjRq2XZQkGEU8sgU",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 8,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "FUwRzXTFj9s5SVAG7c61FctCEMNrXE4tp2NWSQUTWuin",
+      "congestion_info": {
+       "allowed_shard": 11,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "EuooAzS67eiyZu7K2eSjaQM6oBYFQMDt3uy3ui6fewjL",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 9,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "FRkCDzUm45ArwLP1Z8NLZS7cfbPB82wCBbbMtUsBe1Ej",
+      "congestion_info": {
+       "allowed_shard": 1,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "EudPVHZFWA5XnffmFWVqwmeCdr9ZHaF1uqei9TQ7G5YK",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 6,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "686189894371000000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5UVMjXe8RatSqh2sNZtFx7uQ9J2RfaVU7XBQL5GoLSXg",
+      "congestion_info": {
+       "allowed_shard": 8,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 643,
+      "encoded_merkle_root": "8pzx5vzZmwuW7N5zCKydmzkPk8e2a8W4fHcWAvRQrM9H",
+      "gas_limit": 1000000000000000,
+      "gas_used": 9066523587064,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "AFa6hcyMNau2gC4Vs5KsJkseP9UDpMT3Z77Ue31XBtvg",
+      "outgoing_receipts_root": "7e69wf65J5Yr9Y3sbjCiNpoa5qXzmM9T2ZAfQBfyGPZ8",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "7Cgrb51RZQZtXYpmLSesvmA1CzeijtuoCLb2rcMbhtCi",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 7,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "51583194554500000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5z43pbxZbz4agJi4xPntCMraSMCCfe637esbdC8kT7sx",
+      "congestion_info": {
+       "allowed_shard": 9,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 484,
+      "encoded_merkle_root": "A5mDeNEf2Py8iq6DdgdNsJ65f1q6VTiQ1YsqQrt4mQmN",
+      "gas_limit": 1000000000000000,
+      "gas_used": 1185379633045,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "6rCfCLgp92P3B5oJFAryhdJfsrnPE3s7CgJWkgZazxRN",
+      "outgoing_receipts_root": "B4aiDmZTN7cVhPhpjNo28febmPEHvCCPhH7mwsmMEirU",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "42xWJMavpK3R7GYsMoxXBbwyrcZSryVV5L18wYTwebdq",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 4,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "328808930498100000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "F1aNWg6KWqi8xFyvHzqbzM4ZxjNneSD4snKpw9Y2uJ2R",
+      "congestion_info": {
+       "allowed_shard": 6,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 338,
+      "encoded_merkle_root": "GpekqKxWqjmSmunh51SYabDmB3owVW968n8WEvrUSg6r",
+      "gas_limit": 1000000000000000,
+      "gas_used": 3935779518739,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "DTQn4uY72oqJDhAutwGXQ35d4N5yN1v1jrdqUZA4KiBX",
+      "outgoing_receipts_root": "DgwLqQbCRfB7vnaMn1tw94E6v43pshr7JC5CKPf4zPU",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "6BXG8RAEeUngupdKfucKQCasXC5ueCmqy5oDuAGtTeEa",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 12,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "98Hq6DBxvTS56CCoUyai2BfqcGUnxMG9NMGQcudCVCif",
+      "congestion_info": {
+       "allowed_shard": 7,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "9WoUQ3Yr16KTDW5ruYgk9mY4pUfA4u89L6jeD9VxVv7m",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 13,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     }
+    ],
+    "header": {
+     "approvals": [
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null
+     ],
+     "block_body_hash": "AXTU8BfNmf6ptvzSNgTeZyu89fwUrBfmigQaAxSJtSL6",
+     "block_merkle_root": "8wvsJWUncsv95hiPfTwgBYrJftpvPtZQT8aJdAa6KUKD",
+     "block_ordinal": 212231952,
+     "challenges_result": [],
+     "challenges_root": "11111111111111111111111111111111",
+     "chunk_endorsements": [
+      [
+       235,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       63
+      ],
+      [
+       255,
+       255,
+       253,
+       255,
+       255,
+       255,
+       223,
+       255,
+       255
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       253,
+       255,
+       255,
+       127
+      ],
+      [
+       255,
+       255,
+       223,
+       255,
+       255,
+       255,
+       255,
+       247,
+       255,
+       255,
+       1
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       3
+      ],
+      [
+       255,
+       239,
+       255,
+       255,
+       255,
+       255,
+       255,
+       253,
+       255,
+       255,
+       127
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       63
+      ],
+      [
+       253,
+       255,
+       255,
+       255,
+       251,
+       191,
+       255,
+       255,
+       255,
+       15
+      ],
+      [
+       255,
+       247,
+       255,
+       255,
+       255,
+       255,
+       239,
+       255,
+       255,
+       255
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       191,
+       255,
+       255,
+       255,
+       255,
+       127
+      ]
+     ],
+     "chunk_headers_root": "J1BGTKgEaeaji31CzPLryoBgedXRJfsK7myedXVHxxrR",
+     "chunk_mask": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "chunk_receipts_root": "5mGgCrFnTVf3ETUsjjKcsk8J1AZvYHzmM9AnDHxmQpxG",
+     "chunk_tx_root": "EGJM4MmY7DYQ6mNoNqEnhQDrxNAMcKCaBhc63816135e",
+     "chunks_included": 10,
+     "epoch_id": "C7TNZdUGZTbWt3iqm7icLTyQrWbkigAoRs2PtbxLRiR7",
+     "epoch_sync_data_hash": null,
+     "gas_price": "100000000",
+     "hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+     "height": 222516868,
+     "last_ds_final_block": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+     "last_final_block": "BJQA2t1Wgz5bUEDqZ6obXeLCAcQPiZRcckUxGPRyXanp",
+     "latest_protocol_version": 86,
+     "next_bp_hash": "9ZVd2xdT2RbJnhQn3USTtT9KECvyKiijuTFUvbdyDp4Q",
+     "next_epoch_id": "4TYKtcaUHB3QMgeYeZ5J8xhC5qobd8vJcGTvEiN1Ra6G",
+     "outcome_root": "26e2KvpfvWBnUoATUxEp81tRSpA5HbTFBnBDZZiztYaY",
+     "prev_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+     "prev_height": 222516867,
+     "prev_state_root": "Bawz7SzaYV3dZJBSb4EFhGMB6NCRzEPuLCLjX6MYmcCx",
+     "random_value": "6HGta9hDyzErtq7FhnswTyRjXh25rVcHY86WQ6sPydMn",
+     "rent_paid": "0",
+     "shard_split": null,
+     "signature": "ed25519:<a signature, not kept>",
+     "timestamp": 1793505946466546700,
+     "timestamp_nanosec": "1793505946466546692",
+     "total_supply": "1310498906903728708798867977327864",
+     "validator_proposals": [],
+     "validator_reward": "0"
+    }
+   }
+  }
+ },
+ {
+  "url": "https://archival-rpc.mainnet.near.org",
+  "method": "EXPERIMENTAL_tx_status",
+  "params": {
+   "tx_hash": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+   "sender_account_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+   "wait_until": "NONE"
+  },
+  "status": 200,
+  "json": {
+   "jsonrpc": "2.0",
+   "result": {
+    "final_execution_status": "FINAL",
+    "receipts": [
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "119159735895219299999999"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "system",
+        "signer_public_key": "ed25519:11111111111111111111111111111111"
+       }
+      },
+      "receipt_id": "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+      "receiver_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33"
+     },
+     {
+      "predecessor_id": "system",
+      "priority": 0,
+      "receipt": {
+       "Action": {
+        "actions": [
+         {
+          "Transfer": {
+           "deposit": "229993650000000000000"
+          }
+         }
+        ],
+        "gas_price": "0",
+        "input_data_ids": [],
+        "is_promise_yield": false,
+        "output_data_receivers": [],
+        "signer_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+        "signer_public_key": "ed25519:4oEPep14hKiBcFKScdaUQRPZJQMt2LDKeiKNaAAu9TVR"
+       }
+      },
+      "receipt_id": "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB",
+      "receiver_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+     }
+    ],
+    "receipts_outcome": [
+     {
+      "block_hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+      "id": "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm",
+      "outcome": {
+       "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+       "gas_burnt": 255548500000,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [
+        "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+        "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB"
+       ],
+       "status": {
+        "SuccessValue": ""
+       },
+       "tokens_burnt": "25554850000000000000"
+      },
+      "proof": [
+       {
+        "direction": "Right",
+        "hash": "5oX4DitCaCM4QNaaHkx5kDPoKsB8vva1SNfq39kNYQ7C"
+       },
+       {
+        "direction": "Left",
+        "hash": "GTUT1LB4gomTKfgBGS9rNFy9GCqQNC4vibcrQKALKSys"
+       },
+       {
+        "direction": "Right",
+        "hash": "64cU6jNqBYXKR3jYEkbCVzhD5pegZ7oWCEjZoYCAtMMk"
+       }
+      ]
+     },
+     {
+      "block_hash": "2RcFTqj95VEBUa4ECL8TyLAsgypdeopTW3ZtajWoEMtc",
+      "id": "9wEBNxb1a7uLm782NfH4eUyiYqAkRC37ArpT7feKxNgL",
+      "outcome": {
+       "executor_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33",
+       "gas_burnt": 7524947687500,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [],
+       "status": {
+        "SuccessValue": ""
+       },
+       "tokens_burnt": "0"
+      },
+      "proof": []
+     },
+     {
+      "block_hash": "2RcFTqj95VEBUa4ECL8TyLAsgypdeopTW3ZtajWoEMtc",
+      "id": "GBkJTsykxGSHckvi8iCSwLwXiQScxBgbJGTmQp9VMXsB",
+      "outcome": {
+       "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+       "gas_burnt": 7524947687500,
+       "logs": [],
+       "metadata": {
+        "contracts": [
+         null
+        ],
+        "gas_profile": [],
+        "version": 4
+       },
+       "receipt_ids": [],
+       "status": {
+        "Failure": {
+         "ActionError": {
+          "index": 0,
+          "kind": {
+           "AccountDoesNotExist": {
+            "account_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+           }
+          }
+         }
+        }
+       },
+       "tokens_burnt": "0"
+      },
+      "proof": [
+       {
+        "direction": "Right",
+        "hash": "8zieUZkPBN31S3ezS5EE3BizFexiFuJLcmtBeXhiaBGT"
+       },
+       {
+        "direction": "Right",
+        "hash": "3E6mTrw5PXEEnFo4L4ryi3GeSdzHi2vAU6wuHXJpZj9n"
+       }
+      ]
+     }
+    ],
+    "status": {
+     "SuccessValue": ""
+    },
+    "transaction": {
+     "actions": [
+      {
+       "DeleteAccount": {
+        "beneficiary_id": "951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33"
+       }
+      }
+     ],
+     "hash": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+     "nonce": 222476436000004,
+     "priority_fee": 0,
+     "public_key": "ed25519:4oEPep14hKiBcFKScdaUQRPZJQMt2LDKeiKNaAAu9TVR",
+     "receiver_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+     "signature": "ed25519:<a signature, not kept>",
+     "signer_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8"
+    },
+    "transaction_outcome": {
+     "block_hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+     "id": "Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM",
+     "outcome": {
+      "executor_id": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
+      "gas_burnt": 255548500000,
+      "logs": [],
+      "metadata": {
+       "gas_profile": null,
+       "version": 1
+      },
+      "receipt_ids": [
+       "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm"
+      ],
+      "status": {
+       "SuccessReceiptId": "2CYFYeeVGGVoWdKXjFiE5KHGtNYMYZXRM6aKFedHEDRm"
+      },
+      "tokens_burnt": "25554850000000000000"
+     },
+     "proof": [
+      {
+       "direction": "Right",
+       "hash": "25HvgN9KceGsPpf7g2ecagCoN4G2cY1j4tTKZbQ2dDkR"
+      },
+      {
+       "direction": "Right",
+       "hash": "2PtA3dX6dWrCi67XRZyPoF7T4VfvebycnDw5jrAqtYPu"
+      },
+      {
+       "direction": "Right",
+       "hash": "64cU6jNqBYXKR3jYEkbCVzhD5pegZ7oWCEjZoYCAtMMk"
+      }
+     ]
+    }
+   },
+   "id": 1
+  }
+ },
+ {
+  "url": "https://archival-rpc.mainnet.near.org",
+  "method": "block",
+  "params": {
+   "block_id": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E"
+  },
+  "status": 200,
+  "json": {
+   "jsonrpc": "2.0",
+   "result": {
+    "author": "liver.pool.near",
+    "chunks": [
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "BntGZWedM11bCkiCRvYVph4byAY5Hzqes8N4ZQPp6Bj1",
+      "congestion_info": {
+       "allowed_shard": 4,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 973,
+      "encoded_merkle_root": "Bx5bXbGKyRJWP9xZevVbZPZq8wE7tzZxZGo6RcaeR9Mk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "3wzmNXgZCjC5UAiBwXxhcN6V3Y7xPSjWynzjheWrMrGq",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 10,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "GevfrcEeMzTYNX7V6y7m6KeNnCZRsAjsMTLEMfxRgLgp",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "DjE3bqSSWd7SRKtcami37yKqApbJGivEutpfmsqFV3Sy",
+      "congestion_info": {
+       "allowed_shard": 12,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "HWmKG1esMwG1wq9JDBZruWrNmv4vajnfoaBusEpqXxut",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 11,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "EegecE1FCTG38Jzvynvpu8T5UG17a79fZG1Ru9zZ6pt4",
+      "congestion_info": {
+       "allowed_shard": 13,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "ABQf2dTsXAhpErF4ToNoRGDWoPrWdQCMYrgeYH6iLt6q",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 1,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "155775923429200000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5PSdQMbCv384BxA6kpqgf3bWzMvj3tWNrYXhCTvykJFT",
+      "congestion_info": {
+       "allowed_shard": 10,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 265,
+      "encoded_merkle_root": "HufC5FWHhNwKVpqJ4zNSkjs1mQpLXqawYUJ8ncQkEiqV",
+      "gas_limit": 1000000000000000,
+      "gas_used": 9366954604435,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "c7nsoKovEmHnkSsfqRCNuiGU7Kbrv92eyzFXfgFyMxy",
+      "outgoing_receipts_root": "FmoEysJCDBKebmkfpjSki2Cj7j3Hzipt9QeZv7814nNa",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "AeCsgfjDEQVJWFm8ykG18xdp6bSiUjRq2XZQkGEU8sgU",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 8,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "FUwRzXTFj9s5SVAG7c61FctCEMNrXE4tp2NWSQUTWuin",
+      "congestion_info": {
+       "allowed_shard": 11,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "EuooAzS67eiyZu7K2eSjaQM6oBYFQMDt3uy3ui6fewjL",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 9,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "FRkCDzUm45ArwLP1Z8NLZS7cfbPB82wCBbbMtUsBe1Ej",
+      "congestion_info": {
+       "allowed_shard": 1,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "EudPVHZFWA5XnffmFWVqwmeCdr9ZHaF1uqei9TQ7G5YK",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 6,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "686189894371000000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5UVMjXe8RatSqh2sNZtFx7uQ9J2RfaVU7XBQL5GoLSXg",
+      "congestion_info": {
+       "allowed_shard": 8,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 643,
+      "encoded_merkle_root": "8pzx5vzZmwuW7N5zCKydmzkPk8e2a8W4fHcWAvRQrM9H",
+      "gas_limit": 1000000000000000,
+      "gas_used": 9066523587064,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "AFa6hcyMNau2gC4Vs5KsJkseP9UDpMT3Z77Ue31XBtvg",
+      "outgoing_receipts_root": "7e69wf65J5Yr9Y3sbjCiNpoa5qXzmM9T2ZAfQBfyGPZ8",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "7Cgrb51RZQZtXYpmLSesvmA1CzeijtuoCLb2rcMbhtCi",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 7,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "51583194554500000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "5z43pbxZbz4agJi4xPntCMraSMCCfe637esbdC8kT7sx",
+      "congestion_info": {
+       "allowed_shard": 9,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 484,
+      "encoded_merkle_root": "A5mDeNEf2Py8iq6DdgdNsJ65f1q6VTiQ1YsqQrt4mQmN",
+      "gas_limit": 1000000000000000,
+      "gas_used": 1185379633045,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "6rCfCLgp92P3B5oJFAryhdJfsrnPE3s7CgJWkgZazxRN",
+      "outgoing_receipts_root": "B4aiDmZTN7cVhPhpjNo28febmPEHvCCPhH7mwsmMEirU",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "42xWJMavpK3R7GYsMoxXBbwyrcZSryVV5L18wYTwebdq",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 4,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "328808930498100000000",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "F1aNWg6KWqi8xFyvHzqbzM4ZxjNneSD4snKpw9Y2uJ2R",
+      "congestion_info": {
+       "allowed_shard": 6,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 338,
+      "encoded_merkle_root": "GpekqKxWqjmSmunh51SYabDmB3owVW968n8WEvrUSg6r",
+      "gas_limit": 1000000000000000,
+      "gas_used": 3935779518739,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "DTQn4uY72oqJDhAutwGXQ35d4N5yN1v1jrdqUZA4KiBX",
+      "outgoing_receipts_root": "DgwLqQbCRfB7vnaMn1tw94E6v43pshr7JC5CKPf4zPU",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "6BXG8RAEeUngupdKfucKQCasXC5ueCmqy5oDuAGtTeEa",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 12,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     },
+     {
+      "balance_burnt": "0",
+      "bandwidth_requests": {
+       "V1": {
+        "requests": []
+       }
+      },
+      "chunk_hash": "98Hq6DBxvTS56CCoUyai2BfqcGUnxMG9NMGQcudCVCif",
+      "congestion_info": {
+       "allowed_shard": 7,
+       "buffered_receipts_gas": "0",
+       "delayed_receipts_gas": "0",
+       "receipt_bytes": 0
+      },
+      "encoded_length": 8,
+      "encoded_merkle_root": "9zYue7drR1rhfzEEoc4WUXzaYRnRNihvRoGt1BgK7Lkk",
+      "gas_limit": 1000000000000000,
+      "gas_used": 0,
+      "height_created": 222516868,
+      "height_included": 222516868,
+      "outcome_root": "11111111111111111111111111111111",
+      "outgoing_receipts_root": "GkXFM5VkSNfBLbDv8igetxFxFj9f3pcsnjKC37w1CzCA",
+      "prev_block_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+      "prev_state_root": "9WoUQ3Yr16KTDW5ruYgk9mY4pUfA4u89L6jeD9VxVv7m",
+      "proposed_split": null,
+      "rent_paid": "0",
+      "shard_id": 13,
+      "signature": "ed25519:<a signature, not kept>",
+      "tx_root": "11111111111111111111111111111111",
+      "validator_proposals": [],
+      "validator_reward": "0"
+     }
+    ],
+    "header": {
+     "approvals": [
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      null,
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      "ed25519:<a signature, not kept>",
+      null
+     ],
+     "block_body_hash": "AXTU8BfNmf6ptvzSNgTeZyu89fwUrBfmigQaAxSJtSL6",
+     "block_merkle_root": "8wvsJWUncsv95hiPfTwgBYrJftpvPtZQT8aJdAa6KUKD",
+     "block_ordinal": 212231952,
+     "challenges_result": [],
+     "challenges_root": "11111111111111111111111111111111",
+     "chunk_endorsements": [
+      [
+       235,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       63
+      ],
+      [
+       255,
+       255,
+       253,
+       255,
+       255,
+       255,
+       223,
+       255,
+       255
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       253,
+       255,
+       255,
+       127
+      ],
+      [
+       255,
+       255,
+       223,
+       255,
+       255,
+       255,
+       255,
+       247,
+       255,
+       255,
+       1
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       3
+      ],
+      [
+       255,
+       239,
+       255,
+       255,
+       255,
+       255,
+       255,
+       253,
+       255,
+       255,
+       127
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       255,
+       63
+      ],
+      [
+       253,
+       255,
+       255,
+       255,
+       251,
+       191,
+       255,
+       255,
+       255,
+       15
+      ],
+      [
+       255,
+       247,
+       255,
+       255,
+       255,
+       255,
+       239,
+       255,
+       255,
+       255
+      ],
+      [
+       255,
+       255,
+       255,
+       255,
+       191,
+       255,
+       255,
+       255,
+       255,
+       127
+      ]
+     ],
+     "chunk_headers_root": "J1BGTKgEaeaji31CzPLryoBgedXRJfsK7myedXVHxxrR",
+     "chunk_mask": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "chunk_receipts_root": "5mGgCrFnTVf3ETUsjjKcsk8J1AZvYHzmM9AnDHxmQpxG",
+     "chunk_tx_root": "EGJM4MmY7DYQ6mNoNqEnhQDrxNAMcKCaBhc63816135e",
+     "chunks_included": 10,
+     "epoch_id": "C7TNZdUGZTbWt3iqm7icLTyQrWbkigAoRs2PtbxLRiR7",
+     "epoch_sync_data_hash": null,
+     "gas_price": "100000000",
+     "hash": "8UDXmCexGveqJUjomYvPjBfCsyXf6zE3yocyMddFeS1E",
+     "height": 222516868,
+     "last_ds_final_block": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+     "last_final_block": "BJQA2t1Wgz5bUEDqZ6obXeLCAcQPiZRcckUxGPRyXanp",
+     "latest_protocol_version": 86,
+     "next_bp_hash": "9ZVd2xdT2RbJnhQn3USTtT9KECvyKiijuTFUvbdyDp4Q",
+     "next_epoch_id": "4TYKtcaUHB3QMgeYeZ5J8xhC5qobd8vJcGTvEiN1Ra6G",
+     "outcome_root": "26e2KvpfvWBnUoATUxEp81tRSpA5HbTFBnBDZZiztYaY",
+     "prev_hash": "33mxbTY62BbaDYxfxUAHuAbn1XfNyzRVMHsg5Wr7QdbH",
+     "prev_height": 222516867,
+     "prev_state_root": "Bawz7SzaYV3dZJBSb4EFhGMB6NCRzEPuLCLjX6MYmcCx",
+     "random_value": "6HGta9hDyzErtq7FhnswTyRjXh25rVcHY86WQ6sPydMn",
+     "rent_paid": "0",
+     "shard_split": null,
+     "signature": "ed25519:<a signature, not kept>",
+     "timestamp": 1793505946466546700,
+     "timestamp_nanosec": "1793505946466546692",
+     "total_supply": "1310498906903728708798867977327864",
+     "validator_proposals": [],
+     "validator_reward": "0"
+    }
+   },
+   "id": 1
+  }
+ }
+]
