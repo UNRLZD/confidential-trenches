@@ -6,8 +6,8 @@
 //!    FunctionCall(config)], no AddKey) lands, `view_access_key_list` reads `keys: []` at optimistic and at final, and
 //!    `config()` answers the same from the recipe's call and from a view, naming the build's token.
 //! 2. `mock_token_fails_on_demand`: each failure rule of the mock token fails its call (`MockTokenFail: <method>`) with
-//!    nothing moved, and the same call passes once the rule is cleared; `ft_transfer_call` to the skeleton (which has
-//!    no `ft_on_transfer` yet) gives the sender everything back.
+//!    nothing moved, and the same call passes once the rule is cleared; `ft_transfer_call` to the vault with a message
+//!    its `ft_on_transfer` refuses (`{}`, no fields: 2.5.1 row 2) gives the sender everything back.
 //!
 //! The `harness_*` tests plant each case the review of 1 Nov found the harness reading wrong at 65f3bb7 (probes
 //! P1-P8), with the probe contract (tests/harness/probe) making the vault's receipt shapes:
@@ -109,8 +109,8 @@ async fn mock_token_fails_on_demand() -> R<()> {
     let _ = h.storage_deposit(&h.root, &carol).await?;
     assert!(!h.view(&h.token, "storage_balance_of", json!({"account_id": carol})).await?.is_null());
 
-    // ft_transfer_call to the vault: refused on demand at the token; without the rule, the skeleton's missing
-    // ft_on_transfer fails and ft_resolve_transfer gives alice everything back
+    // ft_transfer_call to the vault: refused on demand at the token; without the rule, the vault's ft_on_transfer
+    // refuses the empty message (2.5.1 row 2) and ft_resolve_transfer gives alice everything back
     let call = json!({"receiver_id": h.vault, "amount": "1000000", "msg": "{}"});
     h.mock_fail("ft_transfer_call", Some(&h.vault), true).await?;
     let o = h.call_outcome(&alice, &h.token, "ft_transfer_call", call.clone(), ONE_YOCTO, Gas::from_tgas(100)).await?;
@@ -121,7 +121,7 @@ async fn mock_token_fails_on_demand() -> R<()> {
         println!("ft_transfer_call receipt {}", r.line());
     }
     let [on] = o.calls_exactly(&h.vault, "ft_on_transfer", 1)?[..] else { unreachable!() };
-    assert!(on.failure().is_some_and(|f| f.contains("MethodNotFound")), "the skeleton has no ft_on_transfer: {}", on.line());
+    assert!(on.failure().is_some_and(|f| f.contains("InvalidMessage")), "ft_on_transfer took `{{}}`: {}", on.line());
     let [resolve] = o.calls_exactly(&h.token, "ft_resolve_transfer", 1)?[..] else { unreachable!() };
     assert!(resolve.ok(), "ft_resolve_transfer failed: {}", resolve.line());
     let failed: Vec<String> = o.failures().iter().map(|r| r.line()).collect();

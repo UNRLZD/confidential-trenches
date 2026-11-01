@@ -40,14 +40,26 @@
 //! binary on first use and then sets `NEAR_SANDBOX_BIN_PATH` to it inside this process (src/runner/mod.rs l.272-277),
 //! which a later read would take for a foreign binary.
 //!
+//! Every money test runs twice (vault.md 5): `with_vault_and(TokenKind::Mock)` and `with_vault_and(TokenKind::Usdc)`.
+//! The real tokens (card vault-sandbox-usdc) are mainnet's own code, pinned by size, sha256 and code hash in
+//! tests/fixtures/real-wasm.json and fetched by tests/harness/fetch-wasm.mjs (view_code on two mainnet RPCs; run.sh
+//! names them in `USDC_WASM` and `INTENTS_WASM`); the harness refuses any other bytes:
+//! - USDC (Circle's FiatToken) at TOKEN, set up as mainnet's was: the token account's own [DeployContract,
+//!   FunctionCall init] with a test account in every role, two controllers for one minter and its allowance, each by
+//!   a multisig request. Its halt is the pausers' multisig `Pause` / `Unpause` (`usdc_halt`); `mint` mints by the minter.
+//! - intents.near at DF (defuse v0.4.5, commit 16d04f6), by its own [DeployContract, FunctionCall new], fee 0, a test
+//!   account as super admin and in its pause and unpause roles (`deploy_intents`).
+//! A 64-hex implicit id and a `.near` name are ids no sandbox test can create, so each of those two accounts and one
+//! test key on it come from a state patch (`keyed_account`); their code and state come only from transactions.
+//!
 //! The mock token is not NEP-141 as near-contract-standards 5.29.1 builds it (USDC's code), and these gaps stay:
 //! - `ft_resolve_transfer` reads up to 64 bytes of the receiver's result; NCS reads 42 and refunds all on a longer one;
 //! - `ft_transfer_call` gives the receiver the prepaid gas less 30 Tgas and the resolve 5 Tgas, the unused split
 //!   between them (measured: 80.890 and 15.890 Tgas of 100), not NCS's split;
 //! - an `ft_transfer` from an unregistered sender panics where USDC burns nothing; no events; no
 //!   `storage_unregister`; `mint` registers the account; `ft_resolve_transfer` cannot be made to fail.
-//! Those edges (a halted token between a deposit's move and its resolve, deposit gas at 180 Tgas) are owed by card
-//! vault-sandbox-usdc on the real USDC wasm. There is no NEP-366 `DelegateAction` sender here: VT-S02 needs one, and
+//! Those edges (a halted token between a deposit's move and its resolve, deposit gas at 180 Tgas) are the real USDC
+//! wasm's to drive: run the case with `TokenKind::Usdc`. There is no NEP-366 `DelegateAction` sender here: VT-S02 needs one, and
 //! VT-S02's card, vault-deposit-insert, brings it (its proof: U's call as a `DelegateAction` sent by a relayer
 //! account, in its tests/s02.rs). Gas and code figures hold for one machine: a Linux x86_64 build and a
 //! macOS arm64 build give different vault bytes (at 65f3bb7: bc948c2b, 128767 B on Linux x86_64; 91a23f6f,
@@ -58,7 +70,7 @@ use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::network::Sandbox;
 use near_workspaces::operations::Function;
 use near_workspaces::result::ExecutionFinalResult;
-use near_workspaces::types::{AccountDetailsPatch, Gas, NearToken};
+use near_workspaces::types::{AccessKey, AccountDetailsPatch, CryptoHash, Gas, KeyType, NearToken, SecretKey};
 use near_workspaces::{Account, AccountId, Worker};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -70,6 +82,12 @@ pub const SANDBOX_VERSION: &str = "2.13.4";
 pub const SANDBOX_PROTOCOL: u64 = 86;
 /// The token account the mainnet vault build names (src/constants.rs `TOKEN`).
 pub const TOKEN: &str = blindfill_vault::constants::TOKEN;
+/// NEAR Intents' verifier account the vault build names (src/constants.rs `INTENTS`).
+pub const INTENTS: &str = blindfill_vault::constants::INTENTS;
+/// USDC's own message for every call while halted, its views included.
+pub const USDC_HALTED: &str = "FiatToken: paused";
+/// The pins of the real wasm files (card vault-sandbox-usdc).
+pub const REAL_WASM: &str = include_str!("../fixtures/real-wasm.json");
 /// Yocto per storage byte (nearcore `storage_amount_per_byte`, 10^19).
 pub const YOCTO_PER_BYTE: u128 = 10_000_000_000_000_000_000;
 /// The recipe's config() call gas, as scripts/deploy-testnet.mjs sends it.
@@ -220,12 +238,85 @@ fn sandbox_env() -> &'static (Option<String>, Option<String>) {
     ENV.get_or_init(|| (std::env::var("NEAR_SANDBOX_BIN_PATH").ok(), std::env::var("HARNESS_SANDBOX_BIN").ok()))
 }
 
+/// Which token a money test runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenKind {
+    /// tests/mock-token: fails on demand (`mock_fail`).
+    Mock,
+    /// The real USDC wasm (tests/fixtures/real-wasm.json), with test accounts in its roles.
+    Usdc,
+}
+
+/// The test accounts in the real USDC's roles.
+pub struct UsdcRoles {
+    pub admin: Account,
+    pub owner: Account,
+    pub pausers: [Account; 2],
+    pub blocklister: Account,
+    pub master_minters: [Account; 2],
+    pub minter: Account,
+    pub controllers: [Account; 2],
+}
+
+/// A pin of tests/fixtures/real-wasm.json.
+pub struct Pin {
+    pub env: String,
+    pub account: String,
+    pub bytes: usize,
+    pub sha256: String,
+    pub code_hash: String,
+    pub source_rev: Option<String>,
+}
+
+/// The fixture's pin `name` ("usdc" or "intents").
+pub fn pin(name: &str) -> R<Pin> {
+    let f: Value = serde_json::from_str(REAL_WASM)?;
+    let p = &f["wasm"][name];
+    let s = |k: &str| p[k].as_str().map(str::to_string).ok_or_else(|| format!("real-wasm.json: {name}.{k} is not a string"));
+    Ok(Pin {
+        env: s("env")?,
+        account: s("account")?,
+        bytes: p["bytes"].as_u64().ok_or_else(|| format!("real-wasm.json: {name}.bytes"))? as usize,
+        sha256: s("sha256")?,
+        code_hash: s("code_hash")?,
+        source_rev: p["source_rev"].as_str().map(str::to_string),
+    })
+}
+
+/// NEAR's code hash of `wasm`: base58 of its sha256.
+pub fn code_hash(wasm: &[u8]) -> String {
+    let d: [u8; 32] = near_sdk::env::sha256(wasm).try_into().expect("sha256 is 32 bytes");
+    CryptoHash(d).to_string()
+}
+
+/// `wasm` is the pin: its size, its sha256, and base58(sha256) = the pin's code hash.
+pub fn check_pin(p: &Pin, wasm: &[u8]) -> Result<(), String> {
+    let (sha, hash) = (hex(&near_sdk::env::sha256(wasm)), code_hash(wasm));
+    if wasm.len() != p.bytes || sha != p.sha256 || hash != p.code_hash {
+        return Err(format!(
+            "REFUSED: {} wasm is {} B sha256 {sha} (code hash {hash}); the pin is {} B sha256 {} (code hash {})",
+            p.account, wasm.len(), p.bytes, p.sha256, p.code_hash
+        ));
+    }
+    Ok(())
+}
+
+/// The pinned wasm `name`, read from the file its env var names and refused unless it is the pin.
+pub fn pinned_wasm(name: &str) -> R<Vec<u8>> {
+    let p = pin(name)?;
+    let w = wasm_from_env(&p.env)?;
+    check_pin(&p, &w)?;
+    Ok(w)
+}
+
 pub struct Harness {
     pub worker: Worker<Sandbox>,
     pub root: Account,
     pub vault: AccountId,
     pub token: AccountId,
     pub vault_wasm: Vec<u8>,
+    /// The real USDC's role accounts once `deploy_usdc` ran; `None` on the mock token.
+    pub usdc: Option<UsdcRoles>,
     rpc: String,
     http: reqwest::Client,
     gas: Mutex<BTreeMap<String, Vec<u64>>>,
@@ -273,6 +364,7 @@ impl Harness {
             http: reqwest::Client::new(),
             gas: Mutex::new(BTreeMap::new()),
             gas_failed: Mutex::new(BTreeMap::new()),
+            usdc: None,
             root,
             worker,
         };
@@ -292,9 +384,17 @@ impl Harness {
     /// `start`, then the vault by the 2.8 recipe and the mock token with the vault registered on it: the state every
     /// money test begins from.
     pub async fn with_vault_and_mock_token() -> R<Self> {
-        let h = Self::start().await?;
+        Self::with_vault_and(TokenKind::Mock).await
+    }
+
+    /// `start`, then the vault by the 2.8 recipe and `kind`'s token at TOKEN with the vault registered on it.
+    pub async fn with_vault_and(kind: TokenKind) -> R<Self> {
+        let mut h = Self::start().await?;
         let _ = h.deploy_vault().await?;
-        h.deploy_mock_token().await?;
+        match kind {
+            TokenKind::Mock => h.deploy_mock_token().await?,
+            TokenKind::Usdc => h.deploy_usdc().await?,
+        }
         let _ = h.storage_deposit(&h.root, &h.vault).await?;
         Ok(h)
     }
@@ -328,6 +428,152 @@ impl Harness {
             .transact()
             .await?;
         Ok(())
+    }
+
+    // ---- the real USDC and intents.near ----
+
+    /// An account at `id` holding `near` N with one test key, put there by a state patch: the sandbox's only way to
+    /// hold an id no test can create (a 64-hex implicit id whose key no one here holds, a `.near` name the sandbox's
+    /// registrar cannot create). Only the account and its key are patched; its code and state come from transactions.
+    pub async fn keyed_account(&self, id: &AccountId, near: u128) -> R<Account> {
+        let sk = SecretKey::from_random(KeyType::ED25519);
+        self.worker
+            .patch(id)
+            .account(AccountDetailsPatch::default().balance(NearToken::from_near(near)).storage_usage(182))
+            .access_key(sk.public_key(), AccessKey::full_access())
+            .transact()
+            .await?;
+        Ok(Account::from_secret_key(id.clone(), sk, &self.worker))
+    }
+
+    /// `id`'s code hash, read back at optimistic, is the pin `name`'s.
+    pub async fn expect_code(&self, id: &AccountId, name: &str) -> R<()> {
+        let got = self.account_view(id, "optimistic").await?["code_hash"].clone();
+        let want = pin(name)?.code_hash;
+        if got != json!(want) {
+            return Err(format!("{id} code hash {got}, want the pin {want}").into());
+        }
+        println!("{id}: code hash {want} (the {name} pin)");
+        Ok(())
+    }
+
+    /// The real USDC (the pinned wasm) at TOKEN, set up as mainnet's was (NearBlocks reads, research
+    /// proofs/g1-vault-gas/sandbox/src/payouts.rs `setup_usdc`): the token account's own [DeployContract, FunctionCall
+    /// init] (mainnet tx FEJRCgwWzY58dqG1WYiy1VAiVQZYvUMSQVkQ428t7V82) with a test account in every role, then two
+    /// controllers for one minter and the minter's allowance, each by a multisig request, as mainnet's requests 0-4.
+    pub async fn deploy_usdc(&mut self) -> R<()> {
+        let mut made = vec![];
+        for name in ["usdc-admin", "usdc-owner", "usdc-pauser1", "usdc-pauser2", "usdc-blocklister", "usdc-mm1", "usdc-mm2", "usdc-minter", "usdc-ctl1", "usdc-ctl2"] {
+            made.push(self.account(name, 10).await?);
+        }
+        let mut a = made.into_iter();
+        let mut next = || a.next().expect("ten role accounts");
+        let roles = UsdcRoles {
+            admin: next(),
+            owner: next(),
+            pausers: [next(), next()],
+            blocklister: next(),
+            master_minters: [next(), next()],
+            minter: next(),
+            controllers: [next(), next()],
+        };
+        let token = self.keyed_account(&self.token.clone(), 100).await?;
+        self.init_usdc(&token, &roles).await?;
+        self.usdc = Some(roles);
+        Ok(())
+    }
+
+    /// The pinned USDC deployed and initialised by `token` itself with `roles` in its roles: its code hash read back as
+    /// the pin, the minter allowed to mint, and its storage bounds read as TOKEN_STORAGE (vault.md 2.8).
+    pub async fn init_usdc(&self, token: &Account, roles: &UsdcRoles) -> R<()> {
+        let wasm = pinned_wasm("usdc")?;
+        let init = json!({
+            "admin_ids": [roles.admin.id()], "owner_ids": [roles.owner.id()],
+            "pauser_ids": [roles.pausers[0].id(), roles.pausers[1].id()], "blocklister_id": roles.blocklister.id(),
+            "master_minter_ids": [roles.master_minters[0].id(), roles.master_minters[1].id()],
+            "metadata": {"spec": "ft-1.0.0", "name": "USD Coin", "symbol": "USDC", "icon": null, "reference": null,
+                         "reference_hash": null, "decimals": 6},
+        });
+        let result =
+            token.batch(token.id()).deploy(&wasm).call(Function::new("init").args_json(init).gas(Gas::from_tgas(300))).transact().await?;
+        self.outcome(token.id(), result).await?.expect_all_ok("USDC deploy + init")?;
+        self.expect_code(token.id(), "usdc").await?;
+        for ctl in &roles.controllers {
+            let action = json!({"ConfigureController": {"minter_id": roles.minter.id(), "controller_id": ctl.id()}});
+            let _ = self.multisig(token.id(), &roles.master_minters, action).await?;
+        }
+        let action = json!({"ConfigureMinterAllowance": {"controller_id": roles.controllers[0].id(), "minter_allowance": "1000000000000000"}});
+        let _ = self.multisig(token.id(), &roles.controllers, action).await?;
+        let bounds = self.view(token.id(), "storage_balance_bounds", json!({})).await?;
+        if bounds["min"] != json!(TOKEN_STORAGE.as_yoctonear().to_string()) {
+            return Err(format!("{}: storage_balance_bounds {bounds}, want min {}", token.id(), TOKEN_STORAGE.as_yoctonear()).into());
+        }
+        Ok(())
+    }
+
+    /// One USDC multisig request on `token`: `by[0]` creates it, both approve, `by[1]` executes; the execute's outcome.
+    pub async fn multisig(&self, token: &AccountId, by: &[Account; 2], action: Value) -> R<Outcome> {
+        let (zero, gas) = (NearToken::from_yoctonear(0), Gas::from_tgas(100));
+        let rid = self.view(token, "get_next_multisig_request_id", json!({})).await?;
+        let _ = self.call(&by[0], token, "create_multisig_request", json!({"action": action}), zero, gas).await?;
+        for a in by {
+            let _ = self.call(a, token, "approve_multisig_request", json!({"request_id": rid}), zero, gas).await?;
+        }
+        self.call(&by[1], token, "execute_multisig_request", json!({"request_id": rid}), zero, gas).await
+    }
+
+    /// The real USDC's role accounts; an error on the mock token.
+    pub fn usdc_roles(&self) -> R<&UsdcRoles> {
+        self.usdc.as_ref().ok_or_else(|| "the real USDC is not deployed (with_vault_and(TokenKind::Usdc))".into())
+    }
+
+    /// USDC's own halt: `Pause` (`halt`) or `Unpause` by its two pausers' multisig; the execute must log the token's
+    /// `paused` or `unpaused` event.
+    pub async fn usdc_halt(&self, halt: bool) -> R<Outcome> {
+        let roles = self.usdc_roles()?;
+        let (action, event) = if halt { ("Pause", "\"event\":\"paused\"") } else { ("Unpause", "\"event\":\"unpaused\"") };
+        let o = self.multisig(&self.token, &roles.pausers, json!(action)).await?;
+        if !o.receipts.iter().flat_map(|r| &r.logs).any(|l| l.contains("x-fiat-token") && l.contains(event)) {
+            let logs: Vec<&String> = o.receipts.iter().flat_map(|r| &r.logs).collect();
+            return Err(format!("{action}: the execute logged no {event} event: {logs:?}").into());
+        }
+        Ok(o)
+    }
+
+    /// USDC's `mint {to, amount}` on `token` by `roles.minter`, `to` registered first (by root) when it is not.
+    pub async fn usdc_mint(&self, token: &AccountId, roles: &UsdcRoles, to: &AccountId, amount: u128) -> R<()> {
+        if self.view(token, "storage_balance_of", json!({"account_id": to})).await?.is_null() {
+            let _ = self.storage_deposit_on(token, &self.root, to).await?;
+        }
+        let args = json!({"to": to, "amount": amount.to_string()});
+        let _ = self.call(&roles.minter, token, "mint", args, NearToken::from_yoctonear(0), Gas::from_tgas(100)).await?;
+        Ok(())
+    }
+
+    /// intents.near at DF (the pinned wasm) by its own [DeployContract, FunctionCall new]: fee 0, `intents-admin` as
+    /// super admin and in its PauseManager and UnpauseManager roles. Its code hash is read back as the pin and its
+    /// NEP-330 `contract_source_metadata` must name DF's commit. Returns the role account.
+    pub async fn deploy_intents(&self) -> R<Account> {
+        let id: AccountId = INTENTS.parse()?;
+        let admin = self.account("intents-admin", 10).await?;
+        let acct = self.keyed_account(&id, 100).await?;
+        let wasm = pinned_wasm("intents")?;
+        let config = json!({"config": {
+            "wnear_id": "wrap.near",
+            "fees": {"fee": 0, "fee_collector": admin.id()},
+            "roles": {"super_admins": [admin.id()], "admins": {},
+                      "grantees": {"PauseManager": [admin.id()], "UnpauseManager": [admin.id()]}},
+        }});
+        let result = acct.batch(&id).deploy(&wasm).call(Function::new("new").args_json(config).gas(Gas::from_tgas(300))).transact().await?;
+        self.outcome(&id, result).await?.expect_all_ok("intents.near deploy + new")?;
+        self.expect_code(&id, "intents").await?;
+        let meta = self.view(&id, "contract_source_metadata", json!({})).await?;
+        let rev = pin("intents")?.source_rev.ok_or("real-wasm.json: intents.source_rev")?;
+        if meta["link"] != json!(format!("https://github.com/near/intents/tree/{rev}")) {
+            return Err(format!("intents.near contract_source_metadata {meta} names no DF commit {rev}").into());
+        }
+        println!("intents.near: contract_source_metadata version {} link {}", meta["version"], meta["link"]);
+        Ok(admin)
     }
 
     /// A test account `<name>.<root>` holding `near` N, with a key (test actors are not the vault).
@@ -407,23 +653,35 @@ impl Harness {
         Err(format!("{id} not final after 10 s").into())
     }
 
-    // ---- the mock token ----
+    // ---- the token at TOKEN (mock or real USDC) ----
 
     /// `storage_deposit(account_id)` on the token by `payer`, with USDC's 0.00125 N; an error unless `all_ok()`.
     pub async fn storage_deposit(&self, payer: &Account, account: &AccountId) -> R<Outcome> {
+        self.storage_deposit_on(&self.token, payer, account).await
+    }
+
+    /// `storage_deposit(account_id)` on `token` by `payer`, with USDC's 0.00125 N; an error unless `all_ok()`.
+    pub async fn storage_deposit_on(&self, token: &AccountId, payer: &Account, account: &AccountId) -> R<Outcome> {
         let args = json!({"account_id": account, "registration_only": true});
-        self.call(payer, &self.token, "storage_deposit", args, TOKEN_STORAGE, Gas::from_tgas(10)).await
+        self.call(payer, token, "storage_deposit", args, TOKEN_STORAGE, Gas::from_tgas(10)).await
     }
 
     /// Makes the mock token fail (`fail = true`) or stop failing `method` ("ft_transfer", "ft_transfer_call" or
     /// "storage_deposit"), for calls touching `account` only, or for every call with `None`.
     pub async fn mock_fail(&self, method: &str, account: Option<&AccountId>, fail: bool) -> R<()> {
+        if self.usdc.is_some() {
+            return Err("mock_fail: the token is the real USDC, which fails only by its own roles (usdc_halt)".into());
+        }
         let args = json!({"method": method, "account_id": account, "fail": fail});
         let _ = self.call(&self.root, &self.token, "set_fail", args, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
         Ok(())
     }
 
+    /// Mints `amount` to `account` on the token at TOKEN: the mock's `mint`, or the real USDC's minter.
     pub async fn mint(&self, account: &AccountId, amount: u128) -> R<()> {
+        if let Some(roles) = &self.usdc {
+            return self.usdc_mint(&self.token, roles, account, amount).await;
+        }
         let args = json!({"account_id": account, "amount": amount.to_string()});
         let _ = self.call(&self.root, &self.token, "mint", args, NearToken::from_yoctonear(0), Gas::from_tgas(10)).await?;
         Ok(())

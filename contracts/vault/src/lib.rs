@@ -13,9 +13,11 @@
 
 pub mod constants;
 pub mod context;
+pub mod deposit;
 pub mod events;
 pub mod field;
 pub mod poseidon;
+pub mod prepay;
 pub mod promise;
 pub mod tree;
 pub mod verifier;

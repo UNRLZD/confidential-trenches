@@ -12,10 +12,13 @@
 // land (W:886-917). No field of a refused message is read, so a return_key such as "constructor" is never looked up.
 // A repeated request gets its first answer again, never a second run; a repeated id with another body is refused
 // "id_reused" (startApi). Answers carry states only, never a key, the words or a note secret (W §2.9 row 11).
+// The state is the host's: in the frame, src/state.ts reads it from the wallet store (card signpage-frame-state). On
+// every change the host reports, the page reads the state again and posts a `state` event {v: 1, type, state} when it
+// differs from the last state it sent; none before the first `state` answer, which carries a fresh read itself.
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
-import type { ReadyEvent, SignpageAnswer, SignpageKind, SignpageState } from "../../kit/src/signpage/messages.ts";
+import type { ReadyEvent, SignpageAnswer, SignpageKind, SignpageState, StateEvent } from "../../kit/src/signpage/messages.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
 export const APP_ORIGIN = "https://confidential.unrealized.trade";
@@ -59,8 +62,10 @@ export interface ApiHost {
    * checks and then be read as something else.
    */
   listen(fn: (e: IncomingMessage) => void): void;
-  /** The state now. */
-  state(): SignpageState;
+  /** The state now, read fresh; it must not throw (src/state.ts answers signed out when it cannot read). */
+  state(): SignpageState | Promise<SignpageState>;
+  /** Registers `fn`, called on every change of the state's source (another tab's sign-in, sign-out, words saved, op). */
+  watch?(fn: () => void): void;
 }
 
 /** The state of a page that holds no seed yet. */
@@ -139,11 +144,20 @@ function isStateRequest(m: Record<string, unknown>): boolean {
  * (the SHA-256 is async). An answered id is kept with the SHA-256 of its request's JSON: the same request again gets
  * its first answer, never a second run; the same id with another body is refused "id_reused" (an ErrorCode string,
  * messages.ts), `state` included. `state` is read fresh each time and never kept, so polling it pushes out no other
- * id. A kind that moves money writes its id to the wallet store before it signs (wallet.md §7 item 4), with that card.
+ * id. A change the host reports reads the state in the same queue and posts a `state` event when it differs from the
+ * last state sent (answer or event), so an event never overtakes a newer answer. A kind that moves money writes its id
+ * to the wallet store before it signs (wallet.md §7 item 4), with that card.
  */
 export function startApi(host: ApiHost): { idle(): Promise<void> } {
   const answered = new Map<string, { sha: string; answer: SignpageAnswer }>();
-  const post = (msg: SignpageAnswer | ReadyEvent) => host.parent.postMessage(msg, APP_ORIGIN);
+  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent) => host.parent.postMessage(msg, APP_ORIGIN);
+  // the JSON of the last state sent; null until the first `state` answer
+  let sent: string | null = null;
+  const read = async (): Promise<SignpageState> => {
+    const s = await host.state();
+    sent = JSON.stringify(s);
+    return s;
+  };
 
   const handle = async (data: unknown): Promise<void> => {
     const bytes = plainRequestBytes(data);
@@ -154,7 +168,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void> } {
     const sha = hex(await crypto.subtle.digest("SHA-256", bytes));
     const first = answered.get(id);
     if (first) return post(first.sha === sha ? first.answer : { v: 1, id, ok: false, error: { code: "id_reused" } });
-    if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: host.state() });
+    if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() });
     const answer: SignpageAnswer = { v: 1, id, ok: false, error: { code: "not_allowed" } };
     answered.set(id, { sha, answer });
     if (answered.size > REMEMBERED_IDS) answered.delete(answered.keys().next().value as string);
@@ -162,6 +176,21 @@ export function startApi(host: ApiHost): { idle(): Promise<void> } {
   };
 
   let queue: Promise<void> = Promise.resolve();
+  // many changes while one read waits make one more read, not one each
+  let pushQueued = false;
+  host.watch?.(() => {
+    if (pushQueued) return;
+    pushQueued = true;
+    queue = queue
+      .then(async () => {
+        pushQueued = false;
+        if (sent === null) return;
+        const before = sent;
+        const s = await read();
+        if (sent !== before) post({ v: 1, type: "state", state: s });
+      })
+      .catch(() => {});
+  });
   host.listen((e) => {
     if (e.origin !== APP_ORIGIN || e.source !== host.parent) return;
     const data = e.data;
