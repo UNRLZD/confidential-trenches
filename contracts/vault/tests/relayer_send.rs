@@ -3,21 +3,27 @@
 //! token in near-sandbox 2.13.4. Runs only with `--features sandbox`, through tests/harness/run.sh
 //! (`contracts/vault/tests/harness/run.sh --test relayer_send`); a plain `cargo test` never builds it.
 //!
+//! The vault here is tests/test-vault (`Harness::with_test_vault_and`): the vault's deposit surface only
+//! (`storage_prepay` as src/prepay.rs, `ft_on_transfer` charging 904 B when the state tree's size is 0 or a power of two
+//! and 756 B otherwise, the `deposits` and tree views). It stands in for the vault's deposit rows (vault.md 2.5.1 rows
+//! 3-12) until card vault-deposit-insert lands, since the vault on main still answers every deposit with the whole
+//! amount unused; then the same cases run on the real vault (`with_vault_and`).
+//!
 //! The relayer is driven only through its CLI, `node apps/helper/test/bind-send/carry.ts`, one new process per request
 //! batch, so every run after the first is a restart that reads the same store directory. U's call is signed by
 //! `node apps/helper/test/bind-send/sign.ts` as U's device signs it (2.10 (b)): U's key nonce + 1 and the final height +
 //! 100. Every outcome is read on chain through the harness's RPC, never taken from the CLI's answer alone.
 //!
-//! World per run: the vault and `kind`'s token (`Harness::with_vault_and`), seed deposits by a seeder account first (so
-//! the vault's first deposit is never the relayer's), U = a 64-hex implicit account holding the token (`keyed_account`,
-//! `mint`), and the relayer = a sandbox account with NEAR and a full-access key handed to the CLI.
+//! World per run: the test vault and `kind`'s token (`Harness::with_test_vault_and`), seed deposits by a seeder account
+//! first (so the vault's first deposit is never the relayer's), U = a 64-hex implicit account holding the token
+//! (`keyed_account`, `mint`), and the relayer = a sandbox account with NEAR and a full-access key handed to the CLI.
 //!
 //! - a. `happy_{mock,usdc}`: 200 {tx_hash}; P in the `deposits` pages with depositor U and the amount; U's balance down
 //!   by the amount; one prepay of 756 B (tree size 3) and, for a second U, of 904 B (tree size 4, a power of two); the
 //!   prepay's vault receipt in a block strictly before the send's `Delegate` receipt on U.
 //! - b. `resend_{mock,usdc}`: the same signed call again (a new process): 200 with the same tx_hash, the relayer's key
 //!   nonce and balance unmoved, nothing new on chain.
-//! - c. `twin_{mock,usdc}`: two identical requests in one run: one 200 {tx_hash}, the other 409 in_flight or 200 with
+//! - c. `twin_{mock,usdc}`: two identical requests in one run: one 200 {tx_hash}, the other 400 in_flight or 200 with
 //!   the same tx_hash; exactly one send on chain (relayer nonce + 2: the prepay and the send); failed 0.
 //! - d. `halted_{mock,usdc}`: the watch answers halted (and, on USDC, USDC is halted on chain): 503 token_halted,
 //!   nothing spent, no record.
@@ -139,7 +145,7 @@ impl World {
     async fn new(kind: TokenKind, seeds: u32, case: &str) -> R<Self> {
         cli("carry.ts")?;
         cli("sign.ts")?;
-        let h = Harness::with_vault_and(kind).await?;
+        let h = Harness::with_test_vault_and(kind).await?;
         let relayer = h.account("relayer", 20).await?;
         let seeder = h.account("seeder", 20).await?;
         h.mint(seeder.id(), HELD * seeds.max(1) as u128).await?;
@@ -520,8 +526,9 @@ async fn twin(kind: TokenKind) -> R<()> {
     let send = s(&sent[0].1["tx_hash"])?;
     for (st, body) in [&a, &b] {
         let same = *st == 200 && body["tx_hash"] == send.as_str();
-        let busy = *st == 409 && code(body) == "in_flight";
-        assert!(same || busy, "twin: an answer neither 200 with {send} nor 409 in_flight: {st} {body}");
+        // in_flight is not in the kit's HELPER_CODE_STATUS, so it answers 400 (the device reads it by that status)
+        let busy = *st == 400 && code(body) == "in_flight";
+        assert!(same || busy, "twin: an answer neither 200 with {send} nor 400 in_flight: {st} {body}");
     }
     let rec = &out["record"];
     assert_eq!(rec["failed"], 0);
@@ -655,9 +662,9 @@ async fn three_failed_sends_mock() -> R<()> {
 
 // ---- f. a send failed by USDC's halt does not count (USDC) ----
 
-/// The watch's answers in the order send.ts asks: before the checks' carry (4.), before the prepay, before the send, and
+/// The watch's answers in the order send.ts asks: before checks 1-7, at check 9, before the prepay, before the send, and
 /// after the failed send. Open until the send is out, halted after it.
-const PAUSED_RUN_WATCH: [&str; 4] = ["ok", "ok", "ok", "halted"];
+const PAUSED_RUN_WATCH: [&str; 5] = ["ok", "ok", "ok", "ok", "halted"];
 
 /// The pausers' `Pause` request created and approved by both, not executed: its id.
 async fn stage_pause(h: &Harness) -> R<Value> {
