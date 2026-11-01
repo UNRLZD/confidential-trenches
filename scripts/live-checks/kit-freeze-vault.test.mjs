@@ -4,12 +4,11 @@
 // swapped context order with vectors that the swapped code made itself, so the two files agree with each other and
 // only the check's own encoders catch them.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, checkFiles, load, read } from "./kit-freeze-vault.mjs";
+import { check, checkFiles, keccak256, load, read } from "./kit-freeze-vault.mjs";
 
 process.removeAllListeners("warning"); // stripTypeScriptTypes is marked experimental
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +16,16 @@ const A = JSON.parse(readFileSync(path.join(HERE, "kit-freeze-vault.answers.json
 const GOOD = A.good.main;
 const edited = (b) => ({ ...GOOD, [b.file]: GOOD[b.file].replace(b.from, b.to) });
 const bad = (name) => A.bad.find((b) => b.name === name);
+
+// keccak-256 of 200 'a's (two 136-byte blocks), by OpenSSL 3.5.9's keccak-256 (Homebrew Node 24.22.1, 2026-11-01)
+const A200 = "96ea54061def936c4be90b518992fdc6f12f535068a256229aca54267b4d084d";
+
+test("the check's Keccak-256: Keccak's published answers for '' and 'abc', OpenSSL's for 200 'a's", () => {
+  const hex = (s) => Buffer.from(keccak256(Buffer.from(s))).toString("hex");
+  assert.equal(hex(""), "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
+  assert.equal(hex("abc"), "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45");
+  assert.equal(hex("a".repeat(200)), A200);
+});
 
 test("each bad edit applies to exactly one place in the good answer", () => {
   assert.equal(A.bad.length, 5);
@@ -42,7 +51,7 @@ test("recorded bad answer, recipient and fee_recipient swapped in the context or
 test("bad answer, the swapped order with vectors the swapped code made itself: FAIL on the check's own bytes", async () => {
   const files = edited(bad("recipient and fee_recipient swapped in the context order"));
   const S = await load(files.shapes);
-  const keccak = (b) => createHash("keccak-256").update(b).digest();
+  const keccak = (b) => Buffer.from(keccak256(b));
   const V = JSON.parse(files.vectors);
   for (const v of V.context) {
     const n = Object.fromEntries(Object.entries(v.input).map(([k, x]) => [k, /^(register_deposit|relay_fee|refund_precommitment|deadline_ms)$/.test(k) ? BigInt(x) : x]));

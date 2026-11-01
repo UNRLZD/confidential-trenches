@@ -7,12 +7,11 @@
 //   - U, R and V each move money in by their own ft_transfer_call on TOKEN, and no shape signs an ft_withdraw;
 //   - the six setup-file sha256 values equal the vault paper's 2.6 (vault.md:522-527, pinned below, since this repo
 //     carries no papers);
-//   - the 50 vectors recompute with this check's own Borsh and Node's keccak-256 (read big-endian, mod p) in the
-//     paper's 7.1 order, and shapes.ts's own encoders make the same bytes.
+//   - the 50 vectors recompute with this check's own Borsh and Keccak-256 (read big-endian, mod p) in the paper's 7.1
+//     order, and shapes.ts's own encoders make the same bytes.
 // Nothing here imports the kit: the encoders below are written from the paper, apart from shapes.ts's.
 //   node scripts/live-checks/kit-freeze-vault.mjs [--tag <tag>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the files the run read to <file> ({ref: {shapes, vectors}}), so the check's test can replay them.
-import { createHash } from "node:crypto";
 import { writeFileSync, realpathSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -35,7 +34,35 @@ export const SETUP_SHA256 = [
 export const CONTEXT_ORDER = ["processor", "recipient", "register_deposit", "fee_recipient", "relay_fee", "refund_precommitment", "deadline_ms", "salt"];
 
 // ---- this check's own encoders ----
-const keccak = (b) => createHash("keccak-256").update(b).digest();
+// Keccak-256: FIPS 202's Keccak-f[1600] with Keccak's own 0x01 padding, rate 136 bytes, written from the spec. Node's
+// crypto has no keccak-256 in the official builds (Node 24.12 on Linux: "Digest method not supported"), so the check
+// carries its own; the test holds it to Keccak's published answers.
+const M64 = (1n << 64n) - 1n;
+const RC = [0x1n, 0x8082n, 0x800000000000808an, 0x8000000080008000n, 0x808bn, 0x80000001n, 0x8000000080008081n, 0x8000000000008009n, 0x8an, 0x88n, 0x80008009n, 0x8000000an, 0x8000808bn, 0x800000000000008bn, 0x8000000000008089n, 0x8000000000008003n, 0x8000000000008002n, 0x8000000000000080n, 0x800an, 0x800000008000000an, 0x8000000080008081n, 0x8000000000008080n, 0x80000001n, 0x8000000080008008n];
+const ROT = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14]; // r[x + 5y]
+const rot = (v, n) => (n === 0 ? v : ((v << BigInt(n)) | (v >> BigInt(64 - n))) & M64);
+export function keccak256(data) {
+  const padded = new Uint8Array((Math.floor(data.length / 136) + 1) * 136);
+  padded.set(data);
+  padded[data.length] ^= 0x01;
+  padded[padded.length - 1] ^= 0x80;
+  const A = Array(25).fill(0n);
+  for (let o = 0; o < padded.length; o += 136) {
+    for (let i = 0; i < 17; i++) for (let b = 7; b >= 0; b--) A[i] ^= BigInt(padded[o + 8 * i + b]) << BigInt(8 * b);
+    for (let r = 0; r < 24; r++) {
+      const C = [0, 1, 2, 3, 4].map((x) => A[x] ^ A[x + 5] ^ A[x + 10] ^ A[x + 15] ^ A[x + 20]);
+      for (let x = 0; x < 5; x++) for (let y = 0; y < 25; y += 5) A[x + y] ^= C[(x + 4) % 5] ^ rot(C[(x + 1) % 5], 1);
+      const B = Array(25);
+      for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) B[y + 5 * ((2 * x + 3 * y) % 5)] = rot(A[x + 5 * y], ROT[x + 5 * y]);
+      for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) A[x + 5 * y] = B[x + 5 * y] ^ (~B[((x + 1) % 5) + 5 * y] & M64 & B[((x + 2) % 5) + 5 * y]);
+      A[0] ^= RC[r];
+    }
+  }
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = Number((A[i >> 3] >> BigInt(8 * (i & 7))) & 0xffn);
+  return out;
+}
+const keccak = (b) => Buffer.from(keccak256(b));
 const field = (digest) => BigInt("0x" + digest.toString("hex")) % P;
 const str = (s) => {
   const b = Buffer.from(s, "utf8");
@@ -135,7 +162,7 @@ export async function checkFiles({ shapes, vectors }) {
   (V.context ?? []).forEach((v, i) => one("context", i, v, contextBytes(v), () => S.contextPreimage(asNumbers(v.input), BigInt(v.scope)), "context"));
   const n = [V.scope?.length ?? 0, V.label?.length ?? 0, V.context?.length ?? 0];
   results.push(say(bad.length === 0 && n[0] + n[1] + n[2] === 50,
-    `${n[0]} scope, ${n[1]} label and ${n[2]} context vectors recompute (own Borsh, keccak-256 big-endian mod p), shapes.ts making the same bytes${bad.length ? `; ${bad.slice(0, 4).join("; ")}${bad.length > 4 ? `; and ${bad.length - 4} more` : ""}` : ""}`));
+    `${n[0]} scope, ${n[1]} label and ${n[2]} context vectors recompute (own Borsh and Keccak-256, big-endian mod p), shapes.ts making the same bytes${bad.length ? `; ${bad.slice(0, 4).join("; ")}${bad.length > 4 ? `; and ${bad.length - 4} more` : ""}` : ""}`));
   return { ok: results.every(Boolean), lines };
 }
 

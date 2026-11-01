@@ -1,17 +1,42 @@
 // node --test packages/kit/test/vault-shapes.test.ts: the vault's frozen shapes (src/vault/shapes.ts) against
 // VT-U02's vectors (test/vectors/vault-v1.json) and the vault's own refusals.
-// Anchors outside this code: Node's keccak-256 against Keccak's published answers; scope and label vectors 1-5 against
+// Anchors outside this code: this test's Keccak-256 against Keccak's published answers; scope and label vectors 1-5 against
 // the values the Rust test contract of the gas proof matched byte for byte (research repo,
 // proofs/g1-vault-gas/vectors/encodings.json, tests::vector_encodings_match); two context vectors against that
 // contract's Borsh bytes for the older layout, with relay_fee and salt put where the frozen layout puts them.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as S from "../src/vault/shapes.ts";
 
 const V = JSON.parse(readFileSync(new URL("./vectors/vault-v1.json", import.meta.url), "utf8"));
-const keccak = (b: Uint8Array): Uint8Array => new Uint8Array(createHash("keccak-256").update(b).digest());
+// Keccak-256: FIPS 202's Keccak-f[1600] with Keccak's own 0x01 padding, rate 136 bytes, written from the spec. The
+// shapes take the hash as an argument; Node's official builds have no keccak-256 ("Digest method not supported").
+const M64 = (1n << 64n) - 1n;
+const RC = [0x1n, 0x8082n, 0x800000000000808an, 0x8000000080008000n, 0x808bn, 0x80000001n, 0x8000000080008081n, 0x8000000000008009n, 0x8an, 0x88n, 0x80008009n, 0x8000000an, 0x8000808bn, 0x800000000000008bn, 0x8000000000008089n, 0x8000000000008003n, 0x8000000000008002n, 0x8000000000000080n, 0x800an, 0x800000008000000an, 0x8000000080008081n, 0x8000000000008080n, 0x80000001n, 0x8000000080008008n];
+const ROT = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14]; // r[x + 5y]
+const rot = (v: bigint, n: number): bigint => (n === 0 ? v : ((v << BigInt(n)) | (v >> BigInt(64 - n))) & M64);
+function keccak(data: Uint8Array): Uint8Array {
+  const padded = new Uint8Array((Math.floor(data.length / 136) + 1) * 136);
+  padded.set(data);
+  padded[data.length] ^= 0x01;
+  padded[padded.length - 1] ^= 0x80;
+  const A: bigint[] = Array(25).fill(0n);
+  for (let o = 0; o < padded.length; o += 136) {
+    for (let i = 0; i < 17; i++) for (let b = 7; b >= 0; b--) A[i] ^= BigInt(padded[o + 8 * i + b]) << BigInt(8 * b);
+    for (let r = 0; r < 24; r++) {
+      const C = [0, 1, 2, 3, 4].map((x) => A[x] ^ A[x + 5] ^ A[x + 10] ^ A[x + 15] ^ A[x + 20]);
+      for (let x = 0; x < 5; x++) for (let y = 0; y < 25; y += 5) A[x + y] ^= C[(x + 4) % 5] ^ rot(C[(x + 1) % 5], 1);
+      const B: bigint[] = Array(25);
+      for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) B[y + 5 * ((2 * x + 3 * y) % 5)] = rot(A[x + 5 * y], ROT[x + 5 * y]);
+      for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) A[x + 5 * y] = B[x + 5 * y] ^ (~B[((x + 1) % 5) + 5 * y] & M64 & B[((x + 2) % 5) + 5 * y]);
+      A[0] ^= RC[r];
+    }
+  }
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = Number((A[i >> 3] >> BigInt(8 * (i & 7))) & 0xffn);
+  return out;
+}
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 const U128 = (1n << 128n) - 1n;
 const U64 = (1n << 64n) - 1n;
@@ -27,9 +52,11 @@ const numbers = (i: Input): S.ContextInput => ({
   salt: i.salt,
 });
 
-test("Node's keccak-256 is Keccak (not SHA3-256): the published answers for '' and 'abc'", () => {
+test("this test's Keccak-256: Keccak's published answers for '' and 'abc', OpenSSL's for 200 'a's (two blocks)", () => {
   assert.equal(hex(keccak(new Uint8Array())), "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
   assert.equal(hex(keccak(new TextEncoder().encode("abc"))), "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45");
+  // OpenSSL 3.5.9's keccak-256 (Homebrew Node 24.22.1, 2026-11-01)
+  assert.equal(hex(keccak(new TextEncoder().encode("a".repeat(200)))), "96ea54061def936c4be90b518992fdc6f12f535068a256229aca54267b4d084d");
 });
 
 test("50 vectors: 8 scope, 10 label, 32 context", () => {
