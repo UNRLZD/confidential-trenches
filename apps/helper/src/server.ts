@@ -2,10 +2,12 @@
  * The helper server (HELPER_HOST, markets paper H7). It holds API keys, never a money key, and logs no request: no
  * line it writes holds a client IP, a path or a header.
  *
- *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..] node src/server.ts
+ *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
+ *     [SOLANA_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] node src/server.ts
  *
  * The vendor keys come from the host's environment only (src/proxy/vendors.ts); a vendor with no key is called
- * without one.
+ * without one. So do the RPC providers' URLs (src/rpc/rpc.ts), where a keyed provider holds its key; a chain with none
+ * set uses its public endpoint.
  *
  * Every answer carries X-Helper-Commit and Vary: Origin. Cross-origin reads are allowed for exactly APP_HOST and
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
@@ -13,12 +15,16 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
+import { RPC_BODY_MAX } from "./rpc/methods.ts";
+import { createRpc } from "./rpc/rpc.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
-// The route prefix of every part this server mounts. /v1/health reads its "up" parts from these keys and the
-// dispatch below reads each prefix from here, so a part is up exactly when its routes are mounted.
-const MOUNTED = { proxy: "/v1/proxy/" } as const satisfies Partial<Record<Part, string>>;
-const PROXY_PREFIX = MOUNTED.proxy;
+type Rpc = ReturnType<typeof createRpc>;
+// The route prefixes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health
+// reads its "up" parts from these keys and the dispatch below reads each prefix from here, so a part is up exactly
+// when its routes are mounted.
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const [PROXY_PREFIX, RPC_PREFIX] = MOUNTED.proxy;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 export const ORIGINS: ReadonlySet<string> = new Set([
@@ -86,7 +92,7 @@ function readBody(req: IncomingMessage, max: number): Promise<string | undefined
   });
 }
 
-export function handler(commit: string, proxy: Proxy = createProxy(process.env)) {
+export function handler(commit: string, proxy: Proxy = createProxy(process.env), rpc: Rpc = createRpc(process.env)) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
@@ -103,6 +109,12 @@ export function handler(commit: string, proxy: Proxy = createProxy(process.env))
       }
       res.writeHead(status, h);
       res.end(req.method === "HEAD" ? undefined : text);
+    };
+    const reply = (a: { status: number; headers?: Headers; body: string }) => {
+      const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
+      if (a.status === 413) h.Connection = "close";
+      res.writeHead(a.status, h);
+      res.end(a.body);
     };
     try {
       if (req.method === "OPTIONS") return send(204, undefined, preflight(req));
@@ -130,12 +142,24 @@ export function handler(commit: string, proxy: Proxy = createProxy(process.env))
               ? { status: 413, headers: {}, body: JSON.stringify({ error: { code: "too_large" } }) }
               : proxy.handle(rest.slice(0, slash), rest.slice(slash), q === -1 ? "" : raw.slice(q + 1), body),
           )
-          .then((a) => {
-            const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
-            if (a.status === 413) h.Connection = "close";
-            res.writeHead(a.status, h);
-            res.end(a.body);
-          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path.startsWith(RPC_PREFIX)) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // the raw path, as for the proxy: the chain is the one segment after the prefix, written exactly
+        const raw = req.url ?? "";
+        const q = raw.indexOf("?");
+        const chain = (q === -1 ? raw : raw.slice(0, q)).slice(RPC_PREFIX.length);
+        if (!raw.startsWith(RPC_PREFIX) || chain === "" || chain.includes("/")) return send(404, { error: { code: "not_found" } }, cors(req));
+        void readBody(req, RPC_BODY_MAX)
+          .then((body) =>
+            body === undefined
+              ? { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) }
+              : rpc.handle(chain, req.headers["content-type"], body),
+          )
+          .then(reply)
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
@@ -147,12 +171,12 @@ export function handler(commit: string, proxy: Proxy = createProxy(process.env))
   };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy),
+    handler(commit, proxy, rpc),
   );
   server.listen(port);
   return server;
