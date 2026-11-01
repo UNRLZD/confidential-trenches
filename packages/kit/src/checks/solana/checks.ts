@@ -411,8 +411,8 @@ function s10(c: Ctx): SolanaQuoteResult {
   return refused.length ? fail("S10", `Token-2022 mint with ${refused.join(", ")}`) : pass("S10", `Token-2022 extensions ${found.join(",") || "none"}`);
 }
 
-// S11: the simulation on both providers. A buy's native out stays within a_k + fees + tips + the output account's rent
-// when the simulation shows that account new (anyone can create W_k's account first, and then the create is a no-op)
+// S11: the simulation on both providers. A buy's native out stays within a_k + fees + tips + what the simulation shows
+// W_k's output account gaining, up to its rent (anyone can create or pre-fund that address, so the rent is never assumed)
 // + the wallet's own pump volume account, if the route funds it, up to its rent; and its token in reaches minOut_k.
 // A sell's token out is exactly a_k and its native in, before fees and tips, reaches minOut_k. No other wallet of this
 // user changes.
@@ -436,7 +436,10 @@ function s11(c: Ctx): SolanaQuoteResult {
     if (sim.otherWallets.some((x) => x.pre !== x.post)) wrong.push(`provider ${at}: another wallet of this user changes`);
     if (c.req.side === "buy") {
       const tal = sim.tokenAccountLamports;
-      const newAccount = tal.pre === 0n ? (tal.post - tal.pre < rentTa ? tal.post - tal.pre : rentTa) : 0n;
+      // What the output account gains, clamped to [0, its rent]: a new account's rent, or the rest of it when someone
+      // pre-funded the address (the ATA program then charges W_k only the shortfall); a funded existing account adds 0.
+      const gain = tal.post - tal.pre;
+      const newAccount = gain < 0n ? 0n : gain < rentTa ? gain : rentTa;
       const bound = c.req.amount + fees + tips + (newAccount > 0n ? newAccount : 0n) + (pva > 0n ? pva : 0n);
       if (nativeOut > bound) wrong.push(`provider ${at}: native out ${nativeOut} > ${bound}`);
       if (tokenDelta < c.req.minOut) wrong.push(`provider ${at}: token in ${tokenDelta} < minOut ${c.req.minOut}`);

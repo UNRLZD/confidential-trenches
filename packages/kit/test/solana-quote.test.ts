@@ -409,6 +409,16 @@ function middle(c: ReturnType<typeof buyCase>, tp: string, opts: { close?: strin
 }
 
 const ACCEPTED: [string, (c: ReturnType<typeof buyCase>) => void][] = [
+  ["S11 an existing output account topped up during the swap: lamports into W_k's own account, counted up to its rent", (c) => {
+    for (const s of c.reads.simulations) (s as SolanaSimulation).tokenAccountLamports = { pre: 1_513_840n, post: 3_027_680n };
+  }],
+  ["S11 a stranger pre-funds W_k's output address with 650,240 lamports: W_k pays only the 863,600 rest, within the bound", (c) => {
+    for (const s of c.reads.simulations) {
+      const x = s as SolanaSimulation;
+      x.tokenAccountLamports = { pre: 650_240n, post: 1_513_840n };
+      x.walletLamports.post += 650_240n;
+    }
+  }],
   ["U-6: an SPL middle account created before the route and closed after it, native out unchanged", (c) => { middle(c, TOKEN); }],
   ["U-6: a Token-2022 middle account harvested right before its close", (c) => { middle(c, T22, { harvest: "before-close" }); }],
 ];
@@ -425,7 +435,11 @@ const R2: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uint8A
   ["S11 provider A lies about the token account rent", "S11", (c) => { (c.reads.rent as { tokenAccount: unknown }).tokenAccount = [501_513_840n, 1_513_840n]; }],
   ["S11 provider B lies about the pump volume account rent", "S11", (c) => { (c.reads.rent as { pumpVolumeAccumulator: unknown }).pumpVolumeAccumulator = [1_346_200n, 501_346_200n]; }],
   ["S11 the output account existed before, so its rent is not in the bound", "S11", (c) => { for (const s of c.reads.simulations) (s as SolanaSimulation).tokenAccountLamports = { pre: 1_513_840n, post: 1_513_840n }; }],
-  ["S11 an existing output account topped up during the swap", "S11", (c) => { for (const s of c.reads.simulations) (s as SolanaSimulation).tokenAccountLamports = { pre: 1_513_840n, post: 3_027_680n }; }],
+  ["S12 simulated out at the rounding edge: 1 below the bar rounded up", "S12", (c) => {
+    // E × 9800 / 10000 = 55,991,176,135.02: rounded down the bar equals the simulated out, rounded up it is 1 above
+    // s = 2000 bps keeps minOut_k above floor(E × (1 − s)), so only the simulated-out bar decides
+    (c.reads as { reference: unknown }).reference = { expectedOut: 57_133_853_199n, slippageBps: 2_000 };
+  }],
   ["S13 close before the route", "S13", (c) => { move(c.m, wsolClose(c.m), jupPos(c.m)); }],
   ["S13 create after the route", "S13", (c) => { move(c.m, 5, jupPos(c.m)); }],
   ["S5 wrap after the route", "S5", (c) => { move(c.m, 3, jupPos(c.m)); }],
