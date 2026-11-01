@@ -182,6 +182,18 @@ fn refused(what: &str, r: &ExecutionFinalResult) {
     assert!(e.contains("ActorNoPermission"), "{what} was not refused with ActorNoPermission: {e}");
 }
 
+/// `view_access_key_list` of the vault is `[]` on two reads, at optimistic and at final.
+async fn keys_are_empty(h: &Harness) -> R<()> {
+    for fin in ["optimistic", "final"] {
+        let keys = h.access_keys(&h.vault, fin).await?;
+        println!("view_access_key_list {} at {fin}: {keys:?}", h.vault);
+        if !keys.is_empty() {
+            return Err(format!("the vault has an access key at {fin}: {keys:?}").into());
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn nobody_holds_a_key_to_the_vault() -> R<()> {
     let mut h = Harness::start().await?;
@@ -191,19 +203,6 @@ async fn nobody_holds_a_key_to_the_vault() -> R<()> {
     assert_eq!(rec.expect("no record")["account_id"], json!(h.vault.as_str()));
     h.wait_final(&h.vault).await?;
 
-    let keys_are_empty = |h: &Harness| {
-        let v = h.vault.clone();
-        async move {
-            for fin in ["optimistic", "final"] {
-                let keys = h.access_keys(&v, fin).await?;
-                println!("view_access_key_list {v} at {fin}: {keys:?}");
-                if !keys.is_empty() {
-                    return Err(format!("the vault has an access key at {fin}: {keys:?}").into());
-                }
-            }
-            R::<()>::Ok(())
-        }
-    };
     keys_are_empty(&h).await?;
     let reg = h.view(&h.token, "storage_balance_of", json!({"account_id": h.vault})).await?;
     println!("USDC storage_balance_of(vault): {reg}");
