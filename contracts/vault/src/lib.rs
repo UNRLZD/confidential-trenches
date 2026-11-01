@@ -13,6 +13,7 @@
 
 pub mod constants;
 pub mod field;
+pub mod verifier_keys;
 
 use constants::*;
 use near_sdk::collections::{LookupMap, LookupSet, Vector};
