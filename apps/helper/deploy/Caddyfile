@@ -1,0 +1,19 @@
+# HELPER_HOST behind Caddy's automatic HTTPS (an ACME certificate for the name, no CA sign-up). Nothing here writes a
+# client IP: no access log (Caddy writes one only when a site has a `log` directive), and the loggers that print a
+# request (http.log.error with its remote_ip, http.stdlib's TLS handshake lines) are left out of the default log.
+# HELPER_SITE is set only by the local proof, which serves plain http on a local port.
+{
+	admin off
+	log default {
+		output stderr
+		exclude http.log.access http.log.error http.stdlib http.handlers
+	}
+}
+
+{$HELPER_SITE:api.confidential.unrealized.trade} {
+	reverse_proxy helper:8080 {
+		transport http {
+			keepalive 30s
+		}
+	}
+}
