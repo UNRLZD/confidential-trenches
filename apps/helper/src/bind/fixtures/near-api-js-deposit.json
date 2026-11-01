@@ -1,0 +1,16 @@
+{
+  "made_by": "near-api-js 7.3.1 buildDelegateAction + KeyPairSigner.signDelegateAction + encodeSignedDelegate, a random test key discarded after signing",
+  "signed_delegate": "QAAAADc5OGUwOGYwYTA1YzVkMjg5YjVlOWQwZTZkMDQ3YTQ5ODcwNmE0YzgzNDJiNzJiNWQxZTYzMzQ5OWVkZDY2ZTNAAAAAMTcyMDg2MjhmODRmNWQ2YWQzM2YwZGEzYmJiZWIyN2ZmY2IzOThlYWM1MDFhMzFiZDZhZDIwMTFlMzYxMzNhMQEAAAACEAAAAGZ0X3RyYW5zZmVyX2NhbGzgAAAAeyJyZWNlaXZlcl9pZCI6InZhdWx0LmNvbmZpZGVudGlhbC51bnJsemQubmVhciIsImFtb3VudCI6IjI1MDAwMDAwIiwibXNnIjoie1wicHJlY29tbWl0bWVudFwiOlwiMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MFwiLFwiZGVwb3NpdG9yXCI6XCI3OThlMDhmMGEwNWM1ZDI4OWI1ZTlkMGU2ZDA0N2E0OTg3MDZhNGM4MzQyYjcyYjVkMWU2MzM0OTllZGQ2NmUzXCJ9In0AQA+EtaMAAAEAAAAAAAAAAAAAAAAAAAABMGqvzKIAAHiVugoAAAAAAHmOCPCgXF0om16dDm0EekmHBqTINCtytdHmM0me3WbjADUiDGjCI5+ijA6L2K6iPdmpzbpMNrowGLv71Mugx3BCVveFG6QGtotAmCmHhqo9ve8wv+X4JTLqzkx9c5/cqw8=",
+  "sender_id": "798e08f0a05c5d289b5e9d0e6d047a498706a4c8342b72b5d1e633499edd66e3",
+  "receiver_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "public_key": "ed25519:9BVwyWm7prUcSizyAiH6C21JbhjwguU8t2ZPDP4SqQ1x",
+  "nonce": "179000000000001",
+  "max_block_height": "180000120",
+  "method_name": "ft_transfer_call",
+  "args": "{\"receiver_id\":\"vault.confidential.unrlzd.near\",\"amount\":\"25000000\",\"msg\":\"{\\\"precommitment\\\":\\\"1234567890123456789012345678901234567890\\\",\\\"depositor\\\":\\\"798e08f0a05c5d289b5e9d0e6d047a498706a4c8342b72b5d1e633499edd66e3\\\"}\"}",
+  "gas": "180000000000000",
+  "deposit": "1",
+  "vault": "vault.confidential.unrlzd.near",
+  "precommitment": "1234567890123456789012345678901234567890",
+  "amount": "25000000"
+}
