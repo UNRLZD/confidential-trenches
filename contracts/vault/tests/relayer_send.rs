@@ -654,6 +654,10 @@ async fn three_failed_sends_mock() -> R<()> {
 
 // ---- f. a send failed by USDC's halt does not count (USDC) ----
 
+/// The watch's answers in the order send.ts asks: before the checks' carry (4.), before the prepay, before the send, and
+/// after the failed send. Open until the send is out, halted after it.
+const PAUSED_RUN_WATCH: [&str; 4] = ["ok", "ok", "ok", "halted"];
+
 /// The pausers' `Pause` request created and approved by both, not executed: its id.
 async fn stage_pause(h: &Harness) -> R<Value> {
     let roles = h.usdc_roles()?;
@@ -680,7 +684,7 @@ async fn paused_send_does_not_count_usdc() -> R<()> {
     let input = json!({
         "rpc": [rpc, rpc], "vault": w.h.vault, "token": w.h.token,
         "relayer": {"account_id": w.relayer.id(), "secret_key": w.relayer.secret_key().to_string()},
-        "store": w.store, "marginK": MARGIN_K, "status": ["ok", "ok", "halted"], "requests": [{"signed_delegate": sd}],
+        "store": w.store, "marginK": MARGIN_K, "status": PAUSED_RUN_WATCH, "requests": [{"signed_delegate": sd}],
     });
     let run = tokio::spawn(node(cli("carry.ts")?, input));
     let mut seen = false;
@@ -701,7 +705,7 @@ async fn paused_send_does_not_count_usdc() -> R<()> {
         .await?;
     assert!(pause.receipts.iter().flat_map(|r| &r.logs).any(|l| l.contains("\"event\":\"paused\"")), "the Pause logged no paused event");
     let out = run.await??;
-    println!("carry [ok, ok, halted] (USDC halted after the prepay): answers {} record {}", out["answers"], out["record"]);
+    println!("carry {PAUSED_RUN_WATCH:?} (USDC halted after the prepay): answers {} record {}", out["answers"], out["record"]);
     let _ = w.h.usdc_halt(false).await?;
     assert!(seen, "P's prepaid record never appeared while carry.ts ran: {}", out["answers"]);
     let rec = &out["record"];
