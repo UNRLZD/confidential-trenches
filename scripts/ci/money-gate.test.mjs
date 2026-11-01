@@ -87,7 +87,7 @@ test("an EVM RPC on the wrong chain is refused", async () => {
 
 test("a record that is not a money path reads nothing", async () => {
   const r = await moneyGate(rec("Money path: no\n"), good, RPCS);
-  assert.deepEqual(r, { refusals: [], read: [] });
+  assert.deepEqual(r, { refusals: [], read: [], notes: [] });
 });
 
 test("a tx from before the build is refused on every chain", async () => {
@@ -714,4 +714,77 @@ test("a 429 whose Retry-After is past the 600 s cap is no answer at once: refuse
   assert.match(r.refusals.join("\n"), /no answer \(rate limited, Retry-After 900 s is past the 600 s cap\) on https:\/\/archival-rpc\.mainnet\.near\.org/);
   assert.equal(s.log.filter((l) => l === `ask ${NEAR_ORG} tx`).length, 1);
   assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), []);
+});
+
+// Card money-gate-rate: near.org's testnet archive answers 429 with a Retry-After of about 279 s (read 2026-11-01), and
+// a record lists many txs. Hosts are asked in order; while fewer than two have read a tx ok, a 429 is waited out as
+// above. Once two have, a remaining host is still asked once, but its 429 is no answer: not waited, not decisive, named.
+// A failed or old answer from a host that does answer still refuses. Stub hosts t1, t2, t3 (no URL, so no pacing wait).
+function threeHosts(answer) {
+  const log = [];
+  const fetchFn = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    log.push(`ask ${url} ${method}`);
+    const json = (status, body, headers = {}) => ({ ok: status < 400, status, headers: new Headers(headers), json: async () => body });
+    const a = answer(url, method);
+    if (a === 429) return json(429, { error: { code: -429, message: "rate limited" } }, { "retry-after": "279" });
+    return json(200, { jsonrpc: "2.0", id: 1, ...(a ?? chainAnswers(NOV2)(url, method)) });
+  };
+  const sleep = async (ms) => void log.push(`sleep ${ms}`);
+  return { fetchFn, sleep, log };
+}
+const T3 = { "near-testnet": ["t1", "t2", "t3"] };
+const testnetRec = rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`);
+const NOT_WAITED = `near-testnet ${NEAR_TX} on t3: rate limited, not waited: two hosts read it ok`;
+
+test("two hosts read ok and the third answers 429 with Retry-After 279: passes, never sleeps, names the skip", async () => {
+  const s = threeHosts((url) => (url === "t3" ? 429 : null));
+  const r = await moneyGate(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
+  assert.deepEqual(r.refusals, []);
+  assert.deepEqual(r.read, ["t1", "t2"].map((u) => `near-testnet ${NEAR_TX} ok on ${u} (testnet, not real-money proof)`));
+  assert.deepEqual(s.log.filter((l) => l.startsWith("sleep")), []);
+  assert.equal(s.log.filter((l) => l === "ask t3 tx").length, 1);
+  assert.deepEqual(r.notes, [NOT_WAITED]);
+});
+
+test("two hosts read ok and the third reads the tx as failed: refused", async () => {
+  const s = threeHosts((url, method) =>
+    url === "t3" && method === "tx"
+      ? { result: { final_execution_status: "FINAL", status: { Failure: {} }, receipts_outcome: [], transaction_outcome: { block_hash: "h" } } }
+      : null,
+  );
+  const r = await moneyGate(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
+  assert.match(r.refusals.join("\n"), new RegExp(`near-testnet ${NEAR_TX}: ok on t1, ok on t2, failed on t3$`));
+});
+
+test("one host read ok and the second answers 429 then ok: the gate waits out its Retry-After and passes", async () => {
+  let second = 0;
+  const s = threeHosts((url) => (url === "t2" && second++ === 0 ? 429 : null));
+  const r = await moneyGate(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
+  assert.deepEqual(r.refusals, []);
+  assert.equal(r.read.length, 3);
+  assert.deepEqual(s.log.slice(s.log.indexOf("ask t2 tx"), s.log.indexOf("ask t2 tx") + 3), ["ask t2 tx", "sleep 279000", "ask t2 tx"]);
+});
+
+test("an old near-testnet tx (drpc lacks it) still waits out near.org's 429, with one ok so far", async () => {
+  const ORG = "archival-rpc.testnet.near.org";
+  const log = [];
+  let n = 0;
+  const fetchFn = async (url, init) => {
+    const host = new URL(url).host;
+    const { method } = JSON.parse(init.body);
+    log.push(`ask ${host} ${method}`);
+    const json = (status, body, headers = {}) => ({ ok: status < 400, status, headers: new Headers(headers), json: async () => body });
+    if (host === "near-testnet.drpc.org") return json(200, { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } });
+    if (host === ORG && n++ === 0) return json(429, { error: { code: -429, message: "rate limited" } }, { "retry-after": "279" });
+    return json(200, { jsonrpc: "2.0", id: 1, ...chainAnswers(NOV2)(url, method) });
+  };
+  const sleep = async (ms) => void log.push(`sleep ${ms}`);
+  const r = await moneyGate(testnetRec, fetchFn, { "near-testnet": REAL_RPCS["near-testnet"] }, { sleep });
+  assert.deepEqual(r.refusals, []);
+  assert.deepEqual(r.read.map((x) => x.split(" ok on ")[1].split(" ")[0]), ["https://archival-rpc.testnet.fastnear.com", `https://${ORG}`]);
+  // a pacing wait (at most 1000 ms, each host once a second) is not a rate-limit wait
+  const org = log.filter((l) => l.startsWith(`ask ${ORG} tx`) || (l.startsWith("sleep ") && Number(l.slice(6)) > 1000));
+  assert.deepEqual(org, [`ask ${ORG} tx`, "sleep 279000", `ask ${ORG} tx`]);
+  assert.deepEqual(r.notes, []);
 });
