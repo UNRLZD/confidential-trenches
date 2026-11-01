@@ -183,8 +183,11 @@ export function parseLive(text, key) {
 // RATE_TRIES waits in a row; a Retry-After past RATE_CAP seconds is no answer at once. Other trouble (no reply, a
 // reply that is not JSON, an HTTP error with no RPC error) is asked 3 times, 2 s and 4 s apart. Each host is asked
 // at most once a second.
+// Once two hosts have read a tx ok, a remaining host is still asked once, but with rateWait off: its 429 is no answer at
+// once (NOT_WAITED), never waited and never decisive. A failed or old answer from it still refuses.
 const RATE_TRIES = 5;
 const RATE_CAP = 600;
+const NOT_WAITED = "rate limited, not waited: two hosts read it ok";
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const lastAsked = new Map();
 const hostOf = (url) => {
@@ -195,7 +198,7 @@ const hostOf = (url) => {
   }
 };
 
-async function rpc(fetchFn, url, method, params, sleep = wait) {
+async function rpc(fetchFn, url, method, params, sleep = wait, rateWait = true) {
   let last;
   let rate = 0;
   for (let attempt = 0; attempt < 3; ) {
@@ -214,6 +217,7 @@ async function rpc(fetchFn, url, method, params, sleep = wait) {
       });
       const j = r.status === 429 ? null : await r.json();
       if (r.status === 429 || j.error?.code === -429 || j.error?.code === 429) {
+        if (!rateWait) throw Object.assign(new Error(NOT_WAITED), { rate: true, notWaited: true });
         const after = Number(r.headers?.get?.("retry-after") ?? NaN);
         if (Number.isFinite(after) && after > RATE_CAP) throw Object.assign(new Error(`rate limited, Retry-After ${after} s is past the ${RATE_CAP} s cap`), { rate: true });
         if (++rate > RATE_TRIES) throw Object.assign(new Error(`rate limited ${rate} times in a row`), { rate: true });
@@ -233,13 +237,14 @@ async function rpc(fetchFn, url, method, params, sleep = wait) {
 
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
 
-// One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read.
-export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait) {
+// One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read. rateWait off: a 429 is
+// NOT_WAITED at once.
+export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait, rateWait = true) {
   let j;
   try {
     if (NEAR.has(chain)) {
       // NONE answers at once: the outcome when the tx is known, UNKNOWN_TRANSACTION when it is not
-      j = await rpc(fetchFn, url, "tx", { tx_hash: hash, sender_account_id: signer, wait_until: "NONE" }, sleep);
+      j = await rpc(fetchFn, url, "tx", { tx_hash: hash, sender_account_id: signer, wait_until: "NONE" }, sleep, rateWait);
       if (j.error) return j.error.cause?.name === "UNKNOWN_TRANSACTION" ? "missing" : `error ${JSON.stringify(j.error).slice(0, 120)}`;
       const r = j.result;
       if (!r?.status) return "missing";
@@ -247,13 +252,13 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       if (r.final_execution_status !== "FINAL") return `not final (${r.final_execution_status})`;
       if (!("SuccessValue" in r.status || "SuccessReceiptId" in r.status)) return `not final (${Object.keys(r.status)[0]})`;
       if ((r.receipts_outcome ?? []).some((o) => o.outcome?.status?.Failure)) return "failed (a receipt failed)";
-      const b = await rpc(fetchFn, url, "block", { block_id: r.transaction_outcome?.block_hash }, sleep);
+      const b = await rpc(fetchFn, url, "block", { block_id: r.transaction_outcome?.block_hash }, sleep, rateWait);
       const ns = b.result?.header?.timestamp_nanosec;
       if (!ns) return "no block time";
       return when(Number(BigInt(ns) / 1000000n), floor);
     }
     if (chain === "solana") {
-      j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep);
+      j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep, rateWait);
       if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
       if (!j.result) return "missing";
       if (!j.result.meta) return "no meta";
@@ -261,16 +266,17 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       if (typeof j.result.blockTime !== "number") return "no block time";
       return when(j.result.blockTime * 1000, floor);
     }
-    const id = await rpc(fetchFn, url, "eth_chainId", [], sleep);
+    const id = await rpc(fetchFn, url, "eth_chainId", [], sleep, rateWait);
     if (id.result !== CHAIN_ID[chain]) return `wrong chain (${id.result ?? JSON.stringify(id.error)})`;
-    j = await rpc(fetchFn, url, "eth_getTransactionReceipt", [hash], sleep);
+    j = await rpc(fetchFn, url, "eth_getTransactionReceipt", [hash], sleep, rateWait);
     if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
     if (!j.result) return "missing";
     if (j.result.status !== "0x1") return "failed";
-    const b = await rpc(fetchFn, url, "eth_getBlockByNumber", [j.result.blockNumber, false], sleep);
+    const b = await rpc(fetchFn, url, "eth_getBlockByNumber", [j.result.blockNumber, false], sleep, rateWait);
     if (!b.result?.timestamp) return "no block time";
     return when(Number(b.result.timestamp) * 1000, floor);
   } catch (e) {
+    if (e?.notWaited) return NOT_WAITED;
     return `no answer (${String(e?.message ?? e).slice(0, 80)})`;
   }
 }
@@ -280,6 +286,7 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
 export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
   const refusals = [];
   const read = [];
+  const notes = []; // a host's 429 not waited because two hosts had read the tx ok
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
   const byCard = new Map();
   for (const c of money?.commits ?? []) {
@@ -317,16 +324,21 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
       const answers = [];
-      for (const url of rpcs[tx.chain]) answers.push({ url, r: await readTx(fetchFn, url, tx, floor, sleep) });
+      // in the listed order; a 429 is waited out only while fewer than two hosts have read the tx ok
+      for (const url of rpcs[tx.chain]) {
+        const rateWait = answers.filter((a) => a.r === "ok").length < 2;
+        answers.push({ url, r: await readTx(fetchFn, url, tx, floor, sleep, rateWait) });
+      }
       const ok = answers.filter((a) => a.r === "ok");
       const decisive = answers.filter((a) => /^(failed|old)/.test(a.r));
       const note = TESTNET.has(tx.chain) ? " (testnet, not real-money proof)" : "";
       for (const a of ok) read.push(`${tx.chain} ${tx.hash} ok on ${a.url}${note}`);
+      for (const a of answers) if (a.r === NOT_WAITED) notes.push(`${tx.chain} ${tx.hash} on ${a.url}: ${NOT_WAITED}`);
       if (decisive.length || ok.length < 2)
         refusals.push(`${path}: ${tx.chain} ${tx.hash}: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}`);
     }
   }
-  return { refusals, read };
+  return { refusals, read, notes };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
@@ -388,8 +400,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
-  const { refusals, read } = await moneyGate(records, fetch, RPCS, { every, money });
+  const { refusals, read, notes } = await moneyGate(records, fetch, RPCS, { every, money });
   for (const r of read) console.log(`money-gate: ${r}`);
+  for (const n of notes) console.log(`money-gate: ${n}`);
   if (refusals.length) {
     for (const r of refusals) console.error(`money-gate: REFUSED: ${r}`);
     process.exit(1);
