@@ -64,7 +64,7 @@ test("every host serves over TLS with a certificate valid for its name, under it
     for (const [k, v] of headers) assert.equal(r.headers[k], v, `${name} ${k}`);
     if (headers.size === 0) assert.equal(r.headers["content-security-policy"], undefined, name);
   }
-  assert.ok(want[HOSTS.app].get("content-security-policy")?.includes("frame-ancestors 'none'"));
+  assert.ok(want[HOSTS.app].get("content-security-policy")?.includes("frame-ancestors https://sign.confidential.unrealized.trade;"));
   assert.match(want[HOSTS.sign].get("permissions-policy") ?? "", /publickey-credentials-create=\(self\)/);
   assert.match(want[HOSTS.sign].get("content-security-policy") ?? "", /frame-ancestors https:\/\/confidential\.unrealized\.trade/);
   // a route with no file is the SPA's index.html, as Pages serves a build with no 404.html
