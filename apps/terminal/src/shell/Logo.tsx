@@ -7,7 +7,7 @@ import stackPhCool from "./brand/ct-stack-phone-2x-cool.svg";
 import wm from "./brand/wordmark-dots-header-1x.svg";
 import wmCool from "./brand/wordmark-dots-header-1x-cool.svg";
 
-// "Confidential Trenches" by $UNRLZD (owner round 15), as R5 draws it (design/proto/assets/app.js:340-347 at
+// "Confidential Trenches" by $UNRLZD (design round 15), as R5 draws it (design/proto/assets/app.js:340-347 at
 // design-lock-r5): the stacked dot words, lit layer over cool layer, "by" as text and $UNRLZD as UNRLZD's dot wordmark.
 const LABEL = "Confidential Trenches by $UNRLZD";
 
