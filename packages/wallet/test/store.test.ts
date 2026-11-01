@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
-import { backupFirst, openWalletStore as openStore, WALLET_LANES, WALLET_LOCK, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
+import { backupFirst, openWalletStore as openStore, openWalletStoreReader, WALLET_LANES, WALLET_LOCK, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
 
 // every store a test opens is closed at the end, so a failing assertion fails the run instead of leaving it hanging on
 // an open BroadcastChannel
@@ -95,7 +95,7 @@ test("records are wrapped under a non-extractable K_wrap with aad store/key", as
   await assert.rejects(s.put("counters", `i/${SCOPE}`, { next: 0 }));
   await assert.rejects(s.delete("counters", `i/${SCOPE}`));
   await assert.rejects(s.put("notes", "x", { [`$bigint`]: "1" }));
-  assert.deepEqual(await s.keys("meta"), ["seed", "settings"]);
+  assert.deepEqual(await s.keys("meta"), ["seed", "settings", "status"]);
 
   // a second tab opens the same K_wrap and lane
   const t = await openWalletStore({ indexedDB: idb });
@@ -404,6 +404,143 @@ test("the seed record is never written by put or removed by delete: insertSeed a
   // settings stay writable
   await s.put("meta", "settings", { x: 1 });
   assert.deepEqual(await s.get("meta", "settings"), { x: 1 });
+});
+
+// card signpage-frame-state: meta/"status" = { v: 1, source, code_saved }, the seed's public facts with no secret, is the
+// store's own record, written in the seed's own transaction; SIGN_HOST's frame reads it through openWalletStoreReader.
+function rawDelete(idb: IDBFactory, name: string, store: string, key: string): Promise<void> {
+  return new Promise((ok, no) => {
+    const o = idb.open(name);
+    o.onerror = () => no(o.error);
+    o.onsuccess = () => {
+      const tx = o.result.transaction(store, "readwrite");
+      tx.objectStore(store).delete(key);
+      tx.oncomplete = () => (o.result.close(), ok());
+      tx.onerror = () => no(tx.error);
+    };
+  });
+}
+/** Runs body with every put of `key` aborting its transaction. */
+async function failingPut<T>(key: string, body: () => Promise<T>): Promise<T> {
+  const proto = IDBObjectStore.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+  const orig = proto.put!;
+  proto.put = function (this: { transaction: IDBTransaction }, ...a: unknown[]) {
+    const r = orig.apply(this, a);
+    if (a[1] === key) this.transaction.abort();
+    return r;
+  };
+  try {
+    return await body();
+  } finally {
+    proto.put = orig;
+  }
+}
+const SEED = (code_saved = false) => ({ v: 1, entropy: new Uint8Array(16).fill(0x7f), source: "random", code_saved, created_ms: 1 });
+
+test("status: insertSeed and setCodeSaved write it with the seed, in one transaction; no caller puts or deletes it", async () => {
+  const idb = new IDBFactory();
+  const s = await openWalletStore({ indexedDB: idb });
+  // the status's put fails: the seed is not written either
+  await failingPut("status", () => assert.rejects(s.insertSeed(SEED())));
+  assert.equal(await s.get("meta", "seed"), undefined);
+  assert.equal(await s.get("meta", "status"), undefined);
+  await s.insertSeed(SEED());
+  assert.deepEqual(await s.get("meta", "status"), { v: 1, source: "random", code_saved: false });
+  await failingPut("status", () => assert.rejects(s.setCodeSaved()));
+  assert.equal(((await s.get("meta", "seed")) as { code_saved: boolean }).code_saved, false);
+  await s.setCodeSaved();
+  assert.equal(((await s.get("meta", "seed")) as { code_saved: boolean }).code_saved, true);
+  assert.deepEqual(await s.get("meta", "status"), { v: 1, source: "random", code_saved: true });
+  await assert.rejects(s.put("meta", "status", { v: 1, source: "prf", code_saved: true }), /is the store's own/);
+  await assert.rejects(s.delete("meta", "status"), /is the store's own/);
+});
+
+test("a versionchange that closes the store's connection is an event: \"closed\"", async () => {
+  const idb = new IDBFactory();
+  const seen: WalletEvent[] = [];
+  const s = await openWalletStore({ indexedDB: idb, onEvent: (e) => seen.push(e) });
+  await new Promise<void>((ok, no) => {
+    const r = idb.deleteDatabase("ct-wallet");
+    r.onsuccess = () => ok();
+    r.onerror = () => no(r.error);
+  });
+  assert.deepEqual(seen, [{ kind: "closed" }]);
+  await assert.rejects(s.get("meta", "seed"), /closed/);
+});
+
+test("syncStatus: writes a missing or behind status from the seed, and nothing with no seed", async () => {
+  const idb = new IDBFactory();
+  const seen: WalletEvent[] = [];
+  const s = await openWalletStore({ indexedDB: idb });
+  const other = await openWalletStore({ indexedDB: idb, onEvent: (e) => seen.push(e) });
+  await s.syncStatus();
+  assert.equal(await s.get("meta", "status"), undefined);
+  await s.insertSeed(SEED());
+  const early = await rawGet(idb, "ct-wallet", "meta", "status");
+  await s.setCodeSaved();
+  // a database from before the status record: none stored
+  await rawDelete(idb, "ct-wallet", "meta", "status");
+  seen.length = 0;
+  await s.syncStatus();
+  assert.deepEqual(await other.get("meta", "status"), { v: 1, source: "random", code_saved: true });
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.ok(seen.some((e) => e.kind === "changed" && e.stores.includes("meta")), JSON.stringify(seen));
+  // a status behind the seed (code_saved false while the seed says true): brought up
+  await rawPut(idb, "ct-wallet", "meta", "status", early);
+  assert.deepEqual(await s.get("meta", "status"), { v: 1, source: "random", code_saved: false });
+  await s.syncStatus();
+  assert.deepEqual(await s.get("meta", "status"), { v: 1, source: "random", code_saved: true });
+});
+
+test("openWalletStoreReader: makes no database, writes nothing, reads records and keys, hears a delete", async () => {
+  const idb = new IDBFactory();
+  assert.equal(await openWalletStoreReader({ indexedDB: idb }), null);
+  assert.deepEqual(await idb.databases(), [], "no database was made");
+  // a database with its stores but no K_wrap yet: nothing to read
+  await new Promise<void>((ok, no) => {
+    const r = idb.open("ct-wallet", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("meta");
+    r.onsuccess = () => (r.result.close(), ok());
+    r.onerror = () => no(r.error);
+  });
+  assert.equal(await openWalletStoreReader({ indexedDB: idb }), null);
+  await new Promise<void>((ok, no) => {
+    const r = idb.deleteDatabase("ct-wallet");
+    r.onsuccess = () => ok();
+    r.onerror = () => no(r.error);
+  });
+  const s = await openWalletStore({ indexedDB: idb });
+  await s.insertSeed(SEED(true));
+  await s.put("ops", "op1", { kind: "deposit", stage: "waiting", txs: [] });
+  const proto = IDBObjectStore.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+  const writes: string[] = [];
+  const saved = Object.fromEntries(["put", "add", "delete", "clear"].map((m) => [m, proto[m]!]));
+  for (const m of Object.keys(saved)) proto[m] = function (this: { name: string }, ...a: unknown[]) {
+    writes.push(`${m} ${this.name}`);
+    return saved[m]!.apply(this, a);
+  };
+  const seen: WalletEvent[] = [];
+  let r;
+  try {
+    r = await openWalletStoreReader({ indexedDB: idb, onEvent: (e) => seen.push(e) });
+    assert.ok(r);
+    assert.deepEqual(await r.keys("meta"), ["seed", "status"]);
+    assert.deepEqual(await r.get("meta", "status"), { v: 1, source: "random", code_saved: true });
+    assert.deepEqual(await r.get("ops", "op1"), { kind: "deposit", stage: "waiting", txs: [] });
+    await assert.rejects(r.get("meta", "k_wrap"));
+    // the frame's reader opens meta/status and ops only: never the seed, nor a note or a wallet
+    await assert.rejects(r.get("meta", "seed"), /meta\/status and ops only/);
+    await assert.rejects(r.get("meta", "settings"), /meta\/status and ops only/);
+    await assert.rejects(r.get("notes", "n1"), /meta\/status and ops only/);
+  } finally {
+    for (const m of Object.keys(saved)) proto[m] = saved[m]!;
+  }
+  assert.deepEqual(writes, []);
+  // another tab's sign out deletes the database: the reader closes and says so
+  await s.signOut();
+  assert.ok(seen.some((e) => e.kind === "closed"), JSON.stringify(seen));
+  await assert.rejects(r.keys("meta"), /closed/);
+  assert.equal(await openWalletStoreReader({ indexedDB: idb }), null);
 });
 
 test("sign out refuses while a no-PRF seed's 12 words are the only copy and not saved (wallet.md:922)", async () => {
