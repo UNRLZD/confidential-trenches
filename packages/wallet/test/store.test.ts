@@ -4,10 +4,14 @@
 //   node --test test/store.test.ts      (from packages/wallet)
 // IndexedDB here is fake-indexeddb (one in-memory IDBFactory per test); WebCrypto, Web Locks and BroadcastChannel are
 // Node's own. The same store in real Chromium on SIGN_HOST's origin: test/store.e2e.mjs.
+// What "kill" means here: Node has no tab to crash, so a "closed store" below is store.close(), which drops the
+// connection and the channel and stops the store answering; it stands in for a dead tab only in that the reserved
+// index is never used. A real kill is store.e2e.mjs's: CDP Page.crash takes the renderer down after the reservation.
+// That the index is durable before it is returned is checked here directly, by aborting the counter's commit.
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { IDBFactory } from "fake-indexeddb";
-import { openWalletStore as openStore, WALLET_LANES, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
+import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
+import { openWalletStore as openStore, WALLET_LANES, WALLET_LOCK, type WalletEvent, type WalletStore, type WalletStoreOptions } from "../src/store/index.ts";
 
 // every store a test opens is closed at the end, so a failing assertion fails the run instead of leaving it hanging on
 // an open BroadcastChannel
@@ -117,11 +121,11 @@ test("the deposit counter keeps to the lane, only grows and survives a reopen", 
   await assert.rejects(r.reserveDepositIndex(SCOPE), /closed/);
 });
 
-test("a tab killed between 'counter reserved' and 'account used' never gets that index again", async () => {
+test("a store closed between 'counter reserved' and 'account used' never gets that index again (close, not a crash)", async () => {
   const idb = new IDBFactory();
   const a = await openWalletStore({ indexedDB: idb });
   const i = await a.reserveDepositIndex(SCOPE);
-  a.close(); // the tab dies here: the index was handed out, its key never used
+  a.close(); // the store goes away here: the index was handed out, its key never used
   const b = await openWalletStore({ indexedDB: idb });
   const j = await b.reserveDepositIndex(SCOPE);
   assert.notEqual(j, i);
@@ -159,9 +163,10 @@ test("sign out broadcasts, closes the other tab and deletes the database", async
   c.close();
 });
 
-// WU-06's property: random tabs, random kills between reservation and use, random concurrency, with and without Web
+// WU-06's property: random tabs, random closes (during and after a reservation, before any use), random concurrency,
+// with and without Web
 // Locks. A run's reservations are checked across every tab and every reopen.
-test("WU-06: no deposit index is handed out twice in 10,000 random runs", async () => {
+test("WU-06: no deposit index is handed out twice in 10,000 random runs (stores closed, not crashed)", async () => {
   let seed = 0x9e3779b9;
   const rnd = (n: number): number => {
     seed = (Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) | 0;
@@ -182,7 +187,7 @@ test("WU-06: no deposit index is handed out twice in 10,000 random runs", async 
         const scope = rnd(4) ? SCOPE : SCOPE2;
         const t = rnd(tabs.length);
         const p = tabs[t]!.reserveDepositIndex(scope).then((i) => [scope, i] as const);
-        // now and then the tab dies while its reservation is in flight: any index it got still counts as handed out
+        // now and then the store is closed while its reservation is in flight: any index it got still counts as out
         if (rnd(8) === 0) (tabs[t]!.close(), killed.add(t));
         return p.catch(() => null);
       });
@@ -196,7 +201,7 @@ test("WU-06: no deposit index is handed out twice in 10,000 random runs", async 
         reservations++;
       }
       if (rnd(3) === 0) {
-        // kill a tab right after its reservation, before any use, and open a new one
+        // close a store right after its reservation, before any use, and open a new one
         const k = rnd(tabs.length);
         tabs[k]!.close();
         tabs[k] = await openWalletStore({ indexedDB: idb, locks });
@@ -206,4 +211,134 @@ test("WU-06: no deposit index is handed out twice in 10,000 random runs", async 
     for (const t of tabs) t.close();
   }
   assert.ok(reservations > RUNS);
+});
+
+// Round 2 (independent review of e63bb39).
+
+// The store owns its lock: a caller that holds the old paper's "ct-wallet" lock (06b:743-744) around a reservation
+// must not hang it (Web Locks are not re-entrant).
+test("a caller holding the 'ct-wallet' lock around a reservation does not hang it", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  const got = await navigator.locks.request("ct-wallet", () =>
+    Promise.race([s.reserveDepositIndex(SCOPE), new Promise((ok) => setTimeout(() => ok("hung"), 2000))]),
+  );
+  assert.equal(got, s.lane);
+  assert.equal(WALLET_LOCK, "ct-wallet/counters");
+});
+
+// Fault injection on fake-indexeddb: `when` picks the object store call to break, `fault` breaks it.
+async function withFault<T>(
+  method: "put" | "get",
+  when: (os: { name: string; transaction: IDBTransaction }) => boolean,
+  body: () => Promise<T>,
+): Promise<T> {
+  const proto = IDBObjectStore.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+  const orig = proto[method]!;
+  proto[method] = function (this: { name: string; transaction: IDBTransaction }, ...a: unknown[]) {
+    const r = orig.apply(this, a);
+    if (when(this)) this.transaction.abort();
+    return r;
+  };
+  try {
+    return await body();
+  } finally {
+    proto[method] = orig;
+  }
+}
+
+test("an index is returned only after its counter commits: an aborted commit rejects the reservation", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  await withFault("put", (os) => os.name === "counters", () => assert.rejects(s.reserveDepositIndex(SCOPE)));
+  // nothing was written and nothing went out, so the lane's first index is still the next
+  assert.equal(await s.reserveDepositIndex(SCOPE), s.lane);
+  assert.equal(await s.reserveDepositIndex(SCOPE), s.lane + 8);
+});
+
+test("a counter transaction that aborts during its read leaves no unhandled rejection", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  const loose: unknown[] = [];
+  const on = (e: unknown): void => void loose.push(e);
+  process.on("unhandledRejection", on);
+  try {
+    await withFault("get", (os) => os.name === "counters" && os.transaction.mode === "readwrite", () =>
+      assert.rejects(s.reserveDepositIndex(SCOPE)),
+    );
+    await new Promise((ok) => setTimeout(ok, 50));
+  } finally {
+    process.off("unhandledRejection", on);
+  }
+  assert.equal(loose.length, 0, `unhandled: ${String(loose[0])}`);
+});
+
+for (const locks of [undefined, null] as const) {
+  test(`three tabs opening at once share one K_wrap and one lane (${locks === null ? "no Web Locks" : "Web Locks"})`, async () => {
+    for (let round = 0; round < 20; round++) {
+      const idb = new IDBFactory();
+      const tabs = await Promise.all([0, 1, 2].map(() => openWalletStore({ indexedDB: idb, locks })));
+      await Promise.all(tabs.map((t, i) => t.put("notes", `t${i}`, { i })));
+      for (const t of tabs) {
+        assert.equal(t.lane, tabs[0]!.lane);
+        for (let i = 0; i < 3; i++) assert.deepEqual(await t.get("notes", `t${i}`), { i }, `round ${round}`);
+      }
+      for (const t of tabs) t.close();
+    }
+  });
+}
+
+test("a closed store's sign out refuses, so it never deletes a newer account's database", async () => {
+  // b: shut by a's sign out broadcast only; b2: also closed by close()
+  for (const closeIt of [false, true]) {
+    const idb = new IDBFactory();
+    const a = await openWalletStore({ indexedDB: idb });
+    const b = await openWalletStore({ indexedDB: idb });
+    await a.signOut();
+    await new Promise((ok) => setTimeout(ok, 20));
+    if (closeIt) b.close();
+    const c = await openWalletStore({ indexedDB: idb });
+    await c.put("meta", "seed", { v: 1 });
+    await assert.rejects(b.signOut(), /wallet store is closed/);
+    await new Promise((ok) => setTimeout(ok, 20));
+    assert.deepEqual(await c.get("meta", "seed"), { v: 1 }, `close() called: ${closeIt}`);
+  }
+});
+
+test("the record codec refuses every value it would change", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  class Thing {
+    x = 1;
+  }
+  const bad: [string, unknown][] = [
+    ["Date", new Date(0)], ["Map", new Map()], ["Set", new Set()], ["ArrayBuffer", new ArrayBuffer(2)],
+    ["Uint16Array", new Uint16Array(2)], ["Buffer", Buffer.from([1])], ["undefined", undefined], ["NaN", NaN],
+    ["Infinity", Infinity], ["-0", -0], ["undefined field", { a: undefined }], ["undefined item", [undefined]],
+    ["hole", [1, , 2]], ["class instance", new Thing()], ["symbol key", { [Symbol("s")]: 1 }],
+    ["function", { f: () => 1 }], ["tag key", { $bigint: "1" }], ["nested Date", { a: [{ d: new Date(0) }] }],
+  ];
+  for (const [what, v] of bad) await assert.rejects(s.put("notes", "x", v), Error, `${what} was accepted`);
+  assert.equal(await s.get("notes", "x"), undefined);
+  const good = { a: null, b: true, c: "s", d: 1.5, e: -3, f: 2n ** 200n, g: new Uint8Array([0, 255]), h: [1, [2, { i: "j" }]] };
+  await s.put("notes", "x", good);
+  assert.deepEqual(await s.get("notes", "x"), good);
+});
+
+test("raiseDepositIndex never lowers the counter and keeps the lane (restore step 7)", async () => {
+  const idb = new IDBFactory();
+  const s = await openWalletStore({ indexedDB: idb });
+  const d = s.lane;
+  const up = 100 + ((((d - 100) % 8) + 8) % 8); // the lane's first index at or past 100
+  assert.equal(await s.raiseDepositIndex(SCOPE, 100), up);
+  assert.equal(await s.reserveDepositIndex(SCOPE), up);
+  assert.equal(await s.raiseDepositIndex(SCOPE, 3), up + 8, "a lower minimum changes nothing");
+  assert.equal(await s.raiseDepositIndex(SCOPE, up + 8), up + 8);
+  assert.equal(await s.reserveDepositIndex(SCOPE), up + 8);
+  for (const m of [-1, 1.5, 2 ** 32, NaN]) await assert.rejects(s.raiseDepositIndex(SCOPE, m));
+  // racing with reservations in other tabs: no index twice, every one in the lane
+  const t = await openWalletStore({ indexedDB: idb });
+  const got = await Promise.all(
+    Array.from({ length: 60 }, (_, k) => (k % 3 === 0 ? s.raiseDepositIndex(SCOPE, 200 + k).then(() => null) : (k % 2 ? s : t).reserveDepositIndex(SCOPE))),
+  );
+  const idx = got.filter((x): x is number => x !== null);
+  assert.equal(new Set(idx).size, idx.length);
+  assert.ok(idx.every((i) => i % 8 === d && i > up + 8));
+  assert.ok((await s.reserveDepositIndex(SCOPE)) >= 200 + 57);
 });
