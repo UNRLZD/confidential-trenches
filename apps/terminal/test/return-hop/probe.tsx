@@ -1,10 +1,11 @@
 // The return-hop browser run's build (run.mjs): the app's own start, shell, signing page client and hop, with a probe
 // screen on every route in place of the empty screens: a sheet, a field and one control per open kind, each opening its
-// kind through useReturnHop() exactly as a screen does. Its state is in data attributes for the run to read. Test only.
+// kind through useReturnHop() exactly as a screen does, and on the profile route the phone's account rows. Its state is in data attributes for the run to read. Test only.
 import "@blindfill/kit";
 import type { Chain } from "@blindfill/kit";
 import { useState } from "react";
 import type { RouteId } from "../../src/routes/routes.ts";
+import { PhoneAccountMenu } from "../../src/screens/signin/Account.tsx";
 import { useReturnHop } from "../../src/shell/ReturnHop.tsx";
 import type { HopStart } from "../../src/shell/ReturnHop.tsx";
 import { start } from "../../src/shell/start.tsx";
@@ -28,6 +29,8 @@ function Probe({ id }: { id: RouteId }) {
   const [error, setError] = useState("");
   return (
     <main className="screen probe" data-route={id} data-sheet={sheet ?? ""} data-note={note} data-locked={locked ?? ""} data-restored={r?.control ?? ""} data-error={error}>
+      {/* the phone's account rows, as the Account tab will draw them (none while signed out; hidden on desktop) */}
+      {id === "profile" && <PhoneAccountMenu />}
       <button type="button" data-open-sheet onClick={() => setSheet("probe-sheet")}>
         sheet
       </button>
