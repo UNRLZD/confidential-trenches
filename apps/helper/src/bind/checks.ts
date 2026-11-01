@@ -23,7 +23,7 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 
 // ---- The kit's values (packages/kit/src/helper/v1.ts and vault/shapes.ts), compared in checks.test.ts ----
 
-/** HELPER_V1_PATHS' POST /v1/bind limitBytes: the decoded SignedDelegateAction is at most this. */
+/** HELPER_V1_PATHS' POST /v1/bind limitBytes, the route's body limit; here it also caps the decoded SignedDelegateAction. */
 export const BIND_MAX_BYTES = 4_096;
 /** HELPER_BIND_DEPOSIT_CODES, in H4.3's order. */
 export const BIND_DEPOSIT_CODES = [
@@ -76,6 +76,8 @@ export const BETA_CAP = 1_000_000_000n;
 export const CAP_CODE = "amount_above_cap";
 /** NEP-366's signable prefix: 2^30 + 366, a little-endian u32 before the borsh DelegateAction it signs. */
 export const NEP366_PREFIX = 2 ** 30 + 366;
+/** nearcore's AccessKey::ACCESS_KEY_NONCE_RANGE_MULTIPLIER (2.14.0 core/primitives-core/src/account.rs l.812). */
+export const NONCE_RANGE_MULTIPLIER = 1_000_000n;
 
 const TGAS = 1_000_000_000_000n;
 
@@ -92,8 +94,13 @@ export type BindConfig = {
   marginK: bigint;
 };
 
-/** What a read of the sender's key answered. */
-export type KeyRead = { kind: "no_account" } | { kind: "no_key" } | { kind: "key"; fullAccess: boolean; nonce: bigint };
+/**
+ * What a read of the sender's key answered. `permission` is view_access_key's `permission` field passed through as
+ * the RPC answered it, never mapped: only the exact string "FullAccess" signs a delegate. A gas key reads as
+ * {GasKeyFullAccess: …} or {GasKeyFunctionCall: …} (nearcore 2.14.0 core/primitives/src/views.rs l.170-182) and nearcore
+ * refuses a delegate signed by one (DelegateActionRequiresNonGasKey, runtime/runtime/src/actions.rs l.603-611).
+ */
+export type KeyRead = { kind: "no_account" } | { kind: "no_key" } | { kind: "key"; permission: unknown; nonce: bigint };
 
 /**
  * The chain reads, each at final state on two NEAR providers that agree. A read that fails or disagrees throws, and
@@ -102,7 +109,7 @@ export type KeyRead = { kind: "no_account" } | { kind: "no_key" } | { kind: "key
 export type BindReads = {
   /** view_access_key(account, publicKey); publicKey is "ed25519:<base58>". */
   accessKey(account: string, publicKey: string): Promise<KeyRead>;
-  /** The newest final block height. */
+  /** The newest final block height (check 3's nonce bound and check 4). */
   finalHeight(): Promise<bigint>;
   /** TOKEN.ft_balance_of(account), read now. */
   ftBalance(account: string): Promise<bigint>;
@@ -171,13 +178,16 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   const key = await reads.accessKey(u, publicKey);
   if (key.kind === "no_account") return no("no_account", "sender_id: no such account");
   if (key.kind !== "key") return no("bad_key", "public_key: not on the sender");
-  if (!key.fullAccess) return no("bad_key", "public_key: not a full-access key");
+  if (key.permission !== "FullAccess") return no("bad_key", "public_key: not a full-access key");
   if (d.nonce <= key.nonce) return no("bad_nonce", "nonce: not above the key's nonce");
+  // nearcore refuses nonce >= the receipt's block height x 1,000,000 (DelegateActionNonceTooLarge, 2.14.0
+  // runtime/runtime/src/actions.rs l.657-664); that height is at or above the final one, so this bound is the stricter.
+  const final = await reads.finalHeight();
+  if (d.nonce >= final * NONCE_RANGE_MULTIPLIER) return no("bad_nonce", "nonce: at or above the final height x 1,000,000");
   // R3, right after checks 1-3.
   if (await ledger.struck(u)) return no("sender_struck", "R3: sender struck");
 
   // 4. Expiry: ahead of the newest final height, at most 600 blocks ahead, and at least K ahead (R4).
-  const final = await reads.finalHeight();
   if (d.max_block_height <= final) return no("expired", "max_block_height: not ahead of the final height");
   if (d.max_block_height - final > EXPIRY_MAX_BLOCKS) return no("expired", "max_block_height: over 600 blocks ahead");
   if (d.max_block_height - final < cfg.marginK) return no("resign_needed", "R4: under the margin K");
@@ -220,6 +230,8 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   if (p >= FIELD_P) return no("bad_msg", "msg.precommitment: not below p");
   if (!isAccountId(depositor)) return no("bad_msg", "msg.depositor: not a NEAR account id");
   if (depositor === cfg.vault) return no("bad_msg", "msg.depositor: the vault");
+  // The depositor is the moving id itself in every flow (kit shapes.ts VaultDepositMessage; wallet.md WM-11; CO round 3).
+  if (depositor !== u) return no("bad_msg", "msg.depositor: not the sender");
   if (await reads.pUsed(p)) return no("p_used", "P: in the vault's deposits pages");
 
   // 7. R1-R3 per sender and per P (R3 ran after check 3).

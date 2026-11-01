@@ -114,7 +114,7 @@ type World = {
 function run(req: unknown, w: World = {}, cfg = CFG): Promise<BindVerdict> & { calls: string[] } {
   const calls: string[] = [];
   const reads: BindReads = {
-    accessKey: async (a, pk) => (calls.push(`accessKey ${a} ${pk}`), w.key ?? { kind: "key", fullAccess: true, nonce: 100n }),
+    accessKey: async (a, pk) => (calls.push(`accessKey ${a} ${pk}`), w.key ?? { kind: "key", permission: "FullAccess", nonce: 100n }),
     finalHeight: async () => (calls.push("finalHeight"), w.final ?? FINAL),
     ftBalance: async (a) => (calls.push(`ftBalance ${a}`), w.balance ?? 50_000_000_000n),
     pUsed: async (p) => (calls.push(`pUsed ${p}`), w.used ?? false),
@@ -190,7 +190,7 @@ test("the frozen deposit call passes, and the verdict carries the signed bytes a
 
 test("a delegate recorded from near-api-js 7.3.1 decodes, verifies and passes; one byte changed fails its signature", async () => {
   const f = JSON.parse(readFileSync(new URL("./fixtures/near-api-js-deposit.json", import.meta.url), "utf8"));
-  const w: World = { key: { kind: "key", fullAccess: true, nonce: BigInt(f.nonce) - 1n }, final: BigInt(f.max_block_height) - 120n };
+  const w: World = { key: { kind: "key", permission: "FullAccess", nonce: BigInt(f.nonce) - 1n }, final: BigInt(f.max_block_height) - 120n };
   const r = run({ signed_delegate: f.signed_delegate }, w, { ...CFG, vault: f.vault });
   const v = await r;
   assert.equal(v.ok, true, JSON.stringify(v, (_, x) => (typeof x === "bigint" ? String(x) : x)));
@@ -208,7 +208,7 @@ test("R's and V's moves are the same call: three ids, the same verdicts, read by
     await passes(body(spec({}, k), k));
     const r = run(body(spec({}, k), k), { struck: true });
     assert.equal((await r).ok, false);
-    assert.deepEqual(r.calls, [`accessKey ${k.id} ed25519:${base58(k.pub)}`, `struck ${k.id}`]);
+    assert.deepEqual(r.calls, [`accessKey ${k.id} ed25519:${base58(k.pub)}`, "finalHeight", `struck ${k.id}`]);
   }
   assert.equal(VAULT_DEPOSIT_SIGNERS.R, VAULT_DEPOSIT_SIGNERS.U);
   assert.equal(VAULT_DEPOSIT_SIGNERS.V, VAULT_DEPOSIT_SIGNERS.U);
@@ -286,14 +286,13 @@ test("check 3: sender a 64-hex account that holds the key as full access, nonce 
   await refused(body(spec({ sender: U.id.toUpperCase() })), "no_account", "sender_id: not a 64-hex implicit account");
   await refused(body(spec()), "no_account", "sender_id: no such account", { key: { kind: "no_account" } });
   await refused(body(spec()), "bad_key", "public_key: not on the sender", { key: { kind: "no_key" } });
-  await refused(body(spec()), "bad_key", "public_key: not a full-access key", { key: { kind: "key", fullAccess: false, nonce: 1n } });
-  await refused(body(spec()), "bad_nonce", "nonce: not above the key's nonce", { key: { kind: "key", fullAccess: true, nonce: 101n } });
-  await passes(body(spec()), { key: { kind: "key", fullAccess: true, nonce: 100n } });
+  await refused(body(spec()), "bad_nonce", "nonce: not above the key's nonce", { key: { kind: "key", permission: "FullAccess", nonce: 101n } });
+  await passes(body(spec()), { key: { kind: "key", permission: "FullAccess", nonce: 100n } });
 });
 
 test("R3: a struck sender gets sender_struck right after checks 1-3, before expiry", async () => {
   const calls = await refused(body(spec({ mbh: FINAL })), "sender_struck", "R3: sender struck", { struck: true });
-  assert.ok(!calls.includes("finalHeight"));
+  assert.ok(calls.indexOf("finalHeight") < calls.indexOf(`struck ${U.id}`)); // the height is read for the nonce bound
 });
 
 // ---- 4. Expiry ----
@@ -378,10 +377,12 @@ test("check 6: msg keeps every clause of the vault's row 2 (V 2.10 (e))", async 
     [JSON.stringify({ precommitment: "1", depositor: "Alice.near" }), "msg.depositor: not a NEAR account id"],
     [JSON.stringify({ precommitment: "1", depositor: 7 }), "msg.depositor: not a NEAR account id"],
     [JSON.stringify({ precommitment: "1", depositor: VAULT }), "msg.depositor: the vault"],
+    [JSON.stringify({ precommitment: "1", depositor: "alice.near" }), "msg.depositor: not the sender"],
+    [JSON.stringify({ precommitment: "1", depositor: newKey().id }), "msg.depositor: not the sender"],
   ];
   for (const [msg, why] of cases) await refused(body(withMsg(msg)), "bad_msg", why);
   await passes(body(withMsg(JSON.stringify({ precommitment: String(FIELD_P - 1n), depositor: dep }))));
-  await passes(body(withMsg(JSON.stringify({ precommitment: "0", depositor: "alice.near" }))));
+  await passes(body(withMsg(JSON.stringify({ precommitment: "0", depositor: dep }))));
 });
 
 test("check 6: P not in the deposits pages", async () => {
@@ -419,4 +420,30 @@ test("a leading U+FEFF in method_name is kept and refused", async () => {
 });
 test("a leading U+FEFF in args is kept and refused", async () => {
   await refused(body(spec({ actions: [fc({ args: BOM + args() })] })), "bad_shape", "args: not the frozen {receiver_id, amount, msg}");
+});
+
+// ---- nearcore 2.14.0's delegate key and nonce rules (runtime/runtime/src/actions.rs l.603-611, l.657-664) ----
+
+test("check 3: only a key whose view permission is exactly \"FullAccess\" signs; a gas key or function-call key is bad_key", async () => {
+  const perms: unknown[] = [
+    { FunctionCall: { allowance: null, receiver_id: VAULT_TOKEN, method_names: ["ft_transfer_call"] } },
+    { GasKeyFullAccess: { balance: "0", num_nonces: 1 } },
+    { GasKeyFunctionCall: { balance: "0", num_nonces: 1, allowance: null, receiver_id: VAULT_TOKEN, method_names: [] } },
+    "GasKeyFullAccess",
+    "fullaccess",
+    { FullAccess: {} },
+    undefined,
+  ];
+  for (const permission of perms) {
+    await refused(body(spec()), "bad_key", "public_key: not a full-access key", { key: { kind: "key", permission, nonce: 100n } });
+  }
+});
+
+test("check 3: the nonce is below the final height x 1,000,000 (DelegateActionNonceTooLarge)", async () => {
+  const bound = FINAL * 1_000_000n;
+  const why = "nonce: at or above the final height x 1,000,000";
+  await refused(body(spec({ nonce: (1n << 64n) - 1n })), "bad_nonce", why);
+  await refused(body(spec({ nonce: bound })), "bad_nonce", why);
+  await passes(body(spec({ nonce: bound - 1n })));
+  await refused(body(spec({ nonce: bound - 1n })), "bad_nonce", "nonce: not above the key's nonce", { key: { kind: "key", permission: "FullAccess", nonce: bound - 1n } });
 });
