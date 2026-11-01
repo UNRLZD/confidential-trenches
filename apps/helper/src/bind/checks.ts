@@ -16,56 +16,41 @@
 // (token-status/status.ts tokenHeld); R4's margin again after the prepay; R5-R7, R7's atomic create-if-absent write
 // included. The reads and the ledger are passed in, so this file holds no key, no store and no network.
 //
-// The helper image is built from apps/helper alone (Dockerfile), so the kit's values below are written again;
-// checks.test.ts compares each with the kit's public entry (packages/kit/src/index.ts).
+// The kit's values are imported from its public entry (packages/kit/src/index.ts), so they cannot drift from the device.
 
 import { createHash, createPublicKey, verify } from "node:crypto";
+import {
+  HELPER_BIND_DEPOSIT_CAP,
+  HELPER_BIND_DEPOSIT_CODES,
+  HELPER_V1_PATHS,
+  VAULT_CONSTANTS,
+  VAULT_DEPOSIT_CARRIER,
+  VAULT_DEPOSIT_MESSAGE_FIELDS,
+  VAULT_DEPOSIT_MESSAGE_MAX_BYTES,
+  VAULT_FIELD_P,
+  vaultAccountId,
+  type HelperV1Path,
+} from "@blindfill/kit";
 
-// ---- The kit's values (packages/kit/src/helper/v1.ts and vault/shapes.ts), compared in checks.test.ts ----
+// ---- The kit's values (packages/kit/src/helper/v1.ts and vault/shapes.ts) ----
 
 /** HELPER_V1_PATHS' POST /v1/bind limitBytes, the route's body limit; here it also caps the decoded SignedDelegateAction. */
-export const BIND_MAX_BYTES = 4_096;
+export const BIND_MAX_BYTES = HELPER_V1_PATHS.find((r): r is Extract<HelperV1Path, { path: "/v1/bind" }> => r.path === "/v1/bind")!.limitBytes;
 /** HELPER_BIND_DEPOSIT_CODES, in H4.3's order, with the cap's code after amount_too_low. */
-export const BIND_DEPOSIT_CODES = [
-  "bad_shape",
-  "bad_signature",
-  "no_account",
-  "bad_key",
-  "bad_nonce",
-  "sender_struck",
-  "expired",
-  "resign_needed",
-  "not_one_action",
-  "not_ft_transfer_call",
-  "token_not_accepted",
-  "deposit_not_1_yocto",
-  "gas_too_low",
-  "gas_too_high",
-  "bad_receiver",
-  "amount_too_low",
-  "amount_above_cap",
-  "amount_above_balance",
-  "bad_msg",
-  "p_used",
-  "p_bound",
-  "prepay_open",
-  "in_flight",
-  "token_halted",
-  "relayer_low",
-] as const;
+export const BIND_DEPOSIT_CODES = HELPER_BIND_DEPOSIT_CODES;
 /** VAULT_CONSTANTS.TOKEN: the vault's one token (V5), Circle's USDC on NEAR mainnet. */
-export const VAULT_TOKEN = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"; // gitleaks:allow (a public account id)
+export const VAULT_TOKEN = VAULT_CONSTANTS.TOKEN;
 /** VAULT_CONSTANTS.MIN_DEPOSIT: 1 USDC in base units. */
-export const MIN_DEPOSIT = 1_000_000n;
+export const MIN_DEPOSIT = VAULT_CONSTANTS.MIN_DEPOSIT;
 /** HELPER_BIND_DEPOSIT_CAP: the beta cap per deposit, $1,000 in USDC base units (OD:262: in the kit and the relayer, never the vault). */
-export const BIND_DEPOSIT_CAP = 1_000_000_000n;
+export const BIND_DEPOSIT_CAP = HELPER_BIND_DEPOSIT_CAP;
 /** VAULT_FIELD_P. */
-export const FIELD_P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+export const FIELD_P = VAULT_FIELD_P;
 /** VAULT_DEPOSIT_MESSAGE_FIELDS and VAULT_DEPOSIT_MESSAGE_MAX_BYTES. */
-export const DEPOSIT_MESSAGE_FIELDS = ["precommitment", "depositor"] as const;
-export const DEPOSIT_MESSAGE_MAX_BYTES = 1_024;
+export const DEPOSIT_MESSAGE_FIELDS = VAULT_DEPOSIT_MESSAGE_FIELDS;
+export const DEPOSIT_MESSAGE_MAX_BYTES = VAULT_DEPOSIT_MESSAGE_MAX_BYTES;
 /** VAULT_DEPOSIT_CARRIER's method, args, deposit and gas. */
-export const CARRIER = { method: "ft_transfer_call", args: ["receiver_id", "amount", "msg"], deposit_yocto: 1n, gas_tgas: 180 } as const;
+export const CARRIER = VAULT_DEPOSIT_CARRIER;
 
 // ---- The papers' values ----
 
@@ -332,9 +317,15 @@ function frozenArgs(raw: Uint8Array): { receiver_id: string; amount: string; msg
   }
 }
 
-/** The kit's vaultAccountId rule: 2 to 64 characters, lowercase letters and digits, parts joined by - or _, split by dots. */
+/** The kit's vaultAccountId rule (packages/kit/src/vault/shapes.ts), as a test: true exactly when the kit takes it. */
 export function isAccountId(s: unknown): s is string {
-  return typeof s === "string" && s.length >= 2 && s.length <= 64 && /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(s);
+  if (typeof s !== "string") return false;
+  try {
+    vaultAccountId(s, "account");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";

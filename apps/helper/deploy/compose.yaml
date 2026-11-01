@@ -4,7 +4,9 @@ name: ct-helper
 services:
   helper:
     build:
-      context: ..
+      # the repository root, so the image loads the kit as the package @blindfill/kit (apps/helper/Dockerfile)
+      context: ../../..
+      dockerfile: apps/helper/Dockerfile
       args:
         HELPER_COMMIT: ${HELPER_COMMIT:?set HELPER_COMMIT}
     image: ct-helper:${HELPER_COMMIT:?set HELPER_COMMIT}
