@@ -406,6 +406,19 @@ test("the seed record is never written by put or removed by delete: insertSeed a
   assert.deepEqual(await s.get("meta", "settings"), { x: 1 });
 });
 
+test("meta/status (card signpage-frame-state): a caller may put, get and delete it; another meta key is still refused", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  await s.put("meta", "status", { v: 1, source: "prf", code_saved: false });
+  assert.deepEqual(await s.get("meta", "status"), { v: 1, source: "prf", code_saved: false });
+  assert.deepEqual(await s.keys("meta"), ["status"]);
+  await s.delete("meta", "status");
+  assert.equal(await s.get("meta", "status"), undefined);
+  for (const key of ["k_wrap", "lane", "statu", "Status", "status2"]) {
+    await assert.rejects(s.put("meta", key, { v: 1 }), /is the store's own/, key);
+    await assert.rejects(s.delete("meta", key), /is the store's own/, key);
+  }
+});
+
 test("sign out refuses while a no-PRF seed's 12 words are the only copy and not saved (wallet.md:922)", async () => {
   const idb = new IDBFactory();
   const s = await openWalletStore({ indexedDB: idb });

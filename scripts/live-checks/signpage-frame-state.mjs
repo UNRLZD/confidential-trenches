@@ -7,11 +7,12 @@
 // backup screen), taps Saved, then Sign out. The check reads:
 //   - the frame's `ready`, then its first `state` answer: signed out, exact keys (a fresh profile holds no seed);
 //   - after Create passkey (the top tab on the backup screen): a `state` event with signed_in true, way "passkey",
-//     code_saved false;
+//     code_saved false (the top tab writes the seed, then its status record; an event between the two, signed in with
+//     no way, may come first);
 //   - after Saved (the top tab signed in, code_saved true): a `state` event with code_saved true;
 //   - after Sign out (the top tab signed out): a `state` event with signed_in false, exactly the signed-out state;
 //   - a `state` asked again: signed out;
-//   - every state (answer or event) with exactly the frozen keys (`way` only while signed in), no other message kind.
+//   - every state (answer or event) with exactly the frozen keys (`way` never while signed out), no other message kind.
 // Each event must come within EVENT_MS of the top tab's step. The ops a signing kind writes have no writer on SIGN_HOST
 // yet, so they are checked by packages/signpage/test/state.test.ts, not here. No money, no network beyond SIGN_HOST:
 // the passkey is the virtual authenticator's and the account is thrown away with the profile.
@@ -41,13 +42,16 @@ const KEYS = ["release", "api", "signed_in", "code_saved", "vault_balance", "wal
 // ------------------------------------------------------------------------------------------------ the verdict
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const sameKeys = (v, keys) => isObj(v) && JSON.stringify(Object.keys(v).sort()) === JSON.stringify([...keys].sort());
-/** A state of exactly the frozen keys: `way` present exactly when signed in, nothing else, the types right. */
+/**
+ * A state of exactly the frozen keys, the types right: `way` never when signed out, and optional when signed in (a seed
+ * whose status record is not written yet reads signed in with no way, packages/signpage/src/state.ts).
+ */
 export const exactState = (s) =>
   isObj(s) &&
-  sameKeys(s, s.signed_in === true ? [...KEYS, "way"] : KEYS) &&
+  (sameKeys(s, KEYS) || (s.signed_in === true && sameKeys(s, [...KEYS, "way"]))) &&
   typeof s.release === "string" && s.api === 1 && typeof s.signed_in === "boolean" && typeof s.code_saved === "boolean" &&
   typeof s.vault_balance === "string" && ["wallets", "positions", "orders", "held", "ops"].every((k) => Array.isArray(s[k])) &&
-  (s.signed_in !== true || ["passkey", "words", "wallet"].includes(s.way));
+  (!Object.hasOwn(s, "way") || ["passkey", "words", "wallet"].includes(s.way));
 const signedOut = (s) =>
   exactState(s) && s.signed_in === false && s.code_saved === false && s.vault_balance === "0" &&
   ["wallets", "positions", "orders", "held", "ops"].every((k) => s[k].length === 0);
@@ -74,8 +78,8 @@ export function judge(rec) {
   say(signedOut(first), `the first state answer is signed out with exactly the frozen keys (${show(first)})`);
 
   say(st.created?.top?.state === "backup", `Create passkey with no PRF lands the top tab on the backup screen (${st.created?.top?.state})`);
-  const e1 = eventAfter(rec, st.created?.t, (s) => s.signed_in === true);
-  say(!!e1 && e1.ms <= EVENT_MS && exactState(e1.state) && e1.state.way === "passkey" && e1.state.code_saved === false,
+  const e1 = eventAfter(rec, st.created?.t, (s) => s.signed_in === true && s.way === "passkey");
+  say(!!e1 && e1.ms <= EVENT_MS && exactState(e1.state) && e1.state.code_saved === false,
     `then the frame posts signed in, way passkey, code_saved false (${show(e1?.state)}${e1 ? `, ${e1.ms} ms` : ""})`);
 
   say(st.saved?.top?.state === "signed-in" && st.saved?.top?.codeSaved === "true", `Saved signs the top tab in with the words saved (${st.saved?.top?.state}, code_saved ${st.saved?.top?.codeSaved})`);

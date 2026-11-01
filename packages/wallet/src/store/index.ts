@@ -44,7 +44,7 @@ export const WALLET_STORES = ["notes", "wallets", "quotes", "orders", "ops", "co
 export type WalletStoreName = (typeof WALLET_STORES)[number];
 // The meta keys a caller may write: the seed record and the settings (wallet.md:204, 06b:585-634). K_wrap and the lane
 // are the store's own.
-export type WalletMetaKey = "seed" | "settings";
+export type WalletMetaKey = "seed" | "settings" | "status";
 export type WalletEvent = { kind: "changed"; stores: WalletStoreName[] } | { kind: "signout" };
 
 export interface WalletStoreOptions {
@@ -164,7 +164,7 @@ function checkKey(store: WalletStoreName, key: string): void {
 function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
-  if (store === "meta" && key !== "seed" && key !== "settings") throw new Error(`meta key ${key} is the store's own`);
+  if (store === "meta" && key !== "seed" && key !== "settings" && key !== "status") throw new Error(`meta key ${key} is the store's own`);
   // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
   // setCodeSaved only, and goes only with signOut
   if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");

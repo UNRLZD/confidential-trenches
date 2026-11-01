@@ -18,7 +18,7 @@ const events = (rec) => rec.messages.filter((m) => m.data?.type === "state");
 test("recorded good run (this card's build, harness): PASS", () => {
   const r = judge(GOOD);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(events(GOOD).length, 3);
+  assert.ok(events(GOOD).length >= 3);
 });
 
 test("recorded bad run (the build before this card): FAIL, no state event after any step", () => {
@@ -30,33 +30,33 @@ test("recorded bad run (the build before this card): FAIL, no state event after 
 
 test("a state that carries one more key fails", () => {
   const rec = clone(GOOD);
-  events(rec)[0].data.state.entropy = "7f".repeat(16);
+  for (const e of events(rec)) e.data.state.entropy = "7f".repeat(16);
   const r = judge(rec);
   assert.equal(r.ok, false);
   assert.ok(r.lines.some((l) => l.startsWith("BAD then the frame posts signed in")), r.lines.join("\n"));
 });
 
-test("a signed-out state with a way, or a signed-in one without, fails", () => {
+test("a signed-out state with a way, or a way outside passkey, words and wallet, fails", () => {
   const a = clone(GOOD);
-  events(a)[2].data.state.way = "passkey";
+  events(a).at(-1).data.state.way = "passkey";
   assert.equal(judge(a).ok, false);
   const b = clone(GOOD);
-  delete events(b)[0].data.state.way;
+  for (const e of events(b)) if (e.data.state.signed_in) e.data.state.way = "face";
   assert.equal(judge(b).ok, false);
 });
 
 test("an event later than EVENT_MS after its step fails", () => {
   const rec = clone(GOOD);
-  events(rec)[1].t += 60_000;
+  for (const e of events(rec)) if (e.data.state.code_saved) e.t += 60_000;
   assert.equal(judge(rec).ok, false);
 });
 
 test("an event from another origin or not from the frame is not counted", () => {
   const a = clone(GOOD);
-  events(a)[2].origin = "https://evil.ct.test";
+  events(a).at(-1).origin = "https://evil.ct.test";
   assert.equal(judge(a).ok, false);
   const b = clone(GOOD);
-  events(b)[2].fromFrame = false;
+  events(b).at(-1).fromFrame = false;
   assert.equal(judge(b).ok, false);
 });
 

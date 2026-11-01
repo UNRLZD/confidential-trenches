@@ -7,6 +7,9 @@
 //   neither control and both steps refuse, so a framing page cannot get a click on them. In the frame the page speaks
 //   the postMessage API (src/api.ts, card signpage-postmessage), started below, with the state the store holds
 //   (src/state.ts, card signpage-frame-state): signed in, words saved, the way in and the ops, posted again on each change.
+//   The frame never opens the seed record: it reads the seed's key and the status record meta/"status" { v, source,
+//   code_saved }, which this page writes top-level (markStatus) after every seed landing and after Saved, and syncs from
+//   the seed on every top-level load, so a crash between the seed's write and the status's heals on the next visit.
 // - Create passkey / Use passkey run the ceremony (@blindfill/wallet/signin/passkey). A PRF result becomes the seed's
 //   entropy, written by the store's insertSeed only if no seed is stored (two tabs never write one over the other); the
 //   record is 06b:459's { v, entropy, source: "prf", code_saved: false, created_ms } (ses.2, ses.7, 06b:776, :781), so
@@ -43,7 +46,7 @@ import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/walle
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
-import { frameState } from "./state.ts";
+import { frameState, markStatus } from "./state.ts";
 
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code";
 
@@ -215,9 +218,18 @@ const topLevelOnly = (): void => {
   if (framed) throw new Error("sign-in and sign-out run top-level only, never in a frame");
 };
 
+// The stored seed's public facts into meta/"status" for the frame (src/state.ts), top-level only. A failed write leaves
+// the sign-in as it is: the frame then reads the seed's key alone (signed in, the Backup dot) until the next load.
+async function mark(s: Seed): Promise<void> {
+  if (framed) return;
+  const facts = { source: s.source, code_saved: s.code_saved };
+  await markStatus(await open(), facts).catch(() => {});
+}
+
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
 // stored, which may be another tab's (never its words then).
-function landed(l: Landing): void {
+async function landed(l: Landing): Promise<void> {
+  await mark(l.seed);
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }
@@ -226,21 +238,21 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   topLevelOnly();
   // never replace a seed already stored here, and run no ceremony: sign out first (wallet.md:919)
   const had = await readSeed();
-  if (had) return show("signed-in", shown(had));
+  if (had) return landed({ screen: "signed-in", seed: had });
   const r = await ceremony();
   // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
   if (r.kind === "no-prf" && create) return landed(await signInNoPrf(open));
   if (r.kind !== "prf") return show(r.kind);
   // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
   // zeroed on every path, an open that fails included (words.ts storeSeed)
-  landed(await signInPrf(open, r.entropy));
+  await landed(await signInPrf(open, r.entropy));
 }
 
 // ses.10-12: the typed 12 words, checked on the device before anything else; a failure stores nothing
 async function signInWords(typed: string): Promise<void> {
   topLevelOnly();
   const had = await readSeed();
-  if (had) return show("signed-in", shown(had));
+  if (had) return landed({ screen: "signed-in", seed: had });
   let l: Landing;
   try {
     l = await signInTyped(open, typed);
@@ -248,7 +260,7 @@ async function signInWords(typed: string): Promise<void> {
     if (e instanceof WordsRefused) return show("invalid-code");
     throw e;
   }
-  landed(l);
+  await landed(l);
 }
 
 // The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.
@@ -272,6 +284,7 @@ async function saved(): Promise<void> {
   await saveWords(await open());
   const s = await readSeed();
   if (!s) return show("signed-out");
+  await mark(s);
   show("signed-in", shown(s));
 }
 
@@ -298,11 +311,14 @@ async function run(step: () => Promise<void>): Promise<void> {
 }
 
 show("loading");
-void run(async () => {
-  const s = await readSeed();
-  if (s) show("signed-in", shown(s));
-  else show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
-});
+// top-level only: the frame never opens the seed record (src/state.ts reads the status instead); it draws nothing
+if (framed) root.dataset.signin = "framed";
+else
+  void run(async () => {
+    const s = await readSeed();
+    if (s) await landed({ screen: "signed-in", seed: s });
+    else show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
+  });
 
 if (framed) {
   const fs = frameState((onEvent) => openWalletStore({ onEvent }));

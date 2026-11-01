@@ -10,7 +10,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN, RELEASE, signedOutState, startApi, type IncomingMessage } from "../src/api.ts";
-import { frameState, opOf, type FrameState } from "../src/state.ts";
+import { frameState, markStatus, opOf, statusOf, type FrameState } from "../src/state.ts";
 
 const ENTROPY = () => new Uint8Array(16).fill(0x7f);
 const WORDS = entropyToWords(ENTROPY());
@@ -56,12 +56,18 @@ async function setup() {
 }
 
 const seed = (source: string, code_saved: boolean) => ({ v: 1, entropy: ENTROPY(), source, code_saved, created_ms: 1_767_225_600_000 });
+type Source = "prf" | "random" | "code" | "wallet";
+/** A sign-in as SIGN_HOST's top-level page makes it: the seed first, then its status (main.ts landed). */
+async function signIn(t: WalletStore, source: Source, code_saved: boolean): Promise<void> {
+  await t.insertSeed(seed(source, code_saved));
+  await markStatus(t, { source, code_saved });
+}
 
 test("a stored seed gives signed_in true with its way: prf and random are passkey, code is words, wallet is wallet", async () => {
   for (const [source, way, saved] of [["prf", "passkey", false], ["random", "passkey", false], ["code", "words", true], ["wallet", "wallet", false]] as const) {
     const p = await setup();
     const t = await p.tab();
-    await t.insertSeed(seed(source, saved));
+    await signIn(t, source, saved);
     const s = await p.ask();
     assert.equal(s.signed_in, true, source);
     assert.equal(s.way, way, source);
@@ -74,15 +80,50 @@ test("with no seed stored the frame answers signed out, exactly signedOutState()
   assert.deepEqual(await p.ask(), signedOutState());
 });
 
+test("crash order: a seed with no status is signed in, code_saved false, no way; a status with no seed is signed out", async () => {
+  const p = await setup();
+  const t = await p.tab();
+  await t.put("meta", "status", { v: 1, source: "prf", code_saved: true });
+  assert.deepEqual(await p.ask(), signedOutState());
+  await t.insertSeed(seed("code", true));
+  await t.delete("meta", "status");
+  const s = await p.ask();
+  assert.deepEqual(s, { ...signedOutState(), signed_in: true });
+  assert.ok(!Object.hasOwn(s, "way"));
+  // a status of another shape reads as none
+  for (const bad of [{ source: "prf", code_saved: true }, { v: 1, source: "face", code_saved: true }, { v: 1, source: "prf", code_saved: "yes" }, "prf"]) {
+    await t.put("meta", "status", bad);
+    assert.deepEqual(await p.ask(), { ...signedOutState(), signed_in: true }, JSON.stringify(bad));
+  }
+  // the next top-level load writes it
+  await markStatus(t, { source: "code", code_saved: true });
+  assert.equal((await p.ask()).way, "words");
+});
+
+test("markStatus: code_saved only goes up, nothing is written when it already says the same", async () => {
+  const p = await setup();
+  const t = await p.tab();
+  await markStatus(t, { source: "random", code_saved: false });
+  assert.deepEqual(await t.get("meta", "status"), { v: 1, source: "random", code_saved: false });
+  await markStatus(t, { source: "random", code_saved: true });
+  await markStatus(t, { source: "random", code_saved: false }); // a stale tab's read of the seed before Saved
+  assert.deepEqual(statusOf(await t.get("meta", "status")), { source: "random", code_saved: true });
+  let puts = 0;
+  const counting = { ...t, put: async (...a: Parameters<WalletStore["put"]>) => (puts++, t.put(...a)) } as WalletStore;
+  await markStatus(counting, { source: "random", code_saved: true });
+  assert.equal(puts, 0);
+});
+
 test("a sign-in in another tab posts signed_in true; saving the words there posts code_saved true", async () => {
   const p = await setup();
   const t = await p.tab();
   assert.equal((await p.ask()).signed_in, false);
-  await t.insertSeed(seed("random", false));
-  const e1 = await p.event((s) => s.signed_in === true);
+  await signIn(t, "random", false);
+  const e1 = await p.event((s) => s.signed_in === true && s.way !== undefined);
   assert.equal(e1.code_saved, false);
   assert.equal(e1.way, "passkey");
   await t.setCodeSaved();
+  await markStatus(t, { source: "random", code_saved: true });
   const e2 = await p.event((s) => s.code_saved === true);
   assert.equal(e2.signed_in, true);
 });
@@ -90,21 +131,21 @@ test("a sign-in in another tab posts signed_in true; saving the words there post
 test("a sign-out in another tab posts signed_in false, and a later sign-in is still heard", async () => {
   const p = await setup();
   const t = await p.tab();
-  await t.insertSeed(seed("prf", false));
+  await signIn(t, "prf", false);
   assert.equal((await p.ask()).signed_in, true);
   await t.signOut();
   assert.deepEqual(await p.event((s) => s.signed_in === false), signedOutState());
   // the frame's store was closed by the sign out; it opens a new one and keeps listening
   const t2 = await p.tab();
-  await t2.insertSeed(seed("code", true));
-  const e = await p.event((s) => s.signed_in === true);
+  await signIn(t2, "code", true);
+  const e = await p.event((s) => s.signed_in === true && s.way !== undefined);
   assert.equal(e.way, "words");
 });
 
 test("an op written to the store appears in ops with its stage, and each stage change posts again", async () => {
   const p = await setup();
   const t = await p.tab();
-  await t.insertSeed(seed("code", true));
+  await signIn(t, "code", true);
   assert.deepEqual((await p.ask()).ops, []);
   const id = crypto.randomUUID();
   const tx = { chain: "near", hash: "9xQ1" };
@@ -137,7 +178,7 @@ test("an ops record of another shape is left out, never sent; the others still s
   ]) assert.equal(opOf(ok, bad), null, JSON.stringify(bad) ?? String(bad));
   const p = await setup();
   const t = await p.tab();
-  await t.insertSeed(seed("code", true));
+  await signIn(t, "code", true);
   await t.put("ops", "bad", { kind: "deposit", stage: "filled", txs: [] });
   await t.put("ops", ok, { kind: "withdraw", stage: "proving", txs: [] });
   assert.deepEqual((await p.ask()).ops, [{ id: ok, kind: "withdraw", stage: "proving", txs: [] }]);
@@ -148,7 +189,7 @@ test("exact keys: the state's keys and value types, and nothing secret in it", a
   const t = await p.tab();
   const out = await p.ask();
   assert.deepEqual(Object.keys(out), ["release", "api", "signed_in", "code_saved", "vault_balance", "wallets", "positions", "orders", "held", "ops"]);
-  await t.insertSeed(seed("random", false));
+  await signIn(t, "random", false);
   // an op record that holds what must never leave: every field but the allowed ones is dropped
   const id = crypto.randomUUID();
   await t.put("ops", id, {
@@ -182,36 +223,16 @@ test("a store the frame cannot open or read answers signed out, with no error te
   // no IndexedDB at all
   const none = frameState((onEvent) => openWalletStore({ indexedDB: undefined as unknown as IDBFactory, onEvent }));
   assert.deepEqual(await none.state(), signedOutState());
-  // a broken seed record: signed out, and the reads go on
-  const p = await setup();
-  const t = await p.tab();
-  await t.insertSeed({ v: 1, entropy: new Uint8Array(3), source: "prf", code_saved: false, created_ms: 1 });
-  assert.deepEqual(await p.ask(), signedOutState());
-  assert.deepEqual(await p.fs.state(), signedOutState());
-});
-
-test("the seed's entropy the frame reads is zeroed once read", async () => {
-  const idb = new IDBFactory();
-  const name = `frame-state-zero-${process.pid}`;
-  const t = await openWalletStore({ indexedDB: idb, name });
-  closers.push(() => t.close());
-  await t.insertSeed(seed("prf", false));
-  const seen: Uint8Array[] = [];
-  const fs = frameState(async (onEvent) => {
-    const s = await openWalletStore({ indexedDB: idb, name, onEvent });
+  // a store whose reads fail after it opened: signed out, and the next read opens it again
+  let opens = 0;
+  const failing = frameState(async (onEvent) => {
+    opens++;
+    const s = await openWalletStore({ indexedDB: new IDBFactory(), name: `frame-state-fail-${opens}`, onEvent });
     closers.push(() => s.close());
-    return {
-      ...s,
-      get: async (store, key) => {
-        const v = await s.get(store, key);
-        const e = (v as { entropy?: unknown } | undefined)?.entropy;
-        if (e instanceof Uint8Array) seen.push(e);
-        return v;
-      },
-    } as WalletStore;
+    return { ...s, keys: () => Promise.reject(new Error("internal: read failed at 0x1")) } as WalletStore;
   });
-  closers.push(() => fs.close());
-  assert.equal((await fs.state()).signed_in, true);
-  assert.equal(seen.length, 1);
-  assert.ok(seen[0]!.every((b) => b === 0));
+  closers.push(() => failing.close());
+  assert.deepEqual(await failing.state(), signedOutState());
+  assert.deepEqual(await failing.state(), signedOutState());
+  assert.equal(opens, 2);
 });
