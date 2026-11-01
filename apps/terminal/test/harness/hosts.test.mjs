@@ -66,7 +66,9 @@ test("every host serves over TLS with a certificate valid for its name, under it
   }
   assert.ok(want[HOSTS.app].get("content-security-policy")?.includes("frame-ancestors https://sign.confidential.unrealized.trade;"));
   assert.match(want[HOSTS.sign].get("permissions-policy") ?? "", /publickey-credentials-create=\(self\)/);
-  assert.match(want[HOSTS.sign].get("content-security-policy") ?? "", /frame-ancestors https:\/\/confidential\.unrealized\.trade/);
+  // SIGN_HOST is the top window (the shell) and frames APP_HOST, never the other way
+  assert.match(want[HOSTS.sign].get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  assert.match(want[HOSTS.sign].get("content-security-policy") ?? "", /frame-src https:\/\/confidential\.unrealized\.trade(;|$)/);
   // a route with no file is the SPA's index.html, as Pages serves a build with no 404.html
   assert.equal((await get(HOSTS.app, "/discover")).status, 200);
   assert.deepEqual(new Set(server.log.map((e) => e.host)), new Set(Object.values(HOSTS)));

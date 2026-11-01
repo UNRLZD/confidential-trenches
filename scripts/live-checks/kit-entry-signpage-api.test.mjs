@@ -31,12 +31,13 @@ test("recorded good answer: the branch's exports, kinds, events and order record
   const r = await check({ read: replay(ANSWERS.good.files) });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines[0], "ok  exports keys [., ./core, ./package.json]; pointing at src/; no build fields");
-  assert.equal(r.lines[1], "ok  the kinds: SIGNPAGE_KINDS is the fifteen; SignpageParams is the fifteen; SignpageResults is the fifteen");
+  assert.equal(r.lines[1], "ok  the kinds: SIGNPAGE_KINDS is the seventeen; SignpageParams is the seventeen; SignpageResults is the seventeen");
   assert.equal(r.lines[2], "ok  the events [ready, state, progress] are handshake names only");
   assert.equal(r.lines[3], "ok  the order record: OrderRecord has the twelve fields; ORDER_RECORD_FIELDS is the twelve");
   assert.equal(r.lines[4], "ok  variants holds 1, 2, 3 signed variants");
   assert.equal(r.lines[5], "ok  OrderTrigger is H5.1's trigger");
-  assert.match(r.lines[6], /read packages\/kit\/src\/index\.ts, packages\/kit\/src\/signpage\/messages\.ts, packages\/kit\/src\/orders\/record\.ts$/);
+  // the entry, its messages and the order record first, then every file index.ts re-exports since
+  assert.match(r.lines[6], /read packages\/kit\/src\/index\.ts, packages\/kit\/src\/signpage\/messages\.ts, packages\/kit\/src\/orders\/record\.ts(, packages\/kit\/src\/[\w/-]+\.ts)*$/);
 });
 
 test('recorded bad answer: an exports map with "./internal": FAIL', async () => {
@@ -48,7 +49,7 @@ test('recorded bad answer: an exports map with "./internal": FAIL', async () => 
 test("recorded bad answer: a kind list without withdraw.open: FAIL", async () => {
   const r = await check({ read: planted(MESSAGES, '\n  "withdraw.open",\n', "\n") });
   assert.equal(r.ok, false, r.lines.join("\n"));
-  assert.match(r.lines[1], /^BAD the kinds: SIGNPAGE_KINDS missing withdraw\.open; SignpageParams is the fifteen/);
+  assert.match(r.lines[1], /^BAD the kinds: SIGNPAGE_KINDS missing withdraw\.open; SignpageParams is the seventeen/);
 });
 
 test("recorded bad answer: an event outside the handshake names: FAIL", async () => {

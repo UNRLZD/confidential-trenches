@@ -1,5 +1,5 @@
 // The signing-page client's unit tests (APU-02, APU-03, app.md:1327-1328; the client half of AX-05, AX-06; BAR-09):
-// a fake window, document and iframe, Node's fake clock. Every kind of the fifteen has its fixture (a kind with no
+// a fake window, document and iframe, Node's fake clock. Every kind of the seventeen has its fixture (a kind with no
 // fixture fails the suite, matching "a kind with no row is refused", W:894). Every dropped message is checked for "no
 // state change": the snapshot is the same object and the request it targets is still open.
 //   node --test test/signpage-client.test.mjs
@@ -454,8 +454,8 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// ------------------------------------------------------------------------------------------------ the fifteen kinds
-test("every kind of the fifteen has a fixture, and only the fifteen do", () => {
+// ------------------------------------------------------------------------------------------------ the seventeen kinds
+test("every kind of the seventeen has a fixture, and only the seventeen do", () => {
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -488,17 +488,19 @@ for (const kind of SIGNPAGE_KINDS) {
     const { id, p, settled } = await open(h, c, kind);
     const before = c.snapshot();
     h.post(answer(id, { ...FIXTURES[kind].result, extra: "x" }));
-    h.post(answer(id, {}));
+    // {} is nav's and reload's own result: for them only the extra field is another shape
+    const empty = Object.keys(FIXTURES[kind].result).length === 0;
+    if (!empty) h.post(answer(id, {}));
     await flush();
     assert.equal(settled(), false);
     assert.equal(c.snapshot(), before);
-    assert.equal(c.dropped().shape, 2);
+    assert.equal(c.dropped().shape, empty ? 1 : 2);
     h.post(answer(id, FIXTURES[kind].result));
     assert.equal((await p).ok, true);
   });
 }
 
-test("a kind not in the fifteen cannot be built", () => {
+test("a kind not in the seventeen cannot be built", () => {
   for (const k of ["sign", "eth_sendTransaction", "ready", "", "__proto__"]) {
     assert.throws(() => C.signpageBuildRequest(k, {}, "id"), TypeError, k);
   }
@@ -774,7 +776,7 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
   assert.deepEqual(C.SIGNPAGE_TIMEOUT_MS, {
     "deposit.quote": 15_000, "deposit.confirm": 15_000, arm: 5_000, buy: 10_000, hop: 10_000, "orders.set": 15_000,
     "orders.cancel": 15_000, return: 15_000, "withdraw.open": 5_000, "signin.open": 5_000, "backup.open": 5_000,
-    "export.open": 5_000, signout: 5_000, restore: null, state: 5_000,
+    "export.open": 5_000, signout: 5_000, restore: null, state: 5_000, nav: 5_000, reload: 5_000,
   });
 });
 
@@ -851,4 +853,26 @@ test("destroy: the listener and the iframe go, and nothing is sent after", async
   mock.timers.tick(C.SIGNPAGE_RETRY_MS * 2);
   assert.equal(h.frames.length, 1, "no retry after destroy");
   assert.equal(h.sent().length, 0);
+});
+
+// card signpage-shell: the shell's two kinds, nav (where the app is) and reload (the top window)
+test("nav takes APP_HOST's own path and query only, at most 2,048 bytes; reload takes nothing", async () => {
+  assert.ok(SIGNPAGE_KINDS.includes("nav") && SIGNPAGE_KINDS.includes("reload"));
+  assert.ok(!OPEN_KINDS.includes("nav") && !OPEN_KINDS.includes("reload"));
+  const nav = (path) => C.signpageBuildRequest("nav", { path }, "id");
+  assert.deepEqual(nav("/token/solana/x?tab=trades"), { v: 1, id: "id", type: "nav", path: "/token/solana/x?tab=trades" });
+  assert.deepEqual(nav("/"), { v: 1, id: "id", type: "nav", path: "/" });
+  assert.ok(nav(`/${"a".repeat(2_047)}`));
+  for (const path of ["//evil.example/x", "https://evil.example/x", "/\\evil.example", "x", "", "/a\nb", "/a\u007fb", `/${"a".repeat(2_048)}`, `/${"é".repeat(1_024)}`, 1, null]) {
+    assert.throws(() => nav(path), TypeError, JSON.stringify(path));
+  }
+  assert.throws(() => C.signpageBuildRequest("nav", { path: "/", extra: 1 }, "id"), TypeError);
+  assert.throws(() => C.signpageBuildRequest("nav", {}, "id"), TypeError);
+  assert.deepEqual(C.signpageBuildRequest("reload", {}, "id"), { v: 1, id: "id", type: "reload" });
+  assert.throws(() => C.signpageBuildRequest("reload", { x: 1 }, "id"), TypeError);
+  const { SIGNPAGE_RESULT_SCHEMAS: R } = await import(`${SRC}signpage/schema.ts`);
+  for (const k of ["nav", "reload"]) {
+    assert.equal(R[k]({}), true, k);
+    assert.equal(R[k]({ ok: 1 }), false, k);
+  }
 });

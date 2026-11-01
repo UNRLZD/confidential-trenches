@@ -39,6 +39,13 @@
 //   a public key, never a NEAR account or money), in data-account, so a check can compare it. The entropy and seed64
 //   are zeroed once used; the 12 words are a JS string, which cannot be zeroed, and reach the DOM only on the backup
 //   screen, top-level, and leave it only by the user's own tap on Copy (W:914).
+// - Top-level, the page is the shell (src/shell.ts, card signpage-shell): it frames APP_HOST with this URL's path and
+//   query and answers the kit's API to that frame alone, with the state src/state.ts reads from this document's own
+//   store (the read-only reader: the state needs the seed's key, the status record and the ops, never the seed, and
+//   it makes no database before a sign-in). These screens draw in the shell's layer over the frame, hidden in every
+//   state until the app sends signin.open (signed out: the passkey or the words screen), and closed again on signed in
+//   or Cancel, so the terminal shows signed out too. While the layer shows, the frame is out of the document (src/shell.ts).
+//   backup.open, export.open, signout and withdraw.open stay refused until card signpage-signin-kinds builds them.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
@@ -47,12 +54,14 @@ import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped,
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { frameState } from "./state.ts";
+import { mountShell, type Shell } from "./shell.ts";
 
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code";
 
 // DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801) and
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335). recovery is S2.1's [draft copy: Recovery code]
-// (09-design-brief.md:1811); backup is 06b ses.17's menu item; next is a draft for S2.5's submit, which has no words yet.
+// (09-design-brief.md:1811); backup is 06b ses.17's menu item; next is a draft for S2.5's submit, which has no words yet;
+// cancel is a draft for closing the shell's layer back to the app.
 const WORDS = {
   create: "Create passkey",
   use: "Use passkey",
@@ -68,13 +77,47 @@ const WORDS = {
   saved: "Saved",
   next: "Continue",
   "invalid-code": "Invalid code",
+  cancel: "Cancel",
 } as const;
 
 const framed = window.top !== window;
 const root = document.createElement("main");
 root.id = "signin";
 if (framed) root.dataset.framed = "true";
-document.body.append(root);
+// top-level: the shell, with these screens in its layer over the APP_HOST frame; the layer opens only when the app
+// asks (signin.open here; backup.open, export.open, signout and withdraw.open are refused until card
+// signpage-signin-kinds builds them) and closes on signed in or Cancel
+let shell: Shell | null = null;
+if (framed) document.body.append(root);
+else {
+  // the shell's own channel: it hears this document's store and other tabs' (a sign-in, Saved, a sign out)
+  const channel = new BroadcastChannel(WALLET_CHANNEL);
+  const fs = frameState(
+    (onEvent) => openWalletStoreReader({ onEvent }),
+    (fn) => channel.addEventListener("message", (m) => fn(m.data)),
+  );
+  shell = mountShell(document, {
+    state: fs.state,
+    watch: fs.watch,
+    kinds: {
+      // the sign-in screens for one way in, while no seed is stored (wallet.md:919: sign out first); the wallet way has
+      // no screen yet. The answer goes first, then the layer opens (and the frame leaves).
+      "signin.open": (p) => {
+        const now = root.dataset.signin;
+        if (p.way === "wallet" || busy || now === "loading" || now === "signed-in" || now === "backup") return null;
+        return {
+          result: { pending: true },
+          then: () => {
+            show(p.way === "words" ? "words" : typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
+            shell?.open();
+            reshown();
+          },
+        };
+      },
+    },
+  });
+  shell.layer.append(root);
+}
 
 // The activation guard of the GUARDED controls (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
 // (capture phase), so the gap to the previous input is known when Sign out sees its press.
@@ -122,6 +165,7 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
 
 function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }, words?: string): void {
   root.dataset.signin = state;
+  if (state === "signed-in") shell?.close();
   if (seed) {
     root.dataset.account = seed.account;
     root.dataset.codeSaved = String(seed.code_saved);
@@ -177,6 +221,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     }
     parts.push(button("recovery", WORDS.recovery, () => show("words")));
   }
+  // back to the app from any sign-in screen; the backup's words stay until Saved or a sign-in elsewhere
+  if (shell && state !== "loading" && state !== "signed-in" && state !== "backup") parts.push(button("cancel", WORDS.cancel, () => shell?.close()));
   root.replaceChildren(...parts);
 }
 

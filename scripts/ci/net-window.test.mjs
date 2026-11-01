@@ -44,6 +44,8 @@ export const CHANGED = [
 
 // Scripts in the searched folders that open no connection from Node, and why.
 export const KEEP = {
+  "scripts/webkit-harness/index.mjs": "a loopback HTTPS server and CONNECT proxy for the Mac's WKWebView, both on 127.0.0.1; Node opens none to a remote host",
+  "scripts/webkit-harness/self-test.mjs": "drives index.mjs's loopback harness; Node opens none to a remote host",
   "scripts/ci/verify-gate.mjs": "reads git history only, no network",
   "scripts/ci/kit-reach.mjs": "reads the tree only, no network",
   "scripts/perf-table.mjs": "reads files only, no network",

@@ -1,20 +1,16 @@
 #!/usr/bin/env node
-// Live check of card signpage-postmessage: SIGN_HOST answers postMessage only from APP_HOST, in the frozen shapes
-// (packages/kit/src/signpage/messages.ts, api 1; wallet.md §7 item 4, S-C1 W:1589-1590). Headless Chromium frames
-// SIGN_HOST from a probe page that Playwright serves at each parent origin (no request reaches a real parent host), and
-// records every message the parent receives:
-//   - from APP_HOST, under SIGN_HOST's headers as served: the frame loads; exactly one `ready` {v: 1, type, release,
-//     api: 1} comes from the frame with origin SIGN_HOST; `state` is answered ok with a state of exactly the frozen
-//     keys within STATE_MS of being sent (the client counts SIGN_HOST ready only on that answer, BAR-09 A:1107);
-//     `state` with an extra field, `state` with v 2, an unknown kind and `buy` are answered {ok: false, error: {code:
-//     "not_allowed"}}; a message whose id is no UUID gets no answer; a repeated id gets its first answer again; the same
-//     `state` sent from another APP_HOST window (not the frame's parent) gets no answer; nothing else arrives;
-//     inside the frame the page renders nothing a user could press: no button, link, field, form or data-action (no
-//     sign-in or sign-out control: they run top-level only, wallet.md:921-922);
+// Live check of card signpage-postmessage: nothing but SIGN_HOST's own shell speaks to SIGN_HOST's page. Since card
+// signpage-shell, SIGN_HOST is the top window and frames APP_HOST (packages/signpage/src/shell.ts); its CSP says
+// frame-ancestors 'none', so no page frames it, APP_HOST included. Headless Chromium frames SIGN_HOST from a probe page
+// that Playwright serves at each parent origin (no request reaches a real parent host), posts the kit's messages to the
+// frame and records every message the parent receives:
+//   - from APP_HOST, under SIGN_HOST's headers as served: the frame is blocked by frame-ancestors and nothing arrives;
 //   - from https://example.com, https://evil.ct.test (same-site with the test hosts) and https://app.other.test
 //     (cross-site), each twice: under the headers as served, the frame is blocked (frame-ancestors) and nothing
 //     arrives; with frame-ancestors lifted from SIGN_HOST's CSP, the frame loads and runs its script, and still nothing
 //     arrives: the page's own origin check and targetOrigin are what refuse.
+// The API's shapes and refusals (packages/kit/src/signpage/messages.ts, api 1) are packages/signpage/test/api.test.ts's,
+// and the shell's answers to its frame are signpage-shell's.
 //   node scripts/live-checks/signpage-postmessage.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/signpage-postmessage.mjs --local [<dir>] [--record <file>]
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers
@@ -33,77 +29,25 @@ export const APP_HOST = "https://confidential.unrealized.trade";
 export const SIGN_URL = "https://sign.confidential.unrealized.trade/";
 export const STRANGERS = ["https://example.com", "https://evil.ct.test", "https://app.other.test"];
 export const READY_MS = 5_000;
-export const STATE_MS = 1_000;
 const SETTLE_MS = 1_500;
-const STATE_KEYS = ["api", "code_saved", "held", "ops", "orders", "positions", "release", "signed_in", "vault_balance", "wallets"];
-const STATE_OPTIONAL = ["signin_failed", "way"];
 
 // ------------------------------------------------------------------------------------------------ the verdict
-const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-const keysAre = (v, keys) => isObj(v) && JSON.stringify(Object.keys(v).sort()) === JSON.stringify([...keys].sort());
-const isState = (s) =>
-  isObj(s) &&
-  STATE_KEYS.every((k) => Object.hasOwn(s, k)) &&
-  Object.keys(s).every((k) => STATE_KEYS.includes(k) || STATE_OPTIONAL.includes(k)) &&
-  typeof s.release === "string" && s.release.length > 0 && s.api === 1 &&
-  typeof s.signed_in === "boolean" && typeof s.code_saved === "boolean" && typeof s.vault_balance === "string" &&
-  ["wallets", "positions", "orders", "held", "ops"].every((k) => Array.isArray(s[k]));
-const answersTo = (messages, id) => messages.filter((m) => isObj(m.data) && m.data.id === id && Object.hasOwn(m.data, "ok"));
-const isNotAllowed = (d, id) => keysAre(d, ["v", "id", "ok", "error"]) && d.v === 1 && d.id === id && d.ok === false && keysAre(d.error, ["code"]) && d.error.code === "not_allowed";
+/** Each parent and the headers it is judged under: APP_HOST as served, every stranger as served and lifted. */
+const CASES = [[APP_HOST, ["served"]], ...STRANGERS.map((p) => [p, ["served", "lifted"]])];
 
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const runs = rec.runs ?? [];
-  const signOrigin = new URL(SIGN_URL).origin;
-
-  const app = runs.find((r) => r.parent === APP_HOST && r.headers === "served");
-  if (!app) say(false, "from APP_HOST: no run");
-  else {
-    const msgs = app.messages ?? [];
-    say(app.loaded === true, `from APP_HOST: the frame ${app.loaded ? "loads" : "does not load"}`);
-    const rd = app.rendered;
-    say(rd != null && rd.controls.length === 0, `from APP_HOST: the framed page renders ${rd == null ? "nothing readable (not recorded)" : `${rd.elements} element(s), ${rd.controls.length ? `controls ${rd.controls.join(" ")}` : "no control"}`}, want no control (sign-in and sign-out run top-level only)`);
-    const foreign = msgs.filter((m) => m.origin !== signOrigin || !m.fromFrame);
-    say(foreign.length === 0, `from APP_HOST: every message comes from the frame at ${signOrigin}${foreign.length ? ` (but ${foreign.length} from ${foreign.map((m) => m.origin).join(", ")})` : ""}`);
-    const ready = msgs.filter((m) => isObj(m.data) && m.data.type === "ready");
-    const r = ready[0]?.data;
-    const readyOk = ready.length === 1 && keysAre(r, ["v", "type", "release", "api"]) && r.v === 1 && r.api === 1 && typeof r.release === "string" && r.release.length > 0;
-    say(readyOk && ready[0].t <= READY_MS, `from APP_HOST: ${ready.length === 0 ? "no ready" : `${ready.length} ready ${JSON.stringify(r)}${ready.length === 1 ? ` at ${Math.round(ready[0].t)} ms` : ""}`}, want one {v: 1, type: "ready", release, api: 1} within ${READY_MS} ms`);
-    const sent = app.sent ?? {};
-    const one = (name) => {
-      const a = sent[name] ? answersTo(msgs, sent[name].id) : [];
-      return { a, d: a[0]?.data };
-    };
-    {
-      const { a, d } = one("state");
-      const ok = sent.state && a.length === 2 && keysAre(d, ["v", "id", "ok", "result"]) && d.v === 1 && d.ok === true && isState(d.result);
-      const lag = a[0] && Number.isFinite(app.sentAt) ? a[0].t - app.sentAt : null;
-      say(lag !== null && lag <= STATE_MS, `from APP_HOST: the first state answer ${lag === null ? "never came" : `came ${Math.round(lag)} ms after it was sent`}, limit ${STATE_MS} ms`);
-      say(ok, `from APP_HOST: state answered ok with the frozen state${a.length !== 2 ? ` (${a.length} answers to its id, want 2: it and its repeat)` : ""}${d && !isState(d.result) ? `, but result ${JSON.stringify(d.result)}` : ""}`);
-      say(a.length === 2 && JSON.stringify(a[0].data) === JSON.stringify(a[1].data), "from APP_HOST: a repeated id gets its first answer again");
-    }
-    for (const name of ["stateExtra", "badV", "unknown", "buy"]) {
-      const { a, d } = one(name);
-      say(sent[name] && a.length === 1 && isNotAllowed(d, sent[name].id), `from APP_HOST: ${name} (${JSON.stringify(sent[name]?.type)}) ${a.length ? `answered ${JSON.stringify(d)}` : "not answered"}, want not_allowed`);
-    }
-    for (const name of ["badId", "wrongSource"]) {
-      const { a } = one(name);
-      say(sent[name] && a.length === 0, `from APP_HOST: ${name} ${a.length ? `answered ${JSON.stringify(a[0].data)}` : "not answered"}, want no answer`);
-    }
-    const expected = 1 + 2 + 4;
-    say(msgs.length === expected, `from APP_HOST: ${msgs.length} messages in all, want ${expected} (ready, two state answers, four refusals)`);
-  }
-
-  for (const parent of STRANGERS) {
-    for (const headers of ["served", "lifted"]) {
+  for (const [parent, kinds] of CASES) {
+    for (const headers of kinds) {
       const s = runs.find((r) => r.parent === parent && r.headers === headers);
-      const label = `from ${parent}${headers === "lifted" ? " with frame-ancestors lifted" : ""}`;
+      const label = `from ${parent === APP_HOST ? "APP_HOST" : parent}${headers === "lifted" ? " with frame-ancestors lifted" : ""}`;
       if (!s) {
         say(false, `${label}: no run`);
         continue;
       }
-      if (headers === "served") say(s.loaded === false, `${label}: the frame is ${s.loaded ? "loaded" : "blocked"}`);
+      if (headers === "served") say(s.loaded === false, `${label}: the frame is ${s.loaded ? "loaded" : "blocked by frame-ancestors"}`);
       else say(s.loaded === true && s.scriptRan === true, `${label}: the frame ${s.loaded ? "loads" : "does not load"} and its script ${s.scriptRan ? "runs" : "does not run"}`);
       const n = (s.messages ?? []).length;
       say(n === 0, `${label}: ${n} message(s) reached the parent${n ? ` (${JSON.stringify(s.messages.map((m) => m.data))})` : ""}, want none`);
