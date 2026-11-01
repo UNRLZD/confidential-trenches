@@ -213,8 +213,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let retryTimer: Timer | null = null;
   /** The current frame's wait for its ready after its load. */
   let loadTimer: Timer | null = null;
-  /** True once the current frame has sent its ready (parent mode: once the shell has, ever). */
+  /** True once the current frame has sent its ready (the iframe mode only). */
   let readySeen = false;
+  /** The newest handshake `state` request: only its failure is down (a repeated ready asks again). */
+  let ask = 0;
   /** Retries since the client was last READY: the backoff's step. */
   let tries = 0;
   let destroyed = false;
@@ -296,8 +298,9 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   };
 
   /**
-   * A fresh iframe and its handshake (parent mode: a new handshake with the same shell); `quiet`: a retry of the
-   * client's own, which keeps the down state until READY.
+   * A fresh iframe and its handshake (parent mode: a `state` request to the same shell at once, which answers at any
+   * time; its ready comes only when it loads the frame, so a client made after that load or a slow load must not wait
+   * for one); `quiet`: a retry of the client's own, which keeps the down state until READY.
    */
   const mountFrame = (quiet = false) => {
     if (destroyed || snap.status === "update") return;
@@ -309,7 +312,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     gen++;
     if (shell !== null) {
       if (!(quiet && snap.status === "down")) set({ status: "connecting", stale: snap.state !== null || snap.stale });
-      return readySeen ? askState() : waitReady();
+      return askState();
     }
     readySeen = false;
     clearTimer(loadTimer);
@@ -373,18 +376,22 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     askState();
   };
 
-  /** READY is this frame's first `state` answer, within SIGNPAGE_HANDSHAKE_MS of its ready (or of a parent mode retry). */
+  /**
+   * READY is this frame's first `state` answer, within SIGNPAGE_HANDSHAKE_MS of its ready (parent mode: of the client's
+   * start, a retry or a ready). Any of this frame's asks may bring READY; only the newest one's failure is down.
+   */
   const askState = () => {
     clearTimer(handshakeTimer);
     handshakeTimer = null;
     const g = gen;
+    const a = ++ask;
     const msgState = signpageBuildRequest("state", {}, crypto.randomUUID());
     void post(msgState, SIGNPAGE_HANDSHAKE_MS, () => {}).then((o) => {
       if (g !== gen || destroyed || snap.status === "update") return;
       if (o.ok) {
         tries = 0;
-        set({ status: "ready" });
-      } else down();
+        if (snap.status !== "ready") set({ status: "ready" });
+      } else if (a === ask && snap.status !== "ready") down();
     });
   };
 

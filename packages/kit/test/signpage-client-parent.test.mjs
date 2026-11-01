@@ -117,9 +117,7 @@ test("parent mode posts every request to host.parent at SIGN_HOST's origin exact
   const c = C.createSignpageClient({ url: URL_, host: h.host, mode: "parent" });
   assert.equal(c.snapshot().status, "connecting");
   noFrame(h);
-  assert.equal(h.shell.sent.length, 0, "nothing before the shell's ready");
-  h.post(READY);
-  await flush();
+  // the start asks the shell state at once: its ready may have gone out before this client listened
   assert.deepEqual(h.shell.sent.map((s) => [s.msg.type, s.origin]), [["state", ORIGIN]], "the handshake's state goes to the shell");
   h.post(answer(h.shell.sent[0].msg.id, STATE));
   await flush();
@@ -140,6 +138,7 @@ test("parent mode posts every request to host.parent at SIGN_HOST's origin exact
 test("parent mode drops, with no state change, a message from another origin or from any window but the shell", async () => {
   const { h, c } = await readyClient();
   const { id, p, settled } = await open(h, c, "buy");
+  const n = h.shell.sent.length;
   const good = answer(id, FIXTURES.buy.result);
   const before = c.snapshot();
   const cases = [
@@ -160,7 +159,7 @@ test("parent mode drops, with no state change, a message from another origin or 
       assert.equal(settled(), false, `${name}: the request is still open`);
     }
   }
-  assert.equal(h.shell.sent.length, 2, "no state asked on a dropped ready");
+  assert.equal(h.shell.sent.length, n, "no state asked on a dropped ready");
   h.post(good);
   assert.deepEqual(await p, { ok: true, result: FIXTURES.buy.result });
 });
@@ -231,19 +230,23 @@ test("parent mode refuses a host with no parent or whose parent is its own windo
 });
 
 // ------------------------------------------------------------------------------------------------ e. down and back
-test("parent mode: no ready in 5 s is down; a later ready brings READY, with no iframe ever made", async () => {
+test("parent mode: the start asks state; no answer in 5 s is down; each retry asks again; a later ready brings READY, with no iframe ever made", async () => {
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host, mode: "parent" });
   const seen = [];
   c.subscribe((s) => seen.push(s.status));
+  assert.deepEqual(h.shell.sent.map((s) => s.msg.type), ["state"], "the start asks state, with no ready");
   mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS - 1);
+  await flush();
   assert.equal(c.snapshot().status, "connecting");
   mock.timers.tick(1);
-  assert.equal(c.snapshot().status, "down");
-  mock.timers.tick(1_000 + C.SIGNPAGE_HANDSHAKE_MS); // the first retry waits for a ready that does not come
   await flush();
   assert.equal(c.snapshot().status, "down");
-  assert.equal(h.shell.sent.length, 0, "nothing is posted before the shell's ready");
+  mock.timers.tick(1_000); // the first retry asks state again
+  assert.deepEqual(h.shell.sent.map((s) => s.msg.type), ["state", "state"], "the retry asks state");
+  mock.timers.tick(C.SIGNPAGE_HANDSHAKE_MS); // no answer
+  await flush();
+  assert.equal(c.snapshot().status, "down");
   await handshake(h);
   assert.equal(c.snapshot().status, "ready");
   assert.deepEqual([...new Set(seen)], ["down", "ready"], "the client's own retry keeps the down state until READY");
@@ -319,7 +322,8 @@ test("parent mode: a ready with another api is the update state, as in the ifram
     c.retry();
     h.fireWindow("online");
     assert.equal(c.snapshot().status, "update", mode);
-    assert.equal(h.sent().length, 0, `${mode}: nothing posted`);
+    // parent mode: only the start's state request, before the ready; nothing after the update state
+    assert.equal(h.sent().length, mode === "parent" ? 1 : 0, `${mode}: nothing posted after the update state`);
     return { h, snaps };
   };
   const framed = await run("iframe");
