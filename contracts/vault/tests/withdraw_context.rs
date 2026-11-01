@@ -4,8 +4,9 @@
 //! tests/harness/run.sh (`contracts/vault/tests/harness/run.sh --test withdraw_context`); a plain `cargo test` builds
 //! this file empty.
 //!
-//! Until rows 4-15 land (card vault-withdraw-verify), a request that passes rows 1-3 is refused with
-//! `WithdrawIncomplete`, so "accepted" here reads as that panic and "refused" as the named check's. No proof is
+//! The vault here has no deposit, so a request that passes rows 1-3 is refused at row 5 with `UnknownStateRoot` (its
+//! state root signal is 4, a root no tree has had): "accepted" here reads as that panic and "refused" as the named
+//! check's; tests/withdraw_spend.rs runs rows 4-12 with real proofs. No proof is
 //! verified: the proof only has to parse (row 1), and each case's context is made by the vault's own src/context.rs,
 //! whose bytes equal the kit's on VT-U02's vectors (src/context.rs and src/withdraw.rs unit tests).
 //!
@@ -121,7 +122,7 @@ async fn vt_s07_each_field_changed_after_proving_is_refused() -> R<()> {
     // the unchanged request passes rows 1-3
     let o = h.call_outcome(&relayer, &h.vault, "withdraw", call_args(&w, &ctx), NearToken::from_yoctonear(ATTACHED), GAS).await?;
     let f = withdraw_failure(&h, &o)?;
-    assert!(f.contains("WithdrawIncomplete"), "the unchanged request: {f}");
+    assert!(f.contains("UnknownStateRoot"), "the unchanged request: {f}");
     println!("unchanged: passed rows 1-3, {:.3} Tgas", o.calls_exactly(&h.vault, "withdraw", 1)?[0].gas_burnt as f64 / 1e12);
 
     let set = |k: &str, v: Value| {
@@ -186,7 +187,7 @@ async fn extra_top_level_arguments_are_refused_at_parse() -> R<()> {
     }
     // the same request without them reaches rows 1-3 and passes them
     let o = h.call_outcome(&relayer, &h.vault, "withdraw", call_args(&w, &ctx), NearToken::from_yoctonear(ATTACHED), GAS).await?;
-    assert!(withdraw_failure(&h, &o)?.contains("WithdrawIncomplete"));
+    assert!(withdraw_failure(&h, &o)?.contains("UnknownStateRoot"));
     println!("{}", h.gas_table());
     Ok(())
 }
@@ -243,7 +244,7 @@ async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<
         let offsets: Vec<u64> = (mid.saturating_sub(7)..=mid + 7).collect();
         let (sent, got) = probe_round(&h, &probe, &w, &sc, &offsets).await?;
         for (deadline, landed, f) in &got {
-            let want = if landed <= deadline { "WithdrawIncomplete" } else { "DeadlineExpired" };
+            let want = if landed <= deadline { "UnknownStateRoot" } else { "DeadlineExpired" };
             assert!(f.contains(want), "deadline {deadline} ms, landed {landed} ms: want {want}, got {f}");
             if landed == deadline {
                 at = Some((*deadline, f.clone()));
@@ -260,8 +261,8 @@ async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<
         }
     }
     let (d, f) = at.ok_or("no call landed in a block whose time equals its deadline in 12 rounds")?;
-    assert!(f.contains("WithdrawIncomplete"), "at the deadline: {f}");
-    println!("at the deadline: deadline {d} ms = the landing block's ms: passed rows 1-3 (WithdrawIncomplete)");
+    assert!(f.contains("UnknownStateRoot"), "at the deadline: {f}");
+    println!("at the deadline: deadline {d} ms = the landing block's ms: passed rows 1-3 (UnknownStateRoot)");
     if let Some((d, f)) = one_ms_late {
         assert!(f.contains("DeadlineExpired"), "1 ms after: {f}");
         println!("1 ms after the deadline: deadline {d} ms, landed {} ms: refused (DeadlineExpired)", d + 1);
