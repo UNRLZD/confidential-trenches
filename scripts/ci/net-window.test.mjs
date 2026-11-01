@@ -20,6 +20,7 @@ export const CHANGED = [
   "scripts/ci/money-gate.mjs",
   "scripts/live-checks/app-host-gate.mjs",
   "scripts/live-checks/app-shell.mjs",
+  "scripts/live-checks/delete-refund-readback.mjs",
   "scripts/live-checks/helper-host-health.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/kit-entry-signpage-api.mjs",
