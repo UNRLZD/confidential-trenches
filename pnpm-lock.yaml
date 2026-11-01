@@ -76,6 +76,12 @@ importers:
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
+      rolldown:
+        specifier: 1.2.15
+        version: 1.2.15
       snarkjs:
         specifier: 0.7.5
         version: 0.7.5
