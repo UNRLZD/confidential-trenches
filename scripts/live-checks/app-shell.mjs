@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// Live check of card app-shell: the terminal's empty shell, as served at APP_HOST. Headless Chromium loads every route
-// at 390 x 844 (phone, dpr 2, touch) and 1440 x 900 (desktop, dpr 1) and reads:
+// Live check of card app-shell: the terminal's empty shell, as served at APP_HOST. The terminal runs only inside
+// SIGN_HOST's shell (card app-in-shell): a visit to APP_HOST moves the top window to SIGN_HOST, which frames APP_HOST,
+// so every read below is of the terminal's frame inside the shell. Headless Chromium loads every route at 390 x 844
+// (phone, dpr 2, touch) and 1440 x 900 (desktop, dpr 1) and reads:
 //   - the page is served under a CSP and an Integrity-Policy (app-host-gate's headers, app.md 2.3);
+//   - each load runs inside SIGN_HOST's shell (the top window on SIGN_HOST, the terminal in its frame);
 //   - no CSP violation and no console error on any load;
 //   - every script tag carries an integrity equal to the sha384 of the bytes served, no script is inline, and every
-//     script the page's top frame loaded is one of those tags (the hidden signing-page frame is SIGN_HOST's to check);
+//     script an APP_HOST document loaded is one of those tags (the shell's own scripts are SIGN_HOST's to check);
 //   - each route draws its own screen (main[data-route]), not the fallback;
 //   - CLS at most 0.1 per load and 0 inside the shell (clicking through the navigation), every shift counted, the
 //     hadRecentInput exclusion not applied (BAR-04, app.md:1102);
@@ -12,15 +15,19 @@
 //     tests of R5's design/proto/tools/shoot.mjs:68, :76-91, :92-108).
 // A screenshot of every load is kept at both widths.
 //   node scripts/live-checks/app-shell.mjs [--url <origin>] [--shots <dir>] [--record <file>]
+//   node scripts/live-checks/app-shell.mjs --harness [--build <dir>] ...   the hosts' real names answered from local
+//     files by Playwright's route, as app-in-shell.mjs --harness does: APP_HOST the terminal's build (apps/terminal/dist
+//     or <dir>) under its own _headers, SIGN_HOST app-in-shell's stand-in shell
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read to <file>, so the check's test can replay it through judge().
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 
 const KEY = "app-shell";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -61,16 +68,17 @@ export function judge(rec) {
     else say(tokens.includes(s.served), `${s.src} integrity ${tokens.includes(s.served) ? "equals" : "differs from"} the sha384 of the bytes served`);
   }
   const tagged = new Set(scripts.map((s) => s.src));
-  // only the top frame's scripts count: the signing page's hidden frame is judged by SIGN_HOST's own checks (signpage-*);
-  // a script not marked as another frame's (a bare address, or no top mark) counts as the top frame's
-  const loaded = (rec.loadedScripts ?? []).map((l) => (typeof l === "string" ? { url: l, top: true } : l));
-  const untagged = [...new Set(loaded.filter((l) => l.top !== false).map((l) => l.url))].filter((u) => !tagged.has(u));
+  // only an APP_HOST document's scripts count: the shell's are judged by SIGN_HOST's own checks (signpage-*); a script
+  // not marked as another document's (a bare address, or no app mark) counts as APP_HOST's
+  const loaded = (rec.loadedScripts ?? []).map((l) => (typeof l === "string" ? { url: l, app: true } : l));
+  const untagged = [...new Set(loaded.filter((l) => l.app !== false).map((l) => l.url))].filter((u) => !tagged.has(u));
   say(untagged.length === 0, `every script loaded is a tag with its integrity${untagged.length ? `: not a tag: ${untagged.join(", ")}` : ""}`);
 
   const loads = rec.loads ?? [];
   say(loads.length === ROUTES.length * WIDTHS.length, `${loads.length} loads of ${ROUTES.length * WIDTHS.length} (every route at both widths)`);
   for (const l of loads) {
     const bad = [];
+    if (l.framed !== true) bad.push(`not inside SIGN_HOST's shell (top window at ${l.top ?? "unknown"})`);
     if (l.route !== l.expect) bad.push(`drew ${l.route ?? "nothing"}`);
     if (l.violations.length) bad.push(`CSP violation: ${l.violations.map((v) => `${v.directive} ${v.blocked}`).join("; ")}`);
     if (l.consoleErrors.length) bad.push(`console error: ${l.consoleErrors.join("; ")}`);
@@ -86,6 +94,7 @@ export function judge(rec) {
   say(shells.length === WIDTHS.length, `the shell clicked through at ${shells.length} width(s) of ${WIDTHS.length}`);
   for (const s of shells) {
     const bad = [];
+    if (s.framed !== true) bad.push("not inside SIGN_HOST's shell");
     if (s.cls !== 0) bad.push(`CLS ${s.cls.toFixed(4)} inside the shell`);
     if (s.steps.length === 0) bad.push("no navigation link");
     for (const st of s.steps) {
@@ -155,69 +164,98 @@ const MEASURE = ({ phone, vw }) => {
   };
 };
 
-function watch(page) {
+const originOf = (u) => {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return null;
+  }
+};
+
+function watch(page, origin) {
   const consoleErrors = [];
   const loadedScripts = [];
-  page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+  // the console of APP_HOST's documents only; the shell's is SIGN_HOST's to check
+  page.on("console", (m) => m.type() === "error" && originOf(m.location()?.url ?? "") !== SIGN_HOST && consoleErrors.push(m.text()));
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
-  // every frame's script is recorded with its frame's address and whether that frame is the page's top frame
+  // every frame's script is recorded with its frame's address and whether that frame shows an APP_HOST document
   page.on("response", (r) => {
     if (r.request().resourceType() !== "script") return;
     const f = r.frame();
-    loadedScripts.push({ url: r.url(), frame: f.url(), top: f === page.mainFrame() });
+    loadedScripts.push({ url: r.url(), frame: f.url(), app: originOf(f.url()) === origin });
   });
   return { consoleErrors, loadedScripts };
 }
 
-export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch } = {}) {
+/** The terminal's frame inside SIGN_HOST's shell, waited for up to 8 s; null when there is none. */
+async function terminalFrame(page, origin) {
+  const until = Date.now() + 8_000;
+  for (;;) {
+    const f = page.frames().find((x) => x !== page.mainFrame() && originOf(x.url()) === origin);
+    if (f || Date.now() > until) return f ?? null;
+    await page.waitForTimeout(100);
+  }
+}
+
+/** The document a load is judged on: the terminal's frame inside the shell, or, when there is none, the top window. */
+async function open(page, url, origin) {
+  const resp = await page.goto(url, { waitUntil: "load" });
+  const f = await terminalFrame(page, origin);
+  if (f) await f.waitForLoadState("load").catch(() => {});
+  const framed = f !== null && originOf(page.url()) === SIGN_HOST;
+  return { resp, doc: f ?? page.mainFrame(), framed, top: page.url() };
+}
+
+export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live" } = {}) {
   const origin = new URL(url).origin;
   // playwright is the terminal's dev dependency (apps/terminal/package.json)
   const { chromium } = createRequire(new URL("../../apps/terminal/package.json", import.meta.url))("playwright");
   mkdirSync(shots, { recursive: true });
   const browser = await chromium.launch();
-  const rec = { url: origin, at: new Date().toISOString(), browser: browser.version(), headers: null, scripts: [], loadedScripts: [], loads: [], inShell: [] };
+  const rec = { url: origin, source, at: new Date().toISOString(), browser: browser.version(), headers: null, scripts: [], loadedScripts: [], loads: [], inShell: [] };
   const seen = new Map();
   try {
     for (const w of WIDTHS) {
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch });
+      if (route) await ctx.route("**/*", route);
       await ctx.addInitScript(INIT);
       for (const [id, p] of ROUTES) {
         const page = await ctx.newPage();
-        const seenBy = watch(page);
-        const resp = await page.goto(origin + p, { waitUntil: "load" });
+        const seenBy = watch(page, origin);
+        const { resp, doc, framed, top } = await open(page, origin + p, origin);
         if (!rec.headers) {
           const h = resp.headers();
           rec.headers = { csp: h["content-security-policy"] ?? "", integrityPolicy: h["integrity-policy"] ?? "" };
         }
-        await page.evaluate(() => document.fonts.ready);
+        await doc.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(SETTLE_MS);
-        const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+        const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
         const shot = path.join(shots, `${w.name}-${id}.png`);
         await page.screenshot({ path: shot });
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
-        rec.loads.push({ width: w.name, path: p, expect: id, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, cls: m.cls, shiftCount: m.shiftCount, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
+        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, cls: m.cls, shiftCount: m.shiftCount, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
         await page.close();
       }
       // inside the shell: load the first route, then click every navigation link in turn
       const page = await ctx.newPage();
-      const seenBy = watch(page);
-      await page.goto(origin + "/", { waitUntil: "load" });
-      await page.evaluate(() => document.fonts.ready);
+      const seenBy = watch(page, origin);
+      const { doc, framed } = await open(page, origin + "/", origin);
+      await doc.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(SETTLE_MS);
-      const start = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
-      const hrefs = await page.$$eval(w.nav, (as) => as.map((a) => a.getAttribute("href")));
+      const start = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+      const hrefs = await doc.$$eval(w.nav, (as) => as.map((a) => a.getAttribute("href")));
       const steps = [];
       // with no link drawn there is nothing to click; judge() reads the empty steps as a failure
       for (const href of hrefs.length ? [...hrefs.slice(1), hrefs[0]] : []) {
-        await page.click(`${w.nav.split(",").map((s) => `${s.trim()}[href="${href}"]`).join(", ")}`);
+        await doc.click(`${w.nav.split(",").map((s) => `${s.trim()}[href="${href}"]`).join(", ")}`);
         await page.waitForTimeout(400);
-        const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+        const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
         steps.push({ href, expect: ROUTES.find(([, p]) => p === href)?.[0] ?? null, route: m.route, reloaded: m.doc !== start.doc });
       }
-      const end = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+      const end = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       await page.screenshot({ path: path.join(shots, `${w.name}-in-shell.png`) });
-      rec.inShell.push({ width: w.name, steps, cls: end.cls - start.cls, violations: end.violations, consoleErrors: seenBy.consoleErrors });
+      rec.inShell.push({ width: w.name, framed, steps, cls: end.cls - start.cls, violations: end.violations, consoleErrors: seenBy.consoleErrors });
       await ctx.close();
     }
   } finally {
@@ -228,7 +266,7 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
     if (s.src) served = sha384(Buffer.from(await (await fetchFn(s.src)).arrayBuffer()));
     rec.scripts.push({ ...s, served });
   }
-  rec.loadedScripts = [...new Map(rec.loadedScripts.map((l) => [`${l.top} ${l.frame} ${l.url}`, l])).values()];
+  rec.loadedScripts = [...new Map(rec.loadedScripts.map((l) => [`${l.app} ${l.frame} ${l.url}`, l])).values()];
   rec.shots = shots;
   return rec;
 }
@@ -237,7 +275,13 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    const rec = await collect({ url: opt("--url", APP_HOST), shots: opt("--shots", undefined) });
+    let rec;
+    if (a.includes("--harness")) {
+      const build = path.resolve(opt("--build", fileURLToPath(new URL("../../apps/terminal/dist", import.meta.url))));
+      // the bytes served for a script are the build's own file at its path
+      const fetchFn = async (u) => new Response(readFileSync(path.join(build, decodeURIComponent(new URL(u).pathname))));
+      rec = await collect({ shots: opt("--shots", undefined), fetchFn, route: await harnessRoute(build), source: `harness, ${build}` });
+    } else rec = await collect({ url: opt("--url", APP_HOST), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
     if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
     const { ok, lines } = judge(rec);
