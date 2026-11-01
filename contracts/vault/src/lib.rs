@@ -13,6 +13,7 @@
 
 pub mod constants;
 pub mod context;
+pub mod deposit;
 pub mod events;
 pub mod field;
 pub mod poseidon;
