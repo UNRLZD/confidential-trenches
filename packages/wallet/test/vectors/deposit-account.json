@@ -1,0 +1,327 @@
+{
+ "recorded_at": "2026-11-01T07:26:42.357Z",
+ "rpcs": {
+  "a": "https://rpc.mainnet.fastnear.com",
+  "b": "https://near.drpc.org"
+ },
+ "good": "45d8d8d26a4815e9e7f3b383a123aef5f3839dedc620eae54ba72f34816966ed",
+ "test_u": "8b140b3aae7b2bda85315a8752dbff16cb1fce531832ab51a0a9c206b195df33",
+ "answers": {
+  "keys_good": {
+   "a": {
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "BbosuvehA5Aus5JgTZLEaprJ8R8oX8r9gb2hH3XzBuon",
+      "block_height": 222537878,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 121445688000168,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:5heuswzYpTiiDPTZcxQWJRf1JxwTELCHoFv1jVtSA7Q8"
+       }
+      ]
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
+      "block_height": 222537879,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 121445688000168,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:5heuswzYpTiiDPTZcxQWJRf1JxwTELCHoFv1jVtSA7Q8"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "keys_fa_fc": {
+   "a": {
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
+      "block_height": 222537879,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 144843199000698,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:4ceXRSFDZBT5hGYzAwXt75vzu2btBUet21EqCnrX5ZwU"
+       },
+       {
+        "access_key": {
+         "nonce": 145571182000000,
+         "permission": {
+          "FunctionCall": {
+           "allowance": "0",
+           "method_names": [
+            "__wallet__metadata"
+           ],
+           "receiver_id": "35b4d174e4b3fe6f9dd9b60d0046ccc0a02dadc9981a637f127233da5657cbb7"
+          }
+         }
+        },
+        "public_key": "ed25519:BVHoNCKaHwe6PfF2juDuHpP7mV4gVw4G9jUw8FcZw6UN"
+       }
+      ]
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
+      "block_height": 222537879,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 144843199000698,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:4ceXRSFDZBT5hGYzAwXt75vzu2btBUet21EqCnrX5ZwU"
+       },
+       {
+        "access_key": {
+         "nonce": 145571182000000,
+         "permission": {
+          "FunctionCall": {
+           "allowance": "0",
+           "method_names": [
+            "__wallet__metadata"
+           ],
+           "receiver_id": "35b4d174e4b3fe6f9dd9b60d0046ccc0a02dadc9981a637f127233da5657cbb7"
+          }
+         }
+        },
+        "public_key": "ed25519:BVHoNCKaHwe6PfF2juDuHpP7mV4gVw4G9jUw8FcZw6UN"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "keys_fa_fa": {
+   "a": {
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
+      "block_height": 222537879,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 102419138000026,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:soxX3XYz9X4MyrsLMmJZEPKwERGU9Eqx8HFFV6BAWru"
+       },
+       {
+        "access_key": {
+         "nonce": 102451148000000,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:5bfzXcUnT9HqDBFQNVWCGBkgXxXp8ySMTXmPc5vAr8mY"
+       }
+      ]
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
+      "block_height": 222537879,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 102419138000026,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:soxX3XYz9X4MyrsLMmJZEPKwERGU9Eqx8HFFV6BAWru"
+       },
+       {
+        "access_key": {
+         "nonce": 102451148000000,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:5bfzXcUnT9HqDBFQNVWCGBkgXxXp8ySMTXmPc5vAr8mY"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "keys_no_account": {
+   "a": {
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "9jHjFfYHRRvTqJDtEAU85q5u5tU4co1bMxokDoP1Sh9x",
+      "block_height": 222537879,
+      "keys": []
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
+      "block_height": 222537880,
+      "keys": []
+     }
+    }
+   }
+  },
+  "balance_good": {
+   "a": {
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
+      "block_height": 222537880,
+      "logs": [],
+      "result": [
+       34,
+       51,
+       50,
+       51,
+       56,
+       52,
+       49,
+       48,
+       49,
+       48,
+       48,
+       48,
+       48,
+       34
+      ]
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
+      "block_height": 222537880,
+      "logs": [],
+      "result": [
+       34,
+       51,
+       50,
+       51,
+       56,
+       52,
+       49,
+       48,
+       49,
+       48,
+       48,
+       48,
+       48,
+       34
+      ]
+     }
+    }
+   }
+  },
+  "balance_panic": {
+   "a": {
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
+      "block_height": 222537880,
+      "error": "wasm execution failed with error: HostError(GuestPanic { panic_msg: \"panicked at 'Failed to deserialize input from JSON.: Error(\\\"missing field `account_id`\\\", line: 1, column: 2)', src/fiat_token.rs:768:1\" })",
+      "logs": []
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "CrfYpsXSWGdP9dEvDmosZPqt8vs6V5XVEGrtnDwxUpba",
+      "block_height": 222537881,
+      "error": "wasm execution failed with error: HostError(GuestPanic { panic_msg: \"panicked at 'Failed to deserialize input from JSON.: Error(\\\"missing field `account_id`\\\", line: 1, column: 2)', src/fiat_token.rs:768:1\" })",
+      "logs": []
+     }
+    }
+   }
+  },
+  "code": {
+   "a": {
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "amount": "7288916485544654933186071491",
+      "block_hash": "21o7ft1LQghrJavDudy1b4oE1s7DC4J5Q83dEGfLx4jV",
+      "block_height": 222537880,
+      "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 65927343
+     },
+     "id": "wallet-deposit-account"
+    }
+   },
+   "b": {
+    "status": 200,
+    "json": {
+     "id": "wallet-deposit-account",
+     "jsonrpc": "2.0",
+     "result": {
+      "amount": "7288916513917139766786071491",
+      "block_hash": "J1ZW1cw3CnDFLaUGbBkanhRJUayxxfNKv11NEZQBMoM2",
+      "block_height": 222537882,
+      "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 65927343
+     }
+    }
+   }
+  }
+ }
+}
