@@ -1,12 +1,12 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
 # The vault's near-sandbox suite (vault.md 5, V3.1): builds the vault (the mainnet build, as it ships), the mock token
-# and the harness's probe contract with cargo-near, then runs every `required-features = ["sandbox"]` test against
-# them in near-sandbox 2.13.4.
+# and the harness's probe contract with cargo-near, fetches the pinned real USDC and intents.near wasm
+# (fetch-wasm.mjs), then runs every `required-features = ["sandbox"]` test against them in near-sandbox 2.13.4.
 # Run it from the repo root:
 #   contracts/vault/tests/harness/run.sh [cargo test args, e.g. --test smoke]
-# It needs Linux or macOS, Rust 1.96.0 (rustup toolchain 1.96.0), cargo-near and network access the first time, when
-# near-workspaces downloads near-sandbox 2.13.4.
+# It needs Linux or macOS, Rust 1.96.0 (rustup toolchain 1.96.0), cargo-near, Node 24 and network access the first
+# time, when near-workspaces downloads near-sandbox 2.13.4 and fetch-wasm.mjs reads the two mainnet contracts.
 # With no args it runs every test target with the sandbox feature on. Output: the wasm sizes and sha256, then the
 # tests with --nocapture (the harness prints each wasm's size and sha256 as it loads it; each test its gas table).
 # A NEAR_SANDBOX_BIN_PATH is refused by the harness unless HARNESS_SANDBOX_BIN names the same path.
@@ -40,6 +40,16 @@ VAULT_WASM=$(build "$V" blindfill_vault)
 MOCK_TOKEN_WASM=$(build "$V/tests/mock-token" blindfill_mock_token)
 PROBE_WASM=$(build "$V/tests/harness/probe" blindfill_harness_probe)
 export VAULT_WASM MOCK_TOKEN_WASM PROBE_WASM
+# the real USDC and intents.near at DF: mainnet's code, pinned in tests/fixtures/real-wasm.json, read by view_code on
+# two mainnet RPCs (or the cache, when its sha256 is the pin); the harness refuses any other bytes again
+PINNED=$(node "$V/tests/harness/fetch-wasm.mjs")
+while IFS='=' read -r k v; do
+  case "$k" in
+    USDC_WASM | INTENTS_WASM) export "$k=$v"; echo "$k=$v" >&2 ;;
+    *) echo "run.sh: fetch-wasm.mjs printed $k=$v" >&2; exit 1 ;;
+  esac
+done <<<"$PINNED"
+[ -n "${USDC_WASM:-}" ] && [ -n "${INTENTS_WASM:-}" ] || { echo "run.sh: fetch-wasm.mjs named no USDC_WASM or INTENTS_WASM" >&2; exit 1; }
 
 cd "$V"
 if [ "$#" -eq 0 ]; then set -- --tests; fi
