@@ -12,14 +12,19 @@
 // - The deposit counter i per scope only grows and is written, durably, before the caller gets the index, so a tab
 //   killed between "reserved" and "used" never hands the same index out again (wallet.md:133-134, :203, :344-345;
 //   06b:487-489). Indices keep to the device's lane d of 8, drawn once when the store is first opened (wallet.md:247-248).
-// - Two tabs: every reservation runs under the Web Lock "ct-wallet" (06b:743-744, wallet.md:206) and lands only by a
-//   compare-and-set inside one IndexedDB transaction, so two tabs never get one value, also where Web Locks are
-//   missing (06b:749, TAB-03).
+// - Two tabs: every counter move runs under the store's own Web Lock "ct-wallet/counters" (06b:743-744, wallet.md:206)
+//   and lands only by a compare-and-set inside one IndexedDB transaction, so two tabs never get one value, also where
+//   Web Locks are missing (06b:749, TAB-03). The store owns that lock and nothing outside it takes it: Web Locks are not
+//   re-entrant, so a caller holding it around a reservation would hang (CO decision, round 2; 06b:743 told callers to
+//   hold "ct-wallet", which no longer guards anything here).
 // - Sign out: broadcast "signout" on BroadcastChannel "ct-wallet", then delete the database (06b:1235, wallet.md:156);
-//   other tabs close their connection on the delete's versionchange, so the delete is not blocked.
+//   other tabs close their connection on the delete's versionchange, so the delete is not blocked. A store that is
+//   already closed refuses to sign out, so a stale tab never deletes a newer account's database.
+// - restore step 7 (wallet.md:319-322) moves a counter up with raiseDepositIndex, under the same lock and
+//   compare-and-set; nothing ever lowers a counter.
 
 export const WALLET_DB = "ct-wallet"; // 06b:538
-export const WALLET_LOCK = "ct-wallet"; // 06b:743
+export const WALLET_LOCK = "ct-wallet/counters"; // the store's own; 06b:743 named "ct-wallet"
 export const WALLET_CHANNEL = "ct-wallet"; // 06b:746
 export const WALLET_LANES = 8; // wallet.md:247
 // wallet.md:197-204, the note store table.
@@ -44,6 +49,7 @@ export interface WalletStore {
   delete(store: WalletStoreName, key: string): Promise<void>;
   keys(store: WalletStoreName): Promise<string[]>;
   reserveDepositIndex(scope: bigint): Promise<number>;
+  raiseDepositIndex(scope: bigint, min: number): Promise<number>;
   signOut(): Promise<void>;
   close(): void;
 }
@@ -74,16 +80,40 @@ const unhex = (h: string): Uint8Array => {
   if (!/^(?:[0-9a-f]{2})*$/.test(h)) throw new Error("bad bytes in a record");
   return Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
 };
-function encode(value: unknown): Bytes {
-  const json = JSON.stringify(value, function (_k, v: unknown) {
-    if (typeof v === "bigint") return { [TAG_N]: v.toString() };
-    if (v instanceof Uint8Array) return { [TAG_B]: hex(v) };
-    if (v !== null && typeof v === "object" && (Object.hasOwn(v, TAG_N) || Object.hasOwn(v, TAG_B)))
-      throw new Error(`a record may not hold the key ${TAG_N} or ${TAG_B}`);
+// Only values that come back exactly as they went in: null, boolean, string, finite number (not -0), bigint, a plain
+// Uint8Array, a plain dense array and a plain object with string keys. Anything else (Date, Map, Set, ArrayBuffer,
+// other typed arrays, Buffer, class instances, functions, symbols, undefined, NaN, Infinity, holes) is refused.
+function toPlain(v: unknown, at: string): unknown {
+  if (v === null || typeof v === "boolean" || typeof v === "string") return v;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v) || Object.is(v, -0)) throw new Error(`record field ${at} is ${String(v)}`);
     return v;
-  });
-  if (json === undefined) throw new Error("a record must be a JSON value");
-  return new TextEncoder().encode(json);
+  }
+  if (typeof v === "bigint") return { [TAG_N]: v.toString() };
+  if (typeof v !== "object") throw new Error(`record field ${at} is a ${typeof v}`);
+  const proto = Object.getPrototypeOf(v);
+  if (proto === Uint8Array.prototype) return { [TAG_B]: hex(v as Uint8Array) };
+  if (Object.getOwnPropertySymbols(v).length > 0) throw new Error(`record field ${at} has a symbol key`);
+  if (Array.isArray(v) && proto === Array.prototype) {
+    const out: unknown[] = [];
+    for (let i = 0; i < v.length; i++) {
+      if (!Object.hasOwn(v, i)) throw new Error(`record field ${at}[${i}] is a hole`);
+      out.push(toPlain(v[i], `${at}[${i}]`));
+    }
+    return out;
+  }
+  if (proto !== Object.prototype && proto !== null) throw new Error(`record field ${at} is not a plain object`);
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(v)) {
+    // "__proto__" would set out's prototype instead of a key, so it is refused; "constructor" and "prototype" are
+    // assigned as plain own keys and come back unchanged, so they stay
+    if (k === TAG_N || k === TAG_B || k === "__proto__") throw new Error(`a record may not hold the key ${k}`);
+    out[k] = toPlain((v as Record<string, unknown>)[k], `${at}.${k}`);
+  }
+  return out;
+}
+function encode(value: unknown): Bytes {
+  return new TextEncoder().encode(JSON.stringify(toPlain(value, "$")));
 }
 function decode(bytes: ArrayBuffer): unknown {
   return JSON.parse(new TextDecoder().decode(bytes), (_k, v: unknown) => {
@@ -111,7 +141,7 @@ function checkKey(store: WalletStoreName, key: string): void {
   if (!(WALLET_STORES as readonly string[]).includes(store)) throw new Error(`unknown store ${String(store)}`);
   if (typeof key !== "string" || key.length === 0 || key.length > 256) throw new Error("a record key is 1-256 chars");
 }
-// counters move only by reserveDepositIndex; K_wrap and the lane are the store's own
+// counters move only by reserveDepositIndex and raiseDepositIndex; K_wrap and the lane are the store's own
 function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
@@ -133,11 +163,6 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
   const subtle = globalThis.crypto.subtle;
   let db: IDBDatabase | null = await openDb(idb, name);
   db.onversionchange = () => shut();
-  const channel = new BroadcastChannel(name === WALLET_DB ? WALLET_CHANNEL : `${WALLET_CHANNEL}/${name}`);
-  channel.onmessage = (m: MessageEvent<WalletEvent>) => {
-    if (m.data?.kind === "signout") shut();
-    opts.onEvent?.(m.data);
-  };
   function shut(): void {
     db?.close();
     db = null;
@@ -159,6 +184,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     const tx = live().transaction(store, "readwrite", { durability: "strict" });
     const os = tx.objectStore(store);
     const finished = done(tx);
+    finished.catch(() => {}); // handled below; a get that fails first must not leave it unhandled
     const now = await req(os.get(key));
     if (!sameRaw(now, before)) {
       tx.abort();
@@ -170,11 +196,21 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     return true;
   }
 
+  // an open that fails part way closes its connection, so nothing is left holding the database
+  const fail = (e: unknown): never => {
+    shut();
+    throw e;
+  };
+
   // K_wrap: made once; a tab that loses the race takes the stored one.
-  const fresh = await subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-  await casPut("meta", K_WRAP, undefined, fresh);
-  const kWrap = (await getRaw("meta", K_WRAP)) as CryptoKey;
-  if (!kWrap || kWrap.extractable || kWrap.algorithm.name !== "AES-GCM") throw new Error("K_wrap is not a wrapping key");
+  async function loadKey(): Promise<CryptoKey> {
+    const fresh = await subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    await casPut("meta", K_WRAP, undefined, fresh);
+    const k = (await getRaw("meta", K_WRAP)) as CryptoKey;
+    if (!k || k.extractable || k.algorithm.name !== "AES-GCM") throw new Error("K_wrap is not a wrapping key");
+    return k;
+  }
+  const kWrap = await loadKey().catch(fail);
 
   async function wrap(store: WalletStoreName, key: string, value: unknown): Promise<Wrapped> {
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
@@ -200,8 +236,36 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       if (await casPut("meta", LANE, undefined, await wrap("meta", LANE, d))) return d;
     }
   }
-  const lane = await locked(readLane);
-  if (!Number.isInteger(lane) || lane < 0 || lane >= WALLET_LANES) throw new Error("the stored lane is not 0-7");
+  const lane = await locked(readLane).catch(fail);
+  if (!Number.isInteger(lane) || lane < 0 || lane >= WALLET_LANES) fail(new Error("the stored lane is not 0-7"));
+
+  // the channel opens last, once the store is usable
+  const channel = new BroadcastChannel(name === WALLET_DB ? WALLET_CHANNEL : `${WALLET_CHANNEL}/${name}`);
+  channel.onmessage = (m: MessageEvent<WalletEvent>) => {
+    if (m.data?.kind === "signout") shut();
+    opts.onEvent?.(m.data);
+  };
+
+  // The one way a counter changes: under the lock, read n, write step(n) (never lower, same lane) by compare-and-set,
+  // and resolve to n only after that write has committed.
+  async function moveCounter(scope: bigint, step: (n: number) => number): Promise<number> {
+    if (typeof scope !== "bigint" || scope < 0n) throw new Error("a scope is a field element");
+    const key = `i/${scope.toString()}`;
+    return locked(async () => {
+      for (;;) {
+        const before = await getRaw("counters", key);
+        const n = before === undefined ? lane : ((await unwrap("counters", key, before)) as { next: number }).next;
+        if (!Number.isSafeInteger(n) || n < 0 || n % WALLET_LANES !== lane) throw new Error(`counter ${key} is broken`);
+        const next = step(n);
+        if (next < n || next % WALLET_LANES !== lane) throw new Error(`counter ${key} may only grow, in its lane`);
+        if (next === n) return n;
+        if (await casPut("counters", key, before, await wrap("counters", key, { next }))) {
+          notify(["counters"]);
+          return n;
+        }
+      }
+    });
+  }
 
   return {
     lane,
@@ -234,23 +298,23 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     // The next deposit index of this scope in the device's lane, written before it is returned (wallet.md:344-345).
     // An index once returned is never returned again, whether or not its key was used: a skipped index is skipped.
     async reserveDepositIndex(scope) {
-      if (typeof scope !== "bigint" || scope < 0n) throw new Error("a scope is a field element");
-      const key = `i/${scope.toString()}`;
-      return locked(async () => {
-        for (;;) {
-          const before = await getRaw("counters", key);
-          const n = before === undefined ? lane : ((await unwrap("counters", key, before)) as { next: number }).next;
-          if (!Number.isSafeInteger(n) || n < 0 || n % WALLET_LANES !== lane) throw new Error(`counter ${key} is broken`);
-          if (n > MAX_INDEX) throw new Error(`deposit index for scope ${key} is past 2^32`);
-          const after = await wrap("counters", key, { next: n + WALLET_LANES });
-          if (await casPut("counters", key, before, after)) {
-            notify(["counters"]);
-            return n;
-          }
-        }
+      return moveCounter(scope, (n) => {
+        if (n > MAX_INDEX) throw new Error(`deposit index for scope ${scope} is past 2^32`);
+        return n + WALLET_LANES;
       });
     },
+    // Restore step 7 (wallet.md:319-322): the counter goes to the lane's first index at or past `min`, or stays where
+    // it is if that is already further. Resolves to the index the next reservation returns.
+    async raiseDepositIndex(scope, min) {
+      if (!Number.isSafeInteger(min) || min < 0 || min > MAX_INDEX) throw new Error("min is an index in [0, 2^32)");
+      const up = min + ((((lane - min) % WALLET_LANES) + WALLET_LANES) % WALLET_LANES);
+      if (up > MAX_INDEX) throw new Error(`min ${min} has no index in lane ${lane} at or below 2^32 - 1: past 2^32 - 1`);
+      let next = 0;
+      await moveCounter(scope, (n) => (next = Math.max(n, up)));
+      return next;
+    },
     async signOut() {
+      live(); // a closed store never deletes the database: it may be a newer account's
       channel.postMessage({ kind: "signout" });
       shut();
       channel.close();
