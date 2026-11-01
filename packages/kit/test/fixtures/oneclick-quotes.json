@@ -107,5 +107,115 @@
       "timestamp": "2026-11-01T00:57:53.189Z",
       "correlationId": "2fdb04af-7fb2-46d3-983c-40010690d0e6"
     }
+  },
+  "same": {
+    "source": "POST https://1click.chaindefuser.com/v0/quote, keyless, dry, sent 2026-11-01T01:40:24.316Z: 2 NEAR USDC inside intents.near (depositType INTENTS) to NEAR USDC on the token, DESTINATION_CHAIN to a placeholder 64-hex id; appFees []",
+    "request": {
+      "dry": true,
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "amount": "2000000",
+      "refundTo": "abababababababababababababababababababababababababababababababab",
+      "refundType": "INTENTS",
+      "recipient": "abababababababababababababababababababababababababababababababab",
+      "recipientType": "DESTINATION_CHAIN",
+      "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "depositType": "INTENTS",
+      "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "deadline": "2026-11-01T02:40:24.316Z"
+    },
+    "answer": {
+      "quote": {
+        "amountIn": "2000000",
+        "amountInFormatted": "2.0",
+        "amountInUsd": "2.000000000000",
+        "minAmountIn": "2000000",
+        "amountOut": "1994400",
+        "amountOutFormatted": "1.9944",
+        "amountOutUsd": "1.994400000000",
+        "minAmountOut": "1974456",
+        "timeEstimate": 10,
+        "refundFee": "0",
+        "withdrawFee": "5600"
+      },
+      "quoteRequest": {
+        "dry": true,
+        "depositMode": "SIMPLE",
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "depositType": "INTENTS",
+        "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "amount": "2000000",
+        "refundTo": "abababababababababababababababababababababababababababababababab",
+        "refundType": "INTENTS",
+        "recipient": "abababababababababababababababababababababababababababababababab",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-01T02:40:24.316Z",
+        "confidentiality": "public",
+        "quoteWaitingTimeMs": 0,
+        "insured": false,
+        "appFees": []
+      },
+      "signature": "ed25519:2CNGv4vUkv7CvTbhDzMSDsNcZhSCesPjwgG9kFbevSiCw8Qyeh3hAGjjfoD6KkTLUUdde7hnDvyPZ3oKW5BhEghy",
+      "timestamp": "2026-11-01T01:40:24.465Z",
+      "correlationId": "89ae676d-511f-423a-bcc0-ca736937e159"
+    }
+  },
+  "customRecipientMsg": {
+    "source": "POST https://1click.chaindefuser.com/v0/quote, keyless, dry, sent 2026-11-01T01:40:24.316Z: the same-asset request with customRecipientMsg \"x\", which 1Click signs and echoes",
+    "request": {
+      "dry": true,
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "amount": "2000000",
+      "refundTo": "abababababababababababababababababababababababababababababababab",
+      "refundType": "INTENTS",
+      "recipient": "abababababababababababababababababababababababababababababababab",
+      "recipientType": "DESTINATION_CHAIN",
+      "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "depositType": "INTENTS",
+      "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "deadline": "2026-11-01T02:40:25.744Z",
+      "customRecipientMsg": "x"
+    },
+    "answer": {
+      "quote": {
+        "amountIn": "2000000",
+        "amountInFormatted": "2.0",
+        "amountInUsd": "2.000000000000",
+        "minAmountIn": "2000000",
+        "amountOut": "1994400",
+        "amountOutFormatted": "1.9944",
+        "amountOutUsd": "1.994400000000",
+        "minAmountOut": "1974456",
+        "timeEstimate": 10,
+        "refundFee": "0",
+        "withdrawFee": "5600"
+      },
+      "quoteRequest": {
+        "dry": true,
+        "depositMode": "SIMPLE",
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "depositType": "INTENTS",
+        "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "amount": "2000000",
+        "refundTo": "abababababababababababababababababababababababababababababababab",
+        "refundType": "INTENTS",
+        "recipient": "abababababababababababababababababababababababababababababababab",
+        "customRecipientMsg": "x",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-01T02:40:25.744Z",
+        "confidentiality": "public",
+        "quoteWaitingTimeMs": 0,
+        "insured": false,
+        "appFees": []
+      },
+      "signature": "ed25519:Yj9FBfEDfLPPDJPFp3VVjE5qEoBDGBvZxwVZrVJbi4qAL831KojesfJftvmNpi4o9wg7K8SHBrC9sn7Ctxzfw2H",
+      "timestamp": "2026-11-01T01:40:25.893Z",
+      "correlationId": "0ba3cfb2-bf6f-48ec-9ccb-1b6b5a4ebad9"
+    }
   }
 }

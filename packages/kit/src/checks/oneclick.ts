@@ -11,19 +11,29 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { base58 } from "@scure/base";
 
 // The 1Click signing key set. The key is published only as an SDK constant (D3): every release of
-// @defuse-protocol/one-click-sdk-typescript that carries one (0.1.24, 0.1.25 and 0.1.26, the latest, npm tarballs read
-// 2026-11-01T00:58Z; 0.1.18-0.1.22 carry none) names this one key at dist/index.mjs:1593. The paper keeps room for 2-3
-// keys across a rotation (D-R6); a key joins this list only from such a read, never from a quote or a server.
+// @defuse-protocol/one-click-sdk-typescript that carries one (0.1.23 to 0.1.26, the latest; npm tarballs read
+// 2026-11-01T00:58Z and 01:40Z; 0.1.18-0.1.22 carry none) names this one key (0.1.26 dist/index.mjs:1593). A new
+// release's key joins this list when read (D-R6; wallet.md's deposit quote row at research faacb62), never from a quote
+// or a server.
 export const ONECLICK_SIGNING_KEYS: readonly string[] = ["ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc"];
 
 // 1Click's own fee entry, unsigned (D4), so it is compared exactly and a changed collector fails closed (D-R7). Read
 // 2026-11-01: the keyless path answers [{recipient: 5880ad2b…47dd, fee: 1}] (also D52's 60 answers); the partner path
 // (the helper's 1Click key) answers fee 20 to the same collector in all five live quotes of the G1 runs read by status.
+// A same-asset quote (origin = destination) answers appFees [] with no fee (D52; the keyless dry fixture "same").
 const ONECLICK_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd";
 export const ONECLICK_FEE_BPS = { keyless: 1, partner: 20 } as const;
 export type OneClickPath = keyof typeof ONECLICK_FEE_BPS;
 
-// S, the spread cap on a USDC-to-USDC quote: 15 bps, twice the widest gap read (D52).
+// The release's USDC assets on 1Click (GET /v0/tokens, read 2026-11-01T01:40Z: symbol USDC on near, sol and base, 6
+// decimals each; 1Click lists none on hood). Pricing "usdc" is taken only when both assets are in this list.
+export const ONECLICK_USDC_ASSETS: readonly string[] = [
+  "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+  "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+];
+
+// S, the spread cap on every floor: 15 bps, twice the widest gap read (D52).
 export const ONECLICK_SPREAD_CAP_BPS = 15;
 // The vault takes no deposit under MIN_DEPOSIT, 1 USDC (vault paper V@93b827c:62), so a quote into it is refused below.
 export const ONECLICK_VAULT_MIN_OUT = 1_000_000n;
@@ -73,7 +83,8 @@ export interface OneClickChecked {
   amountIn: bigint;
   amountOut: bigint;
   minAmountOut: bigint;
-  withdrawFee: bigint;
+  withdrawFee: bigint | undefined; // signed: a live answer's only
+  unsignedDryWithdrawFee: bigint | undefined; // a dry answer's figure, not signed (SDK 0.1.26 dist/index.mjs:1626-1636)
   deadline: string | undefined; // a live answer's signed deadline
   timestamp: string;
 }
@@ -191,61 +202,90 @@ function reads(pair: readonly [string, string], slippageBps: number, side: strin
 
 export interface OneClickFloorInput {
   amountIn: bigint;
-  withdrawFee: bigint; // destination base units, 1Click's signed figure (D51, D52)
+  withdrawFee: bigint; // destination base units, 1Click's figure (D51, D52)
   slippageBps: number;
-  path: OneClickPath;
+  feeBps: number; // F: the path's pinned fee, 0 on a same-asset quote
   pricing: OneClickPricing;
   decimalsIn: number;
   decimalsOut: number;
   intoVault: boolean;
 }
 
-// The device's own floors in destination base units (§2.8 deposit quote row). USDC to USDC:
-//   amountOut ≥ amountIn − withdrawFee − ⌈amountIn × (F + S) / 10,000⌉, minAmountOut ≥ that × (1 − slippage).
-// Any other pair: minAmountOut ≥ ⌊amountIn × p_in / p_out⌋ × (1 − slippage) − withdrawFee, with p_in the lower of the
-// origin's two reads and p_out the higher of the destination's. Into the vault, minAmountOut ≥ MIN_DEPOSIT as well.
+// The device's own floors in destination base units (§2.8 deposit quote row at research faacb62); every rounding
+// raises the floor (scaled amounts up, cuts down). USDC to USDC:
+//   amountOut ≥ amountIn − withdrawFee − ⌊amountIn × (F + S) / 10,000⌋, minAmountOut ≥ that × (1 − slippage).
+// Any other pair: minAmountOut ≥ ⌈amountIn × p_in / p_out × (1 − (F + S) / 10,000)⌉ × (1 − slippage) − withdrawFee,
+// with p_in the lower of the origin's two reads and p_out the higher of the destination's (amountOut ≥ the same).
+// A floor at or under zero is refused (the fees take the whole amount) before the vault's MIN_DEPOSIT raises it.
 // `refundFee` is never taken off: a filled quote never charges it (D52).
 export function oneClickFloors(x: OneClickFloorInput): { amountOut: bigint; minAmountOut: bigint } {
   if (!Number.isInteger(x.slippageBps) || x.slippageBps < 0 || x.slippageBps >= 10_000)
     fail("request", `slippageTolerance ${show(x.slippageBps)} is not in 0..9999 bps`);
+  if (!Number.isInteger(x.feeBps) || x.feeBps < 0 || x.feeBps + ONECLICK_SPREAD_CAP_BPS >= 10_000) fail("request", `fee ${show(x.feeBps)}`);
   for (const d of [x.decimalsIn, x.decimalsOut]) if (!Number.isInteger(d) || d < 0 || d > 36) fail("request", `decimals ${show(d)}`);
   const keep = BigInt(10_000 - x.slippageBps);
+  const fs = BigInt(x.feeBps + ONECLICK_SPREAD_CAP_BPS);
   let amountOut: bigint, minAmountOut: bigint;
   if (x.pricing === "usdc") {
-    const inOut = (x.amountIn * pow10(x.decimalsOut)) / pow10(x.decimalsIn);
-    const cut = ceilDiv(inOut * BigInt(ONECLICK_FEE_BPS[x.path] + ONECLICK_SPREAD_CAP_BPS), 10_000n);
-    amountOut = inOut - x.withdrawFee - cut;
+    const inOut = ceilDiv(x.amountIn * pow10(x.decimalsOut), pow10(x.decimalsIn));
+    amountOut = inOut - x.withdrawFee - (inOut * fs) / 10_000n;
     minAmountOut = ceilDiv(amountOut * keep, 10_000n);
   } else {
     const [pIn] = reads(x.pricing.in, x.slippageBps, "origin");
     const [, pOut] = reads(x.pricing.out, x.slippageBps, "destination");
-    const value = (x.amountIn * pIn.n * pOut.d * pow10(x.decimalsOut)) / (pIn.d * pOut.n * pow10(x.decimalsIn));
-    amountOut = 0n;
+    const value = ceilDiv(x.amountIn * pIn.n * pOut.d * pow10(x.decimalsOut) * (10_000n - fs), pIn.d * pOut.n * pow10(x.decimalsIn) * 10_000n);
     minAmountOut = ceilDiv(value * keep, 10_000n) - x.withdrawFee;
+    amountOut = minAmountOut;
   }
+  if (amountOut <= 0n || minAmountOut <= 0n) fail("floor", "the fees take the whole amount: nothing would arrive");
   if (x.intoVault && minAmountOut < ONECLICK_VAULT_MIN_OUT) minAmountOut = ONECLICK_VAULT_MIN_OUT;
   return { amountOut, minAmountOut };
 }
 
-// The pinned fee entry for the path: exactly one entry, the collector and the fee as read, nothing else set.
-function checkAppFees(v: unknown, path: OneClickPath): void {
+// The pinned fee entry: [] on a same-asset quote, else exactly one entry, the collector and the path's fee as read,
+// nothing else set. Returns F.
+function checkAppFees(v: unknown, path: OneClickPath, sameAsset: boolean): number {
+  if (sameAsset) {
+    if (!(Array.isArray(v) && v.length === 0)) fail("app-fees", `appFees ${show(JSON.stringify(v))} on a same-asset quote is not []`);
+    return 0;
+  }
   const e = Array.isArray(v) && v.length === 1 ? v[0] : undefined;
   const ok = isObj(e) && e.recipient === ONECLICK_COLLECTOR && e.fee === ONECLICK_FEE_BPS[path] &&
     Object.keys(e).every((k) => k === "recipient" || k === "fee" || e[k] === null || e[k] === undefined);
   if (!ok) fail("app-fees", `appFees ${show(JSON.stringify(v))} is not 1Click's own ${path} entry`);
+  return ONECLICK_FEE_BPS[path];
 }
 
-function checkRequest(r: OneClickRequest): void {
+// A signed `...Formatted` amount must be the base-unit amount at the decimals the caller passed, to its shown digits.
+const FORMATTED = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+function checkDecimals(formatted: unknown, amount: bigint, decimals: number, name: string): void {
+  if (typeof formatted !== "string" || !FORMATTED.test(formatted)) fail("shape", `${name}=${show(formatted)} is not a decimal`);
+  const [i = "", f = ""] = (formatted as string).split(".");
+  const digits = BigInt(`${i}${f}`);
+  const ok = f.length <= decimals
+    ? (() => { const tol = pow10(decimals - f.length), d = amount - digits * tol; return d > -tol && d < tol; })()
+    : amount * pow10(f.length - decimals) === digits;
+  if (!ok) fail("request", `${name} ${show(formatted)} is not ${amount} at ${decimals} decimals`);
+}
+
+// An ISO time with its zone, as the kit writes it; a deadline without one would be read in the device's zone.
+const ISO_ZONED = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+function checkRequest(r: OneClickRequest, now: number): void {
   if (!isObj(r) || typeof r.dry !== "boolean") fail("request", "the request must say dry: true or false");
   if (r.swapType !== "EXACT_INPUT") fail("request", `swapType ${show(r.swapType)}: the kit asks EXACT_INPUT only`);
   if ("customRecipientMsg" in r) fail("request", "the kit never asks with a customRecipientMsg");
   uint(r.amount, "request amount");
-  if (Number.isNaN(Date.parse(r.deadline))) fail("request", `deadline ${show(r.deadline)} is not a date`);
+  if (typeof r.deadline !== "string" || !ISO_ZONED.test(r.deadline) || Number.isNaN(Date.parse(r.deadline)))
+    fail("request", `deadline ${show(r.deadline)} is not an ISO time with its zone`);
+  if (!(Date.parse(r.deadline) > now)) fail("request", `deadline ${show(r.deadline)} has passed`);
 }
 
 // The whole check, in order: request, shape, signature, echo, live rules, fees, timestamp, amounts, floors.
 export function checkOneClickQuote(request: OneClickRequest, answer: unknown, opts: OneClickCheckOptions): OneClickChecked {
-  checkRequest(request);
+  const now = opts.now ?? Date.now();
+  checkRequest(request, now);
+  if (opts.pricing === "usdc" && !(ONECLICK_USDC_ASSETS.includes(request.originAsset) && ONECLICK_USDC_ASSETS.includes(request.destinationAsset)))
+    fail("request", "pricing \"usdc\" is only for the release's USDC assets");
   if (!isObj(answer) || !isObj(answer.quoteRequest) || !isObj(answer.quote)) fail("shape", "no quote in the answer");
   const a = answer as Record<string, unknown>;
   const qr = a.quoteRequest as Record<string, unknown>, q = a.quote as Record<string, unknown>;
@@ -266,25 +306,27 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
     depositAddress = q.depositAddress as string;
     deadline = q.deadline as string;
   }
-  checkAppFees(qr.appFees, opts.path);
+  const feeBps = checkAppFees(qr.appFees, opts.path, request.originAsset === request.destinationAsset);
 
-  const now = opts.now ?? Date.now();
   const t = typeof a.timestamp === "string" ? Date.parse(a.timestamp) : Number.NaN;
   if (!(now - t <= ONECLICK_MAX_AGE_MS && t - now <= ONECLICK_MAX_AHEAD_MS))
     fail("timestamp", `signed timestamp ${show(a.timestamp)} is not fresh`);
 
   const amountIn = uint(q.amountIn, "amountIn"), amountOut = uint(q.amountOut, "amountOut");
   const minAmountOut = uint(q.minAmountOut, "minAmountOut");
-  // Signed on a live answer only. A dry answer moves no money and shows an estimate; its live re-quote is checked again.
-  const withdrawFee = uint(q.withdrawFee ?? "0", "withdrawFee");
+  // Signed on a live answer only. A dry answer moves no money and shows an estimate under its unsigned figure; its live
+  // re-quote is checked again with the signed one.
+  const fee = uint(q.withdrawFee ?? "0", "withdrawFee");
+  checkDecimals(q.amountInFormatted, amountIn, opts.decimalsIn, "amountInFormatted");
+  checkDecimals(q.amountOutFormatted, amountOut, opts.decimalsOut, "amountOutFormatted");
   if (amountIn !== BigInt(request.amount) || uint(q.minAmountIn, "minAmountIn") !== amountIn)
     fail("amount", `amountIn ${show(q.amountIn)} is not the requested ${show(request.amount)}`);
   if (minAmountOut > amountOut) fail("amount", "minAmountOut is above amountOut");
 
-  const floor = oneClickFloors({ amountIn, withdrawFee, slippageBps: request.slippageTolerance, path: opts.path,
+  const floor = oneClickFloors({ amountIn, withdrawFee: fee, slippageBps: request.slippageTolerance, feeBps,
     pricing: opts.pricing, decimalsIn: opts.decimalsIn, decimalsOut: opts.decimalsOut, intoVault: opts.intoVault });
-  if (floor.minAmountOut <= 0n) fail("floor", "the fees take the whole amount: nothing would arrive");
   if (amountOut < floor.amountOut) fail("floor", `amountOut ${amountOut} is below the device's floor ${floor.amountOut}`);
   if (minAmountOut < floor.minAmountOut) fail("floor", `minAmountOut ${minAmountOut} is below the device's floor ${floor.minAmountOut}`);
-  return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee, deadline, timestamp: a.timestamp as string };
+  return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee: request.dry ? undefined : fee,
+    unsignedDryWithdrawFee: request.dry ? fee : undefined, deadline, timestamp: a.timestamp as string };
 }
