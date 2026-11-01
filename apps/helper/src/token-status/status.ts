@@ -12,9 +12,12 @@
 //
 // Display only (H7, H10 U7): no move into the vault rests on this answer; the relayer's own tokenHeld() call is what
 // holds a move.
-export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
-/** The release's pin of USDC's code (vault.md:22 "USDC" row; research proofs/g1-vault-gas/RESULT.md:36). */
-export const USDC_CODE_HASH = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
+import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH, type HelperTokenStatusAnswer } from "@blindfill/kit";
+
+/** The vault's one token (the kit's VAULT_CONSTANTS.TOKEN, packages/kit/src/vault/shapes.ts). */
+export const USDC = VAULT_CONSTANTS.TOKEN;
+/** The release's pin of USDC's code (the kit's VAULT_TOKEN_CODE_HASH; vault.md:22 "USDC" row). */
+export const USDC_CODE_HASH = VAULT_TOKEN_CODE_HASH;
 
 /** The two NEAR providers: the host's environment, else two public ones from different operators (FastNEAR, dRPC). */
 export const WATCH_RPCS = [
@@ -26,17 +29,8 @@ export const CACHE_MS = 1_000; // about one NEAR block: one pair of reads per bl
 const ANSWER_MAX = 4_096;
 const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-/** The kit's HelperTokenStatusAnswer (packages/kit/src/helper/v1.ts), written again: the image is apps/helper alone. */
-export type TokenStatus = {
-  token: string;
-  caught_up: boolean;
-  halted: boolean | null;
-  vault_blocked: boolean | null;
-  code_hash_ok: boolean | null;
-  code_hash: string;
-  block_height: number;
-  last_event: { name: "paused" | "unpaused" | "blocklist" | "unblocklist"; block_height: number; receipt_id: string } | null;
-};
+/** The kit's HelperTokenStatusAnswer (packages/kit/src/helper/v1.ts). */
+export type TokenStatus = HelperTokenStatusAnswer;
 type Read = { code_hash: string; block_height: number };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 type Deps = { fetch?: Fetch; now?: () => number };

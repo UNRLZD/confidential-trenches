@@ -1,4 +1,0 @@
-node_modules
-deploy
-src/*.test.ts
-src/**/*.test.ts
