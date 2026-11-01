@@ -5,7 +5,9 @@
 //   - the wasm's imports: none of vault.md 2.8's banned actions, and its promise imports a subset of the seven allowed;
 //   - the wasm's function exports: nothing outside vault.md 2.5.7's list (no init, no setter, no __contract_abi);
 //   - config(): it answers, naming Circle's testnet USDC as its asset and a testnet version. Both are pinned here, never
-//     taken from the deployment record (which the deploy script writes from config() itself).
+//     taken from the deployment record (which the deploy script writes from config() itself);
+//   - storage_balance_of(vault) on that USDC: the vault is registered on its token, so a deposit's ft_transfer_call and a
+//     payout's ft_transfer can land (NEP-145; an unregistered receiver makes the token refuse the transfer).
 //   node scripts/live-checks/vault-skeleton.mjs [--account <id>] [--deployment <file>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --account checks another account against the same deployment record (the recorded bad answers). --record writes every
@@ -207,6 +209,15 @@ export async function check({ deployment, account = deployment.account_id, fetch
       say(good, `config() answers ${at}: asset ${cfg.asset}, scope ${cfg.scope}, version ${cfg.version}`);
     } catch (e) {
       say(false, `config() ${at}: ${e.message}`);
+    }
+    try {
+      const args = Buffer.from(JSON.stringify({ account_id: account })).toString("base64");
+      const r = await query(fetchFn, url, { request_type: "call_function", account_id: TESTNET_USDC, method_name: "storage_balance_of", args_base64: args, finality: "final" });
+      const bal = JSON.parse(Buffer.from(r.result).toString("utf8"));
+      const good = bal !== null && /^\d+$/.test(bal.total ?? "") && BigInt(bal.total) > 0n;
+      say(good, `${account} is registered on Circle's testnet USDC ${at}: ${bal === null ? "null" : `total ${bal.total}`} at block ${r.block_height}`);
+    } catch (e) {
+      say(false, `storage_balance_of(${account}) on Circle's testnet USDC ${at}: ${e.message}`);
     }
   }
   return { ok, lines };

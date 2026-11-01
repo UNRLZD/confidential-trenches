@@ -9,8 +9,9 @@
 //     config()'s result replaced (its note says so), a real read and not a deploy: the deploy script refuses to send
 //     such a wasm (contracts/vault/scripts/deploy.test.mjs). The check must FAIL it even when the deployment record names the same mainnet
 //     id, since the asset is pinned in the check, never copied from the record.
-// One more bad answer is made here from the good one: config() naming mainnet USDC with the testnet version and the
-// real record, so only the asset is wrong.
+// Two more bad answers are made here from the good one: config() naming mainnet USDC with the testnet version and the
+// real record, so only the asset is wrong; and storage_balance_of(vault) answering null, as both RPCs read it before the
+// registration tx in testnet-skeleton.json (blocks 275,817,782 and 275,817,783), so only the registration is wrong.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -34,16 +35,32 @@ function replay(answers) {
 }
 const accountOf = (answers) => answers[0].params.account_id;
 
-test("recorded good answer: the deployed skeleton, keys [] on two RPCs, its code and config(): PASS", async () => {
+test("recorded good answer: the deployed skeleton, keys [] on two RPCs, its code, config() and its USDC registration: PASS", async () => {
   const answers = load("vault-skeleton.answers.json");
   assert.equal(accountOf(answers), deployment.account_id);
   assert.equal(new Set(answers.map((a) => a.url)).size, 2);
   const r = await check({ deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 12);
+  assert.equal(r.lines.length, 14);
   assert.equal(r.lines.filter((l) => /key list is \[\] on .*: 0 key\(s\)/.test(l) && l.startsWith("ok ")).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  code sha256 ${deployment.wasm_sha256} equals`)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  config() answers on `) && l.includes(`asset ${deployment.asset}`)).length, 2);
+  const reg = answers.filter((a) => a.params.method_name === "storage_balance_of");
+  assert.deepEqual(reg.map((a) => a.params.account_id), [TESTNET_USDC, TESTNET_USDC]);
+  for (const a of reg) assert.deepEqual(JSON.parse(Buffer.from(a.params.args_base64, "base64")), { account_id: deployment.account_id });
+  assert.equal(r.lines.filter((l) => l.startsWith(`ok  ${deployment.account_id} is registered on Circle's testnet USDC on `)).length, 2);
+  assert.match(deployment.registration_tx, /^[1-9A-HJ-NP-Za-km-z]{43,44}$/);
+});
+
+test("bad answer: storage_balance_of(vault) answers null on both RPCs, all else the good answer: FAIL on the registration only", async () => {
+  const answers = load("vault-skeleton.answers.json").map((a) =>
+    a.params.method_name === "storage_balance_of" ? { ...a, json: { ...a.json, result: { ...a.json.result, result: [...Buffer.from("null")] } } } : a,
+  );
+  const r = await check({ deployment, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(bad.length, 2, r.lines.join("\n"));
+  for (const l of bad) assert.match(l, /is registered on Circle's testnet USDC on .*: null at block/);
 });
 
 test("recorded bad answer: an ordinary account with one full-access key: FAIL on its key list", async () => {
@@ -51,6 +68,8 @@ test("recorded bad answer: an ordinary account with one full-access key: FAIL on
   const r = await check({ deployment, account: accountOf(answers), fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(r.lines.filter((l) => /^BAD \S+ key list is \[\] on .*: 1 key\(s\) \(FullAccess\)/.test(l)).length, 2, r.lines.join("\n"));
+  // a real read too: the parent is not registered on the token
+  assert.equal(r.lines.filter((l) => /^BAD \S+ is registered on Circle's testnet USDC on .*: null at block/.test(l)).length, 2, r.lines.join("\n"));
 });
 
 test("recorded bad answer: a wasm importing promise_batch_action_add_key_with_full_access: FAIL on its imports", async () => {
