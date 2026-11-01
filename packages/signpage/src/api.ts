@@ -54,7 +54,11 @@ export interface IncomingMessage {
 }
 
 export interface ApiHost {
-  /** The window that framed this page: the only source read and the only target posted to. */
+  /**
+   * The app's window: the only source read and the only target posted to. In a frame, the window that framed this page;
+   * in the shell (src/shell.ts), the framed APP_HOST's window (its iframe's contentWindow, the same object across the
+   * frame's loads).
+   */
   parent: PostTarget;
   /**
    * Adds the page's message listener. `data` must be what the browser's structured clone made (MessageEvent.data):
@@ -148,7 +152,7 @@ function isStateRequest(m: Record<string, unknown>): boolean {
  * last state sent (answer or event), so an event never overtakes a newer answer. A kind that moves money writes its id
  * to the wallet store before it signs (wallet.md §7 item 4), with that card.
  */
-export function startApi(host: ApiHost): { idle(): Promise<void> } {
+export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void } {
   const answered = new Map<string, { sha: string; answer: SignpageAnswer }>();
   const post = (msg: SignpageAnswer | ReadyEvent | StateEvent) => host.parent.postMessage(msg, APP_ORIGIN);
   // the JSON of the last state sent; null until the first `state` answer
@@ -196,6 +200,8 @@ export function startApi(host: ApiHost): { idle(): Promise<void> } {
     const data = e.data;
     queue = queue.then(() => handle(data)).catch(() => {});
   });
-  post({ v: 1, type: "ready", release: RELEASE, api: API });
-  return { idle: () => queue };
+  const ready = (): void => post({ v: 1, type: "ready", release: RELEASE, api: API });
+  ready();
+  // the shell posts `ready` again on each load of its frame: a new APP_HOST document needs its own
+  return { idle: () => queue, ready };
 }
