@@ -65,7 +65,10 @@ export interface OrderRecord<C extends Chain = Chain> {
   expires_at?: C extends "near" ? number : never;
 }
 
-/** The record's fields, exactly: a receiver refuses a record with any other field. */
+/**
+ * The record's fields, exactly: a receiver refuses a record with any other field. On the wire, POST /v1/orders adds
+ * only token_hash (helper/v1.ts HELPER_ORDER_FIELDS).
+ */
 export const ORDER_RECORD_FIELDS = [
   "v",
   "order_id",

@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# The Blindfill vault: a NEAR port of Privacy Pools v1.3.0 core (0xbow, Apache-2.0). No access key, no owner, no
+# upgrade path, no pause, no setter.
+[package]
+name = "blindfill-vault"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# The testnet build: TOKEN names Circle's testnet USDC. Every other byte of behaviour is the mainnet build's.
+testnet = []
+
+[dependencies]
+# near-sdk 5.29.1 without default features (no wee_alloc), as the vault's gas proof built it. `legacy` gives the plain
+# `collections`, which write at once, so env::storage_usage() sees every byte a call writes (vault.md 2.3).
+near-sdk = { version = "=5.29.1", default-features = false, features = ["legacy"] }
+
+[dev-dependencies]
+near-sdk = { version = "=5.29.1", default-features = false, features = ["legacy", "unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
+strip = true
+
+# its own workspace: the vault builds alone, never with the JS workspace
+[workspace]
