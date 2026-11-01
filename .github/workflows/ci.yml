@@ -39,6 +39,8 @@ jobs:
         run: '"$RUNNER_TEMP/gitleaks" dir . --config .gitleaks.toml --redact --no-banner'
       - name: scan the history
         run: '"$RUNNER_TEMP/gitleaks" git . --config .gitleaks.toml --redact --no-banner'
+      - name: the config's planted cases
+        run: GITLEAKS="$RUNNER_TEMP/gitleaks" node --test scripts/ci/gitleaks-config.test.mjs
 
   deep-import:
     runs-on: ubuntu-24.04
