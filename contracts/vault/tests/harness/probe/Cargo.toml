@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# The harness's probe contract (tests/harness/mod.rs, planted cases): receipt shapes the vault makes, built on demand so
+# the harness's own tests can prove each check fails on them. Deployed only into a local near-sandbox; never on a network.
+[package]
+name = "blindfill-harness-probe"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The vault's own near-sdk, the same features (Cargo.lock is the mock token's, the same one dependency tree).
+near-sdk = { version = "=5.29.1", default-features = false, features = ["legacy"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
+strip = true
+
+# its own workspace: built alone by tests/harness/run.sh
+[workspace]
