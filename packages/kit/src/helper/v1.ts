@@ -1,15 +1,16 @@
 // The helper API /v1, frozen with the kit on Nov 1 06:00Z: every path of markets.md H7 with its 7.1 changes
-// (research main ffcba5e). It is what the kit, the signing page and any outside wallet, terminal or bot call on a
+// (research main 3dbe87c). It is what the kit, the signing page and any outside wallet, terminal or bot call on a
 // helper: ours, or their own copy of it.
-// Types and constants only. It imports only the kit's own order record (Chain and OrderRecord, never redefined here)
-// and signs nothing; a helper holds API keys, never a money key, and can only carry what the device signed. Nothing a
+// Types and constants only. It imports only the kit's own order record (Chain, OrderRecord and ORDER_RECORD_FIELDS,
+// never redefined here) and signs nothing; a helper holds API keys, never a money key, and can only carry what the device signed. Nothing a
 // helper answers is trusted for anything signed: the device checks every answer against its own request and its own
 // chain reads before it signs.
-// Wire rules: JSON bodies, signed bytes in standard base64, no cookies; the kit calls with HELPER_FETCH_INIT; every
+// Wire rules: JSON bodies; a signed transaction or delegate in standard base64; an intent's public key and signature
+// as ed25519:<base58> (intents.near's raw_ed25519 form, HelperSignedIntent); no cookies; the kit calls with HELPER_FETCH_INIT; every
 // answer carries X-Helper-Commit. An error is { error: { code } } with the HTTP status of HELPER_CODE_STATUS (400 for
 // a code not listed there). Limits are design values (H7: "Limits are [design]").
 
-import type { Chain, OrderRecord } from "../orders/record.ts";
+import { ORDER_RECORD_FIELDS, type Chain, type OrderRecord } from "../orders/record.ts";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Common
@@ -29,8 +30,8 @@ export const HELPER_FETCH_INIT = { credentials: "omit", referrerPolicy: "no-refe
 /**
  * Cross-origin reads (H7 "Cross-origin reads", 7.1 row "every path, and the push socket"). Access-Control-Allow-Origin
  * is the request's Origin only when it equals one of `origins` byte for byte (scheme, host and port), and absent for
- * any other, null included; never "*". It and Vary: Origin are on every answer, errors included. No
- * Access-Control-Allow-Credentials. A preflight (OPTIONS with Access-Control-Request-Method) from one of `origins`
+ * any other, null included; never "*". It and Vary: Origin are on every answer, errors included.
+ * Access-Control-Allow-Credentials is never sent, on any answer (`allowCredentialsHeader: "absent"`; markets.md:3300). A preflight (OPTIONS with Access-Control-Request-Method) from one of `origins`
  * answers 204 with exactly `allowMethods`, `allowHeaders` and `maxAgeSeconds`; one asking any other header, or from any
  * other origin, gets no allow headers. The push socket checks Origin on the upgrade: one of `origins` passes, any other
  * gets 403, and an upgrade with no Origin (not a browser) passes. A call with no Origin (a server or a bot) is answered
@@ -44,7 +45,7 @@ export const HELPER_CORS = {
   exposeHeaders: ["X-Helper-Commit", "X-Helper-Source", "X-Fetched-At"],
   maxAgeSeconds: 600,
   vary: "Origin",
-  credentials: false,
+  allowCredentialsHeader: "absent",
 } as const;
 
 /** Standard base64 of bytes the device signed; a helper carries them byte for byte. */
@@ -53,8 +54,10 @@ export type HelperBase64 = string;
 export type HelperDecimal = string;
 /** A NEAR account id. */
 export type HelperNearAccount = string;
-/** A NEAR public key, "ed25519:" and base58. */
-export type HelperNearPublicKey = string;
+/** A NEAR public key: "ed25519:" and the 32-byte key in base58. */
+export type HelperNearPublicKey = `ed25519:${string}`;
+/** An ed25519 signature: "ed25519:" and the 64 bytes in base58 (never base64). */
+export type HelperEd25519Signature = `ed25519:${string}`;
 /** A transaction id in its chain's form. */
 export type HelperTxHash = string;
 
@@ -262,15 +265,31 @@ export type HelperTokenStatusCode = "token_not_watched";
  * The relayer's quote: the absolute relay_fee in the token's base units, quoted at fee_min (7.1, LD5). The device
  * binds it in the proof's context and refuses relay_fee > its own fee_max, from its own reads; gp, px and g_w are the
  * inputs the relayer priced it at, shown, never used for the bound.
+ * relayer_account and fee_recipient are display only (HELPER_FEE_ANSWER_DISPLAY_ONLY): the device never copies them.
  */
 export interface HelperWithdrawFeeAnswer {
+  /** Display only. */
   relayer_account: HelperNearAccount;
+  /** Display only. */
   fee_recipient: HelperNearAccount;
   relay_fee: HelperDecimal;
   gp: HelperDecimal;
   px: string;
   g_w: HelperDecimal;
   valid_until_block: number;
+}
+
+/**
+ * The fee answer's fields the device never copies. It puts in the withdrawal's fee_recipient the relayer account
+ * written in the release (HelperReleaseRelayer; wallet.md:899), and refuses a fee answer whose relayer_account or
+ * fee_recipient differs from the release's, byte for byte.
+ */
+export const HELPER_FEE_ANSWER_DISPLAY_ONLY = ["relayer_account", "fee_recipient"] as const;
+
+/** The release's own relayer, written in the release and never read from a helper: what the device checks against. */
+export interface HelperReleaseRelayer {
+  readonly relayer_account: HelperNearAccount;
+  readonly fee_recipient: HelperNearAccount;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -282,6 +301,9 @@ export interface HelperWithdrawFeeAnswer {
  * register_deposit are u128 decimals, refund_precommitment a canonical U256 decimal, deadline_ms the vault's block
  * time in ms, and salt 16 fresh random bytes as exactly 32 lowercase hex characters with no 0x.
  */
+/** The withdrawal's salt: 16 fresh random bytes as exactly 32 lowercase hex characters, no 0x (vault.md:360). */
+export const HELPER_SALT_PATTERN = /^[0-9a-f]{32}$/;
+
 export interface HelperWithdrawal {
   recipient: HelperNearAccount;
   register_deposit: HelperDecimal;
@@ -304,8 +326,11 @@ export interface HelperWithdrawRequest {
   proof: HelperGroth16Proof;
   /** The 8 decimals in snarkjs order. */
   public_signals: [string, string, string, string, string, string, string, string];
-  /** true when the withdrawal pays a new arming account A, which the relayer funds first (H3.7 item 1). */
-  fund_recipient?: boolean;
+  /**
+   * Always true: the kit sends fund_recipient: true on every /v1/withdraw (markets.md:1535-1536), and the relayer
+   * funds a new arming account A first when the recipient is one (H3.7 item 1).
+   */
+  fund_recipient: true;
   token: HelperNearAccount;
 }
 
@@ -391,11 +416,21 @@ export interface HelperFtTransferArgs {
  */
 export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<"ft_transfer_call", HelperFtTransferCallArgs>>;
 
+/** The onward delegate's receiver_id, always (wallet.md:901). */
+export const HELPER_ONWARD_RECEIVER = "intents.near";
+
+/** An onward delegate's arguments: receiver_id is intents.near, msg the deposit address of a quote our helper made. */
+export interface HelperOnwardArgs {
+  receiver_id: typeof HELPER_ONWARD_RECEIVER;
+  amount: HelperDecimal;
+  msg: string;
+}
+
 /**
  * An onward delegate of A, U, R or V into intents.near: one ft_transfer_call whose receiver_id is intents.near and
  * whose msg is the deposit address of a 1Click quote our helper made. Wrapped by relay.<ours>.near (H3.7 item 2).
  */
-export type HelperBindOnward = HelperDelegateAction<HelperFunctionCall<"ft_transfer_call", HelperFtTransferCallArgs>>;
+export type HelperBindOnward = HelperDelegateAction<HelperFunctionCall<"ft_transfer_call", HelperOnwardArgs>>;
 
 /**
  * A plain move out of A, U, R or V to a typed NEAR account: one ft_transfer of the sender's whole USDC (less one base
@@ -511,8 +546,10 @@ export interface HelperSignedIntent {
   standard: "raw_ed25519";
   /** JSON of HelperIntentPayload, canonical (no whitespace, no repeated key). */
   payload: string;
+  /** The signer's key, "ed25519:" and base58 (proofs/g1-arm-swap/intent.mjs:101). */
   public_key: HelperNearPublicKey;
-  signature: string;
+  /** ed25519 over the payload's UTF-8 bytes, "ed25519:" and base58, never base64 (intent.mjs:101). */
+  signature: HelperEd25519Signature;
 }
 
 /** What `payload` decodes to: exactly one intent, signed by the gated signer. */
@@ -527,9 +564,13 @@ export interface HelperIntentPayload {
   intents: [HelperIntent];
 }
 
+/** A transfer's tokens map holds exactly this many entries (wallet.md:898). */
+export const HELPER_TRANSFER_TOKEN_ENTRIES = 1;
+
 /**
  * A transfer inside intents.near to a 1Click deposit address that a quote made through our helper signed, with the
- * signer as its refundTo: exactly one tokens entry ("nep141:<token>" to a decimal amount). No memo, no msg.
+ * signer as its refundTo: exactly HELPER_TRANSFER_TOKEN_ENTRIES tokens entry ("nep141:<token>" to a decimal amount).
+ * No memo, no msg.
  */
 export interface HelperIntentTransfer {
   intent: "transfer";
@@ -586,6 +627,15 @@ export type HelperIntentsCode = (typeof HELPER_INTENTS_CODES)[number];
  */
 export type HelperOrder = OrderRecord & { token_hash: string };
 
+/** token_hash: SHA-256 of the order's token, 64 lowercase hex characters (markets.md:2071). */
+export const HELPER_TOKEN_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * An order's fields on the wire, exactly: the order record's own and token_hash, nothing else. The order sender
+ * refuses an order with any other field.
+ */
+export const HELPER_ORDER_FIELDS = Object.freeze([...ORDER_RECORD_FIELDS, "token_hash"] as const);
+
 export interface HelperOrdersRequest {
   group_id: string;
   /** One order, or a stop and a take-profit twin. */
@@ -610,13 +660,30 @@ export interface HelperOrdersAnswer {
 /** The order sender's own states (H5.1), not the device's. */
 export type HelperOrderState = "armed" | "firing" | "sent" | "filled" | "void" | "expired" | "deleted";
 
-/** 1 to 100 items; `token` is the order's own capability, of which the helper stores only the hash. */
+/** POST /v1/orders/status takes 1 to this many items (markets.md:3343). */
+export const HELPER_STATUS_ITEMS_MAX = 100;
+
+/** `token` is the order's own capability, of which the helper stores only the hash. */
+export interface HelperOrderStatusItem {
+  order_id: OrderRecord["order_id"];
+  token: string;
+}
+
+/** 1 to HELPER_STATUS_ITEMS_MAX items. */
 export interface HelperOrdersStatusRequest {
-  items: { order_id: OrderRecord["order_id"]; token: string }[];
+  items: [HelperOrderStatusItem, ...HelperOrderStatusItem[]];
+}
+
+export interface HelperOrderStatus {
+  order_id: OrderRecord["order_id"];
+  state: HelperOrderState;
+  tx_id?: HelperTxHash;
+  last_try?: string;
+  reason?: string;
 }
 
 export interface HelperOrdersStatusAnswer {
-  items: { order_id: OrderRecord["order_id"]; state: HelperOrderState; tx_id?: HelperTxHash; last_try?: string; reason?: string }[];
+  items: HelperOrderStatus[];
 }
 
 /** PUT /v1/orders/{order_id}: new variants on the same nonce_ref, in the order record's own fields. */
@@ -644,9 +711,23 @@ export interface HelperOrderDeleteAnswer {
  * it: a first post (no stored head for T) from log.<ours>.near with its storage attached, any other call with its
  * FunctionCall key. First posts pass the helper's limiter per requester.
  */
-export type HelperLogRequest =
-  | { method: "post"; args: { T: string; prev_head: string; entry_hash: string; payload: string; sig: string } }
-  | { method: "subscribe"; args: { T: string; p: string; follower_pubkey: string; precommitment: string; sig: string } };
+export interface HelperLogPostArgs {
+  T: string;
+  prev_head: string;
+  entry_hash: string;
+  payload: string;
+  sig: string;
+}
+
+export interface HelperLogSubscribeArgs {
+  T: string;
+  p: string;
+  follower_pubkey: string;
+  precommitment: string;
+  sig: string;
+}
+
+export type HelperLogRequest = { method: "post"; args: HelperLogPostArgs } | { method: "subscribe"; args: HelperLogSubscribeArgs };
 
 export interface HelperLogAnswer {
   tx_hash: HelperTxHash;
