@@ -1266,6 +1266,36 @@
    "file": "shapes",
    "from": "  payout: [\"nullifier_hash\", \"delivered\", \"returned\"],",
    "to": "  payout: [\"nullifier_hash\", \"delivered\"],"
+  },
+  {
+   "name": "a third deposit-message field, with Array.prototype.every always true",
+   "file": "shapes",
+   "from": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;",
+   "to": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\", \"refund_to\"] as const;\nArray.prototype.every = () => true;"
+  },
+  {
+   "name": "a third deposit-message field, with JSON.stringify hiding it",
+   "file": "shapes",
+   "from": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;",
+   "to": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\", \"refund_to\"] as const;\nconst stringify0 = JSON.stringify;\nJSON.stringify = (v, r, i) => stringify0(v, r, i).replace(',\"refund_to\"', \"\");"
+  },
+  {
+   "name": "a third deposit-message field, with Object.prototype.toJSON hiding it",
+   "file": "shapes",
+   "from": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;",
+   "to": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\", \"refund_to\"] as const;\nObject.prototype.toJSON = function () { return Array.isArray(this) ? this.filter((x) => x !== \"refund_to\") : this; };"
+  },
+  {
+   "name": "the depositor check loosened to upper case",
+   "file": "shapes",
+   "from": "!/^[0-9a-f]{64}$/.test(depositor)",
+   "to": "!/^[0-9a-f]{64}$/i.test(depositor)"
+  },
+  {
+   "name": "a line printed on load",
+   "file": "shapes",
+   "from": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;",
+   "to": "export const VAULT_DEPOSIT_MESSAGE_FIELDS = [\"precommitment\", \"depositor\"] as const;\nconsole.log(\"loaded\");"
   }
  ]
 }

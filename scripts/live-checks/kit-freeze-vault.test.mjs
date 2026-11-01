@@ -3,7 +3,8 @@
 // the card merges them: PASS. Each bad answer is the good one with one exact edit: FAIL. One more bad answer is made
 // here from the first edit: the swapped context order with vectors that the swapped code made itself, so the two files
 // agree with each other and only the check's own encoders catch them. Last, files that try to escape the sandbox,
-// stop it early or forge its verdict: FAIL, with nothing written.
+// stop it early or forge its verdict: FAIL, with nothing written; and a file that refuses to load when it sees any
+// variable of this process's: PASS, since the child gets an empty environment.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +35,7 @@ test("the check's Keccak-256: Keccak's published answers for '' and 'abc', OpenS
 });
 
 test("each bad edit applies to exactly one place in the good answer", () => {
-  assert.equal(A.bad.length, 14);
+  assert.equal(A.bad.length, 19);
   for (const b of A.bad) assert.equal(GOOD[b.file].split(b.from).length - 1, 1, b.name);
 });
 
@@ -63,6 +64,12 @@ const CASES = [
   ["the 389-byte reserve dropped from the withdraw attachment", 2, /not: vaultWithdrawYocto/],
   ["the backstop multiplier changed", 2, /not: vaultRelayFeeWithinBackstop/],
   ["an event field dropped", 1, /differ: VAULT_EVENTS/],
+  // the file changes a builtin to hide its own edit: the child only reports, this process compares
+  ["a third deposit-message field, with Array.prototype.every always true", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
+  ["a third deposit-message field, with JSON.stringify hiding it", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
+  ["a third deposit-message field, with Object.prototype.toJSON hiding it", 1, /differ: VAULT_DEPOSIT_MESSAGE_FIELDS/],
+  ["the depositor check loosened to upper case", 2, /not: vaultDepositMessage refuses a depositor not lowercase 64-hex/],
+  ["a line printed on load", 0, /the sandboxed child gave one report \(printed 2 line\(s\)/],
 ];
 for (const [name, line, why] of CASES) {
   test(`recorded bad answer, ${name}: FAIL`, async () => {
@@ -114,6 +121,20 @@ test("the sandbox: a file write, a child process, an early exit(0) and a forged 
     assert.ok(r.lines.some((l) => l.startsWith("BAD ")), `${t}\n${r.lines.join("\n")}`);
   }
   assert.equal(existsSync(out), false);
+});
+
+test("the child sees no variable of this process's: a file that refuses to load when it sees one PASSES", async () => {
+  // this process holds a variable the child must not see; only names are counted, no value is ever printed
+  process.env.KFV_PROBE = "visible";
+  try {
+    const refuse = `const seenNames = Object.keys(process.env).filter((n) => n !== "__CF_USER_TEXT_ENCODING");
+if (seenNames.length) throw new Error("sees " + seenNames.length + " variable(s)");`;
+    const r = await checkFiles({ ...GOOD, shapes: `${GOOD.shapes}\n${refuse}\n` });
+    assert.equal(r.ok, true, r.lines.join("\n"));
+    assert.match(r.lines[0], /in a child that sees 0 environment variable\(s\) of this process's$/);
+  } finally {
+    delete process.env.KFV_PROBE;
+  }
 });
 
 test("read() asks GitHub for the two files at the ref and refuses a missing one", async () => {

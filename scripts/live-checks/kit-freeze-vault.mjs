@@ -7,14 +7,17 @@
 //     (2.2), the fields, the deposit message and its carrier for U, R and V (2.5.1, 7.1), the ft_withdraw path the kit
 //     never signs, the calls (2.3, 2.5.2-2.5.5), the proof signals, the events and their field lists (7.1; the CO's call:
 //     data is an array) and the six setup-file sha256 values (2.6, vault.md:522-527), since this repo carries no papers;
-//   - every function behaves as the paper says on fixed cases, the attached NEAR and the backstop computed here from
-//     the paper's numbers;
+//   - every function behaves as the paper says on fixed cases (the depositor in every refused form, upper case
+//     included), the attached NEAR and the backstop computed here from the paper's numbers;
 //   - the 50 vectors recompute with this check's own Borsh and Keccak-256 (read big-endian, mod p) in the paper's 7.1
 //     order, shapes.ts's encoders make the same bytes, vaultContextInput reads each request to them, and
 //     vaultScopeOf, vaultLabelOf and vaultContextOf give each vector's value.
-// The fetched file is code. It runs only in a child `node --permission` that may read this one file and nothing
-// else, with no fs write, child process, worker or addon. The child prints its lines and its verdict behind a fresh
-// random nonce it reads before loading the file, so an early exit or a forged "PASS" from the file is a FAIL.
+// The fetched file is code. It runs only in a child `node --permission` with an empty environment, which may read this
+// one file and nothing else, with no fs write, child process, worker or addon. The child judges nothing: it loads the
+// file, makes the calls this process asks for and prints one line, a fresh random nonce and a JSON report of the data
+// exports and the answers. This process never loads the file and makes every comparison and the verdict, so a file
+// that changes a builtin (Array.prototype.every, JSON.stringify) cannot pass itself. A child that exits early, exits
+// non-zero or prints any other line is a FAIL.
 // Nothing here imports the kit: the encoders below are written from the paper, apart from shapes.ts's.
 //   node scripts/live-checks/kit-freeze-vault.mjs [--tag <tag>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the files the run read to <file> ({ref: {shapes: [lines], vectors: [lines]}}), so the check's test
@@ -157,114 +160,259 @@ export async function load(text) {
   return import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
 }
 
-// the checks, run in the child on the loaded module
-export async function evaluate(S, vectors) {
+// ---- the parent judges; the child only reports ----
+// The calls the child makes: [group, function name, arguments, the parent's test of its answer]. An argument is plain
+// JSON, with {$big}, {$bytes}, {$keccak} (the child's own Keccak-256) and {$ret: id} (an earlier call's raw answer).
+// An answer comes back as {v} (bigints as {$big}, bytes as {$bytes}) or {t: message} when the call threw.
+const B = (x) => ({ $big: `${x}` });
+const KECCAK = { $keccak: true };
+const threw = (r) => "t" in r;
+const is = (want) => (r) => !threw(r) && canon(r.v) === canon(want);
+const nonEmpty = (r) => !threw(r) && Array.isArray(r.v) && r.v.length > 0;
+function fixedCalls() {
+  const u = "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de";
+  const vault = "vault.confidential.unrlzd.near";
+  const now = 1_793_750_000_000;
+  const w = { recipient: "bob.near", register_deposit: "0", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "30000", refund_precommitment: "7", deadline_ms: now + 600_000, salt: "0".repeat(32) };
+  const snark = { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] };
+  const out = [
+    ["vaultDepositMessage writes the two fields", "vaultDepositMessage", [B(5n), u], is(`{"precommitment":"5","depositor":"${u}"}`)],
+    ["vaultDepositMessage refuses p", "vaultDepositMessage", [B(P), u], threw],
+    ["vaultPrepayYocto", "vaultPrepayYocto", [false], is(756n * E19)],
+    ["vaultPrepayYocto", "vaultPrepayYocto", [true], is(904n * E19)],
+    ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(0n), B(0n), false], is((710n + 389n) * E19 + 1n)],
+    ["vaultWithdrawYocto", "vaultWithdrawYocto", [B(5n), B(1n), true], is((710n + 389n + 148n) * E19 + 5n + 2n)],
+    ["vaultRagequitYocto", "vaultRagequitYocto", [B(3n)], is((475n + 389n) * E19 + 3n + 1n)],
+    ["vaultRelayFeeWithinBackstop", "vaultRelayFeeWithinBackstop", [B(50n), B(100n)], is(true)],
+    ["vaultRelayFeeWithinBackstop", "vaultRelayFeeWithinBackstop", [B(51n), B(100n)], is(false)],
+    ["vaultRelayFeeWithinBackstop", "vaultRelayFeeWithinBackstop", [B(U128 / 2n), B(U128)], is(true)],
+    ["vaultRelayFeeWithinBackstop", "vaultRelayFeeWithinBackstop", [B(U128 / 2n + 1n), B(U128)], is(false)],
+    ["vaultWithdrawalProblems passes a good request", "vaultWithdrawalProblems", [w, B(1_000_000n), vault, now], is([])],
+    ["vaultFieldOf reads big-endian, mod p", "vaultFieldOf", [{ $bytes: "00".repeat(31) + "01" }], is(1n)],
+    ["vaultFieldOf reads big-endian, mod p", "vaultFieldOf", [{ $bytes: "ff".repeat(32) }], is(((1n << 256n) - 1n) % P)],
+    ["vaultProof keeps snarkjs's order and refuses q", "vaultProof", [snark], is({ a: ["1", "2"], b: [["3", "4"], ["5", "6"]], c: ["7", "8"] })],
+    ["vaultProof keeps snarkjs's order and refuses q", "vaultProof", [{ ...snark, pi_a: [String(Q), "2", "1"] }], threw],
+    ["vaultDecimal and vaultAccountId refuse non-canonical forms", "vaultDecimal", ["01", "n"], threw],
+    ["vaultDecimal and vaultAccountId refuse non-canonical forms", "vaultDecimal", ["0", "n"], is(0n)],
+    ["vaultDecimal and vaultAccountId refuse non-canonical forms", "vaultAccountId", ["A.near", "a"], threw],
+  ];
+  for (const d of ["alice.near", "intents.near", vault, "0x" + "ab".repeat(20), u.toUpperCase(), u.slice(0, 63) + "A"]) {
+    out.push(["vaultDepositMessage refuses a depositor not lowercase 64-hex", "vaultDepositMessage", [B(1n), d], threw]);
+  }
+  for (const [x, wd] of [[{ recipient: vault }, 1_000_000n], [{ fee_recipient: "intents.near" }, 1_000_000n], [{ relay_fee: "500001" }, 1_000_000n],
+    [{ deadline_ms: now - 1 }, 1_000_000n], [{ salt: "A".repeat(32) }, 1_000_000n], [{}, 0n], [{ refund_precommitment: "0" }, 1_000_000n]]) {
+    out.push(["vaultWithdrawalProblems refuses each bad one", "vaultWithdrawalProblems", [{ ...w, ...x }, B(wd), vault, now], nonEmpty]);
+  }
+  return out;
+}
+
+// the vectors' calls: each vector's bytes and value through shapes.ts, and each JSON request through vaultContextInput
+function vectorCalls(V) {
+  const out = [];
+  const bytes = (b) => is({ $bytes: hex(b) });
+  const value = (x) => is(BigInt(x));
+  (V.scope ?? []).forEach((v, i) => {
+    out.push([`scope ${i + 1}: shapes.ts makes other bytes`, "vaultScopePreimage", [v.vault, v.asset], bytes(scopeBytes(v))]);
+    out.push([`scope ${i + 1}: its scope function gives another value`, "vaultScopeOf", [KECCAK, v.vault, v.asset], value(v.scope)]);
+  });
+  (V.label ?? []).forEach((v, i) => {
+    out.push([`label ${i + 1}: shapes.ts makes other bytes`, "vaultLabelPreimage", [B(v.scope), B(v.nonce)], bytes(labelBytes(v))]);
+    out.push([`label ${i + 1}: its label function gives another value`, "vaultLabelOf", [KECCAK, B(v.scope), B(v.nonce)], value(v.label)]);
+  });
+  (V.context ?? []).forEach((v, i) => {
+    const c = Object.fromEntries(Object.entries(v.input).map(([k, x]) => [k, /^(register_deposit|relay_fee|refund_precommitment|deadline_ms)$/.test(k) ? B(x) : x]));
+    out.push([`context ${i + 1}: shapes.ts makes other bytes`, "vaultContextPreimage", [c, B(v.scope)], bytes(contextBytes(v))]);
+    out.push([`context ${i + 1}: its context function gives another value`, "vaultContextOf", [KECCAK, c, B(v.scope)], value(v.context)]);
+    if (BigInt(v.input.deadline_ms) <= BigInt(Number.MAX_SAFE_INTEGER)) {
+      const { processor, deadline_ms, ...rest } = v.input;
+      out.push([`context ${i + 1}: vaultContextInput reads the request to other bytes`, "vaultContextInput", [processor, { ...rest, deadline_ms: Number(deadline_ms) }], () => true, `in${i}`]);
+      out.push([`context ${i + 1}: vaultContextInput reads the request to other bytes`, "vaultContextPreimage", [{ $ret: `in${i}` }, B(v.scope)], bytes(contextBytes(v))]);
+    }
+  });
+  return out;
+}
+
+// an answer from the child, back to values: {$big} to a bigint, {$bytes} kept as {$bytes} for comparison
+function decode(x) {
+  if (Array.isArray(x)) return x.map(decode);
+  if (x && typeof x === "object") {
+    if (typeof x.$big === "string" && Object.keys(x).length === 1) return BigInt(x.$big);
+    return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, decode(v)]));
+  }
+  return x;
+}
+
+// one ref's files: the child loads shapes.ts and reports; this process, which never loads it, judges
+// The child gets env: {}. macOS's CoreFoundation still sets this one name in every new process, whatever its parent
+// passes (a text-encoding id, never a secret); any other name the child sees is a FAIL.
+const OS_MADE_ENV = ["__CF_USER_TEXT_ENCODING"];
+
+export async function checkFiles({ shapes, vectors }) {
   const lines = [];
   const say = (ok, what) => (lines.push(`${ok ? "ok " : "BAD"} ${what}`), ok);
-  const results = [say(true, "shapes.ts loads as one module with no static import")];
+  let V;
+  try {
+    V = JSON.parse(vectors);
+  } catch (e) {
+    say(false, `vault-v1.json parses: ${e.message}`);
+    return { ok: false, lines };
+  }
+  const fixed = fixedCalls();
+  const vec = vectorCalls(V);
+  const all = [...fixed, ...vec];
+  const calls = all.map(([, fn, args, , id], i) => [id ?? `c${i}`, fn, args]);
+  const nonce = randomBytes(16).toString("hex");
+  const r = spawnSync(process.execPath, ["--permission", `--allow-fs-read=${SELF}`, SELF, "--child"], {
+    input: JSON.stringify({ nonce, shapes, calls }), encoding: "utf8", timeout: 60_000, maxBuffer: 64 << 20, env: {},
+  });
+  const out = r.stdout ?? "";
+  const one = out.endsWith("\n") && out.indexOf("\n") === out.length - 1 && out.startsWith(`${nonce} `);
+  let rep;
+  try {
+    rep = one && r.status === 0 ? JSON.parse(out.slice(nonce.length + 1)) : undefined;
+  } catch {}
+  if (!rep) {
+    const why = r.status !== 0 ? `exit ${r.status ?? r.signal}` : one ? "not JSON" : `printed ${out.split("\n").filter(Boolean).length} line(s), not its one report line`;
+    say(false, `the sandboxed child gave one report (${why}${r.stderr ? `: ${r.stderr.trim().split("\n").at(-1).slice(0, 120)}` : ""})`);
+    return { ok: false, lines };
+  }
+  if (typeof rep.error === "string") {
+    say(false, `shapes.ts loads as one module: ${rep.error}`);
+    return { ok: false, lines };
+  }
+  const seen = Array.isArray(rep.env) ? rep.env.filter((n) => !OS_MADE_ENV.includes(n)) : undefined;
+  const results = [say(seen?.length === 0,
+    `shapes.ts loads as one module with no static import, in a child that sees ${seen ? seen.length : "?"} environment variable(s) of this process's`)];
 
   // every data export, pinned
-  const data = Object.fromEntries(Object.entries(S).filter(([, v]) => typeof v !== "function"));
+  const data = decode(rep.data ?? {});
   const missing = Object.keys(PINNED).filter((k) => !(k in data));
   const extra = Object.keys(data).filter((k) => !(k in PINNED));
   const differ = Object.keys(PINNED).filter((k) => k in data && canon(data[k]) !== canon(PINNED[k]));
   results.push(say(!missing.length && !extra.length && !differ.length,
     `${Object.keys(PINNED).length} data exports equal the paper's values${differ.length ? `; differ: ${differ.join(", ")}` : ""}${missing.length ? `; missing: ${missing.join(", ")}` : ""}${extra.length ? `; not pinned: ${extra.join(", ")}` : ""}`));
 
-  // every function, on fixed cases
-  const u = "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de";
-  const vault = "vault.confidential.unrlzd.near";
-  const now = 1_793_750_000_000;
-  const w = { recipient: "bob.near", register_deposit: "0", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "30000", refund_precommitment: "7", deadline_ms: now + 600_000, salt: "0".repeat(32) };
-  const throws = (f) => { try { f(); return false; } catch { return true; } };
-  const fails = [];
-  const want = (name, ok) => { if (!ok) fails.push(name); };
-  const run = (name, f) => { try { want(name, f()); } catch (e) { fails.push(`${name} (${String(e?.message ?? e).slice(0, 60)})`); } };
-  run("vaultDepositMessage writes the two fields", () => S.vaultDepositMessage(5n, u) === `{"precommitment":"5","depositor":"${u}"}`);
-  run("vaultDepositMessage refuses a depositor not 64-hex", () => ["alice.near", "intents.near", vault, "0x" + "ab".repeat(20)].every((d) => throws(() => S.vaultDepositMessage(1n, d))));
-  run("vaultDepositMessage refuses p", () => throws(() => S.vaultDepositMessage(P, u)));
-  run("vaultPrepayYocto", () => S.vaultPrepayYocto(false) === 756n * E19 && S.vaultPrepayYocto(true) === 904n * E19);
-  run("vaultWithdrawYocto", () => S.vaultWithdrawYocto(0n, 0n, false) === (710n + 389n) * E19 + 1n && S.vaultWithdrawYocto(5n, 1n, true) === (710n + 389n + 148n) * E19 + 5n + 2n);
-  run("vaultRagequitYocto", () => S.vaultRagequitYocto(3n) === (475n + 389n) * E19 + 3n + 1n);
-  run("vaultRelayFeeWithinBackstop", () => S.vaultRelayFeeWithinBackstop(50n, 100n) && !S.vaultRelayFeeWithinBackstop(51n, 100n) && S.vaultRelayFeeWithinBackstop(U128 / 2n, U128) && !S.vaultRelayFeeWithinBackstop(U128 / 2n + 1n, U128));
-  run("vaultWithdrawalProblems passes a good request", () => S.vaultWithdrawalProblems(w, 1_000_000n, vault, now).length === 0);
-  run("vaultWithdrawalProblems refuses each bad one", () => [
-    [{ recipient: vault }, 1_000_000n], [{ fee_recipient: "intents.near" }, 1_000_000n], [{ relay_fee: "500001" }, 1_000_000n],
-    [{ deadline_ms: now - 1 }, 1_000_000n], [{ salt: "A".repeat(32) }, 1_000_000n], [{}, 0n], [{ refund_precommitment: "0" }, 1_000_000n],
-  ].every(([x, wd]) => S.vaultWithdrawalProblems({ ...w, ...x }, wd, vault, now).length > 0));
-  run("vaultFieldOf reads big-endian, mod p", () => S.vaultFieldOf(Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 1 : 0))) === 1n && S.vaultFieldOf(new Uint8Array(32).fill(255)) === ((1n << 256n) - 1n) % P);
-  run("vaultProof keeps snarkjs's order and refuses q", () => canon(S.vaultProof({ pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] })) === canon({ a: ["1", "2"], b: [["3", "4"], ["5", "6"]], c: ["7", "8"] })
-    && throws(() => S.vaultProof({ pi_a: [String(Q), "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"] })));
-  run("vaultDecimal and vaultAccountId refuse non-canonical forms", () => throws(() => S.vaultDecimal("01", "n")) && S.vaultDecimal("0", "n") === 0n && throws(() => S.vaultAccountId("A.near", "a")));
-  results.push(say(fails.length === 0, `every function behaves as the paper says${fails.length ? `; not: ${fails.join("; ")}` : ""}`));
-
-  // the vectors
-  let V;
-  try {
-    V = JSON.parse(vectors);
-  } catch (e) {
-    results.push(say(false, `vault-v1.json parses: ${e.message}`));
-    return { ok: false, lines };
-  }
-  const bad = [];
-  const one = (kind, i, v, own, theirs, of, value) => {
-    const k = keccak(own);
-    if (!(hex(own) === v.preimage_hex && hex(k) === v.keccak_hex && field(k).toString() === v[value])) bad.push(`${kind} ${i + 1} does not recompute`);
-    for (const [what, f] of [["shapes.ts makes other bytes", () => hex(theirs()) === hex(own)], [`its ${kind} function gives another value`, () => String(of()) === v[value]]]) {
-      let ok = false;
-      try { ok = f(); } catch {}
-      if (!ok) bad.push(`${kind} ${i + 1}: ${what}`);
-    }
+  // every call's answer, judged here
+  const answer = (id) => {
+    const a = rep.calls?.[id];
+    if (!a || typeof a !== "object") return { t: "no answer" };
+    return "t" in a ? { t: String(a.t) } : { v: decode(a.v) };
   };
-  const kfn = (b) => new Uint8Array(keccak(Buffer.from(b)));
-  (V.scope ?? []).forEach((v, i) => one("scope", i, v, scopeBytes(v), () => S.vaultScopePreimage(v.vault, v.asset), () => S.vaultScopeOf(kfn, v.vault, v.asset), "scope"));
-  (V.label ?? []).forEach((v, i) => one("label", i, v, labelBytes(v), () => S.vaultLabelPreimage(BigInt(v.scope), BigInt(v.nonce)), () => S.vaultLabelOf(kfn, BigInt(v.scope), BigInt(v.nonce)), "label"));
-  (V.context ?? []).forEach((v, i) => {
-    one("context", i, v, contextBytes(v), () => S.vaultContextPreimage(asNumbers(v.input), BigInt(v.scope)), () => S.vaultContextOf(kfn, asNumbers(v.input), BigInt(v.scope)), "context");
-    if (BigInt(v.input.deadline_ms) <= BigInt(Number.MAX_SAFE_INTEGER)) {
-      const { processor, deadline_ms, ...rest } = v.input;
-      let ok = false;
-      try { ok = hex(S.vaultContextPreimage(S.vaultContextInput(processor, { ...rest, deadline_ms: Number(deadline_ms) }), BigInt(v.scope))) === hex(contextBytes(v)); } catch {}
-      if (!ok) bad.push(`context ${i + 1}: vaultContextInput reads the request to other bytes`);
+  const failed = (list) => [...new Set(list.filter(([, , , test], i) => {
+    try {
+      return !test(answer(calls[all.indexOf(list[i])][0]));
+    } catch {
+      return true;
     }
-  });
+  }).map(([group]) => group))];
+  const f1 = failed(fixed);
+  results.push(say(f1.length === 0, `every function behaves as the paper says${f1.length ? `; not: ${f1.join("; ")}` : ""}`));
+  const bad = [];
+  for (const [kind, list] of [["scope", V.scope ?? []], ["label", V.label ?? []], ["context", V.context ?? []]]) {
+    list.forEach((v, i) => {
+      const own = kind === "scope" ? scopeBytes(v) : kind === "label" ? labelBytes(v) : contextBytes(v);
+      const k = keccak(own);
+      if (!(hex(own) === v.preimage_hex && hex(k) === v.keccak_hex && field(k).toString() === v[kind])) bad.push(`${kind} ${i + 1} does not recompute`);
+    });
+  }
+  bad.push(...failed(vec));
   const n = [V.scope?.length ?? 0, V.label?.length ?? 0, V.context?.length ?? 0];
   results.push(say(bad.length === 0 && n[0] + n[1] + n[2] === 50,
     `${n[0]} scope, ${n[1]} label and ${n[2]} context vectors recompute (own Borsh and Keccak-256, big-endian mod p), shapes.ts's encoders, vaultContextInput and its value functions agreeing${bad.length ? `; ${bad.slice(0, 4).join("; ")}${bad.length > 4 ? `; and ${bad.length - 4} more` : ""}` : ""}`));
   return { ok: results.every(Boolean), lines };
 }
 
-// the child: read {nonce, shapes, vectors} from stdin, then load the file and judge it; every line carries the nonce
+// the child: read {nonce, shapes, calls}, decode the calls, take every builtin it uses, then load the file, make the
+// calls and print one line: the nonce and a JSON report {env, data, calls} (or {error}). It compares nothing.
 async function child() {
   const write = process.stdout.write.bind(process.stdout);
   const exit = process.exit.bind(process);
+  const keysOf = Object.keys;
+  const isArray = Array.isArray;
+  const isView = ArrayBuffer.isView;
+  const quote = JSON.stringify;
+  const apply = Reflect.apply;
+  const Big = BigInt;
+  const U8 = Uint8Array;
+  const HEX = "0123456789abcdef";
+  const env = keysOf(process.env);
   process.removeAllListeners("warning"); // stripTypeScriptTypes is marked experimental
   let input = "";
   for await (const c of process.stdin) input += c;
-  const { nonce, shapes, vectors } = JSON.parse(input);
-  let r;
+  const { nonce, shapes, calls } = JSON.parse(input);
+  const kf = (b) => new U8(keccak256(b));
+  const ret = Object.create(null);
+  const dec = (x) => {
+    if (isArray(x)) {
+      const a = [];
+      for (let i = 0; i < x.length; i++) a[i] = dec(x[i]);
+      return a;
+    }
+    if (x && typeof x === "object") {
+      if (typeof x.$big === "string") return Big(x.$big);
+      if (typeof x.$bytes === "string") {
+        const b = new U8(x.$bytes.length / 2);
+        for (let i = 0; i < b.length; i++) b[i] = parseInt(x.$bytes.slice(2 * i, 2 * i + 2), 16);
+        return b;
+      }
+      if (x.$keccak === true) return kf;
+      if (typeof x.$ret === "string") return { $ret: x.$ret };
+      const o = {};
+      const ks = keysOf(x);
+      for (let i = 0; i < ks.length; i++) o[ks[i]] = dec(x[ks[i]]);
+      return o;
+    }
+    return x;
+  };
+  const todo = [];
+  for (let i = 0; i < calls.length; i++) todo[i] = [calls[i][0], calls[i][1], dec(calls[i][2])];
+  const enc = (v) => {
+    if (v === null || v === undefined) return "null";
+    const t = typeof v;
+    if (t === "bigint") return '{"$big":"' + v + '"}';
+    if (t === "string") return quote(v);
+    if (t === "number" || t === "boolean") return "" + v;
+    if (t === "function") return '{"$fn":true}';
+    if (isView(v)) {
+      let h = "";
+      for (let i = 0; i < v.length; i++) h += HEX[v[i] >> 4] + HEX[v[i] & 15];
+      return '{"$bytes":"' + h + '"}';
+    }
+    if (isArray(v)) {
+      let s = "[";
+      for (let i = 0; i < v.length; i++) s += (i ? "," : "") + enc(v[i]);
+      return s + "]";
+    }
+    const ks = keysOf(v);
+    let s = "{";
+    for (let i = 0; i < ks.length; i++) s += (i ? "," : "") + quote(ks[i]) + ":" + enc(v[ks[i]]);
+    return s + "}";
+  };
+  let report;
   try {
-    r = await evaluate(await load(shapes), vectors);
+    const S = await load(shapes);
+    const names = keysOf(S);
+    let data = "";
+    for (let i = 0; i < names.length; i++) if (typeof S[names[i]] !== "function") data += (data ? "," : "") + quote(names[i]) + ":" + enc(S[names[i]]);
+    let out = "";
+    for (let i = 0; i < todo.length; i++) {
+      const [id, fn, args] = todo[i];
+      for (let j = 0; j < args.length; j++) if (args[j] && typeof args[j] === "object" && typeof args[j].$ret === "string") args[j] = ret[args[j].$ret];
+      let a;
+      try {
+        const v = apply(S[fn], undefined, args);
+        ret[id] = v;
+        a = '{"v":' + enc(v) + "}";
+      } catch (e) {
+        a = '{"t":' + quote("" + (e && e.message)) + "}";
+      }
+      out += (out ? "," : "") + quote(id) + ":" + a;
+    }
+    report = '{"env":' + enc(env) + ',"data":{' + data + '},"calls":{' + out + "}}";
   } catch (e) {
-    r = { ok: false, lines: [`BAD shapes.ts loads as one module: ${String(e?.message ?? e).split("\n")[0]}`] };
+    report = '{"error":' + quote(("" + (e && e.message)).split("\n")[0]) + "}";
   }
-  write(r.lines.map((l) => `${nonce} ${l}\n`).join("") + `${nonce} ${r.ok ? "PASS" : "FAIL"}\n`, () => exit(0));
-}
-
-// one ref's files, judged in the sandboxed child
-export async function checkFiles({ shapes, vectors }) {
-  const nonce = randomBytes(16).toString("hex");
-  const r = spawnSync(process.execPath, ["--permission", `--allow-fs-read=${SELF}`, SELF, "--child"], {
-    input: JSON.stringify({ nonce, shapes, vectors }), encoding: "utf8", timeout: 60_000, maxBuffer: 16 << 20,
-  });
-  const mine = (r.stdout ?? "").split("\n").filter((l) => l.startsWith(`${nonce} `)).map((l) => l.slice(nonce.length + 1));
-  const verdict = mine.at(-1);
-  const lines = mine.slice(0, -1);
-  if (r.status !== 0 || (verdict !== "PASS" && verdict !== "FAIL")) {
-    lines.push(`BAD the sandboxed run gave no verdict (exit ${r.status ?? r.signal}${r.stderr ? `: ${r.stderr.trim().split("\n").at(-1).slice(0, 120)}` : ""})`);
-    return { ok: false, lines };
-  }
-  return { ok: verdict === "PASS", lines };
+  write(nonce + " " + report + "\n", () => exit(0));
 }
 
 export async function read(ref, fetchFn = fetch) {
