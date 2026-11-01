@@ -282,7 +282,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     f.style.border = "0";
     f.style.visibility = "hidden";
     f.addEventListener("error", () => f === frame && down());
-    // the page posts its ready as it starts, before its load; a load with no ready soon after is an error page
+    // the page posts its ready as it starts, before its load (the message can land just after the load event); a load
+    // with no ready within 1 s is the browser's error page
     f.addEventListener("load", () => {
       if (f !== frame || readySeen || loadTimer !== null) return;
       loadTimer = setTimeout(() => {
