@@ -93,7 +93,8 @@ test("the good run with one change each: FAIL", () => {
 
 test("headersOf reads the /* rule of SIGN_HOST's _headers", () => {
   const h = headersOf(readFileSync(path.join(HERE, "../../packages/signpage/public/_headers"), "utf8"));
-  assert.match(h["content-security-policy"], /frame-ancestors https:\/\/confidential\.unrealized\.trade;/);
+  // SIGN_HOST is the top window since card signpage-shell: nothing may frame it
+  assert.match(h["content-security-policy"], /frame-ancestors 'none';/);
   assert.equal(h["integrity-policy"], "blocked-destinations=(script)");
   assert.deepEqual(headersOf("/x\n  A: 1\n/*\n  B: 2\n"), { b: "2" });
 });
