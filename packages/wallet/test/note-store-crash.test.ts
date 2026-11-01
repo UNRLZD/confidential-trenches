@@ -96,11 +96,8 @@ async function act(ns: NoteStore, world: World, proofs: Set<string>): Promise<bo
       }
     }
     if (n.state === "HELD") {
-      if (!proofs.has(n.id)) {
-        // its proof died with the page: free once too late to send
-        if (world.now <= n.deadlineMs!) return ((world.now = n.deadlineMs! + 1n), world.tick(), true);
-        return (await ns.move(n.id, "HELD", "UNSPENT"), true);
-      }
+      // a HELD note always has its proof in this page: one held by a killed page was freed at the open
+      assert.ok(proofs.has(n.id), "a dead page's HELD note survived the open");
       if (n.ref.kind === "change") {
         await ns.move(n.id, "HELD", "UNSPENT"); // the user changed the amount: the proof is dropped
         proofs.delete(n.id);
@@ -200,15 +197,20 @@ async function run(goals: Goal[], killAt: number[]): Promise<{ world: World; fin
   for (let guard = 0; guard < 50; guard++) {
     const w = await openWalletStore({ indexedDB: idb });
     const proofs = new Set<string>(); // the page's memory: gone at a kill
+    let ns: NoteStore | undefined;
     try {
-      const ns = await openNoteStore(counted(w, world)); // the open finishes what a killed page left
-      check(await ns.list(), world, w.lane, `open ${reopens} at step ${world.steps}`);
+      ns = await openNoteStore(counted(w, world)); // the open finishes what a killed page left
+      const all = await ns.list();
+      check(all, world, w.lane, `open ${reopens} at step ${world.steps}`);
+      assert.ok(!all.some((n) => n.state === "HELD"), `open ${reopens}: a killed page's HELD note was not freed at once`);
       for (let n = 0; await act(ns, world, proofs); n++) assert.ok(n < 500, "the page never finishes");
       const final = await ns.list();
       check(final, world, w.lane, "end");
+      ns.close?.();
       w.close();
       return { world, final, reopens };
     } catch (e) {
+      ns?.close?.(); // a killed page's locks go with it
       w.close();
       if (!(e instanceof Kill)) throw e;
       reopens++;

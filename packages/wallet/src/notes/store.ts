@@ -22,12 +22,19 @@
 //   restore's walk "until the first miss" finds every one.
 // - Every note write runs under the Web Lock "ct-wallet/notes", so two tabs never both act on one read. With no Web
 //   Locks the note store does not open, as the seed is never written without them (../store).
+// - A tab that dies while it holds a note frees it at once (the coordinator's call on 09af69f; :389-390): each note store
+//   holds the Web Lock "ct-wallet/tab/<id>" for its life (the browser lets it go when the page dies), and a HELD record
+//   names that id, which is not a secret. Every open and every list() reads navigator.locks.query() and moves a HELD
+//   note whose tab lock is not held back to UNSPENT. Safe because RESERVED is written before a proof leaves the device,
+//   so a HELD note's proof was never sent. Only the holding tab moves its note to RESERVED; a live tab's note still goes
+//   back once too late to send.
 import { VAULT_FIELD_P } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
 import type { WalletStore } from "../store/index.ts";
 import { noteCommitment, type NoteRef } from "./secrets.ts";
 
 export const NOTES_LOCK = "ct-wallet/notes";
+export const TAB_LOCK = "ct-wallet/tab/"; // + the tab's id
 
 export const NOTE_STATES = ["PLANNED", "INCOMING", "UNSPENT", "HELD", "RESERVED", "SPENT"] as const;
 export type NoteState = (typeof NOTE_STATES)[number];
@@ -58,6 +65,7 @@ export type NoteRecord = {
   parent?: string; // a change or refund note: the note whose withdrawal made it
   leaf?: Leaf; // from UNSPENT on, never changed
   deadlineMs?: bigint; // HELD and RESERVED: the attempt's deadline_ms (block time)
+  tab?: string; // HELD: the id of the tab whose proof holds it
 };
 
 /** A note born PLANNED (a return, move or second-arrival note) or UNSPENT (a change or refund note, or one restore found). */
@@ -78,6 +86,8 @@ export interface NoteStore {
   planDeposit(scope: bigint, precommitmentOf: (ref: NoteRef) => bigint): Promise<NoteRecord>;
   add(note: NewNote): Promise<NoteRecord>;
   move(id: string, from: NoteState, to: NoteState, fields?: MoveFields): Promise<NoteRecord>;
+  /** Lets this tab's lock go, as the page's death does (tests; a page need not call it). */
+  close(): void;
 }
 
 export interface NoteStoreOptions {
@@ -176,7 +186,7 @@ function checkDeadline(d: unknown): bigint {
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "tab"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -187,6 +197,7 @@ function checkRecord(id: string, r: unknown): NoteRecord {
   if (n.leaf !== undefined) checkLeaf(n.leaf, n.precommitment);
   if ((n.state === "HELD" || n.state === "RESERVED") !== (n.deadlineMs !== undefined)) throw new Error(`note ${id}: deadlineMs in HELD and RESERVED only`);
   if (n.deadlineMs !== undefined) checkDeadline(n.deadlineMs);
+  if ((n.state === "HELD") !== (typeof n.tab === "string" && /^[0-9a-f]{32}$/.test(n.tab))) throw new Error(`note ${id}: a tab id in HELD only`);
   if (n.parent !== undefined && (typeof n.parent !== "string" || (n.ref.kind !== "change" && n.ref.kind !== "refund"))) throw new Error(`note ${id}: only a change or refund note has a parent`);
   return n;
 }
@@ -197,6 +208,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.parent !== undefined) out.parent = n.parent;
   if (n.leaf !== undefined) out.leaf = n.leaf;
   if (n.deadlineMs !== undefined) out.deadlineMs = n.deadlineMs;
+  if (n.tab !== undefined) out.tab = n.tab;
   return out;
 }
 
@@ -207,7 +219,24 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   const locks = opts.locks === undefined ? (globalThis.navigator?.locks ?? null) : opts.locks;
   if (!locks) throw new Error("no Web Locks: notes change only under the notes lock");
   const lockName = opts.lockName ?? NOTES_LOCK;
-  const locked = <T>(fn: () => Promise<T>): Promise<T> => locks.request(lockName, { mode: "exclusive" }, fn) as Promise<T>;
+  let closed = false; // a closed tab's lock is gone, so it may not hold or change a note any more
+  const locked = <T>(fn: () => Promise<T>): Promise<T> =>
+    // async, so a refusal rejects the callback's promise and the lock goes back (Node keeps a lock whose callback throws)
+    locks.request(lockName, { mode: "exclusive" }, async () => {
+      if (closed) throw new Error("the note store is closed");
+      return fn();
+    }) as Promise<T>;
+  // this tab's lock, held until close() or the page's death
+  const tab = newId();
+  let letGo = (): void => {};
+  await new Promise<void>((held, no) => {
+    locks
+      .request(TAB_LOCK + tab, { mode: "exclusive" }, () => {
+        held();
+        return new Promise<void>((ok) => (letGo = ok));
+      })
+      .catch(no);
+  });
 
   const read = async (id: string): Promise<NoteRecord | undefined> => {
     const r = await store.get("notes", id);
@@ -228,9 +257,12 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     const next: NoteRecord = { ...cur, state: to };
     if (from === "INCOMING") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
     else if (fields.leaf !== undefined) throw new Error("a leaf is set once, when the note lands");
+    if (to === "RESERVED" && cur.tab !== tab) throw new Error(`note ${id} is held by another tab: only the tab that made its proof sends it`);
     if (to === "HELD") next.deadlineMs = checkDeadline(fields.deadlineMs);
     else if (fields.deadlineMs !== undefined) throw new Error("deadlineMs is set when the proof starts (HELD)");
     else if (to !== "RESERVED") delete next.deadlineMs;
+    if (to === "HELD") next.tab = tab;
+    else delete next.tab;
     await write(next);
     return next;
   }
@@ -244,6 +276,16 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     }
     return [...byId.values()];
   }
+
+  // A HELD note whose tab is gone: its proof died with that page and was never sent, so it goes back to UNSPENT now.
+  async function freeDeadTabs(all: NoteRecord[]): Promise<NoteRecord[]> {
+    if (!all.some((n) => n.state === "HELD")) return all;
+    const live = new Set(((await locks!.query()).held ?? []).map((l) => l.name));
+    const out: NoteRecord[] = [];
+    for (const n of all) out.push(n.state === "HELD" && !live.has(TAB_LOCK + n.tab) ? await moveLocked(n.id, "HELD", "UNSPENT") : n);
+    return out;
+  }
+  const settle = async (): Promise<NoteRecord[]> => freeDeadTabs(await finishParents(await readAll()));
 
   async function addLocked(note: NewNote): Promise<NoteRecord> {
     if (note === null || typeof note !== "object") throw new Error("a note is an object");
@@ -284,11 +326,20 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   }
 
   // finish what a killed page left before anyone reads
-  await locked(async () => void (await finishParents(await readAll())));
+  try {
+    await locked(async () => void (await settle()));
+  } catch (e) {
+    letGo();
+    throw e;
+  }
 
   return {
     get: (id) => read(id),
-    list: () => locked(async () => finishParents(await readAll())),
+    list: () => locked(settle),
+    close: () => {
+      closed = true;
+      letGo();
+    },
     add: (note) => locked(() => addLocked(note)),
     move: (id, from, to, fields) => locked(() => moveLocked(id, from, to, fields)),
     planDeposit(scope, precommitmentOf) {

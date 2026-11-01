@@ -18,7 +18,8 @@ const BIG = 123_456_789_012_345_678_901_234_567n; // above 2^53: amounts stay bi
 const leafOf = (precommitment: bigint, value = BIG, label = 11n, leafIndex = 3n): Leaf => ({ value, label, commitment: noteCommitment(value, label, precommitment), leafIndex });
 
 const opened: WalletStore[] = [];
-after(() => opened.forEach((s) => s.close()));
+const notes: NoteStore[] = [];
+after(() => (opened.forEach((s) => s.close()), notes.forEach((n) => (n as { close?: () => void }).close?.())));
 
 type Tab = { idb: IDBFactory; w: WalletStore; ns: NoteStore; puts: () => number };
 async function tab(idb = new IDBFactory()): Promise<Tab> {
@@ -26,7 +27,9 @@ async function tab(idb = new IDBFactory()): Promise<Tab> {
   opened.push(w);
   let n = 0;
   const counted: WalletStore = { ...w, put: async (s, k, v) => (n++, w.put(s, k, v)) };
-  return { idb, w, ns: await openNoteStore(counted), puts: () => n };
+  const ns = await openNoteStore(counted);
+  notes.push(ns);
+  return { idb, w, ns, puts: () => n };
 }
 function rawNote(idb: IDBFactory, key: string): Promise<{ iv: Uint8Array; ct: ArrayBuffer } | undefined> {
   return new Promise((ok, no) => {
@@ -220,7 +223,7 @@ test("nothing is stored unwrapped, and a note holds no nullifier or secret", asy
   for (const s of [n.precommitment.toString(), BIG.toString(), "HELD", "deposit", n.id]) assert.ok(!contains(ct, new TextEncoder().encode(s)), `${s} in clear`);
   const { nullifier, secret } = noteSecrets(SEED, n.ref);
   const back = (await t.w.get("notes", n.id)) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(back).sort(), ["deadlineMs", "id", "leaf", "precommitment", "ref", "scope", "state"]);
+  assert.deepEqual(Object.keys(back).sort(), ["deadlineMs", "id", "leaf", "precommitment", "ref", "scope", "state", "tab"]);
   const text = JSON.stringify(back, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
   assert.ok(!text.includes(nullifier.toString()) && !text.includes(secret.toString()), "a secret in the record");
 });
@@ -254,4 +257,34 @@ test("a write that fails part way leaves the note as it was", async () => {
 test("no Web Locks: the note store does not open", async () => {
   const t = await tab();
   await assert.rejects(openNoteStore(t.w, { locks: null }), /no Web Locks/);
+});
+
+// A tab that dies while it holds a note (wallet.md:389-390, the coordinator's call on 09af69f): each tab holds the Web
+// Lock "ct-wallet/tab/<id>" for its life and its HELD notes name that id; the next open, or any list(), moves a HELD note
+// whose tab lock is not held back to UNSPENT at once. Safe: RESERVED is written before a proof leaves the device.
+const closeNotes = (ns: NoteStore): void => (ns as { close?: () => void }).close?.();
+
+test("a HELD note from a dead tab is UNSPENT on the next open", async () => {
+  const idb = new IDBFactory();
+  const a = await tab(idb);
+  const n = await noteIn(a.ns, "HELD");
+  closeNotes(a.ns); // the tab dies: its tab lock goes
+  a.w.close();
+  const b = await tab(idb);
+  const back = await b.ns.get(n.id);
+  assert.equal(back?.state, "UNSPENT", "a dead tab's note waits for nothing");
+  assert.equal(back?.deadlineMs, undefined);
+  await assert.rejects(a.ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1n }), /closed/, "a dead tab holds nothing");
+});
+
+test("a HELD note from a live tab stays HELD, on open and on list, until that tab dies", async () => {
+  const idb = new IDBFactory();
+  const a = await tab(idb);
+  const n = await noteIn(a.ns, "HELD");
+  const b = await tab(idb); // a second tab opens while the first proves
+  assert.equal((await b.ns.get(n.id))?.state, "HELD");
+  assert.equal((await b.ns.list()).find((x) => x.id === n.id)?.state, "HELD");
+  await assert.rejects(b.ns.move(n.id, "HELD", "RESERVED"), /held by another tab/, "only the tab that made the proof sends it");
+  closeNotes(a.ns); // now it dies
+  assert.equal((await b.ns.list()).find((x) => x.id === n.id)?.state, "UNSPENT", "list frees it at once");
 });
