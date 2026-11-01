@@ -8,4 +8,6 @@ export * from "./vault/shapes.ts";
 export * from "./checks/oneclick.ts";
 export * from "./signpage/client.ts";
 export * from "./vault/messages.ts";
+export * from "./prover/prove.ts";
+export * from "./vault/inputs.ts";
 export * from "./vault/sync.ts";
