@@ -12,6 +12,7 @@
 //! (the vault fills its own label tree), NEAR storage, and the relayer fee as an absolute amount.
 
 pub mod constants;
+pub mod context;
 pub mod events;
 pub mod field;
 pub mod poseidon;
@@ -157,15 +158,8 @@ impl Default for Vault {
     }
 }
 
-/// `scope = keccak256(borsh((SCOPE_TAG, vault, token))) mod p` (vault.md 2.2; PP `State.sol:89` in NEAR form).
-pub fn scope_for(vault: &str, token: &str) -> field::U256 {
-    let mut b = Vec::with_capacity(12 + SCOPE_TAG.len() + vault.len() + token.len());
-    for s in [SCOPE_TAG, vault, token] {
-        b.extend_from_slice(&(s.len() as u32).to_le_bytes());
-        b.extend_from_slice(s.as_bytes());
-    }
-    field::reduce(field::from_be(&env::keccak256_array(&b)))
-}
+/// `scope = keccak256(borsh((SCOPE_TAG, vault, token))) mod p` (vault.md 2.2), in `context`.
+pub use context::scope_for;
 
 /// This vault's scope, computed in each call that needs it (no init stores it).
 pub fn scope() -> field::U256 {
