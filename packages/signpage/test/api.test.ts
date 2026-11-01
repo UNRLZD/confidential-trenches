@@ -75,6 +75,8 @@ test("a malformed envelope is dropped: not an object, no UUID id, a class instan
     { v: 1, type: "state" }, { v: 1, id: 7, type: "state" }, { v: 1, id: "", type: "state" },
     { v: 1, id: "not-a-uuid", type: "state" }, { v: 1, id: id.toUpperCase(), type: "state" }, { v: 1, id: `${id} `, type: "state" },
     Object.assign(Object.create({ v: 1, id }), { type: "state" }),
+    Object.assign(Object.create({ x: 1 }), { v: 1, id, type: "state" }),
+    Object.assign(new Date(), { v: 1, id, type: "state" }),
   ];
   for (const d of bad) p.send(d);
   assert.equal(p.posted.length, 1, "only ready");

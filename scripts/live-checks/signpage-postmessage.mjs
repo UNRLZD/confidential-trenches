@@ -18,11 +18,11 @@
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers
 //     (default: packages/signpage built as packages/signpage/scripts/deploy.mjs builds it), as frame.e2e.mjs does
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { build } from "../../packages/signpage/scripts/deploy.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -161,6 +161,14 @@ export function headersOf(text) {
     if (all && kv) h[kv[1].toLowerCase()] = kv[2];
   }
   return h;
+}
+
+/** packages/signpage built as its deploy builds it (deploy.mjs build(): index.html and public/ copied), read as files. */
+function build() {
+  const out = mkdtempSync(path.join(tmpdir(), "ct-pm-sign-"));
+  copyFileSync(path.join(REPO, "packages/signpage/index.html"), path.join(out, "index.html"));
+  cpSync(path.join(REPO, "packages/signpage/public"), out, { recursive: true });
+  return out;
 }
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
