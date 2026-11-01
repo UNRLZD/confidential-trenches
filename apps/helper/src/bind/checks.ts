@@ -9,7 +9,7 @@
 // M322 (1), MN:330). Every other kind /v1/bind will take (M:3342) is refused here, by its shape: an id's clean-up (one
 // DeleteAccount) gets not_one_action, a plain move out (ft_transfer) not_ft_transfer_call, an onward delegate
 // (receiver_id intents.near) bad_receiver. A's move back to the vault (WM-11) is this same call from A (M:2822, "in
-// the same shape"; wallet.md WM-11, depositor = A), so no shape check can tell it from U's: decided by the CO 07:16Z, A's
+// the same shape"; wallet.md WM-11, depositor = A), so no shape check can tell it from U's: decided 07:16Z, A's
 // move passes as U's does.
 //
 // Not here (card relayer-prepay): check 8's two-RPC simulation, the prepay and the send; check 9's token hold
@@ -25,7 +25,7 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 
 /** HELPER_V1_PATHS' POST /v1/bind limitBytes, the route's body limit; here it also caps the decoded SignedDelegateAction. */
 export const BIND_MAX_BYTES = 4_096;
-/** HELPER_BIND_DEPOSIT_CODES, in H4.3's order. */
+/** HELPER_BIND_DEPOSIT_CODES, in H4.3's order, with the cap's code after amount_too_low. */
 export const BIND_DEPOSIT_CODES = [
   "bad_shape",
   "bad_signature",
@@ -43,6 +43,7 @@ export const BIND_DEPOSIT_CODES = [
   "gas_too_high",
   "bad_receiver",
   "amount_too_low",
+  "amount_above_cap",
   "amount_above_balance",
   "bad_msg",
   "p_used",
@@ -56,6 +57,8 @@ export const BIND_DEPOSIT_CODES = [
 export const VAULT_TOKEN = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"; // gitleaks:allow (a public account id)
 /** VAULT_CONSTANTS.MIN_DEPOSIT: 1 USDC in base units. */
 export const MIN_DEPOSIT = 1_000_000n;
+/** HELPER_BIND_DEPOSIT_CAP: the beta cap per deposit, $1,000 in USDC base units (OD:262: in the kit and the relayer, never the vault). */
+export const BIND_DEPOSIT_CAP = 1_000_000_000n;
 /** VAULT_FIELD_P. */
 export const FIELD_P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 /** VAULT_DEPOSIT_MESSAGE_FIELDS and VAULT_DEPOSIT_MESSAGE_MAX_BYTES. */
@@ -70,10 +73,6 @@ export const CARRIER = { method: "ft_transfer_call", args: ["receiver_id", "amou
 export const EXPIRY_MAX_BLOCKS = 600n;
 /** H4.3 check 5: G_bind_cap = 2 × 101.563 Tgas, twice U's measured whole call at depth 32 (V@31d1b99:841). */
 export const G_BIND_CAP = 203_126_000_000_000n;
-/** The beta cap per deposit, $1,000 (OD:262 "cap": in the kit and the relayer, never the vault), in USDC base units. */
-export const BETA_CAP = 1_000_000_000n;
-/** The cap's refusal, the one code outside the frozen kit's list (CO 07:16Z); card kit-deposit-cap adds it to the kit. */
-export const CAP_CODE = "amount_above_cap";
 /** NEP-366's signable prefix: 2^30 + 366, a little-endian u32 before the borsh DelegateAction it signs. */
 export const NEP366_PREFIX = 2 ** 30 + 366;
 /** nearcore's AccessKey::ACCESS_KEY_NONCE_RANGE_MULTIPLIER (2.14.0 core/primitives-core/src/account.rs l.812). */
@@ -81,7 +80,7 @@ export const NONCE_RANGE_MULTIPLIER = 1_000_000n;
 
 const TGAS = 1_000_000_000_000n;
 
-export type BindCode = (typeof BIND_DEPOSIT_CODES)[number] | typeof CAP_CODE;
+export type BindCode = (typeof BIND_DEPOSIT_CODES)[number];
 
 // ---- Inputs ----
 
@@ -209,7 +208,7 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   if (!/^(0|[1-9][0-9]{0,38})$/.test(args.amount) || BigInt(args.amount) >= 1n << 128n) return no("bad_shape", "args.amount: not a u128 decimal");
   const amount = BigInt(args.amount);
   if (amount < MIN_DEPOSIT) return no("amount_too_low", "amount: under MIN_DEPOSIT");
-  if (amount > BETA_CAP) return no(CAP_CODE, "amount: over the $1,000 beta cap");
+  if (amount > BIND_DEPOSIT_CAP) return no("amount_above_cap", "amount: over the $1,000 beta cap");
   if (amount > (await reads.ftBalance(u))) return no("amount_above_balance", "amount: over the sender's balance");
   // The vault's row 2 and 2.10 (e): exactly the two fields, at most 1,024 bytes, P below p, depositor valid, not the vault.
   const msg = args.msg;
@@ -230,7 +229,7 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   if (p >= FIELD_P) return no("bad_msg", "msg.precommitment: not below p");
   if (!isAccountId(depositor)) return no("bad_msg", "msg.depositor: not a NEAR account id");
   if (depositor === cfg.vault) return no("bad_msg", "msg.depositor: the vault");
-  // The depositor is the moving id itself in every flow (kit shapes.ts VaultDepositMessage; wallet.md WM-11; CO round 3).
+  // The depositor is the moving id itself in every flow (kit shapes.ts VaultDepositMessage; wallet.md WM-11; review round 3).
   if (depositor !== u) return no("bad_msg", "msg.depositor: not the sender");
   if (await reads.pUsed(p)) return no("p_used", "P: in the vault's deposits pages");
 

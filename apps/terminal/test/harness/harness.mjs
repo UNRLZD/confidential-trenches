@@ -36,7 +36,7 @@ export const MAPPED = ["*.ct.test", "*.other.test"];
 
 // The real names. The shipped _headers name them (APP_HOST's frame-src, SIGN_HOST's frame-ancestors), so a test of the
 // iframe or of passkey scope runs on them with startHarness({ realNames: true }): they map to this harness too, the
-// builds and headers stay byte-exact, and the same-site layout is the real one (CO 01:50Z Nov 1).
+// builds and headers stay byte-exact, and the same-site layout is the real one (decided 01:50Z Nov 1).
 export const REAL = {
   app: "confidential.unrealized.trade",
   sign: "sign.confidential.unrealized.trade",
