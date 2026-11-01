@@ -265,3 +265,54 @@ test("the wallet sign-in bytes: EIP-4361 and Sign In With Solana, frozen but for
   assert.match(d.SIGNIN_NONCE, /^[A-Za-z0-9]{8,}$/); // EIP-4361 nonce: 8 or more alphanumerics
   assert.doesNotMatch(d.SIGNIN_STATEMENT, /\n/);
 });
+
+// ---------- round 2 (CO review of 89a2c68) ----------
+test("restore takes the 12 words with a trailing newline or a double space, to the same seed", () => {
+  const words = d.entropyToWords(fromHex(A8.inputs.entropy));
+  const clean = hex(d.wordsToSeed64(words));
+  assert.equal(hex(d.wordsToSeed64(words + "\n")), clean, "a trailing newline");
+  assert.equal(hex(d.wordsToSeed64(words.replace(" ", "  "))), clean, "a double space");
+  assert.equal(hex(d.wordsToSeed64("  " + words.split(" ").join("\t ") + " \r\n")), clean, "tabs and a CRLF");
+});
+
+// ethereum/ERCs master 3dcfe69 ERCS/erc-55.md (sha256 54a9b25f…dc9e) "Test Cases": all caps, all lower, normal.
+const EIP55 = [
+  "0x52908400098527886E0F7030069857D2E4169EE7",
+  "0x8617E340B3D01FA5F11F306F4090FD50E238070D",
+  "0xde709f2102306220921060314715629080e2fb77",
+  "0x27b1fdb04752bbc536007a920d24acb045561c26",
+  "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+  "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
+  "0xdbF03B407c01E7cD3CBea99509d93f8DDDC8C6FB",
+  "0xD1220A0cf47c7B9Be7A2E6BA89F429762e7b9aDb",
+];
+test("EIP-55: the published test cases, from lowercase and as the sign-in's address check", () => {
+  for (const a of EIP55) {
+    assert.equal(d.toChecksum(a.toLowerCase()), a);
+    assert.equal(d.toChecksum(a.toUpperCase().replace("0X", "0x")), a);
+    assert.ok(d.evmSignIn(a).includes(`\n${a}\n`), a);
+  }
+});
+
+test("kindR has the chain tag's own-property check", () => {
+  assert.throws(() => d.kindR("toString" as d.Chain), /unknown chain tag/);
+  assert.throws(() => d.kindR("__proto__" as d.Chain), /unknown chain tag/);
+  assert.throws(() => d.kindR("btc" as d.Chain), /unknown chain tag/);
+});
+
+test("a new account refuses the A.8 test entropy and any single repeated byte; restore and A.8 keep working", () => {
+  const stuck = (byte: number) => (b: Uint8Array) => b.fill(byte);
+  assert.throws(() => d.newEntropy(stuck(0)), /refused/);
+  assert.throws(() => d.newEntropy(stuck(0xff)), /refused/);
+  assert.throws(() => d.newAccountEntropy(new Uint8Array(16)), /refused/);
+  assert.throws(() => d.newAccountEntropy(new Uint8Array(16).fill(0x5a)), /refused/);
+  assert.throws(() => d.newAccountEntropy(new Uint8Array(15).fill(1)), /16 bytes/);
+  const e = d.newEntropy();
+  assert.equal(e.length, 16);
+  assert.ok(new Set(e).size > 1);
+  assert.equal(hex(d.newAccountEntropy(fromHex("000102030405060708090a0b0c0d0e0f"))), "000102030405060708090a0b0c0d0e0f");
+  // the PRF path is a new account too; a real PRF output passes
+  assert.equal(d.entropyFromPrf(fromHex("11".repeat(32))).length, 16);
+  // restore from the A.8 words still works (the WU-03 tests above use SEED)
+  assert.equal(hex(d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)))), hex(SEED));
+});

@@ -31,4 +31,7 @@ export type Chain = keyof typeof CHAINS;
 export const KIND_U = 0x01;
 export const KIND_V = 0x02;
 export const KIND_A = 0x03;
-export const kindR = (c: Chain): number => 0x10 + CHAINS[c].tag;
+export const kindR = (c: Chain): number => {
+  if (typeof c !== "string" || !Object.hasOwn(CHAINS, c)) throw new Error(`unknown chain tag ${String(c)}`);
+  return 0x10 + CHAINS[c].tag;
+};

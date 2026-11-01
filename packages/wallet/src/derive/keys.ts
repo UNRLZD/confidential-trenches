@@ -38,16 +38,34 @@ export function entropyToWords(entropy: Uint8Array): string {
   if (!(entropy instanceof Uint8Array) || entropy.length !== 16) throw new Error("entropy must be 16 bytes");
   return entropyToMnemonic(entropy, wordlist);
 }
-// The BIP-39 checksum is checked on the device before anything else (wallet.md:49).
+// The BIP-39 checksum is checked on the device before anything else (wallet.md:49). The typed words are normalized
+// once (any run of whitespace is one space, none at either end) and that one string goes to the checksum and the seed.
 export function wordsToSeed64(words: string): Uint8Array {
-  if (typeof words !== "string" || words.trim().split(/\s+/).length !== 12 || !validateMnemonic(words, wordlist))
-    throw new Error("not 12 valid BIP-39 English words");
-  return mnemonicToSeedSync(words, "");
+  if (typeof words !== "string") throw new Error("not 12 valid BIP-39 English words");
+  const list = words.trim().split(/\s+/);
+  const one = list.join(" ");
+  if (list.length !== 12 || !validateMnemonic(one, wordlist)) throw new Error("not 12 valid BIP-39 English words");
+  return mnemonicToSeedSync(one, "");
 }
-// The passkey's PRF output to the 16 bytes of entropy (wallet.md:47).
+
+// A new account's entropy. A stuck random source gives one repeated byte, and 16 zero bytes are the A.8 test seed,
+// whose keys are published (wallet.md §A.8): a new account refuses any entropy that is one byte repeated. Restore
+// (wordsToSeed64) takes any valid words, so the A.8 vectors keep working.
+export function newAccountEntropy(entropy: Uint8Array): Uint8Array {
+  if (!(entropy instanceof Uint8Array) || entropy.length !== 16) throw new Error("entropy must be 16 bytes");
+  if (entropy.every((x) => x === entropy[0])) throw new Error("new account entropy refused: one byte repeated");
+  return entropy;
+}
+// 16 random bytes for a new account without PRF (wallet.md:48); random is crypto.getRandomValues unless a test says.
+export function newEntropy(random: (b: Uint8Array<ArrayBuffer>) => unknown = (b) => crypto.getRandomValues(b)): Uint8Array {
+  const e = new Uint8Array(16);
+  random(e);
+  return newAccountEntropy(e);
+}
+// The passkey's PRF output to the 16 bytes of entropy (wallet.md:47), a new account's entropy like the above.
 export function entropyFromPrf(prfOutput: Uint8Array): Uint8Array {
   if (!(prfOutput instanceof Uint8Array) || prfOutput.length !== 32) throw new Error("the PRF output must be 32 bytes");
-  return hkdf(sha256, prfOutput, ascii(PRF_SALT), ascii(PRF_INFO), 16);
+  return newAccountEntropy(hkdf(sha256, prfOutput, ascii(PRF_SALT), ascii(PRF_INFO), 16));
 }
 
 // ---------- the encodings (wallet.md:70-89) ----------
