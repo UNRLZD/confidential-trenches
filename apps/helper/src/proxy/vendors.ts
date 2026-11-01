@@ -17,9 +17,8 @@ export type Vendor = {
   base: string;
   /** The environment variable that holds the key on the host; never a file in the repo, never a request field. */
   env: string;
-  /** The key's header, and how its value is written. */
+  /** The header that carries the key as it is. */
   header: string;
-  value: (key: string) => string;
   paths: Readonly<Record<string, Upstream>>;
 };
 
@@ -32,7 +31,6 @@ export const VENDORS: Readonly<Record<VendorName, Vendor>> = {
     base: "https://api.jup.ag",
     env: "JUPITER_API_KEY",
     header: "x-api-key",
-    value: (k) => k,
     paths: {
       "/swap/v2/build": GET,
       "/tokens/v2/search": GET,
@@ -48,7 +46,6 @@ export const VENDORS: Readonly<Record<VendorName, Vendor>> = {
     base: "https://api.relay.link",
     env: "RELAY_API_KEY",
     header: "x-api-key",
-    value: (k) => k,
     paths: {
       "/quote/v2": POST,
       "/intents/status/v3": GET,
@@ -59,7 +56,6 @@ export const VENDORS: Readonly<Record<VendorName, Vendor>> = {
     base: "https://li.quest",
     env: "LIFI_API_KEY",
     header: "x-lifi-api-key",
-    value: (k) => k,
     paths: {
       "/v1/quote": GET,
       "/v1/status": GET,
@@ -69,8 +65,8 @@ export const VENDORS: Readonly<Record<VendorName, Vendor>> = {
   oneclick: {
     base: "https://1click.chaindefuser.com",
     env: "ONECLICK_JWT",
-    header: "authorization",
-    value: (k) => `Bearer ${k}`,
+    // the partner JWT "as `X-API-Key`" (docs.near-intents.org 1click-api/authentication.md, read 2026-11-01 03:12Z)
+    header: "x-api-key",
     paths: {
       "/v0/quote": POST,
       "/v0/status": GET,

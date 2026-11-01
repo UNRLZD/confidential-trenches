@@ -124,7 +124,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       if (wait > 0) await sleep(wait);
       const headers: Record<string, string> = { accept: "application/json" };
       const key = keys[name];
-      if (key) headers[v.header] = v.value(key);
+      if (key) headers[v.header] = key;
       if (up.method === "POST") headers["content-type"] = "application/json";
       let r: Response;
       let text: string | undefined;

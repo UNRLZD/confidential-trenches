@@ -72,7 +72,7 @@ test("keys come from the environment only, each on its vendor's header, and the 
   assert.deepEqual(f.seen[0]!.headers, { accept: "application/json", "x-api-key": ENV.RELAY_API_KEY, "content-type": "application/json" });
   assert.deepEqual(f.seen[1]!.headers, { accept: "application/json", "x-api-key": ENV.JUPITER_API_KEY });
   assert.deepEqual(f.seen[2]!.headers, { accept: "application/json", "x-lifi-api-key": ENV.LIFI_API_KEY });
-  assert.deepEqual(f.seen[3]!.headers, { accept: "application/json", authorization: `Bearer ${ENV.ONECLICK_JWT}` });
+  assert.deepEqual(f.seen[3]!.headers, { accept: "application/json", "x-api-key": ENV.ONECLICK_JWT });
 });
 
 test("a vendor with no key in the environment is called with no key header", async () => {
