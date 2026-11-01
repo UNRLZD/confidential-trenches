@@ -11,6 +11,7 @@
 // - rp.name is UNRLZD (owner brand-1, owner-decisions.md:136); user.name and displayName are CN-44's signed words
 //   "Trading account" (09-design-brief.md:2338). user.id is 16 random bytes, the challenge 32 (06b:318-320): no server
 //   checks either, the credential only produces the seed.
+// - It runs top-level only: in a frame both calls refuse before the sheet is asked (wallet.md:921-922).
 // - Every answer of the OS sheet is checked; a passkey without PRF is its own outcome ("no-prf"), never a silent
 //   fallback to some other seed: the caller opens the no-PRF path (wallet.md:48; card wallet-typed-words).
 import { PRF_INPUT, SIGN_HOST } from "../derive/constants.ts";
@@ -30,6 +31,7 @@ export interface PasskeyEnv {
   hasWebAuthn?: boolean; // typeof PublicKeyCredential !== "undefined" unless a test says
   random?: (b: Uint8Array<ArrayBuffer>) => unknown; // crypto.getRandomValues unless a test says
   hostname?: string; // location.hostname unless a test says
+  topLevel?: boolean; // window.top === window unless a test says
 }
 
 const prfInput = (): Uint8Array<ArrayBuffer> => new TextEncoder().encode(PRF_INPUT);
@@ -46,6 +48,10 @@ function envOf(env: PasskeyEnv) {
   // The ceremony runs on SIGN_HOST itself: the browser would refuse rp.id SIGN_HOST elsewhere anyway, and a copy of
   // this code on another page must not even try.
   if (hostname !== SIGN_HOST) throw new Error(`passkey sign-in runs on ${SIGN_HOST} only`);
+  // Sign-in runs top-level only, never in a frame (wallet.md:921-922): a framing page could hide the sheet's context.
+  const w = globalThis as { window?: { top?: unknown } };
+  const topLevel = env.topLevel ?? (w.window !== undefined && w.window.top === w.window);
+  if (!topLevel) throw new Error("passkey sign-in runs top-level only, never in a frame");
   const hasWebAuthn = env.hasWebAuthn ?? typeof globalThis.PublicKeyCredential !== "undefined";
   const credentials = env.credentials ?? globalThis.navigator?.credentials;
   return { bytes, hasWebAuthn: hasWebAuthn && !!credentials, credentials: credentials as CredentialsContainer };
@@ -78,10 +84,11 @@ function readAnswer(cred: Credential | null): PrfAnswer {
   return { credentialId: new Uint8Array(c.rawId), enabled, first };
 }
 
-// The PRF output to the entropy, then the output is wiped (best effort: the browser keeps its own copy until GC).
+// The PRF output to the entropy, then the output is wiped. `first` is a view of the browser's own result buffer, never a
+// copy, so the wipe zeroes the one copy this page holds (HKDF reads its input and keeps none).
 function unlock(first: Uint8Array, credentialId: Uint8Array): PasskeyOutcome {
   try {
-    return { kind: "prf", entropy: entropyFromPrf(new Uint8Array(first)), credentialId };
+    return { kind: "prf", entropy: entropyFromPrf(first), credentialId };
   } finally {
     first.fill(0);
   }

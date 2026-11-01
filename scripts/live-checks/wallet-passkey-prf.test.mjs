@@ -1,7 +1,9 @@
 // node --test scripts/live-checks/wallet-passkey-prf.test.mjs: the live check's verdict on its recorded answers, with
 // no browser and no network. good: a real run on the browser harness (SIGN_HOST's real name mapped to its build under
 // its own _headers), which passes. bad: the same run on a planted page whose no-PRF branch signs in with a random seed
-// without notice (the brief's recorded bad answer), which fails.
+// without notice (the brief's recorded bad answer), which fails. Round 2's recorded reds: badC6a2fbe, the page as it was
+// at c6a2fbe (Sign out shown in a frame, two tabs writing two seeds, no cross-tab sign out, no code_saved false), and
+// badNoGuard, a planted page without the "seed already stored" guard (a second tab runs a ceremony).
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -27,6 +29,22 @@ test("the recorded bad answer (no PRF falls back to a random seed without notice
   assert.deepEqual(bad(answers.bad).map((l) => l.split(" (")[0]), ["BAD no-prf: Create passkey opens the no-PRF path"]);
 });
 
+const BAD = (rec) => bad(rec).map((l) => l.split(" (")[0]);
+
+test("round 2's recorded reds fail on their own lines", () => {
+  assert.deepEqual(BAD(answers.badC6a2fbe), [
+    "BAD prf create: the seed record says code_saved false, the Backup dot shows",
+    "BAD prf reload: the seed record says code_saved false, the Backup dot shows",
+    "BAD prf signin: the seed record says code_saved false, the Backup dot shows",
+    "BAD prf: Sign out in one tab shows signed out in the other",
+    "BAD prf: framed by APP_HOST the page shows no sign-in or sign-out control",
+    "BAD prf: two tabs that create at once end on one account, the one stored",
+  ]);
+  assert.equal(answers.badC6a2fbe.prf.framed.buttons, 1, "c6a2fbe showed Sign out inside APP_HOST's frame");
+  assert.deepEqual(BAD(answers.badNoGuard), ["BAD prf: Create in a second tab with a seed already stored runs no ceremony and keeps the seed"]);
+  assert.equal(answers.badNoGuard.prf.guard.credentials, 1, "the guardless page ran a ceremony in the second tab");
+});
+
 test("each broken step fails the check", () => {
   const g = answers.good;
   const A = g.prf.steps.create.account;
@@ -44,6 +62,13 @@ test("each broken step fails the check", () => {
     ["no K_wrap", (r) => (r.prf.steps.signin.kWrap = null)],
     ["a seed record stored in the clear", (r) => (r.prf.steps.reload.seedWrapped = false)],
     ["something in localStorage", (r) => (r.prf.steps.signin.localStorage = 1)],
+    ["Sign out shown in APP_HOST's frame", (r) => (r.prf.framed.buttons = 1)],
+    ["a frame that never loaded", (r) => (r.prf.framed = { framed: null, state: null, buttons: 0, actions: 0 })],
+    ["a second tab that ran a ceremony", (r) => (r.prf.guard.credentials = 1)],
+    ["a second tab that replaced the seed", (r) => (r.prf.guard.ivAfter = "00".repeat(12))],
+    ["two tabs on two accounts", (r) => (r.prf.race.b.account = "22".repeat(32))],
+    ["the other tab still signed in after sign out", (r) => (r.prf.crossTab = { state: "signed-in", account: A })],
+    ["code_saved true on a new PRF seed", (r) => (r.prf.steps.create.codeSaved = "true")],
     ["a CSP violation", (r) => r.errors.push("console: Refused to load the script")],
     ["an empty record", (r) => Object.keys(r).forEach((k) => delete r[k])],
   ];

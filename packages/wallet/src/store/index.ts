@@ -50,6 +50,10 @@ export interface WalletStore {
   keys(store: WalletStoreName): Promise<string[]>;
   reserveDepositIndex(scope: bigint): Promise<number>;
   raiseDepositIndex(scope: bigint, min: number): Promise<number>;
+  // Writes the seed record only if none is stored, in one transaction (a compare-and-set on "absent"), so two tabs
+  // that both read "no seed" never write one over the other. Resolves to the record that is stored afterwards: this
+  // one when inserted, the other tab's when it lost.
+  insertSeed(seed: unknown): Promise<{ inserted: boolean; seed: unknown }>;
   signOut(): Promise<void>;
   close(): void;
 }
@@ -281,6 +285,11 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       tx.objectStore(store).put(w, key);
       await done(tx);
       notify([store]);
+    },
+    async insertSeed(seed) {
+      const inserted = await casPut("meta", "seed", undefined, await wrap("meta", "seed", seed));
+      if (inserted) notify(["meta"]);
+      return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
     },
     async delete(store, key) {
       checkCallerKey(store, key);
