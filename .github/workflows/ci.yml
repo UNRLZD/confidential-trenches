@@ -150,7 +150,7 @@ jobs:
 
   # Each package's own fast tests. Two heavy suites stay out of this job: the near-sandbox tests (a
   # cargo test target with required-features = ["sandbox"], which a plain cargo test skips) and Playwright (a
-  # package's test:e2e script, never its test script).
+  # package's test:e2e script, never its test script), but for the terminal's return-hop run below.
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -171,6 +171,13 @@ jobs:
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
+      # Every way off APP_HOST (sign-in, backup, export, sign-out, withdraw) hops to SIGN_HOST and back on the app's
+      # harness (apps/terminal/test/return-hop/run.mjs, about 30 s after Chromium's install). Left to hand runs, a stale
+      # stand-in failed it on main unseen for hours.
+      - name: the terminal's return-hop browser run
+        run: |
+          pnpm --filter terminal exec playwright install --with-deps chromium
+          pnpm --filter terminal run test:e2e
       - name: the vault's scripts' own tests
         run: pnpm run test:vault-scripts
       # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins

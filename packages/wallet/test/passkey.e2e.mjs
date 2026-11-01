@@ -3,7 +3,9 @@
 // own build under its own _headers (CSP with Trusted Types, Integrity-Policy): create, reload, sign out, sign in
 // (scripts/live-checks/wallet-passkey-prf.mjs's steps, and its verdict), then the account the page shows is the kit's
 // own derivation (kit-freeze-keys: entropyFromPrf, the 12 words, seed64, T_0) of that passkey's PRF output, and the kit
-// still gives A.8's vectors. A no-PRF authenticator opens the no-PRF path. A Playwright run in headless Chromium.
+// still gives A.8's vectors. A no-PRF authenticator (hasPrf false) lands on the backup screen, and the 12 words of A.8's
+// seed typed into Recovery code sign in as the kit's A.8 T_0 (card wallet-typed-words). A Playwright run in headless
+// Chromium.
 // The PRF output stays in this process's memory; nothing secret is printed. exit 0 all as expected, 1 otherwise.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -33,6 +35,12 @@ const a8 = JSON.parse(readFileSync(join(PKG, "test/vectors/a8.json"), "utf8"));
 const seed0 = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const t = a8.ids.filter((x) => x.kind === "profile");
 check("the kit still gives A.8's profile keys", t.length > 0 && t.every((x) => d.profileKey(seed0, x.k).id === x.id), `${t.length} vectors`);
+
+const typed = record.noPrf?.typed?.account;
+const t0 = t.find((x) => x.k === 0)?.id;
+check("typed A.8 words sign in on the page as the kit's A.8 T_0", !!t0 && typed === t0 && d.profileKey(seed0, 0).id === t0,
+  `${typed === t0 ? "equal" : "differs"}`);
+check("hasPrf false lands on the backup screen", record.noPrf?.create?.state === "backup", `${record.noPrf?.create?.state}`);
 
 const ok = results.every(Boolean);
 console.log(ok ? "passkey e2e: all as expected" : "passkey e2e: FAILED");
