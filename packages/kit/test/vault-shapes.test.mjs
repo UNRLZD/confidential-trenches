@@ -191,7 +191,7 @@ test("every move into the vault is the moving account's own ft_transfer_call; no
 test("salt, numbers and ids are refused in every form the vault refuses", () => {
   const c = numbers(V.context[0].input);
   const scope = BigInt(V.context[0].scope);
-  for (const salt of ["F".repeat(32), "0x" + "0".repeat(30), "0".repeat(31), "0".repeat(33), "g".repeat(32)]) {
+  for (const salt of ["F".repeat(32), "0x" + "0".repeat(30), "0x" + "0".repeat(32), "0".repeat(31), "0".repeat(33), "g".repeat(32)]) {
     assert.throws(() => S.vaultContextPreimage({ ...c, salt }, scope), /salt/, salt);
   }
   assert.throws(() => S.vaultContextPreimage({ ...c, refund_precommitment: 0n }, scope), /refund_precommitment/);

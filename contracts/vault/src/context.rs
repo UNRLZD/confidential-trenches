@@ -219,6 +219,7 @@ mod tests {
             "000000000000000000000000000000000", // 33
             "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",  // uppercase: a second spelling
             "0x000000000000000000000000000000",  // a prefix
+            "0x00000000000000000000000000000000", // 0x and 32 hex (34): a prefix, refused for its length
             "g0000000000000000000000000000000",
             " 0000000000000000000000000000000",
         ] {
