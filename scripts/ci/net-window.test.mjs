@@ -30,6 +30,7 @@ export const CHANGED = [
   "scripts/live-checks/kit-freeze-keys.mjs",
   "scripts/live-checks/kit-freeze-vault.mjs",
   "scripts/live-checks/money-gate-testnet.mjs",
+  "scripts/live-checks/signpage-postmessage.mjs",
   "scripts/live-checks/signpage-skeleton.mjs",
   "scripts/live-checks/vault-setup-files.mjs",
   "scripts/live-checks/vault-skeleton.mjs",

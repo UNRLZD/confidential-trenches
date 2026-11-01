@@ -4,7 +4,8 @@
 // - On open the page reads its own store first (wallet.md:50): with a seed there it is signed in, with no passkey sheet
 //   (wallet.md:155); with none it offers the passkey ways in.
 // - Sign-in and sign-out run top-level only (wallet.md:921-922). In a frame (APP_HOST may frame this page) it shows
-//   neither control and both steps refuse, so a framing page cannot get a click on them.
+//   neither control and both steps refuse, so a framing page cannot get a click on them. In the frame the page speaks
+//   the postMessage API (src/api.ts, card signpage-postmessage), started below.
 // - Create passkey / Use passkey run the ceremony (@blindfill/wallet/signin/passkey). A PRF result becomes the seed's
 //   entropy, written by the store's insertSeed only if no seed is stored (two tabs never write one over the other); the
 //   record is 06b:459's { v, entropy, source: "prf", code_saved: false, created_ms } (ses.2, ses.7, 06b:776, :781), so
@@ -29,6 +30,7 @@ import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/der
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
 import { backupFirst, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { activationGuard, type Press } from "./guard.ts";
+import { signedOutState, startApi } from "./api.ts";
 
 type Seed = { v: 1; entropy: Uint8Array; source: "prf" | "random" | "code" | "wallet"; code_saved: boolean; created_ms: number };
 type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error";
@@ -210,3 +212,5 @@ void run(async () => {
   if (s) show("signed-in", shown(s));
   else show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
 });
+
+if (framed) startApi({ parent: window.parent, listen: (fn) => window.addEventListener("message", fn), state: signedOutState });

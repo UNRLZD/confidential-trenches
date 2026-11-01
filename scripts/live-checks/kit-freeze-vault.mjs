@@ -5,7 +5,7 @@
 //   - shapes.ts loads as one module with no static import (its types stripped by Node);
 //   - every data export equals the values pinned below from the vault paper (research main ffcba5e): the constants
 //     (2.2), the fields, the deposit message and its carrier for U, R and V (2.5.1, 7.1), the ft_withdraw path the kit
-//     never signs, the calls (2.3, 2.5.2-2.5.5), the proof signals, the events and their field lists (7.1; the CO's call:
+//     never signs, the calls (2.3, 2.5.2-2.5.5), the proof signals, the events and their field lists (7.1; decided:
 //     data is an array), since this repo carries no papers (the setup files' pins are ZK_SETUP_FILES's, checked by
 //     vault-setup-files's own live check);
 //   - every function behaves as the paper says on fixed cases (the depositor in every refused form, upper case
