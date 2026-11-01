@@ -21,8 +21,10 @@ import { readFileSync } from "node:fs";
 import { bn254 } from "@noble/curves/bn254.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
+  VAULT_CONSTANTS,
   VAULT_FIELD_P,
   VAULT_FIELD_Q,
+  ZK_SETUP_FILES,
   vaultContextInput,
   vaultContextOf,
   vaultRelayFeeWithinBackstop,
@@ -37,9 +39,9 @@ export const WITHDRAW_CHECK_CODES = ["bad_shape", "bad_proof", "bad_fee_recipien
 export type WithdrawCheckCode = (typeof WITHDRAW_CHECK_CODES)[number];
 
 /** sha256 of the ceremony's withdraw.vkey (the kit's ZK_SETUP_FILES pin; V:522). The file beside this one must hash to it. */
-export const WITHDRAW_VKEY_SHA256 = "666bd0983b20c1611543b04f7712e067fbe8cad69f07ada8a310837ff398d21e"; // gitleaks:allow (a public file hash)
-/** The vault's MAX_TREE_DEPTH (rows 4 and 7). */
-export const MAX_TREE_DEPTH = 32n;
+export const WITHDRAW_VKEY_SHA256 = ZK_SETUP_FILES["withdraw.vkey"].sha256;
+/** The vault's MAX_TREE_DEPTH (rows 4 and 7): the kit's VAULT_CONSTANTS.MAX_TREE_DEPTH. */
+export const MAX_TREE_DEPTH = BigInt(VAULT_CONSTANTS.MAX_TREE_DEPTH);
 
 const KEYS = ["withdrawal", "proof", "public_signals", "fund_recipient", "token"] as const;
 const OPTIONAL: ReadonlySet<string> = new Set(["fund_recipient"]);
