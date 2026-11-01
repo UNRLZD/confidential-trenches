@@ -1,0 +1,548 @@
+{
+ "good": {
+  "note": "apps/helper at 0c8f86c (card/helper-rpc-proxy) run with node src/server.ts on the owner's Mac, no RPC URL set, so each chain used its public default (api.mainnet-beta.solana.com, mainnet.base.org, rpc.mainnet.chain.robinhood.com, rpc.mainnet.fastnear.com); read 2026-11-01T06:23:37.318Z (api.confidential.unrealized.trade does not run this commit yet)",
+  "base": "http://127.0.0.1:18090",
+  "reads": [
+   {
+    "chain": "solana",
+    "kind": "listed",
+    "id": 1,
+    "readAt": "2026-11-01T06:23:37.318Z",
+    "ms": 175,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "44",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:37 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":442011348,\"id\":1}\n"
+   },
+   {
+    "chain": "solana",
+    "kind": "unlisted",
+    "id": 2,
+    "readAt": "2026-11-01T06:23:37.494Z",
+    "ms": 3,
+    "status": 400,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "39",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:37 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "chain": "base",
+    "kind": "listed",
+    "id": 3,
+    "readAt": "2026-11-01T06:23:37.497Z",
+    "ms": 241,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "45",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:37 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"0x32e3f03\"}"
+   },
+   {
+    "chain": "base",
+    "kind": "unlisted",
+    "id": 4,
+    "readAt": "2026-11-01T06:23:37.738Z",
+    "ms": 2,
+    "status": 400,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "39",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:37 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "chain": "robinhood",
+    "kind": "listed",
+    "id": 5,
+    "readAt": "2026-11-01T06:23:37.740Z",
+    "ms": 288,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "46",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:38 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":\"0x6264c95\"}\n"
+   },
+   {
+    "chain": "robinhood",
+    "kind": "unlisted",
+    "id": 6,
+    "readAt": "2026-11-01T06:23:38.028Z",
+    "ms": 1,
+    "status": 400,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "39",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:38 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "chain": "near",
+    "kind": "listed",
+    "id": 7,
+    "readAt": "2026-11-01T06:23:38.029Z",
+    "ms": 205,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "59",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:38 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"gas_price\":\"100000000\"},\"id\":7}"
+   },
+   {
+    "chain": "near",
+    "kind": "unlisted",
+    "id": 8,
+    "readAt": "2026-11-01T06:23:38.234Z",
+    "ms": 4,
+    "status": 400,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "39",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:38 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   }
+  ]
+ },
+ "bad_open": {
+  "note": "the same source with rpc.ts's allowlist check removed (a planted open-RPC build), run the same way: every unlisted method reached its provider; read 2026-11-01T06:23:38.312Z",
+  "base": "http://127.0.0.1:18091",
+  "reads": [
+   {
+    "chain": "solana",
+    "kind": "listed",
+    "id": 1,
+    "readAt": "2026-11-01T06:23:38.312Z",
+    "ms": 329,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "44",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:38 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":442011353,\"id\":1}\n"
+   },
+   {
+    "chain": "solana",
+    "kind": "unlisted",
+    "id": 2,
+    "readAt": "2026-11-01T06:23:38.644Z",
+    "ms": 143,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "89",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:38 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32602,\"message\":\"Missing parameter at index 0\"},\"id\":2}"
+   },
+   {
+    "chain": "base",
+    "kind": "listed",
+    "id": 3,
+    "readAt": "2026-11-01T06:23:38.788Z",
+    "ms": 385,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "45",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:39 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"0x32e3f04\"}"
+   },
+   {
+    "chain": "base",
+    "kind": "unlisted",
+    "id": 4,
+    "readAt": "2026-11-01T06:23:39.173Z",
+    "ms": 351,
+    "status": 503,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "29",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:39 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "chain": "robinhood",
+    "kind": "listed",
+    "id": 5,
+    "readAt": "2026-11-01T06:23:39.524Z",
+    "ms": 647,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "46",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:40 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":\"0x6264ca8\"}\n"
+   },
+   {
+    "chain": "robinhood",
+    "kind": "unlisted",
+    "id": 6,
+    "readAt": "2026-11-01T06:23:40.171Z",
+    "ms": 296,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "37",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:40 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":[]}\n"
+   },
+   {
+    "chain": "near",
+    "kind": "listed",
+    "id": 7,
+    "readAt": "2026-11-01T06:23:40.467Z",
+    "ms": 460,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "59",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:40 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"gas_price\":\"100000000\"},\"id\":7}"
+   },
+   {
+    "chain": "near",
+    "kind": "unlisted",
+    "id": 8,
+    "readAt": "2026-11-01T06:23:40.927Z",
+    "ms": 60,
+    "status": 400,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "367",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:40 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "0c8f86c52ce7177dbe1669cbb775072415e43464"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"name\":\"REQUEST_VALIDATION_ERROR\",\"cause\":{\"name\":\"PARSE_ERROR\",\"info\":{\"error_message\":\"Failed parsing args: invalid type: sequence, expected struct RpcStateChangesInBlockByTypeRequest\"}},\"code\":-32700,\"message\":\"Parse error\",\"data\":\"Failed parsing args: invalid type: sequence, expected struct RpcStateChangesInBlockByTypeRequest\"},\"id\":8}"
+   }
+  ]
+ },
+ "bad_base": {
+  "note": "apps/helper at main ba6dc21 (before this card), run the same way: no /v1/rpc route, 404 on every call; read 2026-11-01T06:23:41.020Z",
+  "base": "http://127.0.0.1:18092",
+  "reads": [
+   {
+    "chain": "solana",
+    "kind": "listed",
+    "id": 1,
+    "readAt": "2026-11-01T06:23:41.020Z",
+    "ms": 28,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "chain": "solana",
+    "kind": "unlisted",
+    "id": 2,
+    "readAt": "2026-11-01T06:23:41.049Z",
+    "ms": 2,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "chain": "base",
+    "kind": "listed",
+    "id": 3,
+    "readAt": "2026-11-01T06:23:41.051Z",
+    "ms": 2,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "chain": "base",
+    "kind": "unlisted",
+    "id": 4,
+    "readAt": "2026-11-01T06:23:41.053Z",
+    "ms": 1,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "chain": "robinhood",
+    "kind": "listed",
+    "id": 5,
+    "readAt": "2026-11-01T06:23:41.055Z",
+    "ms": 1,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "chain": "robinhood",
+    "kind": "unlisted",
+    "id": 6,
+    "readAt": "2026-11-01T06:23:41.056Z",
+    "ms": 1,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "chain": "near",
+    "kind": "listed",
+    "id": 7,
+    "readAt": "2026-11-01T06:23:41.057Z",
+    "ms": 1,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "chain": "near",
+    "kind": "unlisted",
+    "id": 8,
+    "readAt": "2026-11-01T06:23:41.058Z",
+    "ms": 1,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "21",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 01 Nov 2026 06:23:41 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "ba6dc21a0c9e6883924a7d206eac28df0b52e437"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   }
+  ]
+ }
+}
