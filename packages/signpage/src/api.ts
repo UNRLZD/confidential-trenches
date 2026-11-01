@@ -145,7 +145,8 @@ function isStateRequest(m: Record<string, unknown>): boolean {
  * its first answer, never a second run; the same id with another body is refused "id_reused" (an ErrorCode string,
  * messages.ts), `state` included. `state` is read fresh each time and never kept, so polling it pushes out no other
  * id. A change the host reports reads the state in the same queue and posts a `state` event when it differs from the
- * last state sent (answer or event), so an event never overtakes a newer answer. A kind that moves money writes its id to the wallet store before it signs (wallet.md §7 item 4), with that card.
+ * last state sent (answer or event), so an event never overtakes a newer answer. A kind that moves money writes its id
+ * to the wallet store before it signs (wallet.md §7 item 4), with that card.
  */
 export function startApi(host: ApiHost): { idle(): Promise<void> } {
   const answered = new Map<string, { sha: string; answer: SignpageAnswer }>();
