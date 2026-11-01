@@ -229,6 +229,7 @@ const CASES: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uin
   ["S10 a confidential transfer mint", "S10", (c) => { const m = withExt(c.reads.mint[0] as SolanaAccountRead, 4, new Uint8Array(65)); (c.reads as { mint: unknown }).mint = [m, m]; }],
   ["S10 non-transferable", "S10", (c) => { const m = withExt(c.reads.mint[0] as SolanaAccountRead, 9, new Uint8Array(0)); (c.reads as { mint: unknown }).mint = [m, m]; }],
   ["S11 provider B's simulation fails", "S11", (c) => { (c.reads.simulations[1] as SolanaSimulation).err = { InstructionError: [6, { Custom: 6001 }] }; }],
+  ["S11 a simulation error that cannot be printed refuses, never throws", "S11", (c) => { (c.reads.simulations[1] as SolanaSimulation).err = 1n; }],
   ["S11 no simulation on provider B", "S11", (c) => { (c.reads as { simulations: unknown }).simulations = [c.reads.simulations[0], null]; }],
   ["S11 native out 1 lamport over the bound", "S11", (c) => { const s = c.reads.simulations[0] as SolanaSimulation; s.walletLamports.post -= 1n + (s.walletLamports.pre - s.walletLamports.post - (9_874_873n + 13_001n + 15_000n + 1_513_840n + 1_346_200n)); }],
   ["S11 token in below minOut", "S11", (c) => { (c.reads.simulations[1] as SolanaSimulation).tokenAccount.post = 46_256_353_719n; }],

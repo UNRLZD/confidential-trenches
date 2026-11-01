@@ -501,7 +501,26 @@ export function checkSolanaQuote(txBytes: Uint8Array, req: SolanaQuoteRequest, r
   } catch (err) {
     return { ok: false, results: [fail("DECODE", `cannot decode the transaction: ${(err as Error).message}`)] };
   }
-  const wk = walk(c);
-  const results = [s1(c), s2(c), s3(c), s4(c), s5(wk), s6(c), s7(c), s8(c), s9(c), s10(c), s11(c), s12(c), s13(c, wk)];
+  // A check that throws on a hostile read refuses; it never throws past the device.
+  const guard = (id: SolanaQuoteCheckId, f: () => SolanaQuoteResult): SolanaQuoteResult => {
+    try {
+      return f();
+    } catch (err) {
+      return fail(id, `threw: ${(err as Error).message}`);
+    }
+  };
+  let wk: Walk;
+  try {
+    wk = walk(c);
+  } catch (err) {
+    wk = { wrong: [`S5 threw: ${(err as Error).message}`, `S13 threw: ${(err as Error).message}`], created: new Map(), closed: new Map() };
+  }
+  const ctx = c;
+  const results = [
+    guard("S1", () => s1(ctx)), guard("S2", () => s2(ctx)), guard("S3", () => s3(ctx)), guard("S4", () => s4(ctx)),
+    guard("S5", () => s5(wk)), guard("S6", () => s6(ctx)), guard("S7", () => s7(ctx)), guard("S8", () => s8(ctx)),
+    guard("S9", () => s9(ctx)), guard("S10", () => s10(ctx)), guard("S11", () => s11(ctx)), guard("S12", () => s12(ctx)),
+    guard("S13", () => s13(ctx, wk)),
+  ];
   return { ok: results.every((r) => r.ok), results };
 }
