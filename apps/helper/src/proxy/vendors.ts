@@ -6,10 +6,11 @@
 // caller's JSON body byte for byte and its query string. `cacheMs` is set only for public lists that are the same for
 // every caller (H2.1 "Cached" column: token lists, never a quote, a build or a status); a per-user query such as a
 // search is never cached, since a cache hit would tell one caller what another asked for.
-// The four vendors are the kit's HELPER_PROXY_VENDORS (packages/kit/src/helper/v1.ts), written again here: the image is
-// built from apps/helper alone and nothing outside the kit's public entry may reach the kit.
-export const VENDOR_NAMES = ["jupiter", "relay", "lifi", "oneclick"] as const;
-export type VendorName = (typeof VENDOR_NAMES)[number];
+// The four vendors are the kit's HELPER_PROXY_VENDORS (packages/kit/src/helper/v1.ts), imported from its public entry.
+import { HELPER_PROXY_VENDORS, type HelperProxyVendor } from "@blindfill/kit";
+
+export const VENDOR_NAMES = HELPER_PROXY_VENDORS;
+export type VendorName = HelperProxyVendor;
 
 export type Upstream = { method: "GET" | "POST"; cacheMs?: number };
 

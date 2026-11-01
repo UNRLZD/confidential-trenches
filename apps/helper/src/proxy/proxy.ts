@@ -9,9 +9,11 @@
 // down, slow, out of quota, refusing our key, or answering anything but JSON within the size cap answers
 // 503 upstream, so the device falls back to its public path (H2.3). A 429 is honoured: the vendor is left alone until
 // its reset, and a request that would wait more than WAIT_MAX_MS for it answers 503 at once.
+import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER, HELPER_V1_PATHS, type HelperV1Path } from "@blindfill/kit";
 import { VENDOR_NAMES, VENDORS, type Upstream, type Vendor, type VendorName } from "./vendors.ts";
 
-export const PROXY_BODY_MAX = 65_536; // H7 "body 64 KB"
+/** H7 "body 64 KB": the kit's /v1/proxy/{vendor}/{path} row of HELPER_V1_PATHS. */
+export const PROXY_BODY_MAX = HELPER_V1_PATHS.find((r): r is Extract<HelperV1Path, { path: "/v1/proxy/{vendor}/{path}" }> => r.path === "/v1/proxy/{vendor}/{path}")!.limitBytes;
 export const QUERY_MAX = 4_096;
 export const ANSWER_MAX = 4 * 1024 * 1024; // a trending list is ~250 KB (D-S3); a build or quote a few KB
 export const TIMEOUT_MS = 8_000;
@@ -165,7 +167,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (!Object.hasOwn(VENDORS, vendor)) return error(404, "not_found");
     const name = vendor as VendorName;
     const v = VENDORS[name];
-    const source = (a: ProxyAnswer): ProxyAnswer => ({ ...a, headers: { "X-Helper-Source": name, ...a.headers } });
+    const source = (a: ProxyAnswer): ProxyAnswer => ({ ...a, headers: { [HELPER_SOURCE_HEADER]: name, ...a.headers } });
     if (!Object.hasOwn(v.paths, path)) return source(error(400, "path_not_allowed"));
     const up = v.paths[path]!;
     if (Buffer.byteLength(body) > PROXY_BODY_MAX) return source(error(413, "too_large"));
@@ -192,7 +194,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       }
     } else out = await call(name, v, up, path, qs, up.method === "POST" ? body : "");
     if (!("fetchedAt" in out)) return source(out);
-    return source({ status: out.status, headers: { "X-Fetched-At": out.fetchedAt }, body: out.body });
+    return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body });
   }
 
   return { handle, keyCount: Object.keys(keys).length };
