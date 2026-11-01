@@ -10,6 +10,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --account checks another account against the same deployment record (the recorded bad answers). --record writes every
 // RPC answer the run read to <file>, so the check's test can replay it.
+import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";

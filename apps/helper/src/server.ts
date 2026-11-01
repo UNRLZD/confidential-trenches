@@ -11,11 +11,15 @@
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { health } from "./health.ts";
+import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
-const PROXY_PREFIX = "/v1/proxy/";
+// The route prefix of every part this server mounts. /v1/health reads its "up" parts from these keys and the
+// dispatch below reads each prefix from here, so a part is up exactly when its routes are mounted.
+const MOUNTED = { proxy: "/v1/proxy/" } as const satisfies Partial<Record<Part, string>>;
+const PROXY_PREFIX = MOUNTED.proxy;
+const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 export const ORIGINS: ReadonlySet<string> = new Set([
   "https://confidential.unrealized.trade",
@@ -110,7 +114,7 @@ export function handler(commit: string, proxy: Proxy = createProxy(process.env))
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit), cors(req));
+        return send(200, health(commit, SERVED), cors(req));
       }
       if (path.startsWith(PROXY_PREFIX)) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });

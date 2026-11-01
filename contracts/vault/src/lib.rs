@@ -13,6 +13,7 @@
 
 pub mod constants;
 pub mod field;
+pub mod poseidon;
 
 use constants::*;
 use near_sdk::collections::{LookupMap, LookupSet, Vector};
