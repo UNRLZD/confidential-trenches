@@ -55,13 +55,21 @@ test("the committed _headers and a build that carries them pass", () => {
   assert.deepEqual(checkDir(BUILD), []);
 });
 
-test("frame-src is exactly SIGN_HOST", () => {
-  assert.match(CSP, new RegExp(`frame-src ${SIGN};`));
-  refused(checkCsp(csp(`frame-src ${SIGN};`, "")), /^CSP frame-src missing/);
-  refused(checkCsp(csp(`frame-src ${SIGN};`, `frame-src ${SIGN} https://evil.ct.test;`)), /frame-src must be exactly/);
-  refused(checkCsp(csp(`frame-src ${SIGN};`, `frame-src ${SIGN} https://evil.ct.test;`)), /evil\.ct\.test is not allowed there/);
-  refused(checkCsp(csp(`frame-src ${SIGN};`, "frame-src *;")), /frame-src contains \*: a wildcard/);
-  refused(checkCsp(csp(`frame-src ${SIGN};`, "frame-src https://*.unrealized.trade;")), /a wildcard/);
+test("frame-src is exactly 'none': the terminal frames nothing, it runs inside SIGN_HOST's shell", () => {
+  assert.match(CSP, /frame-src 'none';/);
+  refused(checkCsp(csp("frame-src 'none';", "")), /^CSP frame-src missing/);
+  refused(checkCsp(csp("frame-src 'none';", `frame-src ${SIGN};`)), /frame-src must be exactly 'none'/);
+  refused(checkCsp(csp("frame-src 'none';", "frame-src *;")), /frame-src contains \*: a wildcard/);
+});
+
+test("frame-ancestors is exactly SIGN_HOST: only SIGN_HOST's shell may frame the terminal", () => {
+  assert.match(CSP, new RegExp(`frame-ancestors ${SIGN};`));
+  refused(checkCsp(csp(`frame-ancestors ${SIGN};`, "")), /^CSP frame-ancestors missing/);
+  refused(checkCsp(csp(`frame-ancestors ${SIGN};`, "frame-ancestors 'none';")), /frame-ancestors must be exactly/);
+  refused(checkCsp(csp(`frame-ancestors ${SIGN};`, "frame-ancestors 'self';")), /frame-ancestors must be exactly/);
+  refused(checkCsp(csp(`frame-ancestors ${SIGN};`, `frame-ancestors ${SIGN} https://evil.ct.test;`)), /evil\.ct\.test is not allowed there/);
+  refused(checkCsp(csp(`frame-ancestors ${SIGN};`, "frame-ancestors *;")), /frame-ancestors contains \*: a wildcard/);
+  refused(checkCsp(csp(`frame-ancestors ${SIGN};`, "frame-ancestors https://*.unrealized.trade;")), /a wildcard/);
 });
 
 test("script-src refuses 'wasm-unsafe-eval', 'unsafe-inline', 'unsafe-eval', 'unsafe-hashes'", () => {
@@ -82,11 +90,10 @@ test("blob:, http:, https: and other bare schemes are refused", () => {
   refused(checkCsp(csp("connect-src 'self'", "connect-src 'self' http://rpc.mainnet.near.org")), /http:\/\/rpc\.mainnet\.near\.org is not allowed there/);
 });
 
-test("worker-src, default-src and frame-ancestors are exactly 'none'", () => {
+test("worker-src and default-src are exactly 'none'", () => {
   refused(checkCsp(csp("worker-src 'none';", "worker-src 'self';")), /worker-src must be exactly 'none'/);
   refused(checkCsp(csp("worker-src 'none';", "")), /worker-src missing/);
   refused(checkCsp(csp("default-src 'none';", "default-src 'self';")), /default-src must be exactly 'none'/);
-  refused(checkCsp(csp("frame-ancestors 'none';", "frame-ancestors 'self';")), /frame-ancestors must be exactly 'none'/);
   refused(checkCsp(csp("trusted-types 'none';", "trusted-types default;")), /trusted-types must be exactly 'none'/);
 });
 
@@ -106,13 +113,14 @@ test("Permissions-Policy: WebAuthn is () and no feature is turned on", () => {
   assert.deepEqual(checkPermissions(`${PP}, fullscreen=()`), []);
 });
 
-test("Integrity-Policy, HSTS, COOP, X-Frame-Options and the rest must be exact; COEP must not be sent", () => {
+test("Integrity-Policy, HSTS, COOP and the rest must be exact; COEP and X-Frame-Options must not be sent", () => {
   const drop = (name: string) => FILE.replace(new RegExp(`\\n  ${name}: .*`), "");
   refused(checkHeadersFile(drop("Integrity-Policy")), /^integrity-policy missing \(must be blocked-destinations=\(script\)\)/);
   refused(checkHeadersFile(FILE.replace("blocked-destinations=(script)", "blocked-destinations=()")), /integrity-policy must be/);
   refused(checkHeadersFile(FILE.replace("max-age=63072000", "max-age=31536000")), /strict-transport-security must be/);
   refused(checkHeadersFile(FILE.replace("Opener-Policy: same-origin", "Opener-Policy: same-origin-allow-popups")), /cross-origin-opener-policy must be same-origin/);
-  refused(checkHeadersFile(drop("X-Frame-Options")), /x-frame-options missing/);
+  // any X-Frame-Options value would refuse SIGN_HOST's shell: DENY and SAMEORIGIN both, and ALLOW-FROM is obsolete
+  for (const v of ["DENY", "SAMEORIGIN"]) refused(checkHeadersFile(`${FILE}  X-Frame-Options: ${v}\n`), /x-frame-options must not be sent/);
   refused(checkHeadersFile(drop("Content-Security-Policy")), /Content-Security-Policy missing/);
   refused(checkHeadersFile(`${FILE}  Cross-Origin-Embedder-Policy: require-corp\n`), /cross-origin-embedder-policy must not be sent/);
   refused(checkHeadersFile(`${FILE}  Content-Security-Policy-Report-Only: default-src *\n`), /report-only must not be sent/);
@@ -122,7 +130,7 @@ test("the _headers file: one /* rule, no policy header set or removed elsewhere,
   refused(checkHeadersFile(`${FILE}/index.html\n  ! Content-Security-Policy\n`), /rule \/index\.html removes content-security-policy/);
   refused(checkHeadersFile(`${FILE}/x/*\n  Content-Security-Policy: default-src *\n`), /rule \/x\/\* sets Content-Security-Policy/);
   assert.deepEqual(checkHeadersFile(`${FILE}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n`), []);
-  refused(checkHeadersFile(`${FILE}  X-Frame-Options: SAMEORIGIN\n`), /sets X-Frame-Options twice/);
+  refused(checkHeadersFile(`${FILE}  Referrer-Policy: origin\n`), /sets Referrer-Policy twice/);
   refused(checkHeadersFile(`${FILE}/*\n  Cache-Control: no-store\n`), /exactly one \/\* rule \(has 2\)/);
   refused(checkHeadersFile(FILE.replace("upgrade-insecure-requests", `upgrade-insecure-requests${" ".repeat(1500)}`)), /over Pages' 2,000 character limit/);
 });

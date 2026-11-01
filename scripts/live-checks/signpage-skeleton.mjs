@@ -5,9 +5,11 @@
 //   - the answer is 200;
 //   - the CSP equals the wallet paper's block (2.7) with HELPER_HOST and RPC_A, RPC_B, RPC_C put in: every directive
 //     equal, none missing, none added, one policy only;
-//   - frame-ancestors lets APP_HOST frame the page and blocks a page framed from https://example.com;
-//   - Integrity-Policy, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options and Permissions-Policy equal the
-//     policy's, and no X-Frame-Options, Cross-Origin-Embedder-Policy or report-only CSP is sent.
+//   - SIGN_HOST is the top window and frames APP_HOST (card signpage-shell): frame-ancestors 'none' blocks every
+//     framing page, APP_HOST and https://example.com included, and frame-src names APP_HOST only;
+//   - Integrity-Policy, Origin-Agent-Cluster, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options and
+//     Permissions-Policy equal the policy's, and no X-Frame-Options, Cross-Origin-Embedder-Policy or report-only CSP is
+//     sent.
 //   node scripts/live-checks/signpage-skeleton.mjs [--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the answer the run read ({ url, status, headers }) to <file>, so the check's test can replay it.
 // packages/signpage/scripts/deploy.mjs runs judge() on the build's _headers before any upload.
@@ -32,7 +34,8 @@ export const CSP = [
   ["style-src", "'self'"],
   ["img-src", "'self' data:"],
   ["font-src", "'self'"], // app.md finding 1 (l.1085): the top-level SIGN_HOST screens draw in the brand fonts
-  ["frame-ancestors", APP],
+  ["frame-src", APP], // the shell's one frame (card signpage-shell)
+  ["frame-ancestors", "'none'"], // nothing frames SIGN_HOST: it is the top window
   ["base-uri", "'none'"],
   ["form-action", "'none'"],
   ["object-src", "'none'"],
@@ -42,6 +45,7 @@ export const CSP = [
 // Integrity-Policy from the wallet paper's block; the rest from the app paper's SIGN_HOST column (app.md 2.3)
 export const HEADERS = {
   "integrity-policy": "blocked-destinations=(script)",
+  "origin-agent-cluster": "?1", // card signpage-shell: a hint to keep SIGN_HOST's agent cluster apart from APP_HOST's
   "strict-transport-security": "max-age=63072000; includeSubDomains",
   "cross-origin-opener-policy": "same-origin",
   "cross-origin-resource-policy": "same-origin",
@@ -52,7 +56,8 @@ export const HEADERS = {
     "display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), " +
     "publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
 };
-// X-Frame-Options cannot name APP_HOST, so it is never sent; no cross-origin isolation; no policy left report-only
+// X-Frame-Options would repeat frame-ancestors, so it is not sent; no cross-origin isolation (COEP would make the APP_HOST
+// frame need CORP and COEP of its own); no policy left report-only
 export const ABSENT = ["x-frame-options", "cross-origin-embedder-policy", "content-security-policy-report-only"];
 
 const ws = (s) => s.trim().replace(/\s+/g, " ");
@@ -118,9 +123,10 @@ export function judge({ status, headers }) {
     say(extra.length === 0 && twice.length === 0, `CSP has no directive beyond the policy's${extra.length ? `: extra ${extra.join(" ")}` : ""}${twice.length ? `: twice ${twice.join(" ")}` : ""}`);
     const fa = got.get("frame-ancestors");
     const sources = fa === undefined ? undefined : fa.split(" ").filter(Boolean);
-    const app = sources !== undefined && frameAllowed(sources, APP);
+    // no frame-ancestors lets every page frame this one
+    const app = sources === undefined || frameAllowed(sources, APP);
     const stranger = sources === undefined || frameAllowed(sources, STRANGER);
-    say(app, `framed from ${APP}: ${app ? "allowed" : "blocked"}`);
+    say(!app, `framed from ${APP}: ${app ? `allowed${sources === undefined ? " (no frame-ancestors)" : ""}` : "blocked"}`);
     say(!stranger, `framed from ${STRANGER}: ${stranger ? `allowed${sources === undefined ? " (no frame-ancestors)" : ""}` : "blocked"}`);
   }
   for (const [k, want] of Object.entries(HEADERS)) {

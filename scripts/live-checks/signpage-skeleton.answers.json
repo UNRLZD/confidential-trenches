@@ -1,19 +1,20 @@
 {
  "good": {
-  "note": "packages/signpage at a018e83 plus round 2 (font-src self), built by deploy.mjs --dry-run and served by wrangler 4.151.1 pages dev (the Pages runtime on this Mac), read 2026-11-01 01:14:25Z",
+  "note": "packages/signpage on card/signpage-shell after bb4239d (the shell headers: frame-ancestors none, frame-src APP_HOST, Origin-Agent-Cluster), built by deploy.mjs --dry-run and served by wrangler 4.151.1 pages dev (the Pages runtime on this Mac), read 2026-11-01T13:55:48Z",
   "url": "http://127.0.0.1:8791/",
   "status": 200,
   "headers": {
    "access-control-allow-origin": "*",
    "cache-control": "public, max-age=0, must-revalidate",
    "content-encoding": "gzip",
-   "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+   "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
    "content-type": "text/html; charset=utf-8",
    "cross-origin-opener-policy": "same-origin",
    "cross-origin-resource-policy": "same-origin",
-   "date": "Sun, 01 Nov 2026 01:14:25 GMT",
-   "etag": "\"33732260dac4fd32150422a45be3bcad\"",
+   "date": "Sun, 01 Nov 2026 13:55:48 GMT",
+   "etag": "\"3bb6b807bbad3b2fda79128e215a979a\"",
    "integrity-policy": "blocked-destinations=(script)",
+   "origin-agent-cluster": "?1",
    "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
    "referrer-policy": "no-referrer",
    "strict-transport-security": "max-age=63072000; includeSubDomains",
@@ -39,6 +40,34 @@
    "retry-after": "120",
    "server": "cloudflare",
    "x-frame-options": "SAMEORIGIN"
+  }
+ },
+ "framed": {
+  "note": "the live SIGN_HOST before card signpage-shell (APP_HOST framed it), read by signpage-skeleton.mjs --record at 2026-11-01T13:42:43Z",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "status": 200,
+  "headers": {
+   "access-control-allow-origin": "*",
+   "alt-svc": "h3=\":443\"; ma=86400",
+   "cache-control": "public, max-age=0, must-revalidate",
+   "cf-ray": "a53b5305add6dd6e-HKG",
+   "connection": "keep-alive",
+   "content-encoding": "br",
+   "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors https://confidential.unrealized.trade; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+   "content-type": "text/html; charset=utf-8",
+   "cross-origin-opener-policy": "same-origin",
+   "cross-origin-resource-policy": "same-origin",
+   "date": "Sun, 01 Nov 2026 13:42:43 GMT",
+   "etag": "W/\"e2d9b25d9c3bc2517937f3f7f94b38f3\"",
+   "integrity-policy": "blocked-destinations=(script)",
+   "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+   "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+   "referrer-policy": "no-referrer",
+   "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=ME6WpTn2NOF4BqrMpHHho3wutkU1QSjDGL9fbJGv%2F%2FBIvZf9aZlY1Bf3KPOmk9g%2B7KR3ZXUh8VOCxmBvg%2Bqx3Lz4Oa0NNWXMDb2jNL1ttO%2BHdSyQ2M0n7nwoknDZXS9f6AyD9KbGvtSacrh7cYk5w7ubOkMI\"}]}",
+   "server": "cloudflare",
+   "strict-transport-security": "max-age=63072000; includeSubDomains",
+   "transfer-encoding": "chunked",
+   "x-content-type-options": "nosniff"
   }
  }
 }
