@@ -399,6 +399,31 @@ impl Harness {
         Ok(h)
     }
 
+    /// `start`, then tests/test-vault (`TEST_VAULT_WASM`, the vault's deposit surface only) at the vault's account by the
+    /// 2.8 recipe's shape with `new(token)` in place of `config`, then `kind`'s token at TOKEN with that account
+    /// registered on it, as `with_vault_and` does. It stands in for the vault's deposit rows until card
+    /// vault-deposit-insert lands (tests/relayer_send.rs).
+    pub async fn with_test_vault_and(kind: TokenKind) -> R<Self> {
+        let mut h = Self::start().await?;
+        let wasm = wasm_from_env("TEST_VAULT_WASM")?;
+        let transfer = (wasm.len() as u128 + 100) * YOCTO_PER_BYTE + NearToken::from_near(1).as_yoctonear();
+        let tx = h
+            .root
+            .batch(&h.vault)
+            .create_account()
+            .transfer(NearToken::from_yoctonear(transfer))
+            .deploy(&wasm)
+            .call(Function::new("new").args_json(json!({"token": h.token})).gas(CONFIG_GAS).deposit(NearToken::from_yoctonear(0)));
+        let result = tx.transact().await?;
+        h.outcome(h.root.id(), result).await?.expect_all_ok("the test vault's deploy")?;
+        match kind {
+            TokenKind::Mock => h.deploy_mock_token().await?,
+            TokenKind::Usdc => h.deploy_usdc().await?,
+        }
+        let _ = h.storage_deposit(&h.root, &h.vault).await?;
+        Ok(h)
+    }
+
     /// The deploy recipe of vault.md 2.8: the parent signs one transaction to `vault.<parent>` with [CreateAccount,
     /// Transfer(code storage + 0.01 N), DeployContract(wasm), FunctionCall(config, 0 deposit)] and no AddKey. An error
     /// unless `all_ok()`.
