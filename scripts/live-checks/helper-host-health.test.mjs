@@ -70,7 +70,7 @@ test("the CLI on a host that does not answer is an error, exit 2", () => {
 
 // The expected commit follows every input of the helper image, not apps/helper alone: in a repo of its own, a commit
 // on main that touches only packages/kit (or only the lockfile) is the commit the live check expects next.
-test("the expected commit is main's newest first-parent commit that touched an image input: a kit-only or lockfile-only commit moves it", async () => {
+test("the expected commit is main's newest first-parent commit that touched an image input: a kit-only or lockfile-only commit moves it", () => {
   const ROOT = path.resolve(HERE, "../..");
   const repo = mkdtempSync(path.join(tmpdir(), "hhh-commit-"));
   try {
@@ -91,7 +91,9 @@ test("the expected commit is main's newest first-parent commit that touched an i
     git("init", "-q", "-b", "main");
     git("add", "--", "scripts", ...(existsSync(path.join(repo, "apps")) ? ["apps"] : []));
     git("commit", "-q", "--no-gpg-sign", "-m", "the check");
-    const { mainCommit } = await import(new URL(`file://${repo}/scripts/live-checks/helper-host-health.mjs`).href);
+    // the repo's own copy of the check, in a process of its own, so its root is this repo
+    const mainCommit = () =>
+      execFileSync(process.execPath, ["--input-type=module", "-e", 'import { mainCommit } from "./scripts/live-checks/helper-host-health.mjs"; console.log(mainCommit());'], { cwd: repo, encoding: "utf8" }).trim();
     const helper = commit("apps/helper/src/server.ts", "helper");
     assert.equal(mainCommit(), helper);
     const kit = commit("packages/kit/src/index.ts", "kit only");
