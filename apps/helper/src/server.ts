@@ -13,7 +13,8 @@
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { HELPER_COMMIT_HEADER, HELPER_CORS } from "@blindfill/kit";
+import { HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
+import { createSolanaLists } from "./data/solana/lists.ts";
 import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
@@ -23,11 +24,12 @@ import { createTokenWatch, USDC } from "./token-status/status.ts";
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
 type Watch = ReturnType<typeof createTokenWatch>;
+type Lists = ReturnType<typeof createSolanaLists>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/"], relay: ["/v1/token-status"] } as const satisfies Partial<Record<Part, readonly string[]>>;
-const [PROXY_PREFIX, RPC_PREFIX] = MOUNTED.proxy;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists"], relay: ["/v1/token-status"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS] = MOUNTED.proxy;
 const [TOKEN_STATUS] = MOUNTED.relay;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
@@ -99,6 +101,7 @@ export function handler(
   proxy: Proxy = createProxy(process.env),
   rpc: Rpc = createRpc(process.env),
   watch: Watch = createTokenWatch(process.env),
+  lists: Lists = createSolanaLists(proxy, rpc),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
@@ -146,6 +149,28 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
+      if (path === MARKET_LISTS) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // Discover's lists (src/data/solana/lists.ts): exactly one chain, and Solana is the one served so far
+        const chains = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("chain");
+        if (chains.length !== 1 || chains[0] !== "solana") return send(404, { error: { code: "not_found" } }, cors(req));
+        void lists
+          .get()
+          .then((a) => {
+            const h: Headers = { ...base, ...cors(req), Vary: "Origin, Accept-Encoding", "Content-Type": "application/json; charset=utf-8" };
+            if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
+            h[HELPER_SOURCE_HEADER] = "jupiter";
+            h[HELPER_FETCHED_AT_HEADER] = new Date(a.asOfMs).toISOString();
+            const gzip = a.gzip !== undefined && /\bgzip\b/i.test(String(req.headers["accept-encoding"] ?? ""));
+            const out = gzip ? a.gzip! : Buffer.from(a.body, "utf8");
+            if (gzip) h["Content-Encoding"] = "gzip";
+            h["Content-Length"] = String(out.length);
+            res.writeHead(200, h);
+            res.end(req.method === "HEAD" ? undefined : out);
+          })
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
       if (path.startsWith(PROXY_PREFIX)) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         // the raw path, never URL's normalised one: only a path written exactly as on the allowlist is served
@@ -189,12 +214,12 @@ export function handler(
   };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watch),
+    handler(commit, proxy, rpc, watch, lists),
   );
   server.listen(port);
   return server;
@@ -209,7 +234,11 @@ if (import.meta.main) {
   }
   let server: Server;
   try {
-    server = start(commit, port);
+    const proxy = createProxy(process.env);
+    const rpc = createRpc(process.env);
+    const lists = createSolanaLists(proxy, rpc);
+    server = start(commit, port, proxy, rpc, undefined, lists);
+    lists.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);

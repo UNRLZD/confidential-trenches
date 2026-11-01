@@ -139,6 +139,10 @@ pub struct Receipt {
     pub actions: Vec<String>,
     /// The methods of its function calls, in order.
     pub methods: Vec<String>,
+    /// The arguments of its function calls, in order, base64 as RPC gives them.
+    pub args: Vec<String>,
+    /// The block it ran in (its outcome's `block_hash`).
+    pub block_hash: String,
     pub gas_burnt: u64,
     pub status: Status,
     pub logs: Vec<String>,
@@ -636,6 +640,15 @@ impl Harness {
         Ok(keys.clone())
     }
 
+    /// A block's time in ms as the vault's `env::block_timestamp_ms()` reads it in that block: the header's
+    /// `timestamp_nanosec` (a decimal string; the `timestamp` JSON number is past 2^53, where a JSON reader in JS
+    /// rounds it) divided by 1,000,000 and rounded down (near-sdk 5.29.1 `env.rs` l.390-392).
+    pub async fn block_ms(&self, block_hash: &str) -> R<u64> {
+        let v = self.rpc("block", json!({"block_id": block_hash})).await?;
+        let ns: u64 = v["result"]["header"]["timestamp_nanosec"].as_str().ok_or_else(|| format!("block {block_hash}: {v}"))?.parse()?;
+        Ok(ns / 1_000_000)
+    }
+
     /// The account's NEAR balance in yocto, at `final`.
     pub async fn near_balance(&self, id: &AccountId) -> R<u128> {
         let a = self.account_view(id, "final").await?;
@@ -826,6 +839,8 @@ impl Harness {
                 predecessor,
                 executor: o["executor_id"].as_str().unwrap_or_default().to_string(),
                 methods: actions.iter().filter_map(|a| a["FunctionCall"]["method_name"].as_str().map(str::to_string)).collect(),
+                args: actions.iter().filter_map(|a| a["FunctionCall"]["args"].as_str().map(str::to_string)).collect(),
+                block_hash: ro["block_hash"].as_str().ok_or_else(|| format!("{tx_hash}: no block_hash in {ro}"))?.to_string(),
                 actions: actions.iter().map(action_name).collect(),
                 gas_burnt: o["gas_burnt"].as_u64().ok_or_else(|| format!("{tx_hash}: no gas_burnt in {ro}"))?,
                 status: Status::parse(&o["status"]),
