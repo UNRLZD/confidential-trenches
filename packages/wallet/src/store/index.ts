@@ -15,7 +15,7 @@
 // - Two tabs: every counter move runs under the store's own Web Lock "ct-wallet/counters" (06b:743-744, wallet.md:206)
 //   and lands only by a compare-and-set inside one IndexedDB transaction, so two tabs never get one value, also where
 //   Web Locks are missing (06b:749, TAB-03). The store owns that lock and nothing outside it takes it: Web Locks are not
-//   re-entrant, so a caller holding it around a reservation would hang (CO decision, round 2; 06b:743 told callers to
+//   re-entrant, so a caller holding it around a reservation would hang (decided in review round 2; 06b:743 told callers to
 //   hold "ct-wallet", which no longer guards anything here).
 // - Sign out: broadcast "signout" on BroadcastChannel "ct-wallet", then delete the database (06b:1235, wallet.md:156);
 //   other tabs close their connection on the delete's versionchange, so the delete is not blocked. A store that is

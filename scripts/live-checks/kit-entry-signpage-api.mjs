@@ -8,7 +8,7 @@
 //     item 4 (pinned below, as the public repo carries no papers);
 //   - SIGNPAGE_EVENTS holds only the handshake events ready, state and progress;
 //   - OrderRecord, and ORDER_RECORD_FIELDS, are exactly the twelve fields of the order record (wallet.md §7 item 3 in
-//     markets.md H5.1's shape, the CO's call of 2026-11-01 00:35Z), its `variants` holds 1 to 3 signed variants, and
+//     markets.md H5.1's shape, decided 2026-11-01 00:35Z), its `variants` holds 1 to 3 signed variants, and
 //     OrderTrigger is exactly H5.1's trigger.
 //   node scripts/live-checks/kit-entry-signpage-api.mjs [--ref <branch or tag> | --root <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
