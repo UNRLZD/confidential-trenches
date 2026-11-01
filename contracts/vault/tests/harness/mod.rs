@@ -39,8 +39,8 @@
 //! Those edges (a halted token between a deposit's move and its resolve, deposit gas at 180 Tgas) are owed by card
 //! vault-sandbox-usdc on the real USDC wasm. There is no NEP-366 `DelegateAction` sender here: VT-S02 needs one, and
 //! VT-S02's card, vault-deposit-insert, brings it (its proof: U's call as a `DelegateAction` sent by a relayer
-//! account, in its tests/s02.rs). Gas and code figures are from one machine: the PC box builds the
-//! vault as bc948c2b (128767 B), the Mac as 91a23f6f (129937 B).
+//! account, in its tests/s02.rs). Gas and code figures hold for one machine: the PC box and the Mac
+//! build different vault bytes (at 65f3bb7: bc948c2b, 128767 B on the box; 91a23f6f, 129937 B on the Mac).
 #![allow(dead_code)] // shared by every sandbox test; each uses a part
 
 use near_sdk::serde_json::{self, json, Value};

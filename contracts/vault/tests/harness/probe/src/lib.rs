@@ -28,8 +28,8 @@ impl Probe {
         let me = env::current_account_id();
         let zero = NearToken::from_yoctonear(0);
         let p = Promise::new(me.clone())
-            .function_call("probe_first".into(), args(json!({"fail": first_fails})), zero, Gas::from_tgas(5))
-            .then(Promise::new(me).function_call("probe_cb".into(), args(json!({"boom": boom})), zero, Gas::from_tgas(5)));
+            .function_call("probe_first", args(json!({"fail": first_fails})), zero, Gas::from_tgas(5))
+            .then(Promise::new(me).function_call("probe_cb", args(json!({"boom": boom})), zero, Gas::from_tgas(5)));
         if returned {
             p.into()
         } else {
@@ -56,13 +56,13 @@ impl Probe {
     pub fn probe_part(&mut self, token: AccountId, account: AccountId, amount: U128, register_deposit: U128) {
         Promise::new(token)
             .function_call(
-                "storage_deposit".into(),
+                "storage_deposit",
                 args(json!({"account_id": account, "registration_only": true})),
                 NearToken::from_yoctonear(register_deposit.0),
                 Gas::from_tgas(10),
             )
             .function_call(
-                "ft_transfer".into(),
+                "ft_transfer",
                 args(json!({"receiver_id": account, "amount": amount})),
                 NearToken::from_yoctonear(1),
                 Gas::from_tgas(15),
