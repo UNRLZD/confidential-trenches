@@ -17,9 +17,8 @@
 //!    final; the code hash is the wasm's; every function body is at most 196,608 B; the vault is registered on the
 //!    token; the wasm's size and sha256 are printed (2.11's code row). Then the vault's first state-writing call (a
 //!    904 B `storage_prepay`) writes the contract's state record (2.3, 200 B), and the vault's free NEAR (amount less
-//!    storage) is still at least 0, also after the first deposit's bytes (756 B written, the 89 B `prepaid` record
-//!    freed). The deposit itself is not sent: on this base `ft_on_transfer` refunds every deposit until card
-//!    vault-deposit-insert lands (src/deposit.rs l.21-22), so the deposit's bytes are counted from 2.3.
+//!    storage) is still at least 0; then the first deposit lands on that prepay (a user's own `ft_transfer_call` of
+//!    1 USDC with the kit's message), and the free NEAR read after it is still at least 0.
 #![cfg(feature = "sandbox")]
 
 mod harness;
@@ -34,8 +33,9 @@ use std::process::Command;
 /// nearcore `max_function_body_size` at protocol 86 (`parameters.snap` l.233).
 pub const MAX_FUNCTION_BODY: usize = 196_608;
 /// 2.3: the deposit's bytes when no tree grows a level, and the `prepaid` record it frees.
-const DEPOSIT_BYTES: u128 = 756;
 const PREPAID_RECORD_BYTES: u128 = 89;
+/// `MIN_DEPOSIT`, 1 USDC (2.2).
+const AMOUNT: u128 = 1_000_000;
 /// The kit's prepay whenever a tree may grow (2.10 (h)).
 const KIT_PREPAY_BYTES: u128 = 904;
 
@@ -276,14 +276,28 @@ async fn the_deploy_script_lands_the_recipe_keyless() -> R<()> {
     let a = h.account_view(&h.vault, "final").await?;
     let (amount1, usage1) = (a["amount"].as_str().unwrap().parse::<u128>()?, a["storage_usage"].as_u64().unwrap() as u128);
     let free = amount1 as i128 - (usage1 * YOCTO_PER_BYTE) as i128;
-    let after_deposit = amount1 as i128 - ((usage1 - PREPAID_RECORD_BYTES + DEPOSIT_BYTES) * YOCTO_PER_BYTE) as i128;
     println!(
-        "vault before the first prepay: amount {amount0}, storage {usage0} B; after: amount {amount1}, storage {usage1} B (+{} B: 89 B prepaid record + the state record); free {free} yocto; after the first deposit's bytes {after_deposit} yocto",
+        "vault before the first prepay: amount {amount0}, storage {usage0} B; after: amount {amount1}, storage {usage1} B (+{} B: 89 B prepaid record + the state record); free {free} yocto",
         usage1 - usage0
     );
     assert!(usage1 - usage0 > PREPAID_RECORD_BYTES, "the first prepay wrote no state record");
     assert!(free >= 0, "the vault's free NEAR is below 0 after its first state write");
-    assert!(after_deposit >= 0, "the vault's free NEAR would be below 0 after the first deposit");
+
+    // the first deposit: U's own ft_transfer_call with the kit's message on the prepaid precommitment
+    let u = h.account("u", 10).await?;
+    h.mint(u.id(), AMOUNT).await?;
+    let msg = format!(r#"{{"precommitment":"{p}","depositor":"{}"}}"#, u.id());
+    let o = h
+        .call(&u, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": AMOUNT.to_string(), "msg": msg}), NearToken::from_yoctonear(1), Gas::from_tgas(180))
+        .await?;
+    let on = o.calls_exactly(&h.vault, "ft_on_transfer", 1)?;
+    println!("first deposit {}: {}", o.tx_hash, on[0].line());
+    assert_eq!(h.token_balance(&h.vault).await?, AMOUNT, "the first deposit did not land in the vault");
+    let a = h.account_view(&h.vault, "final").await?;
+    let (amount2, usage2) = (a["amount"].as_str().unwrap().parse::<u128>()?, a["storage_usage"].as_u64().unwrap() as u128);
+    let free2 = amount2 as i128 - (usage2 * YOCTO_PER_BYTE) as i128;
+    println!("vault after the first deposit: amount {amount2}, storage {usage2} B ({:+} B); free {free2} yocto", usage2 as i128 - usage1 as i128);
+    assert!(free2 >= 0, "the vault's free NEAR is below 0 after the first deposit");
     println!("\ngas table\n{}", h.gas_table());
     Ok(())
 }
