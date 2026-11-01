@@ -2,8 +2,8 @@
 // Live check of card kit-freeze-keys: the wallet's key paths and their vector set, frozen with the kit at Nov 1 06:00Z.
 // It reads packages/wallet/test/vectors/a8.json from GitHub (main, then the freeze tag given by --tag) and derives every
 // key and address in it again with an implementation of its own that shares no code with the kit: Node's node:crypto
-// only (PBKDF2, HKDF-SHA512, HMAC-SHA512, ed25519, secp256k1, keccak-256), with BIP-32 and SLIP-10 hardened steps,
-// base58 and the encodings of docs/plan1/wallet.md §2.2 (research ffcba5e) written out here. The kit uses @noble and
+// (PBKDF2, HKDF-SHA512, HMAC-SHA512, SHA-256, ed25519, secp256k1), with Keccak-256, BIP-32 and SLIP-10 hardened
+// steps, base58 and the encodings of docs/plan1/wallet.md §2.2 (research ffcba5e) written out here. The kit uses @noble and
 // @scure. It compares each one-time id (U, R, V, A, T), each fresh wallet's info, path and address on all six chain
 // tags, and the scope and label, byte for byte. The note values (Poseidon) are pinned by their sha256 below, as the
 // kit's own test WU-03 derives them.
