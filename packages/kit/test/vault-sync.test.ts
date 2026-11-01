@@ -30,8 +30,11 @@ const hashOf = (h: number) => `hash-${h}`;
 const enc = (v: unknown) => [...new TextEncoder().encode(JSON.stringify(v))];
 type Tamper = (method: string, args: { from?: number; limit?: number }, view: unknown) => unknown;
 type Fake = Rpc & { calls: { method: string; args: { from?: number; limit?: number }; at: unknown }[] };
+type Answer = { jsonrpc: "2.0"; id: string; result: { block_hash: unknown; block_height: unknown; logs: unknown[]; result: number[] } };
+type FakeOpts = { tamper?: Tamper; hash?: (h: number) => string; down?: boolean; gcBelow?: number; answer?: (p: Record<string, unknown>, honest: Answer) => unknown };
+const rpcError = (cause: string) => ({ jsonrpc: "2.0", id: "blindfill", error: { name: "HANDLER_ERROR", cause: { name: cause } } });
 
-function fake(name: string, chain: Chain, final: number, opts: { tamper?: Tamper; hash?: (h: number) => string; down?: boolean } = {}): Fake {
+function fake(name: string, chain: Chain, final: number, opts: FakeOpts = {}): Fake {
   const calls: Fake["calls"] = [];
   return {
     name,
@@ -41,7 +44,9 @@ function fake(name: string, chain: Chain, final: number, opts: { tamper?: Tamper
       assert.equal(p.request_type, "call_function");
       assert.equal(p.account_id, VAULT);
       const at = p.finality === "final" ? final : (p.block_id as number);
-      assert.ok(Number.isSafeInteger(at) && at <= final, `block_id ${String(at)} is past this RPC's final ${final}`);
+      assert.ok(Number.isSafeInteger(at), `block_id ${String(at)}`);
+      if (at > final) return rpcError("UNKNOWN_BLOCK");
+      if (opts.gcBelow !== undefined && at < opts.gcBelow) return rpcError("GARBAGE_COLLECTED_BLOCK");
       const method = p.method_name as string;
       const args = JSON.parse(atob(p.args_base64 as string));
       calls.push({ method, args, at: p.finality === "final" ? "final" : p.block_id });
@@ -54,7 +59,8 @@ function fake(name: string, chain: Chain, final: number, opts: { tamper?: Tamper
         view = list.slice(start, Math.min(start + Math.min(args.limit, VAULT_CONSTANTS.PAGE_MAX), list.length));
       }
       if (opts.tamper) view = opts.tamper(method, args, view);
-      return { jsonrpc: "2.0", id: "blindfill", result: { block_hash: (opts.hash ?? hashOf)(at), block_height: at, logs: [], result: enc(view) } };
+      const honest: Answer = { jsonrpc: "2.0", id: "blindfill", result: { block_hash: (opts.hash ?? hashOf)(at), block_height: at, logs: [], result: enc(view) } };
+      return opts.answer ? opts.answer(p, honest) : honest;
     },
   };
 }
@@ -62,7 +68,7 @@ function fake(name: string, chain: Chain, final: number, opts: { tamper?: Tamper
 const base: Snap = { state_tree: SET.state_tree, label_tree: SET.label_tree, deposits: SET.deposits, spends: SET.spends, leaves: SET.leaves, labels: SET.labels };
 const H: number = SET.height;
 const one = (s: Snap = base): Chain => new Map([[H, s]]);
-const pair = (chain: Chain, a: Partial<Parameters<typeof fake>[3]> = {}, b: Partial<Parameters<typeof fake>[3]> = {}, finals: [number, number] = [H, H]) =>
+const pair = (chain: Chain, a: FakeOpts = {}, b: FakeOpts = {}, finals: [number, number] = [H, H]) =>
   [fake("rpc-a", chain, finals[0], a), fake("rpc-b", chain, finals[1], b)] as const;
 
 async function stopped(p: Promise<unknown>, code: string): Promise<void> {
@@ -254,4 +260,223 @@ test("RPCs behind the cursor's height, a cursor for another vault or a malformed
   ];
   for (const c of bad) await stopped(vaultSync({ vault: VAULT, rpcs: pair(one()), cursor: c }), "input");
   await stopped(vaultSync({ vault: VAULT, rpcs: pair(one()), cursor: vaultSyncStart(VAULT), lists: ["deposits", "nullifiers" as "deposits"] }), "input");
+});
+
+// ---------- the review's attacks (independent Opus review of 6e81df1: PROBE and WANT ids kept) ----------
+const P_NEW = "424242424242424242424242424242";
+// The vault at H+50: one more deposit (precommitment P_NEW), its leaf and its label.
+const landed: Snap = {
+  ...base,
+  deposits: [...SET.deposits, { ...SET.deposits[2], index: 3, precommitment: P_NEW, leaf_index: 6 }],
+  leaves: [...SET.leaves, "777"],
+  labels: [...SET.labels, "888"],
+  state_tree: { ...SET.state_tree, size: 7 },
+  label_tree: { ...SET.label_tree, size: 5 },
+};
+const withLanded = (): Chain =>
+  new Map([
+    [H, base],
+    [H + 50, landed],
+  ]);
+async function code(p: Promise<unknown>): Promise<string> {
+  try {
+    await p;
+    return "returned";
+  } catch (e) {
+    assert.ok(e instanceof VaultSyncStopped, String(e));
+    return e.code;
+  }
+}
+
+test("A1 + G: within W the lower RPC's block is read, and a caller's floor in cursor.height refuses a block below it", async () => {
+  const chain = withLanded();
+  // A gap of 100 blocks is inside W: the read is at the lower height, where P_NEW has not landed yet.
+  const r = await vaultSync({ vault: VAULT, rpcs: [fake("low", chain, H), fake("high", chain, H + 100)], cursor: vaultSyncStart(VAULT) });
+  assert.equal(r.height, H);
+  assert.equal(r.deposits.some((d) => d.precommitment === BigInt(P_NEW)), false);
+  // A caller that must see the vault at or after H+55 (max_block_height H+50, + 5) sets the floor: below it, behind.
+  const floor = { ...vaultSyncStart(VAULT), height: H + 55 };
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: [fake("low", chain, H + 40), fake("high", chain, H + 100)], cursor: floor })), "behind");
+  const ok = await vaultSync({ vault: VAULT, rpcs: [fake("a", chain, H + 60), fake("b", chain, H + 100)], cursor: floor });
+  assert.equal(ok.deposits.some((d) => d.precommitment === BigInt(P_NEW)), true);
+});
+
+test("A2: a stuck RPC cannot hold the sync at an old block: once the other is over W ahead, every sync stops (lag)", async () => {
+  const chain = withLanded();
+  const cursor = vaultSyncStart(VAULT);
+  for (let i = 1; i <= 3; i++) {
+    assert.equal(await code(vaultSync({ vault: VAULT, rpcs: [fake("stuck", chain, H), fake("honest", chain, H + 1_000 * i)], cursor })), "lag");
+    assert.equal(await code(vaultSync({ vault: VAULT, rpcs: [fake("honest", chain, H + 1_000 * i), fake("stuck", chain, H)], cursor })), "lag");
+  }
+  assert.deepEqual(cursor, vaultSyncStart(VAULT));
+});
+
+test("A3: a 10,000-block gap between the final heights stops (lag); W exactly is read, W + 1 is not", async () => {
+  const chain = withLanded();
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: [fake("liar", chain, H), fake("honest", chain, H + 10_000)], cursor: vaultSyncStart(VAULT) })), "lag");
+  assert.equal(Kit.VAULT_SYNC_LAG_MAX, 120);
+  const at = await vaultSync({ vault: VAULT, rpcs: [fake("a", chain, H), fake("b", chain, H + 120)], cursor: vaultSyncStart(VAULT) });
+  assert.equal(at.height, H);
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: [fake("a", chain, H), fake("b", chain, H + 121)], cursor: vaultSyncStart(VAULT) })), "lag");
+});
+
+test("A4: the pinned block garbage-collected on one RPC stops the sync (rpc), no rows", async () => {
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: [fake("a", one(), H), fake("b", one(), H + 10, { gcBelow: H + 1 })], cursor: vaultSyncStart(VAULT) })), "rpc");
+});
+
+test("B: another fork's hash, no block_hash, no block_height, another height, a result.error, a byte over 255: each stops", async () => {
+  const cases: [string, NonNullable<FakeOpts["answer"]>][] = [
+    ["fork", (_p, a) => ({ ...a, result: { ...a.result, block_hash: "fork" } })],
+    ["no hash", (_p, a) => ({ ...a, result: { ...a.result, block_hash: undefined } })],
+    ["no height", (_p, a) => ({ ...a, result: { ...a.result, block_height: undefined } })],
+    ["height+1", (p, a) => (p.block_id ? { ...a, result: { ...a.result, block_height: H + 1 } } : a)],
+    ["height as string", (_p, a) => ({ ...a, result: { ...a.result, block_height: String(H) } })],
+    ["result.error", (p, a) => (p.method_name === "deposits" ? { ...a, result: { error: "wasm execution failed", block_height: H, block_hash: hashOf(H), logs: [] } } : a)],
+    ["bytes over 255", (p, a) => (p.method_name === "deposits" ? { ...a, result: { ...a.result, result: [...a.result.result, 256] } } : a)],
+  ];
+  for (const [what, answer] of cases) assert.notEqual(await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer }), cursor: vaultSyncStart(VAULT) })), "returned", what);
+});
+
+test("C1: exactly PAGE_MAX rows then an empty page; one RPC's empty second page while the other has rows stops", async () => {
+  const chain: Chain = new Map([[H, grown(1_500, 1_500)]]);
+  const cut: Tamper = (m, a, v) => (m === "deposits" && a.from === 1_000 ? [] : v);
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(chain, { tamper: cut }), cursor: vaultSyncStart(VAULT) })), "disagree");
+  const ok = await vaultSync({ vault: VAULT, rpcs: pair(new Map([[H, grown(1_000, 1_000)]])), cursor: vaultSyncStart(VAULT) });
+  assert.deepEqual([ok.cursor.deposits, ok.cursor.leaves], [1_000, 1_000]);
+});
+
+test("C2: a page longer than asked (1,001 rows) on one RPC disagrees; on both it is refused as a page", async () => {
+  const chain: Chain = new Map([[H, grown(1_001, 1_001)]]);
+  const long: Tamper = (m, a, v) => (m === "deposits" && a.from === 0 ? grown(1_001, 1_001).deposits : v);
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(chain, { tamper: long }), cursor: vaultSyncStart(VAULT), lists: ["deposits"] })), "disagree");
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(chain, { tamper: long }, { tamper: long }), cursor: vaultSyncStart(VAULT), lists: ["deposits"] })), "row");
+});
+
+test("D1, D2: the spends cursor stops at the first spend not settled, whatever comes after; every other status holds it", async () => {
+  const sp = [
+    { ...SET.spends[1], index: 0 }, // paid
+    { ...SET.spends[0], index: 1 }, // settled
+  ];
+  const r = await vaultSync({ vault: VAULT, rpcs: pair(one({ ...base, spends: sp })), cursor: vaultSyncStart(VAULT), lists: ["spends"] });
+  assert.deepEqual([r.cursor.spends, r.spends.length], [0, 2]);
+  for (const status of ["in_flight", "refund_pending", "paid"]) {
+    const s2 = [SET.spends[0], { ...SET.spends[1], status }];
+    const r2 = await vaultSync({ vault: VAULT, rpcs: pair(one({ ...base, spends: s2 })), cursor: vaultSyncStart(VAULT), lists: ["spends"] });
+    assert.equal(r2.cursor.spends, 1, status);
+  }
+});
+
+test("E2: a deposits or spends cursor past the list's end stops (count); a cursor at the end reads row c - 1 and goes on", async () => {
+  for (const list of ["deposits", "spends"] as const) {
+    assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(one()), cursor: { ...vaultSyncStart(VAULT), [list]: 10 }, lists: [list] })), "count", list);
+  }
+  // At the end (3 deposits, cursor 3): no row, the cursor stays, and the rows written later all come.
+  const chain: Chain = new Map([
+    [H, base],
+    [H + 10, grown(5, 6)],
+  ]);
+  const rpcs = pair(chain);
+  const r = await vaultSync({ vault: VAULT, rpcs, cursor: { ...vaultSyncStart(VAULT), deposits: 3 }, lists: ["deposits"] });
+  assert.deepEqual([r.deposits.length, r.cursor.deposits], [0, 3]);
+  for (const f of rpcs) assert.deepEqual(f.calls.filter((c) => c.method === "deposits").map((c) => c.args), [{ from: 3, limit: 1_000 }, { from: 2, limit: 1 }]);
+  const r2 = await vaultSync({ vault: VAULT, rpcs: pair(chain, {}, {}, [H + 10, H + 10]), cursor: r.cursor, lists: ["deposits"] });
+  assert.deepEqual(r2.deposits.map((d) => d.index), [3, 4]);
+});
+
+test("F: rows the vault cannot write, served by both RPCs, are refused (row)", async () => {
+  const dep = (f: (r: Record<string, unknown>) => unknown): Tamper => (m, _a, v) => (m === "deposits" ? (v as Record<string, unknown>[]).map((r, k) => (k === 0 ? f(r) : r)) : v);
+  const spd = (f: (r: Record<string, unknown>) => unknown): Tamper => (m, _a, v) => (m === "spends" ? (v as Record<string, unknown>[]).map((r, k) => (k === 0 ? f(r) : r)) : v);
+  const P = Kit.VAULT_FIELD_P.toString();
+  const cases: [string, Tamper][] = [
+    ["value 2^128", dep((r) => ({ ...r, value: (1n << 128n).toString() }))],
+    ["value as number", dep((r) => ({ ...r, value: 10 }))],
+    ["value 01", dep((r) => ({ ...r, value: "01" }))],
+    ["extra field", dep((r) => ({ ...r, extra: 1 }))],
+    ["missing field", dep(({ depositor: _d, ...r }) => r)],
+    ["depositor uppercase", dep((r) => ({ ...r, depositor: "Alice.testnet" }))],
+    ["depositor 65 chars", dep((r) => ({ ...r, depositor: "a".repeat(65) }))],
+    ["leaf_index -1", dep((r) => ({ ...r, leaf_index: -1 }))],
+    ["leaf_index 2^53", dep((r) => ({ ...r, leaf_index: 2 ** 53 }))],
+    ["leaf_index 1.5", dep((r) => ({ ...r, leaf_index: 1.5 }))],
+    ["index as string", dep((r) => ({ ...r, index: "0" }))],
+    ["status Settled", spd((r) => ({ ...r, status: "Settled" }))],
+    ["status unknown", spd((r) => ({ ...r, status: "done" }))],
+    ["fee 2^128", spd((r) => ({ ...r, fee: (1n << 128n).toString() }))],
+    ["context = p", spd((r) => ({ ...r, context: P }))],
+    ["payer uppercase (M23)", spd((r) => ({ ...r, payer: "Relayer.testnet" }))],
+    ["recipient empty", spd((r) => ({ ...r, recipient: "" }))],
+    ["leaf = p", (m, _a, v) => (m === "leaves" ? (v as string[]).map((x, k) => (k === 0 ? P : x)) : v)],
+    ["tree depth 33", (m, _a, v) => (m === "state_tree" ? { ...(v as object), depth: 33 } : v)],
+    ["tree root = p", (m, _a, v) => (m === "label_tree" ? { ...(v as object), root: P } : v)],
+    ["page not an array", (m, _a, v) => (m === "labels" ? { 0: "1" } : v)],
+  ];
+  const missed: string[] = [];
+  for (const [what, t] of cases) if ((await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { tamper: t }, { tamper: t }), cursor: vaultSyncStart(VAULT) }))) !== "row") missed.push(what);
+  assert.deepEqual(missed, []);
+});
+
+test("F2, F3: fields out of the vault's order, a repeated field, spacing or another number form, served by both, are refused", async () => {
+  const text = (f: (t: string, p: Record<string, unknown>) => string): NonNullable<FakeOpts["answer"]> => (p, a) => {
+    const t = f(new TextDecoder().decode(Uint8Array.from(a.result.result)), p);
+    return { ...a, result: { ...a.result, result: [...new TextEncoder().encode(t)] } };
+  };
+  const onDep = (f: (t: string) => string) => text((t, p) => (p.method_name === "deposits" ? f(t) : t));
+  const cases: [string, NonNullable<FakeOpts["answer"]>][] = [
+    ["reversed fields", onDep((t) => JSON.stringify((JSON.parse(t) as object[]).map((r) => Object.fromEntries(Object.entries(r).reverse()))))],
+    ["repeated field", onDep((t) => t.replace('"value":"5000000"', '"value":"1","value":"5000000"'))],
+    ["spacing", onDep((t) => JSON.stringify(JSON.parse(t), null, 1))],
+    ["index 1e0", onDep((t) => t.replace('"index":1,', '"index":1e0,'))],
+    ["tree size 6.0", text((t, p) => (p.method_name === "state_tree" ? t.replace('"size":6', '"size":6.0') : t))],
+  ];
+  for (const [what, answer] of cases) {
+    const c = await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer }, { answer }), cursor: vaultSyncStart(VAULT) }));
+    assert.equal(c, "row", what);
+  }
+});
+
+test("M28: a page that is not UTF-8, served by both, is refused as not UTF-8", async () => {
+  const answer: NonNullable<FakeOpts["answer"]> = (p, a) => (p.method_name === "labels" ? { ...a, result: { ...a.result, result: [0x5b, 0x22, 0xff, 0x22, 0x5d] } } : a);
+  await assert.rejects(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer }, { answer }), cursor: vaultSyncStart(VAULT) }), (e: unknown) => {
+    assert.ok(e instanceof VaultSyncStopped);
+    assert.equal(e.code, "row");
+    assert.match(e.message, /not UTF-8/);
+    return true;
+  });
+});
+
+test("H: an abort ends a read one RPC never answers, and the RPCs get the signal", async () => {
+  const seen: unknown[] = [];
+  const hang: Rpc = {
+    name: "hang",
+    query: (_p, signal) => {
+      seen.push(signal);
+      return new Promise<unknown>(() => {});
+    },
+  };
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 20);
+  const t0 = Date.now();
+  await assert.rejects(vaultSync({ vault: VAULT, rpcs: [hang, fake("b", one(), H)], cursor: vaultSyncStart(VAULT), signal: ac.signal }), (e: unknown) => {
+    assert.ok(!(e instanceof VaultSyncStopped));
+    assert.equal((e as Error).name, "AbortError");
+    return true;
+  });
+  assert.ok(Date.now() - t0 < 300, "ended within 300 ms of the abort");
+  assert.deepEqual(seen, [ac.signal]);
+});
+
+test("the mutants the review's set left alive (M2, M21, M22, M32): each now has a test", async () => {
+  // M2: both RPCs agree on a later read's block hash, but it is not the block the first reads named.
+  const moved: NonNullable<FakeOpts["answer"]> = (p, a) => (p.method_name === "deposits" ? { ...a, result: { ...a.result, block_hash: "moved" } } : a);
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer: moved }, { answer: moved }), cursor: vaultSyncStart(VAULT) })), "disagree");
+  // M21: an answer that carries an error beside its bytes, on both, is not a view result.
+  const errBytes: NonNullable<FakeOpts["answer"]> = (p, a) => (p.method_name === "deposits" ? { ...a, result: { ...a.result, error: "wasm execution failed" } } : a);
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer: errBytes }, { answer: errBytes }), cursor: vaultSyncStart(VAULT) })), "rpc");
+  // M22: a byte over 255 on both RPCs is not a view result (it would wrap to 0 in a Uint8Array).
+  const wide: NonNullable<FakeOpts["answer"]> = (p, a) => (p.method_name === "labels" ? { ...a, result: { ...a.result, result: [...a.result.result.slice(0, -1), 93 + 256] } } : a);
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer: wide }, { answer: wide }), cursor: vaultSyncStart(VAULT) })), "rpc");
+  // M32: the row before an at-the-end cursor, served by both with another index, is refused.
+  const offBy: Tamper = (m, a, v) => (m === "deposits" && a.from === 2 && a.limit === 1 ? [{ ...SET.deposits[2], index: 7 }] : v);
+  const c = { ...vaultSyncStart(VAULT), deposits: 3 };
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { tamper: offBy }, { tamper: offBy }), cursor: c, lists: ["deposits"] })), "row");
 });

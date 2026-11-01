@@ -5,29 +5,44 @@
 // - One block on both RPCs. Each RPC's final height is read first (state_tree at final); every read after it names
 //   the lower of the two by block_id, so two honest RPCs answer the same state and any difference is a lie or a fault,
 //   never lag. An RPC ahead of the other only waits: its newer rows come in the next sync. Both answers must carry
-//   that height and the same block hash.
+//   that height and the same block hash. Final heights more than VAULT_SYNC_LAG_MAX (the device's window W) apart
+//   stop the sync ("lag"): one RPC is stuck or lying, and a read at its height would be stale. A caller that needs a
+//   block at or above a height (a signed call's max_block_height + 5) puts it in cursor.height ("behind" below it).
 // - Byte for byte. Each view's answer bytes must be equal on both RPCs (vault paper 2.12 step 2), else the sync stops
 //   (VaultSyncStopped "disagree"): an extra, missing or changed row on one RPC, a tree head that differs, another
 //   block. One RPC down, or an answer that is not a view result, stops it too ("rpc"). Nothing is returned from a
 //   stopped sync and the caller's cursor is never changed, so a stop costs a read again, never a row.
 // - Rows as the vault writes them. Every row is checked as contracts/vault/src/lib.rs's views write it: its exact
-//   fields, its index at its place, decimals canonical and below p, amounts u128, account ids NEAR ids ("row").
+//   fields, in its order, once each, compact, so the answer must be the bytes the vault's serializer writes for
+//   the rows parsed from it; its index at its place, decimals canonical and below p, amounts u128, account ids NEAR
+//   ids ("row").
 // - The cursor moves only past rows both RPCs gave. A reported count never moves it: the leaves and labels read must
 //   end at their tree's size, which both RPCs gave equal ("count" otherwise, and for a cursor past that size), and the
-//   deposits and spends cursors move by the rows read. Every list is append-only (2.5.6), so the rows below a cursor
-//   never change, with one exception: a spend's status and refund fields change until it is settled (2.5.5), so the
-//   spends cursor stops at the first spend not settled and the next sync reads it again (a row read again replaces
-//   the earlier copy, by its index).
+//   deposits and spends cursors move by the rows read; a deposits or spends cursor c > 0 that reads no row must find
+//   row c - 1 ("count" otherwise), so a cursor past the list's end never skips the rows written later. Every list is
+//   append-only (2.5.6), so the rows below a cursor never change, with one exception: a spend's status and refund
+//   fields change until it is settled (2.5.5), so the spends cursor stops at the first spend not settled and the next
+//   sync reads it again (a row read again replaces the earlier copy, by its index).
 // - No lookup of one secret-derived value: whole pages only, matched here (2.5.6). Deposits are confirmed from these
 //   rows, never from a transaction read by hash (2.10 (c)).
+// - An abort ends the sync at once, even inside a read an RPC never answers; the signal goes to the RPC's query too.
 // The kit names no provider: the caller passes two RPCs of different operators (the wallet's NEAR_NETWORKS pair).
 import { VAULT_CONSTANTS, VAULT_FIELD_P, vaultAccountId, vaultDecimal, type VaultSpendStatus } from "./shapes.ts";
 
-/** A NEAR JSON-RPC provider's `query` method: the params of one query, its whole JSON-RPC answer. */
+/**
+ * A NEAR JSON-RPC provider's `query` method: the params of one query, its whole JSON-RPC answer. The signal is the
+ * sync's; a provider may end its request on it (the sync stops waiting on its own either way).
+ */
 export interface VaultSyncRpc {
   name: string;
-  query(params: Record<string, unknown>): Promise<unknown>;
+  query(params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
 }
+
+/**
+ * The most the two RPCs' final heights may differ, in blocks: the device's window W, 120 blocks or about 70 s (vault
+ * paper 2.10 (b), docs/plan1/vault.md l.670-672). Two honest RPCs differ by a block or two.
+ */
+export const VAULT_SYNC_LAG_MAX = 120;
 
 /** The lists the vault pages (2.5.6). */
 export const VAULT_SYNC_LISTS = ["deposits", "spends", "leaves", "labels"] as const;
@@ -82,7 +97,7 @@ export type VaultSyncResult = {
   cursor: VaultSyncCursor;
 };
 
-export type VaultSyncStopCode = "input" | "rpc" | "disagree" | "row" | "count" | "behind";
+export type VaultSyncStopCode = "input" | "rpc" | "disagree" | "row" | "count" | "behind" | "lag";
 export class VaultSyncStopped extends Error {
   readonly code: VaultSyncStopCode;
   constructor(code: VaultSyncStopCode, detail: string) {
@@ -112,7 +127,9 @@ export async function vaultSync(args: VaultSyncArgs): Promise<VaultSyncResult> {
   // The two final heights; every read after this one names the lower.
   signal?.throwIfAborted();
   const probe = call(vault, "state_tree", {}, { finality: "final" });
-  const finals = await Promise.all([answer(rpcs[0], probe), answer(rpcs[1], probe)]);
+  const finals = await Promise.all([answer(rpcs[0], probe, signal), answer(rpcs[1], probe, signal)]);
+  if (Math.abs(finals[0].height - finals[1].height) > VAULT_SYNC_LAG_MAX)
+    throw new VaultSyncStopped("lag", `the RPCs' final heights ${finals[0].height} and ${finals[1].height} are over ${VAULT_SYNC_LAG_MAX} blocks apart`);
   const height = Math.min(finals[0].height, finals[1].height);
   if (height < cursor.height) throw new VaultSyncStopped("behind", `the RPCs' final height ${height} is below the cursor's ${cursor.height}`);
 
@@ -120,16 +137,26 @@ export async function vaultSync(args: VaultSyncArgs): Promise<VaultSyncResult> {
   const read = async (method: string, a: Record<string, number>): Promise<unknown> => {
     signal?.throwIfAborted();
     const at = call(vault, method, a, { block_id: height });
-    const [x, y] = await Promise.all([answer(rpcs[0], at), answer(rpcs[1], at)]);
+    const [x, y] = await Promise.all([answer(rpcs[0], at, signal), answer(rpcs[1], at, signal)]);
     if (x.height !== height || y.height !== height) throw new VaultSyncStopped("rpc", `${method}: an answer not at block ${height}`);
     if (x.hash !== y.hash || (blockHash !== "" && x.hash !== blockHash)) throw new VaultSyncStopped("disagree", `${method}: two blocks at height ${height}`);
     blockHash = x.hash;
     if (!sameBytes(x.bytes, y.bytes)) throw new VaultSyncStopped("disagree", `${method}(${JSON.stringify(a)}): the RPCs' answers differ`);
+    let text: string;
     try {
-      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(x.bytes));
+      text = new TextDecoder("utf-8", { fatal: true }).decode(x.bytes);
+    } catch {
+      throw new VaultSyncStopped("row", `${method}: not UTF-8`);
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
     } catch {
       throw new VaultSyncStopped("row", `${method}: not JSON`);
     }
+    if (JSON.stringify(inVaultOrder(method, value)) !== text)
+      throw new VaultSyncStopped("row", `${method}: not the vault's own bytes (field order, a repeated field, spacing or a number's form)`);
+    return value;
   };
 
   const stateTree = head(await read("state_tree", {}), "state_tree");
@@ -147,6 +174,13 @@ export async function vaultSync(args: VaultSyncArgs): Promise<VaultSyncResult> {
       if (!Array.isArray(page) || page.length > VAULT_CONSTANTS.PAGE_MAX) throw new VaultSyncStopped("row", `${list}: not a page`);
       page.forEach((x, k) => rows.push(parseRow(list, x, at + k)));
       if (page.length < VAULT_CONSTANTS.PAGE_MAX) break;
+    }
+    // A deposits or spends cursor past the list's end would read no row and wait there, skipping every row written
+    // below it later: an empty read from c > 0 must find row c - 1.
+    if (size === null && rows.length === 0 && from > 0) {
+      const last = await read(list, { from: from - 1, limit: 1 });
+      if (!Array.isArray(last) || last.length !== 1) throw new VaultSyncStopped("count", `${list}: the cursor ${from} is past the list's end`);
+      parseRow(list, last[0], from - 1);
     }
     const end = from + rows.length; // a cursor past the list's end reads no row, so it ends past the tree's size too
     if (size !== null && end !== size) throw new VaultSyncStopped("count", `${list}: the pages end at ${end}, the tree's size is ${size}`);
@@ -169,11 +203,12 @@ function call(vault: string, method: string, a: Record<string, number>, at: { fi
 }
 
 /** One RPC's answer to one view call: its bytes, height and block hash, or a stop ("rpc"). */
-async function answer(rpc: VaultSyncRpc, params: Obj): Promise<{ bytes: Uint8Array; height: number; hash: string }> {
+async function answer(rpc: VaultSyncRpc, params: Obj, signal?: AbortSignal): Promise<{ bytes: Uint8Array; height: number; hash: string }> {
   let a: unknown;
   try {
-    a = await rpc.query(params);
+    a = await untilAbort(rpc.query(params, signal), signal);
   } catch (e) {
+    if (signal?.aborted) throw signal.reason;
     throw new VaultSyncStopped("rpc", `${rpc.name}: ${e instanceof Error ? e.message : String(e)}`);
   }
   const r = isObj(a) && a.error === undefined ? a.result : undefined;
@@ -188,6 +223,17 @@ async function answer(rpc: VaultSyncRpc, params: Obj): Promise<{ bytes: Uint8Arr
   )
     throw new VaultSyncStopped("rpc", `${rpc.name}: ${String(params.method_name)}: not a view result`);
   return { bytes: Uint8Array.from(bytes as number[]), height: r.block_height as number, hash: r.block_hash };
+}
+
+/** p, or the signal's reason once it aborts, whichever comes first. */
+function untilAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p;
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(signal.reason);
+    if (signal.aborted) return stop();
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -229,6 +275,14 @@ const SPEND_FIELDS = [
 ];
 const TREE_FIELDS = ["size", "depth", "root"];
 const STATUSES: readonly VaultSpendStatus[] = ["in_flight", "paid", "refund_pending", "settled"];
+
+/** A view's value with each object's fields in the vault's struct order, as its serializer writes them. */
+function inVaultOrder(method: string, v: unknown): unknown {
+  const order = method === "deposits" ? DEPOSIT_FIELDS : method === "spends" ? SPEND_FIELDS : method.endsWith("_tree") ? TREE_FIELDS : null;
+  if (order === null) return v;
+  const pick = (o: unknown) => (isObj(o) ? Object.fromEntries(order.map((k) => [k, o[k]])) : o);
+  return Array.isArray(v) ? v.map(pick) : pick(v);
+}
 
 function parseRow(list: VaultSyncList, x: unknown, at: number): unknown {
   try {
@@ -277,11 +331,11 @@ function head(x: unknown, what: string): VaultTreeHead {
   }
 }
 
-/** An object with exactly these fields. */
+/** An object with every one of these fields (an extra, repeated or reordered field is refused before, by the bytes check in read). */
 function fields(x: unknown, names: readonly string[]): Obj {
   if (!isObj(x)) throw new Error("not an object");
   const keys = Object.keys(x);
-  if (keys.length !== names.length || !names.every((n) => keys.includes(n))) throw new Error(`fields: not ${names.join(", ")}`);
+  if (!names.every((n) => keys.includes(n))) throw new Error(`fields: not ${names.join(", ")}`);
   return x;
 }
 function field(x: unknown, what: string): bigint {
