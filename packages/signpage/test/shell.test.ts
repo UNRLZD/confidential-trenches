@@ -161,6 +161,7 @@ test("open takes the frame out of the document and nothing reaches the old windo
   sh.open();
   assert.equal(sh.layer.hidden, false);
   assert.equal(d.frames().length, 1, "the frame stays FRAME_LEAVE_MS, for the answer that opened the layer");
+  assert.equal((old as unknown as { inert?: boolean }).inert, true, "inert in the same task as the layer shows");
   await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
   assert.equal(d.frames().length, 0);
   const before = d.posted.length;
@@ -190,6 +191,7 @@ test("open takes the frame out of the document and nothing reaches the old windo
   sh.close();
   await new Promise((ok) => setTimeout(ok, FRAME_LEAVE_MS + 20));
   assert.equal(d.frames().length, 1);
+  assert.equal((d.frames()[0] as unknown as { inert?: boolean }).inert, false, "a frame kept by a quick close is live again");
 });
 
 test("nav: the top window's address becomes APP_HOST's path and query, by replaceState only; another origin, // and an over-long path are refused", async () => {

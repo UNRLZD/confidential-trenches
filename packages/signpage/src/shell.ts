@@ -41,8 +41,8 @@ export function appSrc(loc: { pathname: string; search: string }): string {
 
 /**
  * How long the frame stays after the layer opens: the answer to the kind that opened it (posted just before) is
- * delivered to the frame as a task of its own, and a frame taken out first never gets it. Far below a person's first
- * tap on the layer; the layer covers the frame from the start.
+ * delivered to the frame as a task of its own, and a frame taken out first never gets it. The frame is inert from the
+ * first moment, so it holds no focus in the meantime, and the layer covers it.
  */
 export const FRAME_LEAVE_MS = 100;
 
@@ -89,7 +89,8 @@ export interface Shell {
   /** The screens' layer, over the frame. */
   layer: HTMLElement;
   /**
-   * Shows the layer and, FRAME_LEAVE_MS later, takes the frame out of the document. A frame under the layer could
+   * Shows the layer and makes the frame inert in the same task, then FRAME_LEAVE_MS later takes it out of the document
+   * (inert alone lets a focus thief through on one engine, the review measured). A frame under the layer could
    * still take the keyboard's focus back (an APP_HOST page that calls focus() every few ms gets every key typed after
    * the first, the 12 words included, on every engine; inert, visibility and display each let it through on one), so
    * none is left.
@@ -156,7 +157,11 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
     layer,
     open() {
       layer.hidden = false;
-      if (!frame || leaving !== null) return;
+      if (!frame) return;
+      // in the same task the layer shows: an inert frame takes no focus, click or key (its focus is dropped at once),
+      // and a posted message still reaches it
+      frame.inert = true;
+      if (leaving !== null) return;
       leaving = setTimeout(() => {
         leaving = null;
         if (layer.hidden || !frame) return;
@@ -169,7 +174,8 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
       layer.hidden = true;
       if (leaving !== null) clearTimeout(leaving);
       leaving = null;
-      if (!frame) add();
+      if (frame) frame.inert = false;
+      else add();
     },
   };
 }
