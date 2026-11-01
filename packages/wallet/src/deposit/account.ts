@@ -50,7 +50,7 @@ export const NEAR_RPC_URLS = ["https://rpc.mainnet.fastnear.com", "https://rpc.m
 export const NEAR_NETWORKS = {
   mainnet: { token: VAULT_CONSTANTS.TOKEN, fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
   testnet: {
-    token: "bf-usdc-20261101t022248.testnet",
+    token: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (a public account id)
     fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],
     drpc: "https://near-testnet.drpc.org",
   },
