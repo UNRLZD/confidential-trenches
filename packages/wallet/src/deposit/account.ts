@@ -21,16 +21,16 @@
 // whole at its first receipt, before any USDC moves, and U keeps its USDC (V 2.5.1 case 2, V:275-283, measured with the
 // real USDC wasm halted, RESULT.md:131 `halted_u_call_fails_whole`); the residual is a halt between the move and the
 // resolve of a deposit the vault refuses (V 2.5.1 case 3, V:294-318). V 2.5.1 case 3's bound, "signs no call while a
-// Pause request is pending", is therefore not true of this code (the CO's merge notes record it). A lead for SB run (4)
+// Pause request is pending", is therefore not true of this code (research docs/spec/11-merge-notes.md, M333). An open question for SB run (4)
 // (review of 2026-11-01): approve_multisig_request called as a view panics "unwrap on None" for an unknown request id;
 // a pending id may answer differently. Not used here.
 //
 // The network and the RPCs (NEAR_NETWORKS). The caller names the network, never the token: each network has one token
 // and two operators. Mainnet: the release's RPC_A, RPC_B, RPC_C (M306 (5), research docs/spec/11-merge-notes.md:314; the
 // sign page's CSP lists the same three). RPC_A and RPC_B are one operator, FastNEAR: their `status` answers carry the
-// same node keys (CO read 07:59Z: Be6YJaMr… on both; lead read 08:02Z: 688aviNn…, E6qPW56a… and Be6YJaMr… on both,
+// same node keys (read 07:59Z: Be6YJaMr… on both; read 08:02Z: 688aviNn…, E6qPW56a… and Be6YJaMr… on both,
 // rotating), while RPC_C is dRPC's own nodes (368TikGm…, 3qsP9433…). Testnet: test.rpc.fastnear.com and
-// rpc.testnet.near.org answered with one node key, vknQwA6g…, and near-testnet.drpc.org with Cz6fGcTA… (lead read
+// rpc.testnet.near.org answered with one node key, vknQwA6g…, and near-testnet.drpc.org with Cz6fGcTA… (read
 // 08:02Z). So the pair is exactly one FastNEAR URL and the dRPC URL of the network, by exact string; anything else is
 // refused as input. The kit names the methods (HELPER_RPC_METHODS.near) but no provider. Retries on a busy answer are
 // §2.9's (WU-08), not this file's: here one RPC down stops the deposit.
@@ -44,7 +44,7 @@ export const NEAR_RPC_URLS = ["https://rpc.mainnet.fastnear.com", "https://rpc.m
 /**
  * One token and two operators per network. The token's code must be VAULT_TOKEN_CODE_HASH on both: the testnet token
  * (contracts/vault/deployments/testnet-usdc.json, account_id) was deployed from mainnet USDC's own wasm (its wasm_from:
- * view_code of mainnet USDC on two RPCs, equal bytes), and its code_hash is DVJx7F3d… (the file; lead read on
+ * view_code of mainnet USDC on two RPCs, equal bytes), and its code_hash is DVJx7F3d… (the file; read on
  * test.rpc.fastnear.com and near-testnet.drpc.org 2026-11-01T08:02Z).
  */
 export const NEAR_NETWORKS = {
