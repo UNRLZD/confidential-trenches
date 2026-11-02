@@ -381,6 +381,17 @@ jobs:
           cargo-build-sbf --sbf-out-dir out -- --locked 2>&1 | tee "$RUNNER_TEMP/sbf.log"
           test "${PIPESTATUS[0]}" = 0
           if grep -q "overflows the maximum allowed frame space" "$RUNNER_TEMP/sbf.log"; then echo "a stack frame overflows 4 KiB"; exit 1; fi
+      # svm-tests' tag 3 tests: a hostile venue (re-entry, a venue taking pool lamports), and copies of mainnet's pump,
+      # PumpSwap and fee programs, whose code is not committed (closed source) and must hash as the fixtures' JSON says:
+      # a pump upgrade fails here until the fixtures are re-dumped.
+      - name: the hostile test venue's build
+        working-directory: contracts/pool-solana/svm-tests/evil-venue
+        run: cargo-build-sbf --sbf-out-dir ../../out -- --locked
+      - name: the venue fetch's own tests (a code change, a retried and a failed RPC, on fake RPCs)
+        run: node --test contracts/pool-solana/fixtures/venues/dump.test.mjs
+      - name: the venues' mainnet code, sha256-checked
+        working-directory: contracts/pool-solana
+        run: node fixtures/venues/dump.mjs --programs-only
       - name: the pool program's LiteSVM tests, on that build
         run: |
           POOL_SO="$PWD/contracts/pool-solana/out/blindfill_pool_solana.so" \
