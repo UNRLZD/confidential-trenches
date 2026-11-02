@@ -51,8 +51,11 @@
 //   the relayer and the rest is on chain.
 // - Attempt contexts (card wallet-withdraw-request; wallet.md l.214-217): the move UNSPENT -> HELD takes the attempt's
 //   withdrawal context (a decimal below p) and appends { context, deadlineMs } to the note's contexts in the same
-//   compare-and-set, so the context is stored before its proof starts. Only the move HELD -> UNSPENT removes an entry,
-//   the freed attempt's own: a HELD proof was never sent (RESERVED is written first), so it can never land. Every
+//   compare-and-set, so the context is stored before its proof starts. Only the moves HELD -> UNSPENT and HELD -> HELD
+//   remove an entry, the freed or replaced attempt's own: a HELD proof was never sent (RESERVED is written first), so
+//   it can never land. HELD -> HELD is the holder's only (its attempt, its tab): it writes the newer attempt's context
+//   in place of its own and gives a new attempt, in one compare-and-set, so the note is never UNSPENT between the two
+//   proofs and the replaced proof can no longer be sent (its attempt is gone). Every
 //   sent attempt's entry stays: it can still land before its own deadline, and the device may read its spend only
 //   later. So a note proved again every epoch keeps a short list. A spends record whose
 //   context is in the list is this device's own (the check itself is the sync and arming cards'). The list stays
@@ -79,8 +82,9 @@ export const NOTE_EDGES: Readonly<Record<NoteState, readonly NoteState[]>> = Obj
   INCOMING: Object.freeze(["UNSPENT"] as const), // its leaf read on two RPCs (:418)
   // HELD: a proof of this device has started. SPENT: another device's withdrawal spent it (:230-231)
   UNSPENT: Object.freeze(["HELD", "SPENT"] as const),
-  // UNSPENT: the proof dropped or too late to send (:389-390); RESERVED: written before the proof is sent
-  HELD: Object.freeze(["UNSPENT", "RESERVED", "SPENT"] as const),
+  // UNSPENT: the proof dropped or too late to send (:389-390); RESERVED: written before the proof is sent; HELD: the
+  // holder's unsent proof replaced by a newer one in one write (the proof queue's remake at a new epoch)
+  HELD: Object.freeze(["UNSPENT", "RESERVED", "SPENT", "HELD"] as const),
   // UNSPENT: block time past its deadline_ms with nothing landed (:363-365, :748-749)
   RESERVED: Object.freeze(["SPENT", "UNSPENT"] as const),
   SPENT: Object.freeze([] as const),
@@ -132,8 +136,8 @@ export type NewNote = {
   leaf?: Leaf;
 };
 
-// leaf: INCOMING -> UNSPENT. deadlineMs and context: UNSPENT -> HELD. attempt: the holder's HELD -> RESERVED or
-// HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
+// leaf: INCOMING -> UNSPENT. deadlineMs and context: UNSPENT -> HELD, and the holder's HELD -> HELD (with its attempt).
+// attempt: the holder's HELD -> RESERVED, HELD -> HELD or HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
 // deadline_ms - margin).
 export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint };
 
@@ -405,7 +409,9 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (to === "HELD") {
       next.deadlineMs = u64(fields.deadlineMs, "deadlineMs");
       const c = context(fields.context, "context");
-      next.contexts = checkContexts([...(cur.contexts ?? []), { context: c, deadlineMs: next.deadlineMs }], cur.id);
+      // HELD -> HELD: the replaced attempt was never sent, so its context (the last entry, checkRecord) goes
+      const kept = cur.state === "HELD" ? (cur.contexts ?? []).slice(0, -1) : (cur.contexts ?? []);
+      next.contexts = checkContexts([...kept, { context: c, deadlineMs: next.deadlineMs }], cur.id);
       next.attempt = newId();
       next.tab = tab;
     } else {
@@ -456,6 +462,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (to === "TAKEN" && cur.ref.kind !== "deposit") throw new Error("only a deposit index is marked taken");
     const time = fields.blockTimeMs === undefined ? undefined : u64(fields.blockTimeMs, "blockTimeMs");
     const own = fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab;
+    if (from === "HELD" && to === "HELD" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it replaces its proof`);
     if (from === "HELD" && to === "RESERVED" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it sends it`);
     if (from === "HELD" && to === "UNSPENT" && !own && !(time !== undefined && time > cur.deadlineMs! - SEND_MARGIN_MS))
       throw new Error(`note ${id} is held by another attempt: freed only by that attempt, or once block time is past deadline_ms - ${SEND_MARGIN_MS} ms`);

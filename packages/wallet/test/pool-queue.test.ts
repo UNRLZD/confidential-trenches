@@ -209,6 +209,58 @@ test("at a new epoch the ready set is made again on the new epoch root and grid;
   assert.equal(proves(ps), 2);
 });
 
+test("at a boundary the old proofs stay ready while the new ones are made: a tap 10 ms in takes the old one at once", async () => {
+  const v = await vaultWith([usd(5), usd(10)]);
+  const pool = fakePool(v);
+  let gate: Promise<void> | undefined;
+  let open_ = (): void => {};
+  let entered = 0;
+  const slow = provers3().map((sp): VaultProver => ({
+    load: sp.load,
+    prove: async (c, i) => {
+      if (gate !== undefined) {
+        entered++;
+        await gate; // a prover slower than a tap
+      }
+      return sp.prove(c, i);
+    },
+  }));
+  const q = queue(v, pool, slow);
+  await q.refresh();
+  const [x, y] = q.ready();
+  const xBefore = await state(v, x!.noteId);
+  gate = new Promise<void>((ok) => (open_ = ok));
+  pool.t.now = START + E + 10n; // 10 ms after the boundary
+  const pass = q.refresh();
+  for (let k = 0; entered < 2 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  assert.equal(entered, 2, "both notes are being made again");
+  assert.deepEqual(q.ready(), [x, y], "the ready set keeps the previous epoch's proofs during the remake");
+  const timeout = new Promise<never>((_, no) => setTimeout(() => no(new Error("take waited for the prover")), 1_000).unref());
+  const taken = await Promise.race([q.take(x!.noteId), timeout]);
+  assert.equal(taken, x, "the previous epoch's proof, handed out while the new one is still being made");
+  assert.equal(taken.epochStartMs, START);
+  assert.equal((await state(v, x!.noteId)).state, "RESERVED");
+  open_();
+  const done = await pass;
+  // the remake of the taken note finished after the take: dropped, never ready, its context never written
+  assert.deepEqual(done.remade, [y!.noteId]);
+  assert.deepEqual(done.failed.map((f) => f.noteId), [x!.noteId]);
+  assert.match(done.failed[0]!.error, /never sent/);
+  const xAfter = await state(v, x!.noteId);
+  assert.equal(xAfter.attempt, x!.attempt);
+  assert.deepEqual(xAfter.contexts, xBefore.contexts);
+  // the other note: HELD throughout, its old attempt and context replaced in one write
+  const [y2] = q.ready();
+  assert.equal(y2!.noteId, y!.noteId);
+  assert.equal(y2!.epochStartMs, START + E);
+  const yAfter = await state(v, y!.noteId);
+  assert.equal(yAfter.state, "HELD");
+  assert.equal(yAfter.attempt, y2!.attempt);
+  assert.notEqual(y2!.attempt, y!.attempt);
+  assert.deepEqual(yAfter.contexts!.map((c) => c.context), [y2!.binding.context.toString()]);
+  await assert.rejects(v.ns.move(y!.noteId, "HELD", "RESERVED", { attempt: y!.attempt }), /held by another attempt/, "the replaced proof can no longer be sent");
+});
+
 test("a deposit's own note is proved at once on the newest root, and on the epoch root at the next epoch", async () => {
   const v = await vaultWith([usd(2)]);
   const pool = fakePool(v);
@@ -321,7 +373,8 @@ test("a free whose write fails is tried again at the next pass; one failed free 
   fail = false;
   assert.equal((await v.ns.list())[0]!.state, "HELD");
   assert.equal((await q.refresh()).made.length, 1, "freed, then proved");
-  // at a new epoch one note's free fails: the others are made again, and it follows at the next pass
+  // at a new epoch one note's swap write fails: its old proof stays ready (HELD, its attempt), the other is made
+  // again, and it follows at the next pass
   const v2 = await vaultWith([usd(5), usd(10)]);
   const pool2 = fakePool(v2);
   const q2 = queue(v2, pool2);
@@ -331,17 +384,19 @@ test("a free whose write fails is tried again at the next pass; one failed free 
   let once = true;
   v2.failPut.on = (rec) => {
     const r = rec as { id?: string; state?: string };
-    if (once && r.id === x!.noteId && r.state === "UNSPENT") return !(once = false);
+    if (once && r.id === x!.noteId && r.state === "HELD") return !(once = false);
     return false;
   };
   const pass = await q2.refresh();
   v2.failPut.on = undefined;
-  assert.deepEqual(pass.failed, []);
+  assert.equal(pass.failed.length, 1);
+  assert.equal(pass.failed[0]!.noteId, x!.noteId);
   assert.deepEqual(pass.remade, [y!.noteId]);
-  assert.equal((await state(v2, x!.noteId)).state, "HELD");
+  assert.equal((await state(v2, x!.noteId)).attempt, x!.attempt, "the old proof still holds its note");
+  assert.equal(q2.ready().find((r) => r.noteId === x!.noteId), x, "and is still ready");
   const later = await q2.refresh();
-  assert.deepEqual(later.remade.length + later.made.length, 1);
-  assert.equal(q2.ready().length, 2);
+  assert.deepEqual(later.remade, [x!.noteId]);
+  assert.deepEqual(q2.ready().map((r) => r.epochStartMs), [START + E, START + E]);
 });
 
 test("a proof dropped while it is made is not kept, and its note is freed", async () => {
