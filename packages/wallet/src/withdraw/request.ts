@@ -15,6 +15,10 @@
 //   only its id is used. register_deposit is the caller's two-RPC read of A's registration (registerDepositOf,
 //   arming/accounts.ts armingRegisterDepositOf), asked for A's id and this withdrawal's token after the pick and
 //   before anything is written, so the read is refused when it would be made on another token.
+// - The fee: relayFee is the relayer's quote, and the device refuses one above its own fee_max (./feemax.ts: LD5's
+//   formula on the device's own reads of the gas price and the NEAR price, on two providers each, for this
+//   withdrawal's register_deposit), before anything is written or proved (the §2.8 arming row, wallet.md l.915; §8
+//   item 13, l.1333-1338: at any amount). No caller names the cap. The token is the network's own, the unit the cap is in.
 // - The withdrawal and its context are the kit's vaultWithdrawRequest: a fresh 16-byte salt from the device, the
 //   vault's own scope, the context the vault recomputes (vaultContextOf over vaultContextInput, the vault as processor).
 //   The proof is the kit's vaultProveWithdraw, through the prover worker the caller passes; it refuses a worker answer
@@ -37,7 +41,7 @@
 // Nothing here logs: the seed, the note's secrets and the circuit input never leave the device.
 //
 // Not here: the reads (the trees' leaves, the newest roots and the block time on two RPCs, register_deposit, the
-// relayer's fee_min), the send to the relayer and its answers, the "own" check itself (a spends record whose context
+// relayer's fee_min; fee_max's reads are feemax.ts's), the send to the relayer and its answers, the "own" check itself (a spends record whose context
 // is in the note's contexts is this device's, l.224-227: the sync and arming cards), and a withdrawal across several
 // notes (WM-06, l.716-760).
 import {
@@ -50,9 +54,11 @@ import {
   vaultWithdrawRequest,
 } from "@blindfill/kit";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { NEAR_NETWORKS, type NearNetwork } from "../deposit/account.ts";
 import { armAccount, changeIndex } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
+import { type FeeRpc, readWithdrawFeeMax } from "./feemax.ts";
 
 /** A change note's ref: change note j of label l. */
 export type NoteRefChange = Extract<NoteRef, { kind: "change" }>;
@@ -85,8 +91,13 @@ export type WithdrawRequestArgs = {
   registerDepositOf: (accountId: string, token: string) => Promise<bigint>;
   /** The release's relayer fee recipient, never a helper's answer. */
   feeRecipient: string;
-  /** The fee, in the token's base units, taken from the note on top of the amount. */
+  /** The fee, in the token's base units, taken from the note on top of the amount: at most the device's own fee_max. */
   relayFee: bigint;
+  /** The release's network, whose token `token` must be: its release pair reads the gas price of fee_max. */
+  network: NearNetwork;
+  rpcs: readonly [FeeRpc, FeeRpc];
+  /** Mainnet's release pair, for fee_max's price pool (rpcs again on mainnet). */
+  priceRpcs: readonly [FeeRpc, FeeRpc];
   /** What the recipient gets, in the token's base units. */
   amount: bigint;
   /** The withdrawal's deadline, in block time, ms (withdrawDeadlineMs). */
@@ -136,6 +147,9 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
       if (typeof v !== "bigint") throw new Error(`${k}: not a bigint`);
     }
     if (typeof registerDepositOf !== "function") throw new Error("registerDepositOf: not a function");
+    const { network, rpcs, priceRpcs } = a;
+    if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new Error(`network: unknown ${String(network)}`);
+    if (token !== NEAR_NETWORKS[network].token) throw new Error("token: not the network's own (fee_max is in its unit)");
     if (amount <= 0n) throw new Error("amount: 0 or less");
     if (relayFee < 0n) throw new Error("relayFee: below 0");
     if (relayFee >= amount) throw new Error("relayFee: at or above the amount"); // the §2.8 arming row, l.907
@@ -155,6 +169,8 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     arm.secretKey.fill(0);
     const registerDeposit = await registerDepositOf(recipient, token);
     if (typeof registerDeposit !== "bigint") throw new Error("registerDepositOf: not a bigint");
+    const feeMax = await readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit });
+    if (relayFee > feeMax) throw new Error("relayFee: above the device's fee_max"); // §2.8 arming row, l.915; §8 item 13
     const spent = noteSecrets(seed, note.ref);
     const next = noteSecrets(seed, change);
     const req = vaultWithdrawRequest({

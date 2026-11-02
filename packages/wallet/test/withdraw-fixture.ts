@@ -13,6 +13,7 @@ import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
+import type { FeeRpc } from "../src/withdraw/feemax.ts";
 import type { WithdrawRequestArgs } from "../src/withdraw/request.ts";
 
 const RELAYER = JSON.parse(readFileSync(new URL("../../../apps/helper/src/withdraw/fixtures/withdraw-request.json", import.meta.url), "utf8")) as {
@@ -80,6 +81,37 @@ export async function vaultWith(values = NOTE_VALUES): Promise<Vault> {
   return v;
 }
 
+// ---------- fee_max's reads, replayed (test/record-withdraw-feemax.mjs) ----------
+type Rec = { url: string; status: number; json: Record<string, unknown> };
+type NetRec = { final: Record<"a" | "b", Rec>; at: Record<"a" | "b", Rec>; pool?: Record<"a" | "b", Rec>; metadata?: Record<"a" | "b", Rec> };
+export const FEE_READS = JSON.parse(readFileSync(new URL("./vectors/withdraw-feemax.json", import.meta.url), "utf8")) as {
+  recorded_at: string;
+  answers: Record<"mainnet" | "testnet", NetRec>;
+};
+/** An edit of one side's answer before it is handed back: (read, side, answer JSON) -> answer JSON. */
+export type FeeEdit = (read: "final" | "at" | "pool", side: "a" | "b", json: Record<string, unknown>) => Record<string, unknown>;
+/** The recorded release pair of `net` (names: the recorded URLs), each answer through `edit`. */
+export function feeReplay(net: "mainnet" | "testnet", edit: FeeEdit = (_r, _s, j) => j): [FeeRpc, FeeRpc] {
+  const rec = FEE_READS.answers[net];
+  const one = (side: "a" | "b"): FeeRpc => ({
+    name: rec.final[side].url,
+    async block(params) {
+      if ("finality" in params) return edit("final", side, structuredClone(rec.final[side].json));
+      const at = rec.at[side].json as { result: { header: { height: number } } };
+      if (params.block_id !== at.result.header.height) throw new Error(`no recorded block ${params.block_id}`);
+      return edit("at", side, structuredClone(rec.at[side].json));
+    },
+    async query(params) {
+      const pool = rec.pool?.[side].json as { result: { block_height: number } } | undefined;
+      if (pool === undefined || params.method_name !== "get_pool" || params.block_id !== pool.result.block_height) throw new Error("no recorded answer");
+      return edit("pool", side, structuredClone(rec.pool![side].json));
+    },
+  });
+  return [one("a"), one("b")];
+}
+/** The fixture's fee_max: LD5 at the recorded reads (gas price 1e8, Ref pool 4512) and REGISTER_DEPOSIT. */
+export const FEE_MAX = 433_462n;
+
 /** The ids registerDepositOf was asked about, in order (the request asks for its A_{l,j} only). */
 export const registerAsked: string[] = [];
 
@@ -98,6 +130,9 @@ export function argsFor(v: Vault, prover: VaultProver, over: Partial<WithdrawReq
     registerDepositOf: async (id) => (registerAsked.push(id), REGISTER_DEPOSIT),
     feeRecipient: FEE_RECIPIENT,
     relayFee: RELAY_FEE,
+    network: "mainnet",
+    rpcs: feeReplay("mainnet"),
+    priceRpcs: feeReplay("mainnet"),
     amount: 3_000_000n,
     deadlineMs: BLOCK_MS + 590_000,
     blockTimestampNanosec: BLOCK_NS,

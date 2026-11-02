@@ -63,3 +63,7 @@
   .trb .trb-preset { height: 44px; }
   .trb .trb-row { height: 44px; }
 }
+
+/* An ended trade's one plain line above the main button (States.tsx EndLine): coral for Failed and Not landed. */
+.trb-end { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
+.trb-end[data-end="failed"], .trb-end[data-end="notLanded"] { color: var(--sell); }

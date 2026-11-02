@@ -67,6 +67,17 @@ Object.freeze(NEAR_NETWORKS);
 export type NearNetwork = keyof typeof NEAR_NETWORKS;
 /** The six reads' heights may spread by this many blocks at most (live spread measured by the review: 5-6). */
 export const HEIGHT_SPREAD_MAX = 30;
+/**
+ * The one bound on two providers' "final": the reads' heights may spread HEIGHT_SPREAD_MAX blocks at most, so a
+ * provider that names an old block as final cannot date a read, or pick the block both are read at, from the past.
+ * Gives the refusal's words, or null within the bound.
+ */
+export function heightSpreadOver(heights: readonly (number | bigint)[]): string | null {
+  const hs = heights.map((h) => BigInt(h));
+  const top = hs.reduce((a, b) => (a > b ? a : b));
+  const low = hs.reduce((a, b) => (a < b ? a : b));
+  return top - low > BigInt(HEIGHT_SPREAD_MAX) ? `the reads' heights spread ${top - low} blocks, over ${HEIGHT_SPREAD_MAX}` : null;
+}
 const METHOD = "query";
 if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(METHOD)) throw new Error(`"${METHOD}" is not on the kit's NEAR method list`);
 export const RPC_TIMEOUT_MS = 10_000;
@@ -266,7 +277,8 @@ export async function checkDepositAccount(
   if (ha !== VAULT_TOKEN_CODE_HASH) throw new DepositAccountRefused("code_hash", `USDC's code hash ${ha} is not the pin`);
 
   // Every read is in (result() saw all six): a lagging RPC would date the delegate's window from a stale height.
-  if (top - height > HEIGHT_SPREAD_MAX) throw new DepositAccountRefused("height", `the reads' heights spread ${top - height} blocks, over ${HEIGHT_SPREAD_MAX}`);
+  const spread = heightSpreadOver([top, height]);
+  if (spread !== null) throw new DepositAccountRefused("height", spread);
   if (ba < amount) throw new DepositAccountRefused("balance", `U holds ${ba}, under the amount ${amount}`);
   return { account, publicKey, nonce, balance: ba, height, codeHash: ha, halted: false, pendingPause: PENDING_PAUSE };
 }

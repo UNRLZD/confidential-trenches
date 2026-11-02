@@ -1,0 +1,208 @@
+{
+  "card": "vault-testnet-t04",
+  "network": "testnet",
+  "vault": "vault.bf-vt-20261102t071444.testnet",
+  "asset": "bf-usdc-20261101t022248.testnet",
+  "accounts": {
+    "parent": "bf-vt-20261102t071444.testnet",
+    "depositor": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+    "bounce": "b-03fc656a.bf-vt-20261102t071444.testnet",
+    "settler": "s-03fc656a.bf-vt-20261102t071444.testnet"
+  },
+  "amounts": {
+    "note1": "1000000",
+    "note2": "2000000",
+    "fee": "100000",
+    "refund": "1900000"
+  },
+  "ragequit": {
+    "nullifier_hash": "3437866076157992177837577578926772713044810799954431165401446146266174045010",
+    "label": "6647271274026183549623531992845140410957144982178868555387313025654498383012"
+  },
+  "bounce": {
+    "nullifier_hash": "16591691021017242531302693839499786835604282633207427282874802500067334834871"
+  },
+  "settle": {
+    "reserve_before": "4870000000000000000000",
+    "settle_cost": "4630000000000000000000",
+    "attached": "0",
+    "payer_back": "240000000000000000000",
+    "refund_value": "1900000",
+    "refund_label": "9860530609164071635291835191900949456705683904687323102285520588973295062053",
+    "refund_leaf_index": "3",
+    "refund_commitment": "13094665642350563597862164787960002341551523224574415097453320422490938489601",
+    "refund_precommitment": "8007749010523389682811146203547029085716228108825353641390104646730804653792"
+  },
+  "refund": {
+    "nullifier_hash": "17535836422590371958104117926419861971958303875950117028218534737676812344074"
+  },
+  "prove_ms": {
+    "ragequit": 456,
+    "bounce": 1472,
+    "refund": 1334
+  },
+  "before": {
+    "at": "2026-11-02T08:13:50.930Z",
+    "D_usdc": "0",
+    "vault_usdc": "0",
+    "B_usdc": "0",
+    "B_registered": null,
+    "D_near": "null",
+    "P_near": "7679467251461928200000000",
+    "totals": {
+      "deposited": "0",
+      "spent": "0",
+      "returned": "0"
+    }
+  },
+  "after": {
+    "at": "2026-11-02T08:32:41.530Z",
+    "D_usdc": "3000000",
+    "vault_usdc": "0",
+    "B_usdc": "0",
+    "B_registered": null,
+    "D_near": "932448318861943499999994",
+    "P_near": "6146631710750935500000000",
+    "totals": {
+      "deposited": "3000000",
+      "spent": "4900000",
+      "returned": "1900000"
+    }
+  },
+  "txs": [
+    {
+      "step": "setup",
+      "method": "Transfer (D, implicit)",
+      "hash": "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL",
+      "signer": "bf-vt-20261102t071444.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "setup",
+      "method": "storage_deposit (D)",
+      "hash": "8X7mYufNUzGwGixjiK1TQ2bRVYUkKuX8NMZLhv2o3Tds",
+      "signer": "bf-vt-20261102t071444.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "setup",
+      "method": "CreateAccount (B, no key)",
+      "hash": "BibFo2mrsyrbx84v42Z1AXf6QkYR67xZvvXY2x4sWkJr",
+      "signer": "bf-vt-20261102t071444.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "deposit1",
+      "method": "storage_prepay",
+      "hash": "6yn16A9RuxH78HR7nY9nEM1n77j2XBezFAv4fLT2bWrS",
+      "signer": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+      "expect": "success",
+      "vault_gas_burnt": [
+        1823346473027
+      ]
+    },
+    {
+      "step": "deposit1",
+      "method": "ft_transfer_call (deposit)",
+      "hash": "BmAiyRHQLw2uhsfj5zVeJM8AFHLobvWT7KnGPNErnU9Z",
+      "signer": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+      "expect": "success",
+      "vault_gas_burnt": [
+        6674230240060
+      ]
+    },
+    {
+      "step": "deposit2",
+      "method": "storage_prepay",
+      "hash": "GKdJjahvtXTtkitz9WoAtt2RTRwwhedtyY6D8FeHqeAX",
+      "signer": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+      "expect": "success",
+      "vault_gas_burnt": [
+        1865138763327
+      ]
+    },
+    {
+      "step": "deposit2",
+      "method": "ft_transfer_call (deposit)",
+      "hash": "GfAPoxh5JqN9DfVypbYNz9iy9WwhjwJ6N1J3hhWFxzLQ",
+      "signer": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+      "expect": "success",
+      "vault_gas_burnt": [
+        9441830277046
+      ]
+    },
+    {
+      "step": "ragequit",
+      "method": "ragequit",
+      "hash": "Lq84Ea7At2k96WxKpzpMkyT41JqjuXjLX7TNfRjFWAQ",
+      "signer": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+      "expect": "success",
+      "vault_gas_burnt": [
+        35761544718350,
+        1842370124464
+      ]
+    },
+    {
+      "step": "bounce",
+      "method": "withdraw (to B, bounces)",
+      "hash": "DA8KWBXZgZpqpt3dyC2Y7c1qKoheMGq1vRVD2PBL8HQT",
+      "signer": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+      "expect": "bounce",
+      "vault_gas_burnt": [
+        40410455361023,
+        223182562500,
+        1847111294757
+      ]
+    },
+    {
+      "step": "settle",
+      "method": "CreateAccount (S)",
+      "hash": "939ookUy9HQpbpwXZF1w6y8gwUGLizEoxhzcix3gthxi",
+      "signer": "bf-vt-20261102t071444.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "settle",
+      "method": "Transfer (S, to S_NEAR)",
+      "hash": "2X3cJ3peZpbqXLoYH31knfxdLD6YAaLbi6JCVGRe25wt",
+      "signer": "bf-vt-20261102t071444.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "settle",
+      "method": "settle (S)",
+      "hash": "8J5NgZKnFJMwRPrTaCERPBC3QK7oT5hWz7zW2kwRywDx",
+      "signer": "s-03fc656a.bf-vt-20261102t071444.testnet",
+      "expect": "success",
+      "vault_gas_burnt": [
+        11558396638877
+      ]
+    },
+    {
+      "step": "settle",
+      "method": "settle (S, again)",
+      "hash": "6E2GCWogFJGtpYyGLWW31u9FFZ1mgM1XmjLdtr3z2Zth",
+      "signer": "s-03fc656a.bf-vt-20261102t071444.testnet",
+      "expect": "refused AlreadySettled",
+      "vault_gas_burnt": [
+        1431018037607
+      ]
+    },
+    {
+      "step": "refund",
+      "method": "withdraw (refund note to D)",
+      "hash": "CmnM5dZ1gERmaoDr2w9W4fF1zkLRtDNshtPFJLLHVdvq",
+      "signer": "4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a",
+      "expect": "success",
+      "vault_gas_burnt": [
+        40147350180736,
+        1848267150067
+      ]
+    }
+  ]
+}

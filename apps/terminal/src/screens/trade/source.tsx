@@ -2,6 +2,7 @@ import type { Chain, SignpageClient, SignpageClientSnapshot } from "@blindfill/k
 import { createContext, useContext, useMemo } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
 import type { Slice } from "./model.ts";
+import type { PartCount } from "./States.tsx";
 
 // What the trade box's buy side reads and does. From the kit's public entry: the balance (`state.vault_balance`), the
 // buy (`request("buy", ...)`, kind `buy` of messages.ts) and its stages (`onProgress`). Not in the kit yet, so typed
@@ -44,6 +45,9 @@ export interface TradeKit {
   maxBuy: (chain: Chain) => string | null;
   request: SignpageClient["request"] | null;
   onProgress: SignpageClient["onProgress"] | null;
+  /** Missing kit call: how many of a part-filled trade's slices landed, by the request's id. Absent: not read, so a
+   *  part fill draws without a count. */
+  part?: (id: string) => PartCount | null;
 }
 
 export interface TradeSource {

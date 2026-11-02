@@ -3,7 +3,6 @@ import type { Chain } from "@blindfill/kit";
 import {
   amountOk,
   busy,
-  buttonTime,
   centsToDecimal,
   fmtUsd,
   outcome,
@@ -16,6 +15,7 @@ import {
   tap,
 } from "./model.ts";
 import type { Cents, Phase } from "./model.ts";
+import { EndLine, hasRunLabel, RunLabel, stateId } from "./States.tsx";
 import { useTradeSource } from "./source.tsx";
 import type { SetPreview } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -26,9 +26,9 @@ import "./trade.css";
 // column"), drawn after R5's ticket (design/proto at design-lock-r5: assets/token.js U.ticket, trenches-1440.html's
 // ticket; unrlzd.css .tk-*): the side switch, the order tabs with `Bal`, the amount box, the four presets that buy on one
 // click, `You receive`, the max line, the main button and the Route & fees and settings line. States: S8.3 Ready,
-// S8.9 Sending, S8.10 Landing, S8.12 Filled. Seams for the next cards: Sell, Limit and TP/SL are drawn off; a buy
-// the kit ends otherwise (`ended`: part filled, not landed, refused) and Slow are app-trade-box-states'; Route & fees
-// opens on its own card. No dialog, no confirm, ever.
+// S8.9 Sending, S8.10 Landing, S8.11 Slow, S8.12 Filled, and a buy the kit ended (States.tsx): S8.23 Failed, S8.24 Not
+// landed, each with Retry, and part filled, with the ready label back. Seams for the next cards: Sell, Limit and TP/SL
+// are drawn off; Route & fees opens on its own card. No dialog, no confirm, ever.
 
 /** A word, marked when it is still the owner's draft. */
 function W({ id }: { id: WordId }) {
@@ -38,9 +38,6 @@ function W({ id }: { id: WordId }) {
 
 const Bolt = () => (
   <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>
-);
-const Check = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5" /></svg>
 );
 const Swap = () => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 2.5v11M4 13.5l-2.5-2.5M4 13.5l2.5-2.5M12 13.5v-11M12 2.5l-2.5 2.5M12 2.5l2.5 2.5" /></svg>
@@ -111,12 +108,16 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   // the kit's stages for the running buy
   useEffect(() => {
     if (!kit.onProgress) return;
-    return kit.onProgress((id, stage) => setPhase((p) => progress(p, id, stage, src.now())));
+    // the time is read when the stage arrives, not when React renders it: a late render must not stretch Filled's time
+    return kit.onProgress((id, stage) => {
+      const at = src.now();
+      setPhase((p) => progress(p, id, stage, at));
+    });
   }, [kit.onProgress, src.now]);
 
-  // Landing's counter: a tick every 100 ms while it draws, none otherwise
+  // Landing's counter and Slow: a tick every 100 ms while a buy runs, none otherwise
   useEffect(() => {
-    if (phase.k !== "landing") return;
+    if (!busy(phase)) return;
     const t = setInterval(() => tick((n) => n + 1), 100);
     return () => clearInterval(t);
   }, [phase.k]);
@@ -129,31 +130,22 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     const next = tap(phaseRef.current, h.id, src.now());
     phaseRef.current = next;
     setPhase(next);
-    void h.outcome.then((o) => setPhase((p) => outcome(p, h.id, o, src.now())));
+    void h.outcome.then((o) => {
+      const at = src.now();
+      setPhase((p) => outcome(p, h.id, o, at));
+    });
   }
 
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
   const pending = shown === null && last !== null;
   const est = (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
-  const state = phase.k === "sending" ? "S8.9" : phase.k === "landing" ? "S8.10" : phase.k === "filled" ? "S8.12" : phase.k === "ended" ? "ended" : "S8.3";
-  const time = buttonTime(phase, src.now());
+  const now = src.now();
+  const state = stateId(phase, now, "buy") ?? "S8.3";
   const canBuy = ready && !running && amountOk(amount, max, balance);
 
   let label;
-  if (phase.k === "sending") label = <W id="sending" />;
-  else if (phase.k === "landing")
-    label = (
-      <>
-        <W id="landing" />&nbsp;<span className="trb-live" data-time={time}>{time}</span>
-      </>
-    );
-  else if (phase.k === "filled")
-    label = (
-      <>
-        <Check />&nbsp;<W id="filled" />&nbsp;<span data-time={time}>{time}</span>
-      </>
-    );
+  if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} />;
   else
     label = (
       <span className="trb-ctaLbl" title={`${WORDS.buy.text} ${symbol}`}>
@@ -223,7 +215,9 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
         <span data-pending={pending || undefined} data-testid="trade-receive">{est}</span>
       </div>
       <div className="trb-warn" data-testid="trade-max">
-        {max !== null && (
+        {phase.k === "ended" ? (
+          <EndLine phase={phase} side="buy" part={kit.part?.(phase.id) ?? null} />
+        ) : max !== null && (
           <span>
             <W id="max" /> {fmtUsd(max)}
           </span>

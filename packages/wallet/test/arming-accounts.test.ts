@@ -279,3 +279,12 @@ test("armingRegisterDepositOf is withdrawRequest's registerDepositOf", async () 
     await refused(armingRegisterDepositOf(net, pair(net, { seen }))(rec.test_a, token as unknown as string), "input", /token/);
   assert.equal(seen.length, 0);
 });
+
+test("a stale final: answers more than HEIGHT_SPREAD_MAX blocks apart are refused; within it they are read", async () => {
+  // the recorded four answers span 222686288-222686290: 27 back on a puts them 30 apart, 400 back is a stale final
+  const back = (n: number): Opts => ({ edit: (_r, j) => (j.result.block_height -= n) });
+  const a = await readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a", back(27)), replay("mainnet", "b", back(0))]);
+  assert.equal(typeof a.registerDeposit, "bigint");
+  await refused(readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a", back(400)), replay("mainnet", "b", back(0))]), "disagree", /spread/);
+  await refused(readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a", { edit: (_r, j) => delete j.result.block_height }), replay("mainnet", "b")]), "rpc", /block height/);
+});
