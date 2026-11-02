@@ -59,7 +59,7 @@ export const PREPAY_GAS = 30_000_000_000_000n;
  *   one send's gas bought up front: prepaid gas is bought at max(gas price, 1e9 yocto per gas) (markets.md F10,
  *   M:1480); a delegate transaction holds at most 300 Tgas (its inner call at most G_bind_cap, 203.126 Tgas, check 5),
  *   so 300e12 x 1e9 = 0.3 N, returned less the burn once it runs;
- *   plus a (U, P)'s worst spend, A1's row-7 maximum (vault.md 2.10, V:735-737): 904 B prepaid (0.00904 N) in three
+ *   plus a (U, P)'s worst spend, A1's row-7 maximum (vault.md 2.10, V:735-737): 904 B prepaid (0.00904 N), three
  *   prepays' gas (3 x 0.0003 N) and two failed sends that each burn row 7's 0.0101563 N,
  *   0.00904 + 3 x 0.0003 + 2 x 0.0101563 = 0.0302526 N (PER_P_WORST_YOCTO);
  *   = 0.3302526 N. Below it the relayer answers 503 relayer_low, so a relayer at the floor still holds 0.3 N after it.
