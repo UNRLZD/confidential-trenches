@@ -20,7 +20,9 @@
 //     pinned in SHAPES, and every frozen value (CORS, paths with their limits, the RPC allowlist, the HTTP statuses,
 //     the patterns and limits, the order's wire fields with orders/record.ts's ORDER_RECORD_FIELDS) equals VALUES;
 //   - after kit-v1, the additions only: the beta cap per deposit HELPER_BIND_DEPOSIT_CAP (1,000 USDC in base units,
-//     OD:262) and its code amount_above_cap right after amount_too_low (card kit-deposit-cap);
+//     OD:262) and its code amount_above_cap right after amount_too_low (card kit-deposit-cap); and POST /v1/bind's
+//     answer bound HELPER_BIND_ANSWER_MS (60 s), which the helper answers within and the device's send waits for, one
+//     number both read (card wallet-bind-carry-wait);
 //   - after 06:00Z, main's v1.ts equals the tag's byte for byte.
 // Once the helper answers (card helper-host-health), it also reads https://api.confidential.unrealized.trade/v1/health
 // from APP_HOST's Origin and from a stranger's, and compares its parts, X-Helper-Commit and CORS headers with the file.
@@ -144,7 +146,7 @@ export const SHAPES = {
 export const VALUES = {
   HELPER_CORS: {"origins":["https://confidential.unrealized.trade","https://sign.confidential.unrealized.trade"],"allowMethods":["GET","POST","PUT","DELETE"],"allowHeaders":["content-type"],"exposeHeaders":["X-Helper-Commit","X-Helper-Source","X-Fetched-At"],"maxAgeSeconds":600,"vary":"Origin","allowCredentialsHeader":"absent"},
   HELPER_V1_PATHS: [{"method":"GET","path":"/v1/health","part":"all","limitBytes":1024},{"method":"POST","path":"/v1/proxy/{vendor}/{path}","part":"proxy","limitBytes":65536},{"method":"POST","path":"/v1/rpc/{chain}","part":"proxy","limitBytes":262144},{"method":"GET","path":"/v1/market/...","part":"proxy","limitBytes":null},{"method":"GET","path":"/v1/logo/{chain}/{token}","part":"proxy","limitBytes":262144},{"method":"GET","path":"/v1/token-status","part":"relay","limitBytes":1024},{"method":"GET","path":"/v1/withdraw/fee","part":"relay","limitBytes":1024},{"method":"POST","path":"/v1/withdraw","part":"relay","limitBytes":8192},{"method":"GET","path":"/v1/withdraw/{tx_hash}","part":"relay","limitBytes":1024},{"method":"POST","path":"/v1/bind","part":"delegate","limitBytes":4096},{"method":"POST","path":"/v1/intents","part":"intents","limitBytes":8192},{"method":"POST","path":"/v1/orders","part":"orders","limitBytes":65536},{"method":"POST","path":"/v1/orders/status","part":"orders","limitBytes":16384},{"method":"PUT","path":"/v1/orders/{order_id}","part":"orders","limitBytes":32768},{"method":"DELETE","path":"/v1/orders/{order_id}","part":"orders","limitBytes":1024},{"method":"POST","path":"/v1/log","part":"log","limitBytes":4096}],
-  HELPER_RPC_METHODS: {"solana":["getAccountInfo","getMultipleAccounts","getBalance","getTokenAccountsByOwner","getTokenLargestAccounts","getLatestBlockhash","simulateTransaction","sendTransaction","getSignatureStatuses","getTransaction","getBlockHeight","getMinimumBalanceForRentExemption"],"base":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"robinhood":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"near":["query","block","gas_price","tx","send_tx","EXPERIMENTAL_tx_status","EXPERIMENTAL_protocol_config"]},
+  HELPER_RPC_METHODS: {"solana":["getAccountInfo","getMultipleAccounts","getBalance","getTokenAccountsByOwner","getTokenLargestAccounts","getLatestBlockhash","simulateTransaction","sendTransaction","getSignatureStatuses","getTransaction","getBlockHeight","getMinimumBalanceForRentExemption","isBlockhashValid"],"base":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"robinhood":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"near":["query","block","gas_price","tx","send_tx","EXPERIMENTAL_tx_status","EXPERIMENTAL_protocol_config"]},
   HELPER_RPC_BATCH_MAX: 10,
   HELPER_CODE_STATUS: {"not_found":404,"token_not_watched":404,"too_large":413,"rate_limited":429,"id_not_ours":403,"sender_struck":403,"receiver_is_vault":403,"prepay_open":409,"not_paid":409,"receiver_not_registered":409,"upstream":503,"token_halted":503,"index_behind":503,"relayer_low":503},
   HELPER_SALT_PATTERN: "/^[0-9a-f]{32}$/",
@@ -161,6 +163,7 @@ export const VALUES = {
   HELPER_LOGO_TYPES: ["image/png","image/jpeg","image/webp","image/gif"],
   HELPER_PROXY_VENDORS: ["jupiter","relay","lifi","oneclick"],
   HELPER_BIND_DEPOSIT_CAP: "1000000000n",
+  HELPER_BIND_ANSWER_MS: 60000,
 };
 const NEVER_IN_INTENTS = ["msg", "memo", "storage_deposit"];
 // the one import v1.ts makes, and the wallet's exported names it must not declare (decided 00:35Z)

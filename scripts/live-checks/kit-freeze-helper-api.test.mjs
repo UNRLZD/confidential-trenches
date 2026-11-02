@@ -4,7 +4,8 @@
 //     helper host does not answer (a timeout), so the health part is skipped;
 //   good: v1.ts, orders/record.ts and index.ts as GitHub serves them once this card merges (all from the branch at
 //     5682bcf, index.ts with its export line), on main and on a stand-in for the 06:00Z tag, and the same real
-//     health timeout; v1.ts is the file with card kit-deposit-cap's additions (the cap and amount_above_cap);
+//     health timeout; v1.ts is the file with card kit-deposit-cap's additions (the cap and amount_above_cap) and
+//     card wallet-bind-carry-wait's (HELPER_BIND_ANSWER_MS; its text is v1.ts on that card's branch);
 //   live_kit_v1: the real run on GitHub main and the kit-v1 tag at 2026-11-01 08:32:10Z, before kit-deposit-cap
 //     merged: both v1.ts files lack the cap and its code, and the helper answers its health. Its two orders/record.ts
 //     reads answered the same text as good's main record.ts byte for byte, so the file names that answer
@@ -70,7 +71,7 @@ test("recorded good answer with the helper up: the health parts and CORS headers
 test("recorded real run on GitHub main and kit-v1, before the cap was added: the cap and its code missing: FAIL", async () => {
   const r = await check({ fetchFn: replay(REC.live_kit_v1), now: Date.parse("2026-11-01T08:32:10Z"), tag: "kit-v1", requireHealth: true });
   assert.equal(r.ok, false);
-  assert.deepEqual(failed(r), ["main", "kit-v1"].flatMap((ref) => [`BAD ${ref}: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES`, `BAD ${ref}: every frozen value equals its pin: differs: HELPER_BIND_DEPOSIT_CAP`]));
+  assert.deepEqual(failed(r), ["main", "kit-v1"].flatMap((ref) => [`BAD ${ref}: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES`, `BAD ${ref}: every frozen value equals its pin: differs: HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS`]));
   assert.ok(r.lines.includes("ok  main's v1.ts equals the tag kit-v1's byte for byte"));
 });
 
@@ -129,6 +130,9 @@ test("more bad answers, each caught by exactly the lines named", () => {
     ["a field on the order", (t) => t.replace('[...ORDER_RECORD_FIELDS, "token_hash"]', '[...ORDER_RECORD_FIELDS, "token_hash", "note"]'), [/^every frozen value equals its pin: differs: HELPER_ORDER_FIELDS$/]],
     ["bind codes out of H4.3's order", (t) => t.replace('  "sender_struck",\n  "expired",\n  "resign_needed",\n  "not_one_action",', '  "expired",\n  "sender_struck",\n  "resign_needed",\n  "not_one_action",'), [/differs: HELPER_BIND_DEPOSIT_CODES/]],
     ["the cap raised", (t) => t.replace("export const HELPER_BIND_DEPOSIT_CAP = 1_000_000_000n;", "export const HELPER_BIND_DEPOSIT_CAP = 10_000_000_000n;"), [/^every frozen value equals its pin: differs: HELPER_BIND_DEPOSIT_CAP$/]],
+    ["the answer bound cut to the old 10 s", (t) => t.replace("export const HELPER_BIND_ANSWER_MS = 60_000;", "export const HELPER_BIND_ANSWER_MS = 10_000;"), [/^every frozen value equals its pin: differs: HELPER_BIND_ANSWER_MS$/]],
+    ["the answer bound dropped", (t) => t.replace("export const HELPER_BIND_ANSWER_MS = 60_000;", ""), [/^every frozen value equals its pin: differs: HELPER_BIND_ANSWER_MS$/]],
+    ["the answer bound computed", (t) => t.replace("export const HELPER_BIND_ANSWER_MS = 60_000;", "export const HELPER_BIND_ANSWER_MS = Number(process.env.WAIT);"), [/^every frozen value equals its pin: differs: HELPER_BIND_ANSWER_MS$/]],
     ["the cap a number, not a bigint", (t) => t.replace("export const HELPER_BIND_DEPOSIT_CAP = 1_000_000_000n;", "export const HELPER_BIND_DEPOSIT_CAP = 1_000_000_000;"), [/^every frozen value equals its pin: differs: HELPER_BIND_DEPOSIT_CAP$/]],
     ["the cap's code dropped", (t) => t.replace('  "amount_too_low",\n  "amount_above_cap",\n', '  "amount_too_low",\n'), [/differs: HELPER_BIND_DEPOSIT_CODES/]],
     ["the cap's code after the balance", (t) => t.replace('  "amount_above_cap",\n  "amount_above_balance",\n', '  "amount_above_balance",\n  "amount_above_cap",\n'), [/differs: HELPER_BIND_DEPOSIT_CODES/]],
