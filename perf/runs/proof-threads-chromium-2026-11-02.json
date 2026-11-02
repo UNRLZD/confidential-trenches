@@ -1,0 +1,42 @@
+{
+ "schema": "perf-run/1",
+ "id": "proof-threads-chromium-2026-11-02",
+ "chain": "near",
+ "network": "device",
+ "signer": "script",
+ "date": "2026-11-02",
+ "source": "packages/kit/test/prover/chromium.e2e.mjs",
+ "note": "Signing page prover on 4 threads, headless chromium 153.0.8010.12, test box (i5-14600K, 8-core cap), 5 fresh pages, each proof cold; all verified. Same box and browser, one thread before this card: median 4819 ms (2.7x slower).",
+ "series": [
+  {
+   "step": "proof-withdraw-browser",
+   "samples": [
+    {
+     "ok": true,
+     "value": 1754,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 1760,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 1752,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 1760,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 1785,
+     "txs": []
+    }
+   ]
+  }
+ ]
+}

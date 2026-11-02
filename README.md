@@ -161,6 +161,8 @@ Every number below comes from a run we recorded, and each row links to the trans
 | NEAR | Money out to a fresh wallet (NEAR Intents) | 24.4 s | 1 of 1 | mainnet, test script | [near-intents-2026-10-19](docs/performance.md#near-intents-2026-10-19) |
 | NEAR | Withdraw proof on a phone | 8.3 s / 8.5 s | 5 of 5 | device, phone browser | [proof-phone-2026-10-26](docs/performance.md#proof-phone-2026-10-26) |
 | NEAR | Commitment proof on a phone | 0.6 s / 0.7 s | 5 of 5 | device, phone browser | [proof-phone-2026-10-26](docs/performance.md#proof-phone-2026-10-26) |
+| NEAR | Withdraw proof in a desktop browser | 1.8 s / 1.8 s | 5 of 5 | device, test script | [proof-threads-chromium-2026-11-02](docs/performance.md#proof-threads-chromium-2026-11-02) |
+| NEAR | Withdraw proof in a desktop browser | 1.3 s / 1.4 s | 6 of 6 | device, test script | [proof-threads-webkit-2026-11-02](docs/performance.md#proof-threads-webkit-2026-11-02) |
 | NEAR | Vault withdraw, the vault's own gas | up to 82.420 Tgas | 3 of 3 | testnet, test script | [vault-gas-testnet-2026-10-26](docs/performance.md#vault-gas-testnet-2026-10-26) |
 | NEAR | Vault deposit, tree work only | up to 11.900 Tgas | 5 of 5 | testnet, test script | [vault-gas-testnet-2026-10-26](docs/performance.md#vault-gas-testnet-2026-10-26) |
 <!-- perf-table:end -->

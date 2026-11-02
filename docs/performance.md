@@ -381,3 +381,23 @@ snarkjs 0.7.5 in one worker, single thread, in a phone browser; the first run of
 |---|---|---|---|---|---|---|
 | Withdraw proof on a phone | proof time | 5 | 5 | 8,348 ms / 8,492 ms | 8,492 ms | - |
 | Commitment proof on a phone | proof time | 5 | 5 | 600 ms / 616 ms | 616 ms | - |
+
+## proof-threads-chromium-2026-11-02
+
+NEAR, device, 2026-11-02, signed by: test script. Record: `packages/kit/test/prover/chromium.e2e.mjs`.
+
+Signing page prover on 4 threads, headless chromium 153.0.8010.12, test box (i5-14600K, 8-core cap), 5 fresh pages, each proof cold; all verified. Same box and browser, one thread before this card: median 4819 ms (2.7x slower).
+
+| What | Measures | n | ok | p50 / p95 | max | Fee per sample |
+|---|---|---|---|---|---|---|
+| Withdraw proof in a desktop browser | proof time | 5 | 5 | 1,760 ms / 1,785 ms | 1,785 ms | - |
+
+## proof-threads-webkit-2026-11-02
+
+NEAR, device, 2026-11-02, signed by: test script. Record: `scripts/live-checks/signpage-prover-threads.answers.json`.
+
+Signing page prover on 4 threads, headless webkit 26.6, test box (i5-14600K, 8-core cap), 6 proofs in one page, first cold; all verified. Same box and browser, one thread before this card: median 4105 ms (3.2x slower).
+
+| What | Measures | n | ok | p50 / p95 | max | Fee per sample |
+|---|---|---|---|---|---|---|
+| Withdraw proof in a desktop browser | proof time | 6 | 6 | 1,286 ms / 1,364 ms | 1,364 ms | - |

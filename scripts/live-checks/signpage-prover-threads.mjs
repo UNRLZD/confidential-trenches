@@ -6,7 +6,8 @@
 //   - the thread file at https://SIGN_HOST/prover-thread.js: 200, a script, its size and sha256 THREAD_PIN's (snarkjs
 //     0.7.5's own thread code byte for byte after a licence header; the kit's build.mjs refuses any other), under two
 //     policies at once: the site's (signpage-skeleton's CSP, every directive) and its own, exactly THREAD_CSP;
-//   - in a headless browser on https://SIGN_HOST/ (Chromium, or WebKit with --browser webkit): planted workers from a
+//   - in a headless browser on https://SIGN_HOST/ (WebKit, Safari's engine, or Chromium with --browser chromium; the
+//     harness's routed answers stall Chromium's nested thread workers, so the harness runs in WebKit): planted workers from a
 //     data: URL and from a blob: URL, each made a TrustedScriptURL by the page's one prover-worker policy so that only
 //     the CSP stands in their way, are refused and never run; then the prover worker, made through that policy, loads
 //     the pinned withdraw files and proves the fixed input (packages/kit/test/prover/withdraw.input.json) on
@@ -14,7 +15,7 @@
 //     and snarkjs 0.7.5's groth16.verify accepts it with the pinned withdraw.vkey;
 //   - the browser fetched /prover-thread.js and no other worker script; no CSP or Trusted Types violation but the two
 //     the planted workers make.
-//   node scripts/live-checks/signpage-prover-threads.mjs [--browser chromium|webkit] [--proofs <n>] [--record <file>]
+//   node scripts/live-checks/signpage-prover-threads.mjs [--browser webkit|chromium] [--proofs <n>] [--record <file>]
 //   node scripts/live-checks/signpage-prover-threads.mjs --harness [--site <dir>] [...]
 //     the harness: SIGN_HOST answered from a build folder under its own _headers, every matching rule joined as Pages
 //     joins them (default: a fresh `deploy.mjs --dry-run` build, which passed the deploy gate); every other host refused.
@@ -179,7 +180,9 @@ const RUN = `async ([input, pins, proofs]) => {
   });
   const dead = new Promise((_, fail) => worker.addEventListener("error", (e) => fail(new Error("prover worker: " + (e.message || "failed to load")))));
   dead.catch(() => {});
-  const call = (msg, transfer = []) => Promise.race([dead, new Promise((ok, fail) => { const id = next++; waiting.set(id, { ok, fail }); worker.postMessage({ ...msg, id }, transfer); })]);
+  // a desktop proof takes seconds; one that has not answered in 120 s is a hang (a thread that never started), not slow
+  const late = () => new Promise((_, fail) => setTimeout(() => fail(new Error("no answer in 120 s")), 120000));
+  const call = (msg, transfer = []) => Promise.race([dead, late(), new Promise((ok, fail) => { const id = next++; waiting.set(id, { ok, fail }); worker.postMessage({ ...msg, id }, transfer); })]);
   const file = async (p) => {
     const r = await fetch(p, { credentials: "omit" });
     if (!r.ok) throw new Error(p + ": HTTP " + r.status);
@@ -235,6 +238,10 @@ async function readPage(serve, engine, proofs) {
       });
     }
     const page = await ctx.newPage();
+    const consoleLines = [];
+    page.on("console", (m) => consoleLines.length < 50 && consoleLines.push(`${m.type()} ${m.text()}`.slice(0, 300)));
+    page.on("pageerror", (e) => consoleLines.length < 50 && consoleLines.push(`pageerror ${e.message}`.slice(0, 300)));
+    page.on("worker", (w) => consoleLines.length < 50 && consoleLines.push(`worker ${w.url().slice(0, 120)}`));
     await page.goto(`${SIGN}/`, { waitUntil: "load" });
     if (!(await page.evaluate(() => !!window.__pt))) throw new Error("the init script did not run on SIGN_HOST's page");
     const want = expected();
@@ -242,6 +249,7 @@ async function readPage(serve, engine, proofs) {
     const out = await page.evaluate(`(${RUN})(${JSON.stringify([want.input, pins, proofs])})`);
     await new Promise((ok) => setTimeout(ok, 250)); // a violation is reported a task after its cause
     out.violations = await page.evaluate(() => window.__pt.violations);
+    out.console = consoleLines; // for the reader; the judge reads none of it
     out.workerScripts = workerScripts; // every script on SIGN_HOST but the page's app.js, and every data: or blob: one
     return { browser: `${engine} ${browser.version()} (Playwright)`, page: out };
   } finally {
@@ -249,7 +257,7 @@ async function readPage(serve, engine, proofs) {
   }
 }
 
-export async function collect({ harness = false, site, engine = "chromium", proofs = 3 } = {}) {
+export async function collect({ harness = false, site, engine = "webkit", proofs = 3 } = {}) {
   let dir = null;
   try {
     let serve = null;
@@ -273,10 +281,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const valued = ["--site", "--record", "--browser", "--proofs"];
     const known = new Set(["--harness", ...valued]);
     const bad = a.filter((x, i) => x.startsWith("--") && !known.has(x) && !(i > 0 && valued.includes(a[i - 1])));
-    const engine = opt("--browser") ?? "chromium";
+    const engine = opt("--browser") ?? "webkit";
     const proofs = Number(opt("--proofs") ?? 3);
     if (bad.length || (opt("--site") && !a.includes("--harness")) || !["chromium", "webkit"].includes(engine) || !(Number.isInteger(proofs) && proofs > 0 && proofs <= 20))
-      throw new Error("usage: signpage-prover-threads.mjs [--harness [--site <dir>]] [--browser chromium|webkit] [--proofs <1-20>] [--record <file>]");
+      throw new Error("usage: signpage-prover-threads.mjs [--harness [--site <dir>]] [--browser webkit|chromium] [--proofs <1-20>] [--record <file>]");
     const rec = await collect({ harness: a.includes("--harness"), site: opt("--site"), engine, proofs });
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     const { ok, lines } = await judge(rec);

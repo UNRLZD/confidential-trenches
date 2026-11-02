@@ -26,6 +26,7 @@ const STEPS = {
   "intents-out": { label: "Money out to a fresh wallet (NEAR Intents)", metric: "request to visible", unit: "ms" },
   "proof-withdraw": { label: "Withdraw proof on a phone", metric: "proof time", unit: "ms" },
   "proof-commitment": { label: "Commitment proof on a phone", metric: "proof time", unit: "ms" },
+  "proof-withdraw-browser": { label: "Withdraw proof in a desktop browser", metric: "proof time", unit: "ms" },
   "vault-withdraw-gas": { label: "Vault withdraw, the vault's own gas", metric: "gas", unit: "Tgas" },
   "vault-deposit-gas": { label: "Vault deposit, tree work only", metric: "gas", unit: "Tgas" },
 };
