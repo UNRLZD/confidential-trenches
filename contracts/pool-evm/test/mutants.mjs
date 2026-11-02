@@ -139,6 +139,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const r = run(dir, t);
       if (file === VERIFIER) writeFileSync(st, stSrc);
       writeFileSync(f, src);
+      // each mutant runs alone: every file is back as it is in the pool before the next
+      for (const x of new Set(MUTANTS.map((m) => m[0]))) {
+        if (readFileSync(path.join(dir, x), "utf8") !== readFileSync(path.join(ROOT, x), "utf8")) throw new Error(`mutant ${i + 1} left ${x} changed`);
+      }
       console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1} ${file}: ${find.trim().split("\n")[0].slice(0, 70)} -> ${t} ${r === "fail" ? "fails" : "PASSES"}`);
       if (r !== "fail") bad++;
     });
