@@ -10,12 +10,13 @@ import { test } from "node:test";
 import { base58 } from "./checks.ts";
 import { BIND_ENV, bindSenderFromEnv, MARGIN_K_ENV } from "./env.ts";
 
-const key = (() => {
-  const seed = Buffer.alloc(32, 5);
+const keyOf = (fill: number) => {
+  const seed = Buffer.alloc(32, fill);
   const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
   const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
   return `ed25519:${base58(Buffer.concat([seed, pub]))}`;
-})();
+};
+const key = keyOf(5);
 const good = () => ({
   BIND_VAULT_TESTNET: "vault.test.testnet",
   BIND_RELAYER_TESTNET: "bind.test.testnet",
@@ -61,4 +62,16 @@ test("a network half set, a key that does not parse, a vault that is not the wit
   } catch (e) {
     assert.ok(!(e as Error).message.includes("secret"));
   }
+});
+
+test("one key on one account in both relayers is refused at start (two nonce counters for one key); another key, or the same key on another account, is not", () => {
+  const other = keyOf(6);
+  const withdraw = { WITHDRAW_RELAYER_TESTNET: "bind.test.testnet", WITHDRAW_FEE_RECIPIENT_TESTNET: "fees.test.testnet", WITHDRAW_VAULT_TESTNET: "vault.test.testnet" };
+  for (const keys of [key, `${other},${key}`]) {
+    assert.throws(() => bindSenderFromEnv({ ...good(), ...withdraw, WITHDRAW_RELAYER_KEYS_TESTNET: keys }, {}), /BIND_RELAYER_KEY_TESTNET must not be one of WITHDRAW_RELAYER_KEYS_TESTNET on the same account/, keys);
+  }
+  assert.doesNotThrow(() => bindSenderFromEnv({ ...good(), ...withdraw, WITHDRAW_RELAYER_KEYS_TESTNET: other }, {}));
+  assert.doesNotThrow(() => bindSenderFromEnv({ ...good(), ...withdraw, WITHDRAW_RELAYER_TESTNET: "relay.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: key }, {}));
+  // the other network's withdrawal keys are not this network's
+  assert.doesNotThrow(() => bindSenderFromEnv({ ...good(), WITHDRAW_RELAYER_MAINNET: "bind.test.testnet", WITHDRAW_RELAYER_KEYS_MAINNET: key }, {}));
 });

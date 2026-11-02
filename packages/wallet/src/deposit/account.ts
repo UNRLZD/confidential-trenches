@@ -38,10 +38,10 @@
 import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { base58, base64 } from "@scure/base";
 import { depositId } from "../derive/keys.ts";
-import { NEAR_NETWORKS, NEAR_RPC_METHOD, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../near/networks.ts";
+import { NEAR_NETWORKS, NEAR_RPC_METHOD, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../../../kit/src/near/networks.ts";
 
-// The networks, the pair rule and nearRpc live in ../near/networks.ts (no kit import); every caller still imports them here.
-export { NEAR_NETWORKS, NEAR_RPC_METHOD, NEAR_RPC_URLS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "../near/networks.ts";
+// The networks, the pair rule and nearRpc live in the kit (packages/kit/src/near/networks.ts); every caller still imports them here.
+export { NEAR_NETWORKS, NEAR_RPC_METHOD, NEAR_RPC_URLS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "../../../kit/src/near/networks.ts";
 
 /** The six reads' heights may spread by this many blocks at most (live spread measured by the review: 5-6). */
 export const HEIGHT_SPREAD_MAX = 30;
