@@ -70,6 +70,8 @@ function base58decodeKey(s: string): Uint8Array {
 }
 
 type Opt = {
+  /** load these keys each from its own table instead (one table per key) */
+  tables?: string[];
   r?: Partial<SolanaPoolRelease>;
   /** tag 3: the inner instruction's program key (account 8) */
   inner?: string;
@@ -94,7 +96,9 @@ function wire(o: Opt = {}): Uint8Array {
     data = solanaEncodePoolTag3(r, false, 0n, [{ ...(o.innerIx ?? { program: 8, accounts: [1, 9] }), data: transfer }]);
   }
   if (o.accounts) accounts = o.accounts(accounts);
-  const tables = o.table ? [{ address: TABLE, table: solanaDecodeLookupTable(tableData(o.table)) }] : [];
+  const tables = o.table
+    ? [{ address: TABLE, table: solanaDecodeLookupTable(tableData(o.table)) }]
+    : (o.tables ?? []).map((k, i) => ({ address: key(`TABLE_${i}`).address, table: solanaDecodeLookupTable(tableData([k])) }));
   const { message } = solanaCompileV0(FP.address, [...(o.pre ?? [cuLimit(400_000), cuPrice(1_000n)]), { program: PROGRAM, accounts, data }], BH, tables, [FP.address, W.address]);
   o.edit?.(message);
   return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, W.seed), ...message]);
@@ -233,4 +237,15 @@ test("S14: the pool instruction's account 1 not W is refused (bad_shape), W's si
     accounts: (a) => [...a.map((x, i) => (i === 1 ? { key: key("NOT_W").address, signer: false, writable: true } : x)), { key: W.address, signer: true, writable: true }],
   });
   assert.equal(verdict(w), "bad_shape");
+});
+
+test("a message loading more than SOLANA_POOL_LOOKUPS_MAX (4) tables is refused before any read (bad_shape)", () => {
+  // tag 3 with the tip and TO: the pool, the spent mark, the pages, the tip account and TO are loadable, each distinct
+  const accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, rel(), 6);
+  const loadable = [...new Set([0, 3, 4, 5, 6].map((i) => accounts[i]!.key)), TO];
+  assert.ok(loadable.length >= 5);
+  const five = checkSolanaPoolTx(wire({ inner: SOLANA_SYSTEM_PROGRAM, tables: loadable.slice(0, 5) }), CFG);
+  assert.equal(five.ok ? "ok" : five.code, "bad_shape");
+  const four = checkSolanaPoolTx(wire({ inner: SOLANA_SYSTEM_PROGRAM, tables: loadable.slice(0, 4) }), CFG);
+  assert.ok(four.ok && four.tx.message.lookups.length === 4);
 });

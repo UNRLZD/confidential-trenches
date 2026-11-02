@@ -7,6 +7,7 @@
 //   - "fee_off": the release at the published fee plus one step;
 //   - "extra_instruction": the release, then a transfer out of the fee payer;
 //   - "fee_payer_named": a tag 3 whose inner instruction names the fee payer (the pool instruction's account 2);
+//   - "fee_payer_account": the release naming the fee payer as another pool account (its spent mark) too;
 //   - "fee_below_cost": the release with a priority fee (1,400,000 CU at a price) over what the fee leaves;
 //   - "inner_program": a tag 3 whose inner instruction invokes a program off the kit's list;
 //   - "deadline_near": the release with a deadline one second away (under now plus 90 s).
@@ -33,6 +34,7 @@ export const PLANTS = [
   ["fee_off", "fee_off"],
   ["extra_instruction", "extra_instruction"],
   ["fee_payer_named", "fee_payer_named"],
+  ["fee_payer_account", "fee_payer_named"],
   ["fee_below_cost", "fee_below_cost"],
   ["inner_program", "inner_program"],
   ["deadline_near", "deadline_near"],
@@ -130,7 +132,7 @@ const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
  * compute unit limit, before nothing; its accounts the pool, W, the fee payer and throwaway keys (it is refused before
  * the program ever reads them). Slot 0 empty. `kind` plants one fault: "changed" (a relay fee byte changed after W
  * signed), "extra_instruction" (a transfer out of the fee payer after the release), "fee_payer_named" (tag 3, its inner
- * instruction names account 2), "fee_below_cost" (1,400,000 CU priced over the fee), "inner_program" (tag 3, its inner
+ * instruction names account 2), "fee_payer_account" (the fee payer as the spent mark too), "fee_below_cost" (1,400,000 CU priced over the fee), "inner_program" (tag 3, its inner
  * instruction invokes a throwaway program), "deadline_near" (a deadline 1 s away); "ok" plants none.
  */
 export function plant({ program, pool, feePayer, relayFee, kind = "ok", nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey }) {
@@ -153,7 +155,7 @@ export function plant({ program, pool, feePayer, relayFee, kind = "ok", nowMs = 
   ]);
   // the pool instruction's accounts: pool, W, fee payer, mark, state root page, label root page, state page, system;
   // tag 3 adds the tip account (8) and the inner instruction's program (9: system, or the throwaway one)
-  const accounts = [2, 1, 0, 3, 6, 7, 4, 8, ...(tag3 ? [5, kind === "inner_program" ? 11 : 8] : [])];
+  const accounts = [2, 1, 0, kind === "fee_payer_account" ? 0 : 3, 6, 7, 4, 8, ...(tag3 ? [5, kind === "inner_program" ? 11 : 8] : [])];
   const transfer = Buffer.concat([u32(2), u64(1_000n)]);
   const innerAccounts = kind === "fee_payer_named" ? [2, 8] : [1, 8];
   const data = tag3
