@@ -6,7 +6,7 @@ pragma solidity 0.8.28;
 // fee cap and a deadline), deposit(value, precommitment) with msg.sender the depositor, withdraw with the fee, the
 // Withdrawn event names the payees, the deposit and relay errors moved in from IEntrypoint, no windDown or PoolDied,
 // IncorrectASPRoot is UnknownLabelRoot, the unused ScopeMismatch removed; no ragequit, Ragequit, InvalidCommitment or
-// OnlyOriginalDepositor.
+// OnlyOriginalDepositor. Blindfill's buy (IPrivacyPoolSimple): Buy, Bought, buy and its errors, and InvalidRelayData.
 
 import {ProofLib} from '../lib/ProofLib.sol';
 import {IState} from 'interfaces/IState.sol';
@@ -162,6 +162,11 @@ interface IPrivacyPool is IState {
    */
   error InvalidRecipient();
 
+  /**
+   * @notice Thrown when the withdrawal's data is not exactly abi.encode(RelayData), 192 bytes
+   */
+  error InvalidRelayData();
+
   /*///////////////////////////////////////////////////////////////
                               LOGIC
   //////////////////////////////////////////////////////////////*/
@@ -202,8 +207,90 @@ interface IPrivacyPool is IState {
  */
 interface IPrivacyPoolSimple is IPrivacyPool {
   /*///////////////////////////////////////////////////////////////
+                              STRUCTS
+  //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice A buy W signs: the chunk less the fee goes to `adapter`, which swaps it for `token` sent to W
+   * @dev W signs it as EIP-712 typed data, Buy(address adapter,bytes data,uint256 minOut,address token,uint256
+   *      nullifier), with the spend's nullifier, under the domain {name "Blindfill", version "1", chainId,
+   *      verifyingContract: this pool}
+   * @param adapter The swap adapter: a contract with no owner and no storage
+   * @param data The adapter's route
+   * @param minOut The least W's balance of `token` must rise by; never 0
+   * @param token The token W buys
+   */
+  struct Buy {
+    address adapter;
+    bytes data;
+    uint256 minOut;
+    address token;
+  }
+
+  /*///////////////////////////////////////////////////////////////
+                              EVENTS
+  //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice Emitted when a chunk is released into a buy for W
+   * @param _recipient W, whose `_token` balance rose by `_out`
+   * @param _feeRecipient The fee recipient, paid _fee
+   * @param _value The withdrawn value; _value less _fee went to the adapter
+   * @param _fee The fee
+   * @param _spentNullifier The spent nullifier
+   * @param _newCommitment The new commitment
+   * @param _token The token bought
+   * @param _out How much W's `_token` balance rose by
+   */
+  event Bought(
+    address indexed _recipient,
+    address _feeRecipient,
+    uint256 _value,
+    uint256 _fee,
+    uint256 _spentNullifier,
+    uint256 _newCommitment,
+    address _token,
+    uint256 _out
+  );
+
+  /*///////////////////////////////////////////////////////////////
                               ERRORS
   //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice Thrown when the buy's signature is not W's, for this buy, note, pool and chain
+   */
+  error InvalidSignature();
+
+  /**
+   * @notice Thrown when a buy's minOut is 0
+   */
+  error InvalidMinOut();
+
+  /**
+   * @notice Thrown when W's token balance rose by less than the buy's minOut
+   */
+  error MinOutNotMet();
+
+  /*///////////////////////////////////////////////////////////////
+                              LOGIC
+  //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice Release a chunk into a buy for W, signed by W; anyone may submit. The same proof serves withdraw.
+   * @param _w The `Withdrawal` struct; its data is abi.encode(RelayData), whose recipient is W
+   * @param _p The withdraw proof
+   * @param _fee The fee paid to the request's fee recipient, at most its fee cap, out of withdrawnValue
+   * @param _buy The buy W signed
+   * @param _signature W's EIP-712 signature of the buy and the proof's nullifier: r, s, v (65 bytes)
+   */
+  function buy(
+    Withdrawal memory _w,
+    ProofLib.WithdrawProof memory _p,
+    uint256 _fee,
+    Buy memory _buy,
+    bytes memory _signature
+  ) external;
 
   /**
    * @notice Thrown when sending less amount of native asset than required

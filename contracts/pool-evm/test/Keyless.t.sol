@@ -60,7 +60,7 @@ contract KeylessTest is Deploy {
   }
 
   function test_theDispatcherHasExactlyTheListedSelectors() public view {
-    bytes4[19] memory _want = [
+    bytes4[20] memory _want = [
       bytes4(0x4800d97f), // ASSET()
       0xc072c05c, // MAX_RELAY_FEE_BPS()
       0xe38df5f0, // MAX_TREE_DEPTH()
@@ -79,7 +79,8 @@ contract KeylessTest is Deploy {
       0xaffed0e0, // nonce()
       0x1f79a1e9, // nullifierHashes(uint256)
       0xa1cc748b, // usedPrecommitments(uint256)
-      0x8a3bff22 // withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)
+      0x8a3bff22, // withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)
+      0x3edadd79 // buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)
     ];
     (, bytes4[] memory _got) = _walk();
     assertEq(_got.length, _want.length, 'the number of selectors');

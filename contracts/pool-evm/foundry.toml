@@ -23,3 +23,9 @@ remappings = [
 
 [fuzz]
 runs = 1000
+
+# The fork tests' chains (test/BuyFork.t.sol), each at a pinned block, served by test/fork-rpc.mjs from the answers
+# recorded in test/fixtures/fork-rpc.json: forge reads no network (run forge through it, see its header).
+[rpc_endpoints]
+base = 'http://127.0.0.1:47545/base'
+robinhood = 'http://127.0.0.1:47545/robinhood'

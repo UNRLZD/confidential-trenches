@@ -26,7 +26,8 @@ https://defi.sucks
 // - the ASP root is a root the label tree has had, in place of ENTRYPOINT.latestRoot();
 // - no windDown, and no ragequit (nor its depositors record): every label is in the pool's own label tree, so a
 //   withdraw proof always works, and ragequit would only add a public exit that links a deposit to its exit;
-// - the spend checks are one internal function, _spendChecked, for each method that spends a note.
+// - the spend checks are one internal function, _spendChecked, for each method that spends a note, and a relayed
+//   release's checks one more, _release, for withdraw and buy; the request is exactly RelayData's 192 bytes.
 
 import {PoseidonT4} from 'poseidon-solidity/PoseidonT4.sol';
 
@@ -101,18 +102,8 @@ abstract contract PrivacyPool is State, IPrivacyPool {
     ProofLib.WithdrawProof memory _proof,
     uint256 _fee
   ) external nonReentrant {
-    RelayData memory _data = abi.decode(_withdrawal.data, (RelayData));
-
-    // The two payees: never the zero address or the pool
-    if (_data.recipient == address(0) || _data.recipient == address(this)) revert InvalidRecipient();
-    if (_data.feeRecipient == address(0) || _data.feeRecipient == address(this)) revert InvalidRecipient();
-    // The fee: at most the cap the context binds
-    if (_fee > _data.feeCap) revert FeeOverCap();
-
-    uint256 _withdrawn = _spendChecked(_withdrawal, _proof, _data.deadlineMs);
-
-    // The backstop: at most MAX_RELAY_FEE_BPS of the withdrawn value, whatever cap a proof binds
-    if (_fee > _withdrawn * MAX_RELAY_FEE_BPS / 10_000) revert RelayFeeGreaterThanMax();
+    RelayData memory _data = _relayData(_withdrawal.data);
+    uint256 _withdrawn = _release(_withdrawal, _proof, _fee, _data);
 
     // The fee comes out of the withdrawn value
     _push(_data.recipient, _withdrawn - _fee);
@@ -131,6 +122,44 @@ abstract contract PrivacyPool is State, IPrivacyPool {
   /*///////////////////////////////////////////////////////////////
                              SPEND CHECKS
   //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice The request a withdrawal's data holds: exactly abi.encode(RelayData), so one proof serves withdraw and buy
+   *         alike, and a request made with more bytes is never read as one (abi.decode accepts trailing bytes)
+   * @param _encoded The withdrawal's data
+   * @return _data The request
+   */
+  function _relayData(bytes memory _encoded) internal pure returns (RelayData memory _data) {
+    if (_encoded.length != 192) revert InvalidRelayData();
+    _data = abi.decode(_encoded, (RelayData));
+  }
+
+  /**
+   * @notice The checks of a relayed release, withdraw's and buy's alike, then the spend: both payees, the fee against
+   *         the request's cap and the backstop, and every spend check. The caller pays.
+   * @param _withdrawal The withdrawal the proof's context binds
+   * @param _proof The withdraw proof
+   * @param _fee The fee the submitter picks
+   * @param _data The request, _relayData(_withdrawal.data)
+   * @return _withdrawn The proof's withdrawnValue; the fee is at most half of it
+   */
+  function _release(
+    Withdrawal memory _withdrawal,
+    ProofLib.WithdrawProof memory _proof,
+    uint256 _fee,
+    RelayData memory _data
+  ) internal returns (uint256 _withdrawn) {
+    // The two payees: never the zero address or the pool
+    if (_data.recipient == address(0) || _data.recipient == address(this)) revert InvalidRecipient();
+    if (_data.feeRecipient == address(0) || _data.feeRecipient == address(this)) revert InvalidRecipient();
+    // The fee: at most the cap the context binds
+    if (_fee > _data.feeCap) revert FeeOverCap();
+
+    _withdrawn = _spendChecked(_withdrawal, _proof, _data.deadlineMs);
+
+    // The backstop: at most MAX_RELAY_FEE_BPS of the withdrawn value, whatever cap a proof binds
+    if (_fee > _withdrawn * MAX_RELAY_FEE_BPS / 10_000) revert RelayFeeGreaterThanMax();
+  }
 
   /**
    * @notice Every check a spend of a note makes, then the spend: the nullifier is marked and the change commitment
