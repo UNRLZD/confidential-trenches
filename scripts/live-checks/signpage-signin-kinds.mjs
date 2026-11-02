@@ -241,7 +241,9 @@ async function appFrame(page) {
 
 // Posts one kind from inside the APP_HOST frame to the shell, as the terminal does, and returns the shell's answer.
 async function send(page, type, params = {}) {
-  const f = await appFrame(page);
+  // no frame: the layer is open (an open kind a page should have refused took it), so no kind can be sent
+  const f = await appFrame(page).catch(() => null);
+  if (!f) return { noFrame: true };
   return f.evaluate(({ type, params, origin }) => new Promise((done) => {
     const id = crypto.randomUUID();
     const t = setTimeout(() => done({ timeout: true }), 5_000);
@@ -334,6 +336,8 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const backup = await send(page, "backup.open", { return_key: "settings" });
       p.backup = { answer: backup, page: await read(page, ["signed-in"]) };
       p.backupCancel = await press(page, "cancel", ["backup"]);
+      // past 500 ms from the last press, so only the opening's own restart of the guard can stop the early press below
+      await page.waitForTimeout(GUARD_MS);
       const signout = await send(page, "signout", { return_key: "settings" });
       // a press as soon as the page is drawn, inside the 500 ms the opening restarts
       await page.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signout", null, { timeout: WAIT_MS }).catch(() => {});
