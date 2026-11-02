@@ -12,10 +12,16 @@
 //   READY or IN_POSITION, and W_{sol,l,j} derived from this device's own seed is that wallet. Every other wallet is
 //   refused with ArmRefused before the seed is opened, so a request, a bug or the kit's own `arm.own` flag cannot sign
 //   from a wallet funded by someone else (solana-buy-flow's review finding 4: arm.own was only the caller's word).
-// - moveArmRecord changes a record's state (and the token of a position) only on a record that already passes
-//   armRecordOf; it never makes a record and never touches `own`.
+// - A trade marks each wallet it uses on its record before anything is signed (`inflight`, claimArm: the trade's op
+//   id, side and token), and the signer adds each signature to that mark and waits for the write before it gives the signature back, so no tx can be sent that the store does not name. The
+//   signer signs only for a wallet whose mark is this trade's own. A mark goes (settleArm) once the trade knows each
+//   tx filled or failed, or, after a reload, once both providers say so (packages/signpage/src/trade.ts); until then
+//   no other trade picks or signs from that wallet, whose money may still move.
+// - moveArmRecord, claimArm and settleArm change a record only when it already passes armRecordOf; they never make a
+//   record and never touch `own`. Every write of a record is the one put in rewriteArm.
 // Nothing here logs; a key is zeroed once its signature is made, the seed when the signer closes.
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { base58 } from "@scure/base";
 import { CHAINS, type Chain, P, freshWallet } from "../derive/index.ts";
 import type { WalletStore } from "../store/index.ts";
 
@@ -41,6 +47,17 @@ export interface ArmRecord {
   spend: bigint;
   /** The token held, once IN_POSITION. */
   token?: string;
+  /** The trade using this wallet, and the txs it signed from it, until each one's end is known. */
+  inflight?: ArmMark;
+}
+
+export interface ArmMark {
+  /** The trade's op id (its request id). */
+  op: string;
+  side: "buy" | "sell";
+  token: string;
+  /** Each signature (base58), in the order signed; the first is the trade's swap. */
+  txs: string[];
 }
 
 /** The store key of W_{c,l,j}'s record. */
@@ -51,6 +68,14 @@ export function armKey(chain: Chain, l: bigint, j: number): string {
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const KEY = /^([a-z-]+):(0|[1-9][0-9]{0,77}):(0|[1-9][0-9]{0,9})$/;
 const HEX64 = /^[0-9a-f]{64}$/;
+const OP = /^[0-9a-f-]{1,64}$/;
+const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,90}$/;
+
+function markOf(m: unknown): boolean {
+  if (!isObj(m) || typeof m.op !== "string" || !OP.test(m.op) || (m.side !== "buy" && m.side !== "sell")) return false;
+  if (typeof m.token !== "string" || !Array.isArray(m.txs)) return false;
+  return m.txs.every((t) => typeof t === "string" && B58.test(t));
+}
 
 /** The record under `key` when it is a well-formed arm record for that key; null otherwise. */
 export function armRecordOf(key: string, rec: unknown): ArmRecord | null {
@@ -66,6 +91,7 @@ export function armRecordOf(key: string, rec: unknown): ArmRecord | null {
   if (!(ARM_STATES as readonly unknown[]).includes(rec.state)) return null;
   if (!isObj(own) || typeof own.context !== "string" || !HEX64.test(own.context)) return null;
   if (rec.token !== undefined && typeof rec.token !== "string") return null;
+  if (rec.inflight !== undefined && !markOf(rec.inflight)) return null;
   return rec as unknown as ArmRecord;
 }
 
@@ -80,7 +106,7 @@ export async function armRecords(store: Pick<WalletStore, "keys" | "get">, chain
   return out;
 }
 
-export type ArmRefusalCode = "not_armed" | "state" | "not_this_seed";
+export type ArmRefusalCode = "not_armed" | "state" | "not_this_seed" | "not_claimed";
 export class ArmRefused extends Error {
   readonly code: ArmRefusalCode;
   constructor(code: ArmRefusalCode, detail: string) {
@@ -100,33 +126,44 @@ export async function ownSolanaArm(store: Pick<WalletStore, "keys" | "get">, wal
 }
 
 export interface SolanaArmedSigner {
-  /** The 64-byte ed25519 signature of `message` by `wallet`'s key; ArmRefused, before the seed is opened, for any wallet this device did not arm. */
+  /**
+   * The 64-byte ed25519 signature of `message` by `wallet`'s key, given back only once the store's mark of this trade on
+   * the wallet's record holds it; ArmRefused, before the seed is opened, for any wallet this device did
+   * not arm or this trade did not mark.
+   */
   sign(wallet: string, message: Uint8Array): Promise<Uint8Array>;
   /** Zeroes the seed, if it was opened. */
   close(): void;
 }
 
 /**
- * A signer for one trade. `seed64` opens the seed (BIP-39 seed of the 12 words) and is called at most once, only after
- * a wallet passes its arm check; the signer keeps it until close().
+ * A signer for the trade with op id `op`. `seed64` opens the seed (BIP-39 seed of the 12 words) and is called at most
+ * once, only after a wallet passes its arm check; the signer keeps it until close().
  */
-export function solanaArmedSigner(store: Pick<WalletStore, "keys" | "get">, seed64: () => Promise<Uint8Array>): SolanaArmedSigner {
+export function solanaArmedSigner(store: Pick<WalletStore, "keys" | "get" | "put">, seed64: () => Promise<Uint8Array>, op: string): SolanaArmedSigner {
   let seed: Promise<Uint8Array> | null = null;
   let closed = false;
   return {
     async sign(wallet, message) {
       if (closed) throw new Error("the signer is closed");
       if (!(message instanceof Uint8Array) || message.length === 0) throw new Error("no message to sign");
-      const { rec } = await ownSolanaArm(store, wallet);
+      const { key, rec } = await ownSolanaArm(store, wallet);
+      if (rec.inflight?.op !== op) throw new ArmRefused("not_claimed", `${wallet} is not marked by this trade`);
       const s = await (seed ??= seed64());
       if (closed) throw new Error("the signer is closed");
       const w = freshWallet(s, "sol", rec.l, rec.j);
+      let sig: Uint8Array;
       try {
-        if (w.address !== wallet) throw new ArmRefused("not_this_seed", `${wallet} is not W_{sol,${rec.l},${rec.j}} of this seed`);
-        return ed25519.sign(message, w.secretKey);
+        if (w.address !== wallet) throw new ArmRefused("not_this_seed", `${wallet} is not this seed's wallet`);
+        sig = ed25519.sign(message, w.secretKey);
       } finally {
         w.secretKey.fill(0);
       }
+      // the signature goes back only once the store names it: a reload after this finds the tx, never a lost one
+      const tx = base58.encode(sig);
+      const marked = await rewriteArm(store, key, (r) => (r.inflight?.op === op ? { ...r, inflight: { ...r.inflight, txs: [...r.inflight.txs, tx] } } : null));
+      if (!marked) throw new ArmRefused("not_claimed", `${wallet} is not marked by this trade`);
+      return sig;
     },
     close() {
       closed = true;
@@ -146,10 +183,48 @@ export async function moveArmRecord(
   to: ArmState,
   token?: string,
 ): Promise<boolean> {
+  return (await rewriteArm(store, key, (rec) => {
+    if (rec.state !== from) return null;
+    const next: ArmRecord = { ...rec, state: to };
+    if (token !== undefined) next.token = token;
+    return next;
+  })) !== null;
+}
+
+/** Marks a READY or IN_POSITION wallet with no mark as used by the trade `mark.op`; false when it is not one. */
+export async function claimArm(store: Pick<WalletStore, "get" | "put">, key: string, mark: Omit<ArmMark, "txs">): Promise<boolean> {
+  const m: ArmMark = { op: mark.op, side: mark.side, token: mark.token, txs: [] };
+  if (!markOf(m)) return false;
+  return (await rewriteArm(store, key, (rec) => (rec.inflight === undefined && ARM_SIGNING_STATES.includes(rec.state) ? { ...rec, inflight: m } : null))) !== null;
+}
+
+/**
+ * Takes the trade `op`'s mark off a wallet, once each of its txs is known to have filled or failed (or never to land);
+ * with `move`, its swap filled and the record moves state as moveArmRecord does. False when the mark is not op's.
+ */
+export async function settleArm(
+  store: Pick<WalletStore, "get" | "put">,
+  key: string,
+  op: string,
+  move?: { from: ArmState; to: ArmState; token?: string },
+): Promise<boolean> {
+  return (await rewriteArm(store, key, (rec) => {
+    if (rec.inflight?.op !== op) return null;
+    const { inflight: _, ...rest } = rec;
+    const next: ArmRecord = rest;
+    if (move && rec.state === move.from) {
+      next.state = move.to;
+      if (move.token !== undefined) next.token = move.token;
+    }
+    return next;
+  })) !== null;
+}
+
+// the one write of an arm record: `change` of the record under `key` when it passes armRecordOf (null: no write)
+async function rewriteArm(store: Pick<WalletStore, "get" | "put">, key: string, change: (rec: ArmRecord) => ArmRecord | null): Promise<ArmRecord | null> {
   const rec = armRecordOf(key, await store.get("wallets", key));
-  if (!rec || rec.state !== from) return false;
-  const next: ArmRecord = { ...rec, state: to };
-  if (token !== undefined) next.token = token;
+  const next = rec ? change(rec) : null;
+  if (!next) return null;
   await store.put("wallets", key, next);
-  return true;
+  return next;
 }
