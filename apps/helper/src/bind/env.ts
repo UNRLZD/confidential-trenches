@@ -15,7 +15,7 @@ import { decodeSignedDelegate } from "./checks.ts";
 import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RPC_TIMEOUT_MS, startLockRounds, startRelayer, type Answer, type Rpc, type SendDeps } from "./send.ts";
 import { readUrls, statusesOf, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenStatus } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
-import { agreedBlock, STORE_ENV, viewAt } from "../withdraw/fee.ts";
+import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
 import { OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
 
 /** Per network: the release's vault, the gas account that sends deposits (bind.<ours>) and its one full-access key. */
@@ -68,6 +68,8 @@ export function bindSenderFromEnv(
   const nets = Object.keys(BIND_ENV) as TokenNetwork[];
   const set = Object.fromEntries(nets.map((n) => [n, BIND_ENV[n].map((name) => env[name] ?? "")])) as Record<TokenNetwork, string[]>;
   const withdrawVault = Object.fromEntries(nets.map((n) => [n, env[SEND_ENV[n][0]] ?? ""])) as Record<TokenNetwork, string>;
+  const withdrawKeys = Object.fromEntries(nets.map((n) => [n, env[SEND_ENV[n][1]] ?? ""])) as Record<TokenNetwork, string>;
+  const withdrawRelayer = Object.fromEntries(nets.map((n) => [n, env[RELAYER_ENV[n][0]] ?? ""])) as Record<TokenNetwork, string>;
   const urls: Record<TokenNetwork, readonly [string, string]> = { mainnet: readUrls(env, "mainnet"), testnet: readUrls(env, "testnet") };
 
   type Net = { network: TokenNetwork; vault: string; account: string; key: string };
@@ -80,7 +82,20 @@ export function bindSenderFromEnv(
     if (!/^[1-9][0-9]{0,8}$/.test(release)) throw new Error(`${RELEASE_ENV} must be a whole number, 1 or more, to carry deposits`);
     if (storeDir === "") throw new Error(`${STORE_ENV} must be set to carry deposits`);
     if (!/^[1-9][0-9]{0,2}$/.test(k) || Number(k) > 600) throw new Error(`${MARGIN_K_ENV} must be a whole number of blocks, 1 to 600, to carry deposits`);
-    relayerKey(key); // a key that does not parse stops the helper at start, never at a request
+    const pub = Buffer.from(relayerKey(key).pub); // a key that does not parse stops the helper at start, never at a request
+    // one key on one account in both relayers would have two nonce counters (bind-<net> and withdraw-keys-<net>), and a
+    // concurrent sign would drop a transaction: refused
+    if (account === withdrawRelayer[n]) {
+      for (const w of withdrawKeys[n].split(",").filter((x) => x !== "")) {
+        let other: Buffer | null = null;
+        try {
+          other = Buffer.from(relayerKey(w).pub);
+        } catch {
+          other = null; // withdrawSenderFromEnv refuses a key that does not parse
+        }
+        if (other !== null && other.equals(pub)) throw new Error(`${BIND_ENV[n][2]} must not be one of ${SEND_ENV[n][1]} on the same account`);
+      }
+    }
     carried.set(WATCHED[n].token, { network: n, vault, account, key });
   }
 

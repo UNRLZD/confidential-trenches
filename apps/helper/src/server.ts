@@ -27,6 +27,7 @@ import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
+import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused } from "./withdraw/fee.ts";
@@ -46,8 +47,8 @@ const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
-/** POST /v1/bind's body limit (the kit's HELPER_V1_PATHS row: 4 KB). */
-export const BIND_BODY_MAX = 4_096;
+/** POST /v1/bind's body limit: the kit's HELPER_V1_PATHS row, as bind/checks.ts reads it (4 KB). */
+export const BIND_BODY_MAX = BIND_MAX_BYTES;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).

@@ -35,6 +35,7 @@ const MAINNET = { NEAR_RPC_URL: "https://m-a.example", NEAR_RPC_URL_B: "https://
 const TESTNET = { NEAR_TESTNET_RPC_URL: "https://t-a.example", NEAR_TESTNET_RPC_URL_B: "https://t-b.example" };
 const RELAYER = "relay.test.testnet";
 const BIND_RELAYER = "bind.test.testnet";
+const BIND_RELAYER_MAINNET = "bind.test.near";
 
 /** An ed25519 key from a fixed seed, as the host's env holds it ("ed25519:" base58 of seed and public key). */
 function keyText(fill: number): string {
@@ -76,7 +77,7 @@ function fakeNear() {
     else if (method === "query" && params.request_type === "call_function" && String(params.method_name) in views) {
       result = { result: [...Buffer.from(JSON.stringify(views[String(params.method_name)]))], logs: [], ...at(h) };
     } else if (method === "query" && params.request_type === "view_account") {
-      const relayer = params.account_id === RELAYER || params.account_id === BIND_RELAYER || params.account_id === "relay.test.near";
+      const relayer = [RELAYER, BIND_RELAYER, "relay.test.near", BIND_RELAYER_MAINNET].includes(String(params.account_id));
       result = { amount: relayer ? (10n ** 25n).toString() : A_STORE_YOCTO.toString(), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, ...at(h) };
     } else if (method === "query" && params.request_type === "view_access_key_list") {
       result = { keys: [{ public_key: idKeyOf(W.recipient), access_key: { nonce: 0, permission: "FullAccess" } }], ...at(h) };
@@ -228,6 +229,53 @@ test("POST /v1/bind on testnet is held by testnet's own watch: past the hold to 
       const b = await call(port, "POST", "/v1/bind", JSON.stringify({ signed_delegate: badlySigned(USDC) }));
       assert.deepEqual([b.status, codeOf(b.body)], [400, "token_not_accepted"]);
       assert.equal(near.seen.length, before);
+    });
+  }
+});
+
+const BIND_ENV_MAINNET = () => ({
+  BIND_VAULT_MAINNET: fixture.vault,
+  BIND_RELAYER_MAINNET: BIND_RELAYER_MAINNET,
+  BIND_RELAYER_KEY_MAINNET: keyText(10),
+  BIND_MARGIN_K: "20",
+  HELPER_RELEASE: "1",
+  HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "networks-bm-")),
+});
+const hostsOf = (near: ReturnType<typeof fakeNear>, from: number) => [...new Set(near.seen.slice(from).map((c) => new URL(c.url).host))].sort();
+
+test("POST /v1/bind on mainnet is held by mainnet's own watch: past the hold when it is open (testnet held or not), 503 token_halted when it holds; reads only on mainnet's pair", async () => {
+  for (const [m, t, want, status] of [
+    ["open", "held", "bad_signature", 400],
+    ["held", "open", "token_halted", 503],
+  ] as const) {
+    await withHelper(BIND_ENV_MAINNET(), watches(m, t), async (port, near) => {
+      const a = await call(port, "POST", "/v1/bind", JSON.stringify({ signed_delegate: badlySigned(USDC) }));
+      assert.deepEqual([a.status, codeOf(a.body)], [status, want], `mainnet ${m}, testnet ${t}: ${a.body}`);
+      assert.deepEqual(hostsOf(near, 0), ["m-a.example", "m-b.example"]);
+      // a delegate on the testnet token: no testnet network is set, so it is refused with nothing read
+      const before = near.seen.length;
+      const b = await call(port, "POST", "/v1/bind", JSON.stringify({ signed_delegate: badlySigned(TESTNET_TOKEN) }));
+      assert.deepEqual([b.status, codeOf(b.body)], [400, "token_not_accepted"]);
+      assert.equal(near.seen.length, before);
+    });
+  }
+});
+
+test("POST /v1/bind with both networks set at once: each delegate is held by its own network's watch only and reads its own pair only", async () => {
+  for (const [m, t] of [
+    ["held", "open"],
+    ["open", "held"],
+  ] as const) {
+    await withHelper({ ...BIND_ENV_TESTNET(), ...BIND_ENV_MAINNET() }, watches(m, t), async (port, near) => {
+      for (const [token, state, hosts] of [
+        [USDC, m, ["m-a.example", "m-b.example"]],
+        [TESTNET_TOKEN, t, ["t-a.example", "t-b.example"]],
+      ] as const) {
+        const from = near.seen.length;
+        const a = await call(port, "POST", "/v1/bind", JSON.stringify({ signed_delegate: badlySigned(token) }));
+        assert.deepEqual([a.status, codeOf(a.body)], state === "open" ? [400, "bad_signature"] : [503, "token_halted"], `${token} (mainnet ${m}, testnet ${t}): ${a.body}`);
+        assert.deepEqual(hostsOf(near, from), hosts, `${token}'s carry reads its own pair`);
+      }
     });
   }
 });
