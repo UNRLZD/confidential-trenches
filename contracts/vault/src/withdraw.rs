@@ -99,12 +99,12 @@ pub struct Checked {
 }
 
 /// A canonical decimal's number, or `InvalidNumber` naming `what`.
-fn number(s: &str, what: &str) -> U256 {
+pub(crate) fn number(s: &str, what: &str) -> U256 {
     field::parse_decimal(s).unwrap_or_else(|| env::panic_str(&format!("InvalidNumber: {what} is not a canonical decimal")))
 }
 
 /// A public signal: a canonical decimal below p.
-fn signal(s: &str) -> U256 {
+pub(crate) fn signal(s: &str) -> U256 {
     let n = number(s, "a public signal");
     if field::ge(&n, &field::P) {
         env::panic_str("FieldOverflow: a public signal is not below p");
@@ -113,7 +113,7 @@ fn signal(s: &str) -> U256 {
 }
 
 /// An amount: a canonical decimal below 2^128.
-fn amount(s: &str, what: &str) -> u128 {
+pub(crate) fn amount(s: &str, what: &str) -> u128 {
     let n = number(s, what);
     if n[0] != 0 || n[1] != 0 {
         env::panic_str(&format!("AmountOverflow: {what} is not below 2^128"));
