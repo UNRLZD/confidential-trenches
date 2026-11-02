@@ -20,6 +20,7 @@ W0.secretKey.fill(0);
 W1.secretKey.fill(0);
 const CONTEXT = "ab".repeat(32);
 const MSG = new TextEncoder().encode("a checked Solana message");
+const TX = { lastValidBlockHeight: 300_000_000 };
 
 const OP = "6f9619ff-8b86-4011-b42d-00c04fc964ff";
 const MINT = "Mint1111111111111111111111111111111111111111";
@@ -61,7 +62,7 @@ test("a wallet with no arm record is refused before the seed is opened, so nothi
   const s = store();
   const o = opener();
   const signer = solanaArmedSigner(s as never, o.open, OP);
-  await assert.rejects(signer.sign(W0.address, MSG), (e: unknown) => e instanceof ArmRefused && e.code === "not_armed");
+  await assert.rejects(signer.sign(W0.address, MSG, TX), (e: unknown) => e instanceof ArmRefused && e.code === "not_armed");
   assert.equal(o.opened(), 0, "the seed was never opened");
 });
 
@@ -76,7 +77,7 @@ test("a wallet whose record lacks the device's own withdrawal, or names another 
   for (const [name, rec] of Object.entries(bad)) {
     const o = opener();
     const signer = solanaArmedSigner(store({ [armKey("sol", L, 0)]: rec }) as never, o.open, OP);
-    await assert.rejects(signer.sign(W0.address, MSG), ArmRefused, name);
+    await assert.rejects(signer.sign(W0.address, MSG, TX), ArmRefused, name);
     assert.equal(o.opened(), 0, name);
   }
 });
@@ -86,14 +87,14 @@ test("a record for an address the seed does not derive at (l, j) is refused: not
   const other = freshWallet(wordsToSeed64(entropyToWords(new Uint8Array(16).fill(7))), "sol", L, 0);
   other.secretKey.fill(0);
   const signer = solanaArmedSigner(store({ [armKey("sol", L, 0)]: record(0, other.address) }) as never, opener().open, OP);
-  await assert.rejects(signer.sign(other.address, MSG), (e: unknown) => e instanceof ArmRefused && e.code === "not_this_seed");
+  await assert.rejects(signer.sign(other.address, MSG, TX), (e: unknown) => e instanceof ArmRefused && e.code === "not_this_seed");
 });
 
 test("a wallet not READY or IN_POSITION is refused before the seed is opened", async () => {
   for (const state of ["PLANNED", "ARMING", "RETURNING", "EMPTY"] as const) {
     const o = opener();
     const signer = solanaArmedSigner(store({ [armKey("sol", L, 0)]: record(0, W0.address, { state }) }) as never, o.open, OP);
-    await assert.rejects(signer.sign(W0.address, MSG), (e: unknown) => e instanceof ArmRefused && e.code === "state", state);
+    await assert.rejects(signer.sign(W0.address, MSG, TX), (e: unknown) => e instanceof ArmRefused && e.code === "state", state);
     assert.equal(o.opened(), 0, state);
   }
 });
@@ -102,14 +103,14 @@ test("an own-armed wallet signs with W_{sol,l,j}'s key; the seed is opened once 
   const s = store({ [armKey("sol", L, 0)]: record(0, W0.address), [armKey("sol", L, 1)]: record(1, W1.address, { state: "IN_POSITION", token: "So11111111111111111111111111111111111111112" }) });
   let held: Uint8Array | null = null;
   const signer = solanaArmedSigner(s as never, async () => (held = seed()), OP);
-  const a = await signer.sign(W0.address, MSG);
-  const b = await signer.sign(W1.address, MSG);
+  const a = await signer.sign(W0.address, MSG, TX);
+  const b = await signer.sign(W1.address, MSG, TX);
   assert.ok(ed25519.verify(a, MSG, W0.publicKey));
   assert.ok(ed25519.verify(b, MSG, W1.publicKey));
   signer.close();
   await new Promise((r) => setTimeout(r, 0));
   assert.ok(held !== null && (held as Uint8Array).every((x) => x === 0), "the seed is zeroed at close");
-  await assert.rejects(signer.sign(W0.address, MSG), /closed/);
+  await assert.rejects(signer.sign(W0.address, MSG, TX), /closed/);
 });
 
 test("armRecordOf: the key and the record must agree; armRecords lists one chain's well-formed records", async () => {
@@ -153,16 +154,16 @@ test("no source of the wallet or the signing page writes a `wallets` record but 
 test("two records for one address are refused: the signer never picks one of them", async () => {
   const o = opener();
   const s = store({ [armKey("sol", L, 0)]: record(0, W0.address), [armKey("sol", L, 1)]: record(1, W0.address) });
-  await assert.rejects(solanaArmedSigner(s as never, o.open, OP).sign(W0.address, MSG), (e: unknown) => e instanceof ArmRefused && e.code === "not_armed" && /more than one/.test(e.message));
+  await assert.rejects(solanaArmedSigner(s as never, o.open, OP).sign(W0.address, MSG, TX), (e: unknown) => e instanceof ArmRefused && e.code === "not_armed" && /more than one/.test(e.message));
   assert.equal(o.opened(), 0);
 });
 
 test("an empty message, or a signature asked for after close (while the seed opens), gives no signature", async () => {
   const s = store({ [armKey("sol", L, 0)]: record(0, W0.address) });
-  await assert.rejects(solanaArmedSigner(s as never, opener().open, OP).sign(W0.address, new Uint8Array(0)), /no message/);
+  await assert.rejects(solanaArmedSigner(s as never, opener().open, OP).sign(W0.address, new Uint8Array(0), TX), /no message/);
   let open!: (b: Uint8Array) => void;
   const signer = solanaArmedSigner(s as never, () => new Promise<Uint8Array>((r) => (open = r)), OP);
-  const asked = signer.sign(W0.address, MSG);
+  const asked = signer.sign(W0.address, MSG, TX);
   await new Promise((r) => setTimeout(r, 0));
   signer.close();
   const held = seed();
@@ -177,7 +178,7 @@ test("the not_this_seed refusal names no derivation path", async () => {
   const other = freshWallet(wordsToSeed64(entropyToWords(new Uint8Array(16).fill(7))), "sol", L, 0);
   other.secretKey.fill(0);
   const signer = solanaArmedSigner(store({ [armKey("sol", L, 0)]: record(0, other.address) }) as never, opener().open, OP);
-  await assert.rejects(signer.sign(other.address, MSG), (e: unknown) => e instanceof Error && !e.message.includes(String(L)) && !/W_\{/.test(e.message));
+  await assert.rejects(signer.sign(other.address, MSG, TX), (e: unknown) => e instanceof Error && !e.message.includes(String(L)) && !/W_\{/.test(e.message));
 });
 
 test("the signer signs only for this trade's mark, and gives the signature back only once the mark holds it", async () => {
@@ -185,21 +186,26 @@ test("the signer signs only for this trade's mark, and gives the signature back 
   for (const inflight of [undefined, { op: "0f9619ff-8b86-4011-b42d-00c04fc964ff", side: "buy" as const, token: MINT, txs: [] }]) {
     const o = opener();
     const s = store({ [k]: record(0, W0.address, { inflight }) });
-    await assert.rejects(solanaArmedSigner(s as never, o.open, OP).sign(W0.address, MSG), (e: unknown) => e instanceof ArmRefused && e.code === "not_claimed");
+    await assert.rejects(solanaArmedSigner(s as never, o.open, OP).sign(W0.address, MSG, TX), (e: unknown) => e instanceof ArmRefused && e.code === "not_claimed");
     assert.equal(o.opened(), 0, "not this trade's mark: the seed never opened");
   }
   const s = store({ [k]: record(0, W0.address) });
   let wrote!: () => void;
   const slow = { ...s, put: async (st: string, key: string, v: unknown) => { await new Promise<void>((r) => (wrote = r)); return s.put(st, key, v); } };
   let back = false;
-  const asked = solanaArmedSigner(slow as never, opener().open, OP).sign(W0.address, MSG).then((sig) => ((back = true), sig));
+  const asked = solanaArmedSigner(slow as never, opener().open, OP).sign(W0.address, MSG, TX).then((sig) => ((back = true), sig));
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(back, false, "no signature before the mark is written");
   wrote();
   const sig = await asked;
-  assert.deepEqual((s.m.get(k) as ArmRecord).inflight!.txs, [base58.encode(sig)]);
+  assert.deepEqual((s.m.get(k) as ArmRecord).inflight!.txs, [{ sig: base58.encode(sig), lvbh: 300_000_000 }]);
+  for (const bad of [undefined, { lastValidBlockHeight: -1 }, { lastValidBlockHeight: 1.5 }]) {
+    const o = opener();
+    await assert.rejects(solanaArmedSigner(store({ [k]: record(0, W0.address) }) as never, o.open, OP).sign(W0.address, MSG, bad as never), /lastValidBlockHeight/, "no height: no signature");
+    assert.equal(o.opened(), 0);
+  }
   const failing = { ...store({ [k]: record(0, W0.address) }), put: async () => { throw new Error("QuotaExceededError"); } };
-  await assert.rejects(solanaArmedSigner(failing as never, opener().open, OP).sign(W0.address, MSG), /QuotaExceeded/, "a failed mark write gives no signature");
+  await assert.rejects(solanaArmedSigner(failing as never, opener().open, OP).sign(W0.address, MSG, TX), /QuotaExceeded/, "a failed mark write gives no signature");
 });
 
 test("claimArm marks only an unmarked READY or IN_POSITION record; settleArm takes only its own op's mark off", async () => {
@@ -215,5 +221,6 @@ test("claimArm marks only an unmarked READY or IN_POSITION record; settleArm tak
   const r = store({ [k]: { ...bare, state: "RETURNING" } });
   assert.equal(await claimArm(r as never, k, { op: OP, side: "sell", token: MINT }), false, "not a signing state");
   assert.equal(await claimArm(r as never, k, { op: "not an op id!", side: "sell", token: MINT }), false);
-  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: ["not base58 0OIl"] } }), null, "a malformed mark is no record");
+  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: [{ sig: "not base58 0OIl", lvbh: 1 }] } }), null, "a malformed mark is no record");
+  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: [{ sig: base58.encode(new Uint8Array(64).fill(1)), lvbh: -1 }] } }), null, "a mark with no height is no record");
 });

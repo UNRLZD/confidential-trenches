@@ -20,7 +20,7 @@
 //   row 8; the lower), and splits the amount over them in proportion, so an amount equal to the held total sells
 //   each whole balance (T1.3 item 6). No wallet set, or a sell over what is held, is refused before anything is signed.
 // - runSolanaTrade (the kit) runs the reads, builds, checks S1-S13, signatures, sends and fill reads, given every
-//   arm record's address (userWallets) to refuse a tx naming another of the user's wallets. Its signer is the
+//   arm record's address (wallets) to refuse a tx naming another of the user's wallets. Its signer is the
 //   wallet's solanaArmedSigner, which signs only for a wallet with this device's own arm record marked by this trade,
 //   and gives each signature back only once the mark names it, so no tx is sent that a reload could lose.
 // - The answer: { stage "sent", txs } once every leg is signed and sent (the kit's "sent"); each fill stage (filled,
@@ -35,7 +35,7 @@ import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
 import { rereadSolanaSignature, runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
-import { solanaHelperRpc, solanaJsonRpc, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { solanaHelperRpc, solanaJsonRpc, solanaNeverLands, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
 import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
@@ -266,9 +266,10 @@ export function tradeKind(host: TradeHost): TradeKind {
         if (!m) continue;
         const live = await locks.request(tradeLock(m.op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
         if (live) continue;
-        const states = await Promise.all(m.txs.map((sig) => rereadSolanaSignature(host.deps.providers, sig).then((r) => r.state)));
+        const states = await Promise.all(m.txs.map((t) => txEnd(host.deps.providers, t.sig, t.lvbh)));
         if (states.includes("unknown")) continue;
         await settleArm(store, key, m.op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
+        if (m.txs[0]) await noteLeg(store, m.op, m.txs[0].sig, states[0] as LegEnd).catch(() => {});
       }
       const records = await armRecords(store, "sol");
       const all = records.map((r) => r.rec.address);
@@ -322,12 +323,13 @@ export function tradeKind(host: TradeHost): TradeKind {
       };
       let record: SolanaTradeRecord | null = null;
       try {
-        // userWallets: every arm record's address on Solana, so the kit refuses a tx naming another of the user's wallets
-        const req: SolanaTradeRequest & { userWallets: string[] } = { side, token, slippageBps: params.slippage_bps as number, legs, userWallets: set.all };
+        // wallets: every arm record's address on Solana, so the kit refuses a tx naming another of the user's wallets
+        // (solana-buy-flow 249521d's required SolanaTradeRequest.wallets; typed from the kit once it merges)
+        const req: SolanaTradeRequest & { wallets: string[] } = { side, token, slippageBps: params.slippage_bps as number, legs, wallets: set.all };
         record = await run(req, {
           ...host.deps,
-          sign: async (wallet, message) => {
-            const sig = await signer.sign(wallet, message);
+          sign: async (wallet, message, tx) => {
+            const sig = await signer.sign(wallet, message, tx);
             // the legs sign before "signed"; a teardown's frames sign after the fill and are not the trade's txs
             if (last === null) signed.push({ chain: "solana", hash: base58.encode(sig) });
             return sig;
@@ -366,6 +368,40 @@ export function tradeKind(host: TradeHost): TradeKind {
       while (runs.size > 0) await Promise.allSettled([...runs]);
     },
   });
+}
+
+type LegEnd = "filled" | "failed" | "not_landed";
+
+/**
+ * How a tx a dead tab signed ended, on both providers: filled or failed as rereadSolanaSignature reads it; not_landed
+ * when it can never land (the kit's solanaNeverLands: each provider's finalized height, read first, past its
+ * lastValidBlockHeight, and then no status for it on that provider); unknown otherwise, which keeps its wallet out.
+ */
+export async function txEnd(providers: readonly [SolanaRpc, SolanaRpc], sig: string, lvbh: number): Promise<LegEnd | "unknown"> {
+  const first = await rereadSolanaSignature(providers, sig);
+  if (first.state !== "unknown") return first.state;
+  const heights = await Promise.all(providers.map((p) => p("getBlockHeight", [{ commitment: "finalized" }]).then((h) => (typeof h === "number" ? h : null), () => null)));
+  const again = await rereadSolanaSignature(providers, sig);
+  if (again.state !== "unknown") return again.state;
+  // a read of [null] is "no status"; a status not yet confirmed is found; an error or another shape is no answer
+  const found = again.reads.map((r) => (r === null ? false : typeof r === "object" ? true : null));
+  return solanaNeverLands(lvbh, [{ finalizedHeight: heights[0]!, found: found[0]! }, { finalizedHeight: heights[1]!, found: found[1]! }]) ? "not_landed" : "unknown";
+}
+
+/** Records how a dead tab's leg ended on its op: the tx's state, and the op's stage once every tx of it has one. */
+async function noteLeg(store: TradeStore, op: string, sig: string, end: LegEnd): Promise<void> {
+  const rec = (await store.get("ops", op)) as { stage?: unknown; txs?: unknown } | undefined;
+  if (!rec || typeof rec !== "object") return;
+  const txs = (Array.isArray(rec.txs) ? rec.txs : []).filter((t): t is { hash: string; state?: string } => !!t && typeof t === "object" && typeof (t as { hash?: unknown }).hash === "string");
+  const i = txs.findIndex((t) => t.hash === sig);
+  if (i >= 0) txs[i] = { ...txs[i]!, state: end };
+  else txs.push({ chain: "solana", hash: sig, state: end } as { hash: string; state: string });
+  let stage = rec.stage;
+  const ends = txs.map((t) => t.state);
+  if (!["filled", "part_filled", "not_landed", "refused"].includes(String(stage)) && ends.every((e) => e !== undefined)) {
+    stage = ends.every((e) => e === "filled") ? "filled" : ends.some((e) => e === "filled") ? "part_filled" : "not_landed";
+  }
+  await store.put("ops", op, { ...rec, txs, stage });
 }
 
 /** A repeated id's answer from its ops record: its trade stage and txs, its code; id_reused while it is pending or when the request differs. */

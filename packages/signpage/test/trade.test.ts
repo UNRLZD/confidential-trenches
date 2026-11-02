@@ -87,7 +87,7 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
     }
     const msg = new TextEncoder().encode(`message of ${req.side}`);
     for (const l of legs) {
-      const sig = await deps.sign!(script.signAs ?? l.wallet, msg);
+      const sig = await deps.sign!(script.signAs ?? l.wallet, msg, { lastValidBlockHeight: LVBH });
       assert.ok(ed25519.verify(sig, msg, base58.decode(script.signAs ?? l.wallet)));
       l.signature = base58.encode(sig);
     }
@@ -101,6 +101,7 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
   };
 }
 
+const LVBH = 1_000;
 const noRpc: SolanaRpc = async () => { throw new Error("no read expected"); };
 const shaOf = (params: Record<string, unknown>) => createHash("sha256").update(JSON.stringify(params)).digest("hex");
 function page(s: ReturnType<typeof store>, script: Script, providers: readonly [SolanaRpc, SolanaRpc] = [noRpc, noRpc]) {
@@ -155,7 +156,7 @@ test("a buy: the ladder split's READY wallets from the arm records, answered at 
   assert.ok(txs.txs.every((t) => t.chain === "solana" && base58.decode(t.hash).length === 64));
   assert.deepEqual(p.progress, ["filled"]);
   assert.deepEqual(s.m.ops!.get(id), { kind: "buy", sha: shaOf(buy("17")), stage: "filled", txs: txs.txs, created_ms: 1_700_000_000_000 });
-  assert.deepEqual((p.calls[0] as { userWallets?: string[] }).userWallets, [0, 1, 2, 3].map((j) => W[j]!.address), "the kit gets every one of the user's Solana wallets");
+  assert.deepEqual((p.calls[0] as { wallets?: string[] }).wallets, [0, 1, 2, 3].map((j) => W[j]!.address), "the kit gets every one of the user's Solana wallets");
   assert.ok([0, 1, 2, 3].every((j) => mark(s, j) === undefined), "every mark is off once the fill is read");
   assert.deepEqual([0, 1, 2, 3].map((j) => (s.m.wallets!.get(armKey("sol", L, j)) as ArmRecord).state), ["IN_POSITION", "IN_POSITION", "IN_POSITION", "READY"]);
   assert.equal((s.m.wallets!.get(armKey("sol", L, 0)) as ArmRecord).token, MINT);
@@ -290,7 +291,7 @@ test("a sell's token account must be the wallet's own of that mint on both provi
 });
 
 test("a buy takes READY wallets only: an IN_POSITION, RETURNING or marked wallet is never a buy's", async () => {
-  for (const over of [{ state: "IN_POSITION" as const, token: MINT }, { state: "RETURNING" as const }, { inflight: { op: "0f9619ff-8b86-4011-b42d-00c04fc964ff", side: "buy" as const, token: MINT, txs: [base58.encode(new Uint8Array(64).fill(1))] } }]) {
+  for (const over of [{ state: "IN_POSITION" as const, token: MINT }, { state: "RETURNING" as const }, { inflight: { op: "0f9619ff-8b86-4011-b42d-00c04fc964ff", side: "buy" as const, token: MINT, txs: [{ sig: base58.encode(new Uint8Array(64).fill(1)), lvbh: LVBH }] } }]) {
     const p = page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n, over) }), { final: "filled" });
     assert.deepEqual((await p.ask(buy("10"))).answer, { error: "no_ready_set" }, JSON.stringify(Object.keys(over)));
     assert.equal(p.calls.length, 0);
@@ -363,7 +364,12 @@ test("a running trade's wallets are not picked by a second trade; one whose tx i
 });
 
 // the review's F1-F5 (Opus review of 974d724): each failed before the fold, as the reviewer's own test showed the fault
-const sigStatus = (state: "ok" | "err" | null): SolanaRpc => async (method) => {
+/** A provider with one status for every signature (null: none) and its finalized block height. */
+const sigStatus = (state: "ok" | "err" | null, height = 0): SolanaRpc => async (method, params) => {
+  if (method === "getBlockHeight") {
+    assert.deepEqual(params, [{ commitment: "finalized" }]);
+    return height;
+  }
   assert.equal(method, "getSignatureStatuses");
   return { value: [state === null ? null : { confirmationStatus: "finalized", err: state === "ok" ? null : { InstructionError: [0, "Custom"] } }] };
 };
@@ -391,6 +397,27 @@ test("F1 a reload mid-trade: the reloaded page never re-picks the wallet whose b
   assert.deepEqual((await after.ask(buy("10"))).answer, { error: "no_ready_set" });
   const r = s.m.wallets!.get(armKey("sol", L, 0)) as ArmRecord;
   assert.deepEqual([r.state, r.token, r.inflight], ["IN_POSITION", MINT, undefined]);
+});
+
+test("a dead tab's tx that can never land frees its wallet: both providers' finalized height past its lastValidBlockHeight and no status on both", async () => {
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
+  const before = page(s, { hold: new Promise<void>(() => {}) });
+  const first = await before.ask(buy("10"));
+  assert.equal(mark(s, 0)!.txs[0]!.lvbh, LVBH, "the mark holds the tx's lastValidBlockHeight from the kit");
+  before.die();
+  // the height not yet past on both, or past on one only: it may still land, so the wallet stays out
+  for (const heights of [[LVBH, LVBH], [LVBH + 1, LVBH], [LVBH, LVBH + 1]]) {
+    const q = page(s, { final: "filled" }, [sigStatus(null, heights[0]), sigStatus(null, heights[1])]);
+    assert.deepEqual((await q.ask(buy("10"))).answer, { error: "no_ready_set" }, JSON.stringify(heights));
+    assert.ok(mark(s, 0), JSON.stringify(heights));
+  }
+  // past on both, no status on both: it can never land; the mark goes, the wallet is READY and buys again
+  const after = page(s, { final: "filled" }, [sigStatus(null, LVBH + 1), sigStatus(null, LVBH + 1)]);
+  await after.ask(buy("10"));
+  assert.equal(after.calls.length, 1, "the freed wallet bought");
+  const op = s.m.ops!.get(first.id) as { stage: string; txs: { hash: string; state?: string }[] };
+  assert.equal(op.stage, "not_landed", "the dead trade's op reads not_landed");
+  assert.deepEqual(op.txs.map((t) => t.state), ["not_landed"]);
 });
 
 test("F1 a mark of a trade still running in another tab is never resolved or taken, whatever the providers say", async () => {

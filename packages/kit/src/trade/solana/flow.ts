@@ -73,7 +73,9 @@ export type SolanaTradeDeps = {
   /** E(A): the device's own pool read of the exact whole size (S12's reference), null when there is no reference pool. */
   readonly reference: (q: { side: "buy" | "sell"; token: string; amount: bigint }) => Promise<bigint | null>;
   /** Signs a message with the wallet's key, on the device; answers the 64-byte ed25519 signature. Unused when dry. */
-  readonly sign?: (wallet: string, message: Uint8Array) => Promise<Uint8Array>;
+  /** Signs `message` for `wallet`; `tx.lastValidBlockHeight` is the height after which the tx can never land, for a
+   * signer that records each tx before it is sent (packages/signpage/src/trade.ts). */
+  readonly sign?: (wallet: string, message: Uint8Array, tx: { readonly lastValidBlockHeight: number }) => Promise<Uint8Array>;
   readonly paths: readonly SolanaSendPath[];
   /** Simulate the signed set instead of sending it (row M1.3's --dry): no key is used and nothing is sent. */
   readonly dry?: boolean;
@@ -369,7 +371,7 @@ async function prepareLeg(
 }
 
 /** The signature into the wire's one slot, checked against the wallet's key before anything is sent. */
-async function signed(deps: SolanaTradeDeps, wallet: string, a: { wire: Uint8Array; message: Uint8Array }): Promise<Uint8Array> {
+async function signed(deps: SolanaTradeDeps, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }): Promise<Uint8Array> {
   let sig: Uint8Array;
   if (deps.dry) {
     // Dry: no key is used. A placeholder fills the slot; every simulation runs with sigVerify off.
@@ -378,7 +380,7 @@ async function signed(deps: SolanaTradeDeps, wallet: string, a: { wire: Uint8Arr
     sig = placeholder;
   } else {
     if (!deps.sign) throw new Error("no signer");
-    sig = await deps.sign(wallet, a.message);
+    sig = await deps.sign(wallet, a.message, { lastValidBlockHeight: a.lastValidBlockHeight });
     if (!(sig instanceof Uint8Array) || sig.length !== 64 || !ed25519.verify(sig, a.message, base58.decode(wallet))) throw new Error(`the signature for ${wallet} does not verify`);
   }
   const wire = Uint8Array.from(a.wire);

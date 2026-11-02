@@ -13,7 +13,8 @@
 //   refused with ArmRefused before the seed is opened, so a request, a bug or the kit's own `arm.own` flag cannot sign
 //   from a wallet funded by someone else (solana-buy-flow's review finding 4: arm.own was only the caller's word).
 // - A trade marks each wallet it uses on its record before anything is signed (`inflight`, claimArm: the trade's op
-//   id, side and token), and the signer adds each signature to that mark and waits for the write before it gives the signature back, so no tx can be sent that the store does not name. The
+//   id, side and token), and the signer adds each signature, with the block height after which its tx can never land,
+//   to that mark and waits for the write before it gives the signature back, so no tx can be sent that the store does not name. The
 //   signer signs only for a wallet whose mark is this trade's own. A mark goes (settleArm) once the trade knows each
 //   tx filled or failed, or, after a reload, once both providers say so (packages/signpage/src/trade.ts); until then
 //   no other trade picks or signs from that wallet, whose money may still move.
@@ -56,8 +57,8 @@ export interface ArmMark {
   op: string;
   side: "buy" | "sell";
   token: string;
-  /** Each signature (base58), in the order signed; the first is the trade's swap. */
-  txs: string[];
+  /** Each signature (base58) with its blockhash's lastValidBlockHeight, in the order signed; the first is the trade's swap. */
+  txs: { sig: string; lvbh: number }[];
 }
 
 /** The store key of W_{c,l,j}'s record. */
@@ -74,7 +75,7 @@ const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,90}$/;
 function markOf(m: unknown): boolean {
   if (!isObj(m) || typeof m.op !== "string" || !OP.test(m.op) || (m.side !== "buy" && m.side !== "sell")) return false;
   if (typeof m.token !== "string" || !Array.isArray(m.txs)) return false;
-  return m.txs.every((t) => typeof t === "string" && B58.test(t));
+  return m.txs.every((t) => isObj(t) && typeof t.sig === "string" && B58.test(t.sig) && Number.isSafeInteger(t.lvbh) && (t.lvbh as number) >= 0);
 }
 
 /** The record under `key` when it is a well-formed arm record for that key; null otherwise. */
@@ -128,10 +129,10 @@ export async function ownSolanaArm(store: Pick<WalletStore, "keys" | "get">, wal
 export interface SolanaArmedSigner {
   /**
    * The 64-byte ed25519 signature of `message` by `wallet`'s key, given back only once the store's mark of this trade on
-   * the wallet's record holds it; ArmRefused, before the seed is opened, for any wallet this device did
+   * the wallet's record holds it with `tx.lastValidBlockHeight`; ArmRefused, before the seed is opened, for any wallet this device did
    * not arm or this trade did not mark.
    */
-  sign(wallet: string, message: Uint8Array): Promise<Uint8Array>;
+  sign(wallet: string, message: Uint8Array, tx: { readonly lastValidBlockHeight: number }): Promise<Uint8Array>;
   /** Zeroes the seed, if it was opened. */
   close(): void;
 }
@@ -144,9 +145,11 @@ export function solanaArmedSigner(store: Pick<WalletStore, "keys" | "get" | "put
   let seed: Promise<Uint8Array> | null = null;
   let closed = false;
   return {
-    async sign(wallet, message) {
+    async sign(wallet, message, tx) {
       if (closed) throw new Error("the signer is closed");
       if (!(message instanceof Uint8Array) || message.length === 0) throw new Error("no message to sign");
+      const lvbh = tx?.lastValidBlockHeight;
+      if (!Number.isSafeInteger(lvbh) || lvbh < 0) throw new Error("no lastValidBlockHeight to mark the tx with");
       const { key, rec } = await ownSolanaArm(store, wallet);
       if (rec.inflight?.op !== op) throw new ArmRefused("not_claimed", `${wallet} is not marked by this trade`);
       const s = await (seed ??= seed64());
@@ -160,8 +163,8 @@ export function solanaArmedSigner(store: Pick<WalletStore, "keys" | "get" | "put
         w.secretKey.fill(0);
       }
       // the signature goes back only once the store names it: a reload after this finds the tx, never a lost one
-      const tx = base58.encode(sig);
-      const marked = await rewriteArm(store, key, (r) => (r.inflight?.op === op ? { ...r, inflight: { ...r.inflight, txs: [...r.inflight.txs, tx] } } : null));
+      const t = { sig: base58.encode(sig), lvbh };
+      const marked = await rewriteArm(store, key, (r) => (r.inflight?.op === op ? { ...r, inflight: { ...r.inflight, txs: [...r.inflight.txs, t] } } : null));
       if (!marked) throw new ArmRefused("not_claimed", `${wallet} is not marked by this trade`);
       return sig;
     },

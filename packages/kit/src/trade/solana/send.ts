@@ -227,6 +227,21 @@ export function solanaSendPaths(opts: { helper?: SolanaRpc | null; rpcUrl?: stri
   return paths;
 }
 
+/**
+ * 06c A4 for a tx signed in an earlier session (a reload, a closed tab), whose send loop is gone: it can never land
+ * once each provider's finalized block height is past its lastValidBlockHeight (from the device's own blockhash read,
+ * kept with the tx when it was signed) and that same provider, read after the height, has no status for its signature
+ * with searchTransactionHistory: true. Both providers must say so; anything else decides nothing (the tx stays
+ * unknown). The caller reads the height first, then the status, on each provider.
+ */
+export function solanaNeverLands(
+  lastValidBlockHeight: number,
+  reads: readonly [{ finalizedHeight: number | null; found: boolean | null }, { finalizedHeight: number | null; found: boolean | null }],
+): boolean {
+  if (!Number.isSafeInteger(lastValidBlockHeight) || lastValidBlockHeight < 0) return false;
+  return reads.every((r) => typeof r.finalizedHeight === "number" && Number.isSafeInteger(r.finalizedHeight) && r.finalizedHeight > lastValidBlockHeight && r.found === false);
+}
+
 // One pacer per 1-rps URL (or per path object without a paceKey), shared by every set in flight: at most one request
 // per interval, each turn going to the next set that has a tx to send. A request is never sent sooner than one
 // interval after the last; a set that joins a pacer idle for an interval sends at once.

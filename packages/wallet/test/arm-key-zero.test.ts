@@ -29,7 +29,7 @@ test("the derived key is zero after the signature", async () => {
   const m = new Map([[armKey("sol", L, 0), rec]]);
   const store = { keys: async () => [...m.keys()], get: async (_s: string, k: string) => m.get(k), put: async (_s: string, k: string, v: unknown) => void m.set(k, v as never) };
   const signer = solanaArmedSigner(store as never, async () => seed(), OP);
-  await signer.sign(W0.address, new Uint8Array([1, 2, 3]));
+  await signer.sign(W0.address, new Uint8Array([1, 2, 3]), { lastValidBlockHeight: 1 });
   signer.close();
   assert.equal(keysSeen.length, 1);
   assert.ok(keysSeen[0]!.every((x) => x === 0), "the signing key was left in memory");

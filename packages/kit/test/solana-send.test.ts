@@ -15,6 +15,7 @@ import {
   dryRunSolanaSet,
   sendSolanaSet,
   solanaHelperRpc,
+  solanaNeverLands,
   solanaJsonRpc,
   solanaSendPaths,
   type SolanaRpc,
@@ -812,4 +813,16 @@ test("Low: a pacer leaves the map once its last set is done and its interval has
     await advance(1_000); // its last request plus one interval
     assert.equal(count!(), before, `after set ${n}, its pacer is gone`);
   }
+});
+
+test("solanaNeverLands: only when both providers' finalized height is past lastValidBlockHeight and neither has the signature", () => {
+  const past = { finalizedHeight: 1_001, found: false };
+  assert.equal(solanaNeverLands(1_000, [past, past]), true);
+  assert.equal(solanaNeverLands(1_000, [past, { finalizedHeight: 1_000, found: false }]), false, "one provider not past");
+  assert.equal(solanaNeverLands(1_000, [{ finalizedHeight: 999, found: false }, { finalizedHeight: 999, found: false }]), false, "not past on either");
+  assert.equal(solanaNeverLands(1_000, [past, { finalizedHeight: 1_001, found: true }]), false, "found on one");
+  assert.equal(solanaNeverLands(1_000, [past, { finalizedHeight: null, found: false }]), false, "a provider that did not answer the height");
+  assert.equal(solanaNeverLands(1_000, [past, { finalizedHeight: 1_001, found: null }]), false, "a provider that did not answer the status");
+  assert.equal(solanaNeverLands(Number.NaN, [past, past]), false);
+  assert.equal(solanaNeverLands(-1, [past, past]), false);
 });
