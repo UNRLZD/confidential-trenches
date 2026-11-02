@@ -36,7 +36,7 @@ import {
   type SolanaSimulation,
   type SolanaTeardownVerdict,
 } from "../../checks/solana/checks.ts";
-import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, type SolanaLookupTable } from "../../checks/solana/message.ts";
+import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, solanaDecodeMessage, solanaResolveKeys, type SolanaLookupTable } from "../../checks/solana/message.ts";
 import {
   SolanaBuildError,
   assembleSolanaSwap,
@@ -304,9 +304,13 @@ async function prepareLeg(
   });
   const assembled = assembleSolanaSwap(breq, built.build, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, mintHasTransferFee(mintA) ? { transferFeeMints: [req.token] } : {});
   const [rent, pre] = await sideReads;
-  // The simulation on both providers, at once: the wallet, its token account and its pump volume account in one call,
-  // the set's other wallets three to a call (a provider may read back at most 4 accounts).
+  // The simulation on both providers, at once: the wallet, its token account and its pump volume account in one call;
+  // then the set's other wallets that the message names, three to a call (a provider may read back at most 4
+  // accounts). A wallet the message does not name, statically or through a table, is not an account of the tx, so the
+  // runtime cannot change its lamports: its post-state is its pre-state, with no simulation spent on it.
   const b64 = btoa(String.fromCharCode(...assembled.wire));
+  const named = new Set(solanaResolveKeys(solanaDecodeMessage(assembled.message), decoded).map((k) => k.key));
+  const simulated = ctx.others.filter((k) => named.has(k));
   const simErrors: string[] = [];
   const simOne = async (rpc: SolanaRpc, at: "A" | "B", before: (Acc | null)[]): Promise<SolanaSimulation | null> => {
     try {
@@ -317,15 +321,19 @@ async function prepareLeg(
         return { err: v.err ?? null, accs };
       };
       const groups: string[][] = [];
-      for (let i = 0; i < ctx.others.length; i += 3) groups.push(ctx.others.slice(i, i + 3));
+      for (let i = 0; i < simulated.length; i += 3) groups.push(simulated.slice(i, i + 3));
       const [main, ...rest] = await Promise.all([run(watch), ...groups.map(run)]);
       if (main!.err !== null) return { err: main!.err, walletLamports: { pre: 0n, post: 0n }, tokenAccount: { pre: 0n, post: 0n }, tokenAccountLamports: { pre: 0n, post: 0n }, pumpVolumeAccumulator: { pre: 0n, post: 0n }, otherWallets: [] };
       if (!main!.accs || !main!.accs[0]) { simErrors.push(`${at}: no wallet read back`); return null; }
-      const otherWallets: { pre: bigint; post: bigint }[] = [];
+      const post = new Map<string, bigint>();
       for (const [g, r] of rest.entries()) {
         if (r.err !== null || !r.accs) { simErrors.push(`${at}: the other wallets' run did not match`); return null; }
-        (groups[g] as string[]).forEach((_, j) => otherWallets.push({ pre: before[3 + g * 3 + j]?.lamports ?? 0n, post: r.accs![j]?.lamports ?? 0n }));
+        (groups[g] as string[]).forEach((k, j) => post.set(k, r.accs![j]?.lamports ?? 0n));
       }
+      const otherWallets = ctx.others.map((k, i) => {
+        const p0 = before[3 + i]?.lamports ?? 0n;
+        return { pre: p0, post: post.has(k) ? (post.get(k) as bigint) : p0 };
+      });
       const m = main!.accs;
       return {
         err: null,
