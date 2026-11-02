@@ -7,9 +7,9 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
-import { pumpCurveAddress, ROW_FIELDS } from "./lists.ts";
+import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
-  CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
+  CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
 } from "./token.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
@@ -49,12 +49,13 @@ function fakeProxy(opts: { down?: boolean; search?: (mint: string) => unknown } 
   const calls: string[] = [];
   return {
     calls,
-    async handle(vendor: string, path: string, q: string) {
+    async handle(vendor: string, path: string, q: string): Promise<{ status: number; headers: Record<string, string>; body: string }> {
       calls.push(`${vendor}${path}?${q}`);
       if (opts.down) return { status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' };
-      const mint = new URLSearchParams(q).get("query")!;
-      const body = opts.search ? opts.search(mint) : (FX.tokens[mint]?.search ?? []);
-      return { status: 200, headers: { "X-Fetched-At": FX.tokens[mint]?.fetched_at ?? "2026-11-02T13:52:51.287Z" }, body: JSON.stringify(body) };
+      // Jupiter's search takes mints joined by commas and answers a row for each it knows
+      const mints = new URLSearchParams(q).get("query")!.split(",");
+      const body = mints.flatMap((m) => (opts.search ? opts.search(m) : (FX.tokens[m]?.search ?? [])) as unknown[]);
+      return { status: 200, headers: { "X-Fetched-At": FX.tokens[mints[0]!]?.fetched_at ?? "2026-11-02T13:52:51.287Z" }, body: JSON.stringify(body) };
     },
   };
 }
@@ -150,6 +151,72 @@ test("page: an upstream down answers 503; the last good page serves up to 60 s, 
   assert.equal((await cold.page(PUMP)).status, 503);
   const rpcDown = createSolanaToken(fakeProxy(), fakeRpc({ down: true }), { now: () => NOW });
   assert.equal((await rpcDown.page(PUMP)).status, 503);
+});
+
+test("page: Jupiter's search is batched: mints asked together share one call; one asked within JUP_GAP_MS of the last waits it out; a row is kept 12 s", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let now = NOW;
+  const proxy = fakeProxy();
+  const tok = createSolanaToken(proxy, fakeRpc(), { now: () => now });
+  const flush = () => new Promise((ok) => setImmediate(ok));
+  // the reads reach the search a few promise steps after they are asked: let them, then move the clock
+  const advance = async (ms: number) => {
+    await flush();
+    t.mock.timers.tick(ms);
+    await flush();
+  };
+  const first = Promise.all([tok.page(PUMP), tok.page(CURVE), tok.holders(PUMP)]);
+  await advance(0);
+  assert.deepEqual((await first).map((a) => a.status), [200, 200, 200]);
+  assert.deepEqual(proxy.calls, [`jupiter/tokens/v2/search?query=${PUMP},${CURVE}`]);
+  // 13 s on (past the 12 s row and the page's 5 s cache), PUMP is asked: sent at once, the gap is long past
+  now += 13_000;
+  const p2 = tok.page(PUMP);
+  await advance(0);
+  assert.equal((await p2).status, 200);
+  assert.equal(proxy.calls.length, 2);
+  // 1 s after that search, CURVE (read 14 s ago) is due: it waits until JUP_GAP_MS after the last search
+  now += 1_000;
+  const p3 = tok.page(CURVE);
+  await advance(JUP_GAP_MS - 1_000 - 1);
+  assert.equal(proxy.calls.length, 2, "held inside the gap");
+  await advance(1);
+  assert.equal((await p3).status, 200);
+  assert.equal(proxy.calls.length, 3);
+  assert.equal(proxy.calls[2], `jupiter/tokens/v2/search?query=${CURVE}`);
+});
+
+test("page and holders: a token on Discover's lists takes its row from there, with no Jupiter call", async () => {
+  const proxy = fakeProxy();
+  const row = toRow(FX.tokens[CURVE].search[0], Date.parse(FX.tokens[CURVE].fetched_at))!;
+  const snapshot = { chain: "solana", lists: { new: [row], trending: [], trending_5m: [], trending_1h: [], graduating: [] }, as_of_ms: 1793627000000 };
+  const listed = async () => ({ status: 200, body: JSON.stringify(snapshot), asOfMs: snapshot.as_of_ms });
+  const tok = createSolanaToken(proxy, fakeRpc(), { now: () => NOW, listed });
+  const p = JSON.parse((await tok.page(CURVE)).body);
+  assert.deepEqual(Object.keys(p.row), [...ROW_FIELDS]);
+  assert.equal(p.row.symbol, row.symbol);
+  assert.equal(p.row.as_of_ms, row.as_of_ms);
+  assert.equal(p.pool, pumpCurveAddress(CURVE), "on its curve: the curve account");
+  assert.equal(p.risk.holders.as_of_ms, snapshot.as_of_ms);
+  const h = JSON.parse((await tok.holders(CURVE)).body);
+  assert.equal(h.src, "jupiter");
+  assert.equal(h.total, row.holders);
+  assert.equal(proxy.calls.length, 0);
+  // a token off the lists still goes to Jupiter
+  assert.equal((await tok.page(PUMP)).status, 200);
+  assert.deepEqual(proxy.calls, [`jupiter/tokens/v2/search?query=${PUMP}`]);
+});
+
+test("page: one search failing fails every mint in it with 503, and the next search is a new call", async () => {
+  let down = true;
+  const ok = fakeProxy();
+  const proxy = { calls: ok.calls, handle: (v: string, p: string, q: string) => (down ? fakeProxy({ down: true }).handle(v, p, q) : ok.handle(v, p, q)) };
+  let now = NOW;
+  const tok = createSolanaToken(proxy, fakeRpc(), { now: () => now });
+  assert.deepEqual((await Promise.all([tok.page(PUMP), tok.page(CURVE)])).map((a) => a.status), [503, 503]);
+  down = false;
+  now += 5_000;
+  assert.equal((await tok.page(PUMP)).status, 200);
 });
 
 test("toMint: decimals, supply, authorities and the Token-2022 fee in force at the slot's epoch; malformed is null", () => {

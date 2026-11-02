@@ -5,9 +5,10 @@
 //
 // Sources:
 //   - page: one `getMultipleAccounts` (jsonParsed) of the mint and its pump.fun curve account through the helper's RPC
-//     path (src/rpc/), and Jupiter's `/tokens/v2/search?query=<mint>` through the helper's proxy (src/proxy/), at once.
-//     The mint account gives decimals, the mint and freeze authorities and the Token-2022 transfer fee (Risk `tax`);
-//     Jupiter gives the row; the curve account gives `curve_bps` and `lp: curve` while the token is on its curve.
+//     path (src/rpc/), and the token's row: Discover's own row when the token is on the lists (lists.ts), else Jupiter's
+//     `/tokens/v2/search` through the helper's proxy (src/proxy/), batched up to 100 mints a call and at most one call
+//     every JUP_GAP_MS (D-S6), at once. The mint account gives decimals, the mint and freeze authorities and the
+//     Token-2022 transfer fee (Risk `tax`); the curve account gives `curve_bps` and `lp: curve` while on its curve.
 //   - holders: `getTokenLargestAccounts`, then one `getMultipleAccounts` (jsonParsed) of those accounts for their
 //     owners, merged per owner (D-S11). When the RPC does not answer it: `holders: []`, `total` and `top_bps` from
 //     Jupiter's `holderCount` and `audit.topHoldersPercentage`, `src` naming Jupiter (06b v1.36).
@@ -36,6 +37,12 @@ export const POOL_FRESH_MS = 600_000;
 /** L-05: GeckoTerminal's public API, about 10 calls a minute. */
 export const GT_PER_MIN = 10;
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
+/** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. One search at most every
+ *  JUP_GAP_MS: with the lists' 3 calls per 12 s that is at most 30 a minute, half the keyed free bucket (L-01: 1 RPS,
+ *  one bucket shared with the swap build), so a busy token page never starves a trade's build. */
+export const SEARCH_MAX = 100;
+export const JUP_FRESH_MS = 12_000;
+export const JUP_GAP_MS = 4_000;
 /** Tokens held per cache; the oldest goes first. */
 export const CACHE_MAX = 2_000;
 export const HOLDERS_MAX = 20;
@@ -133,11 +140,18 @@ export function searchRow(answer: unknown, mint: string): Record<string, unknown
   return hit === undefined ? null : obj(hit);
 }
 
-/** The TokenPage from a mint, Jupiter's row and the curve progress (null when the curve account is not one). */
-export function toPage(mint: Mint, jup: Record<string, unknown>, curveBps: number | null, chainAtMs: number, jupAtMs: number): TokenPage | null {
-  const parsed = toRow(jup, jupAtMs);
-  if (parsed === null) return null;
-  const row: Row = parsed.curve_bps === null && curveBps !== null ? { ...parsed, curve_bps: curveBps } : parsed;
+/** The pool Jupiter names for a token: its graduated pool, else its first pool, which Jupiter writes as the mint
+ *  itself for a token on a curve (never a pool). */
+export function jupiterPool(jup: Record<string, unknown>): string | null {
+  const first = address(obj(jup.firstPool).id);
+  return address(jup.graduatedPool) ?? (first !== jup.id ? first : null);
+}
+
+/** The TokenPage from a mint, the token's Row (Discover's, or made from Jupiter's search row), the pool Jupiter names
+ *  and the curve progress (null when the curve account is not one). */
+export function toPage(mint: Mint, base: Row, jupPool: string | null, curveBps: number | null, chainAtMs: number, jupAtMs: number): TokenPage {
+  const row: Row = { ...base };
+  if (row.curve_bps === null && curveBps !== null) row.curve_bps = curveBps;
   // the chain's own reads win over Jupiter's for the authorities (D-S12)
   row.mint_auth = mint.mintAuth;
   row.freeze_auth = mint.freezeAuth;
@@ -146,10 +160,8 @@ export function toPage(mint: Mint, jup: Record<string, unknown>, curveBps: numbe
   const none: Field<never> = { v: null, src: "none", as_of_ms: chainAtMs };
   const onCurve = row.launchpad !== null && curveBps !== null && curveBps < 10_000;
   const created = row.created_s as number | null;
-  // the pool the token trades in: Jupiter's graduated pool, else the curve account while on its curve, else Jupiter's
-  // first pool (which Jupiter writes as the mint itself for a curve token: never a pool)
-  const first = address(obj(jup.firstPool).id);
-  const pool = address(jup.graduatedPool) ?? (onCurve ? pumpCurveAddress(row.token as string) : null) ?? (first !== row.token ? first : null);
+  // the pool the token trades in: the curve account while on its curve, else the pool Jupiter names, when it does
+  const pool = onCurve ? pumpCurveAddress(row.token as string) : jupPool;
   return {
     row,
     decimals: mint.decimals,
@@ -297,7 +309,8 @@ class Upstream extends Error {}
 
 const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
 
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number } = {}) {
+/** `listed` is Discover's lists (lists.ts get): a token on them takes its row from there, with no Jupiter call. */
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer> } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
 
@@ -309,11 +322,62 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return { result: obj(j.result) };
   }
 
-  async function jupiter(mint: string): Promise<{ row: Record<string, unknown> | null; at: number }> {
-    const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${mint}`, "");
-    if (a.status !== 200) throw new Upstream();
-    const at = Date.parse(a.headers["X-Fetched-At"] ?? "");
-    return { row: searchRow(JSON.parse(a.body), mint), at: Number.isFinite(at) ? at : now() };
+  // Jupiter's search, batched (D-S6): every mint asked while a search is out or within JUP_GAP_MS of the last joins
+  // one call of up to SEARCH_MAX mints, so this part's Jupiter calls stay at most 60 / JUP_GAP_MS s a minute whatever
+  // the number of pages open; a mint's row is kept JUP_FRESH_MS from our own read.
+  type JupRow = { row: Record<string, unknown> | null; at: number };
+  const jrows = bounded<JupRow & { readAt: number }>(CACHE_MAX);
+  const waiting = new Map<string, { ok: (r: JupRow) => void; fail: (e: Error) => void }[]>();
+  let lastSearch = -Infinity;
+  let searching = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  function schedule() {
+    if (searching || timer !== null || waiting.size === 0) return;
+    timer = setTimeout(() => void search(), Math.max(0, lastSearch + JUP_GAP_MS - now()));
+  }
+
+  async function search() {
+    timer = null;
+    const batch = [...waiting.keys()].slice(0, SEARCH_MAX);
+    searching = true;
+    lastSearch = now();
+    let rows: unknown = null;
+    let at = now();
+    try {
+      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "");
+      if (a.status === 200) {
+        rows = JSON.parse(a.body);
+        const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
+        if (Number.isFinite(t)) at = t;
+      }
+    } catch {
+      rows = null;
+    }
+    for (const mint of batch) {
+      const ws = waiting.get(mint) ?? [];
+      waiting.delete(mint);
+      if (!Array.isArray(rows)) {
+        for (const w of ws) w.fail(new Upstream());
+        continue;
+      }
+      const r: JupRow = { row: searchRow(rows, mint), at };
+      jrows.set(mint, { ...r, readAt: now() });
+      for (const w of ws) w.ok(r);
+    }
+    searching = false;
+    schedule();
+  }
+
+  function jupiter(mint: string): Promise<JupRow> {
+    const hit = jrows.get(mint);
+    if (hit !== undefined && now() - hit.readAt < JUP_FRESH_MS) return Promise.resolve(hit);
+    return new Promise((ok, fail) => {
+      const ws = waiting.get(mint);
+      if (ws !== undefined) ws.push({ ok, fail });
+      else waiting.set(mint, [{ ok, fail }]);
+      schedule();
+    });
   }
 
   /** The mint account at a slot, or null when it is not a mint. */
@@ -326,12 +390,50 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return { mint: toMint(value[0], slot as number), curve: curveToo ? pumpCurveBps(value[1]) : null, at: now() };
   }
 
+  // Discover's rows (D-S6 reads Jupiter only for tokens off the lists): indexed once per snapshot
+  let index: { asOfMs: number; rows: Map<string, Row> } | null = null;
+  async function listedRow(mint: string): Promise<{ row: Row; at: number } | null> {
+    if (deps.listed === undefined) return null;
+    try {
+      const a = await deps.listed();
+      if (a.status !== 200 || a.asOfMs === undefined) return null;
+      if (index?.asOfMs !== a.asOfMs) {
+        const rows = new Map<string, Row>();
+        for (const list of Object.values(obj(obj(JSON.parse(a.body)).lists))) if (Array.isArray(list)) for (const r of list as Row[]) rows.set(r.token as string, r);
+        index = { asOfMs: a.asOfMs, rows };
+      }
+      const row = index.rows.get(mint);
+      return row === undefined ? null : { row, at: a.asOfMs };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The token's Row: Discover's when listed, else from Jupiter's search; null when Jupiter does not know it. */
+  async function rowOf(mint: string): Promise<{ row: Row; at: number } | null> {
+    const listed = await listedRow(mint);
+    if (listed !== null) return listed;
+    const j = await jupiter(mint);
+    const row = j.row === null ? null : toRow(j.row, j.at);
+    return row === null ? null : { row, at: j.at };
+  }
+
   const page = cached(PAGE_FRESH_MS, now, async (mint) => {
-    const [m, j] = await Promise.all([mintAt(mint, true), jupiter(mint)]);
-    if (m.mint === null || j.row === null) return NOT_FOUND;
-    const p = toPage(m.mint, j.row, m.curve, m.at, j.at);
-    if (p === null) return NOT_FOUND;
-    return { status: 200, body: JSON.stringify(p), src: "jupiter", asOfMs: Math.min(m.at, j.at) };
+    const listed = await listedRow(mint);
+    const [m, j] = await Promise.all([mintAt(mint, true), listed === null ? jupiter(mint) : null]);
+    if (m.mint === null) return NOT_FOUND;
+    let base: Row | null = listed?.row ?? null;
+    let at = listed?.at ?? 0;
+    let pool: string | null = null;
+    if (j !== null) {
+      if (j.row === null) return NOT_FOUND;
+      base = toRow(j.row, j.at);
+      at = j.at;
+      pool = jupiterPool(j.row);
+    }
+    if (base === null || base.token !== mint) return NOT_FOUND;
+    const p = toPage(m.mint, base, pool, m.curve, m.at, at);
+    return { status: 200, body: JSON.stringify(p), src: "jupiter", asOfMs: Math.min(m.at, at) };
   });
 
   const holders = cached(HOLDERS_FRESH_MS, now, async (mint) => {
@@ -346,19 +448,17 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const rows = toHolders(largest.slice(0, HOLDERS_MAX), Array.isArray(owners) ? owners : [], m.mint.supply);
       if (rows === null) throw new Upstream();
       const top = rows.slice(0, 10).reduce((s, h) => s + (h.bps ?? 0), 0);
-      const j = await jupiter(mint).catch(() => null);
-      const total = j?.row ? ((toRow(j.row, j.at)?.holders ?? null) as number | null) : null;
+      const r = await rowOf(mint).catch(() => null);
+      const total = (r?.row.holders ?? null) as number | null;
       const at = now();
       const body: Holders = { holders: rows, total, top_bps: rows.length > 0 && m.mint.supply > 0n ? Math.min(10_000, top) : null, src: "chain", as_of_ms: at };
       return { status: 200, body: JSON.stringify(body), src: "chain", asOfMs: at };
     } catch {
       // the fallback (06b v1.36): no rows, Jupiter's holder count and top-holders share
-      const j = await jupiter(mint);
-      if (j.row === null) return NOT_FOUND;
-      const r = toRow(j.row, j.at);
+      const r = await rowOf(mint);
       if (r === null) return NOT_FOUND;
-      const body: Holders = { holders: [], total: r.holders as number | null, top_bps: r.top10_bps as number | null, src: "jupiter", as_of_ms: j.at };
-      return { status: 200, body: JSON.stringify(body), src: "jupiter", asOfMs: j.at };
+      const body: Holders = { holders: [], total: r.row.holders as number | null, top_bps: r.row.top10_bps as number | null, src: "jupiter", as_of_ms: r.at };
+      return { status: 200, body: JSON.stringify(body), src: "jupiter", asOfMs: r.at };
     }
   });
 

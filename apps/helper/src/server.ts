@@ -114,7 +114,7 @@ export function handler(
   lists: Lists = createSolanaLists(proxy, rpc),
   fee: Fee = feeQuoterFromEnv(process.env),
   withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status }),
-  token: Token = createSolanaToken(proxy, rpc),
+  token: Token = createSolanaToken(proxy, rpc, { listed: lists.get }),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
