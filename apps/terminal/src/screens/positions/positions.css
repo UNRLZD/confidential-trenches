@@ -1,0 +1,65 @@
+/* The sell side and Your position. Values are R5's (research repo design/proto/assets/u/unrlzd.css at design-lock-r5:
+   .tk-side[data-on="sell"], .tk-amountBtn[data-on="sell"], .tk-cta[data-tone="sell"], .tk-position, .tk-pos*,
+   .tk-quick, .tk-share), which carry the live UNRLZD terminal's ticket. The sell box is the buy side's .trb with the coral. */
+.trb .trb-side[data-on="sell"] { background: var(--sell); color: var(--on-acc); }
+.trb.pos-sell .trb-preset[data-on] { background: rgba(var(--sell-rgb), 0.14); color: var(--sell); }
+.trb .trb-cta[data-tone="sell"]:not(:disabled) { background: var(--sell); color: var(--on-acc); box-shadow: 0 0 28px rgba(var(--sell-rgb), 0.28); }
+/* R5 draws no sell Landing state and has no sell rule for the time (its only one is the global .live blue, proto.css:48),
+   so the time on the coral button takes the button's own on-colour: blue on coral is near 1.4:1. The buy side keeps its blue. */
+.trb.pos-sell .trb-cta[data-tone="sell"] .trb-live { color: var(--on-acc); }
+@media (hover: hover) and (pointer: fine) {
+  .trb .trb-cta[data-tone="sell"]:not(:disabled):not([data-kind="live"]):hover { background: var(--sell); filter: brightness(1.08); }
+}
+
+.tk-position {
+  --bg-panel: #0f0f0f; --border-panel: #1f1f1f; --border-row: #1a1a1a;
+  --acc: #50e397; --acc-rgb: 80, 227, 151; --sell: #ff5d4d; --sell-rgb: 255, 93, 77; --blue: #5b8cff;
+  overflow: hidden; min-width: 0;
+  background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px;
+}
+.tk-position button { border: 0; background: transparent; padding: 0; font-family: inherit; line-height: inherit; color: inherit; cursor: pointer; }
+.tk-posHead { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px; }
+.tk-posHead > span:first-child { font-size: 15px; font-weight: 600; flex: 1; }
+.tk-posHero { padding: 0 16px 12px; display: grid; gap: 2px; }
+.tk-posHeroTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; }
+.tk-posLabel { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.tk-posHeroMain { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.tk-posHeroVal, .tk-posHeroPct, .tk-posHeroUsd, .tk-posVal, .tk-posUsd, .tk-posMetaVal {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.tk-posHeroVal { font-size: 24px; font-weight: 500; letter-spacing: -0.01em; line-height: 30px; }
+.tk-posHeroPct { flex: none; height: 24px; padding: 0 8px; border-radius: 7px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 500; background: var(--bg-raised); }
+.tk-posHeroUsd { font-size: 12px; color: var(--text-2); }
+.tk-posHero[data-up="true"] .tk-posHeroVal, .tk-posHero[data-up="true"] .tk-posHeroPct { color: var(--acc); }
+.tk-posHero[data-up="true"] .tk-posHeroPct { background: rgba(var(--acc-rgb), 0.1); }
+.tk-posHero[data-up="false"] .tk-posHeroVal, .tk-posHero[data-up="false"] .tk-posHeroPct { color: var(--sell); }
+.tk-posHero[data-up="false"] .tk-posHeroPct { background: rgba(var(--sell-rgb), 0.1); }
+.tk-posRows { margin: 0 16px; padding: 6px 0; border-top: 1px solid var(--border-row); border-bottom: 1px solid var(--border-row); }
+.tk-posRow { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(0, 88px); align-items: baseline; column-gap: 10px; padding: 4px 0; }
+.tk-posVal { font-size: 13px; text-align: right; color: var(--text-1); }
+.tk-posVal[data-tone="true"] { color: var(--acc); }
+.tk-posVal[data-tone="false"] { color: var(--sell); }
+.tk-posUsd { font-size: 12px; text-align: right; color: var(--text-3); }
+.tk-posRow[data-testid="pos-total"] .tk-posLabel { color: var(--text-2); }
+.tk-posRow[data-testid="pos-total"] .tk-posVal { font-weight: 500; }
+.tk-posRule { height: 1px; margin: 4px 0; background: var(--border-row); }
+.tk-posMeta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 12px 16px; }
+.tk-posMeta > div { display: grid; gap: 2px; min-width: 0; }
+.tk-posMetaVal { font-size: 13px; color: var(--text-1); }
+.tk-position .tk-share { height: 30px; padding: 0 11px; display: flex; align-items: center; gap: 6px; border-radius: 9px; background: var(--bg-raised); font-size: 12px; flex: none; }
+.tk-quick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0 16px 16px; }
+.tk-position .tk-quick > button {
+  height: 36px; min-width: 0; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 13px; font-weight: 500;
+  background: rgba(var(--sell-rgb), 0.12); color: var(--sell); white-space: nowrap; overflow: hidden;
+}
+.tk-position .tk-quick > button:disabled { cursor: default; opacity: 0.5; }
+.tk-position .tk-quick > button[data-live]:disabled { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .tk-position .tk-quick > button:not(:disabled):hover { background: rgba(var(--sell-rgb), 0.2); }
+}
+
+/* phone: every tap target at least 44 px (BAR-10) */
+@media (max-width: 767.98px) {
+  .tk-position .tk-quick > button { height: 44px; }
+  .tk-position .tk-share { height: 44px; }
+}

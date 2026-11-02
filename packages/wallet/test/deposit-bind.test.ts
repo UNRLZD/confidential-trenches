@@ -1172,7 +1172,7 @@ async function signedCall(t: Awaited<ReturnType<typeof setup>>) {
   };
   return { call, view };
 }
-const rpcOf = (answers: Map<string, unknown>) => ({ name: "x", query: async () => ({}), tx: async ({ tx_hash }: { tx_hash: string }) => structuredClone(answers.get(tx_hash) ?? { error: { name: "UNKNOWN_TRANSACTION" } }) }) as unknown as BindRpc;
+const rpcOf = (answers: Map<string, unknown>, name: string = NET.fastnear[0]) => ({ name, query: async () => ({}), tx: async ({ tx_hash }: { tx_hash: string }) => structuredClone(answers.get(tx_hash) ?? { error: { name: "UNKNOWN_TRANSACTION" } }) }) as unknown as BindRpc;
 
 test("R2-5: txCarriesFinal is true on a valid view and false when any one field is altered", async () => {
   const t = await setup();
@@ -1229,7 +1229,7 @@ test("R2-5: findDeadCall takes the call at the nonce whose Delegate succeeded, w
   assert.notEqual(two.call.signed_delegate, one.call.signed_delegate);
   const [hA, hB] = [base58.encode(new Uint8Array(32).fill(11)), base58.encode(new Uint8Array(32).fill(12))];
   const rec = (c: typeof one.call, h: string) => ({ ...c, tx_hashes: [h] });
-  const pair = (m: Map<string, unknown>): [BindRpc, BindRpc] => [rpcOf(m), rpcOf(m)];
+  const pair = (m: Map<string, unknown>): [BindRpc, BindRpc] => [rpcOf(m), rpcOf(m, NET.drpc)]; // the release pair's names
   // the earlier call used the nonce, the later one's Delegate failed (a used nonce): the earlier, not "the latest"
   let m = new Map<string, unknown>([[hA, txView(one.view, hA, true, false)], [hB, txView(two.view, hB, true, true)]]);
   assert.equal((await findDeadCall([rec(one.call, hA), rec(two.call, hB)], one.call.nonce, pair(m), RELAYER))?.signed_delegate, one.call.signed_delegate);
@@ -1243,7 +1243,7 @@ test("R2-5: findDeadCall takes the call at the nonce whose Delegate succeeded, w
   m = new Map<string, unknown>([[hA, txView(one.view, hA, true, false)]]);
   assert.equal(await findDeadCall([rec(one.call, hA)], one.call.nonce + 1n, pair(m), RELAYER), null);
   // valid on one RPC only: none
-  assert.equal(await findDeadCall([rec(one.call, hA)], one.call.nonce, [rpcOf(m), rpcOf(new Map())], RELAYER), null);
+  assert.equal(await findDeadCall([rec(one.call, hA)], one.call.nonce, [rpcOf(m), rpcOf(new Map(), NET.drpc)], RELAYER), null);
 });
 
 // R2-6. A row that shows only while the dead call's tx is being read: the pages are read again before anything is signed.
@@ -1459,4 +1459,33 @@ test("Q7d: another id's FINAL call at the refused nonce is not the call that use
   await t.store.addCallTx(other.id, calls[0]!, h);
   await assert.rejects(p, /caller stopped/);
   assert.ok(t.sent.every((s) => s.nonce === n0 + 1n), t.sent.map((s) => s.nonce).join(","));
+});
+
+// Review of card wallet-withdraw-relay, A: two hosts of one operator are one read, on every path that reads NEAR twice.
+test("every exported read refuses a pair that is not a release pair, before any read: bindDeposit, readU, DepositsWatch, resignDeposit, checkCleanup, findDeadCall", async () => {
+  const t = await setup(["tx"]);
+  let reads = 0;
+  const as = (names: [string, string]) =>
+    t.deps.rpcs.map((r, k) => ({ name: names[k]!, query: (p: Record<string, unknown>) => (reads++, r.query(p)), tx: (p: Parameters<typeof r.tx>[0]) => (reads++, r.tx(p)) })) as typeof t.deps.rpcs;
+  const net = NEAR_NETWORKS.testnet;
+  const pairs: [string, string][] = [
+    [net.fastnear[0], net.fastnear[1]], // FastNEAR's two hosts: one operator
+    [net.drpc, net.drpc],
+    ["rpc-a", "rpc-b"],
+  ];
+  const input = (e: unknown) => e instanceof DepositBindRefused && e.code === "input" && /exactly/.test(e.message);
+  for (const names of pairs) {
+    const rpcs = as(names);
+    await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, rpcs }), input, `bindDeposit ${names}`);
+    await assert.rejects(readU(t.u, rpcs), input, `readU ${names}`);
+    assert.throws(() => new DepositsWatch(VAULT, t.note.precommitment, rpcs), input, `DepositsWatch ${names}`);
+    const args = { network: "testnet" as const, amount: AMOUNT, precommitment: t.note.precommitment };
+    await assert.rejects(resignDeposit(SEED, 1n, t.i, args, { sender_id: t.u, nonce: 1n, max_block_height: 0n }, "lapse", rpcs), input, `resignDeposit ${names}`);
+    await assert.rejects(checkCleanup("DeleteAccount", t.u, rpcs, t.store), input, `checkCleanup ${names}`);
+    await assert.rejects(findDeadCall([], 1n, rpcs, RELAYER), input, `findDeadCall ${names}`);
+  }
+  // bindDeposit: the other network's pair is refused too
+  await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, rpcs: as([NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc]) }), input);
+  assert.equal(reads, 0);
+  assert.equal(t.sent.length, 0);
 });

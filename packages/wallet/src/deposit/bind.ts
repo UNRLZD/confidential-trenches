@@ -44,7 +44,7 @@ import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/k
 import { base58, base64 } from "@scure/base";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
-import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./account.ts";
+import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./account.ts";
 import { type BindAnswer, depositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
 
 /** The margin past max_block_height, in blocks, before a call counts as dead (W:448; V:741-743 covers both readings). */
@@ -137,13 +137,12 @@ type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
 const DIGITS = /^(0|[1-9][0-9]*)$/;
 
-function checkPair(network: NearNetwork, rpcs: readonly [BindRpc, BindRpc]): void {
-  const net = NEAR_NETWORKS[network];
-  const names =
-    Array.isArray(rpcs) && rpcs.length === 2 ? rpcs.map((r) => (isObj(r) && typeof r.query === "function" && typeof r.tx === "function" ? r.name : undefined)) : [];
-  const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n);
-  if (!((fast(names[0]) && names[1] === net.drpc) || (names[0] === net.drpc && fast(names[1]))))
-    throw new DepositBindRefused("input", `the RPCs must be one of ${net.fastnear.join(", ")} and ${net.drpc}, exactly`);
+// The release pair of `network` (account.ts nearPairNetwork, the one rule), each with `tx` when `tx` is asked; with no
+// network, the pair of any network: the exported reads below take no network, and their account ids are on both.
+function checkPair(network: NearNetwork | undefined, rpcs: readonly NearRpc[], tx: boolean): void {
+  const net = nearPairNetwork(rpcs);
+  if (net === null || (network !== undefined && net !== network) || (tx && !rpcs.every((r) => typeof (r as BindRpc).tx === "function")))
+    throw new DepositBindRefused("input", nearPairRule(network));
 }
 
 function resultOf(a: unknown): Obj | undefined {
@@ -156,6 +155,7 @@ function resultOf(a: unknown): Obj | undefined {
 /** U's key nonce at final on each RPC, or null when either does not answer, lacks U's key or they disagree. */
 export type URead = { nonce: bigint; heights: [bigint, bigint] };
 export async function readU(account: string, rpcs: readonly [NearRpc, NearRpc]): Promise<URead | null> {
+  checkPair(undefined, rpcs, false);
   const publicKey = `ed25519:${base58.encode(Uint8Array.from(account.match(/../g)!, (h) => parseInt(h, 16)))}`;
   const sides = await Promise.all(
     rpcs.map(async (r) => {
@@ -228,6 +228,7 @@ export class DepositsWatch {
   readonly rpcs: readonly [NearRpc, NearRpc];
   alsoState: PagesRead = { state: "unsure" };
   constructor(vault: string, p: bigint, rpcs: readonly [NearRpc, NearRpc], also: bigint | null = null) {
+    checkPair(undefined, rpcs, false);
     this.vault = vault;
     this.p = p;
     this.rpcs = rpcs;
@@ -293,6 +294,7 @@ export async function resignDeposit(
 export async function checkCleanup(action: string, account: string, rpcs: readonly [NearRpc, NearRpc], store: NoteStore): Promise<void> {
   if (action === "storage_unregister") throw new DepositBindRefused("cleanup", "never storage_unregister on a one-time id: the token would burn a refund to it");
   if (action !== "DeleteAccount") throw new DepositBindRefused("cleanup", `${String(action)} is not a clean-up`);
+  checkPair(undefined, rpcs, false);
   const gate = async (): Promise<bigint> => {
     if (running.has(account)) throw new DepositBindRefused("cleanup", "a deposit call of this id is being sent");
     const calls = (await store.list()).flatMap((n) => n.calls ?? []).filter((c) => c.sender_id === account);
@@ -392,6 +394,7 @@ const callOf = (c: BindCall): SignedDepositDelegate => ({
  * Delegate run and succeeded (txCarriesFinal): the call that used the nonce, all of its receipts done. Else null.
  */
 export async function findDeadCall(calls: readonly BindCall[], nonce: bigint, rpcs: readonly [BindRpc, BindRpc], relayer: string): Promise<SignedDepositDelegate | null> {
+  checkPair(undefined, rpcs, true);
   for (const c of calls) {
     if (c.nonce !== nonce) continue;
     for (const h of c.tx_hashes) {
@@ -432,7 +435,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
   const vault = NEAR_NETWORKS[own.network].vault;
   if (vault === null) throw new DepositBindRefused("input", `the release names no vault on ${own.network}`);
   const rpcs = deps.rpcs;
-  checkPair(own.network, rpcs);
+  checkPair(own.network, rpcs, true);
   const relayer = deps.relayerAccount === undefined ? RELEASE_RELAYER[own.network] : deps.relayerAccount;
   const seed = Uint8Array.from(seed64);
   const store = deps.store;

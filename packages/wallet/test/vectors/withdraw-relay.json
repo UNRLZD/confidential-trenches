@@ -1,0 +1,54 @@
+{
+  "notes": [
+    "The relayer's answers to GET /v1/withdraw/fee and POST /v1/withdraw, in the shapes of the kit's frozen helper API (packages/kit/src/helper/v1.ts: HelperWithdrawFeeAnswer, HelperWithdrawAnswer, HELPER_WITHDRAW_CODES with HELPER_CODE_STATUS). Test values only, never money.",
+    "The relayer and the fee recipient are the relayer fixture's (apps/helper/src/withdraw/fixtures/withdraw-request.json), relay_fee its 30000. Each bad answer changes one thing a hostile helper could, and the device must refuse it."
+  ],
+  "relayer": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near" },
+  "fee": {
+    "good": {
+      "status": 200,
+      "body": {
+        "relayer_account": "relayer.confidential.unrlzd.near",
+        "fee_recipient": "relayer.confidential.unrlzd.near",
+        "relay_fee": "30000",
+        "gp": "100000000",
+        "px": "2.41",
+        "g_w": "92505000000000",
+        "valid_until_block": 175000000
+      }
+    },
+    "bad": {
+      "another fee recipient": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "thief.near", "relay_fee": "30000", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "another relayer account": { "status": 200, "body": { "relayer_account": "thief.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "30000", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "a fee above fee_max": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "60001", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "a fee as a number": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": 30000, "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "a fee with a leading zero": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "030000", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "a negative fee": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "-1", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "a fee past u128": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "340282366920938463463374607431768211456", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "an extra field": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "30000", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": 175000000, "fee": "1" } },
+      "a missing field": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "30000", "gp": "100000000", "px": "2.41", "valid_until_block": 175000000 } },
+      "px not a decimal": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "30000", "gp": "100000000", "px": "2.41e3", "g_w": "92505000000000", "valid_until_block": 175000000 } },
+      "valid_until_block a string": { "status": 200, "body": { "relayer_account": "relayer.confidential.unrlzd.near", "fee_recipient": "relayer.confidential.unrlzd.near", "relay_fee": "30000", "gp": "100000000", "px": "2.41", "g_w": "92505000000000", "valid_until_block": "175000000" } },
+      "an error at another status": { "status": 200, "body": { "error": { "code": "upstream" } } },
+      "not JSON": { "status": 200, "body": "<html>" }
+    },
+    "busy": { "status": 503, "body": { "error": { "code": "upstream" } } }
+  },
+  "withdraw": {
+    "submitted": { "status": 200, "body": { "tx_hash": "2EYUQMxVBZNC4Xr4Ax7XVZ4e5pmwHTVyw1vuJQGtMB3E", "state": "submitted" } },
+    "codes": {
+      "rate_limited": { "status": 429, "body": { "error": { "code": "rate_limited" } } },
+      "index_behind": { "status": 503, "body": { "error": { "code": "index_behind" } } },
+      "in_flight": { "status": 400, "body": { "error": { "code": "in_flight" } } },
+      "withdraw_failed": { "status": 400, "body": { "error": { "code": "withdraw_failed" } } },
+      "fee_too_low": { "status": 400, "body": { "error": { "code": "fee_too_low" } } }
+    },
+    "bad": {
+      "a code at another status": { "status": 200, "body": { "error": { "code": "withdraw_failed" } } },
+      "a code not frozen": { "status": 400, "body": { "error": { "code": "try_elsewhere" } } },
+      "a tx hash not 32 bytes": { "status": 200, "body": { "tx_hash": "2EYUQMxVBZNC4Xr4", "state": "submitted" } },
+      "another state": { "status": 200, "body": { "tx_hash": "2EYUQMxVBZNC4Xr4Ax7XVZ4e5pmwHTVyw1vuJQGtMB3E", "state": "final" } },
+      "an extra field": { "status": 200, "body": { "tx_hash": "2EYUQMxVBZNC4Xr4Ax7XVZ4e5pmwHTVyw1vuJQGtMB3E", "state": "submitted", "change_leaf": "1" } }
+    }
+  }
+}
