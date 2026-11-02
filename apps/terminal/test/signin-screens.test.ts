@@ -107,11 +107,11 @@ test("S19 shows while running or stalled; a finished one only if this page saw i
   assert.equal(showRestore(restoreModel(st({ ops: [op("r1", "stalled")] })), none, none), true);
 });
 
-test("WORDS: every picked word carries its source; every other word is a draft", () => {
+test("WORDS: every picked word carries its source; no draft is left (owner 1 Nov 16:45Z, keep)", () => {
   for (const [k, w] of Object.entries(WORDS)) {
     assert.ok(w.text.length > 0 && w.source.length > 0, k);
   }
-  assert.deepEqual(DRAFTS.sort(), ["backup", "close", "hopError", "hopRefused", "hopSilent", "nothingFound", "offline", "recoveryCode", "restoring", "sync"]);
+  assert.deepEqual([...DRAFTS], []);
   // owner-words-pass and the signed CN rows: final
   for (const k of ["usePasskey", "wallet", "signOut", "privacy", "retry"] as const) assert.equal(WORDS[k].draft, false, k);
 });

@@ -198,10 +198,10 @@ test("edge rows: huge numbers stay short, hostile text stays text, a curve shows
   assert.deepEqual([zalgo!.name, zalgo!.mc, zalgo!.vol, zalgo!.chg, zalgo!.stage.pill, zalgo!.buyShare, zalgo!.top10.level], ["<img src=x onerror=alert(1)>", "$1.00M", "$1.00K", "−33% · 5m", "99%", 0, "warn"]);
 });
 
-test("WORDS: every visible word sits in one table, each draft marked", () => {
+test("WORDS: every visible word sits in one table, no draft is left (owner 1 Nov 16:45Z, keep)", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text && w.source, k);
   assert.deepEqual(DRAFTS, (Object.keys(WORDS) as (keyof typeof WORDS)[]).filter((k) => WORDS[k].draft));
-  assert.ok(DRAFTS.length > 0);
+  assert.deepEqual(DRAFTS, []);
 });
 
 test("Graduating holds J19's curve rule, the token page's (card app-token-page): a launchpad and whole basis points 0-9999", () => {
