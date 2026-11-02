@@ -60,6 +60,7 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
+import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { afterSaved, pageFor, takes, type AccountKind } from "./pages/open.ts";
 
 type State =
@@ -118,6 +119,8 @@ else {
       "signin.open": (p) => openKind("signin.open", p.way),
       signout: () => openKind("signout"),
       "backup.open": () => openKind("backup.open"),
+      // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
+      buy: tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() }),
     },
   });
   shell.layer.append(root);
@@ -337,6 +340,17 @@ const open = async (): Promise<WalletStore> =>
   }));
 
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
+// The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed
+// here and the seed64 by the signer when the trade ends.
+async function openSeed64(): Promise<Uint8Array> {
+  const s = await readSeedSettled();
+  if (!s) throw new Error("no seed is stored");
+  try {
+    return wordsToSeed64(entropyToWords(s.entropy));
+  } finally {
+    s.entropy.fill(0);
+  }
+}
 // The store moved (another tab signed in, saved or signed out) since `moved` was last read: a read that spans a move
 // may hold a seed that is no longer stored, so it is read again; a store that keeps moving reads as no seed.
 let moved = 0;

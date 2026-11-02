@@ -360,3 +360,41 @@ test("a kind whose handler answers later is answered with its result once it set
   assert.deepEqual(answers, [{ v: 1, id: a, ok: true, result: { pending: true } }, stateAnswer(b)]);
   assert.deepEqual(ran, ["then"]);
 });
+
+test("a host kind gets its request's id; its progress events follow its answer, in order; a coded refusal is posted as that code", async () => {
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const ids: string[] = [];
+  startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: signedOutState,
+    kinds: {
+      // a trade answered at "sent", its fill as a progress event (src/trade.ts)
+      buy: (p, ctx) => {
+        ids.push(ctx.id);
+        if (p.side === "sell") return { error: "quote_check_failed" };
+        return { after: held, answer: () => (ctx.progress("filled"), { result: { stage: "sent" as const, txs: [{ chain: "solana" as const, hash: "sig" }] } }) };
+      },
+    },
+  });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  const a = uuid();
+  const b = uuid();
+  const buy = { v: 1, type: "buy", chain: "solana", token: "Mint", amount: "10", slippage_bps: 500 };
+  send({ ...buy, id: a, side: "buy" });
+  send({ ...buy, id: b, side: "sell" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(posted.slice(1), [], "nothing before the trade's answer");
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ids, [a, b]);
+  assert.deepEqual(posted.slice(1), [
+    { v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } },
+    { v: 1, id: b, ok: false, error: { code: "quote_check_failed" } },
+    { v: 1, type: "progress", id: a, stage: "filled" },
+  ]);
+});
