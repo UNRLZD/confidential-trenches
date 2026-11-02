@@ -129,9 +129,10 @@ function run(dir, test) {
   } catch (e) {
     out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
   }
-  const ran = out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? [];
+  // PASS or FAIL of each test of that name (two contracts may share it, each failing for its own reason)
+  const ran = (out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? []).map((r) => r.slice(1, 5));
   // forge prints a failing test twice, in the run and in the summary
-  if (ran.length >= 1 && ran.every((r) => r === ran[0])) return ran[0].startsWith("[PASS") ? "pass" : "fail";
+  if (ran.length >= 1 && ran.every((r) => r === ran[0])) return ran[0] === "PASS" ? "pass" : "fail";
   throw new Error(`forge ran ${ran.length} tests named ${test}:\n${out.slice(-2000)}`);
 }
 
