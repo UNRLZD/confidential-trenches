@@ -175,6 +175,9 @@ test("trees refuses an RPC that has not reached the cut, two RPCs that differ, a
   // both RPCs serve the same forged root at the cut
   const forged = relChain(500, (e, i) => { if (i === 5) e[63] ^= 1; });
   await assert.rejects(poolWith(pair(forged, forged)).trees(before), /not the page's root/);
+  // RPC b claims a block past the cut but lacks deposit 5, which landed under it
+  const short: Chain = { ...relChain(), accounts: new Map([...pages(0, REL_STATE.slice(0, 5)), ...pages(1, REL_LABELS)]) };
+  await assert.rejects(poolWith(pair(relChain(), short)).trees(before), /tree 0: the two RPCs differ below the cut/);
   // a time that goes back
   const back = relChain(500, (e, i) => { if (i === 3) new DataView(e.buffer, e.byteOffset).setBigInt64(64, T(1), true); });
   await assert.rejects(poolWith(pair(back, back)).trees(before), /a time goes back/);

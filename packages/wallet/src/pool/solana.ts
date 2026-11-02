@@ -23,8 +23,8 @@
 //   72-byte one and the base fee of a two-signature message, which must agree, and computes the fee payer's cost of an
 //   ordinary release, the spent mark rent(0) + the change entry's growth rent(72) - rent(0) + the base fee, 1,026,000
 //   lamports at mainnet rent (release.rs row 8, M352 (1)). It refuses a fee below that cost, off the step, or above the
-//   cost rounded up to the step plus SOL_FEE_HEADROOM (two steps: W's priority fee and the one release in 1,024 whose
-//   change opens a page, which the helper carries). At mainnet rent the bound is 1,300,000 lamports.
+//   cost rounded up to the step plus SOL_FEE_HEADROOM, two steps: W's priority budget (M353). At mainnet rent the bound
+//   is 1,300,000 lamports.
 // - The chunk: the program pays W chunk - fee - tip, and the runtime refuses a W left under rent(0); the backstop needs
 //   2 x fee at most the chunk. bind refuses a chunk where either fails at the fee and the tip cap.
 // - No refund note: the release pays W in the same transaction (lib.rs), so refundPrecommitment is not bound.
