@@ -1,5 +1,5 @@
 // The sandbox's door into send.ts (contracts/vault/tests/relayer_send.rs): one process carries the requests it is given
-// against a NEAR RPC with a relayer key made by the sandbox, through the real createSendReads, createRelayer and
+// against a NEAR RPC with a relayer key made by the sandbox, through the real createSendReads, startRelayer and
 // createFileStore, so every process start is a restart of the relayer on the same store.
 //   stdin: {"rpc":[a,b],"vault","token","relayer":{"account_id","secret_key"},"store","marginK","status":["ok"|"halted",...],
 //           "requests":[{"signed_delegate"},...]}
@@ -9,7 +9,7 @@
 // run at once.
 import { readFileSync } from "node:fs";
 import { decodeSignedDelegate } from "../../src/bind/checks.ts";
-import { USDC_PAUSED, carryDeposit, createFileStore, createRelayer, createSendReads, nearRpc } from "../../src/bind/send.ts";
+import { USDC_PAUSED, carryDeposit, createFileStore, createSendReads, nearRpc, startRelayer } from "../../src/bind/send.ts";
 import { USDC_CODE_HASH, type TokenStatus } from "../../src/token-status/status.ts";
 
 type Input = {
@@ -53,7 +53,8 @@ const deps = {
   reads: createSendReads(rpcs, { vault: input.vault, token: input.token }),
   store,
   // the sandbox node keeps every block, so it stands in for the archival provider too
-  relayer: createRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault),
+  // the validity period read live from both providers (EXPERIMENTAL_protocol_config), as the relayer starts
+  relayer: await startRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault),
   tokenStatus,
   pausedAt,
 };

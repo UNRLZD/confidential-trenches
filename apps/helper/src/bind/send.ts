@@ -12,10 +12,11 @@
 //   4. (f) again (check 9); (g) U's USDC and key nonce read at one final height on two RPCs that must agree.
 //   5. R1's binding of P to U, then R7's record for U, each by an atomic create-if-absent; R2's one open P per U.
 //   6. Every earlier transaction of (U, P) whose outcome is not known is settled first: its stored signed bytes go out
-//      again (a send's only while U's delegate is K or more ahead, as R4 holds for the first send) and it is read on
-//      both providers and an archival one. It is "dropped" (never landed, never will) only with its hash unknown on
-//      all three and an Expired refusal, the relayer's key nonce past its nonce on both providers, or U's delegate
-//      past its max_block_height; until it is known the call answers in_flight and nothing new goes out on (U, P).
+//      again (a send's only while U's delegate is K or more ahead, as R4 holds for the first send; none while the
+//      token is held, as (f) holds) and it is read on both providers and an archival one. It is "dropped" (never
+//      landed, never will) only with its hash unknown on all three, read twice on finals a block apart, past its
+//      validity period (markets.md l.1300 (b)); until it is known the call answers in_flight and nothing new goes out
+//      on (U, P).
 //      R2's move to a new P settles the old P's this way first.
 //   7. (h) the prepay: 904 B whenever a tree may grow or a send on P already went (R5's top-up), else 756 B; never above
 //      904 B on P (the bytes of a prepay in flight count). Then the send, only after the prepay read SuccessValue at
@@ -25,8 +26,8 @@
 //   8. (i) the count is written before the send (R7). A send counts as failed only once the deposits pages, read at a
 //      height both providers' finals have passed beyond its last receipt, do not hold P for U; short of that it stays
 //      pending. It is not counted when the pages hold P for U, when USDC's own receipt failed with its paused error
-//      and the watch's pause history shows USDC paused at that receipt's height (R3's one exception), when U's
-//      delegate ran past its max_block_height, or when it was dropped.
+//      and the watch's pause history shows USDC paused at that receipt's height (R3's one exception), or when it was
+//      dropped. Any other outcome counts, an expired delegate (DelegateActionExpired) included.
 //      At three failures U is struck: sender_struck from then on, no top-up.
 //
 // The gas account holds NEAR for gas and prepays only (markets.md MN:314 (6)); its key signs the relayer's own
@@ -58,16 +59,15 @@ export const PREPAY_GAS = 30_000_000_000_000n;
  *   one send's gas bought up front: prepaid gas is bought at max(gas price, 1e9 yocto per gas) (markets.md F10,
  *   M:1480); a delegate transaction holds at most 300 Tgas (its inner call at most G_bind_cap, 203.126 Tgas, check 5),
  *   so 300e12 x 1e9 = 0.3 N, returned less the burn once it runs;
- *   plus a (U, P)'s worst spend (vault.md 2.10 as amended): a failed prepay, the prepay, its top-up and two failed
- *   sends, 0.00904 + 3 x 0.0003 + 2 x 0.0002805 = 0.010501 N (PER_P_WORST_YOCTO);
- *   = 0.310501 N. Below it the relayer answers 503 relayer_low.
+ *   plus a (U, P)'s worst spend, A1's row-7 maximum (vault.md 2.10, V:735-737): 904 B prepaid (0.00904 N) in three
+ *   prepays' gas (3 x 0.0003 N) and two failed sends that each burn row 7's 0.0101563 N,
+ *   0.00904 + 3 x 0.0003 + 2 x 0.0101563 = 0.0302526 N (PER_P_WORST_YOCTO);
+ *   = 0.3302526 N. Below it the relayer answers 503 relayer_low, so a relayer at the floor still holds 0.3 N after it.
  */
-export const PER_P_WORST_YOCTO = 10_501_000_000_000_000_000_000n;
+export const PER_P_WORST_YOCTO = 30_252_600_000_000_000_000_000n;
 export const RELAYER_FLOOR_YOCTO = 300_000_000_000_000n * 1_000_000_000n + PER_P_WORST_YOCTO;
 /** USDC's message for every call while paused (V 2.5.1 case 2). */
 export const USDC_PAUSED = "FiatToken: paused";
-/** nearcore's ActionErrorKind for a delegate that ran past its max_block_height. */
-export const DELEGATE_EXPIRED = "DelegateActionExpired";
 /** How long a send's outcome is waited for at FINAL, and the pages for both finals, before it stays pending. */
 export const OUTCOME_WAIT_MS = 30_000;
 export const SETTLE_WAIT_MS = 6_000;
@@ -93,14 +93,17 @@ export type SendReads = BindReads & {
   trees(): Promise<{ state: bigint; label: bigint }>;
 };
 
-/** One of the relayer's own transactions: its hash, its key nonce and its signed bytes (base64), kept to resend. */
-export type TxRef = { tx_hash: string; nonce: string; signed_tx: string };
+/**
+ * One of the relayer's own transactions: its hash, its key nonce, the height b0 of the block it was signed on (its
+ * validity runs from there) and its signed bytes (base64), kept to resend.
+ */
+export type TxRef = { tx_hash: string; nonce: string; height: string; signed_tx: string };
 export type Receipt = { executor: string; ok: boolean; failure: string; height: bigint };
 
 /** One relayer transaction's outcome. */
 export type TxOutcome =
   | { kind: "final"; tx_hash: string; receipts: Receipt[] }
-  /** It never landed and never can (Expired, or the key nonce passed it with its hash unknown on both providers). */
+  /** It never landed and never can: unknown on every provider, read twice past its validity period. */
   | { kind: "dropped"; tx_hash: string; why: string }
   /** Not known yet: it may still land. */
   | { kind: "unknown"; tx_hash: string; why: string };
@@ -119,10 +122,9 @@ export type Relayer = {
   send(action: RelayerAction, guard: () => Promise<BindCode | null>, before: (tx: TxRef) => void): Promise<TxOutcome | { kind: "guarded"; code: BindCode }>;
   /**
    * A transaction of ours whose outcome was not read: its bytes sent again (unless `resend` is false), then read on
-   * both providers and the archival one. `gone`: whatever it carries can no longer land (U's delegate expired), so
-   * unknown everywhere is dropped.
+   * both providers and the archival one.
    */
-  resolve(tx: TxRef, opts: { resend: boolean; gone: boolean }): Promise<TxOutcome>;
+  resolve(tx: TxRef, opts: { resend: boolean }): Promise<TxOutcome>;
 };
 
 export type SendDeps = {
@@ -204,7 +206,9 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
   fs.mkdirSync(dir, { recursive: true });
   const path = (name: string) => join(dir, name);
 
-  // the lock: one process per store
+  // The lock: one process per store. Only take() opens this path: POSIX drops all of a process's fcntl locks on a
+  // file when any descriptor of that file in the process closes, so nothing else in this process may ever open it
+  // (no record name can be "lock"; the truncate below runs only before the lock is held).
   const take = (): DatabaseSync => {
     const db = new DatabaseSync(path("lock"), { timeout: LOCK_WAIT_MS });
     try {
@@ -435,8 +439,8 @@ async function sendState(deps: SendDeps, u: string, p: bigint, amount: bigint, o
   const pages = await deps.reads.depositSettled(p, last);
   if (pages.state === "unknown") return "pending";
   if (pages.state === "held" && pages.depositor === u && pages.value === amount) return "landed";
-  // U's delegate ran past its max_block_height: the relayer's late delivery, never U's failure; it moved nothing.
-  if (out.receipts.some((r) => !r.ok && r.failure.includes(DELEGATE_EXPIRED))) return "dropped";
+  // Whatever else the outcome is, an expiry (DelegateActionExpired) included, it counts (R3, M284, V 2.10): the per-U
+  // cost bound never rests on K's value.
   const paused = out.receipts.find((r) => !r.ok && r.executor === deps.cfg.token && r.failure.includes(USDC_PAUSED));
   if (paused !== undefined) {
     // R3's exception: USDC's own receipt failed with its paused error, and the watch's pause history shows USDC
@@ -451,18 +455,19 @@ async function sendState(deps: SendDeps, u: string, p: bigint, amount: bigint, o
 /** Settles every earlier transaction of (U, P) whose outcome is not known; the record as it then stands. */
 async function settle(deps: SendDeps, rec: DepositRecord, u: string, p: bigint): Promise<DepositRecord> {
   for (const pre of rec.prepays.filter((x) => x.ok === null)) {
-    const out = await deps.relayer.resolve(pre, { resend: true, gone: false });
+    // (f) holds for a re-send as for the first send
+    const out = await deps.relayer.resolve(pre, { resend: !(await held(deps)) });
     if (out.kind === "unknown") continue;
     if (out.kind === "dropped") rec = { ...rec, prepaid_bytes: rec.prepaid_bytes - pre.bytes, prepays: rec.prepays.filter((x) => x.tx_hash !== pre.tx_hash) };
     else rec = await prepayDone(deps, rec, pre, out, p);
     deps.store.put(rec);
   }
   for (const s of rec.sends.filter((x) => x.state === "pending")) {
-    // R4 holds for a re-send as for the first: once U's delegate is within K of its max_block_height its bytes never
-    // go out again; once past it, nothing it carries can land, so unknown on every provider is dropped.
+    // R4 and (f) hold for a re-send as for the first: once U's delegate is within K of its max_block_height, or the
+    // token is held, its bytes do not go out again. It is still read: it may have landed, and an expired one counts.
     const newest = await deps.reads.newestFinalHeight();
     const mbh = BigInt(s.max_block_height);
-    const out = await deps.relayer.resolve(s, { resend: mbh - newest >= deps.cfg.marginK, gone: newest >= mbh });
+    const out = await deps.relayer.resolve(s, { resend: mbh - newest >= deps.cfg.marginK && !(await held(deps)) });
     if (out.kind === "unknown") continue;
     const state = out.kind === "dropped" ? "dropped" : await sendState(deps, u, p, BigInt(s.amount), out);
     rec = tally({ ...rec, landed: rec.landed || state === "landed", sends: rec.sends.map((x) => (x.tx_hash === s.tx_hash ? { ...x, state } : x)) });
@@ -556,7 +561,7 @@ async function carryChecked(deps: SendDeps, d: Checked, sha: string): Promise<An
     rec = tally({ ...rec, landed: rec.landed || state === "landed", sends: rec.sends.map((x) => (x.tx_hash === out.tx_hash ? { ...x, state } : x)) });
     store.put(rec);
     if (state !== "dropped") return sent(out.tx_hash);
-    if (out.kind === "final" || attempt > 0) return no("resign_needed"); // ran expired, or dropped twice
+    if (attempt > 0) return no("resign_needed"); // dropped twice
   }
 }
 
@@ -755,39 +760,70 @@ export function relayerKey(secretKey: string): { priv: ReturnType<typeof createP
   return { priv, pub: sk.subarray(32) };
 }
 
-/** The refusal's whole error (nearcore puts the InvalidTxError in `data`), for an INVALID_TRANSACTION only. */
-const causeInfo = (e: unknown): string => (e instanceof RpcError && e.cause_name === "INVALID_TRANSACTION" ? JSON.stringify(e.data) : "");
+/** At most this many entries in each of the relayer's caches (block heights, first reads past the validity period). */
+export const CACHE_MAX = 4_096;
+/** A Map entry kept, the oldest dropped past `CACHE_MAX`: forgetting one only costs a read again. */
+export const remember = <K, V>(m: Map<K, V>, k: K, v: V) => {
+  m.delete(k);
+  m.set(k, v);
+  if (m.size > CACHE_MAX) m.delete(m.keys().next().value as K);
+};
+
+/**
+ * The chain's `transaction_validity_period` (blocks), read live from EXPERIMENTAL_protocol_config on both providers;
+ * an error when they differ, so the relayer never starts on a number one provider alone gave.
+ */
+export async function transactionValidityPeriod(rpcs: readonly [Rpc, Rpc]): Promise<bigint> {
+  const ps = await Promise.all(rpcs.map(async (r) => u64(((await r("EXPERIMENTAL_protocol_config", { finality: "final" })) as { transaction_validity_period?: unknown }).transaction_validity_period, "transaction_validity_period")));
+  if (ps[0] !== ps[1]) throw new Error(`relayer: the two RPCs disagree on transaction_validity_period (${ps[0]} and ${ps[1]})`);
+  return ps[0]!;
+}
+
+/** The relayer as it starts: the validity period read from both providers first, then the gas account. */
+export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, waitMs = OUTCOME_WAIT_MS): Promise<Relayer> {
+  return createRelayer(rpcs, archival, account, secretKey, vault, await transactionValidityPeriod(rpcs), waitMs);
+}
 
 /**
  * The gas account: one key. Its queue holds only the guard, the signing, the durable write and the send to both
- * providers, never the wait for FINAL. Transactions go by send_tx with wait_until NONE, which answers a node's
- * validation refusal (InvalidNonce, Expired; broadcast_tx_async answers only a hash). The nonce is a local next,
- * set from the key's nonce on both providers when first used and read again after a nonce refusal or a drop, so two
- * transactions never share one and a key whose nonce jumped is followed at once.
+ * providers, never the wait for FINAL. Each transaction is signed from one view_access_key answer at final (markets.md
+ * send record): its block hash and height b0 from that answer, its nonce one above the larger of the key's nonce there
+ * and the last nonce this relayer handed out, so transactions in flight never share one and a key whose nonce jumped
+ * is followed at the next signing. They go by send_tx with wait_until NONE, which validates nothing before it answers
+ * (nearcore send_tx: NONE is send_tx_async, chain/jsonrpc lib.rs l.1191-1206), so a refusal is never read from the
+ * send: only the chain says what happened.
  *
  * A transaction is dropped (never landed, never will) only when its hash is unknown on both providers and on the
- * archival one (a regular node forgets a landed transaction after its garbage collection, an archival one never),
- * and the node refused it as Expired, or the key's nonce on both providers has passed its nonce, or it is `gone`.
+ * archival one (a regular node forgets a landed transaction after its garbage collection, an archival one never) and
+ * the newest final is more than `validity` blocks past b0, so no block can include it (markets.md l.1300 (b)); that
+ * is read twice, on finals at least a block apart, so a provider whose `tx` index lags its own final cannot make a
+ * landed transaction look dropped. Nothing else drops one: not UNKNOWN_TRANSACTION on its own, not a nonce past it.
  */
-export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, waitMs = OUTCOME_WAIT_MS): Relayer {
+export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, validity: bigint, waitMs = OUTCOME_WAIT_MS): Relayer {
   const { priv, pub } = relayerKey(secretKey);
   const publicKey = `ed25519:${base58(pub)}`;
   let queue: Promise<unknown> = Promise.resolve();
-  let next = 0n; // the next nonce to use; 0 until the key is read
-  let reread = true;
+  let last = 0n; // the last nonce handed out
 
-  const keyNonce = async (r: Rpc): Promise<bigint> => u64(((await r("query", { request_type: "view_access_key", finality: "final", account_id: account, public_key: publicKey })) as { nonce?: unknown }).nonce, "relayer nonce");
-  const broadcast = async (signed: string): Promise<string[]> => {
-    const answers = await Promise.allSettled(rpcs.map((r) => r("send_tx", { signed_tx_base64: signed, wait_until: "NONE" })));
-    const causes = answers.map((a) => (a.status === "rejected" ? causeInfo(a.reason) : ""));
-    if (causes.some((c) => c.includes("InvalidNonce"))) reread = true; // the key's nonce moved: read it for the next
-    return causes;
+  const broadcast = async (signed: string): Promise<void> => {
+    await Promise.allSettled(rpcs.map((r) => r("send_tx", { signed_tx_base64: signed, wait_until: "NONE" })));
   };
   const heights = new Map<string, bigint>();
   const heightOf = async (r: Rpc, hash: unknown): Promise<bigint> => {
     if (typeof hash !== "string") throw new Error("receipt: no block_hash");
-    if (!heights.has(hash)) heights.set(hash, u64(((await r("block", { block_id: hash })) as { header?: { height?: unknown } }).header?.height, "block.height"));
-    return heights.get(hash)!;
+    let h = heights.get(hash);
+    if (h === undefined) {
+      h = u64(((await r("block", { block_id: hash })) as { header?: { height?: unknown } }).header?.height, "block.height");
+      remember(heights, hash, h);
+    }
+    return h;
+  };
+  const finalOf = async (r: Rpc): Promise<bigint | null> => {
+    try {
+      return u64(((await r("block", { finality: "final" })) as { header?: { height?: unknown } }).header?.height, "block.height");
+    } catch {
+      return null;
+    }
   };
   type Read = { final: Receipt[] | null; unknownTx: boolean };
   const readTx = async (r: Rpc, tx: TxRef): Promise<Read | null> => {
@@ -809,39 +845,37 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
       return null;
     }
   };
-  /** One read on both providers and the archival one. */
-  const readOnce = async (tx: TxRef, expired: boolean, gone: boolean): Promise<TxOutcome> => {
-    const per = await Promise.all(
-      rpcs.map(async (r) => {
-        try {
-          const nonce = await keyNonce(r); // read before the tx, so a tx this nonce counts is visible to the read after it
-          const t = await readTx(r, tx);
-          return t === null ? null : { ...t, nonce };
-        } catch {
-          return null;
-        }
-      }),
-    );
-    const arch = await readTx(archival, tx);
-    const f = [...per, arch].find((x) => x?.final);
-    if (f?.final) return { kind: "final", tx_hash: tx.tx_hash, receipts: f.final };
-    const unknownEverywhere = per.every((x) => x !== null && x.unknownTx) && arch !== null && arch.unknownTx;
-    const passed = per.every((x) => x !== null && x.nonce >= BigInt(tx.nonce));
-    if (unknownEverywhere && (expired || gone || passed)) {
-      reread = true; // a drop may mean the key's nonce moved
-      return { kind: "dropped", tx_hash: tx.tx_hash, why: expired ? "Expired" : gone ? "its delegate expired" : "the key nonce passed it" };
+  /** The newest final at the first read that found a transaction unknown everywhere past its validity period. */
+  const pastAt = new Map<string, bigint>();
+  /** One read: the finals first, then the transaction on both providers and the archival one. */
+  const readOnce = async (tx: TxRef): Promise<TxOutcome> => {
+    const finals = await Promise.all(rpcs.map(finalOf));
+    const reads = await Promise.all([...rpcs, archival].map((r) => readTx(r, tx)));
+    const f = reads.find((x) => x?.final);
+    if (f?.final) {
+      pastAt.delete(tx.tx_hash);
+      return { kind: "final", tx_hash: tx.tx_hash, receipts: f.final };
     }
-    return { kind: "unknown", tx_hash: tx.tx_hash, why: "not final on any provider" };
+    const known = finals.filter((x): x is bigint => x !== null);
+    const newest = known.length === 0 ? null : known.reduce((a, b) => (a > b ? a : b));
+    const past = newest !== null && newest > BigInt(tx.height) + validity;
+    if (!past || !reads.every((x) => x !== null && x.unknownTx)) return { kind: "unknown", tx_hash: tx.tx_hash, why: "not final on any provider" };
+    const first = pastAt.get(tx.tx_hash);
+    if (first === undefined || newest <= first) {
+      if (first === undefined) remember(pastAt, tx.tx_hash, newest);
+      return { kind: "unknown", tx_hash: tx.tx_hash, why: "past its validity period once; read again a block later" };
+    }
+    pastAt.delete(tx.tx_hash);
+    return { kind: "dropped", tx_hash: tx.tx_hash, why: "unknown on every provider past its validity period" };
   };
-  const wait = async (tx: TxRef, expired: boolean): Promise<TxOutcome> => {
+  const wait = async (tx: TxRef): Promise<TxOutcome> => {
     const until = Date.now() + waitMs;
     for (;;) {
-      const out = await readOnce(tx, expired, false);
+      const out = await readOnce(tx);
       if (out.kind !== "unknown" || Date.now() >= until) return out;
       await sleep(POLL_MS);
     }
   };
-  const isExpired = (causes: string[]) => causes.some((c) => c.includes("Expired"));
 
   return {
     account,
@@ -850,36 +884,31 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
       return u128(a.amount, "relayer amount");
     },
     async send(action, guard, before) {
-      const turn = queue.then(async (): Promise<{ guarded: BindCode } | { tx: TxRef; causes: string[] }> => {
+      const turn = queue.then(async (): Promise<{ guarded: BindCode } | { tx: TxRef }> => {
         const code = await guard();
         if (code !== null) return { guarded: code };
-        if (reread) {
-          // never below a nonce already handed out: transactions of ours in flight may not show in the key yet
-          const ns = await Promise.all(rpcs.map(keyNonce));
-          const chain = (ns[0]! > ns[1]! ? ns[0]! : ns[1]!) + 1n;
-          if (chain > next) next = chain;
-          reread = false;
-        }
-        const nonce = next;
-        next = nonce + 1n;
-        const block = (await rpcs[0]("block", { finality: "final" })) as { header?: { hash?: unknown } };
-        if (typeof block.header?.hash !== "string") throw new Error("block: no hash");
+        const ak = (await rpcs[0]("query", { request_type: "view_access_key", finality: "final", account_id: account, public_key: publicKey })) as { nonce?: unknown; block_hash?: unknown; block_height?: unknown };
+        const keyNonce = u64(ak.nonce, "relayer nonce");
+        const b0 = u64(ak.block_height, "view_access_key block_height");
+        if (typeof ak.block_hash !== "string") throw new Error("view_access_key: no block_hash");
+        const nonce = (keyNonce > last ? keyNonce : last) + 1n;
+        last = nonce;
         const receiver = action.kind === "storage_prepay" ? vault : action.receiver;
-        const body = encodeTransaction({ signer: account, publicKey: pub, nonce, receiver, blockHash: base58decode(block.header.hash), action: encodeAction(action) });
+        const body = encodeTransaction({ signer: account, publicKey: pub, nonce, receiver, blockHash: base58decode(ak.block_hash), action: encodeAction(action) });
         const hash = createHash("sha256").update(body).digest();
-        const tx: TxRef = { tx_hash: base58(hash), nonce: nonce.toString(), signed_tx: Buffer.concat([body, Buffer.from([0]), edSign(null, hash, priv)]).toString("base64") };
+        const tx: TxRef = { tx_hash: base58(hash), nonce: nonce.toString(), height: b0.toString(), signed_tx: Buffer.concat([body, Buffer.from([0]), edSign(null, hash, priv)]).toString("base64") };
         before(tx);
-        const causes = await broadcast(tx.signed_tx);
-        return { tx, causes };
+        await broadcast(tx.signed_tx);
+        return { tx };
       });
       queue = turn.catch(() => undefined);
       const t = await turn;
       if ("guarded" in t) return { kind: "guarded", code: t.guarded };
-      return wait(t.tx, isExpired(t.causes));
+      return wait(t.tx);
     },
     async resolve(tx, opts) {
-      const causes = opts.resend ? await broadcast(tx.signed_tx) : [];
-      return readOnce(tx, isExpired(causes), opts.gone);
+      if (opts.resend) await broadcast(tx.signed_tx);
+      return readOnce(tx);
     },
   };
 }

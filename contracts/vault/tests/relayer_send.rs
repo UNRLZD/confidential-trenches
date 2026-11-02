@@ -63,9 +63,9 @@ const WINDOW: u64 = 100;
 /// 2.3: a deposit with no tree growing a level, and with one (the 148 B of a new level in both trees).
 const B756: u64 = 756;
 const B904: u64 = 904;
-/// vault.md 2.10: a struck U's most, 904 B prepaid in up to 3 prepays, and 2 failed sends beyond the first that the
-/// first prepay's arithmetic already holds: 0.00904 + 3 x 0.0003 + 2 x 0.0002805 = 0.010501 N (send.ts
-/// PER_P_WORST_YOCTO).
+/// vault.md 2.10 (V:735): a struck U's most when its sends fail at the token or the vault's first check, as every
+/// case here does: 0.00904 + 3 x 0.0003 + 2 x 0.0002805 = 0.010501 N. The relayer's floor holds the larger row-7
+/// maximum, 0.0302526 N (send.ts PER_P_WORST_YOCTO), for sends that burn more before they fail.
 const STRUCK_MAX: u128 = 10_501_000_000_000_000_000_000;
 /// What each seed deposit prepays: more than any deposit writes, the seeder's own NEAR.
 const SEED_PREPAY_BYTES: u128 = 2_000;
