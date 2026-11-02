@@ -21,6 +21,7 @@ import {
   type SolanaSendPath,
   type SolanaSignedTx,
 } from "../src/index.ts";
+import * as kit from "../src/index.ts";
 
 // ---- a signed-looking v0 tx: 1 signature slot, a message with one signer and the system program (test only)
 function tx(seed: number, lvbh = 1_000, firstIxData: number[] = []): SolanaSignedTx {
@@ -708,6 +709,7 @@ test("solanaSendPaths' Sender and Jito through sendSolanaSet on a 1-rps fake: no
   await advance(4_000);
   h.stop();
   await h.done;
+  await advance(1_000); // the shared URL pacers leave the map before the fake clock is reset
   const lane = (u: string) => log.filter((l) => l.url === u);
   for (const u of [SOLANA_SENDER_FAST_URL, SOLANA_JITO_TRANSACTIONS_URL]) {
     assert.ok(lane(u).every((l) => l.ok), `${u}: nothing refused`);
@@ -729,6 +731,7 @@ test("two sets at once on the same 1-rps URLs stay at 1 request a second per URL
   h1.stop();
   h2.stop();
   await Promise.all([h1.done, h2.done]);
+  await advance(1_000); // the shared URL pacers leave the map before the fake clock is reset
   for (const u of [SOLANA_SENDER_FAST_URL, SOLANA_JITO_TRANSACTIONS_URL]) {
     const at = log.filter((l) => l.url === u).map((l) => l.at);
     assert.ok(log.filter((l) => l.url === u).every((l) => l.ok), `${u}: nothing refused`);
@@ -757,4 +760,56 @@ test("a later valid read clears an earlier expired one: a provider that reads th
   const h = sendSolanaSet([tx(125, 500)], { ...opts, providers: [prov(0), prov(1)], deadlineMs: 12_000 });
   await advance(12_000);
   assert.equal((await h.done).txs[0]!.state, "unknown");
+});
+
+// ---- the Opus round 3 review of 2dc2cc2 (L-a ported from its repro3 and repro3c)
+
+function laProvider(refuseValid: boolean): SolanaRpc {
+  // Both status caches have dropped the landing (a phone suspended for over 64 s); the history has it.
+  return async (method, params) => {
+    if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "f", lastValidBlockHeight: 750 } };
+    if (method === "isBlockhashValid") {
+      if (refuseValid) throw new Error("HTTP 400"); // the deployed helper's method_not_allowed, until its allowlist is redeployed
+      return { context: { slot: 2_000 }, value: false };
+    }
+    if (method === "getSignatureStatuses") {
+      const hist = (params[1] as { searchTransactionHistory?: boolean }).searchTransactionHistory;
+      return { context: { slot: 2_000 }, value: (params[0] as string[]).map(() => (hist ? FIN : null)) };
+    }
+    throw new Error(method);
+  };
+}
+
+test("Low (L-a): a refused isBlockhashValid is no answer, and that cycle's history read still runs: the filled tx ends filled", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const h = sendSolanaSet([tx(151, 500)], { ...opts, providers: [laProvider(false), laProvider(true)], deadlineMs: 10_000 });
+  await advance(10_000);
+  assert.equal((await h.done).txs[0]!.state, "filled");
+});
+
+test("Low (L-a control): with isBlockhashValid answered on both, the same tx ends filled", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const h = sendSolanaSet([tx(152, 500)], { ...opts, providers: [laProvider(false), laProvider(false)], deadlineMs: 10_000 });
+  await advance(10_000);
+  assert.equal((await h.done).txs[0]!.state, "filled");
+});
+
+test("Low: a pacer leaves the map once its last set is done and its interval has passed (a fresh path object per trade)", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const count = (kit as { solanaSendPacerCount?: () => number }).solanaSendPacerCount;
+  assert.equal(typeof count, "function", "solanaSendPacerCount is exported");
+  const before = count!();
+  for (let n = 0; n < 3; n++) {
+    const fresh: SolanaSendPath = { name: "custom", minIntervalMs: 1_000, send: async (b64) => base58.encode(base64.decode(b64).subarray(1, 65)) };
+    const h = sendSolanaSet([tx(153 + n)], { ...opts, paths: [fresh, ...opts.paths] });
+    assert.equal(count!(), before + 1, "the running set's pacer is held");
+    await advance(1_500);
+    h.stop();
+    await h.done;
+    await advance(1_000); // its last request plus one interval
+    assert.equal(count!(), before, `after set ${n}, its pacer is gone`);
+  }
 });

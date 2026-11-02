@@ -231,8 +231,23 @@ export function solanaSendPaths(opts: { helper?: SolanaRpc | null; rpcUrl?: stri
 // per interval, each turn going to the next set that has a tx to send. A request is never sent sooner than one
 // interval after the last; a set that joins a pacer idle for an interval sends at once.
 type PaceClient = () => (() => void) | null;
-type Pacer = { interval: number; last: number; idleUntil: number; clients: PaceClient[]; turn: number; timer: ReturnType<typeof setTimeout> | undefined };
+type Pacer = {
+  interval: number;
+  last: number;
+  idleUntil: number;
+  clients: PaceClient[];
+  turn: number;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** Set while the pacer has no client: it leaves the map one interval after its last request, not sooner, so a set
+   * that starts right after another on the same URL still waits out that URL's second. */
+  dropTimer: ReturnType<typeof setTimeout> | undefined;
+};
 const pacers = new Map<unknown, Pacer>();
+
+/** How many 1-rps pacers this page holds: a diagnostic read (the kit's tests check that a finished set's pacer goes). */
+export function solanaSendPacerCount(): number {
+  return pacers.size;
+}
 
 function paceFire(p: Pacer): boolean {
   const n = p.clients.length;
@@ -266,10 +281,14 @@ function paceArm(p: Pacer): void {
 function paceJoin(key: unknown, interval: number, client: PaceClient): () => void {
   let p = pacers.get(key);
   if (!p) {
-    p = { interval, last: -Infinity, idleUntil: 0, clients: [], turn: 0, timer: undefined };
+    p = { interval, last: -Infinity, idleUntil: 0, clients: [], turn: 0, timer: undefined, dropTimer: undefined };
     pacers.set(key, p);
   }
   const pacer = p;
+  if (pacer.dropTimer !== undefined) {
+    clearTimeout(pacer.dropTimer);
+    pacer.dropTimer = undefined;
+  }
   pacer.interval = Math.max(pacer.interval, interval);
   pacer.clients.push(client);
   const now = Date.now();
@@ -283,10 +302,18 @@ function paceJoin(key: unknown, interval: number, client: PaceClient): () => voi
   return () => {
     const i = pacer.clients.indexOf(client);
     if (i >= 0) pacer.clients.splice(i, 1);
-    if (pacer.clients.length === 0 && pacer.timer !== undefined) {
+    if (pacer.clients.length > 0) return;
+    if (pacer.timer !== undefined) {
       clearTimeout(pacer.timer);
       pacer.timer = undefined;
     }
+    const drop = () => {
+      pacer.dropTimer = undefined;
+      if (pacer.clients.length === 0 && pacers.get(key) === pacer) pacers.delete(key);
+    };
+    const wait = pacer.last + pacer.interval - Date.now();
+    if (wait <= 0 || pacer.last > Date.now()) drop();
+    else if (pacer.dropTimer === undefined) pacer.dropTimer = setTimeout(drop, wait);
   };
 }
 
@@ -543,7 +570,13 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       // Every undecided tx's blockhash, from the first cycle on, so a fresh hash is read valid before it can read expired.
       const open = txs.map((_, i) => i).filter((i) => !decided[i]);
       for (const bh of new Set(open.map((i) => txs[i]!.blockhash))) {
-        const v = readValid(await call(p, "isBlockhashValid", [bh, { commitment: "processed" }]));
+        let answer: unknown;
+        try {
+          answer = await call(p, "isBlockhashValid", [bh, { commitment: "processed" }]);
+        } catch {
+          continue; // refused (a helper whose allowlist predates it), rate-limited or timed out: no answer, the cycle goes on
+        }
+        const v = readValid(answer);
         if (!v) continue;
         if (v.valid) {
           invalidAt[p].delete(bh);
