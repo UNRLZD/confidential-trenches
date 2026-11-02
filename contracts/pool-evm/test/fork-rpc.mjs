@@ -40,6 +40,7 @@ async function answer(book, chain, req, record) {
   const have = book[chain]?.[key];
   if (have !== undefined) return { jsonrpc: "2.0", id: req.id, ...have };
   if (!record || !UPSTREAM[chain]) {
+    console.error(`fork-rpc: not recorded for ${chain}: ${key}`);
     return { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: `fork-rpc: not recorded for ${chain}: ${key}` } };
   }
   let got;
