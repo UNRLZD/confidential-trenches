@@ -541,6 +541,20 @@ contract PoolTest is Test {
     pool.withdraw(_w, _p, 0.01 ether);
     console.log('relayed withdraw (depth 2) gas:', _g - gasleft());
   }
+
+  /// A deposit into two trees of 699,050 leaves (0xAAAAA, alternating bits: about half the levels hash) at depth 20.
+  function test_gasDepth20() public {
+    for (uint256 _slot = 3; _slot <= 7; _slot += 4) {
+      vm.store(POOL, bytes32(_slot), bytes32(uint256(0xAAAAA)));
+      vm.store(POOL, bytes32(_slot + 1), bytes32(uint256(20)));
+      for (uint256 _l; _l <= 20; ++_l) vm.store(POOL, keccak256(abi.encode(_l, _slot + 2)), bytes32(_l + 1));
+    }
+    vm.prank(DEPOSITOR);
+    uint256 _g = gasleft();
+    pool.deposit{value: 1 ether}(1 ether, 1);
+    console.log('deposit (depth 20, index 0xAAAAA) gas:', _g - gasleft());
+    assertEq(pool.currentTreeDepth(), 20);
+  }
 }
 
 /// A payee that makes one call when first paid, and keeps what the call returned.

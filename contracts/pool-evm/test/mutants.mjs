@@ -60,14 +60,26 @@ export const MUTANTS = [
   [ST, "  /// @inheritdoc IState\n  uint256 public nonce;", "  /// @inheritdoc IState\n  uint256 public nonce;\n  address internal admin;", "layout"],
 ];
 
+// "pass" or "fail" of one named test; throws unless forge ran exactly that one test (forge matches --mt against
+// `name()`, and a pattern that matches nothing exits 0)
 function run(dir, test) {
-  try {
-    if (test === "layout") execFileSync("node", ["--test", "test/layout.test.mjs"], { cwd: dir, stdio: "pipe" });
-    else execFileSync("forge", ["test", "--mt", `^${test}$`], { cwd: dir, stdio: "pipe" });
-    return "pass";
-  } catch {
-    return "fail";
+  if (test === "layout") {
+    try {
+      execFileSync("node", ["--test", "test/layout.test.mjs"], { cwd: dir, stdio: "pipe" });
+      return "pass";
+    } catch {
+      return "fail";
+    }
   }
+  let out;
+  try {
+    out = execFileSync("forge", ["test", "--mt", `^${test}\\(`], { cwd: dir, encoding: "utf8", stdio: "pipe" });
+  } catch (e) {
+    out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+  }
+  const ran = out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? [];
+  if (ran.length === 1) return ran[0].startsWith("[PASS") ? "pass" : "fail";
+  throw new Error(`forge ran ${ran.length} tests named ${test}:\n${out.slice(-2000)}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
