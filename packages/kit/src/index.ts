@@ -12,3 +12,4 @@ export * from "./prover/prove.ts";
 export * from "./vault/inputs.ts";
 export * from "./vault/sync.ts";
 export * from "./trade/solana/send.ts";
+export * from "./trade/solana/build.ts";
