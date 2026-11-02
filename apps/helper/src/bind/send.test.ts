@@ -1025,15 +1025,24 @@ test("a request that is not canonical base64 is refused at check 1 and never mat
 // ---- M3, M4: the store ----
 
 const emptyRecord = (u: string) => ({ u, p: "1", prepaid_bytes: 0, failed: 0, struck: false, landed: false, p_closed: false, prepays: [], sends: [], carried: [] });
-/** A child process that opens the store on `dir`, writes `won` or `lost` to `dir/<tag>`, then holds it `holdMs`. */
-function storeChild(dir: string, tag: string, holdMs: number) {
+/** How long a lock probe's child holds the store at most while it waits for the other children's results. */
+const PROBE_HOLD_CAP_MS = 10_000;
+/**
+ * A child process that opens the store on `dir`, writes `won` or `lost` to `dir/<tag>`, then holds it `holdMs`; with
+ * `peers`, it holds it instead until every peer has written its own result (at most PROBE_HOLD_CAP_MS), so two wins can
+ * only mean two holders at once, never a start that came after a holder's exit on a slow runner.
+ */
+function storeChild(dir: string, tag: string, holdMs: number, peers?: string[]) {
   const src = `
-    import { writeFileSync } from "node:fs";
+    import { existsSync, writeFileSync } from "node:fs";
     import { createFileStore } from ${JSON.stringify(new URL("./send.ts", import.meta.url).href)};
+    const dir = ${JSON.stringify(dir)};
     let out = "won";
-    try { globalThis.store = createFileStore(${JSON.stringify(dir)}); } catch (e) { out = "lost " + e.message; } // kept for the hold
-    writeFileSync(${JSON.stringify(dir)} + "/" + ${JSON.stringify(tag)}, out);
-    setTimeout(() => {}, ${holdMs});`;
+    try { globalThis.store = createFileStore(dir); } catch (e) { out = "lost " + e.message; } // kept for the hold
+    writeFileSync(dir + "/" + ${JSON.stringify(tag)}, out);
+    const peers = ${JSON.stringify(peers ?? null)};
+    if (peers === null) setTimeout(() => {}, ${holdMs});
+    else for (const t0 = Date.now(); !peers.every((t) => existsSync(dir + "/" + t)) && Date.now() - t0 < ${PROBE_HOLD_CAP_MS}; ) await new Promise((r) => setTimeout(r, 5));`;
   return spawn(process.execPath, ["--input-type=module", "-e", src], { stdio: "ignore" });
 }
 const exited = (c: ReturnType<typeof spawn>) => new Promise((r) => c.on("exit", r));
@@ -1103,11 +1112,13 @@ test("E (RECHECK R6): the holder reading every other file of its store (records,
 
 test("PROBE N3: starts at the same moment leave exactly one holder", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bind-race-"));
-  const kids = ["a", "b", "c", "d"].map((t) => storeChild(dir, t, 1_500));
+  const tags = ["a", "b", "c", "d"];
+  const kids = tags.map((t) => storeChild(dir, t, 0, tags));
+  const done = kids.map(exited); // listened from the start: a child may exit before the results are read
   await until(() => ["a", "b", "c", "d"].every((t) => existsSync(join(dir, t))));
   const outs = ["a", "b", "c", "d"].map((t) => readFileSync(join(dir, t), "utf8"));
   assert.equal(outs.filter((o) => o === "won").length, 1, outs.join(" | "));
-  await Promise.all(kids.map(exited));
+  await Promise.all(done);
 });
 
 test("a start that meets a holder in its last moments (a restart overlapping the old process's exit) waits it out and opens", async () => {
@@ -1119,9 +1130,13 @@ test("a start that meets a holder in its last moments (a restart overlapping the
   await exited(child);
 });
 
-test("PROBE N3, scheduled: B pauses right after any read of the lock while A takes the store; B resumes: still exactly one holder", async () => {
-  // the review's interleaving (lockchild2.mjs): a start that reads the lock's contents and acts on them later can
-  // remove a live holder's lock; a kernel lock has nothing to read, so the pause point never comes and A waits it out
+/**
+ * The review's interleaving (lockchild2.mjs): a start that reads the lock's contents and acts on them later can remove
+ * a live holder's lock; a kernel lock has nothing to read, so B's pause point never comes and A waits it out. Each child
+ * holds its store until the other has written its result (at most PROBE_HOLD_CAP_MS), so two wins mean two holders at
+ * once. `aAfterBWonMs`: A starts that long after B has won (a slow runner), instead of after B's read of the lock.
+ */
+async function scheduledLockProbe(aAfterBWonMs?: number): Promise<string[]> {
   const dir = mkdtempSync(join(tmpdir(), "bind-race2-"));
   writeFileSync(join(dir, "lock"), "99990");
   const send = JSON.stringify(new URL("./send.ts", import.meta.url).href);
@@ -1130,26 +1145,41 @@ test("PROBE N3, scheduled: B pauses right after any read of the lock while A tak
     import { syncBuiltinESMExports } from "node:module";
     const dir = ${JSON.stringify(dir)};
     const spin = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-    const waitFor = (f, ms) => { const t0 = Date.now(); while (!fs.existsSync(dir + "/" + f) && Date.now() - t0 < ms) spin(1); };
+    const waitFor = (fs_, ms) => { const t0 = Date.now(); while (!fs_.some((f) => fs.existsSync(dir + "/" + f)) && Date.now() - t0 < ms) spin(1); };
     if (${JSON.stringify(role)} === "B") {
       const orig = fs.readFileSync;
       fs.readFileSync = function (p, ...rest) {
         const v = orig.call(this, p, ...rest);
-        if (String(p).endsWith("/lock") && !fs.existsSync(dir + "/b-read")) { fs.writeFileSync(dir + "/b-read", ""); waitFor("a-done", 5000); }
+        if (String(p).endsWith("/lock") && !fs.existsSync(dir + "/b-read")) { fs.writeFileSync(dir + "/b-read", ""); waitFor(["a-done"], 5000); }
         return v;
       };
       syncBuiltinESMExports();
     }
     const { createFileStore } = await import(${send});
-    if (${JSON.stringify(role)} === "A") waitFor("b-read", 1000);
+    const delay = ${JSON.stringify(aAfterBWonMs ?? null)};
+    if (${JSON.stringify(role)} === "A") {
+      if (delay === null) waitFor(["b-read"], 1000);
+      else { waitFor(["B-won", "B-lost"], ${PROBE_HOLD_CAP_MS}); spin(delay); }
+    }
     let out = "won";
     try { createFileStore(dir); } catch (e) { out = "lost"; }
     fs.writeFileSync(dir + "/" + ${JSON.stringify(role)} + "-" + out, "");
     if (${JSON.stringify(role)} === "A") fs.writeFileSync(dir + "/a-done", "");
-    spin(1500);`;
+    const other = ${JSON.stringify(role)} === "A" ? "B" : "A";
+    waitFor([other + "-won", other + "-lost"], ${PROBE_HOLD_CAP_MS});`;
   const kids = (["B", "A"] as const).map((r) => spawn(process.execPath, ["--input-type=module", "-e", child(r)], { stdio: "ignore" }));
   await Promise.all(kids.map(exited));
-  assert.equal(readdirSync(dir).filter((f) => /^(A|B)-won$/.test(f)).length, 1, readdirSync(dir).join(" "));
+  return readdirSync(dir).filter((f) => /^(A|B)-(won|lost)$/.test(f)).sort();
+}
+
+test("PROBE N3, scheduled: B pauses right after any read of the lock while A takes the store; B resumes: still exactly one holder", async () => {
+  const results = await scheduledLockProbe();
+  assert.equal(results.filter((f) => f.endsWith("-won")).length, 1, results.join(" "));
+  assert.equal(results.length, 2, results.join(" "));
+});
+
+test("PROBE N3, scheduled, a slow runner: A starts 400 ms after B has won; B still holds, so A loses", async () => {
+  assert.deepEqual(await scheduledLockProbe(400), ["A-lost", "B-won"]);
 });
 
 test("PROBE N4: temps a crash left (any name) never block a start and are swept once the lock is held; temp names are random", () => {
