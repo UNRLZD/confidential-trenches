@@ -295,14 +295,16 @@ test("GET /v1/pool/fee answers the pool's epoch fee; POST /v1/pool/solana/send c
   const { handler } = await import("../server.ts");
   const sent: Uint8Array[] = [];
   const s = sender(null, [], sent);
-  const srv = createServer(handler("a".repeat(40), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 1, new Map([[s.pool, s]])));
+  const srv = createServer(handler("a".repeat(40), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 1, new Map([[s.pool, s]]), new Map(), () => 1_800_000_090_000));
   await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", () => ok()));
   const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
   try {
     const f = await fetch(`${base}/v1/pool/fee?pool=${POOL}&epoch=1800000060000`);
     assert.equal(f.status, 200);
     assert.deepEqual(await f.json(), s.fee(1_800_000_060_000));
-    for (const q of [`pool=${OTHER.address}`, "", `pool=${POOL}&epoch=1800000000001`, `pool=${POOL}&pool=${POOL}`]) assert.equal((await fetch(`${base}/v1/pool/fee?${q}`)).status, 404, q);
+    // M356 (3): an epoch off the grid, after now, or older than POOL_LIFE_MAX_MS (600,000) is refused before any read
+    for (const q of [`pool=${OTHER.address}`, "", `pool=${POOL}&epoch=1800000000001`, `pool=${POOL}&pool=${POOL}`, `pool=${POOL}&epoch=1800000120000`, `pool=${POOL}&epoch=1799999460000`]) assert.equal((await fetch(`${base}/v1/pool/fee?${q}`)).status, 404, q);
+    assert.equal((await fetch(`${base}/v1/pool/fee?pool=${POOL}&epoch=1799999520000`)).status, 200, "ten minutes back is still in the window");
     const post = (b: unknown) => fetch(`${base}/v1/pool/solana/send`, { method: "POST", body: JSON.stringify(b) });
     const ok = await post(body(build({ tag: 3 })));
     assert.equal(ok.status, 200);
@@ -312,6 +314,14 @@ test("GET /v1/pool/fee answers the pool's epoch fee; POST /v1/pool/solana/send c
     assert.deepEqual(await off.json(), { error: { code: "fee_off", detail: "relay_fee 2100000, published 2000000" } });
     assert.equal((await post({ pool: OTHER.address, tx: "AA==" })).status, 404);
     assert.equal(sent.length, 1);
+    // M356 (3): one client past POOL_RATE_MAX (30) in a window gets 429 on every pool route; 11 requests so far
+    let last = 0;
+    for (let i = 0; i < 19; i++) last = (await post({ pool: OTHER.address, tx: "AA==" })).status;
+    assert.equal(last, 404, "the 30th request is still under the limit");
+    assert.equal((await post({ pool: OTHER.address, tx: "AA==" })).status, 429);
+    const limited = await fetch(`${base}/v1/pool/fee?pool=${POOL}`);
+    assert.equal(limited.status, 429);
+    assert.deepEqual(await limited.json(), { error: { code: "rate_limited" } });
   } finally {
     srv.close();
   }
