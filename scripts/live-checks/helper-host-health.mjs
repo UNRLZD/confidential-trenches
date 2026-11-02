@@ -103,8 +103,13 @@ export function judge({ reads, bind }, commit, since) {
     if (!was || !SHA.test(was.commit ?? "")) say(false, `the --since record holds no health answer with a commit`);
     else if (was.release === undefined || was.release === null) say(isRelease(release), `release ${show(release)} is up from the record's none (commit ${was.commit.slice(0, 12)}, a helper before release reporting)`);
     else if (!isRelease(was.release)) say(false, `the --since record's release ${show(was.release)} is no whole number`);
-    else if (was.commit === commit) say(release === was.release, `the same commit as the record: release ${show(release)} kept from ${show(was.release)}`);
-    else say(isRelease(release) && release > was.release, `another commit than the record's (${was.commit.slice(0, 12)}): release ${show(release)} went up from ${show(was.release)}`);
+    else if (was.commit === commit) {
+      const kept = release === was.release;
+      say(kept, `the same commit as the record: release ${show(release)}${kept ? " kept at" : ", want kept at"} ${show(was.release)}`);
+    } else {
+      const up = isRelease(release) && release > was.release;
+      say(up, `another commit than the record's (${was.commit.slice(0, 12)}): release ${show(release)}${up ? " went up from" : ", want above"} ${show(was.release)}`);
+    }
   }
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
