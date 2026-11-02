@@ -81,7 +81,7 @@ export function Verify({ view, onClose, opened = [] }: { view: VerifyView; onClo
             </div>
             <div>
               <dt><W id="rpcs" /></dt>
-              <dd className="num">{read ? read.rpcs.map((r) => <span key={r} className="rpcline">{host(r)}</span>) : <span className="sk" />}</dd>
+              <dd className="num">{read ? (read.rpcs.length ? read.rpcs.map((r) => <span key={r} className="rpcline">{host(r)}</span>) : "—") : <span className="sk" />}</dd>
             </div>
           </dl>
         </div>
