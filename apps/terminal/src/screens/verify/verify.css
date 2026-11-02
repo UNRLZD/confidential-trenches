@@ -1,0 +1,64 @@
+/* The Verify panel's styles (09-design-brief S18): the deposit sheet's drawer and tokens (src/screens/deposit/deposit.css,
+   R5's proto.css), rows like settings rows, 48 desktop and 54 phone, a status dot at the left (blue ok, amber warn,
+   coral danger) and a chevron, hashes and blocks in Chivo 12. Desktop sizes are layout px on the 1920 design, drawn at
+   --fit-zoom (fit.ts). */
+.vfy {
+  --bg-panel: #111111; --bg-drawer: #0c0c0c; --border-panel: #1f1f1f; --border-strong: #2a2a2a; --border-row: #171717;
+  --ok: #5b8cff; --warn: #f2b543; --danger: #ff5d4d;
+  position: fixed; inset: 0; z-index: 100;
+}
+.vfy button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.vfy button:disabled { cursor: default; }
+.vfy-scrim { position: absolute; inset: 0; background: rgba(5,5,5,.5); }
+.vfy-box { position: absolute; top: 0; right: 0; bottom: 0; width: 440px; background: var(--bg-drawer); border-left: 1px solid var(--border-panel); display: flex; flex-direction: column; }
+.vhd { height: 56px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--border-panel); }
+.vhd h2 { margin: 0; font: 600 16px var(--font-ui); color: var(--text-1); }
+.vfy-x { margin-left: auto; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-2); }
+.vbody { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+
+.vstat { display: flex; align-items: center; min-height: 44px; border-radius: 12px; padding: 0 14px; background: var(--bg-panel); border: 1px solid var(--border-panel); font: 500 14px var(--font-ui); flex: none; }
+.vstat.warn { color: var(--warn); }
+
+.vrow-box { border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-panel); flex: none; }
+.vfy .vrow { width: 100%; height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 14px; text-align: left; }
+.vrow .nm { font: 600 15px var(--font-ui); color: var(--text-1); }
+.vrow .chev { margin-left: auto; color: var(--text-3); transform: rotate(-90deg); transition: transform .15s; }
+.vrow-box.open .chev { transform: none; }
+
+.vdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-3); }
+.vdot.ok { background: var(--ok); }
+.vdot.warn { background: var(--warn); }
+.vdot.danger { background: var(--danger); }
+.vdot.load { background: #262626; animation: vfy-skp 1.2s linear infinite; }
+@keyframes vfy-skp { 50% { opacity: .55; } }
+
+.vchecks { list-style: none; margin: 0; padding: 0 14px 6px; border-top: 1px solid var(--border-row); }
+.vcheck { padding: 10px 0; }
+.vcheck + .vcheck { border-top: 1px solid var(--border-row); }
+.vline { min-height: 24px; display: flex; align-items: center; gap: 10px; }
+.vline .vdot { width: 6px; height: 6px; }
+.vline .nm { font: 500 13px var(--font-ui); color: var(--text-2); }
+.vline .v { margin-left: auto; font: 12px var(--font-num); color: var(--text-1); white-space: nowrap; }
+.vline .st { margin-left: auto; font: 500 13px var(--font-ui); }
+.vline .st.warn { color: var(--warn); }
+.vsub { margin: 4px 0 0 16px; display: flex; flex-direction: column; gap: 4px; }
+.vsub > div, .vmeta > div { display: flex; align-items: center; gap: 10px; min-height: 18px; }
+.vsub dt, .vmeta dt { font: 12px var(--font-ui); color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.vsub dd, .vmeta dd { margin: 0 0 0 auto; font: 12px var(--font-num); color: var(--text-1); white-space: nowrap; }
+.vsub .rpc { font-size: 11px; color: var(--text-3); }
+
+.vmeta { margin: 6px 0 0; padding: 0 2px; display: flex; flex-direction: column; gap: 6px; }
+.vfy .t3 { color: var(--text-3); }
+.vfy .sk { display: inline-block; width: 90px; height: 12px; background: #181818; border-radius: 6px; animation: vfy-skp 1.2s linear infinite; vertical-align: middle; }
+
+@media (prefers-reduced-motion: reduce) { .vfy .sk, .vdot.load { animation: none; } .vrow .chev { transition: none; } }
+
+/* phone: a full page (S18: a pushed page from Account) */
+@media (max-width: 767.98px) {
+  .vfy { z-index: 110; }
+  .vfy-scrim { display: none; }
+  .vfy-box { left: 0; width: auto; border-left: 0; background: var(--bg-page); }
+  .vhd { height: 56px; padding: 0 8px 0 16px; }
+  .vfy-x { width: 44px; height: 44px; border-radius: 14px; background: #181818; }
+  .vfy .vrow { height: 54px; }
+}
