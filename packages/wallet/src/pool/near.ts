@@ -11,8 +11,9 @@
 //   the chunk, refund note (l, j)'s precommitment, a fresh salt, and the queue's deadline_ms on the epoch grid. The
 //   request it returns is withdraw()'s first argument as is. The relayer's fee is its fee for the epoch.
 // - now: the newest final block's timestamp_nanosec, the lower of two RPCs, in ms; never the device clock.
-// - Epochs of 60 s and a life of 240 s: the smallest life at or above one epoch, one epoch to make the set again, and
-//   the relayer's 120 s check 9 margin (markets.md H3.4), well inside the device's 10 minute cap on deadline_ms
+// - Epochs of 60 s and a life of 270 s: one epoch to use the set, one epoch to make it again, the relayer's 120 s
+//   check 9 margin (markets.md H3.4) and 30 s of slack, twice the queue's take slack (pool.ts TAKE_SLACK_MS), so a
+//   take anywhere in the next epoch still has the margin + 15 s left; well inside the device's 10 minute cap on deadline_ms
 //   (../withdraw/request.ts WITHDRAW_DEADLINE_MAX_MS). The vault keeps every root, so an epoch root stays valid.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultScopeOf, vaultWithdrawRequest, type VaultWithdrawal } from "@blindfill/kit";
@@ -20,13 +21,13 @@ import { NEAR_NETWORKS, type NearNetwork } from "../deposit/account.ts";
 import { type FeeRpc, readWithdrawFeeMax } from "../withdraw/feemax.ts";
 import { blockTimeMsOf, WITHDRAW_DEADLINE_MAX_MS, WITHDRAW_SEND_MARGIN_MS } from "../withdraw/request.ts";
 import type { Ladder } from "./ladder.ts";
-import type { Pool, PoolTrees } from "./pool.ts";
+import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** USDC's ladder: $1 = 10^6 base units, from $2 (owner pick ladder, OD:268). */
 export const USDC_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 2_000_000n });
 /** E and L on the NEAR vault, ms. */
 export const NEAR_EPOCH_MS = 60_000n;
-export const NEAR_LIFE_MS = 2n * NEAR_EPOCH_MS + BigInt(WITHDRAW_SEND_MARGIN_MS);
+export const NEAR_LIFE_MS = 2n * NEAR_EPOCH_MS + BigInt(WITHDRAW_SEND_MARGIN_MS) + 2n * TAKE_SLACK_MS;
 if (NEAR_LIFE_MS > BigInt(WITHDRAW_DEADLINE_MAX_MS)) throw new Error("the NEAR life is past the 10 minute cap");
 
 export type NearVaultPoolArgs = {

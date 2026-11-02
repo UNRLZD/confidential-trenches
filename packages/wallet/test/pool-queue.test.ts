@@ -10,7 +10,7 @@ import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import type { NoteRecord } from "../src/notes/store.ts";
 import { NEAR_EPOCH_MS, NEAR_LIFE_MS, USDC_LADDER, nearVaultPool } from "../src/pool/near.ts";
-import type { Pool, PoolBindArgs, PoolTrees } from "../src/pool/pool.ts";
+import { NEWEST_GRACE_MS, TAKE_SLACK_MS, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
 import { openProofQueue, proofPoolSize, type ProofQueue } from "../src/pool/queue.ts";
 import {
   BLOCK_MS, BLOCK_NS, closeVaults, FEE_MAX, FEE_RECIPIENT, feeReplay, REGISTER_DEPOSIT, SCOPE, SEED, signalsProver, TOKEN, VAULT, vaultWith, type Vault,
@@ -19,7 +19,7 @@ import {
 after(closeVaults);
 const usd = (x: number): bigint => BigInt(Math.round(x * 1_000_000));
 const E = 60_000n;
-const L = 240_000n;
+const L = 270_000n; // 2E + MARGIN + 30 s, as on the NEAR vault
 const MARGIN = 120_000n;
 const START = BigInt(BLOCK_MS) - (BigInt(BLOCK_MS) % E); // an epoch's start
 const T0 = START - 3_600_000n; // when the fixture's leaves landed
@@ -278,6 +278,259 @@ test("a deposit's own note is proved at once on the newest root, and on the epoc
   const again = q.ready().find((r) => r.noteId === dep.id)!;
   assert.equal(again.root, "epoch");
   assert.equal(again.publicSignals[3], pool.rootAt(START + E).state.toString());
+});
+
+/** A note of `ref` (born PLANNED), landed now under a label of its own. */
+async function landPlanned(v: Vault, pool: Fake, ref: NoteRef, value: bigint, nonce: bigint): Promise<NoteRecord> {
+  const pre = noteSecrets(SEED, ref).precommitment;
+  let n = await v.ns.add({ ref, scope: SCOPE, precommitment: pre, state: "PLANNED" });
+  n = await v.ns.move(n.id, "PLANNED", "INCOMING");
+  const label = vaultLabelOf(keccak_256, SCOPE, nonce);
+  const commitment = noteCommitment(value, label, pre);
+  pool.land(commitment, label);
+  return v.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: BigInt(v.stateLeaves.length - 1) } });
+}
+
+test("only a deposit's own notes are proved at once: a return note and a return's second arrival wait for the boundary", async () => {
+  const v = await vaultWith([usd(2)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  pool.t.now += 10_000n;
+  const dep = await landDeposit(v, pool, usd(50), 1000n);
+  const i = (dep.ref as Extract<NoteRef, { kind: "deposit" }>).i;
+  const back = await landPlanned(v, pool, { kind: "return", c: "sol", l: 7n, j: 1 }, usd(20), 2000n); // a sell's money back
+  const backSecond = await landPlanned(v, pool, { kind: "second", id: { id: "R", c: "sol", l: 7n, j: 1 }, n: 0 }, usd(10), 2001n);
+  const depSecond = await landPlanned(v, pool, { kind: "second", id: { id: "U", s: SCOPE, i }, n: 0 }, usd(5), 1001n);
+  await q.refresh();
+  const ready = new Map(q.ready().map((r) => [r.noteId, r]));
+  assert.equal(ready.get(dep.id)!.root, "newest");
+  assert.equal(ready.get(depSecond.id)!.root, "newest", "a second arrival of a deposit from U is the deposit's own");
+  assert.equal(ready.size, 3);
+  for (const n of [back, backSecond]) {
+    assert.ok(!ready.has(n.id), "a return's note never on the root right after its own leaf");
+    assert.equal((await state(v, n.id)).state, "UNSPENT");
+  }
+  for (const n of [dep, depSecond]) await q.take(n.id);
+  pool.t.now = START + E + 10n;
+  const p = await q.refresh();
+  assert.deepEqual(p.made.sort(), [back.id, backSecond.id].sort());
+  for (const r of q.ready().filter((x) => p.made.includes(x.noteId))) {
+    assert.equal(r.root, "epoch");
+    assert.equal(r.publicSignals[3], pool.rootAt(START + E).state.toString());
+  }
+});
+
+test("a newest-root proof is handed out in the next epoch only until its replacement, never past the boundary + 15 s", async () => {
+  assert.equal(NEWEST_GRACE_MS, 15_000n);
+  // its remake fails: refused 16 s into the next epoch, and its note freed
+  const v = await vaultWith([usd(2)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  pool.t.now += 10_000n;
+  const dep = await landDeposit(v, pool, usd(50), 1000n);
+  await q.refresh();
+  assert.equal(q.ready().find((r) => r.noteId === dep.id)!.root, "newest");
+  const bind = pool.bind;
+  pool.bind = async () => Promise.reject(new Error("fee read failed"));
+  pool.t.now = START + E + 16_000n;
+  const p = await q.refresh();
+  pool.bind = bind;
+  assert.ok(p.failed.some((f) => f.noteId === dep.id));
+  await assert.rejects(q.take(dep.id), /newest root/);
+  assert.equal((await state(v, dep.id)).state, "UNSPENT");
+  // taken 5 s in while its remake runs: the newest-root proof, at once; the remake is dropped
+  const v2 = await vaultWith([usd(2)]);
+  const pool2 = fakePool(v2);
+  let gate: Promise<void> | undefined;
+  let open_ = (): void => {};
+  let entered = 0;
+  const slow = provers3().map((sp): VaultProver => ({
+    load: sp.load,
+    prove: async (c, i) => {
+      if (gate !== undefined) {
+        entered++;
+        await gate;
+      }
+      return sp.prove(c, i);
+    },
+  }));
+  const q2 = queue(v2, pool2, slow);
+  pool2.t.now += 10_000n;
+  const dep2 = await landDeposit(v2, pool2, usd(50), 1000n);
+  await q2.refresh();
+  gate = new Promise<void>((ok) => (open_ = ok));
+  pool2.t.now = START + E + 5_000n;
+  const pass = q2.refresh();
+  for (let k = 0; entered < 2 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  assert.equal(entered, 2);
+  const t = await q2.take(dep2.id);
+  assert.equal(t.root, "newest");
+  assert.equal(t.epochStartMs, START);
+  open_();
+  assert.deepEqual((await pass).failed.map((f) => f.noteId), [dep2.id]);
+  assert.equal((await state(v2, dep2.id)).state, "RESERVED");
+});
+
+test("take refuses a proof with less than the send margin + 15 s before its deadline, at the boundary", async () => {
+  assert.equal(TAKE_SLACK_MS, 15_000n);
+  const v = await vaultWith([usd(5), usd(10)]);
+  const tight = { ...fakePool(v), lifeMs: 2n * E + MARGIN }; // a pool with no slack of its own
+  const q = queue(v, tight);
+  await q.refresh();
+  const [a, b] = q.ready();
+  tight.t.now = START + tight.lifeMs - MARGIN - TAKE_SLACK_MS; // deadline - now = margin + 15 s
+  assert.equal((await q.take(a!.noteId)).noteId, a!.noteId);
+  tight.t.now += 1n;
+  await assert.rejects(q.take(b!.noteId), /send margin/);
+  assert.equal((await state(v, b!.noteId)).state, "UNSPENT");
+  assert.deepEqual(q.ready(), [], "a refused proof is no longer listed");
+});
+
+test("close waits for a proof being made: when it resolves, that proof's note is free", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  let open_ = (): void => {};
+  const gate = new Promise<void>((ok) => (open_ = ok));
+  let entered = 0;
+  const sp = signalsProver();
+  const q = queue(v, pool, [{ load: sp.load, prove: async (c, i) => (entered++, await gate, sp.prove(c, i)) }]);
+  const pass = q.refresh();
+  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  assert.equal(entered, 1);
+  const closing = q.close();
+  open_();
+  await closing;
+  assert.equal((await v.ns.list())[0]!.state, "UNSPENT");
+  assert.equal((await pass).failed.length, 1);
+});
+
+/** The note store, with `hook` run once right after a move (from, to) is queued on the store's lock. */
+function hooked(v: Vault, from: string, to: string, hook: () => void): Vault["ns"] {
+  const ns = v.ns;
+  let armed = true;
+  return {
+    ...ns,
+    move: async (...a: Parameters<typeof ns.move>) => {
+      const fire = armed && a[1] === from && a[2] === to;
+      if (fire) armed = false;
+      const p = ns.move(...a);
+      if (fire) hook();
+      return p;
+    },
+  } as typeof ns;
+}
+
+test("a take, close or drop that arrives during the swap's HELD -> HELD write waits for it: never the old attempt", async () => {
+  // take: gets the new proof; only its context stays
+  {
+    const v = await vaultWith([usd(5)]);
+    const pool = fakePool(v);
+    let q!: ProofQueue<unknown>;
+    let tk: Promise<ReadyProof<unknown>> | undefined;
+    q = openProofQueue({ seed64: SEED, notes: hooked(v, "HELD", "HELD", () => (tk = q.take(v.notes[0]!.id))), pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 2 });
+    open.push(q);
+    await q.refresh();
+    const [a] = q.ready();
+    pool.t.now = START + E + 10n;
+    assert.deepEqual((await q.refresh()).remade, [a!.noteId]);
+    const taken = await tk!;
+    assert.equal(taken.epochStartMs, START + E);
+    const n = await state(v, a!.noteId);
+    assert.equal(n.state, "RESERVED");
+    assert.equal(n.attempt, taken.attempt);
+    assert.notEqual(n.attempt, a!.attempt);
+    assert.deepEqual(n.contexts!.map((c) => c.context), [taken.binding.context.toString()]);
+    assert.deepEqual(q.ready(), []);
+  }
+  // close: the new attempt is freed, both unsent contexts gone
+  {
+    const v = await vaultWith([usd(5)]);
+    const pool = fakePool(v);
+    let q!: ProofQueue<unknown>;
+    let cl: Promise<void> | undefined;
+    q = openProofQueue({ seed64: SEED, notes: hooked(v, "HELD", "HELD", () => (cl = q.close())), pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 2 });
+    await q.refresh();
+    pool.t.now = START + E + 10n;
+    await q.refresh();
+    await cl;
+    const n = (await v.ns.list())[0]!;
+    assert.equal(n.state, "UNSPENT");
+    assert.equal(n.contexts, undefined);
+    assert.deepEqual(q.ready(), []);
+  }
+  // drop: the note ends UNSPENT, nothing ready
+  {
+    const v = await vaultWith([usd(5)]);
+    const pool = fakePool(v);
+    let q!: ProofQueue<unknown>;
+    let dr: Promise<void> | undefined;
+    q = openProofQueue({ seed64: SEED, notes: hooked(v, "HELD", "HELD", () => (dr = q.drop(v.notes[0]!.id))), pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 2 });
+    open.push(q);
+    await q.refresh();
+    pool.t.now = START + E + 10n;
+    await q.refresh();
+    await dr;
+    assert.equal((await v.ns.list())[0]!.state, "UNSPENT");
+    assert.deepEqual(q.ready(), []);
+  }
+});
+
+test("a full ready set (3 of 3) is made again at the boundary, on the epoch root even when a leaf landed after it", async () => {
+  const v = await vaultWith([usd(2), usd(5), usd(10)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  assert.equal((await q.refresh()).made.length, 3);
+  pool.t.now = START + E + 5n;
+  await landDeposit(v, pool, usd(1), 4242n); // someone's leaf, after the boundary (below the ladder: never proved)
+  pool.t.now = START + E + 10n;
+  const p = await q.refresh();
+  assert.equal(p.remade.length, 3);
+  for (const r of q.ready()) {
+    assert.equal(r.epochStartMs, START + E);
+    assert.equal(r.root, "epoch");
+    assert.equal(r.publicSignals[3], pool.rootAt(START + E).state.toString());
+    assert.notEqual(r.publicSignals[3], v.stateTree.root!.toString());
+  }
+});
+
+test("store: HELD -> HELD and a free drop the last context (the unsent one), never a sent attempt's before it", async () => {
+  const v = await vaultWith([usd(5)]);
+  const id = v.notes[0]!.id;
+  const ns = v.ns;
+  let n = await ns.move(id, "UNSPENT", "HELD", { deadlineMs: 1000n, context: "11" });
+  n = await ns.move(id, "HELD", "RESERVED", { attempt: n.attempt! });
+  n = await ns.move(id, "RESERVED", "UNSPENT", { blockTimeMs: 1001n });
+  n = await ns.move(id, "UNSPENT", "HELD", { deadlineMs: 2000n, context: "22" });
+  n = await ns.move(id, "HELD", "HELD", { attempt: n.attempt!, deadlineMs: 3000n, context: "33" });
+  assert.deepEqual(n.contexts!.map((c) => c.context), ["11", "33"]);
+  n = await ns.move(id, "HELD", "UNSPENT", { attempt: n.attempt! });
+  assert.deepEqual(n.contexts!.map((c) => c.context), ["11"]);
+});
+
+test("a drop whose write fails is tried again at the next pass", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  let fail = true;
+  const ns = v.ns;
+  const notes = {
+    ...ns,
+    move: async (...a: Parameters<typeof ns.move>) => {
+      if (fail && a[1] === "HELD" && a[2] === "UNSPENT") {
+        fail = false;
+        throw new Error("store write failed");
+      }
+      return ns.move(...a);
+    },
+  } as typeof ns;
+  const q = openProofQueue({ seed64: SEED, notes, pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 2 });
+  open.push(q);
+  await q.refresh();
+  const [a] = q.ready();
+  await q.drop(a!.noteId);
+  assert.equal((await state(v, a!.noteId)).attempt, a!.attempt, "the failed write left it HELD");
+  await q.refresh();
+  const n = await state(v, a!.noteId);
+  assert.ok(!(n.state === "HELD" && n.attempt === a!.attempt), "the dropped attempt was freed at the next pass");
 });
 
 test("a change note that landed in this epoch waits for the next one; then its own W (j + 1) and refund note (l, j + 1)", async () => {
@@ -579,9 +832,9 @@ function nearPool(v: Vault, relayFee = 300_000n, feesAsked: bigint[] = []) {
   });
 }
 
-test("NEAR vault: epochs of 60 s and a life of 240 s, inside the 10 minute cap and past the relayer's 120 s margin", () => {
+test("NEAR vault: epochs of 60 s and a life of 270 s (2E + the relayer's 120 s margin + 30 s of slack), inside the 10 minute cap", () => {
   assert.equal(NEAR_EPOCH_MS, 60_000n);
-  assert.equal(NEAR_LIFE_MS, 240_000n);
+  assert.equal(NEAR_LIFE_MS, 270_000n);
 });
 
 test("NEAR vault: each proof's context is the one the vault recomputes, paying W_{near, l, j}, on the epoch's grid and fee", async () => {

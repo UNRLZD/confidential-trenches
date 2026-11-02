@@ -10,9 +10,11 @@
 //   of an epoch shares its root, label root, deadline and fee. At each new epoch the ready set is made again, and a
 //   proof of the epoch before stays ready and takeable while its note's new proof is made: the new one replaces it in
 //   one store write (HELD -> HELD, the old context pruned), so the ready set never empties at a boundary and a tap
-//   during the remake takes the old proof. A remake that finishes after that take is dropped, never sent. A note a
-//   move into the pool made (not a change or refund note) that landed after the epoch's start is proved at once on the
-//   newest root, so the first buy never waits for a boundary; a change or refund note waits for the next epoch.
+//   during the remake takes the old proof. A remake that finishes after that take is dropped, never sent. A deposit's
+//   own note (a deposit note, or a second arrival of a deposit from U) that landed after the epoch's start is proved
+//   at once on the newest root, so the first buy never waits for a boundary; take() hands that proof out past its
+//   epoch only until its replacement is made and never past the next boundary + NEWEST_GRACE_MS. Every other note
+//   (change, refund, return, move) waits for the next epoch: a root right after its own leaf would link two Ws.
 // - W: the fresh wallet W_{chain, l, j} (derive/keys.ts freshWallet), with l the note's label and j its change index
 //   (keys.ts changeIndex: a label's first note gives 0, change note k gives k + 1). So each note has its own W, fixed
 //   by the note, and a restore finds it. W's secret key is zeroed at once; the pool gets only its address and public
@@ -22,7 +24,8 @@
 //   the proof starts (notes/store.ts).
 // - HELD until sent or dropped: a ready proof keeps its note HELD. take() writes HELD -> RESERVED before it hands the
 //   proof out, so nothing leaves before the store has it, and refuses a proof made before the previous epoch (on
-//   resume the queue makes them again first). drop() and close() write HELD -> UNSPENT. take, drop, close and a
+//   resume the queue makes them again first), a newest-root proof past its grace, and one with less than the send
+//   margin + TAKE_SLACK_MS left. drop() and close() free the note (HELD -> UNSPENT). take, drop, close and a
 //   remake's swap run one at a time per note, so a tap never meets a half-made swap. A proof that fails frees its
 //   note; a free whose write fails is tried again at the next pass. A page that dies leaves HELD notes the store frees
 //   on its next open (the dead tab's lock).
@@ -36,7 +39,7 @@ import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
 import { checkLadder, chunkOf } from "./ladder.ts";
-import { checkBinding, checkPool, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
+import { checkBinding, checkPool, NEWEST_GRACE_MS, TAKE_SLACK_MS, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
 /** Provers side by side: min(hardwareConcurrency - 1, 3), at least 1. */
 export function proofPoolSize(hardwareConcurrency: number | undefined): number {
@@ -67,7 +70,9 @@ export interface ProofQueue<R> {
   refresh(signal?: AbortSignal): Promise<QueuePass>;
   /** The proofs ready now, in leaf order. */
   ready(): ReadyProof<R>[];
-  /** At the tap: refused for a proof made before the previous epoch; else HELD -> RESERVED, then it is handed out. */
+  /** At the tap: refused (and its note freed) for a proof made before the previous epoch, a newest-root proof past the
+   * next boundary + NEWEST_GRACE_MS, or one with less than sendMarginMs + TAKE_SLACK_MS left; else HELD -> RESERVED,
+   * then it is handed out. */
   take(noteId: string): Promise<ReadyProof<R>>;
   /** The proof is dropped and its note goes back to UNSPENT. */
   drop(noteId: string): Promise<void>;
@@ -228,10 +233,10 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     for (const n of open) {
       if (todo.length === want) break;
       if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });
-      else if (n.ref.kind !== "change" && n.ref.kind !== "refund") {
+      else if (n.ref.kind === "deposit" || (n.ref.kind === "second" && n.ref.id.id === "U")) {
         newest ??= await pool.trees(nowMs + 1n, signal); // every leaf up to now
         todo.push({ n, trees: newest, root: "newest" });
-      } // a change or refund note that landed in this epoch waits for the next
+      } // any other note that landed in this epoch (change, refund, return, move) waits for the next
     }
     let k = 0;
     const lane = async (prover: VaultProver): Promise<void> => {
@@ -266,10 +271,18 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         const r = ready.get(noteId);
         if (r === undefined) throw new Error(`no ready proof for note ${noteId}`);
         const nowMs = await pool.now();
-        if (epochOf(nowMs) > r.epochStartMs + pool.epochMs) {
+        const why =
+          epochOf(nowMs) > r.epochStartMs + pool.epochMs
+            ? "is from before the previous epoch"
+            : r.root === "newest" && nowMs >= r.epochStartMs + pool.epochMs + NEWEST_GRACE_MS
+              ? `is on the newest root and its epoch ended over ${NEWEST_GRACE_MS} ms ago`
+              : r.deadlineMs - nowMs < pool.sendMarginMs + TAKE_SLACK_MS
+                ? `has less than the send margin + ${TAKE_SLACK_MS} ms left`
+                : undefined;
+        if (why !== undefined) {
           ready.delete(noteId);
           await free(noteId, r.attempt);
-          throw new Error(`the proof for note ${noteId} is from before the previous epoch: it is made again first`);
+          throw new Error(`the proof for note ${noteId} ${why}: it is made again first`);
         }
         ready.delete(noteId);
         try {
@@ -288,7 +301,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         const r = ready.get(noteId);
         if (r === undefined) return;
         ready.delete(noteId);
-        await notes.move(noteId, "HELD", "UNSPENT", { attempt: r.attempt });
+        await free(noteId, r.attempt); // a failed write is tried again at the next pass
       });
     },
     async close() {

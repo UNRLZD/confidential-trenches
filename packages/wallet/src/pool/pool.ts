@@ -15,11 +15,20 @@
 // - Epochs: the pool's time is cut into epochs of epochMs. Every proof made in epoch e proves against e's epoch root
 //   (the newest root whose leaf landed before e's start: trees(e's start)), binds the deadline e's start + lifeMs and
 //   the relayer's fee for e, so every proof of that epoch, from every user, shares its root, label root, deadline and
-//   fee. The queue makes its ready proofs again at each new epoch. One exception: a note a move into the pool just
-//   made (not a change or refund note) is proved at once on the newest root, so the first buy never waits for a
-//   boundary; that proof too is made again at the next epoch.
+//   fee. The queue makes its ready proofs again at each new epoch. One exception: a deposit's own note (a deposit note,
+//   or a second arrival of a deposit from U) is proved at once on the newest root, so the first buy never waits for a
+//   boundary. That proof is made again at the next epoch and is handed out only until its replacement is made, and
+//   never past the next boundary + NEWEST_GRACE_MS. Every other note (change, refund, return, move, and second
+//   arrivals of a return or a move) waits for the next boundary: a root right after its own leaf would link the W it
+//   pays to the earlier W whose money made that leaf.
 // - now and trees: the pool's time and its two trees cut at a time, each read on two RPCs by the pool's own reader.
 //   Never the device clock, and never one RPC's word. The tree source must know each leaf's chain time.
+// - Two duties on every adapter, which the queue cannot check (the NEAR leaf-time sync and each pool adapter hold
+//   them):
+//   1. relayFee(epoch), the fee bind uses, is the relayer's one published fee for that epoch, shared by every user,
+//      in coarse steps; a fee picked per user or per request would mark that user's proofs.
+//   2. trees(start) is refused unless the pool's sync has read the chain past `start` (every leaf before `start` is
+//      in), so an epoch root is the same for every user and never a partial tree.
 // - bind: the context function. It binds one chunk's release to W, the fee cap and the queue's deadline, and never the
 //   token: the token, route and minimum out are W's signature at the tap. It returns the context and the request
 //   fields the pool recomputes that context from at the tap, so a context the pool would not recompute exactly is
@@ -68,7 +77,8 @@ export interface Pool<R = unknown> {
   readonly ladder: Ladder;
   /** E: the length of an epoch of the pool's time, ms. */
   readonly epochMs: bigint;
-  /** L: every proof of an epoch has the deadline epoch start + L. At least 2E + sendMarginMs. */
+  /** L: every proof of an epoch has the deadline epoch start + L. At least 2E + sendMarginMs; 2E + sendMarginMs +
+   * 2 TAKE_SLACK_MS keeps every take of the next epoch inside take()'s slack (the NEAR vault's 270 s). */
   readonly lifeMs: bigint;
   /** What the relayer keeps before a deadline (its check 9): a proof is handed out only with more than this left. */
   readonly sendMarginMs: bigint;
@@ -97,6 +107,13 @@ export type ReadyProof<R = unknown> = {
   proof: VaultSnarkjsProof;
   publicSignals: VaultWithdrawSignals;
 };
+
+/** take() hands a proof out only with more than sendMarginMs + this left before its deadline (clock skew between the
+ * pool's time and the relayer's). */
+export const TAKE_SLACK_MS = 15_000n;
+/** A newest-root proof (a deposit's own note) is handed out past its epoch only until its replacement is made, and
+ * never past the next boundary + this: it bounds how long the root right after the deposit stays in use. */
+export const NEWEST_GRACE_MS = 15_000n;
 
 const field = (x: unknown): boolean => typeof x === "bigint" && x >= 0n && x < VAULT_FIELD_P;
 
