@@ -8,10 +8,13 @@
 //   - this page asked both of them itself, each answered 200: the rows are reads of this session, not a recording;
 //   - no CSP violation and no console error in the terminal's frame;
 //   - on desktop, the footer's Verify pill opens the panel over the page and its close returns there.
+// On a network whose release names no vault yet (mainnet until the freeze; the run records it as vaultNamed: false)
+// the end state is the other one: every check Unverified and no NEAR read at all, so nothing is drawn as read.
 // A screenshot of each width is kept.
-//   node scripts/live-checks/app-verify-mount.mjs [--network testnet|mainnet] [--shots <dir>] [--record <file>]
-//     the deployed hosts: APP_HOST/verify as it is served; --network is the network its build names (testnet default)
-//   node scripts/live-checks/app-verify-mount.mjs --harness [--build <dir>] ...
+//   node scripts/live-checks/app-verify-mount.mjs [--network mainnet|testnet] [--shots <dir>] [--record <file>]
+//     the deployed hosts: APP_HOST/verify as it is served; --network is the network its build names (the deploy passes
+//     it, read from the build's _headers; mainnet when not given)
+//   node scripts/live-checks/app-verify-mount.mjs --harness [--build <dir>] [--network testnet|mainnet] ...  (testnet when not given)
 //     a local build (VITE_NEAR_NETWORK=testnet pnpm --filter terminal build) on the hosts' real names, answered by
 //     Playwright's route from local files with the stand-in shell of app-in-shell.mjs; the two NEAR RPCs are the real
 //     ones, reached over the network (route.continue), so the reads are live
@@ -49,6 +52,15 @@ export function judge(rec) {
       continue;
     }
     const p = r.panel;
+    if (rec.vaultNamed === false) {
+      const reads = (r.requests ?? []).filter((x) => x.method === "POST" && p.rpcs.some((u) => sameHost(x.url, u)));
+      const allWarn = CHECKS.every((c) => p.checks[c] === "warn") && Object.keys(p.checks).length === CHECKS.length;
+      say(p.state === "unverified" && p.code === "warn" && p.funds === "warn" && allWarn && reads.length === 0 && p.block === "—", `${n}: no vault named on ${rec.network}: panel ${p.state}, code ${p.code}, funds ${p.funds}, ${CHECKS.filter((c) => p.checks[c] === "warn").length} of ${CHECKS.length} checks Unverified, ${reads.length} NEAR read(s), block ${p.block || "none"}`);
+      const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.errors ?? []).map((e) => `console ${e}`)];
+      say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : "no CSP violation, no console error"}`);
+      if (r.width === "desktop") say(r.footer?.opened === true && r.footer?.closedTo === "/", `${n}: the footer's Verify pill ${r.footer?.opened ? "opens the panel" : "does not open the panel"}, close ${r.footer?.closedTo ? `returns to ${r.footer.closedTo}` : "returns nowhere"}`);
+      continue;
+    }
     const allOk = CHECKS.every((c) => p.checks[c] === "ok") && Object.keys(p.checks).length === CHECKS.length;
     say(p.state === "read" && p.code === "ok" && p.funds === "ok" && allOk, `${n}: panel ${p.state}, code ${p.code}, funds ${p.funds}; checks ${CHECKS.map((c) => `${c} ${p.checks[c] ?? "none"}`).join(", ")}`);
     const ops = p.rpcs.map(operatorOf);
@@ -162,14 +174,14 @@ async function runOne({ browser, w, shots, route }) {
 }
 
 /** Every width, in Chromium. `route`: a Playwright route handler for the harness, or null (the deployed hosts). */
-export async function collect({ shots, route = null, network, source }) {
+export async function collect({ shots, route = null, network, source, vaultNamed = true }) {
   const pw = createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
   if (shots) mkdirSync(shots, { recursive: true });
   const browser = await pw.chromium.launch();
   try {
     const runs = [];
     for (const w of WIDTHS) runs.push(await runOne({ browser, w, shots, route }));
-    return { check: KEY, at: new Date().toISOString(), source, network, browser: browser.version(), runs };
+    return { check: KEY, at: new Date().toISOString(), source, network, vaultNamed, browser: browser.version(), runs };
   } finally {
     await browser.close();
   }
@@ -191,14 +203,14 @@ async function main() {
   };
   const shots = opt("--shots") ?? path.join(tmpdir(), `${KEY}-${Date.now()}`);
   const harness = args.includes("--harness");
-  const network = opt("--network") ?? "testnet";
+  const network = opt("--network") ?? (harness ? "testnet" : "mainnet");
   const { VERIFY_RELEASES } = await import("../../apps/terminal/src/screens/verify/release.ts");
   const release = VERIFY_RELEASES[network];
   if (!release) throw new Error(`--network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const route = harness ? await harnessRoute(build, release.rpcs) : null;
   const source = harness ? `harness, terminal build ${path.relative(REPO, build) || build}, live ${network} RPCs` : `live ${APP_HOST}`;
-  const rec = await collect({ shots, route, network, source });
+  const rec = await collect({ shots, route, network, source, vaultNamed: release.pins !== null });
   const record = opt("--record");
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
   const r = judge(rec);

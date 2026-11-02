@@ -4,10 +4,10 @@
 // testnet RPCs reached live.
 //   good:       this card's build: Verify drawn from a live read of vault.bf-vt-20261102t071444.testnet on
 //               test.rpc.fastnear.com (FastNEAR) and near-testnet.drpc.org (dRPC), every check ok at both widths: PASS;
-//   mainnetNoVault: the same tree built for mainnet (VITE_NEAR_NETWORK unset), as APP_HOST serves it until the release
-//               names the Nov 7 vault: every check Unverified, nothing read: FAIL.
-// Both recorded on the PC box on 2 Nov 2026 (the answers' `at`). The red run before this card (main's build: no panel)
-// is apps/terminal/test/verify-mount/run.mjs --build <main's build>.
+//   noVault:    the same tree built for mainnet (VITE_NEAR_NETWORK unset), as APP_HOST serves it until the release
+//               names the Nov 7 vault: every check Unverified and no NEAR read at all: PASS (that network's end state);
+//   notMounted: the build of main before this card (Screen.tsx draws an empty main for /verify): FAIL, no panel.
+// All three recorded on 2 Nov 2026 (each answer's `at`).
 // Each planted bad case is the good run with one thing changed, and fails on it.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -38,13 +38,30 @@ test("recorded good answer: Verify read live on two operators, every check ok at
   assert.ok(r.lines.includes("ok  desktop /verify: the footer's Verify pill opens the panel, close returns to /"));
 });
 
-test("recorded bad answer: the mainnet build before the vault exists draws every check Unverified and reads nothing: FAIL", () => {
-  const r = judge(ANSWERS.mainnetNoVault);
+test("recorded good answer, mainnet before the vault: every check Unverified, no NEAR read, the pill works: PASS", () => {
+  const r = judge(ANSWERS.noVault);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.deepEqual([ANSWERS.noVault.network, ANSWERS.noVault.vaultNamed], ["mainnet", false]);
+  for (const w of WIDTHS) assert.ok(r.lines.includes(`ok  ${w.name} /verify: no vault named on mainnet: panel unverified, code warn, funds warn, 6 of 6 checks Unverified, 0 NEAR read(s), block —`), w.name);
+});
+
+test("recorded bad answer: main's build mounts no Verify: FAIL", () => {
+  const r = judge(ANSWERS.notMounted);
   assert.equal(r.ok, false);
-  for (const w of WIDTHS) {
-    assert.ok(bad(r).includes(`BAD ${w.name} /verify: panel unverified, code warn, funds warn; checks ${CHECKS.map((c) => `${c} warn`).join(", ")}`), w.name);
-    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w.name} /verify: this page read rpc.mainnet.fastnear.com 0 time(s)`)), w.name);
-  }
+  for (const w of WIDTHS) assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w.name} /verify: no Verify panel`)), w.name);
+});
+
+test("planted: with no vault named, a NEAR read made or a check not Unverified: FAIL", () => {
+  const read = structuredClone(ANSWERS.noVault);
+  read.runs[0].requests.push({ url: "https://near.drpc.org/", method: "POST", type: "fetch", status: 200 });
+  assert.equal(judge(read).ok, false);
+  const drawn = structuredClone(ANSWERS.noVault);
+  drawn.runs[1].panel.checks.keys = "ok";
+  assert.equal(judge(drawn).ok, false);
+  // a vault named on the network: the Unverified panel is a failure there
+  const named = structuredClone(ANSWERS.noVault);
+  named.vaultNamed = true;
+  assert.equal(judge(named).ok, false);
 });
 
 test("planted: no Verify panel in the terminal's frame (main's build, before this card): FAIL", () => {

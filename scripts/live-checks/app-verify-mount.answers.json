@@ -1,9 +1,10 @@
 {
  "good": {
   "check": "app-verify-mount",
-  "at": "2026-11-02T16:49:39.078Z",
+  "at": "2026-11-02T16:54:05.091Z",
   "source": "harness, terminal build dist/build-testnet, live testnet RPCs",
   "network": "testnet",
+  "vaultNamed": true,
   "browser": "153.0.8010.12",
   "runs": [
    {
@@ -25,7 +26,7 @@
       "https://test.rpc.fastnear.com",
       "https://near-testnet.drpc.org"
      ],
-     "block": "275,925,892",
+     "block": "275,926,334",
      "words": [
       "Verify",
       "Code",
@@ -232,7 +233,7 @@
       "https://test.rpc.fastnear.com",
       "https://near-testnet.drpc.org"
      ],
-     "block": "275,925,896",
+     "block": "275,926,337",
      "words": [
       "Verify",
       "Code",
@@ -426,11 +427,12 @@
    }
   ]
  },
- "mainnetNoVault": {
+ "noVault": {
   "check": "app-verify-mount",
-  "at": "2026-11-02T16:49:40.370Z",
+  "at": "2026-11-02T16:54:06.429Z",
   "source": "harness, terminal build dist/build-mainnet, live mainnet RPCs",
   "network": "mainnet",
+  "vaultNamed": false,
   "browser": "153.0.8010.12",
   "runs": [
    {
@@ -669,6 +671,182 @@
     "footer": {
      "opened": true,
      "closedTo": "/"
+    }
+   }
+  ]
+ },
+ "notMounted": {
+  "check": "app-verify-mount",
+  "at": "2026-11-02T16:56:32.008Z",
+  "source": "harness, terminal build dist/build-main, live testnet RPCs",
+  "network": "testnet",
+  "vaultNamed": true,
+  "browser": "153.0.8010.12",
+  "runs": [
+   {
+    "width": "phone",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "panel": null,
+    "requests": [
+     {
+      "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/index-Dc9HYs5k.js",
+      "method": "GET",
+      "type": "script",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/style-BcTfhng9.css",
+      "method": "GET",
+      "type": "stylesheet",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     }
+    ],
+    "violations": [],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "panel": null,
+    "requests": [
+     {
+      "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/index-Dc9HYs5k.js",
+      "method": "GET",
+      "type": "script",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/style-BcTfhng9.css",
+      "method": "GET",
+      "type": "stylesheet",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     }
+    ],
+    "violations": [],
+    "errors": [],
+    "footer": {
+     "opened": false,
+     "closedTo": "/verify"
     }
    }
   ]
