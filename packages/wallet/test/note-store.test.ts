@@ -51,7 +51,7 @@ const fieldsFor = (from: NoteState, to: NoteState, n: NoteRecord) =>
   from === "INCOMING" && to === "UNSPENT"
     ? { leaf: leafOf(n.precommitment) }
     : to === "HELD"
-      ? { deadlineMs: 1_800_000_000_000n, context: String(contexts++) }
+      ? { deadlineMs: 1_800_000_000_000n, context: String(contexts++), ...(from === "HELD" ? { attempt: n.attempt } : {}) }
       : from === "HELD"
         ? { attempt: n.attempt }
         : from === "RESERVED" && to === "UNSPENT"
@@ -91,7 +91,7 @@ test("every state, and every edge: the legal ones move, every other is refused w
   }
   // the row's chain, the two ways back to UNSPENT and the other device's spend; nothing else
   assert.deepEqual(legal.sort(), [
-    "HELD>RESERVED", "HELD>SPENT", "HELD>UNSPENT", "INCOMING>UNSPENT", "PLANNED>INCOMING", "PLANNED>TAKEN",
+    "HELD>HELD", "HELD>RESERVED", "HELD>SPENT", "HELD>UNSPENT", "INCOMING>UNSPENT", "PLANNED>INCOMING", "PLANNED>TAKEN",
     "RESERVED>SPENT", "RESERVED>UNSPENT", "UNSPENT>HELD", "UNSPENT>SPENT",
   ]);
 });
@@ -115,6 +115,25 @@ test("a move names the state it expects: a stale read changes nothing", async ()
   await assert.rejects(t.ns.move("nope", "UNSPENT", "HELD", { deadlineMs: 5n }), /no note/);
   await assert.rejects(t.ns.move(n.id, "HELD", "BURNT" as NoteState), /unknown note state/);
   assert.equal(t.puts(), puts);
+});
+
+test("HELD -> HELD: only the holder replaces its unsent proof, in one write; the replaced context goes, the attempt is new", async () => {
+  const t = await tab();
+  const n = await noteIn(t.ns, "HELD");
+  const puts = t.puts();
+  const next = { deadlineMs: n.deadlineMs! + 60_000n, context: String(contexts++) };
+  await assert.rejects(t.ns.move(n.id, "HELD", "HELD", { ...next, attempt: "0".repeat(32) }), /held by another attempt/);
+  await assert.rejects(t.ns.move(n.id, "HELD", "HELD", next), /held by another attempt/);
+  assert.equal(t.puts(), puts);
+  const m = await t.ns.move(n.id, "HELD", "HELD", { ...next, attempt: n.attempt });
+  assert.equal(t.puts(), puts + 1, "one write");
+  assert.equal(m.state, "HELD");
+  assert.equal(m.tab, n.tab);
+  assert.notEqual(m.attempt, n.attempt);
+  assert.equal(m.deadlineMs, next.deadlineMs);
+  assert.deepEqual(m.contexts, [{ context: next.context, deadlineMs: next.deadlineMs }]);
+  await assert.rejects(t.ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt }), /held by another attempt/, "the replaced attempt is never sent");
+  assert.equal((await t.ns.move(n.id, "HELD", "RESERVED", { attempt: m.attempt })).state, "RESERVED");
 });
 
 test("fields: a leaf only when it lands and only one that hashes to its commitment, a deadline only when held, bigint only", async () => {

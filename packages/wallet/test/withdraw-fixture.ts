@@ -43,6 +43,9 @@ export type Vault = {
   stateTree: VaultTree;
   labelTree: VaultTree;
   failPut: { on?: (rec: unknown) => boolean };
+  /** The two trees' leaves in insert order (the arrays the trees were built from; tests append to both). */
+  stateLeaves: bigint[];
+  labelLeaves: bigint[];
   /** A new tab's note store on the same database (as after the page died), now v.ns. */
   reopen: () => Promise<NoteStore>;
 };
@@ -76,7 +79,7 @@ export async function vaultWith(values = NOTE_VALUES): Promise<Vault> {
     labels.push(label);
     notes.push(n);
   }
-  const v: Vault = { w, ns, notes, stateTree: new VaultTree(state), labelTree: new VaultTree(labels), failPut, reopen: async () => (v.ns = await openNoteStore(store)) };
+  const v: Vault = { w, ns, notes, stateTree: new VaultTree(state), labelTree: new VaultTree(labels), failPut, stateLeaves: state, labelLeaves: labels, reopen: async () => (v.ns = await openNoteStore(store)) };
   open.push(v);
   return v;
 }

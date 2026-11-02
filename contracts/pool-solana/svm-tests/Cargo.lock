@@ -1627,6 +1627,7 @@ dependencies = [
  "sha2 0.10.9",
  "solana-account",
  "solana-address 2.7.0",
+ "solana-bn254",
  "solana-clock 3.2.1",
  "solana-instruction 3.5.1",
  "solana-keypair",
