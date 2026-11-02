@@ -50,6 +50,9 @@ test("planted: a setup file not served, served short, or not cached for good: FA
   bad(await judge(planted((a) => (a.files[zkPath(PINS[3])].bytes -= 1))), "commitment.wasm: 2380441 B");
   bad(await judge(planted((a) => (a.files[ZKEY].status = 404))), `withdraw.zkey at ${ZKEY}: 404`);
   bad(await judge(planted((a) => (a.files[ZKEY].headers["cache-control"] = "public, max-age=0, must-revalidate"))), "withdraw.zkey: cache-control");
+  // two rules joined by Pages: the right value and a second, conflicting max-age
+  bad(await judge(planted((a) => (a.files[ZKEY].headers["cache-control"] = "public, max-age=31536000, immutable, public, max-age=0, must-revalidate"))), "withdraw.zkey: cache-control");
+  bad(await judge(planted((a) => delete a.files[zkPath(PINS[2])].headers["cache-control"])), 'withdraw.vkey: cache-control none, want "public, max-age=31536000, immutable"');
 });
 
 test("planted: a worker that is not the release's, or without its own policy, or with a third: FAIL", async () => {

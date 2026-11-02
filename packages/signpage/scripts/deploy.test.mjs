@@ -37,6 +37,7 @@ function recorder() {
 }
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
+const ZK_RULE = "/assets/zk/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
 const swap = (from, to) => {
   assert.ok(REAL.includes(from), from);
@@ -85,6 +86,20 @@ test("other policy breaks are refused", () => {
     "the worker's CSP also on another path": `${REAL}${WORKER_RULE.replace("/prover-worker.js", "/app.js")}`,
     "the worker rule sets a second header": swap(WORKER_RULE, `${WORKER_RULE}  Cross-Origin-Resource-Policy: cross-origin\n`),
     "the worker rule removes the site's CSP": swap(WORKER_RULE, `${WORKER_RULE}  ! Content-Security-Policy\n`),
+    // the review's plants (signpage-prover-host round 2): every rule, header and removal off the allow-list
+    "/ sends Refresh to another site": `${REAL}/\n  Refresh: 0; url=https://evil.example/\n`,
+    "/index.html sends Refresh": `${REAL}/index.html\n  Refresh: 0; url=https://evil.example/\n`,
+    "/ sets a cookie": `${REAL}/\n  Set-Cookie: a=b; Secure\n`,
+    "/ adds Integrity-Policy-Report-Only": `${REAL}/\n  Integrity-Policy-Report-Only: blocked-destinations=(script)\n`,
+    "/* adds Service-Worker-Allowed": swap("  Integrity-Policy:", "  Service-Worker-Allowed: /\n  Integrity-Policy:"),
+    "/* adds a Cache-Control, joined onto /assets/zk/*'s": swap("  Integrity-Policy:", "  Cache-Control: no-store\n  Integrity-Policy:"),
+    "/assets/zk/* allows every origin": `${REAL.trimEnd()}\n  Access-Control-Allow-Origin: *\n`,
+    "/prover-* serves the worker as HTML": `${REAL}/prover-*\n  Content-Type: text/html\n`,
+    "/assets/zk/* without its Cache-Control": swap(ZK_RULE, ""),
+    "/assets/zk/* no-store": swap(ZK_RULE, ZK_RULE.replace("public, max-age=31536000, immutable", "no-store")),
+    "/assets/zk/* a second max-age": swap(ZK_RULE, ZK_RULE.replace("immutable", "immutable, max-age=0")),
+    "/assets/zk/* twice": `${REAL}${ZK_RULE}`,
+    "/assets/zk/* removes a header": swap(ZK_RULE, `${ZK_RULE}  ! X-Content-Type-Options\n`),
   };
   for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
 });
@@ -99,14 +114,18 @@ test("a build carrying _worker.js or .well-known/webauthn is refused", () => {
   assert.equal(calls.length, 0);
 });
 
-test("--dry-run stops after the gate; the build holds the page and _headers only", () => {
+test("--dry-run stops after the gate and keeps the build, whose _headers is the package's", () => {
   const { calls, run } = recorder();
   const r = deploy(["--dry-run"], {}, run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   const dir = /gate ok on (\S+);/.exec(r.out[0])[1];
-  assert.deepEqual(checkDir(dir), []);
-  assert.equal(readFileSync(join(dir, "_headers"), "utf8"), REAL);
-  assert.equal(calls.length, 0);
+  try {
+    assert.deepEqual(checkDir(dir), []);
+    assert.equal(readFileSync(join(dir, "_headers"), "utf8"), REAL);
+    assert.equal(calls.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("with the gate passed and no token, nothing is uploaded", () => {

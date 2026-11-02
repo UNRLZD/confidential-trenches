@@ -2,13 +2,15 @@
 //   node --test test/prover-host.test.ts      (from packages/signpage)
 // The worker starts at the first proof that passes the kit's input checks, never before; one worker serves every proof
 // and loads the withdraw setup files once; a worker that died is replaced at the next proof, which loads them again; a
-// refused worker answer keeps the worker; stop() ends it. The worker here is a stand-in that answers the fixture's
-// signals: the real worker in Chromium under SIGN_HOST's headers is packages/kit/test/prove-e2e.test.ts's
+// refused worker answer keeps the worker; stop() ends it; proofs run one at a time. The worker here is a stand-in that
+// answers the fixture's signals, behind a fake startProver or behind the kit's real one (client.ts) on a fake Worker
+// and fetch: the real worker in Chromium under SIGN_HOST's headers is packages/kit/test/prove-e2e.test.ts's
 // (KIT_PROVER_E2E=1) and the live check scripts/live-checks/signpage-prover-host.mjs's.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import type { Prover, ProverOptions } from "../../kit/src/prover/client.ts";
+import { isProverDead, startProver, type Prover, type ProverOptions } from "../../kit/src/prover/client.ts";
+import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
 import { fixtureArgs, fixtureSignals, type ContextVector } from "../../kit/test/fixtures/prove-fixture.ts";
 import { proverHost } from "../src/prover-host.ts";
@@ -105,4 +107,99 @@ test("stop() ends the worker; the next proof starts a new one", async () => {
   host.stop();
   await host.proveWithdraw(fixtureArgs(CV));
   assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "stop 1", "start 2", "load 2 withdraw", "prove 2 withdraw"]);
+});
+
+test("proofs run one at a time: a second proof asked while one runs waits for it", async () => {
+  let running = 0;
+  let most = 0;
+  const s = starter(() => ({
+    prove: async () => {
+      most = Math.max(most, ++running);
+      await new Promise((ok) => setTimeout(ok, 20));
+      running--;
+      return { proof: PROOF, publicSignals: [...SIGNALS], proveMs: 1 };
+    },
+  }));
+  const host = proverHost(s.start);
+  const all = await Promise.allSettled([host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV, "state-leaf")), host.proveWithdraw(fixtureArgs(CV))]);
+  assert.deepEqual(all.map((r) => r.status), ["fulfilled", "rejected", "fulfilled"]);
+  assert.equal(most, 1);
+  assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "prove 1 withdraw"]);
+});
+
+// ---- the kit's real startProver (client.ts) on a fake Worker and fetch ----
+
+const SIGN = "https://sign.confidential.unrealized.trade";
+type Posted = { cmd: string; id: number; circuit: string };
+/** A Worker stand-in speaking worker.js's protocol; `die()` fires the error event client.ts reads as a dead worker. */
+class FakeWorker {
+  static made: FakeWorker[] = [];
+  readonly url: string;
+  posted: Posted[] = [];
+  inFlight = 0;
+  most = 0;
+  ended = false;
+  private on: Record<string, ((e: unknown) => void)[]> = {};
+  constructor(url: string, _o: unknown) {
+    this.url = String(url);
+    FakeWorker.made.push(this);
+  }
+  addEventListener(type: string, fn: (e: unknown) => void) {
+    (this.on[type] ??= []).push(fn);
+  }
+  private emit(type: string, e: unknown) {
+    for (const fn of this.on[type] ?? []) fn(e);
+  }
+  die() {
+    this.emit("error", { message: "" });
+  }
+  postMessage(m: Posted) {
+    this.posted.push(m);
+    this.most = Math.max(this.most, ++this.inFlight);
+    setTimeout(() => {
+      this.inFlight--;
+      if (this.ended) return;
+      const value = m.cmd === "load" ? { circuit: m.circuit } : { proof: PROOF, publicSignals: [...SIGNALS], proveMs: 1 };
+      this.emit("message", { data: { id: m.id, ok: true, value } });
+    }, 10);
+  }
+  terminate() {
+    this.ended = true;
+  }
+}
+
+test("on the kit's real startProver: one same-origin worker, setup files fetched uncached, a dead worker replaced, one proof at a time", async (t) => {
+  const g = globalThis as Record<string, unknown>;
+  const saved = { self: g.self, Worker: g.Worker, fetch: g.fetch };
+  const fetched: { url: string; init: RequestInit | undefined }[] = [];
+  g.self = { location: { origin: SIGN } };
+  g.Worker = FakeWorker;
+  g.fetch = async (url: string, init?: RequestInit) => (fetched.push({ url: String(url), init }), new Response(new Uint8Array(4)));
+  FakeWorker.made = [];
+  t.after(() => Object.assign(g, saved));
+
+  const host = proverHost(startProver);
+  const two = await Promise.all([host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV))]);
+  for (const r of two) assert.deepEqual(r.publicSignals, SIGNALS);
+  assert.equal(FakeWorker.made.length, 1);
+  const w1 = FakeWorker.made[0]!;
+  assert.equal(w1.url, `${SIGN}/prover-worker.js`);
+  assert.deepEqual(w1.posted.map((m) => m.cmd), ["load", "prove", "prove"]);
+  assert.equal(w1.most, 1, "two proofs were in the worker at once");
+  const zk = (n: keyof typeof ZK_SETUP_FILES) => `${SIGN}/assets/zk/${ZK_SETUP_FILES[n].sha256}.${n.split(".").pop()}`;
+  assert.deepEqual(fetched.map((f) => f.url).sort(), [zk("withdraw.wasm"), zk("withdraw.zkey")].sort());
+  // a file that once came back wrong is fetched from the server again, never from the browser's cache
+  for (const f of fetched) assert.deepEqual(f.init, { credentials: "omit", cache: "no-cache" });
+
+  // the worker dies while a proof waits on it: that proof is refused as a dead worker, the next starts a new one
+  const p = host.proveWithdraw(fixtureArgs(CV));
+  await new Promise((ok) => setTimeout(ok, 0));
+  w1.die();
+  await assert.rejects(p, (e: unknown) => isProverDead(e));
+  assert.equal(w1.ended, true);
+  assert.deepEqual((await host.proveWithdraw(fixtureArgs(CV))).publicSignals, SIGNALS);
+  assert.equal(FakeWorker.made.length, 2);
+  assert.deepEqual(FakeWorker.made[1]!.posted.map((m) => m.cmd), ["load", "prove"]);
+  host.stop();
+  assert.equal(FakeWorker.made[1]!.ended, true);
 });
