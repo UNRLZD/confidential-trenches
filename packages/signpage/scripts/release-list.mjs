@@ -177,10 +177,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       const p = diffLists(fresh, readList(tag));
       for (const l of p) console.error(`release-list: ${l}`);
       if (!p.length) console.log(`release-list: a fresh build of ${fresh.commit.slice(0, 7)} equals ${tag}'s list`);
-      process.exit(p.length ? 1 : 0);
+      process.exitCode = p.length ? 1 : 0; // not process.exit: the finally below removes the two builds (24 MB of setup files)
+    } else {
+      writeFileSync(listPath(tag), `${JSON.stringify(fresh, null, 1)}\n`);
+      for (const [name, h] of Object.entries(fresh.hosts)) console.log(`release-list: ${tag} ${name} ${h.files.length} files, _headers ${h.headers_file.sha256}`);
     }
-    writeFileSync(listPath(tag), `${JSON.stringify(fresh, null, 1)}\n`);
-    for (const [name, h] of Object.entries(fresh.hosts)) console.log(`release-list: ${tag} ${name} ${h.files.length} files, _headers ${h.headers_file.sha256}`);
   } finally {
     removeBuilds(dirs);
   }
