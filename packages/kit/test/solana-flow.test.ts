@@ -19,6 +19,8 @@ import {
   solanaRouteFloor,
   solanaSetFloors,
   solanaAta,
+  solanaPacedRpc,
+  solanaSameProvider,
   type SolanaRpc,
   type SolanaTradeDeps,
   type SolanaTxOutcome,
@@ -366,4 +368,33 @@ test("a filled sell of part of a balance is not torn down; only a sell of the wh
   assert.ok(r[1]?.teardown);
   const read = (p: { calls: Call[] }) => p.calls.filter((c) => c.method === "getMultipleAccounts").flatMap((c) => c.params[0] as string[]);
   assert.ok(!read(a).includes(solanaAta(W1, TOKEN, T)) && !read(b).includes(solanaAta(W1, TOKEN, T)), "nothing is read for the part sell's teardown");
+});
+
+test("one provider passed twice, bare and wrapped or by one URL, is refused before any read, by the trade and by its finish", async () => {
+  const req = { side: "buy" as const, token: TOKEN, slippageBps: 100, wallets: WALLETS, legs: [{ wallet: W1, amount: 5n, arm: { own: true } }] };
+  const p = reads(1_000);
+  const twins: [SolanaRpc, SolanaRpc][] = [
+    [p, p],
+    [p, solanaPacedRpc(p)],
+    [solanaPacedRpc(p), p],
+    [Object.assign(async () => null, { url: "https://same.example" }), Object.assign(async () => null, { url: "https://same.example/" })],
+  ];
+  for (const providers of twins) {
+    const refs: unknown[] = [];
+    await assert.rejects(runSolanaTrade(req, deps({ providers, refs })), /same provider/);
+    await assert.rejects(finishSolanaSet(req, [], [], deps({ providers }), "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), /same provider/);
+    assert.equal(refs.length, 0, "no reference read");
+  }
+  assert.equal(p.calls.length, 0, "no read");
+});
+
+test("the reference reads through the trade's paced providers: the same providers, in their shared queues", async () => {
+  const pa = reads(1_000);
+  const pb = reads(1_001);
+  let given: readonly SolanaRpc[] = [];
+  const req = { side: "buy" as const, token: TOKEN, slippageBps: 100, wallets: WALLETS, legs: [{ wallet: W1, amount: 5n, arm: { own: true } }] };
+  await runSolanaTrade(req, deps({ providers: [pa, pb], reference: async (_q, providers) => { given = providers; return null; } }));
+  assert.equal(given.length, 2);
+  assert.ok(given[0] !== pa && given[1] !== pb, "wrapped, not the bare providers");
+  assert.ok(solanaSameProvider(given[0]!, pa) && solanaSameProvider(given[1]!, pb), "the trade's own two providers");
 });

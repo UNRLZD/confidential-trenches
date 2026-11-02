@@ -54,7 +54,7 @@ import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
 } from "../../checks/solana/checks.ts";
-import type { SolanaRpc } from "./send.ts";
+import { solanaSameProvider, type SolanaRpc } from "./send.ts";
 
 /** §2.0 LD1's band between two providers' reads of one reserve. */
 export const SOLANA_POOL_READ_TOL_BPS = 200;
@@ -566,7 +566,7 @@ function fail(why: string): never {
 export async function readSolanaReference(providers: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {
   if (!Array.isArray(providers) || providers.length !== 2 || typeof providers[0] !== "function" || typeof providers[1] !== "function") throw new Error("two providers are needed");
   const [pa, pb] = providers;
-  if (pa === pb || (pa.url !== undefined && pa.url === pb.url)) throw new Error("the two providers are the same provider: a reference must never rest on one provider's word");
+  if (solanaSameProvider(pa, pb)) throw new Error("the two providers are the same provider: a reference must never rest on one provider's word");
   if (req?.side !== "buy" && req?.side !== "sell") throw new Error("side must be buy or sell");
   if (typeof req.amount !== "bigint" || req.amount <= 0n || req.amount > U64_MAX) throw new Error("amount must be a positive u64");
   if (req.amounts !== undefined) {

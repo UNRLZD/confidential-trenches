@@ -182,6 +182,59 @@ test("the trade's map of the user's wallets: the real buy passes with it, and it
   assert.equal(links.ownerOf(solanaAta(W, F.mint, TOKEN)), W);
 });
 
+test("one long-lived map: it grows only by new wallets and new keys, a wallet joins once its accounts are all derived, and grows run in turn", async () => {
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const k1 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 11 + 5) & 0xff));
+  const W2 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 13 + 1) & 0xff));
+  // a wallet joins only once its last account is derived: a check between two slices does not trust the map with it
+  const part = new SolanaWalletLinks();
+  part.add([k1, OTHER, W2, W]);
+  const growing = part.grow([OTHER], [], 0);
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(part.holds([OTHER]), false, "half derived, not held");
+  await growing;
+  assert.equal(part.holds([OTHER]), true);
+  const m = new SolanaWalletLinks();
+  const first = m.grow([OTHER], [k1], 0);
+  const second = m.grow([W2], [], 0);
+  assert.equal(m.holds([OTHER]), false, "nothing is derived before the grow runs");
+  await second;
+  assert.equal(m.holds([OTHER, W2]), true, "an awaited grow means every earlier one is done");
+  await first;
+  for (const w of [OTHER, W2]) for (const k of [WSOL, k1]) for (const prog of [TOKEN, T22]) assert.equal(m.ownerOf(solanaAta(w, k, prog)), w, `${w} ${k}`);
+  // a later trade: the same wallets and keys cost nothing; a new key reaches every wallet in the map
+  let t = performance.now();
+  await m.grow([OTHER, W2], [k1, WSOL]);
+  m.add([k1, WSOL]);
+  assert.ok(performance.now() - t < 20, "nothing derived again");
+  const k2 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 17 + 9) & 0xff));
+  t = performance.now();
+  await m.grow([], [k2]);
+  assert.equal(m.ownerOf(solanaAta(W2, k2, T22)), W2);
+  // S11 trusts it only while it holds every other wallet
+  const c = buyCase();
+  (c.req as { links?: SolanaWalletLinks }).links = m;
+  assert.equal(run(c).ok, true);
+  assert.equal(m.holds([W]), false, "S11 grows a given map by the tx's keys only, never by a wallet");
+  assert.equal(m.ownerOf(solanaAta(OTHER, allKeys(c.m).at(-1) as string, TOKEN)), OTHER, "and by the tx's keys");
+});
+
+test("a mint another wallet holds that the tx never names: S11 refuses its token account once the caller names the mint", () => {
+  const M = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 19 + 2) & 0xff));
+  const named = () => { const c = buyCase(); addKey(c.m, solanaAta(OTHER, M, TOKEN)); return c; };
+  assert.equal(run(named()).ok, true, "without the held mint the map cannot know the account");
+  for (const links of [undefined, new SolanaWalletLinks([W, OTHER])]) {
+    const c = named();
+    (c.req as { heldMints?: readonly string[] }).heldMints = [M];
+    if (links) (c.req as { links?: SolanaWalletLinks }).links = links;
+    refusedBy("S11", run(c));
+  }
+  const bad = buyCase();
+  (bad.req as { heldMints?: unknown }).heldMints = ["not a key"];
+  refusedBy("S11", run(bad));
+});
+
 test("the paper's sell shape passes every check", () => {
   const v = run(sellCase());
   assert.equal(v.ok, true, v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | "));

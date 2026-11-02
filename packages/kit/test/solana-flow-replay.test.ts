@@ -14,6 +14,7 @@ import {
   SOLANA_SOL_MINT,
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
+  SolanaWalletLinks,
   runSolanaTrade,
   solanaAta,
   solanaDecodeMessage,
@@ -319,4 +320,19 @@ test("a reference without one E per leg is no reference", async () => {
   const ref = fx.references[SELL]!.answer!;
   const r = await runSolanaTrade(request(SELL), { ...deps(SELL), reference: async () => ({ expectedOut: BigInt(ref.expectedOut), expectedOuts: [BigInt(ref.expectedOuts[0]!)] }) });
   for (const l of r.legs) assert.match(l.refused ?? "", /no reference pool/);
+});
+
+test("one long-lived map across trades: a user with 204 wallets, the next three-wallet sell inside the 2 s budget, nothing derived again", async () => {
+  const extra = Array.from({ length: 200 }, (_, i) => base58.encode(Uint8Array.from({ length: 32 }, (_, j) => (i * 31 + j * 7 + 1) & 0xff)));
+  const req = { ...request(SELL), wallets: [...request(SELL).wallets, ...extra] };
+  const links = new SolanaWalletLinks();
+  const first = await runSolanaTrade(req, { ...deps(SELL), links });
+  assert.ok(first.legs.every((l) => l.refused === undefined));
+  assert.equal(links.holds(req.wallets), true, "the trade grew the caller's map by every wallet");
+  const t = performance.now();
+  const next = await runSolanaTrade(req, { ...deps(SELL), links });
+  const ms = performance.now() - t;
+  assert.ok(next.legs.every((l) => l.refused === undefined && l.dry?.state === "simulated"));
+  assert.ok(ms < 2_000, `the next trade took ${ms.toFixed(0)} ms`);
+  console.log(`204 wallets, long-lived map: the next sell ${ms.toFixed(0)} ms`);
 });

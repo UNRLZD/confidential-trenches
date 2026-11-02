@@ -35,7 +35,7 @@ import {
   type SolanaPumpSwapPool,
   type SolanaReference,
 } from "../src/trade/solana/pool.ts";
-import type { SolanaRpc } from "../src/trade/solana/send.ts";
+import { solanaPacedRpc, type SolanaRpc } from "../src/trade/solana/send.ts";
 
 type RawAcc = { owner: string; lamports: number; data: [string, string]; executable?: boolean } | null;
 type Answer = { context: { slot: number }; value: RawAcc[] };
@@ -291,6 +291,10 @@ test("a malformed answer is no answer: no reference rests on one provider's word
   const one = provider(fx.rpcs[0], good, s.lists);
   await assert.rejects(readSolanaReference([one, one], req(curveToken, s)), /same provider/);
   await assert.rejects(readSolanaReference([one, provider(fx.rpcs[0], good, s.lists)], req(curveToken, s)), /same provider/);
+  // one provider bare and wrapped, with no URL to compare: the same provider
+  const bare: SolanaRpc = async () => null;
+  await assert.rejects(readSolanaReference([bare, solanaPacedRpc(bare)], req(curveToken, s)), /same provider/);
+  await assert.rejects(readSolanaReference([solanaPacedRpc(bare), bare], req(curveToken, s)), /same provider/);
 });
 
 test("a liar who inflates one pool's depth on one provider cannot drop the honest pool", async () => {

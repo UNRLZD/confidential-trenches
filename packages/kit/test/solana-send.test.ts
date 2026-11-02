@@ -945,3 +945,93 @@ test("one queue a provider: another caller's reads through solanaPacedRpc and a 
   assert.deepEqual(at.slice(0, 10).map((c) => c.m), Array(10).fill("getMinimumBalanceForRentExemption"));
   assert.ok(at.length > 12);
 });
+
+test("one queue a provider, first in first out per method: while the status budget is spent, another method's call goes at once", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const at: { t: number; m: string }[] = [];
+  const rpc = Object.assign(async (m: string) => { at.push({ t: Date.now(), m }); return null; }, { url: "https://fifo.example" }) as SolanaRpc;
+  const paced = kit.solanaPacedRpc(rpc);
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  const statuses = Array.from({ length: L.perMethod + 1 }, () => paced("getSignatureStatuses", [["x"]]));
+  const read = paced("getMultipleAccounts", [["y"]]);
+  await flush();
+  assert.equal(at.filter((c) => c.m === "getSignatureStatuses").length, L.perMethod, "the status budget is spent, its next call waits for the window");
+  assert.deepEqual(at.filter((c) => c.m === "getMultipleAccounts").map((c) => c.t), [0], "the other method starts at once");
+  for (let ms = 0; ms <= L.windowMs + 10; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([...statuses, read]);
+  assert.equal(at.length, L.perMethod + 2);
+});
+
+test("a set unlanded and not yet expired for 25 s on a keyless provider: the fill poll keeps to the method's sustained rate, never stalls, and no other read on the provider waits", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  a.height = 500; // under the txs' lastValidBlockHeight: undecided, no history read
+  const at: { t: number; m: string }[] = [];
+  const rpc = Object.assign(async (m: string, p: readonly unknown[]) => { at.push({ t: Date.now(), m }); return m === "getMultipleAccounts" ? { context: { slot: 1 }, value: [null] } : a.rpc(m, p); }, { url: "https://undecided.example" }) as SolanaRpc;
+  const paced = kit.solanaPacedRpc(rpc);
+  const h = sendSolanaSet([tx(130), tx(131), tx(132)], { paths: [path("rpc").path], providers: [rpc, b.rpc], deadlineMs: 25_000 });
+  // another caller reads the same provider once a second all along: each starts in the tick it asks
+  const waited: number[] = [];
+  for (let ms = 0; ms < 25_000; ms += 10) {
+    if (ms % 1_000 === 500) { const t0 = Date.now(); void paced("getMultipleAccounts", [["z"]]).then(() => waited.push(Date.now() - t0)); }
+    mock.timers.tick(10);
+    await flush();
+  }
+  await h.done;
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  assert.ok(waited.length >= 24 && waited.every((w) => w <= 10), `other reads waited ${waited.join(",")} ms`);
+  const st = at.filter((c) => c.m === "getSignatureStatuses").map((c) => c.t);
+  const gaps = st.slice(1).map((x, i) => x - st[i]!);
+  assert.ok(st.length >= 50 && Math.max(...gaps) <= 600, `${st.length} status reads, the longest gap between them ${Math.max(...gaps)} ms`);
+  for (const x of at) {
+    const win = at.filter((y) => y.t >= x.t && y.t < x.t + L.windowMs);
+    assert.ok(win.length <= L.total && win.filter((y) => y.m === x.m).length <= L.perMethod, `over the limit from ${x.t} ms`);
+  }
+});
+
+test("one URL, several limits: a providerRps 4 set beside a keyless wrapper and the RPC send path on the same URL stays at 4 a second", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const U = "https://one-url-many-limits.example";
+  const a = provider();
+  const b = provider();
+  a.height = 2_000;
+  const at: { t: number; m: string }[] = [];
+  const rpcA = Object.assign(async (m: string, p: readonly unknown[]) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); }, { url: U }) as SolanaRpc;
+  // another object for the same URL, as another caller holds it
+  const other = Object.assign(async (m: string, p: readonly unknown[]) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); }, { url: U }) as SolanaRpc;
+  const fakeFetch = (_url: string, init: RequestInit) => {
+    at.push({ t: Date.now(), m: "sendTransaction" });
+    const body = JSON.parse(String(init.body)) as { id: string; params: [string] };
+    const sig = base58.encode(base64.decode(body.params[0]).subarray(1, 65));
+    return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: sig }), { headers: { "content-type": "application/json" } }));
+  };
+  // the keyless wrapper is made first, so the keyless limit is named on the URL before the set names 4 a second
+  const wrapped = kit.solanaPacedRpc(other);
+  const rpcPath = solanaSendPaths({ rpcUrl: U, fetch: fakeFetch }).find((p) => p.name === "rpc")!;
+  const h = sendSolanaSet([tx(133), tx(134)], { paths: [rpcPath], providers: [rpcA, b.rpc], deadlineMs: 6_000, providerRps: [4, undefined] });
+  const reads = Array.from({ length: 12 }, () => wrapped("getMinimumBalanceForRentExemption", [165]).catch(() => null));
+  for (let ms = 0; ms < 6_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([h.done, ...reads]);
+  const ts = at.map((c) => c.t);
+  assert.ok(at.some((c) => c.m === "sendTransaction") && at.filter((c) => c.m === "getMinimumBalanceForRentExemption").length === 12, "every caller ran");
+  assert.ok(perSecond(ts) <= 4, `${perSecond(ts)} calls in one second on the URL`);
+});
+
+test("the dry run through a direct caller's bare providers is paced: 1 a second simulates a set of 3 one a second", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: number[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push(Date.now()); return a.rpc(m, p); };
+  const d = dryRunSolanaSet([tx(135), tx(136), tx(137)], { paths: [path("rpc").path], providers: [rpc, b.rpc], providerRps: [1, 1] });
+  for (let ms = 0; ms < 4_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  const r = await d;
+  assert.equal(r.txs.length, 3);
+  assert.equal(at.length, 3);
+  assert.ok(perSecond(at) <= 1, `${perSecond(at)} simulations in one second`);
+});

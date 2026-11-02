@@ -115,38 +115,91 @@ export type SolanaQuoteRequest = {
   // The trade's SolanaWalletLinks, built while the build and reads are in flight; S11 uses it only when it holds every
   // wallet in otherWallets, and otherwise builds its own.
   links?: SolanaWalletLinks;
+  // Mints the user's wallets hold, when the caller names them: S11 also refuses the associated token account of any
+  // other wallet for these, though the tx names no such mint.
+  heldMints?: readonly string[];
 };
 
-// The accounts of the user's wallets a tx could name, by address, built once per trade and grown with each leg's keys:
+// The accounts of the user's wallets a tx could name, by address, kept across trades or built for one, and grown by new
+// wallets and each leg's keys:
 // each wallet, its pump and PumpSwap volume accounts, the PumpSwap cashback account (the WSOL account of its PumpSwap
 // volume account, which PumpSwap adds on a cashback coin: pump-swap-sdk 2.2.0 offlinePumpAmm.ts, buy 797-808, sell
 // 1055-1070), and its associated token account, under Token and Token-2022, for WSOL, the token, and every key any of
 // the trade's txs names. Creator vaults are not in it: no wallet of the user can create a coin yet.
 export class SolanaWalletLinks {
-  readonly wallets: ReadonlySet<string>;
+  readonly #wallets = new Set<string>();
   readonly #owner = new Map<string, string>();
+  // Keys whose associated token accounts are derived for every wallet in #wallets.
   readonly #added = new Set<string>();
-  constructor(wallets: readonly string[]) {
-    this.wallets = new Set(wallets);
-    for (const w of this.wallets) {
-      const sva = solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM);
-      for (const k of [w, solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), sva, solanaAta(sva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)]) this.#set(k, w);
-    }
+  // grow() calls run one after another, so two never derive the same key, and one awaited grow means every earlier one
+  // is done.
+  #chain: Promise<void> = Promise.resolve();
+  constructor(wallets: Iterable<string> = []) {
+    this.addWallets(wallets);
     this.add([SOLANA_SOL_MINT]);
+  }
+  /** The wallets whose accounts are all in the map: a wallet joins only once its every account is derived. */
+  get wallets(): ReadonlySet<string> {
+    return this.#wallets;
+  }
+  /** True when every one of these wallets is in the map. */
+  holds(wallets: Iterable<string>): boolean {
+    for (const w of wallets) if (!this.#wallets.has(w)) return false;
+    return true;
   }
   #set(k: string, w: string): void {
     if (!this.#owner.has(k)) this.#owner.set(k, w);
   }
-  /** Each wallet's associated token accounts for these keys, once per key. */
-  add(keys: Iterable<string>): void {
-    for (const k of keys) {
-      if (this.#added.has(k)) continue;
-      this.#added.add(k);
-      for (const w of this.wallets) {
-        this.#set(solanaAta(w, k, SOLANA_TOKEN_PROGRAM), w);
-        this.#set(solanaAta(w, k, SOLANA_TOKEN_2022_PROGRAM), w);
-      }
+  // Generators of the work, one derivation a step, so add() runs them whole and grow() in slices. Each marks its wallet
+  // or key done only after its last pair. Sets iterate live: a key added while a wallet is derived is reached by it, and
+  // a wallet that joins while a key is derived is reached by that key.
+  *#walletWork(w: string): Generator<void> {
+    if (this.#wallets.has(w)) return;
+    const sva = solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM);
+    for (const k of [w, solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), sva, solanaAta(sva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)]) this.#set(k, w);
+    yield;
+    for (const k of this.#added) {
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_PROGRAM), w);
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_2022_PROGRAM), w);
+      yield;
     }
+    this.#wallets.add(w);
+  }
+  *#keyWork(k: string): Generator<void> {
+    if (this.#added.has(k)) return;
+    for (const w of this.#wallets) {
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_PROGRAM), w);
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_2022_PROGRAM), w);
+      yield;
+    }
+    this.#added.add(k);
+  }
+  /** Each new wallet's accounts, and its associated token accounts for every key already in the map. */
+  addWallets(wallets: Iterable<string>): void {
+    for (const w of wallets) for (const _ of this.#walletWork(w));
+  }
+  /** Each wallet's associated token accounts for these keys, once per key. Every key counts, a program's too: the
+   * rule is about what a tx names, and an address derived from another wallet links the two whatever it holds. */
+  add(keys: Iterable<string>): void {
+    for (const k of keys) for (const _ of this.#keyWork(k));
+  }
+  /** addWallets then add, in slices of about `sliceMs` that yield to the event loop, so the work overlaps the reads
+   * and the build in flight. */
+  grow(wallets: Iterable<string>, keys: Iterable<string>, sliceMs = 4): Promise<void> {
+    const work = [...[...wallets].map((w) => () => this.#walletWork(w)), ...[...keys].map((k) => () => this.#keyWork(k))];
+    const run = async (): Promise<void> => {
+      let t = performance.now();
+      for (const job of work) {
+        for (const _ of job()) {
+          if (performance.now() - t < sliceMs) continue;
+          await new Promise<void>((r) => setTimeout(r, 0));
+          t = performance.now();
+        }
+      }
+    };
+    const done = this.#chain.then(run);
+    this.#chain = done.catch(() => undefined);
+    return done;
   }
   /** The wallet whose account this is, if any. */
   ownerOf(key: string): string | undefined {
@@ -216,6 +269,14 @@ type Ctx = {
   jupAt: number;
 };
 
+const isAddress = (v: unknown): v is string => {
+  if (typeof v !== "string" || v.length < 32 || v.length > 44) return false;
+  try {
+    return base58.decode(v).length === 32;
+  } catch {
+    return false;
+  }
+};
 const pass = (id: SolanaQuoteCheckId, detail: string): SolanaQuoteResult => ({ id, ok: true, detail });
 const fail = (id: SolanaQuoteCheckId, detail: string): SolanaQuoteResult => ({ id, ok: false, detail });
 const u16 = (d: Uint8Array, o: number): number => new DataView(d.buffer, d.byteOffset, d.byteLength).getUint16(o, true);
@@ -577,8 +638,10 @@ function s11(c: Ctx): SolanaQuoteResult {
   const others = c.req.otherWallets;
   if (!Array.isArray(others)) return fail("S11", "no list of the user's other wallets");
   const given = c.req.links;
-  const links = given instanceof SolanaWalletLinks && others.every((o) => given.wallets.has(o)) ? given : new SolanaWalletLinks(others);
-  links.add([c.req.token, ...c.keys]);
+  const held = c.req.heldMints ?? [];
+  if (!Array.isArray(held) || !held.every(isAddress)) return fail("S11", "the held mints must be addresses");
+  const links = given instanceof SolanaWalletLinks && given.holds(others) ? given : new SolanaWalletLinks(others);
+  links.add([c.req.token, ...held, ...c.keys]);
   const otherSet = new Set(others);
   const linked: string[] = [];
   for (const k of new Set(c.keys)) {
