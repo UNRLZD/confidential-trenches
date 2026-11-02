@@ -15,6 +15,8 @@ function W({ id }: { id: WordId }) {
 }
 
 const LABEL: Record<VerifyCheckId, WordId> = { keys: "keys", code: "codeHash", asset: "asset", registration: "registration", tokenCode: "tokenCode", balance: "balance" };
+/** An RPC's name is the URL it reads (the pair rule's); the screen shows its host, one to a line. */
+const host = (name: string) => name.replace(/^https?:\/\//, "");
 const Dot = ({ s }: { s: VerifyStatus | null }) => <span className={`vdot ${s ?? "load"}`} data-dot={s ?? "loading"} />;
 
 function Check({ c }: { c: VerifyCheck }) {
@@ -31,7 +33,7 @@ function Check({ c }: { c: VerifyCheck }) {
         <dl className="vsub">
           {rest.map((x, i) => (
             <div key={i}>
-              <dt><W id={x!.k} />{x!.rpc && <span className="rpc num">{x!.rpc}</span>}</dt>
+              <dt><W id={x!.k} />{x!.rpc && <span className="rpc num">{host(x!.rpc)}</span>}</dt>
               <dd className="num">{x!.v}</dd>
             </div>
           ))}
@@ -79,7 +81,7 @@ export function Verify({ view, onClose, opened = [] }: { view: VerifyView; onClo
             </div>
             <div>
               <dt><W id="rpcs" /></dt>
-              <dd className="num">{read ? read.rpcs.join(", ") : <span className="sk" />}</dd>
+              <dd className="num">{read ? read.rpcs.map((r) => <span key={r} className="rpcline">{host(r)}</span>) : <span className="sk" />}</dd>
             </div>
           </dl>
         </div>

@@ -46,6 +46,7 @@
 .vsub dt, .vmeta dt { font: 12px var(--font-ui); color: var(--text-3); display: flex; align-items: center; gap: 6px; }
 .vsub dd, .vmeta dd { margin: 0 0 0 auto; font: 12px var(--font-num); color: var(--text-1); white-space: nowrap; }
 .vsub .rpc { font-size: 11px; color: var(--text-3); }
+.vmeta .rpcline { display: block; text-align: right; }
 
 .vmeta { margin: 6px 0 0; padding: 0 2px; display: flex; flex-direction: column; gap: 6px; }
 .vfy .t3 { color: var(--text-3); }
