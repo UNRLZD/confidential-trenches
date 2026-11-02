@@ -45,8 +45,21 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      recipient, fee cap, deadline in ms, refund precommitment, salt), bound by the context as in the source
      (keccak256(abi.encode(withdrawal, SCOPE)) mod p). The relayer names a fee of at most the cap and at most
      MAX_RELAY_FEE_BPS of withdrawnValue; it comes out of withdrawnValue. withdrawnValue is not 0 (Entrypoint.sol).
+     Whoever submits picks the fee, up to the cap, and it goes to the bound fee recipient: a proof the recipient
+     submits itself binds a fee cap of 0.
   7. A reentrancy guard in transient storage on deposit and withdraw, in place of the Entrypoint's.
   8. The spend checks are one internal function, _spendChecked, which every method that spends a note calls.
+  9. A precommitment at or above the field size is refused, as the NEAR vault does: Poseidon reduces it, so X + p
+     would be a second note with X's nullifier.
+ 10. The constructor refuses to deploy unless PoseidonT3 and PoseidonT4 hold the code read on chain and the
+     withdrawal verifier holds this build's code (both hashes in the source), so a pool on a chain without them
+     never takes a deposit.
+
+Open items:
+
+  - A method that spends a note for another purpose (a buy) must require data.length to be exactly its struct's
+    size (RelayData is 192 bytes) or a leading kind word: abi.decode accepts trailing bytes, so without it one
+    request's bytes could decode as the other's. The context binds the whole data, so withdraw alone is safe.
 
 Third-party code:
 
