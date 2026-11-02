@@ -444,6 +444,15 @@ test("M28: a page that is not UTF-8, served by both, is refused as not UTF-8", a
   });
 });
 
+test("a page with a leading byte-order mark, served by both, is refused: the BOM is kept, never dropped", async () => {
+  const answer: NonNullable<FakeOpts["answer"]> = (p, a) => (p.method_name === "labels" ? { ...a, result: { ...a.result, result: [0xef, 0xbb, 0xbf, ...a.result.result] } } : a);
+  await assert.rejects(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer }, { answer }), cursor: vaultSyncStart(VAULT) }), (e: unknown) => {
+    assert.ok(e instanceof VaultSyncStopped);
+    assert.equal(e.code, "row");
+    return true;
+  });
+});
+
 test("H: an abort ends a read one RPC never answers, and the RPCs get the signal", async () => {
   const seen: unknown[] = [];
   const hang: Rpc = {
