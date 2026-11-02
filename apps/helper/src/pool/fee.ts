@@ -59,3 +59,10 @@ export function solanaPoolFee(raw: string, what: string): bigint {
 
 /** The start of the epoch holding `ms`. */
 export const epochStartOf = (ms: number): number => ms - (ms % POOL_EPOCH_MS);
+
+/**
+ * M356 (1): the helper refuses a release whose deadline is under now plus this margin, longer than a blockhash lives
+ * (about 60 to 90 s), so a send it accepts can still land. The kit's SOLANA_POOL_SEND_MARGIN_MS (card
+ * notes-per-pool-sol fold 3, pool-buy.ts) replaces this definition when that card lands on main: one value, the kit's.
+ */
+export const SOLANA_POOL_SEND_MARGIN_MS = 90_000n;

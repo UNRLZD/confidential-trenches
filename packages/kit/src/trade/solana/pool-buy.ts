@@ -333,6 +333,20 @@ const createIdempotent = (wallet: string, mint: string, tp: string): SolanaApiIn
 const transfer = (from: string, to: string, lamports: bigint): SolanaApiInstruction =>
   ix(SOLANA_SYSTEM_PROGRAM, [acc(from, true, true), acc(to, false, true)], [...u32le(2), ...u64le(lamports)]);
 
+/**
+ * Every program a pool buy's steps invoke as a tag 3 inner instruction (solanaPoolBuySteps, solanaPoolVenueBuy): the two
+ * venues, the token programs, the ATA program and the system program. The one list the builder holds its steps to and
+ * the helper carries (M356 (1)): the pool program itself stays open to any venue and any relayer.
+ */
+export const SOLANA_POOL_STEP_PROGRAMS: readonly string[] = Object.freeze([
+  SOLANA_PUMP_PROGRAM,
+  SOLANA_PUMP_AMM_PROGRAM,
+  SOLANA_TOKEN_PROGRAM,
+  SOLANA_TOKEN_2022_PROGRAM,
+  SOLANA_ATA_PROGRAM,
+  SOLANA_SYSTEM_PROGRAM,
+]);
+
 /** What W does with its chunk, in order: its token account, the wrap (PumpSwap), the buy, the unwrap (PumpSwap). */
 export function solanaPoolBuySteps(venue: SolanaPoolBuyVenue, wallet: string, spend: bigint, minOut: bigint): SolanaApiInstruction[] {
   const buy = solanaPoolVenueBuy(venue, wallet, spend, minOut);
@@ -610,6 +624,7 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   if ((req.tip > 0n) !== (tipAccount !== null)) throw new Error("a tip account goes with a tip above 0, and only then");
   if (tipAccount !== null && !SOLANA_JITO_TIP_ACCOUNTS.includes(tipAccount)) throw new Error("the tip account is not a Jito tip account");
   const steps = solanaPoolBuySteps(venue, req.wallet, req.spend, req.minOut);
+  if (steps.some((x) => !SOLANA_POOL_STEP_PROGRAMS.includes(x.program))) throw new Error("a step invokes a program outside SOLANA_POOL_STEP_PROGRAMS");
   const outer: SolanaApiAccount[] = [...solanaPoolReleaseAccounts(cfg, req.wallet, req.feePayer, release, stateSize), ...(tipAccount ? [acc(tipAccount, false, true)] : [])];
   const indexOf = (a: SolanaApiAccount): number => {
     let i = outer.findIndex((o) => o.key === a.key);

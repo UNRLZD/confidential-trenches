@@ -1,0 +1,236 @@
+// node --test apps/helper/src/pool/solana-attacks.test.ts: the review of a514150 (M356 (1), (2), item 9) and its
+// surviving mutants S8, S13 and S14. Each case is a release W signed with every other field good: only the named field
+// is off, and the refusal comes before any read unless the case says the read is the check (a lookup table). Test keys
+// only: ed25519 of sha256("helper-pool-senders/attack/<name>").
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { test } from "node:test";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import {
+  SOLANA_ALT_PROGRAM,
+  SOLANA_COMPUTE_BUDGET_PROGRAM,
+  SOLANA_POOL_STEP_PROGRAMS,
+  SOLANA_SYSTEM_PROGRAM,
+  solanaCompileV0,
+  solanaDecodeLookupTable,
+  solanaEncodePoolRelease,
+  solanaEncodePoolTag3,
+  solanaPoolAccount,
+  solanaPoolReleaseAccounts,
+  type SolanaApiAccount,
+  type SolanaApiInstruction,
+  type SolanaPoolRelease,
+  type SolanaRpc,
+} from "@blindfill/kit";
+import { base58 } from "../bind/checks.ts";
+import { POOL_EPOCH_MS } from "./fee.ts";
+import { checkSolanaPoolTx, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
+
+const key = (n: string) => {
+  const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/attack/${n}`).digest());
+  const pub = ed25519.getPublicKey(seed);
+  return { seed, address: base58(pub), secret: base58(Uint8Array.from([...seed, ...pub])) };
+};
+const FP = key("FP");
+const W = key("W");
+const PROGRAM = key("PROGRAM").address;
+const POOL = solanaPoolAccount(PROGRAM);
+const ATTACKER = key("ATTACKER_PROGRAM").address; // a program W deployed: passes simulation, fails on chain
+const TO = key("TO").address;
+const BH = key("BH").address;
+const TABLE = key("TABLE").address;
+const FEE = 1_100_000n;
+const NOW = 1_800_000_000_000;
+const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE, nowMs: NOW };
+const u32 = (n: number) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
+const u64 = (n: bigint) => Array.from({ length: 8 }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn));
+const cuLimit = (n: number): SolanaApiInstruction => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([2, ...u32(n)]) });
+const cuPrice = (n: bigint): SolanaApiInstruction => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([3, ...u64(n)]) });
+const f32 = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
+const rel = (o: Partial<SolanaPoolRelease> = {}): SolanaPoolRelease => ({
+  proof: new Uint8Array(256).fill(7), newCommitmentHash: f32(1), existingNullifierHash: f32(2), withdrawnValue: 50_000_000n,
+  stateRootIndex: 5, stateTreeDepth: 3, labelRootIndex: 5, labelTreeDepth: 3, relayFee: FEE, relayFeeCap: FEE, tipCap: 10_000n,
+  deadlineMs: BigInt(NOW + 270_000), salt: new Uint8Array(16).fill(9), ...o,
+});
+/** A lookup table's account data: the 56-byte meta (type 1, never deactivated unless `deactivated`), then the keys. */
+const tableData = (keys: string[], deactivated = false): Uint8Array => {
+  const meta = new Uint8Array(56);
+  const dv = new DataView(meta.buffer);
+  dv.setUint32(0, 1, true);
+  dv.setBigUint64(4, deactivated ? 5n : (1n << 64n) - 1n, true);
+  return Uint8Array.from([...meta, ...keys.flatMap((k) => [...base58decodeKey(k)])]);
+};
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58decodeKey(s: string): Uint8Array {
+  let n = 0n;
+  for (const c of s) n = n * 58n + BigInt(B58.indexOf(c));
+  const out = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--, n >>= 8n) out[i] = Number(n & 0xffn);
+  return out;
+}
+
+type Opt = {
+  r?: Partial<SolanaPoolRelease>;
+  /** tag 3: the inner instruction's program key (account 8) */
+  inner?: string;
+  pre?: SolanaApiInstruction[];
+  /** keys loaded from TABLE instead of static */
+  table?: string[];
+  /** replace the pool instruction's accounts before compiling */
+  accounts?: (a: SolanaApiAccount[]) => SolanaApiAccount[];
+  /** the tag 3 inner instruction's account and program indexes */
+  innerIx?: { program: number; accounts: number[] };
+  /** edit the message bytes before W signs */
+  edit?: (m: Uint8Array) => void;
+};
+function wire(o: Opt = {}): Uint8Array {
+  const r = rel(o.r);
+  let accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, r, 6);
+  let data: Uint8Array;
+  if (o.inner === undefined && o.innerIx === undefined) data = solanaEncodePoolRelease(r);
+  else {
+    accounts.push({ key: o.inner ?? SOLANA_SYSTEM_PROGRAM, signer: false, writable: false }, { key: TO, signer: false, writable: true });
+    const transfer = Uint8Array.from([2, 0, 0, 0, ...u64(1_000n)]);
+    data = solanaEncodePoolTag3(r, false, 0n, [{ ...(o.innerIx ?? { program: 8, accounts: [1, 9] }), data: transfer }]);
+  }
+  if (o.accounts) accounts = o.accounts(accounts);
+  const tables = o.table ? [{ address: TABLE, table: solanaDecodeLookupTable(tableData(o.table)) }] : [];
+  const { message } = solanaCompileV0(FP.address, [...(o.pre ?? [cuLimit(400_000), cuPrice(1_000n)]), { program: PROGRAM, accounts, data }], BH, tables, [FP.address, W.address]);
+  o.edit?.(message);
+  return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, W.seed), ...message]);
+}
+const verdict = (w: Uint8Array, nowMs = NOW) => {
+  const c = checkSolanaPoolTx(w, { ...CFG, nowMs });
+  return c.ok ? "ok" : c.code;
+};
+
+type Calls = string[];
+const stub = (calls: Calls, tables: Record<string, Uint8Array | null> = {}): SolanaRpc =>
+  Object.assign(
+    async (m: string, p: readonly unknown[]) => {
+      calls.push(m);
+      if (m === "simulateTransaction") return { context: { slot: 1 }, value: { err: null } };
+      if (m === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: BH, lastValidBlockHeight: 1000 } };
+      if (m === "getAccountInfo") {
+        const d = tables[p[0] as string];
+        return { context: { slot: 1 }, value: d ? { owner: SOLANA_ALT_PROGRAM, data: [Buffer.from(d).toString("base64"), "base64"] } : null };
+      }
+      throw new Error(m);
+    },
+    { url: `https://stub.invalid/${Math.random()}` },
+  );
+function sender(o: { a?: Calls; tablesA?: Record<string, Uint8Array | null>; tablesB?: Record<string, Uint8Array | null>; sent?: Uint8Array[]; end?: string; now?: () => number } = {}) {
+  return solanaPoolSender(
+    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: FEE },
+    {
+      providers: [stub(o.a ?? [], o.tablesA), stub([], o.tablesB ?? o.tablesA)],
+      now: o.now ?? (() => NOW),
+      send: (set) => {
+        o.sent?.push(set[0]!.wire);
+        const sig = base58(set[0]!.wire.subarray(1, 65));
+        return { signatures: [sig], done: Promise.resolve({ txs: [{ signature: sig, state: (o.end ?? "filled") as "filled", sends: [] }] }), stop() {} };
+      },
+    },
+  );
+}
+const body = (w: Uint8Array) => ({ pool: POOL, tx: Buffer.from(w).toString("base64") });
+const code = (a: PoolSendAnswer) => ("error" in a.body ? a.body.error.code : "ok");
+
+test("A1: a tag 3 inner instruction invoking a program off the kit's list is refused before any read (inner_program)", async () => {
+  assert.equal(verdict(wire({ inner: ATTACKER })), "inner_program");
+  for (const p of SOLANA_POOL_STEP_PROGRAMS) assert.equal(verdict(wire({ inner: p })), "ok", p);
+  const calls: Calls = [];
+  assert.equal(code(await sender({ a: calls }).carry(body(wire({ inner: ATTACKER })))), "inner_program");
+  assert.deepEqual(calls, []);
+});
+
+test("A1, loaded: an inner program from a lookup table is checked once the table is read on both providers", async () => {
+  const off = [ATTACKER, TO];
+  const on = [SOLANA_SYSTEM_PROGRAM, TO];
+  // a program invoked only inside tag 3 is an account of the pool instruction, so the compiler may load it
+  const wOff = wire({ inner: ATTACKER, table: off });
+  const c = checkSolanaPoolTx(wOff, CFG);
+  assert.ok(c.ok && c.tx.message.lookups.length === 1, "loaded from the table, so the pure check passes it on");
+  const calls: Calls = [];
+  assert.equal(code(await sender({ a: calls, tablesA: { [TABLE]: tableData(off) } }).carry(body(wOff))), "inner_program");
+  assert.ok(!calls.includes("simulateTransaction"), "refused before the simulation");
+  assert.equal(code(await sender({ tablesA: { [TABLE]: tableData(on) } }).carry(body(wire({ inner: SOLANA_SYSTEM_PROGRAM, table: on })))), "ok");
+});
+
+test("item 9: a pool account loaded from a lookup table is checked at account 0 (not_pool), and a bad table is refused (bad_table)", async () => {
+  const other = solanaPoolAccount(key("OTHER_PROGRAM").address);
+  const swap = (a: SolanaApiAccount[]) => a.map((x, i) => (i === 0 ? { ...x, key: other } : x));
+  const w = wire({ table: [other], accounts: swap });
+  assert.equal(verdict(w), "ok", "a loaded pool needs its table");
+  assert.equal(code(await sender({ tablesA: { [TABLE]: tableData([other]) } }).carry(body(w))), "not_pool");
+  // our own pool, loaded: carried
+  assert.equal(code(await sender({ tablesA: { [TABLE]: tableData([POOL]) } }).carry(body(wire({ table: [POOL] })))), "ok");
+  // the providers disagree, the table is deactivated, or it is missing on one
+  const w2 = wire({ table: [POOL] });
+  assert.equal(code(await sender({ tablesA: { [TABLE]: tableData([POOL]) }, tablesB: { [TABLE]: tableData([other]) } }).carry(body(w2))), "bad_table");
+  assert.equal(code(await sender({ tablesA: { [TABLE]: tableData([POOL], true) } }).carry(body(w2))), "bad_table");
+  assert.equal(code(await sender({ tablesA: { [TABLE]: tableData([POOL]) }, tablesB: {} }).carry(body(w2))), "bad_table");
+});
+
+test("A2: a deadline past, or under now plus 90 s, is refused before any read (deadline_near)", async () => {
+  assert.equal(verdict(wire({ r: { deadlineMs: 1n } })), "deadline_near");
+  assert.equal(verdict(wire({ r: { deadlineMs: BigInt(NOW + 1_000) } })), "deadline_near");
+  assert.equal(verdict(wire({ r: { deadlineMs: BigInt(NOW + 89_999) } })), "deadline_near");
+  assert.equal(verdict(wire({ r: { deadlineMs: BigInt(NOW + 90_000) } })), "ok");
+  const calls: Calls = [];
+  assert.equal(code(await sender({ a: calls }).carry(body(wire({ r: { deadlineMs: 1n } })))), "deadline_near");
+  assert.deepEqual(calls, []);
+});
+
+test("A3: a release that failed on chain is sent once per epoch, not again and again (failed_this_epoch)", async () => {
+  const sent: Uint8Array[] = [];
+  let now = NOW;
+  const s = sender({ sent, end: "failed", now: () => now });
+  const tx = wire({ inner: SOLANA_SYSTEM_PROGRAM });
+  assert.equal(code(await s.carry(body(tx))), "ok");
+  await new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 24; i++) assert.equal(code(await s.carry(body(tx))), "failed_this_epoch");
+  assert.equal(sent.length, 1, "one paid failure for the note in this epoch");
+  now += POOL_EPOCH_MS;
+  assert.equal(code(await s.carry(body(tx))), "ok");
+  assert.equal(sent.length, 2, "the next epoch may try once more");
+});
+
+test("A4: 50 concurrent variants of one nullifier give one simulation and one send", async () => {
+  const sent: Uint8Array[] = [];
+  const calls: Calls = [];
+  const s = sender({ a: calls, sent });
+  const variants = Array.from({ length: 50 }, (_, i) => body(wire({ pre: [cuLimit(400_000), cuPrice(BigInt(i + 1))] })));
+  await Promise.all(variants.map((b) => s.carry(b)));
+  assert.equal(sent.length, 1);
+  assert.equal(calls.filter((c) => c === "simulateTransaction").length, 1);
+});
+
+test("A6: a compute unit price without a limit is refused before any read (no_cu_limit)", () => {
+  assert.equal(verdict(wire({ pre: [cuPrice(370_000n)] })), "no_cu_limit");
+  assert.equal(verdict(wire({ pre: [cuLimit(200_000), cuPrice(370_000n)] })), "ok");
+  assert.equal(verdict(wire({ pre: [cuLimit(200_000)] })), "ok", "a limit alone prices nothing");
+  assert.equal(verdict(wire({ pre: [] })), "ok");
+});
+
+test("S8: W signed as a read-only signer is refused (bad_shape), W's signature valid", () => {
+  // the header's second byte counts read-only signers: 1 makes W (the last signer) read-only
+  const w = wire({ edit: (m) => void (m[2] = 1) });
+  assert.equal(verdict(w), "bad_shape");
+  assert.equal(verdict(wire({ edit: () => {} })), "ok");
+});
+
+test("S13: a tag 3 inner index past the pool instruction's accounts is refused (not_pool), W's signature valid", () => {
+  assert.equal(verdict(wire({ innerIx: { program: 8, accounts: [1, 10] } })), "not_pool");
+  assert.equal(verdict(wire({ innerIx: { program: 10, accounts: [1, 9] } })), "not_pool");
+  assert.equal(verdict(wire({ innerIx: { program: 8, accounts: [1, 9] } })), "ok");
+});
+
+test("S14: the pool instruction's account 1 not W is refused (bad_shape), W's signature valid", () => {
+  // W still signs (a signer of the message, named at account 10), but the pool's account 1 is another key
+  const w = wire({
+    inner: SOLANA_SYSTEM_PROGRAM,
+    accounts: (a) => [...a.map((x, i) => (i === 1 ? { key: key("NOT_W").address, signer: false, writable: true } : x)), { key: W.address, signer: true, writable: true }],
+  });
+  assert.equal(verdict(w), "bad_shape");
+});

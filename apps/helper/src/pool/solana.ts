@@ -20,21 +20,38 @@
 //   fee_off             relay_fee is not the fee this helper publishes for the pool;
 //   fee_below_cost      relay_fee under the fee payer's cost of a release (SOLANA_RELEASE_COST, 1,026,000) plus the
 //                       priority fee W set; a release whose change opens a page costs 731,520 more and is carried;
+//   no_cu_limit         a compute unit price without a compute unit limit (the runtime's default limit is not ours
+//                       to guess, so the priority fee would be unbounded by what the helper priced);
+//   deadline_near       the release's deadline is under now plus SOLANA_POOL_SEND_MARGIN_MS (M356 (1)): a send
+//                       that cannot land before it would only be a paid failure;
+//   inner_program       a tag 3 inner instruction invokes a program off the kit's SOLANA_POOL_STEP_PROGRAMS (helper
+//                       policy, M356 (1): a program W chose could fail on chain after passing the simulation);
+//   bad_table           a lookup table the message loads is not an active table both providers read the same at
+//                       every index used (read only when the message has lookups; at most SOLANA_POOL_LOOKUPS_MAX);
+//   failed_this_epoch   this nullifier's send already failed on chain in this epoch (M356 (1): at most one paid
+//                       failure per nullifier per epoch);
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
 //   upstream (503)      the simulation or the blockhash read could not be made.
 // Answer: 200 { signature } (the fee payer's, the transaction id). The device reads the fill itself.
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
+  SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_MAX_TX_BYTES,
+  SOLANA_POOL_STEP_PROGRAMS,
   SOLANA_POOL_TAG3_MAX_INNER,
   SOLANA_POOL_TAG_RELEASE,
   SOLANA_POOL_TAG_RELEASE_AND_BUY,
   sendSolanaSet,
+  solanaDecodeLookupTable,
   solanaDecodePoolRelease,
   solanaDecodeTransaction,
   solanaJsonRpc,
   solanaPoolAccount,
+  solanaResolveKeys,
+  solanaTableIsActive,
+  type SolanaLookupTable,
+  type SolanaMessage,
   type SolanaRpc,
   type SolanaSendPath,
   type SolanaSignedTx,
@@ -42,7 +59,7 @@ import {
 import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
 import { oncePerNullifier } from "./once.ts";
-import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, SOLANA_RELEASE_COST, solanaPoolFee, type PoolFeeAnswer } from "./fee.ts";
+import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, SOLANA_RELEASE_COST, solanaPoolFee, type PoolFeeAnswer } from "./fee.ts";
 
 /** POST /v1/pool/solana/send's body limit: a 1,232-byte transaction in base64 and the JSON around it. */
 export const POOL_SOLANA_BODY_MAX = 4_096;
@@ -51,8 +68,10 @@ const PROOF_RAW = 256;
 const PROOF_COMPRESSED = 128;
 const FIELDS = RAW_LEN - 1 - PROOF_RAW; // 130: newCommitmentHash to salt
 const RELAY_FEE_AT = 32 + 32 + 8 + 4 + 1 + 4 + 1; // in the fields run
-const DEFAULT_CU_PER_IX = 200_000n; // the runtime's limit per instruction when no SetComputeUnitLimit is given
 const MICRO = 1_000_000n;
+const DEADLINE_AT = RELAY_FEE_AT + 8 + 8 + 8; // after relay_fee, relay_fee_cap and tip_cap
+/** The most lookup tables one carried message may load [design: the kit's buy loads one; four bounds the reads]. */
+export const SOLANA_POOL_LOOKUPS_MAX = 4;
 
 export type PoolSendCode =
   | "bad_shape"
@@ -62,18 +81,23 @@ export type PoolSendCode =
   | "fee_payer_named"
   | "fee_off"
   | "fee_below_cost"
+  | "no_cu_limit"
+  | "deadline_near"
+  | "inner_program"
+  | "bad_table"
+  | "failed_this_epoch"
   | "simulation_failed"
   | "upstream";
 export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } } };
 
 /** What a pool instruction carries that the checks read: its tag, its relay fee and the accounts tag 3's inner instructions name. */
-export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; nullifier: string; innerAccounts: number[]; innerPrograms: number[] };
+export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; innerAccounts: number[]; innerPrograms: number[] };
 
 /** Tag 2's or tag 3's data, read; throws on any layout TAG3.md and release.rs do not allow. */
 export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   if (d[0] === SOLANA_POOL_TAG_RELEASE) {
     const r = solanaDecodePoolRelease(d); // exactly 387 bytes
-    return { tag: 2, relayFee: r.relayFee, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), innerAccounts: [], innerPrograms: [] };
+    return { tag: 2, relayFee: r.relayFee, deadlineMs: r.deadlineMs, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), innerAccounts: [], innerPrograms: [] };
   }
   if (d[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || d.length < 2) throw new Error("not tag 2 or tag 3");
   const flags = d[1]!;
@@ -102,18 +126,29 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
     if (at > d.length) throw new Error("tag 3 inner data truncated");
   }
   if (at !== d.length) throw new Error("tag 3 bytes after the last inner instruction");
-  return { tag: 3, relayFee, nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), innerAccounts, innerPrograms };
+  return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), innerAccounts, innerPrograms };
 }
 
 /** The priority fee W set, lamports: price (micro-lamports per CU) x limit, rounded up, as the runtime charges it. */
 const priorityFee = (price: bigint, limit: bigint): bigint => (price * limit + MICRO - 1n) / MICRO;
 
 /** A transaction that passed every check: its bytes, its message, W, its relay fee and its nullifier hash (64 hex). */
-export type SolanaPoolChecked = { wire: Uint8Array; messageBytes: Uint8Array; w: string; relayFee: bigint; nullifier: string };
+export type SolanaPoolChecked = {
+  wire: Uint8Array;
+  messageBytes: Uint8Array;
+  w: string;
+  relayFee: bigint;
+  deadlineMs: bigint;
+  nullifier: string;
+  /** The message, and the message indexes a loaded key must resolve to: the pool (account 0) and every inner program. */
+  message: SolanaMessage;
+  poolIndex: number;
+  innerProgramIndexes: number[];
+};
 export type SolanaPoolCheck = { ok: true; tx: SolanaPoolChecked } | { ok: false; status: number; code: PoolSendCode; detail?: string };
 
-/** Every check before the simulation, on the bytes as received. Pure: no read, no clock. */
-export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool: string; feePayer: string; fee: bigint }): SolanaPoolCheck {
+/** Every check before any read, on the bytes as received and the caller's clock. Pure: no read. */
+export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool: string; feePayer: string; fee: bigint; nowMs: number }): SolanaPoolCheck {
   const no = (code: PoolSendCode, detail?: string, status = 422): SolanaPoolCheck => ({ ok: false, status, code, ...(detail ? { detail } : {}) });
   if (wire.length > SOLANA_MAX_TX_BYTES) return no("bad_shape", "over 1,232 bytes", 400);
   let tx;
@@ -127,6 +162,7 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   if (m.staticKeys[0] !== cfg.feePayer) return no("bad_shape", "the payer is not this helper's fee payer", 400);
   // wire: compact(2) = 1 byte, then slot 0 (the fee payer's) and slot 1 (W's)
   if (wire.subarray(1, 65).some((b) => b !== 0)) return no("bad_shape", "the fee payer's slot is not empty", 400);
+  if (m.lookups.length > SOLANA_POOL_LOOKUPS_MAX) return no("bad_shape", `more than ${SOLANA_POOL_LOOKUPS_MAX} lookup tables`, 400);
   const w = m.staticKeys[1]!;
   let good = false;
   try {
@@ -149,6 +185,7 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
     else return no("extra_instruction", "a compute budget instruction other than one limit and one price");
   }
   if (ixs.length !== k + 1) return no("extra_instruction", "not exactly one instruction after the compute budget");
+  if (price !== null && limit === null) return no("no_cu_limit", "a compute unit price needs a compute unit limit");
   const pix = ixs[k]!;
   if (pix.programIndex === 0) return no("fee_payer_named", "as a program");
   if (keyOf(pix.programIndex) !== cfg.program) return no("not_pool", "another program");
@@ -159,8 +196,8 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
     return no("not_pool", (e as Error).message);
   }
   if (pix.accounts.length < 8 || (p.tag === 2 && pix.accounts.length !== 8)) return no("not_pool", "not the release's accounts");
-  const poolKey = keyOf(pix.accounts[0]!);
-  if (pix.accounts[0]! < m.staticKeys.length && poolKey !== cfg.pool) return no("not_pool", "another pool");
+  // the pool at account 0: a static key here, a loaded one once its table is read (checkSolanaPoolKeys)
+  if (pix.accounts[0]! < m.staticKeys.length && keyOf(pix.accounts[0]!) !== cfg.pool) return no("not_pool", "another pool");
   if (pix.accounts[1] !== 1) return no("bad_shape", "account 1 is not W", 400);
   if (pix.accounts[2] !== 0) return no("fee_payer_named", "the pool's account 2 is not the fee payer");
   if (pix.accounts.some((a, i) => a === 0 && i !== 2)) return no("fee_payer_named", "as another pool account");
@@ -169,9 +206,50 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   if ([...p.innerAccounts, ...p.innerPrograms].some((i) => i >= pix.accounts.length)) return no("not_pool", "an inner index past the accounts");
 
   if (p.relayFee !== cfg.fee) return no("fee_off", `relay_fee ${p.relayFee}, published ${cfg.fee}`);
-  const cost = SOLANA_RELEASE_COST + priorityFee(price ?? 0n, limit ?? DEFAULT_CU_PER_IX);
+  const cost = SOLANA_RELEASE_COST + priorityFee(price ?? 0n, limit ?? 0n); // a price comes with a limit (no_cu_limit)
   if (p.relayFee < cost) return no("fee_below_cost", `relay_fee ${p.relayFee}, cost ${cost}`);
-  return { ok: true, tx: { wire, messageBytes: tx.messageBytes, w, relayFee: p.relayFee, nullifier: p.nullifier } };
+  if (p.deadlineMs < BigInt(cfg.nowMs) + SOLANA_POOL_SEND_MARGIN_MS) return no("deadline_near", `deadline ${p.deadlineMs}, now ${cfg.nowMs}`);
+  // tag 3's inner programs, by their message index; a static one is checked now, a loaded one after its table's read
+  const innerProgramIndexes = p.innerPrograms.map((i) => pix.accounts[i]!);
+  if (innerProgramIndexes.some((i) => i < m.staticKeys.length && !SOLANA_POOL_STEP_PROGRAMS.includes(m.staticKeys[i]!))) return no("inner_program", "an inner instruction invokes a program off the kit's list");
+  const checked: SolanaPoolChecked = { wire, messageBytes: tx.messageBytes, w, relayFee: p.relayFee, deadlineMs: p.deadlineMs, nullifier: p.nullifier, message: m, poolIndex: pix.accounts[0]!, innerProgramIndexes };
+  return { ok: true, tx: checked };
+}
+
+/**
+ * The checks on keys the message loads from lookup tables, once the tables are read: the pool at account 0 and every
+ * inner program on the kit's list. `tables` holds each table the message names, as both providers answered.
+ */
+export function checkSolanaPoolKeys(tx: SolanaPoolChecked, cfg: { pool: string }, tables: Readonly<Record<string, readonly [SolanaLookupTable | null, SolanaLookupTable | null]>>): { ok: true } | { ok: false; code: PoolSendCode; detail: string } {
+  const m = tx.message;
+  const one: Record<string, SolanaLookupTable> = {};
+  for (const l of m.lookups) {
+    const [a, b] = Object.hasOwn(tables, l.table) ? tables[l.table]! : [null, null];
+    if (!a || !b) return { ok: false, code: "bad_table", detail: `${l.table} is not a table on both providers` };
+    if (!solanaTableIsActive(a) || !solanaTableIsActive(b)) return { ok: false, code: "bad_table", detail: `${l.table} is deactivated` };
+    if ([...l.writable, ...l.readonly].some((i) => a.addresses[i] === undefined || a.addresses[i] !== b.addresses[i])) return { ok: false, code: "bad_table", detail: `${l.table}: the providers disagree or an index is past its end` };
+    one[l.table] = a;
+  }
+  let keys: string[];
+  try {
+    keys = solanaResolveKeys(m, one).map((k) => k.key);
+  } catch (e) {
+    return { ok: false, code: "bad_table", detail: (e as Error).message };
+  }
+  if (keys[tx.poolIndex] !== cfg.pool) return { ok: false, code: "not_pool", detail: "another pool" };
+  if (tx.innerProgramIndexes.some((i) => !SOLANA_POOL_STEP_PROGRAMS.includes(keys[i]!))) return { ok: false, code: "inner_program", detail: "an inner instruction invokes a program off the kit's list" };
+  return { ok: true };
+}
+
+/** A lookup table as one provider answers getAccountInfo (base64): null when absent or not owned by the table program. */
+function tableOf(value: unknown): SolanaLookupTable | null {
+  const v = (value as { value?: { owner?: unknown; data?: unknown } } | null)?.value;
+  if (!v || v.owner !== SOLANA_ALT_PROGRAM || !Array.isArray(v.data) || v.data[1] !== "base64" || typeof v.data[0] !== "string") return null;
+  try {
+    return solanaDecodeLookupTable(new Uint8Array(Buffer.from(v.data[0], "base64")));
+  } catch {
+    return null;
+  }
 }
 
 /** The fee payer's signature in slot 0; every other byte as received (checked, so a change here throws, never sends). */
@@ -191,6 +269,8 @@ export type SolanaPoolSenderDeps = {
   send?: typeof sendSolanaSet;
   /** How many nullifiers ./once.ts remembers (POOL_SEND_MEMORY). */
   memory?: number;
+  /** The clock, ms; replaced in tests. */
+  now?: () => number;
 };
 
 export type SolanaPoolSender = {
@@ -236,6 +316,16 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     }));
   const no = (status: number, code: PoolSendCode, detail?: string): PoolSendAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
   const once = oncePerNullifier<PoolSendAnswer>(deps.memory);
+  const now = deps.now ?? Date.now;
+  // M356 (1)/(2): a nullifier whose send failed on chain waits for the next epoch; one whose outcome is unknown is held
+  // until its deadline (after it the release cannot land). Both bounded like once's memory.
+  const failedIn = new Map<string, number>();
+  const heldUntil = new Map<string, { entry: Promise<PoolSendAnswer> | undefined; deadline: number }>();
+  const bounded = <V>(m: Map<string, V>, k: string, v: V) => {
+    m.delete(k);
+    m.set(k, v);
+    while (m.size > (deps.memory ?? 10_000)) m.delete(m.keys().next().value as string);
+  };
   return {
     cluster: cfg.cluster,
     program: cfg.program,
@@ -258,15 +348,44 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (typeof raw !== "string" || raw.length > 1_644 || !B64.test(raw)) return no(400, "bad_shape");
       const wire = new Uint8Array(Buffer.from(raw, "base64"));
       if (Buffer.from(wire).toString("base64") !== raw) return no(400, "bad_shape");
-      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee });
+      const at = now();
+      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee, nowMs: at });
       if (!c.ok) return no(c.status, c.code, c.detail);
+      const nf = c.tx.nullifier;
+      const failed = failedIn.get(nf);
+      if (failed !== undefined) {
+        if (failed === epochStartOf(at)) return no(422, "failed_this_epoch");
+        failedIn.delete(nf);
+      }
+      const held = heldUntil.get(nf);
+      if (held !== undefined && at >= held.deadline) {
+        heldUntil.delete(nf);
+        if (once.get(nf) === held.entry) once.forget(nf);
+      }
       // one send per nullifier (./once.ts): a repeat gets the first answer and sends nothing
-      return once.run(c.tx.nullifier, () => simulateSignSend(raw, c.tx));
+      return once.run(nf, () => simulateSignSend(raw, c.tx));
     },
   };
   async function simulateSignSend(raw: string, tx: SolanaPoolChecked): Promise<PoolSendAnswer> {
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
+      // a message that loads keys: its tables on both providers first, then the pool and inner programs they resolve to
+      if (tx.message.lookups.length > 0) {
+        const tables: Record<string, readonly [SolanaLookupTable | null, SolanaLookupTable | null]> = {};
+        try {
+          await Promise.all(
+            tx.message.lookups.map(async (l) => {
+              const read = (rpc: SolanaRpc) => rpc("getAccountInfo", [l.table, { encoding: "base64", commitment: "processed" }]);
+              const [x, y] = await Promise.all([read(a), read(b)]);
+              tables[l.table] = [tableOf(x), tableOf(y)];
+            }),
+          );
+        } catch {
+          return no(503, "upstream");
+        }
+        const k = checkSolanaPoolKeys(tx, { pool }, tables);
+        if (!k.ok) return no(422, k.code, k.detail);
+      }
       let sim: unknown;
       let height: number;
       try {
@@ -285,13 +404,27 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
       const signed: SolanaSignedTx = { wire: signAsFeePayer(tx, seed), lastValidBlockHeight: height };
       const h = send([signed], { paths, providers: [a, b] });
-      // a send the chain ended without the spend (failed, or its blockhash expired) frees the nullifier for a retry
+      // the send's end frees the nullifier only if once still holds this send's entry (a newer one stays):
+      //   expired (never landed, no fee paid): free now; failed (a paid failure): free, and refuse it until the next
+      //   epoch; unknown, or no answer: held until the release's deadline, after which it cannot land
+      const nf = tx.nullifier;
+      const entry = once.get(nf); // this carry's own entry: once set it before the first await above
+      const mine = (): boolean => entry !== undefined && once.get(nf) === entry;
+      const hold = () => {
+        if (mine()) bounded(heldUntil, nf, { entry, deadline: Number(tx.deadlineMs) });
+      };
       void h.done
         .then((r) => {
           const state = r.txs[0]?.state;
-          if (state === "failed" || state === "expired") once.forget(tx.nullifier);
+          if (state === "filled") return;
+          if (state === "expired" || state === "failed") {
+            if (state === "failed") bounded(failedIn, nf, epochStartOf(now()));
+            if (mine()) once.forget(nf);
+            return;
+          }
+          hold();
         })
-        .catch(() => {});
+        .catch(hold);
       return { status: 200, body: { signature: h.signatures[0]! } };
   }
 }

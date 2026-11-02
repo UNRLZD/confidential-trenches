@@ -36,10 +36,11 @@ const TIP_TO = testKey("TIP_TO").address;
 const TO = testKey("TO").address;
 const BLOCKHASH = testKey("BLOCKHASH").address;
 const FEE = 2_000_000n;
-const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE };
+const NOW = 1_800_000_000_000; // 270 s before the releases' deadline
+const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE, nowMs: NOW };
 
 const field = (n: number): Uint8Array => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
-const release = (relayFee = FEE, nullifier = 2): SolanaPoolRelease => ({
+const release = (relayFee = FEE, nullifier = 2, deadlineMs = 1_800_000_270_000n): SolanaPoolRelease => ({
   proof: new Uint8Array(256).fill(7),
   newCommitmentHash: field(1),
   existingNullifierHash: field(nullifier),
@@ -51,7 +52,7 @@ const release = (relayFee = FEE, nullifier = 2): SolanaPoolRelease => ({
   relayFee,
   relayFeeCap: 3_000_000n,
   tipCap: 10_000n,
-  deadlineMs: 1_800_000_270_000n,
+  deadlineMs,
   salt: new Uint8Array(16).fill(9),
 });
 const u32 = (n: number) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
@@ -80,10 +81,11 @@ type Build = {
   nullifier?: number;
   stateSize?: number;
   blockhash?: string;
+  deadlineMs?: bigint;
 };
 /** A v0 transaction W signed, the fee payer's slot empty: what the device sends. */
 function build(o: Build = {}): Uint8Array {
-  const r = release(o.fee ?? FEE, o.nullifier ?? 2);
+  const r = release(o.fee ?? FEE, o.nullifier ?? 2, o.deadlineMs);
   const cfg = { program: o.program ?? PROGRAM, pool: o.pool ?? POOL };
   const accounts = solanaPoolReleaseAccounts(cfg, W.address, FP.address, r, o.stateSize ?? 6);
   let data: Uint8Array;
@@ -157,8 +159,9 @@ test("a relay fee off the published one is refused (fee_off); one under the cost
   assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_000n)] })), "ok");
   assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_001n)] })), "fee_below_cost");
   // no limit given: the runtime's 200,000 per instruction
-  assert.equal(refusal(build({ pre: [cuPrice(4_870_001n)] })), "fee_below_cost");
-  assert.equal(refusal(build({ pre: [cuPrice(4_870_000n)] })), "ok");
+  // 400,000 CU: the room is 2,000,000 - 1,026,000 = 974,000 lamports, so 2,435,000 micro-lamports a CU at most
+  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_001n)] })), "fee_below_cost");
+  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_000n)] })), "ok");
 });
 
 test("not a v0 transaction of the fee payer and W, or a fee payer slot already filled, is bad_shape", () => {
@@ -185,12 +188,13 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
     { url: `https://stub.invalid/${Math.random()}` },
   );
 }
-function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number } = {}) {
+function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number } = {}) {
   return solanaPoolSender(
     { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: o.fee ?? FEE },
     {
       providers: [rpcStub(simErr, calls), rpcStub()],
       ...(o.memory ? { memory: o.memory } : {}),
+      now: o.now ?? (() => NOW),
       send: (set) => {
         sent.push(set[0]!.wire);
         const sig = base58(set[0]!.wire.subarray(1, 65));
@@ -348,23 +352,33 @@ test("one send per nullifier: a repeat in flight or landed, even as other bytes,
   assert.equal(sent.length, 2, "another nullifier is its own send");
 });
 
-test("a refused carry, or a send that failed or expired on chain, frees the nullifier; a filled one never does", async () => {
+test("a refused carry or an expired send frees the nullifier; a failed one waits for the next epoch; an unknown one its deadline; a filled one never", async () => {
   const sent: Uint8Array[] = [];
   const simCalls: Calls = [];
   const failing = sender({ InstructionError: [1, { Custom: 4 }] }, simCalls, sent);
   assert.equal(code(await failing.carry(body(build()))), "simulation_failed");
   assert.equal(code(await failing.carry(body(build()))), "simulation_failed");
   assert.equal(simCalls.filter((c) => c.method === "simulateTransaction").length, 2, "refused, so simulated again, not answered from memory");
-  for (const end of ["failed", "expired"]) {
+  for (const end of ["failed", "expired", "unknown"]) {
     const sentE: Uint8Array[] = [];
     let finish!: (s: string) => void;
-    const s = sender(null, [], sentE, { ends: () => new Promise((r) => (finish = r)) });
+    let now = NOW;
+    const s = sender(null, [], sentE, { ends: () => new Promise((r) => (finish = r)), now: () => now });
     await s.carry(body(build()));
     await s.carry(body(build()));
     assert.equal(sentE.length, 1, `${end}: in flight, one send`);
     finish(end);
     await new Promise((r) => setImmediate(r));
-    await s.carry(body(build({ blockhash: testKey("BLOCKHASH_2").address })));
+    const retry = await s.carry(body(build({ blockhash: testKey("BLOCKHASH_2").address })));
+    if (end === "expired") {
+      assert.equal(sentE.length, 2, "expired: freed, the retry is sent");
+      continue;
+    }
+    assert.equal(sentE.length, 1, `${end}: not sent again yet`);
+    assert.equal(code(retry), end === "failed" ? "failed_this_epoch" : "ok", `${end}: the retry's answer`);
+    // failed: the next epoch frees it; unknown: the first release's deadline frees it (a new release, a later deadline)
+    now = end === "failed" ? NOW + POOL_EPOCH_MS : 1_800_000_270_000;
+    await s.carry(body(build({ blockhash: testKey("BLOCKHASH_3").address, deadlineMs: BigInt(now) + 270_000n })));
     assert.equal(sentE.length, 2, `${end}: freed, the retry is sent`);
   }
   const sentF: Uint8Array[] = [];
