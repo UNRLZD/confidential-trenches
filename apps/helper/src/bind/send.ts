@@ -204,6 +204,11 @@ export type StoreFs = Pick<typeof nodeFs, "closeSync" | "fsyncSync" | "linkSync"
 
 /** How long a start waits for another holder's lock before it refuses (two simultaneous starts: one holds). */
 const LOCK_WAIT_MS = 250;
+/**
+ * Every lock this process holds, until its store's close(): a DatabaseSync nothing references is closed by the garbage
+ * collector, and its lock with it (the f487d98 re-check's gc-child), so a store the caller dropped keeps its lock.
+ */
+const HELD_LOCKS = new Set<DatabaseSync>();
 
 /**
  * A store of small JSON files in `dir`, owned by one process. The owner holds an exclusive SQLite lock on `dir/lock`
@@ -244,10 +249,12 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
   } catch (e) {
     throw new Error(`store: ${dir} is held by another process (${e instanceof Error ? e.message : String(e)})`);
   }
+  HELD_LOCKS.add(lock);
   let open = true;
   const release = () => {
     if (!open) return;
     open = false;
+    HELD_LOCKS.delete(lock);
     lock.close();
   };
   const held = () => {

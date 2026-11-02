@@ -1028,7 +1028,7 @@ function storeChild(dir: string, tag: string, holdMs: number) {
     import { writeFileSync } from "node:fs";
     import { createFileStore } from ${JSON.stringify(new URL("./send.ts", import.meta.url).href)};
     let out = "won";
-    try { createFileStore(${JSON.stringify(dir)}); } catch (e) { out = "lost " + e.message; }
+    try { globalThis.store = createFileStore(${JSON.stringify(dir)}); } catch (e) { out = "lost " + e.message; } // kept for the hold
     writeFileSync(${JSON.stringify(dir)} + "/" + ${JSON.stringify(tag)}, out);
     setTimeout(() => {}, ${holdMs});`;
   return spawn(process.execPath, ["--input-type=module", "-e", src], { stdio: "ignore" });
@@ -1037,6 +1037,23 @@ const exited = (c: ReturnType<typeof spawn>) => new Promise((r) => c.on("exit", 
 const until = async (f: () => boolean) => {
   for (let i = 0; i < 400 && !f(); i++) await new Promise((r) => setTimeout(r, 25));
 };
+
+test("RC3 Low 2: a store nothing references any more keeps its lock through a full GC: a second process is still refused", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-gc-"));
+  const src = `
+    import { writeFileSync } from "node:fs";
+    import { createFileStore } from ${JSON.stringify(new URL("./send.ts", import.meta.url).href)};
+    createFileStore(${JSON.stringify(dir)}); // not kept
+    globalThis.gc(); await new Promise((r) => setTimeout(r, 50)); globalThis.gc();
+    writeFileSync(${JSON.stringify(dir)} + "/first", "won");
+    setTimeout(() => {}, 5000);`;
+  const c = spawn(process.execPath, ["--expose-gc", "--input-type=module", "-e", src], { stdio: "ignore" });
+  await until(() => existsSync(join(dir, "first")));
+  assert.ok(existsSync(join(dir, "first")));
+  assert.throws(() => createFileStore(dir), /is held by another process/);
+  c.kill("SIGKILL");
+  await exited(c);
+});
 
 test("M3: one process per store: a second open is refused while the first holds it, and opens after close", () => {
   const dir = mkdtempSync(join(tmpdir(), "bind-lock-"));
