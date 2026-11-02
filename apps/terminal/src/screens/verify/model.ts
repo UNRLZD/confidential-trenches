@@ -158,7 +158,8 @@ export function verifyView(reads: VerifyReads | null, pins: VerifyPins): VerifyV
 
 /**
  * The panel when nothing was read: a pair the rule refuses, no final height on either RPC, or no vault named on this
- * network. Every check is Unverified (S18.3) with no value, both rows amber, no block; `rpcs` are the RPCs it tried.
+ * network. Every check is Unverified (S18.3) with no value, both rows amber, no block; `rpcs` are the RPCs it asked,
+ * none when it asked none (the panel then draws "—").
  */
 export function unverifiedView(rpcs: readonly string[]): VerifyView {
   const row = (rules: Rule[]): VerifyRow => ({ status: "warn", checks: rules.map((r) => ({ id: r.id, status: "warn", word: "unverified", values: [] })) });

@@ -1,8 +1,9 @@
-// The NEAR network a build names (card app-verify-mount): VITE_NEAR_NETWORK, mainnet when unset, any other value stops
-// the build. The app reads it as import.meta.env.VITE_NEAR_NETWORK (src/screens/verify/release.ts). A testnet build's
-// _headers lets the page reach the testnet pair Verify reads in place of the mainnet RPCs, so its policy names only
-// the RPCs of the network it reads; a mainnet build's _headers is public/_headers byte for byte.
-// test/verify-mount.test.ts holds TESTNET_RPCS to the release's testnet pair.
+// The NEAR network a build names (card app-verify-mount): VITE_NEAR_NETWORK as Vite resolves it (the environment or a
+// .env file), mainnet when unset, any other value stops the build. The app reads it as
+// import.meta.env.VITE_NEAR_NETWORK (src/screens/verify/release.ts). A testnet build's _headers lets the page reach
+// the testnet pair Verify reads in place of the mainnet RPCs, so its policy names only the RPCs of the network it
+// reads; a mainnet build's _headers is public/_headers byte for byte. test/verify-mount.test.ts holds TESTNET_RPCS to
+// the release's testnet pair.
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -24,12 +25,18 @@ export function headersFor(network, text) {
   return parts.join(` ${TESTNET_RPCS};`);
 }
 
+/**
+ * The plugin. The network is read from Vite's resolved env (c.env: the environment and every .env file Vite loads,
+ * the same values import.meta.env.VITE_NEAR_NETWORK is replaced with), so a .env file cannot name a network the
+ * headers do not follow, and a value that is not a network stops the build.
+ */
 export function nearNetwork() {
-  const network = networkOf(process.env.VITE_NEAR_NETWORK);
+  let network = "mainnet";
   let outDir = "dist";
   return {
     name: "near-network",
     configResolved(c) {
+      network = networkOf(c.env?.VITE_NEAR_NETWORK);
       outDir = path.resolve(c.root, c.build.outDir);
     },
     writeBundle() {

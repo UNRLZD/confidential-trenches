@@ -19,6 +19,7 @@ export function verifyRpc(url: string, fetchFn: typeof fetch = fetch): VaultSync
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: "verify", method: "query", params }),
+        redirect: "error",
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(VERIFY_READ_MS)]) : AbortSignal.timeout(VERIFY_READ_MS),
       });
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
@@ -29,10 +30,14 @@ export function verifyRpc(url: string, fetchFn: typeof fetch = fetch): VaultSync
 
 export async function liveVerify(release: VerifyRelease, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<VerifyView> {
   const rpcs = [verifyRpc(release.rpcs[0], fetchFn), verifyRpc(release.rpcs[1], fetchFn)] as const;
-  // no vault named on this network yet (mainnet until the freeze): nothing to read, and nothing failed
-  if (release.pins === null) return unverifiedView(release.rpcs);
+  // no vault named on this network yet: nothing to read, nothing asked and nothing failed
+  if (release.pins === null) return unverifiedView([]);
+  // a pair the rule refuses is never asked, so the panel names no RPC
+  if (nearPairNetwork(rpcs) !== release.network) {
+    console.error(nearPairRule(release.network));
+    return unverifiedView([]);
+  }
   try {
-    if (nearPairNetwork(rpcs) !== release.network) throw new Error(nearPairRule(release.network));
     return verifyView(await readVerify(rpcs, release.pins, signal), release.pins);
   } catch (e) {
     if (!signal?.aborted) console.error(e instanceof Error ? e.message : String(e));

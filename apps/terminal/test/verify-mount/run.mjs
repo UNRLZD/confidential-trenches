@@ -2,9 +2,11 @@
 // Verify mounted, in the app (card app-verify-mount): the terminal built for testnet (VITE_NEAR_NETWORK=testnet) opened
 // at /verify inside the stand-in shell of the live check's harness (scripts/live-checks/app-verify-mount.mjs), at 390 and
 // 1440. The page's NEAR reads are answered by a test double: Playwright's route answers each from the recording
-// (answers.json, made by record.ts), so nothing recorded is in the build. Two runs:
-//   recorded: the panel draws the read: both rows and every check ok, the pair named, the block read, the footer pill
-//             opens and closes it (the live check's own verdict, judge());
+// (answers.json, made by record.ts), so nothing recorded is in the build. Three runs:
+//   recorded: the panel draws the read: both rows and every check ok, the pair named, the block read, and the footer
+//             pill's second open starts from loading and reads again (the live check's own verdict, judge());
+//   re-open:  the first open answered from the recording, then both RPCs refuse: the pill's second open draws every
+//             check Unverified, so it never shows the first open's read;
 //   failed:   both RPCs refuse every request: the panel draws every check Unverified (its existing word), both rows
 //             amber, and no word the panel did not already have.
 // The unit test (test/verify-mount.test.ts) holds the refused pair and the other network's pair to the same view.
@@ -47,22 +49,35 @@ const own = opt("--build") ? null : await build();
 const dir = path.resolve(opt("--build") ?? own);
 const shots = opt("--shots");
 const fails = [];
+const known = new Set(Object.values(WORDS).map((w) => w.text));
+/** Every check Unverified, both rows amber, and only the panel's own words; else the reason. */
+function unverified(p) {
+  const n = (p?.words ?? []).filter((x) => x === WORDS.unverified.text).length;
+  const all = !!p && CHECKS.every((c) => p.checks[c] === "warn") && Object.keys(p.checks).length === CHECKS.length;
+  const extra = (p?.words ?? []).filter((x) => !known.has(x));
+  const ok = p?.state === "unverified" && p.code === "warn" && p.funds === "warn" && all && n === CHECKS.length && !extra.length;
+  return { ok, text: `panel ${p?.state ?? "none"}, code ${p?.code}, funds ${p?.funds}; ${n} x ${WORDS.unverified.text}${extra.length ? `; words the panel lacks: ${extra.join(", ")}` : ""}` };
+}
 try {
   const good = await collect({ shots: shots && path.join(shots, "recorded"), route: await harnessRoute(dir, RPCS, recorded), network: "testnet", source: "recorded reads" });
   const g = judge(good);
   for (const l of g.lines) console.log(`recorded: ${l}`);
   if (!g.ok) fails.push("recorded: the panel did not draw the recorded read");
 
+  let mode = recorded;
+  const again = await collect({ shots: shots && path.join(shots, "reopen"), route: await harnessRoute(dir, RPCS, (r) => mode(r)), network: "testnet", source: "recorded, then refused", beforeReopen: () => (mode = refused) });
+  const d = again.runs.find((r) => r.width === "desktop");
+  const first = d?.panel?.state === "read";
+  const u = unverified(d?.footer?.panel);
+  const ok = first && d.footer.firstState === "loading" && u.ok;
+  console.log(`${ok ? "ok " : "BAD"} re-open: first open ${d?.panel?.state ?? "none"}; after the RPCs refuse, the pill's open starts ${d?.footer?.firstState ?? "nowhere"} and draws ${u.text}`);
+  if (!ok) fails.push("re-open: the second open did not read afresh");
+
   const bad = await collect({ shots: shots && path.join(shots, "failed"), route: await harnessRoute(dir, RPCS, refused), network: "testnet", source: "refused reads" });
-  const known = new Set(Object.values(WORDS).map((w) => w.text));
   for (const r of bad.runs) {
-    const p = r.panel;
-    const n = (p?.words ?? []).filter((x) => x === WORDS.unverified.text).length;
-    const all = !!p && CHECKS.every((c) => p.checks[c] === "warn") && Object.keys(p.checks).length === CHECKS.length;
-    const ok = p?.state === "unverified" && p.code === "warn" && p.funds === "warn" && all && n === CHECKS.length;
-    const extra = (p?.words ?? []).filter((x) => !known.has(x));
-    console.log(`${ok && !extra.length ? "ok " : "BAD"} failed: ${r.width}: panel ${p?.state ?? "none"}, code ${p?.code}, funds ${p?.funds}; ${n} x ${WORDS.unverified.text}${extra.length ? `; words the panel lacks: ${extra.join(", ")}` : ""}`);
-    if (!ok || extra.length) fails.push(`failed: ${r.width}`);
+    const v = unverified(r.panel);
+    console.log(`${v.ok ? "ok " : "BAD"} failed: ${r.width}: ${v.text}`);
+    if (!v.ok) fails.push(`failed: ${r.width}`);
   }
 } finally {
   if (own) rmSync(own, { recursive: true, force: true });
@@ -71,4 +86,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.join("; ")}`);
   process.exit(1);
 }
-console.log(`PASS the recorded read drawn at 390/1440 with the pill's open and close; failed reads drawn Unverified at 390/1440${shots ? `; shots in ${shots}` : ""}`);
+console.log(`PASS the recorded read drawn at 390/1440 and read again on the pill's open; a re-open after the RPCs refuse draws Unverified; failed reads drawn Unverified at 390/1440${shots ? `; shots in ${shots}` : ""}`);

@@ -1,10 +1,20 @@
 {
  "good": {
   "check": "app-verify-mount",
-  "at": "2026-11-02T16:54:05.091Z",
-  "source": "harness, terminal build dist/build-testnet, live testnet RPCs",
+  "at": "2026-11-02T17:22:44.975Z",
+  "source": "harness, terminal build dist/build-testnet, the release's testnet RPCs live",
   "network": "testnet",
-  "vaultNamed": true,
+  "pins": {
+   "vault": "vault.bf-vt-20261102t071444.testnet",
+   "asset": "bf-usdc-20261101t022248.testnet",
+   "release": "CXer6tYxd9w2Bgdcz1g2vGJTFoj927goSLscRCtgyEhc"
+  },
+  "record": {
+   "network": "testnet",
+   "account_id": "vault.bf-vt-20261102t071444.testnet",
+   "asset": "bf-usdc-20261101t022248.testnet",
+   "code_hash": "CXer6tYxd9w2Bgdcz1g2vGJTFoj927goSLscRCtgyEhc"
+  },
   "browser": "153.0.8010.12",
   "runs": [
    {
@@ -26,7 +36,7 @@
       "https://test.rpc.fastnear.com",
       "https://near-testnet.drpc.org"
      ],
-     "block": "275,926,334",
+     "block": "275,929,321",
      "words": [
       "Verify",
       "Code",
@@ -46,169 +56,197 @@
       "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-C2K1fTS7.js",
+      "url": "https://confidential.unrealized.trade/assets/index-jNo7ANup.js",
       "method": "GET",
       "type": "script",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
       "method": "GET",
       "type": "stylesheet",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      }
     ],
     "violations": [],
@@ -233,7 +271,7 @@
       "https://test.rpc.fastnear.com",
       "https://near-testnet.drpc.org"
      ],
-     "block": "275,926,337",
+     "block": "275,929,324",
      "words": [
       "Verify",
       "Code",
@@ -253,175 +291,347 @@
       "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-C2K1fTS7.js",
+      "url": "https://confidential.unrealized.trade/assets/index-jNo7ANup.js",
       "method": "GET",
       "type": "script",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
       "method": "GET",
       "type": "stylesheet",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://test.rpc.fastnear.com/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://near-testnet.drpc.org/",
       "method": "POST",
       "type": "fetch",
-      "status": 200
+      "status": 200,
+      "phase": "open"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200,
+      "phase": "reopen"
      }
     ],
     "violations": [],
     "errors": [],
     "footer": {
      "opened": true,
+     "firstState": "loading",
+     "panel": {
+      "state": "read",
+      "code": "ok",
+      "funds": "ok",
+      "checks": {
+       "keys": "ok",
+       "code": "ok",
+       "asset": "ok",
+       "registration": "ok",
+       "tokenCode": "ok",
+       "balance": "ok"
+      },
+      "rpcs": [
+       "https://test.rpc.fastnear.com",
+       "https://near-testnet.drpc.org"
+      ],
+      "block": "275,929,327",
+      "words": [
+       "Verify",
+       "Code",
+       "Vault keys",
+       "Code hash",
+       "Funds",
+       "Asset",
+       "Registration",
+       "Token code",
+       "Balance",
+       "Block",
+       "RPCs"
+      ]
+     },
      "closedTo": "/"
     }
    }
@@ -429,10 +639,11 @@
  },
  "noVault": {
   "check": "app-verify-mount",
-  "at": "2026-11-02T16:54:06.429Z",
-  "source": "harness, terminal build dist/build-mainnet, live mainnet RPCs",
+  "at": "2026-11-02T17:22:46.344Z",
+  "source": "harness, terminal build dist/build-mainnet, the release's mainnet RPCs live",
   "network": "mainnet",
-  "vaultNamed": false,
+  "pins": null,
+  "record": null,
   "browser": "153.0.8010.12",
   "runs": [
    {
@@ -450,10 +661,7 @@
       "tokenCode": "warn",
       "balance": "warn"
      },
-     "rpcs": [
-      "https://rpc.mainnet.fastnear.com",
-      "https://near.drpc.org"
-     ],
+     "rpcs": [],
      "block": "—",
      "words": [
       "Verify",
@@ -480,73 +688,85 @@
       "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-cMi5Qa8m.js",
+      "url": "https://confidential.unrealized.trade/assets/index-DLTMZCpS.js",
       "method": "GET",
       "type": "script",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
       "method": "GET",
       "type": "stylesheet",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      }
     ],
     "violations": [],
@@ -567,10 +787,7 @@
       "tokenCode": "warn",
       "balance": "warn"
      },
-     "rpcs": [
-      "https://rpc.mainnet.fastnear.com",
-      "https://near.drpc.org"
-     ],
+     "rpcs": [],
      "block": "—",
      "words": [
       "Verify",
@@ -597,79 +814,126 @@
       "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-cMi5Qa8m.js",
+      "url": "https://confidential.unrealized.trade/assets/index-DLTMZCpS.js",
       "method": "GET",
       "type": "script",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
       "method": "GET",
       "type": "stylesheet",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      }
     ],
     "violations": [],
     "errors": [],
     "footer": {
      "opened": true,
+     "firstState": "loading",
+     "panel": {
+      "state": "unverified",
+      "code": "warn",
+      "funds": "warn",
+      "checks": {
+       "keys": "warn",
+       "code": "warn",
+       "asset": "warn",
+       "registration": "warn",
+       "tokenCode": "warn",
+       "balance": "warn"
+      },
+      "rpcs": [],
+      "block": "—",
+      "words": [
+       "Verify",
+       "Code",
+       "Vault keys",
+       "Unverified",
+       "Code hash",
+       "Unverified",
+       "Funds",
+       "Asset",
+       "Unverified",
+       "Registration",
+       "Unverified",
+       "Token code",
+       "Unverified",
+       "Balance",
+       "Unverified",
+       "Block",
+       "RPCs"
+      ]
+     },
      "closedTo": "/"
     }
    }
@@ -677,10 +941,20 @@
  },
  "notMounted": {
   "check": "app-verify-mount",
-  "at": "2026-11-02T16:56:32.008Z",
-  "source": "harness, terminal build dist/build-main, live testnet RPCs",
+  "at": "2026-11-02T17:24:14.053Z",
+  "source": "harness, terminal build dist/build-main, the release's testnet RPCs live",
   "network": "testnet",
-  "vaultNamed": true,
+  "pins": {
+   "vault": "vault.bf-vt-20261102t071444.testnet",
+   "asset": "bf-usdc-20261101t022248.testnet",
+   "release": "CXer6tYxd9w2Bgdcz1g2vGJTFoj927goSLscRCtgyEhc"
+  },
+  "record": {
+   "network": "testnet",
+   "account_id": "vault.bf-vt-20261102t071444.testnet",
+   "asset": "bf-usdc-20261101t022248.testnet",
+   "code_hash": "CXer6tYxd9w2Bgdcz1g2vGJTFoj927goSLscRCtgyEhc"
+  },
   "browser": "153.0.8010.12",
   "runs": [
    {
@@ -692,73 +966,85 @@
       "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/index-Dc9HYs5k.js",
       "method": "GET",
       "type": "script",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/style-BcTfhng9.css",
       "method": "GET",
       "type": "stylesheet",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      }
     ],
     "violations": [],
@@ -773,79 +1059,93 @@
       "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "method": "GET",
       "type": "font",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/index-Dc9HYs5k.js",
       "method": "GET",
       "type": "script",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/style-BcTfhng9.css",
       "method": "GET",
       "type": "stylesheet",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      },
      {
       "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "method": "GET",
       "type": "image",
-      "status": 200
+      "status": 200,
+      "phase": "open"
      }
     ],
     "violations": [],
     "errors": [],
     "footer": {
      "opened": false,
+     "firstState": null,
+     "panel": null,
      "closedTo": "/verify"
     }
    }
