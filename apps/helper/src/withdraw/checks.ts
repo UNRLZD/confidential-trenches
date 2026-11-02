@@ -273,7 +273,8 @@ type Vkey = { alpha: G1; beta: G2; gamma: G2; delta: G2; ic: G1[] };
 export function loadWithdrawVkey(bytes: Uint8Array = readFileSync(new URL("./withdraw.vkey", import.meta.url))): Vkey {
   const got = createHash("sha256").update(bytes).digest("hex");
   if (got !== WITHDRAW_VKEY_SHA256) throw new Error(`withdraw.vkey: sha256 ${got}, not the pinned ${WITHDRAW_VKEY_SHA256}`);
-  const v = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+  // fatal and BOM-keeping as every decoder of checked bytes here (bind/checks.ts str()); the pin above refuses any such bytes first
+  const v = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)) as Record<string, unknown>;
   const pt1 = (a: unknown): G1 => {
     const p = a as [string, string, string];
     if (p[2] !== "1") throw new Error("withdraw.vkey: a G1 point not affine");

@@ -134,3 +134,24 @@ export function createTokenWatch(env: Record<string, string | undefined>, deps: 
 
   return { status, held };
 }
+
+/** One pause or unpause of the token, as the watch read it from the token's own event log. */
+export type PauseEvent = { name: "paused" | "unpaused"; block_height: number };
+/** The watch's pause history: the state at `from`, every pause and unpause since, read through `caughtUpTo`. */
+export type PauseHistory = { from: number; pausedAtFrom: boolean; caughtUpTo: number; events: readonly PauseEvent[] };
+
+/**
+ * Was the token paused at block `height` (R3's exception, M:1846): null outside what the watch has read. A receipt in
+ * the same block as a pause or an unpause counts as paused there: its order inside the block is not known, and an
+ * unpause in that block means it was paused before it. Later events (another pause, a blocklist) never change it.
+ */
+export function pausedAt(h: PauseHistory, height: number): boolean | null {
+  if (height < h.from || height > h.caughtUpTo) return null;
+  let paused = h.pausedAtFrom;
+  for (const e of [...h.events].sort((x, y) => x.block_height - y.block_height)) {
+    if (e.block_height > height) break;
+    if (e.block_height === height) return true;
+    paused = e.name === "paused";
+  }
+  return paused;
+}

@@ -93,7 +93,7 @@ export type KeyRead = { kind: "no_account" } | { kind: "no_key" } | { kind: "key
 export type BindReads = {
   /** view_access_key(account, publicKey); publicKey is "ed25519:<base58>". */
   accessKey(account: string, publicKey: string): Promise<KeyRead>;
-  /** The newest final block height (check 3's nonce bound and check 4). */
+  /** The final block height, the lower of the two providers' finals (check 3's nonce bound and check 4). */
   finalHeight(): Promise<bigint>;
   /** TOKEN.ft_balance_of(account), read now. */
   ftBalance(account: string): Promise<bigint>;
