@@ -148,7 +148,7 @@ function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: Dep
   const window = args.window ?? DEPOSIT_WINDOW;
   if (!Number.isSafeInteger(window) || window < 1 || window > DEPOSIT_WINDOW_MAX)
     throw new DepositDelegateRefused("window", `the window must be a whole number of blocks in 1..${DEPOSIT_WINDOW_MAX}`);
-  const { token, vault } = NEAR_NETWORKS[args.network];
+  const { usdc: token, vault } = NEAR_NETWORKS[args.network];
   if (vault === null) throw new DepositDelegateRefused("no_vault", `the release names no vault on ${args.network}`);
   const n = BigInt(read.nonce) + 1n;
   if (n >= BigInt(read.height) * NONCE_RANGE_MULTIPLIER) throw new DepositDelegateRefused("nonce", "nonce + 1 is at or above the read height x 1,000,000");

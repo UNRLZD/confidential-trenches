@@ -12,7 +12,15 @@
 //   node packages/signpage/scripts/release-list.mjs --print [--host sign|app]
 //     this checkout's own build's list (named build-<sha>), for both hosts or the one asked, to stdout: what a deploy
 //     from this commit serves, which the live check after a deploy reads that host against
-// Writing refuses a tree with uncommitted changes outside releases/, since the list names the commit it was built from.
+// Writing refuses a release that is already written (a release is never written again, card signpage-withdraw-form)
+// and a tree with uncommitted changes outside releases/, since the list names the tree it was built from: `tree` (git
+// rev-parse HEAD^{tree}) beside `commit`. On the remote test machine (its job runner sets HEAVY_JOB) the checkout's commit is made
+// up for the job, so a list cut there names its tree only (commit null); the tree is the Mac's, byte for byte, and the
+// verify gate (scripts/ci/verify-gate.mjs) holds every new list's tree to a commit of the pull request.
+// RELEASED is the ledger of every written list's sha256: releaseProblems() fails an old list edited after it was
+// written, a list missing from the ledger, and a newest list whose SIGN_HOST part is not a fresh deploy.mjs build of
+// this checkout (every file, every header, the _headers file), so a page change lands with its own release-<N+1>,
+// written here and added to RELEASED by hand; the verify gate refuses a change to a list or a ledger entry on main.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -167,7 +175,40 @@ export function diffLists(fresh, listed) {
   return p;
 }
 
-export const listPath = (tag) => join(RELEASES, `${tag}.json`);
+export const listPath = (tag, releases = RELEASES) => join(releases, `${tag}.json`);
+
+/** Every written release list's sha256, as written: a list is never edited after (releaseProblems). */
+export const RELEASED = Object.freeze({
+  "release-1": "c8ffda0045fc1a814abea60ee8f0815cfd995e6c670b98e68b0c1e2f144ac3bc",
+  "release-2": "835286962d6f563cc1d1fcb3e49e282b8c2e29d48284dc4a19a201899a0dc82a",
+});
+
+/**
+ * Problems with the release lists in `dir` against `ledger` and SIGN_HOST's build from the package folder `pkg`: an
+ * old list edited, a list not in the ledger or a ledger entry with no list, and a newest list whose SIGN_HOST part is
+ * not a fresh deploy.mjs build() of `pkg` (empty = none).
+ */
+export function releaseProblems(dir = RELEASES, ledger = RELEASED, pkg = PKG) {
+  const p = [];
+  const tags = readdirSync(dir).map((f) => /^(release-[1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean);
+  for (const tag of tags) {
+    const sha = hash("sha256", readFileSync(join(dir, `${tag}.json`)), "hex");
+    if (!Object.hasOwn(ledger, tag)) p.push(`${tag} is not in RELEASED: add its sha256 ${sha}`);
+    else if (ledger[tag] !== sha) p.push(`${tag} was edited after it was written (sha256 ${sha}, written ${ledger[tag]})`);
+  }
+  for (const tag of Object.keys(ledger)) if (!tags.includes(tag)) p.push(`${tag} is in RELEASED but its list is gone`);
+  if (!tags.length) return [...p, "no release list"];
+  const newest = tags.sort((a, b) => Number(a.slice(8)) - Number(b.slice(8))).at(-1);
+  const listed = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
+  const built = buildSign(pkg);
+  try {
+    for (const l of diffLists(makeList(newest, { SIGN_HOST: built }, null), listed))
+      p.push(`${newest} is not this checkout's SIGN_HOST build (${l}): write release-${Number(newest.slice(8)) + 1}`);
+  } finally {
+    rmSync(built, { recursive: true, force: true });
+  }
+  return p;
+}
 
 const git = (...args) => spawnSync("git", ["-C", REPO, ...args], { encoding: "utf8" }).stdout.trim();
 const uncommitted = () => git("status", "--porcelain", "--", ".", ":!packages/signpage/releases");
@@ -175,9 +216,11 @@ const uncommitted = () => git("status", "--porcelain", "--", ".", ":!packages/si
 /** The list of this checkout's own build, in memory, for the hosts named: what a deploy from this commit serves. */
 export function headList(names = Object.keys(HOSTS)) {
   const commit = git("rev-parse", "HEAD");
+  const tree = git("rev-parse", "HEAD^{tree}");
   const dirs = buildHosts(names);
   try {
-    return makeList(`build-${commit.slice(0, 12)}${uncommitted() ? "-dirty" : ""}`, dirs, commit);
+    const list = makeList(`build-${commit.slice(0, 12)}${uncommitted() ? "-dirty" : ""}`, dirs, process.env.HEAVY_JOB ? null : commit);
+    return { release: list.release, commit: list.commit, tree, hosts: list.hosts };
   } finally {
     removeBuilds(dirs);
   }
@@ -190,7 +233,7 @@ const USAGE = [
 ].join("\n");
 
 /** The command line: { code, out, err } (no process.exit inside, so every build is removed before the process ends). */
-export function main(a) {
+export function main(a, releases = RELEASES) {
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
   const usage = { code: 2, err: [USAGE] };
   if (a[0] === "--print") {
@@ -206,14 +249,15 @@ export function main(a) {
     const listed = file === undefined ? readList(tag) : JSON.parse(readFileSync(file, "utf8"));
     const fresh = headList(Object.keys(listed.hosts ?? {}));
     const p = diffLists(fresh, listed);
-    return p.length ? { code: 1, err: p } : { code: 0, out: [`a fresh build of ${fresh.commit.slice(0, 7)} equals ${listed.release}'s list`] };
+    return p.length ? { code: 1, err: p } : { code: 0, out: [`a fresh build of ${(fresh.commit ?? fresh.tree).slice(0, 7)} equals ${listed.release}'s list`] };
   }
   if (a.length !== 1 || !TAG.test(a[0])) return usage;
+  if (existsSync(listPath(a[0], releases))) return { code: 1, err: [`${a[0]} is already written: a release is never written again`] };
   const dirty = uncommitted();
-  if (dirty) return { code: 1, err: [`uncommitted changes, so the list could not name its commit:\n${dirty}`] };
+  if (dirty) return { code: 1, err: [`uncommitted changes, so the list could not name its tree:\n${dirty}`] };
   const list = headList();
   list.release = a[0];
-  writeFileSync(listPath(a[0]), `${JSON.stringify(list, null, 1)}\n`);
+  writeFileSync(listPath(a[0], releases), `${JSON.stringify(list, null, 1)}\n`);
   return { code: 0, out: Object.entries(list.hosts).map(([name, h]) => `${a[0]} ${name} ${h.files.length} files, _headers ${h.headers_file.sha256}`) };
 }
 
