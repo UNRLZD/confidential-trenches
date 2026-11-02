@@ -21,7 +21,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const KIT_DIR = process.env.KIT_DIR ?? join(HERE, "..", "..", "..", "..", "packages", "kit");
 // What to run when mainnet's code no longer hashes as the JSON says: a fresh dump of both venues, from the repo root.
 const REFRESH = "pnpm install --frozen-lockfile && node contracts/pool-solana/fixtures/venues/dump.mjs";
-const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
+// VENUE_RPCS and VENUE_RPC_BACKOFF_MS are for dump.test.mjs, which points the script at local fake RPCs.
+const RPCS = process.env.VENUE_RPCS ? process.env.VENUE_RPCS.split(",") : ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
+// An RPC's error or rate limit is retried 3 times, after 0.5, 1 and 2 s, before the run fails as an RPC failure.
+const RETRIES = 3;
+const BACKOFF_MS = Number(process.env.VENUE_RPC_BACKOFF_MS ?? 500);
 const SPEND = 5_000_000n;
 const SLIPPAGE_BPS = 300n;
 const PUMP_SELL = [51, 230, 133, 164, 1, 127, 131, 173];
@@ -29,15 +33,24 @@ const PUMP_SELL = [51, 230, 133, 164, 1, 127, 131, 173];
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
 
+/** An RPC that did not answer, rate-limited or answered with an error, every try: no read of mainnet's code. */
+class RpcFailure extends Error {}
+
 async function rpc(url, method, params) {
-  for (let i = 0; i < 6; i++) {
-    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-    if (r.status === 429 || r.status >= 500) { await new Promise((x) => setTimeout(x, 800 * (i + 1))); continue; }
-    const j = await r.json();
-    if (j.error) throw new Error(`${url} ${method}: ${JSON.stringify(j.error)}`);
-    return j.result;
+  let last = "";
+  for (let i = 0; i <= RETRIES; i++) {
+    if (i > 0) await new Promise((x) => setTimeout(x, BACKOFF_MS * 2 ** (i - 1)));
+    try {
+      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+      if (!r.ok) { last = `HTTP ${r.status}`; continue; }
+      const j = await r.json();
+      if (j.error) { last = `error ${JSON.stringify(j.error)}`; continue; }
+      return j.result;
+    } catch (e) {
+      last = String(e?.cause?.code ?? e?.message ?? e);
+    }
   }
-  throw new Error(`${url} ${method}: no answer after retries`);
+  throw new RpcFailure(`${url} ${method}: ${last}, after ${RETRIES + 1} tries`);
 }
 
 // A program's ELF on one provider: the program account's programdata address (jsonParsed, so no base58 library is
@@ -69,21 +82,32 @@ async function dumpPrograms(addresses) {
   return out;
 }
 
+// --programs-only exits 0 when every program hashes as the JSON says; 1 when mainnet's code changed (refresh the
+// fixtures); 2 when an RPC failed every try (mainnet's code was not read: nothing is known to have changed).
 if (process.argv.includes("--programs-only")) {
-  let bad = 0;
-  for (const name of ["pump.json", "pumpswap.json"]) {
-    const fx = JSON.parse(readFileSync(join(HERE, name), "utf8"));
-    const got = await dumpPrograms(fx.programs.map((p) => p.address));
-    for (const p of fx.programs) {
-      const g = got.find((x) => x.address === p.address);
-      if (g.sha256 !== p.sha256) { bad++; console.log(`MISMATCH ${name} ${p.address}: json ${p.sha256}, chain ${g.sha256}`); }
-    }
-  }
-  if (bad) {
-    console.log(`FAIL: ${bad} program(s) changed on mainnet since the dump. Refresh the fixtures from the repo root with: ${REFRESH}`);
+  const refresh = (why) => {
+    console.log(`FAIL (code change): ${why}. Refresh the fixtures from the repo root with: ${REFRESH}`);
     console.log("then run the pool's LiteSVM tests on the new code and commit contracts/pool-solana/fixtures/venues/*.json");
     process.exit(1);
+  };
+  let bad = 0;
+  try {
+    for (const name of ["pump.json", "pumpswap.json"]) {
+      const fx = JSON.parse(readFileSync(join(HERE, name), "utf8"));
+      const got = await dumpPrograms(fx.programs.map((p) => p.address));
+      for (const p of fx.programs) {
+        const g = got.find((x) => x.address === p.address);
+        if (g.sha256 !== p.sha256) { bad++; console.log(`MISMATCH ${name} ${p.address}: json ${p.sha256}, chain ${g.sha256}`); }
+      }
+    }
+  } catch (e) {
+    if (e instanceof RpcFailure) {
+      console.log(`FAIL (RPC, not a code change): ${e.message}. Mainnet's code was not read, so nothing is known to have changed: run the job again.`);
+      process.exit(2);
+    }
+    refresh(e.message);
   }
+  if (bad) refresh(`${bad} program(s) changed on mainnet since the dump`);
   console.log("PASS: every program's sha256 equals the JSON's");
   process.exit(0);
 }
