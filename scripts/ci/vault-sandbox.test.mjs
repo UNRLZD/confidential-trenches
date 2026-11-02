@@ -28,6 +28,8 @@ test("every file the sandbox suite reads is one the rule runs the suite for", ()
   const reads = suiteReads();
   assert.ok(reads.includes("contracts/vault/src/lib.rs"));
   for (const f of ["contracts/vault/scripts/deploy.mjs", "scripts/live-checks/vault-testnet-t01.mjs", "apps/helper/src/bind/send.ts", "apps/helper/test/bind-send/carry.ts", "packages/kit/zk/withdraw.vkey", "packages/kit/src/vault/shapes.ts", "packages/kit/test/vectors/vault-v1.json",
+    // the kit's entry exports the NEAR pair rule from this file, which imports nothing (covered by packages/kit/src/)
+    "packages/kit/src/near/networks.ts",
     // relayer_withdraw.rs: the withdraw relayer's CLI, the send it drives (through its imports) and the fixture
     "apps/helper/test/withdraw-send/carry.ts", "apps/helper/src/withdraw/send.ts", "apps/helper/src/withdraw/checks.ts", "apps/helper/src/withdraw/fee.ts", "contracts/vault/tests/fixtures/withdraw-spends.json"]) {
     assert.ok(reads.includes(f), `the suite reads ${f}, and suiteReads did not find it`);

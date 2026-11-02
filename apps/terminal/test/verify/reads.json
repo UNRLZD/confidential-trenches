@@ -9,7 +9,7 @@
  "height": 275831776,
  "rpcs": [
   {
-   "name": "fastnear",
+   "name": "https://test.rpc.fastnear.com",
    "answers": {
     "keys": {
      "jsonrpc": "2.0",
@@ -641,7 +641,7 @@
    }
   },
   {
-   "name": "drpc",
+   "name": "https://near-testnet.drpc.org",
    "answers": {
     "keys": {
      "id": "verify",

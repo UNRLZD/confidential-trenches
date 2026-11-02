@@ -14,3 +14,4 @@ export * from "./vault/inputs.ts";
 export * from "./vault/sync.ts";
 export * from "./trade/solana/send.ts";
 export * from "./trade/solana/build.ts";
+export { nearPairNetwork, nearPairRule, type NearNetwork } from "./near/networks.ts";
