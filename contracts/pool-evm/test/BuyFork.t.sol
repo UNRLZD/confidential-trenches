@@ -79,7 +79,9 @@ abstract contract BuyForkBase is BuyBase {
     assertGe(_got, _b.minOut);
     assertEq(RELAYER.balance, _fee);
     assertEq(POOL.balance, _poolBefore - 0.4 ether);
-    assertEq(address(adapter).balance, 0, 'the adapter keeps nothing');
+    assertEq(address(adapter).balance, 0, 'the adapter keeps no ether');
+    assertEq(IERC20Balance(_b.token).balanceOf(address(adapter)), 0, 'nor any token');
+    assertEq(IERC20Balance(_b.token).balanceOf(POOL), 0, 'and the pool got none');
     assertEq(W.balance, 0);
   }
 
