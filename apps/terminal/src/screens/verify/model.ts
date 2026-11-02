@@ -16,7 +16,7 @@ export type VerifyCheck = { id: VerifyCheckId; status: VerifyStatus; word: "unve
 export type VerifyRow = { status: VerifyStatus; checks: VerifyCheck[] };
 export type VerifyView =
   | { state: "loading" }
-  | { state: "read" | "disagree"; code: VerifyRow; funds: VerifyRow; height: string; blockHash: string | null; rpcs: string[] };
+  | { state: "read" | "disagree" | "unverified"; code: VerifyRow; funds: VerifyRow; height: string; blockHash: string | null; rpcs: string[] };
 
 type Totals = { deposited: bigint; spent: bigint; returned: bigint };
 type Decoded = { keys: unknown[]; account: string; config: string; totals: Totals; balance: bigint; registration: bigint | null; token: string };
@@ -154,4 +154,13 @@ export function verifyView(reads: VerifyReads | null, pins: VerifyPins): VerifyV
     blockHash: hashes.size === 1 ? short([...hashes][0]) : null,
     rpcs: rpcs.map((r) => r.name),
   };
+}
+
+/**
+ * The panel when nothing was read: a pair the rule refuses, no final height on either RPC, or no vault named on this
+ * network. Every check is Unverified (S18.3) with no value, both rows amber, no block; `rpcs` are the RPCs it tried.
+ */
+export function unverifiedView(rpcs: readonly string[]): VerifyView {
+  const row = (rules: Rule[]): VerifyRow => ({ status: "warn", checks: rules.map((r) => ({ id: r.id, status: "warn", word: "unverified", values: [] })) });
+  return { state: "unverified", code: row(RULES.code), funds: row(RULES.funds), height: "—", blockHash: null, rpcs: [...rpcs] };
 }
