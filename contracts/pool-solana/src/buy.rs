@@ -184,6 +184,8 @@ pub fn release_and_buy(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8
         let mut infos = Vec::with_capacity(x.accounts.len() + 1);
         for &i in x.accounts {
             let a = &accounts[i as usize];
+            // W signs wherever an inner instruction names it, whatever flag that instruction asked for: W's one
+            // signature covers every inner instruction, so the device must rebuild and check each one before W signs.
             metas.push(AccountMeta { pubkey: *a.key, is_signer: a.key == recipient.key, is_writable: a.is_writable });
             infos.push(a.clone());
         }
