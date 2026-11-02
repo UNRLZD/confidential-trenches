@@ -10,15 +10,16 @@
 // is answered with the state; every other kind, a kind with no row, a v other than 1 and a field its row does not allow
 // are refused as "not_allowed" (W:917; app.md §2.1 A2-A4, A:116-117), each signing kind until its own payload rules
 // land (W:886-917). No field of a refused message is read, so a return_key such as "constructor" is never looked up.
-// A repeated request gets its first answer again, never a second run; a repeated id with another body is refused
-// "id_reused" (startApi). Answers carry states only, never a key, the words or a note secret (W §2.9 row 11).
+// A kind the host answers may refuse with its own code (deposit.quote, src/deposit-wire.ts).
+// A repeated request gets its first answer again, never a second run, but for a "busy" or "down" refusal (RETRY_CODES),
+// which is not kept, so a retry runs again; a repeated id with another body is refused "id_reused" (startApi). Answers carry states only, never a key, the words or a note secret (W §2.9 row 11).
 // The state is the host's: in the frame, src/state.ts reads it from the wallet store (card signpage-frame-state). On
 // every change the host reports, the page reads the state again and posts a `state` event {v: 1, type, state} when it
 // differs from the last state it sent; none before the first `state` answer, which carries a fresh read itself.
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
-import type { ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, StateEvent } from "../../kit/src/signpage/messages.ts";
+import type { ErrorCode, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, StateEvent } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_PARAM_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
@@ -38,6 +39,12 @@ const MAX_DEPTH = 12;
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 /** How many answered ids are kept for a retry (never `state`'s); the oldest goes first. */
 export const REMEMBERED_IDS = 1024;
+
+/**
+ * Refusals that say "not now", never "no": a rate-limited or silent helper. They are not kept for the id, so the same
+ * request again runs again (card signpage-deposit-quote-wire); every other answer is kept and given again.
+ */
+export const RETRY_CODES: ReadonlySet<ErrorCode> = new Set(["busy", "down"]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATE: SignpageKind = "state";
@@ -80,12 +87,13 @@ export interface ApiHost {
   /**
    * Kinds the host answers itself (the shell's signin.open, nav and reload). A request reaches its handler only when its
    * params are exactly what the kit's schema for that kind allows (packages/kit/src/signpage/schema.ts); the handler
-   * returns the result, or null to refuse not_allowed, or a Deferred when it must wait for the page's own read first
-   * (src/main.ts: an open kind waits out a store read in flight); the queue holds every later message until it is
+   * returns the result, or null to refuse not_allowed, or a HostRefusal to refuse with its own code (deposit.quote's
+   * above_max, busy, down, quote_check_failed), or a Deferred when it must wait first (src/main.ts: an open kind waits
+   * out a store read in flight; deposit.quote waits for the helper); the queue holds every later message until it is
    * answered, so answers keep their order. `then` runs once the answer is posted (the shell removes its frame after
    * answering signin.open, so the answer must go first).
    */
-  kinds?: { [K in SignpageKind]?: (params: Record<string, unknown>) => HostAnswer<K> | Deferred<K> | null };
+  kinds?: { [K in SignpageKind]?: (params: Record<string, unknown>) => HostAnswer<K> | HostRefusal | Deferred<K> | null };
 }
 
 /**
@@ -94,7 +102,12 @@ export interface ApiHost {
  */
 export interface Deferred<K extends SignpageKind> {
   after: Promise<unknown>;
-  answer(): HostAnswer<K> | null;
+  answer(): HostAnswer<K> | HostRefusal | null;
+}
+
+/** A host-answered kind's refusal with its own code; RETRY_CODES are not kept for the id. */
+export interface HostRefusal {
+  error: ErrorCode;
 }
 
 /** A host-answered kind's result, and what runs once it is posted. */
@@ -175,7 +188,7 @@ function isStateRequest(m: Record<string, unknown>): boolean {
 }
 
 /** The host's own answer to `m`, when the host answers its kind and its params are exactly the kit's schema's. */
-function hostAnswer(host: ApiHost, m: Record<string, unknown>): HostAnswer<SignpageKind> | Deferred<SignpageKind> | null {
+function hostAnswer(host: ApiHost, m: Record<string, unknown>): HostAnswer<SignpageKind> | HostRefusal | Deferred<SignpageKind> | null {
   if (!Object.hasOwn(m, "v") || m.v !== 1 || !Object.hasOwn(m, "type") || typeof m.type !== "string") return null;
   const kind = m.type as SignpageKind;
   const run = host.kinds && Object.hasOwn(host.kinds, kind) ? host.kinds[kind] : undefined;
@@ -183,7 +196,7 @@ function hostAnswer(host: ApiHost, m: Record<string, unknown>): HostAnswer<Signp
   const params: Record<string, unknown> = {};
   for (const k of Object.keys(m)) if (k !== "v" && k !== "id" && k !== "type") params[k] = m[k];
   if (!SIGNPAGE_PARAM_SCHEMAS[kind](params)) return null;
-  return (run as (p: Record<string, unknown>) => HostAnswer<SignpageKind> | Deferred<SignpageKind> | null)(params);
+  return (run as (p: Record<string, unknown>) => HostAnswer<SignpageKind> | HostRefusal | Deferred<SignpageKind> | null)(params);
 }
 
 /**
@@ -218,16 +231,21 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() });
     // a Deferred is answered once its wait settles, either way; a plain answer is used as it is, in this task
     const got = hostAnswer(host, m);
-    let own: HostAnswer<SignpageKind> | null;
+    let own: HostAnswer<SignpageKind> | HostRefusal | null;
     if (got && "after" in got) {
       await got.after.catch(() => {});
       own = got.answer();
     } else own = got;
-    const answer: SignpageAnswer = own ? { v: 1, id, ok: true, result: own.result } : { v: 1, id, ok: false, error: { code: "not_allowed" } };
-    answered.set(id, { sha, answer });
-    if (answered.size > REMEMBERED_IDS) answered.delete(answered.keys().next().value as string);
+    const ok = own !== null && "result" in own ? own : null;
+    const code: ErrorCode = own !== null && "error" in own && typeof own.error === "string" ? own.error : "not_allowed";
+    const answer: SignpageAnswer = ok ? { v: 1, id, ok: true, result: ok.result } : { v: 1, id, ok: false, error: { code } };
+    // a "not now" refusal is not kept: the same request again runs again
+    if (ok || !RETRY_CODES.has(code)) {
+      answered.set(id, { sha, answer });
+      if (answered.size > REMEMBERED_IDS) answered.delete(answered.keys().next().value as string);
+    }
     post(answer);
-    own?.then?.();
+    ok?.then?.();
   };
 
   let queue: Promise<void> = Promise.resolve();

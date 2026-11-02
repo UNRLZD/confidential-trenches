@@ -457,6 +457,18 @@ export type HelperBindDelegate = HelperBindDeposit | HelperBindOnward | HelperBi
 export const HELPER_BIND_DEPOSIT_CAP = 1_000_000_000n;
 
 /**
+ * The longest POST /v1/bind takes to answer, in ms. The helper answers within it: a carry still running at it answers
+ * in_flight and goes on to its own end, as it does when the client closes. The device waits this long plus the
+ * request's way there and back, so it hears every answer given in time (a tx_hash, written with the call, and every
+ * refusal, acted on at once); a send with no answer by then is unsure, and the device reads the deposits pages again.
+ * A deposit's carry is two transactions read at final, the prepay and the delegate: a testnet deposit took 19.4 s from
+ * the signed call to the pages. 45 s is 2.3 times that, and well inside the call's own window of 120 blocks. With the
+ * device's 5 s for the way there and back, its whole wait is 50 s, under the 60 s at which browsers and proxies often
+ * cut a long request, so the device hears the helper's own in_flight rather than a broken connection.
+ */
+export const HELPER_BIND_ANSWER_MS = 45_000;
+
+/**
  * A deposit delegate's codes, in H4.3's order. Not failures: prepay_open (the device waits until the deposits pages
  * hold the previous P) and resign_needed (the device signs again). sender_struck is final for that id.
  * amount_above_cap: the amount is over HELPER_BIND_DEPOSIT_CAP.
