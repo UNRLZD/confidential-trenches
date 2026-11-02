@@ -83,10 +83,12 @@ export interface ApiHost {
    * returns the result, or null to refuse not_allowed, or a Deferred when it must wait for the page's own read first
    * (src/main.ts: an open kind waits out a store read in flight); the queue holds every later message until it is
    * answered, so answers keep their order. `then` runs once the answer is posted (the shell removes its frame after
-   * answering signin.open, so the answer must go first). `ctx` gives the request's id and `progress`, which posts a
-   * `progress` event {v: 1, type, id, stage} for it in the same queue, so one never overtakes the answer.
+   * answering signin.open, so the answer must go first). A Running answer (a trade) is answered once its wait settles
+   * too, but the queue does not wait for it: a trade's reads and signatures never hold `state`, nav or an open kind.
+   * `ctx` gives the request's id and `progress`, which posts a `progress` event {v: 1, type, id, stage} for it in the
+   * queue, held until the id's answer is posted, so one never overtakes the answer.
    */
-  kinds?: { [K in SignpageKind]?: (params: Record<string, unknown>, ctx: KindContext) => HostAnswer<K> | Deferred<K> | null };
+  kinds?: { [K in SignpageKind]?: (params: Record<string, unknown>, ctx: KindContext) => HostAnswer<K> | Deferred<K> | Running<K> | null };
 }
 
 /** What a host-answered kind knows of its request: its id, and the poster of its `progress` events. */
@@ -102,6 +104,15 @@ export interface KindContext {
 export interface Deferred<K extends SignpageKind> {
   after: Promise<unknown>;
   answer(): HostAnswer<K> | null;
+}
+
+/**
+ * A kind that runs long (a trade): answered once `after` settles, by `answer()` then, with no other message waiting for
+ * it. While it runs, the same request again gets no second run and no answer of its own (its one answer is on its way to
+ * the id); the same id with another body is refused "id_reused".
+ */
+export interface Running<K extends SignpageKind> extends Deferred<K> {
+  running: true;
 }
 
 /** A host-answered kind's result, or its refusal with an ErrorCode of messages.ts, and what runs once it is posted. */
@@ -181,7 +192,7 @@ function isStateRequest(m: Record<string, unknown>): boolean {
 }
 
 /** The host's own answer to `m`, when the host answers its kind and its params are exactly the kit's schema's. */
-function hostAnswer(host: ApiHost, m: Record<string, unknown>, ctx: KindContext): HostAnswer<SignpageKind> | Deferred<SignpageKind> | null {
+function hostAnswer(host: ApiHost, m: Record<string, unknown>, ctx: KindContext): HostAnswer<SignpageKind> | Deferred<SignpageKind> | Running<SignpageKind> | null {
   if (!Object.hasOwn(m, "v") || m.v !== 1 || !Object.hasOwn(m, "type") || typeof m.type !== "string") return null;
   const kind = m.type as SignpageKind;
   const run = host.kinds && Object.hasOwn(host.kinds, kind) ? host.kinds[kind] : undefined;
@@ -189,7 +200,7 @@ function hostAnswer(host: ApiHost, m: Record<string, unknown>, ctx: KindContext)
   const params: Record<string, unknown> = {};
   for (const k of Object.keys(m)) if (k !== "v" && k !== "id" && k !== "type") params[k] = m[k];
   if (!SIGNPAGE_PARAM_SCHEMAS[kind](params)) return null;
-  return (run as (p: Record<string, unknown>, c: KindContext) => HostAnswer<SignpageKind> | Deferred<SignpageKind> | null)(params, ctx);
+  return (run as (p: Record<string, unknown>, c: KindContext) => HostAnswer<SignpageKind> | Deferred<SignpageKind> | Running<SignpageKind> | null)(params, ctx);
 }
 
 /**
@@ -202,7 +213,9 @@ function hostAnswer(host: ApiHost, m: Record<string, unknown>, ctx: KindContext)
  * to the wallet store before it signs (wallet.md §7 item 4), with that card.
  */
 export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void } {
-  const answered = new Map<string, { sha: string; answer: SignpageAnswer }>();
+  // answer null: a Running kind's id whose answer is not posted yet; `held` keeps its progress events until it is
+  const answered = new Map<string, { sha: string; answer: SignpageAnswer | null }>();
+  const held = new Map<string, Stage[]>();
   const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent) => host.parent.postMessage(msg, APP_ORIGIN);
   // the JSON of the last state sent; null until the first `state` answer
   let sent: string | null = null;
@@ -220,23 +233,44 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     const id = m.id as string;
     const sha = hex(await crypto.subtle.digest("SHA-256", bytes));
     const first = answered.get(id);
-    if (first) return post(first.sha === sha ? first.answer : { v: 1, id, ok: false, error: { code: "id_reused" } });
+    if (first && first.sha !== sha) return post({ v: 1, id, ok: false, error: { code: "id_reused" } });
+    if (first) return first.answer ? post(first.answer) : undefined;
     if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() });
     // a Deferred is answered once its wait settles, either way; a plain answer is used as it is, in this task
-    const got = hostAnswer(host, m, { id, progress: (stage) => void (queue = queue.then(() => post({ v: 1, type: "progress", id, stage })).catch(() => {})) });
+    const progress = (stage: Stage): void => {
+      const waiting = held.get(id);
+      if (waiting) return void waiting.push(stage);
+      queue = queue.then(() => post({ v: 1, type: "progress", id, stage })).catch(() => {});
+    };
+    // a progress event before the id's answer waits for it (give posts it after)
+    held.set(id, []);
+    const got = hostAnswer(host, m, { id, progress });
+    if (got && "running" in got) {
+      answered.set(id, { sha, answer: null });
+      void got.after.catch(() => {}).then(() => give(id, sha, got.answer(), progress));
+      return;
+    }
     let own: HostAnswer<SignpageKind> | null;
     if (got && "after" in got) {
       await got.after.catch(() => {});
       own = got.answer();
     } else own = got;
+    give(id, sha, own, progress);
+  };
+  // posts a host kind's answer (null: not_allowed), keeps it for a retry, then the id's progress events held for it
+  const give = (id: string, sha: string, own: HostAnswer<SignpageKind> | null, progress: (stage: Stage) => void): void => {
     const answer: SignpageAnswer = !own
       ? { v: 1, id, ok: false, error: { code: "not_allowed" } }
       : "error" in own
         ? { v: 1, id, ok: false, error: { code: own.error } }
         : { v: 1, id, ok: true, result: own.result };
+    answered.delete(id);
     answered.set(id, { sha, answer });
     if (answered.size > REMEMBERED_IDS) answered.delete(answered.keys().next().value as string);
     post(answer);
+    const stages = held.get(id) ?? [];
+    held.delete(id);
+    for (const stage of stages) progress(stage);
     own?.then?.();
   };
 

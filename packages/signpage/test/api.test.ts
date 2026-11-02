@@ -361,7 +361,7 @@ test("a kind whose handler answers later is answered with its result once it set
   assert.deepEqual(ran, ["then"]);
 });
 
-test("a host kind gets its request's id; its progress events follow its answer, in order; a coded refusal is posted as that code", async () => {
+test("a running kind (a trade) gets its id, holds no other message, runs once for a repeat, and its progress follows its answer", async () => {
   const posted: unknown[] = [];
   const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
   let listener: ((e: IncomingMessage) => void) | null = null;
@@ -373,28 +373,36 @@ test("a host kind gets its request's id; its progress events follow its answer, 
     listen: (fn) => (listener = fn),
     state: signedOutState,
     kinds: {
-      // a trade answered at "sent", its fill as a progress event (src/trade.ts)
+      // a trade answered at "sent", its fill as a progress event (src/trade.ts); a progress before the answer waits for it
       buy: (p, ctx) => {
         ids.push(ctx.id);
         if (p.side === "sell") return { error: "quote_check_failed" };
-        return { after: held, answer: () => (ctx.progress("filled"), { result: { stage: "sent" as const, txs: [{ chain: "solana" as const, hash: "sig" }] } }) };
+        ctx.progress("signed");
+        return { running: true, after: held.then(() => ctx.progress("filled")), answer: () => ({ result: { stage: "sent" as const, txs: [{ chain: "solana" as const, hash: "sig" }] } }) };
       },
     },
   });
   const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
   const a = uuid();
   const b = uuid();
+  const c = uuid();
   const buy = { v: 1, type: "buy", chain: "solana", token: "Mint", amount: "10", slippage_bps: 500 };
   send({ ...buy, id: a, side: "buy" });
+  send({ ...buy, id: a, side: "buy" });
+  send({ ...buy, id: a, side: "buy", amount: "20" });
   send({ ...buy, id: b, side: "sell" });
+  send(state(c));
   await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual(posted.slice(1), [], "nothing before the trade's answer");
+  assert.deepEqual(posted.slice(1), [idReused(a), { v: 1, id: b, ok: false, error: { code: "quote_check_failed" } }, stateAnswer(c)], "nothing waits for the trade; its repeat is not run");
   release();
   await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual(ids, [a, b]);
-  assert.deepEqual(posted.slice(1), [
+  assert.deepEqual(ids, [a, b], "one run for a");
+  assert.deepEqual(posted.slice(4), [
     { v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } },
-    { v: 1, id: b, ok: false, error: { code: "quote_check_failed" } },
+    { v: 1, type: "progress", id: a, stage: "signed" },
     { v: 1, type: "progress", id: a, stage: "filled" },
   ]);
+  send({ ...buy, id: a, side: "buy" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(posted.slice(7), [{ v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } }], "a repeat after the answer gets it again");
 });

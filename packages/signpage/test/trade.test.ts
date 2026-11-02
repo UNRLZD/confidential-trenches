@@ -39,7 +39,7 @@ function store(wallets: Record<string, unknown> = {}) {
   };
 }
 
-type Script = { final?: Stage; legState?: (i: number) => "filled" | "failed" | "unknown"; refuse?: string; signAs?: string };
+type Script = { final?: Stage; legState?: (i: number) => "filled" | "failed" | "unknown"; refuse?: string; signAs?: string; hold?: Promise<void> };
 /** runSolanaTrade's stand-in: signs each leg (or `signAs`) through deps.sign, then signed, sent and the final stage. */
 function standIn(script: Script, calls: SolanaTradeRequest[]) {
   return async (req: SolanaTradeRequest, deps: SolanaTradeDeps): Promise<SolanaTradeRecord> => {
@@ -58,6 +58,7 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
     }
     deps.onProgress?.("signed");
     deps.onProgress?.("sent");
+    await script.hold;
     legs.forEach((l, i) => (l.outcome = { signature: l.signature!, state: script.legState?.(i) ?? "filled" } as never));
     if (script.final) deps.onProgress?.(script.final as never);
     return { side: req.side, token: req.token, reference: 1n, blockhash: null, legs };
@@ -220,4 +221,29 @@ test("ladderSizes, buyLegs and sellSplit", () => {
 
 test("the trade's helper is the wallet's release helper", () => {
   assert.equal(TRADE_HELPER, RELEASE_HELPER);
+});
+
+test("a running trade's wallets are not picked by a second trade; one whose tx is still unknown stays out after it ends", async () => {
+  let release!: () => void;
+  const hold = new Promise<void>((r) => (release = r));
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 1_000n) });
+  const p = page(s, { legState: () => "unknown", hold });
+  await p.ask(buy("10"));
+  await p.ask(buy("10"));
+  assert.deepEqual(p.calls.map((c) => c.legs[0]!.wallet), [W[0]!.address, W[1]!.address], "two trades, two wallets");
+  assert.deepEqual((await p.ask(buy("10"))).answer, { error: "no_ready_set" }, "both in use");
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual((await p.ask(buy("10"))).answer, { error: "no_ready_set" }, "their txs are unknown: still out");
+  assert.equal(p.calls.length, 2);
+});
+
+test("a read that fails before the answer refuses the trade as failed, and the op says so", async () => {
+  const pos = { state: "IN_POSITION" as const, token: MINT };
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos) });
+  const down: SolanaRpc = async () => { throw new Error("HTTP 503"); };
+  const p = page(s, {}, [down, down]);
+  const { id, answer } = await p.ask(sell("1"));
+  assert.deepEqual(answer, { error: "failed" });
+  assert.deepEqual(s.m.ops!.get(id), { kind: "sell", stage: "refused", txs: [], code: "failed", created_ms: 1_700_000_000_000 });
 });

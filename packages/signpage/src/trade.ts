@@ -32,7 +32,7 @@ import { solanaHelperRpc, solanaJsonRpc, solanaSendPaths, type SolanaRpc } from 
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ArmRefused, armRecords, moveArmRecord, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
 import type { WalletStore } from "@blindfill/wallet/store";
-import type { Deferred, HostAnswer, KindContext } from "./api.ts";
+import type { HostAnswer, KindContext, Running } from "./api.ts";
 
 export type TradeStore = Pick<WalletStore, "get" | "put" | "keys">;
 
@@ -166,13 +166,19 @@ export function refusalCode(record: SolanaTradeRecord): ErrorCode {
 }
 
 const filled = (l: SolanaTradeRecord["legs"][number]): boolean => l.outcome?.state === "filled" || l.reread?.state === "filled";
+// sent, and neither filled nor failed on both providers: its money may still move
+const unknown = (l: SolanaTradeRecord["legs"][number]): boolean =>
+  l.signature !== undefined && (l.reread ? l.reread.state === "unknown" : l.outcome === undefined || l.outcome.state === "unknown");
 
 type Answer = HostAnswer<"buy">;
 
 /** The `buy` kind's handler for the shell's `kinds` (src/main.ts). */
-export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ctx: KindContext) => Deferred<"buy"> | null {
+export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ctx: KindContext) => Running<"buy"> | null {
   const run = host.run ?? runSolanaTrade;
   const now = host.now ?? Date.now;
+  // the arm records of wallets a trade of this page is using: no second trade picks one until the first has ended, and
+  // one whose tx is still unknown stays out for the page's life (its money may yet move)
+  const busy = new Set<string>();
   return (params, ctx) => {
     if (params.chain !== "solana") return null;
     const side = params.side as "buy" | "sell";
@@ -198,7 +204,7 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
       settle();
     };
     void trade().catch(() => give({ error: "failed" }));
-    return { after, answer: () => answer };
+    return { running: true, after, answer: () => answer };
 
     async function trade(): Promise<void> {
       const store = await host.store();
@@ -218,23 +224,47 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
         give({ error: code });
       };
 
-      const records = await armRecords(store, "sol");
-      let legs: SolanaTradeLeg[];
-      let keys: string[] = [];
-      if (side === "buy") {
-        const set = buyLegs(records, cents);
-        if (!set) return refuse("no_ready_set");
-        ({ legs, keys } = set);
-      } else {
-        const pos = records.filter((r) => r.rec.role === "fresh" && r.rec.state === "IN_POSITION" && r.rec.token === token);
-        if (pos.length === 0) return refuse("no_position");
-        const held = await heldOnBoth(host.deps.providers, token, pos.map((r) => r.rec.address));
-        const split = sellSplit(units, held);
-        if (!split) return refuse("over_held");
-        legs = pos.flatMap((r, i) => (split[i]! > 0n ? [{ wallet: r.rec.address, amount: split[i]!, arm: { own: true } }] : []));
-        keys = pos.flatMap((r, i) => (split[i]! > 0n ? [r.key] : []));
+      // a read that fails before the answer refuses the trade; the op says so
+      try {
+        const records = (await armRecords(store, "sol")).filter((r) => !busy.has(r.key));
+        let legs: SolanaTradeLeg[];
+        let keys: string[] = [];
+        if (side === "buy") {
+          const set = buyLegs(records, cents);
+          if (!set) return refuse("no_ready_set");
+          ({ legs, keys } = set);
+        } else {
+          const pos = records.filter((r) => r.rec.role === "fresh" && r.rec.state === "IN_POSITION" && r.rec.token === token);
+          if (pos.length === 0) return refuse("no_position");
+          const held = await heldOnBoth(host.deps.providers, token, pos.map((r) => r.rec.address));
+          const split = sellSplit(units, held);
+          if (!split) return refuse("over_held");
+          legs = pos.flatMap((r, i) => (split[i]! > 0n ? [{ wallet: r.rec.address, amount: split[i]!, arm: { own: true } }] : []));
+          keys = pos.flatMap((r, i) => (split[i]! > 0n ? [r.key] : []));
+        }
+        for (const k of keys) busy.add(k);
+        let keep = keys;
+        try {
+          keep = await legsRun(store, legs, keys, write, refuse);
+        } finally {
+          for (const k of keys) if (!keep.includes(k)) busy.delete(k);
+        }
+      } catch (e) {
+        if (!answer) return refuse("failed");
+        throw e;
+      } finally {
+        await writes;
       }
+    }
 
+    /** Runs the trade on its legs; answers the keys whose txs are still unknown at its end (all of them on a throw after the answer). */
+    async function legsRun(
+      store: TradeStore,
+      legs: SolanaTradeLeg[],
+      keys: string[],
+      write: (patch: { stage?: string; txs?: TxRef[] }) => void,
+      refuse: (code: ErrorCode) => Promise<void>,
+    ): Promise<string[]> {
       const signer = solanaArmedSigner(store, host.seed64);
       const signed: TxRef[] = [];
       let last: SolanaTradeStage | null = null;
@@ -262,13 +292,13 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
           },
         );
       } catch (e) {
-        if (!answer) return refuse(e instanceof ArmRefused ? "not_armed" : "failed");
+        if (!answer) return (await refuse(e instanceof ArmRefused ? "not_armed" : "failed"), []);
         throw e;
       } finally {
         signer.close();
       }
       const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature }] : []));
-      if (!answer) return refuse(refusalCode(record));
+      if (!answer) return (await refuse(refusalCode(record)), []);
       const final = last as SolanaTradeStage | null;
       if (final === "filled" || final === "part_filled" || final === "not_landed") {
         write({ stage: final, txs });
@@ -279,16 +309,17 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
           record.legs.map((l, i) => (filled(l) ? moveArmRecord(store, keys[i]!, "READY", "IN_POSITION", token).catch(() => false) : false)),
         );
       }
-      await writes;
+      return keys.filter((_, i) => unknown(record.legs[i]!));
     }
   };
 }
 
 /** A repeated id's answer from its ops record: its trade stage and txs, its code, or id_reused while it is pending. */
 function fromRecord(rec: unknown): Answer {
-  const r = rec as { stage?: unknown; txs?: unknown; code?: unknown } | null;
-  if (r && typeof r.code === "string") return { error: r.code };
-  if (r && typeof r.stage === "string" && TRADE_STAGES.includes(r.stage) && Array.isArray(r.txs)) {
+  const r = rec as { kind?: unknown; stage?: unknown; txs?: unknown; code?: unknown } | null;
+  if (!r || (r.kind !== "buy" && r.kind !== "sell")) return { error: "id_reused" };
+  if (typeof r.code === "string") return { error: r.code };
+  if (typeof r.stage === "string" && TRADE_STAGES.includes(r.stage) && Array.isArray(r.txs)) {
     const txs = (r.txs as { chain?: unknown; hash?: unknown }[]).filter((t) => t && t.chain === "solana" && typeof t.hash === "string").map((t) => ({ chain: "solana" as const, hash: t.hash as string }));
     return { result: { stage: r.stage as TradeStage, txs } satisfies SignpageResults["buy"] };
   }
