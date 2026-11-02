@@ -35,6 +35,7 @@ export const CHANGED = [
   "scripts/live-checks/money-gate-testnet.mjs",
   "scripts/live-checks/near-rpc-operators.mjs",
   "scripts/live-checks/signpage-postmessage.mjs",
+  "scripts/live-checks/signpage-prover-host.mjs",
   "scripts/live-checks/signpage-skeleton.mjs",
   "scripts/live-checks/solana-jupiter-build.mjs",
   "scripts/live-checks/vault-setup-files.mjs",

@@ -115,9 +115,12 @@ export async function signInTyped(open: Opener, typed: string, env: WordsEnv = {
   return land(await storeSeed(open, typedSeed(typed, env)));
 }
 
-/** The backup's Saved (ses.5): the stored seed's code_saved becomes true, and nothing else changes. */
-export function saveWords(store: WalletStore): Promise<void> {
-  return store.setCodeSaved();
+/**
+ * The backup's Saved (ses.5): the stored seed's code_saved becomes true, and nothing else changes, only while the stored
+ * seed is `shown`, the one whose 12 words the screen drew (else the store refuses with SeedChanged).
+ */
+export function saveWords(store: WalletStore, shown: { entropy: Uint8Array }): Promise<void> {
+  return store.setCodeSaved(shown);
 }
 
 /** The 12 words for the backup screen: on SIGN_HOST's top-level page only, never in a frame (W:914). */
