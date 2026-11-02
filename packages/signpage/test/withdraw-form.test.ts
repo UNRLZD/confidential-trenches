@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { NEAR_NETWORKS, type NearRpc } from "../../wallet/src/near/networks.ts";
+import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { CHECK_IDLE_MS, drawWithdrawForm, evaluate, formatUnits, refusalWords, WITHDRAW_WORDS } from "../src/withdraw/form.ts";
 
 const MAIN = NEAR_NETWORKS.mainnet;

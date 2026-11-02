@@ -8,7 +8,7 @@
   "scripts": {
     "check:imports": "depcruise --config .dependency-cruiser.cjs --output-type err . && node scripts/ci/kit-reach.mjs",
     "test:gates": "node --test scripts/ci/*.test.mjs",
-    "test:vault-scripts": "node --test contracts/vault/scripts/*.test.mjs"
+    "test:vault-scripts": "node --test contracts/vault/scripts/*.test.mjs contracts/vault/scripts/*.test.ts"
   },
   "devDependencies": {
     "dependency-cruiser": "18.5.0",

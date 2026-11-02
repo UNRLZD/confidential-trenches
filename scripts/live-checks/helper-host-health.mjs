@@ -7,7 +7,10 @@
 //     changed one of the image's inputs (IMAGE_INPUTS, apps/helper/deploy/image-inputs.mjs: the helper, the kit, the
 //     root manifests, the lockfile and .dockerignore), or --commit;
 //   - APP_HOST and SIGN_HOST are each echoed exactly in Access-Control-Allow-Origin; example.com gets none; no answer
-//     carries `*` or Access-Control-Allow-Credentials; every answer has Vary: Origin.
+//     carries `*` or Access-Control-Allow-Credentials; every answer has Vary: Origin;
+//   - deposits are carried (card helper-testnet-carry): every answer lists the delegate part (POST /v1/bind) "up",
+//     and POST /v1/bind with a body that is no SignedDelegateAction answers the route's own 400 bad_shape, not 404.
+//     That read sends nothing anywhere: check 1 refuses the body before any chain read.
 //   node scripts/live-checks/helper-host-health.mjs [--base <url>] [--commit <sha>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
@@ -22,12 +25,14 @@ export const APP = "https://confidential.unrealized.trade";
 export const SIGN = "https://sign.confidential.unrealized.trade";
 export const OTHER = "https://example.com";
 export const PARTS = ["proxy", "relay", "intents", "delegate", "orders", "log"];
+/** POST /v1/bind's probe: not one SignedDelegateAction, so the route answers check 1's bad_shape and reads nothing. */
+export const BIND_PROBE = JSON.stringify({ signed_delegate: "AAAA" });
 const SHA = /^[0-9a-f]{40}$/;
 
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 
-/** The check on one recorded run: { reads: [{ origin, status, headers, body }] }, against the expected commit. */
-export function judge({ reads }, commit) {
+/** The check on one recorded run: { reads: [{ origin, status, headers, body }], bind }, against the expected commit. */
+export function judge({ reads, bind }, commit) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   say(SHA.test(commit ?? ""), `expected commit ${show(commit)} is a full sha`);
@@ -52,6 +57,7 @@ export function judge({ reads }, commit) {
     say(sameParts, `${tag} parts are exactly ${PARTS.join(", ")}: ${keys.join(", ") || "none"}`);
     const states = keys.every((k) => b.parts[k] === "up" || b.parts[k] === "down");
     say(sameParts && states, `${tag} each part is "up" or "down"`);
+    say(b?.parts?.delegate === "up", `${tag} delegate (POST /v1/bind) is ${show(b?.parts?.delegate)}, want "up"`);
     say(h["x-helper-commit"] === commit, `${tag} X-Helper-Commit: ${show(h["x-helper-commit"])}${h["x-helper-commit"] === commit ? "" : `, want ${show(commit)}`}`);
     say(b?.commit === commit, `${tag} body commit equals it`);
     const acao = h["access-control-allow-origin"];
@@ -62,6 +68,14 @@ export function judge({ reads }, commit) {
     const vary = (h["vary"] ?? "").split(",").map((s) => s.trim().toLowerCase());
     say(vary.includes("origin"), `${tag} Vary: ${show(h["vary"])} names Origin`);
   }
+  let code;
+  try {
+    code = JSON.parse(bind?.body ?? "").error?.code;
+  } catch {
+    code = undefined;
+  }
+  say(bind?.status === 400 && code === "bad_shape", `POST /v1/bind with no SignedDelegateAction answers ${show(bind?.status)} ${show(code)}, want 400 "bad_shape"`);
+  say(bind !== undefined && bind.headers["x-helper-commit"] === commit, `POST /v1/bind's X-Helper-Commit: ${show(bind?.headers["x-helper-commit"])}`);
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -73,7 +87,11 @@ export async function read(base = BASE, fetchFn = fetch) {
     for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
     reads.push({ origin, status: r.status, headers, body: await r.text() });
   }
-  return { base, reads };
+  const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/bind`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: BIND_PROBE });
+  const headers = {};
+  for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
+  const bind = { status: r.status, headers, body: await r.text() };
+  return { base, reads, bind };
 }
 
 export function mainCommit() {

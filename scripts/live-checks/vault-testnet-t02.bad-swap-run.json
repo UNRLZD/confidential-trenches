@@ -1,0 +1,52 @@
+{
+  "card": "vault-testnet-t02",
+  "network": "testnet",
+  "vault": "vault.bf-vt-20261102t071444.testnet",
+  "asset": "bf-usdc-20261101t022248.testnet",
+  "accounts": {
+    "parent": "bf-vt-20261102t071444.testnet",
+    "U": "c6402698d49b19a00789fb241eb2ddb255f482bcee381d5b4a2076ce7eea947f",
+    "G": "g-2b700409.bf-vt-20261102t071444.testnet",
+    "R": "r-2b700409.bf-vt-20261102t071444.testnet",
+    "F": "w-2b700409.bf-vt-20261102t071444.testnet",
+    "W": "f-2b700409.bf-vt-20261102t071444.testnet"
+  },
+  "deposit": {
+    "value": "2000000",
+    "precommitment": "9775808869911771665370841875994888418084894598613505923326993934364451469563",
+    "label": "12354063450875291147508737659428171804728314293405627380521006968164537183946",
+    "leaf_index": "9",
+    "commitment": "11881630471660976202627085430046756682400493535117928488580656527840004222195"
+  },
+  "withdraw": {
+    "withdrawn": "1500000",
+    "relay_fee": "204633",
+    "nullifier_hash": "4910010644466411696720549086939136823393294956057406544438811251005825991077",
+    "change_value": "500000",
+    "change_leaf_index": "10",
+    "change_commitment": "18303131046826982454090794363398667525579902114817226546004082563214314984081"
+  },
+  "browser": {
+    "name": "Chrome desktop",
+    "brands": [
+      {
+        "brand": "Not:A-Brand",
+        "version": "8"
+      },
+      {
+        "brand": "Chromium",
+        "version": "156"
+      },
+      {
+        "brand": "Google Chrome",
+        "version": "156"
+      }
+    ],
+    "platform": "macOS",
+    "hardware_concurrency": 12,
+    "device_memory_gb": 16,
+    "load_ms": 62,
+    "prove_ms": 5026,
+    "page_prove_ms": 5028
+  }
+}

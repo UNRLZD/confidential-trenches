@@ -18,8 +18,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createProxy } from "../src/proxy/proxy.ts";
 import { createRpc } from "../src/rpc/rpc.ts";
-import { createTokenWatch } from "../src/token-status/status.ts";
+import { bindSenderFromEnv } from "../src/bind/env.ts";
+import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
+import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
+import { solanaTokenFromEnv } from "../src/server.ts";
 
 const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Quoted constants in src/ that are not environment names: NEAR RPC error causes and a Ref pool kind. */
@@ -47,7 +50,20 @@ export function envNamesIn(text) {
 export const computedEnvReads = (text) => [...text.matchAll(/process\.env\[(?!\s*["'][A-Z][A-Z0-9_]*["']\s*\])/g)].length;
 
 /** The functions server.ts hands process.env to, each run here with a recording env. */
-export const ENV_READERS = { createProxy, createRpc, createTokenWatch, feeQuoterFromEnv };
+// withdrawSenderFromEnv takes the server's fee quoter (fee.ts opens its store once); its own names are read with a stub quoter
+const noFee = { networkOf: () => null, quote: async () => { throw new Error("no quote"); }, reads: () => ({ feeMin: async () => 0n }) };
+// solanaTokenFromEnv takes the server's proxy and lists; its own names are read with stubs
+const noProxy = { handle: async () => ({ status: 503, headers: {}, body: "" }) };
+const noLists = { get: async () => ({ status: 503, body: "" }), warm: () => () => {} };
+export const ENV_READERS = {
+  createProxy,
+  createRpc,
+  tokenWatchesFromEnv,
+  feeQuoterFromEnv,
+  withdrawSenderFromEnv: (env) => withdrawSenderFromEnv(env, noFee),
+  bindSenderFromEnv: (env) => bindSenderFromEnv(env),
+  solanaTokenFromEnv: (env) => solanaTokenFromEnv(env, noProxy, noLists),
+};
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */
 export function recordingEnv(values) {
@@ -100,12 +116,24 @@ test("every environment name src/ reads is passed by compose.yaml or set by the 
 
 test("every environment name the helper's code reads when it runs is passed by compose.yaml or set by the image", () => {
   // the readers are exactly the functions server.ts hands process.env to
-  const handed = new Set([...read("src/server.ts").matchAll(/(\w+)\(process\.env\)/g)].map((m) => m[1]));
+  // process.env as the first argument, alone or with others (withdrawSenderFromEnv(process.env, fee, ...))
+  const handed = new Set([...read("src/server.ts").matchAll(/(\w+)\(process\.env[,)]/g)].map((m) => m[1]));
   assert.deepEqual([...handed].sort(), Object.keys(ENV_READERS).sort());
   const atRun = namesReadAtRun();
   const passed = passedNames(read("deploy/compose.yaml"), read("Dockerfile"));
   assert.ok(["HELPER_STORE_DIR", "WITHDRAW_RELAYER_TESTNET", "NEAR_TESTNET_RPC_URL_B", "JUPITER_API_KEY", "SOLANA_RPC_URL"].every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
   assert.deepEqual([...atRun].filter((n) => !passed.has(n)).sort(), []);
+  // POST /v1/withdraw's names (withdraw/send.ts), read when nothing is set: a compose without one is caught
+  assert.ok(["HELPER_RELEASE", "WITHDRAW_VAULT_MAINNET", "WITHDRAW_RELAYER_KEYS_TESTNET"].every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
+  const without = passedNames(read("deploy/compose.yaml").replace(/^ {6}WITHDRAW_RELAYER_KEYS_TESTNET:.*\n/m, ""), read("Dockerfile"));
+  assert.deepEqual([...atRun].filter((n) => !without.has(n)), ["WITHDRAW_RELAYER_KEYS_TESTNET"]);
+  // POST /v1/bind's names (bind/env.ts), read when nothing is set: a compose without one is caught
+  const bind = ["BIND_VAULT_MAINNET", "BIND_RELAYER_MAINNET", "BIND_RELAYER_KEY_MAINNET", "BIND_VAULT_TESTNET", "BIND_RELAYER_TESTNET", "BIND_RELAYER_KEY_TESTNET", "BIND_MARGIN_K"];
+  assert.ok(bind.every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
+  for (const n of bind) {
+    const missing = passedNames(read("deploy/compose.yaml").replace(new RegExp(`^ {6}${n}:.*\\n`, "m"), ""), read("Dockerfile"));
+    assert.deepEqual([...atRun].filter((x) => !missing.has(x)), [n]);
+  }
 });
 
 test("planted: a name read in src/ that compose.yaml does not pass is caught; one it passes is not", () => {

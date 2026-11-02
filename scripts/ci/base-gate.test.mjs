@@ -1,5 +1,5 @@
-// On a pull request, ci.yml runs money-gate and verify-gate as the base commit has them, so a pull request cannot
-// change the gate that judges it. This test finds every ci.yml step that runs a gate from "$RUNNER_TEMP", replays its
+// On a pull request, ci.yml runs money-gate, verify-gate and vault-sandbox's rule as the base commit has them, so a pull
+// request cannot change the gate that judges it. This test finds every ci.yml step that runs a gate from "$RUNNER_TEMP", replays its
 // "$RUNNER_TEMP" lines in a temp clone and checks that each gate loads (no ERR_MODULE_NOT_FOUND), runs as the base
 // has it (the head's tampered copy never runs) and judges the head's checkout (the head's own record and live check).
 //   node --test scripts/ci/base-gate.test.mjs
@@ -86,7 +86,7 @@ function prClone() {
   git(repo, ["checkout", "--quiet", "--detach", base]);
   writeFileSync(path.join(repo, `scripts/live-checks/${PROBE}.mjs`), "// probe\n");
   writeFileSync(path.join(repo, `scripts/live-checks/${PROBE}.md`), `CARD ${PROBE} / live: PASS\nMoney path: no\n`);
-  for (const g of ["money-gate", "verify-gate"]) {
+  for (const g of ["money-gate", "verify-gate", "vault-sandbox"]) {
     const f = path.join(repo, `scripts/ci/${g}.mjs`);
     const text = readFileSync(f, "utf8");
     writeFileSync(f, text.startsWith("#!") ? text.replace(/\n/, `\n${TAMPER}`) : TAMPER + text);
@@ -110,11 +110,13 @@ function replay(pr, lines, env) {
 const EXPECT = {
   "money-gate": /money-gate: PASS \(1 record\(s\) read, 0 tx read\(s\)\)/,
   "verify-gate": new RegExp(`verify-gate: PASS \\(cards: ${PROBE}\\)`),
+  // the head touches scripts/ci/vault-sandbox.mjs, a file of the rule's own PATHS
+  "vault-sandbox": /run=true: \d+ changed file\(s\) the suite reads/,
 };
 
-test("ci.yml runs money-gate and verify-gate from the base on a pull request", () => {
+test("ci.yml runs money-gate, verify-gate and vault-sandbox's rule from the base on a pull request", () => {
   const steps = baseGateSteps(readFileSync(CI, "utf8"));
-  assert.deepEqual(steps.map((s) => s.gate).sort(), ["money-gate", "verify-gate"], JSON.stringify(steps, null, 2));
+  assert.deepEqual(steps.map((s) => s.gate).sort(), ["money-gate", "vault-sandbox", "verify-gate"], JSON.stringify(steps, null, 2));
 });
 
 test("each base gate loads with every file it imports and judges the head's checkout", (t) => {

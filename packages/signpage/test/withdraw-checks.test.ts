@@ -6,7 +6,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { NEAR_NETWORKS, type NearRpc } from "../../wallet/src/near/networks.ts";
+import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { addressForm, checkAmount, checkRecipient, parseAmount, withdrawable } from "../src/withdraw/checks.ts";
 

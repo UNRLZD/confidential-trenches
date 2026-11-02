@@ -36,7 +36,7 @@ import { type HelperWithdrawFeeAnswer } from "@blindfill/kit";
 import { nearRpc, RPC_TIMEOUT_MS } from "../bind/send.ts";
 import type { Rpc } from "../near/pages.ts";
 import { openDurableDir, type DurableDir } from "../store/durable.ts";
-import { readUrls, USDC } from "../token-status/status.ts";
+import { readUrls, TESTNET_RPCS, TESTNET_TOKEN, USDC } from "../token-status/status.ts";
 import { decimal, isAccountId, type CheckedWithdraw, type WithdrawReads } from "./checks.ts";
 import { MAX_FINAL_AGE_MS } from "./index.ts";
 
@@ -76,8 +76,8 @@ export const FEE_CACHE_MS = 1_000;
  * ahead is no quote of this chain's (a testnet reset) and is dropped.
  */
 export const FEE_QUOTE_AHEAD_MAX = BigInt(FEE_QUOTE_WINDOW_BLOCKS) + HEIGHT_SPREAD_MAX + 1n;
-/** The testnet token: contracts/vault/deployments/testnet-usdc.json account_id (fee.test.ts reads the file). */
-export const TESTNET_TOKEN = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
+/** The testnet token and testnet's two providers: the token watch's (token-status/status.ts WATCHED), one list. */
+export { TESTNET_RPCS, TESTNET_TOKEN };
 
 const U128 = 1n << 128n;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -126,7 +126,7 @@ export function pxOf(poolToken: bigint, poolNear: bigint): string {
 
 // ---- The reads ----
 
-type Block = { height: bigint; hash: string; gasPrice: bigint; ms: bigint };
+export type Block = { height: bigint; hash: string; gasPrice: bigint; ms: bigint };
 
 function headerOf(a: unknown, who: string): Block {
   const h = isObj(a) && isObj(a.header) ? a.header : undefined;
@@ -171,7 +171,7 @@ export async function agreedBlock(rpcs: readonly [Rpc, Rpc], now: () => number):
 }
 
 /** One view at block `b` on both providers, its bytes equal on both, parsed as JSON. */
-async function viewAt(rpcs: readonly [Rpc, Rpc], b: Block, account: string, method: string, args: unknown): Promise<unknown> {
+export async function viewAt(rpcs: readonly [Rpc, Rpc], b: Block, account: string, method: string, args: unknown): Promise<unknown> {
   const params = { request_type: "call_function", block_id: Number(b.height), account_id: account, method_name: method, args_base64: Buffer.from(JSON.stringify(args)).toString("base64") };
   const bytes = await Promise.all(
     rpcs.map(async (r, i) => {
@@ -350,11 +350,6 @@ export function createFeeQuoter(cfg: FeeQuoterConfig): FeeQuoter {
 
 // ---- The host's configuration ----
 
-/** Testnet's two providers: the host's environment, else the device's release pair (FastNEAR and dRPC). */
-export const TESTNET_RPCS = [
-  { env: "NEAR_TESTNET_RPC_URL", fallback: "https://test.rpc.fastnear.com" },
-  { env: "NEAR_TESTNET_RPC_URL_B", fallback: "https://near-testnet.drpc.org" },
-] as const;
 /** The relayers' durable store folder (store/durable.ts; deploy/compose.yaml mounts a volume there). */
 export const STORE_ENV = "HELPER_STORE_DIR";
 /** The release's relayer per network: a network is quoted only when both its accounts are set. */
@@ -369,7 +364,7 @@ export const RELAYER_ENV = {
  * a Mac (curl, 2026-11-02 09:27Z), so token-status's 2 s would refuse an honest provider.
  */
 export function feeQuoterFromEnv(env: Record<string, string | undefined>, fetchFn: typeof fetch = fetch): FeeQuoter {
-  const mainnet = readUrls(env).map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as [Rpc, Rpc];
+  const mainnet = readUrls(env, "mainnet").map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as [Rpc, Rpc];
   const testnetUrls = TESTNET_RPCS.map(({ env: k, fallback }) => {
     const v = env[k];
     if (v === undefined || v === "") return fallback;

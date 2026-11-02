@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/helper-host-health.test.mjs: the live check replays recorded answers
-// (helper-host-health.answers.json). good: apps/helper at 6aa24c5 in its image behind deploy/Caddyfile, run by
-// deploy/compose.yaml on a Mac (HELPER_HOST has no server yet, so no served answer exists): PASS. bad_commit: a real
-// answer from the same image built with another commit (854f02d): FAIL. bad_star: the good answer with
-// Access-Control-Allow-Origin: * on every read: FAIL.
+// (helper-host-health.answers.json). good: the helper of card helper-testnet-carry run locally (its note says how):
+// PASS. bad_no_bind: apps/helper at 6aa24c5 in its image behind deploy/Caddyfile, before /v1/bind was mounted (delegate
+// "down", POST /v1/bind 404): FAIL. bad_commit: a real answer from the same image built with another commit (854f02d):
+// FAIL. bad_star: an answer with Access-Control-Allow-Origin: * on every read: FAIL.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -16,17 +16,34 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-host-health.answers.json"), "utf8"));
 const COMMIT = A.good.commit;
 
-// a fetch that answers each read with the recorded answer for the request's Origin
-const replay = (a) => async (_url, init) => {
+// a fetch that answers each read with the recorded answer for the request's Origin, and POST /v1/bind with the recorded
+// one (an answer recorded before the route was read: 404 not_found, as the helper answered an unmounted path)
+const replay = (a) => async (url, init) => {
+  if (init.method === "POST") {
+    assert.equal(new URL(url).pathname, "/v1/bind");
+    assert.equal(init.body, '{"signed_delegate":"AAAA"}');
+    const b = a.bind ?? { status: 404, headers: a.reads[0].headers, body: '{"error":"not_found"}' };
+    return new Response(b.body, { status: b.status, headers: b.headers });
+  }
   const r = a.reads.find((x) => x.origin === init.headers.origin);
   return new Response(r.body, { status: r.status, headers: r.headers });
 };
 
-test("recorded good answer: 200, the six parts, the commit, the two origins echoed, example.com none: PASS", async () => {
+test("recorded good answer: 200, the six parts, delegate up and POST /v1/bind mounted, the commit, the two origins echoed, example.com none: PASS", async () => {
   const r = judge(await read("https://api.confidential.unrealized.trade", replay(A.good)), COMMIT);
   assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.includes('ok  POST /v1/bind with no SignedDelegateAction answers 400 "bad_shape", want 400 "bad_shape"'), r.lines.join("\n"));
   assert.ok(r.lines.includes('ok  [https://confidential.unrealized.trade] Access-Control-Allow-Origin: "https://confidential.unrealized.trade"'));
   assert.ok(r.lines.includes("ok  [https://example.com] Access-Control-Allow-Origin: none"));
+});
+
+test("recorded bad answer: the helper before /v1/bind was mounted (delegate down, POST /v1/bind 404): FAIL", async () => {
+  const r = judge(await read(undefined, replay(A.bad_no_bind)), A.bad_no_bind.commit);
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.includes('BAD [https://confidential.unrealized.trade] delegate (POST /v1/bind) is "down", want "up"'), r.lines.join("\n"));
+  assert.ok(r.lines.includes('BAD POST /v1/bind with no SignedDelegateAction answers 404 none, want 400 "bad_shape"'), r.lines.join("\n"));
+  // and nothing else in it fails: the bind reads are what this answer is refused on
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).filter((l) => !l.includes("delegate") && !l.includes("/v1/bind")), []);
 });
 
 test("recorded bad answer: X-Helper-Commit is not main's: FAIL", async () => {
@@ -44,7 +61,7 @@ test("recorded bad answer: Access-Control-Allow-Origin: *: FAIL", async () => {
 });
 
 test("bad answers made from the good one: a part missing, a part added, no Vary, credentials allowed, a 503: FAIL", () => {
-  const edit = (fn) => ({ reads: A.good.reads.map((r) => fn(structuredClone(r))) });
+  const edit = (fn) => ({ reads: A.good.reads.map((r) => fn(structuredClone(r))), bind: A.good.bind });
   const body = (f) => (r) => ((r.body = JSON.stringify(f(JSON.parse(r.body)))), r);
   const cases = {
     "parts are exactly": edit(body((b) => (delete b.parts.log, b))),
@@ -53,6 +70,7 @@ test("bad answers made from the good one: a part missing, a part added, no Vary,
     "Vary: none": edit((r) => (delete r.headers.vary, r)),
     "no Access-Control-Allow-Credentials": edit((r) => ((r.headers["access-control-allow-credentials"] = "true"), r)),
     "answers 503": edit((r) => ((r.status = 503), r)),
+    "delegate (POST /v1/bind) is": edit(body((b) => ((b.parts.delegate = "down"), b))),
   };
   for (const [want, answer] of Object.entries(cases)) {
     const r = judge(answer, COMMIT);
