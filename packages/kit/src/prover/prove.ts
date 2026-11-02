@@ -18,7 +18,7 @@
 import { poseidon1 } from "poseidon-lite/poseidon1";
 import { poseidon2 } from "poseidon-lite/poseidon2";
 import { poseidon3 } from "poseidon-lite/poseidon3";
-import { vaultWithdrawInput, type VaultWithdrawInput, type VaultWithdrawInputArgs } from "../vault/inputs.ts";
+import { poolWithdrawInput, type PoolWithdrawInputArgs, vaultWithdrawInput, type VaultWithdrawInput, type VaultWithdrawInputArgs } from "../vault/inputs.ts";
 import { VAULT_WITHDRAW_SIGNALS, vaultProof, type VaultSnarkjsProof, type VaultWithdrawSignals } from "../vault/shapes.ts";
 import type { Prover } from "./client.ts";
 
@@ -64,7 +64,18 @@ function signalsOf(i: VaultWithdrawInput): VaultWithdrawSignals {
  * any proof, and refuses a worker answer whose public signals are not this input's or whose proof is not well formed.
  */
 export async function vaultProveWithdraw(prover: VaultProver, args: VaultWithdrawInputArgs): Promise<VaultWithdrawProof> {
-  const input = vaultWithdrawInput(args);
+  return proveInput(prover, vaultWithdrawInput(args));
+}
+
+/**
+ * The same for a spend in any pool on this circuit, with the context the pool's own context function gave
+ * (poolWithdrawInput): the answer's 8 public signals must be this input's, its context the pool's.
+ */
+export async function poolProveWithdraw(prover: VaultProver, args: PoolWithdrawInputArgs): Promise<VaultWithdrawProof> {
+  return proveInput(prover, poolWithdrawInput(args));
+}
+
+async function proveInput(prover: VaultProver, input: VaultWithdrawInput): Promise<VaultWithdrawProof> {
   const want = signalsOf(input);
   await loadWithdraw(prover);
   const got: unknown = await prover.prove("withdraw", input);
