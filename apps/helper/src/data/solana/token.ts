@@ -1,0 +1,422 @@
+// GET /v1/market/token, /v1/market/holders and /v1/market/candles with chain=solana: the token page's Solana reads
+// (markets paper M4.2 and D1.1 rows D-S6, D-S7, D-S11 and D-S12; the field lists frozen with the app's screens). The
+// answers are 06b §6.1's `TokenPage`, `Holders` and `Candles` (docs/spec/06b-wallet-webapp.md:1729-1749), with the
+// page's `row` the same `Row` Discover reads (lists.ts toRow, apps/terminal/src/screens/discover/fields.ts).
+//
+// Sources:
+//   - page: one `getMultipleAccounts` (jsonParsed) of the mint and its pump.fun curve account through the helper's RPC
+//     path (src/rpc/), and Jupiter's `/tokens/v2/search?query=<mint>` through the helper's proxy (src/proxy/), at once.
+//     The mint account gives decimals, the mint and freeze authorities and the Token-2022 transfer fee (Risk `tax`);
+//     Jupiter gives the row; the curve account gives `curve_bps` and `lp: curve` while the token is on its curve.
+//   - holders: `getTokenLargestAccounts`, then one `getMultipleAccounts` (jsonParsed) of those accounts for their
+//     owners, merged per owner (D-S11). When the RPC does not answer it: `holders: []`, `total` and `top_bps` from
+//     Jupiter's `holderCount` and `audit.topHoldersPercentage`, `src` naming Jupiter (06b v1.36).
+//   - candles: GeckoTerminal (keyless) `tokens/<mint>` for the token's top pool, then the pool's OHLCV in USD for the
+//     mint (D-S7), every call through one queue of at most GT_PER_MIN a minute (L-05) and each answer shared.
+//
+// Display only: nothing here feeds a signature (the device reads the mint and the pools itself before it signs). Every
+// vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
+// is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
+import { address, dec, pumpCurveAddress, pumpCurveBps, toRow, type Row } from "./lists.ts";
+
+export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+/** Mainnet's epoch length in slots (no warm-up), for the Token-2022 fee in force at the read's slot. */
+const SLOTS_PER_EPOCH = 432_000;
+
+/** The page and the holders: the last good answer serves this long, then the read answers 503 (D1's helper rules). */
+export const STALE_MS = 60_000;
+/** TokenPage "cacheable 5 s" (06b); D-S6's per-token 12 s is the longer bound, and the page asks every 5 s. */
+export const PAGE_FRESH_MS = 5_000;
+/** D-S11: per mint 60 s. */
+export const HOLDERS_FRESH_MS = 60_000;
+/** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
+export const CANDLES_FRESH_MS = 60_000;
+export const POOL_FRESH_MS = 600_000;
+/** L-05: GeckoTerminal's public API, about 10 calls a minute. */
+export const GT_PER_MIN = 10;
+export const GT_BASE = "https://api.geckoterminal.com/api/v2";
+/** Tokens held per cache; the oldest goes first. */
+export const CACHE_MAX = 2_000;
+export const HOLDERS_MAX = 20;
+export const CANDLES_MAX = 500;
+const ANSWER_MAX = 2 * 1024 * 1024;
+const TIMEOUT_MS = 8_000;
+
+/** The timeframes 06b names and the GeckoTerminal OHLCV call for each; `1s` is not served on Solana (06b v1.15). */
+export const TF = {
+  "1m": { period: "minute", aggregate: 1, s: 60 },
+  "5m": { period: "minute", aggregate: 5, s: 300 },
+  "15m": { period: "minute", aggregate: 15, s: 900 },
+  "1h": { period: "hour", aggregate: 1, s: 3_600 },
+  "4h": { period: "hour", aggregate: 4, s: 14_400 },
+  "1d": { period: "day", aggregate: 1, s: 86_400 },
+} as const;
+export type Tf = keyof typeof TF;
+
+/** 06b `Field<T>`: `src` names the provider, "chain" for our own read, or "none" for a value nothing reads yet. */
+export type Field<T> = { v: T | null; src: string; as_of_ms: number };
+export const RISK_FIELDS = [
+  "mint_auth", "freeze_auth", "lp", "top10_bps", "dev_bps", "snipers_bps", "holders", "liq_usd", "age_s", "tax", "honeypot",
+  "insiders_bps", "bundlers_bps", "fresh_bps",
+] as const;
+export type Risk = Record<(typeof RISK_FIELDS)[number], Field<unknown>>;
+export const PAGE_FIELDS = ["row", "decimals", "pool", "risk", "route"] as const;
+export type TokenPage = { row: Row; decimals: number; pool: string | null; risk: Risk; route: "ok" | "none" | "unknown" };
+export type Holder = { addr: string; amt: string; bps: number | null; kind?: "burn" };
+export const HOLDERS_FIELDS = ["holders", "total", "top_bps", "src", "as_of_ms"] as const;
+export type Holders = { holders: Holder[]; total: number | null; top_bps: number | null; src: string; as_of_ms: number };
+export type Candle = [number, string, string, string, string, string];
+export const CANDLES_FIELDS = ["tf", "candles", "src", "as_of_ms"] as const;
+export type Candles = { tf: Tf; candles: Candle[]; src: string; as_of_ms: number };
+
+/** The burn address SPL tokens are sent to (the incinerator). */
+const INCINERATOR = "1nc1nerator11111111111111111111111111111111";
+
+const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const U64 = /^(0|[1-9]\d{0,19})$/;
+const u64 = (v: unknown): bigint | null => (typeof v === "string" && U64.test(v) && BigInt(v) <= 0xffff_ffff_ffff_ffffn ? BigInt(v) : null);
+
+// ---------------------------------------------------------------------------------------------------------------
+// The mint account (D-S12)
+// ---------------------------------------------------------------------------------------------------------------
+
+export type Mint = { decimals: number; supply: bigint; mintAuth: boolean; freezeAuth: boolean; feeBps: number };
+
+/** An authority as jsonParsed writes it: null when none, else an address; anything else is not a mint. */
+const auth = (v: unknown): boolean | undefined => (v === null ? false : address(v) !== null ? true : undefined);
+
+/** The transfer fee in force at `slot` in basis points: 0 with no TransferFeeConfig; undefined when it is malformed. */
+function transferFee(extensions: unknown, slot: number): number | undefined {
+  if (extensions === undefined) return 0;
+  if (!Array.isArray(extensions)) return undefined;
+  const cfg = extensions.find((e) => obj(e).extension === "transferFeeConfig");
+  if (cfg === undefined) return 0;
+  const st = obj(obj(cfg).state);
+  const pick = (f: unknown) => {
+    const o = obj(f);
+    return Number.isSafeInteger(o.epoch) && Number.isInteger(o.transferFeeBasisPoints) && (o.transferFeeBasisPoints as number) >= 0 && (o.transferFeeBasisPoints as number) <= 10_000
+      ? { epoch: o.epoch as number, bps: o.transferFeeBasisPoints as number }
+      : null;
+  };
+  const older = pick(st.olderTransferFee);
+  const newer = pick(st.newerTransferFee);
+  if (older === null || newer === null) return undefined;
+  return Math.floor(slot / SLOTS_PER_EPOCH) >= newer.epoch ? newer.bps : older.bps;
+}
+
+/** A jsonParsed account as a mint, or null when it is not a mint of the two token programs. */
+export function toMint(account: unknown, slot: number): Mint | null {
+  const a = obj(account);
+  if (a.owner !== TOKEN_PROGRAM && a.owner !== TOKEN_2022_PROGRAM) return null;
+  const parsed = obj(obj(a.data).parsed);
+  if (parsed.type !== "mint") return null;
+  const info = obj(parsed.info);
+  const decimals = info.decimals;
+  const supply = u64(info.supply);
+  const mintAuth = auth(info.mintAuthority);
+  const freezeAuth = auth(info.freezeAuthority);
+  // a classic SPL mint has no extensions and no transfer fee
+  const feeBps = a.owner === TOKEN_PROGRAM ? 0 : transferFee(info.extensions, slot);
+  if (!Number.isInteger(decimals) || (decimals as number) < 0 || (decimals as number) > 255 || supply === null || mintAuth === undefined || freezeAuth === undefined || feeBps === undefined) return null;
+  return { decimals: decimals as number, supply, mintAuth, freezeAuth, feeBps };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The page
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Jupiter's search answer: the one row whose id is exactly this mint, or null. */
+export function searchRow(answer: unknown, mint: string): Record<string, unknown> | null {
+  if (!Array.isArray(answer)) return null;
+  const hit = answer.slice(0, 100).find((r) => obj(r).id === mint);
+  return hit === undefined ? null : obj(hit);
+}
+
+/** The TokenPage from a mint, Jupiter's row and the curve progress (null when the curve account is not one). */
+export function toPage(mint: Mint, jup: Record<string, unknown>, curveBps: number | null, chainAtMs: number, jupAtMs: number): TokenPage | null {
+  const parsed = toRow(jup, jupAtMs);
+  if (parsed === null) return null;
+  const row: Row = parsed.curve_bps === null && curveBps !== null ? { ...parsed, curve_bps: curveBps } : parsed;
+  // the chain's own reads win over Jupiter's for the authorities (D-S12)
+  row.mint_auth = mint.mintAuth;
+  row.freeze_auth = mint.freezeAuth;
+  const chain = <T>(v: T | null): Field<T> => ({ v, src: "chain", as_of_ms: chainAtMs });
+  const jupiter = <T>(v: T | null): Field<T> => ({ v, src: "jupiter", as_of_ms: jupAtMs });
+  const none: Field<never> = { v: null, src: "none", as_of_ms: chainAtMs };
+  const onCurve = row.launchpad !== null && curveBps !== null && curveBps < 10_000;
+  const created = row.created_s as number | null;
+  // the pool the token trades in: Jupiter's graduated pool, else the curve account while on its curve, else Jupiter's
+  // first pool (which Jupiter writes as the mint itself for a curve token: never a pool)
+  const first = address(obj(jup.firstPool).id);
+  const pool = address(jup.graduatedPool) ?? (onCurve ? pumpCurveAddress(row.token as string) : null) ?? (first !== row.token ? first : null);
+  return {
+    row,
+    decimals: mint.decimals,
+    pool,
+    risk: {
+      mint_auth: chain(mint.mintAuth),
+      freeze_auth: chain(mint.freezeAuth),
+      // a launchpad curve is `curve`; other Solana pools have no named read yet (06b `lp`), so null
+      lp: onCurve ? chain({ class: "curve", bps: null }) : { ...none },
+      top10_bps: jupiter(row.top10_bps),
+      dev_bps: jupiter(row.dev_bps),
+      snipers_bps: { ...none }, // D-S13: no free source at list scale
+      holders: jupiter(row.holders),
+      liq_usd: jupiter(row.liq_usd),
+      age_s: jupiter(created === null ? null : Math.max(0, Math.floor(jupAtMs / 1000) - created)),
+      // Token-2022 TransferFee (06c §3.6): the fee is charged on every transfer, so on a buy and on a sell alike
+      tax: chain({ buy_bps: mint.feeBps, sell_bps: mint.feeBps }),
+      honeypot: { ...none }, // 06c §3.8 mintRisk is not built
+      insiders_bps: { ...none },
+      bundlers_bps: { ...none },
+      fresh_bps: { ...none },
+    },
+    // whether a token routes is the device's reference-pool read at the quote (S12), never the data part's call
+    route: "unknown",
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Holders (D-S11)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Holder rows from getTokenLargestAccounts' value and the owners read for those accounts; null when either is
+ *  malformed. Accounts of one owner are merged; `bps` is of the supply. */
+export function toHolders(largest: unknown, owners: readonly unknown[], supply: bigint): Holder[] | null {
+  if (!Array.isArray(largest) || largest.length > HOLDERS_MAX || owners.length !== largest.length) return null;
+  const by = new Map<string, bigint>();
+  for (let i = 0; i < largest.length; i++) {
+    const amt = u64(obj(largest[i]).amount);
+    const acct = obj(owners[i]);
+    const info = obj(obj(obj(acct.data).parsed).info);
+    const owner = address(info.owner);
+    if (amt === null || owner === null || (acct.owner !== TOKEN_PROGRAM && acct.owner !== TOKEN_2022_PROGRAM)) return null;
+    by.set(owner, (by.get(owner) ?? 0n) + amt);
+  }
+  return [...by]
+    .sort((a, b) => (b[1] > a[1] ? 1 : b[1] < a[1] ? -1 : 0))
+    .map(([addr, amt]) => {
+      const h: Holder = { addr, amt: amt.toString(), bps: supply > 0n ? Number((amt * 10_000n) / supply) : null };
+      if (addr === INCINERATOR) h.kind = "burn";
+      return h;
+    });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Candles (D-S7)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** GeckoTerminal's token answer: the address of its top pool on Solana, or null. */
+export function topPool(answer: unknown): string | null {
+  const pools = obj(obj(obj(obj(answer).data).relationships).top_pools).data;
+  if (!Array.isArray(pools) || pools.length === 0) return null;
+  const id = obj(pools[0]).id;
+  return typeof id === "string" && id.startsWith("solana_") ? address(id.slice("solana_".length)) : null;
+}
+
+/** GeckoTerminal's OHLCV answer as bars, oldest first, one per open time, each on its timeframe's grid; null when it
+ *  is not a list. A bar with a value that is not a finite non-negative number, or with low above high, is dropped. */
+export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number): Candle[] | null {
+  const list = obj(obj(obj(answer).data).attributes).ohlcv_list;
+  if (!Array.isArray(list)) return null;
+  const step = TF[tf].s;
+  const seen = new Set<number>();
+  const out: Candle[] = [];
+  for (const raw of list.slice(0, 1_000)) {
+    if (!Array.isArray(raw) || raw.length < 6) continue;
+    const [t, o, h, l, c, v] = raw as unknown[];
+    if (!Number.isSafeInteger(t) || (t as number) % step !== 0 || (t as number) * 1000 > nowMs + 60_000 || (t as number) < 1_230_768_000) continue;
+    const vals = [o, h, l, c].map((x) => dec(x));
+    const vol = dec(v);
+    if (vals.some((x) => x === null || x === "0") || vol === null) continue;
+    if ((l as number) > (h as number) || (o as number) > (h as number) || (c as number) > (h as number) || (o as number) < (l as number) || (c as number) < (l as number)) continue;
+    if (seen.has(t as number)) continue;
+    seen.add(t as number);
+    out.push([t as number, vals[0]!, vals[1]!, vals[2]!, vals[3]!, vol]);
+  }
+  return out.sort((a, b) => a[0] - b[0]).slice(-limit);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The served answers
+// ---------------------------------------------------------------------------------------------------------------
+
+type Answer = { status: number; headers: Record<string, string>; body: string };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string): Promise<Answer> };
+type Rpc = { handle(chain: string, contentType: string | undefined, body: string): Promise<{ status: number; body: string }> };
+type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number };
+
+const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
+export const NOT_FOUND = err(404, "not_found");
+export const UPSTREAM = err(503, "upstream");
+
+/** A map that keeps at most `max` keys, dropping the oldest written. */
+function bounded<V>(max: number) {
+  const m = new Map<string, V>();
+  return {
+    get: (k: string) => m.get(k),
+    set(k: string, v: V) {
+      m.delete(k);
+      m.set(k, v);
+      while (m.size > max) m.delete(m.keys().next().value!);
+    },
+    size: () => m.size,
+  };
+}
+
+/** A read cached per key: fresh within `freshMs` of our own read; a failed refresh serves the last good one while its
+ *  data is under STALE_MS old; one read per key at a time. `read` answers null for "no such token" and throws for an
+ *  upstream failure. */
+function cached(freshMs: number, now: () => number, read: (key: string) => Promise<DataAnswer>) {
+  const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
+  const running = new Map<string, Promise<DataAnswer>>();
+  return {
+    size: last.size,
+    get(key: string): Promise<DataAnswer> {
+      const hit = last.get(key);
+      if (hit !== undefined && now() - hit.at < freshMs) return Promise.resolve(hit.a);
+      let p = running.get(key);
+      if (p === undefined) {
+        p = read(key)
+          .then((a) => {
+            if (a.status === 200 || a.status === 404) last.set(key, { a, at: now() });
+            return a;
+          })
+          .catch(() => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : UPSTREAM))
+          .finally(() => running.delete(key));
+        running.set(key, p);
+      }
+      return p;
+    },
+  };
+}
+
+class Upstream extends Error {}
+
+const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number } = {}) {
+  const now = deps.now ?? Date.now;
+  const doFetch = deps.fetch ?? fetch;
+
+  async function call(method: string, params: unknown[]): Promise<{ result: Record<string, unknown> }> {
+    const a = await rpc.handle("solana", "application/json", rpcBody(method, params));
+    if (a.status !== 200) throw new Upstream();
+    const j = obj(JSON.parse(a.body));
+    if (!Object.hasOwn(j, "result")) throw new Upstream();
+    return { result: obj(j.result) };
+  }
+
+  async function jupiter(mint: string): Promise<{ row: Record<string, unknown> | null; at: number }> {
+    const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${mint}`, "");
+    if (a.status !== 200) throw new Upstream();
+    const at = Date.parse(a.headers["X-Fetched-At"] ?? "");
+    return { row: searchRow(JSON.parse(a.body), mint), at: Number.isFinite(at) ? at : now() };
+  }
+
+  /** The mint account at a slot, or null when it is not a mint. */
+  async function mintAt(mint: string, curveToo: boolean) {
+    const keys = curveToo ? [mint, pumpCurveAddress(mint)] : [mint];
+    const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }]);
+    const value = result.value;
+    const slot = obj(result.context).slot;
+    if (!Array.isArray(value) || value.length !== keys.length || !Number.isSafeInteger(slot)) throw new Upstream();
+    return { mint: toMint(value[0], slot as number), curve: curveToo ? pumpCurveBps(value[1]) : null, at: now() };
+  }
+
+  const page = cached(PAGE_FRESH_MS, now, async (mint) => {
+    const [m, j] = await Promise.all([mintAt(mint, true), jupiter(mint)]);
+    if (m.mint === null || j.row === null) return NOT_FOUND;
+    const p = toPage(m.mint, j.row, m.curve, m.at, j.at);
+    if (p === null) return NOT_FOUND;
+    return { status: 200, body: JSON.stringify(p), src: "jupiter", asOfMs: Math.min(m.at, j.at) };
+  });
+
+  const holders = cached(HOLDERS_FRESH_MS, now, async (mint) => {
+    const m = await mintAt(mint, false);
+    if (m.mint === null) return NOT_FOUND;
+    try {
+      const largest = (await call("getTokenLargestAccounts", [mint, { commitment: "confirmed" }])).result.value;
+      if (!Array.isArray(largest)) throw new Upstream();
+      const accts = largest.slice(0, HOLDERS_MAX).map((r) => address(obj(r).address));
+      if (accts.some((a) => a === null)) throw new Upstream();
+      const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }])).result.value;
+      const rows = toHolders(largest.slice(0, HOLDERS_MAX), Array.isArray(owners) ? owners : [], m.mint.supply);
+      if (rows === null) throw new Upstream();
+      const top = rows.slice(0, 10).reduce((s, h) => s + (h.bps ?? 0), 0);
+      const j = await jupiter(mint).catch(() => null);
+      const total = j?.row ? ((toRow(j.row, j.at)?.holders ?? null) as number | null) : null;
+      const at = now();
+      const body: Holders = { holders: rows, total, top_bps: rows.length > 0 && m.mint.supply > 0n ? Math.min(10_000, top) : null, src: "chain", as_of_ms: at };
+      return { status: 200, body: JSON.stringify(body), src: "chain", asOfMs: at };
+    } catch {
+      // the fallback (06b v1.36): no rows, Jupiter's holder count and top-holders share
+      const j = await jupiter(mint);
+      if (j.row === null) return NOT_FOUND;
+      const r = toRow(j.row, j.at);
+      if (r === null) return NOT_FOUND;
+      const body: Holders = { holders: [], total: r.holders as number | null, top_bps: r.top10_bps as number | null, src: "jupiter", as_of_ms: j.at };
+      return { status: 200, body: JSON.stringify(body), src: "jupiter", asOfMs: j.at };
+    }
+  });
+
+  // GeckoTerminal: one queue of at most GT_PER_MIN calls a minute, shared by every token; a 429 pauses it
+  const gtCalls: number[] = [];
+  let gtPausedUntil = 0;
+  async function gecko(path: string): Promise<unknown> {
+    const t = now();
+    while (gtCalls.length > 0 && t - gtCalls[0]! >= 60_000) gtCalls.shift();
+    if (t < gtPausedUntil || gtCalls.length >= GT_PER_MIN) throw new Upstream();
+    gtCalls.push(t);
+    const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+    if (r.status === 429) {
+      const ra = Number(r.headers.get("retry-after"));
+      gtPausedUntil = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
+      throw new Upstream();
+    }
+    if (r.status === 404) return null;
+    if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) throw new Upstream();
+    const text = await r.text();
+    if (text.length > ANSWER_MAX) throw new Upstream();
+    return JSON.parse(text);
+  }
+
+  const pools = cached(POOL_FRESH_MS, now, async (mint) => {
+    const a = await gecko(`/networks/solana/tokens/${mint}`);
+    const pool = a === null ? null : topPool(a);
+    return pool === null ? NOT_FOUND : { status: 200, body: pool, asOfMs: now() };
+  });
+
+  const bars = cached(CANDLES_FRESH_MS, now, async (key) => {
+    const [mint, tf, to] = key.split(":") as [string, Tf, string];
+    const p = await pools.get(mint);
+    if (p.status !== 200) {
+      if (p.status === 404) return NOT_FOUND;
+      throw new Upstream();
+    }
+    const { period, aggregate } = TF[tf];
+    const before = to === "" ? "" : `&before_timestamp=${to}`;
+    const a = await gecko(`/networks/solana/pools/${p.body}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`);
+    const candles = a === null ? [] : toCandles(a, tf, 1_000, now());
+    if (candles === null) throw new Upstream();
+    const at = now();
+    return { status: 200, body: JSON.stringify(candles), src: "geckoterminal", asOfMs: at };
+  });
+
+  return {
+    /** 06b TokenPage for a Solana mint: 404 when it is no mint or Jupiter does not list it, 503 on an upstream failure. */
+    page: (mint: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : page.get(mint)),
+    /** 06b Holders (20 rows, merged per owner), or Jupiter's fallback. */
+    holders: (mint: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint)),
+    /** 06b Candles: up to `limit` bars of `tf` ending before `to` (unix seconds) when it is set. */
+    async candles(mint: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
+      if (address(mint) === null || !Object.hasOwn(TF, tf)) return NOT_FOUND;
+      const a = await bars.get(`${mint}:${tf}:${to ?? ""}`);
+      if (a.status !== 200) return a;
+      const body: Candles = { tf: tf as Tf, candles: (JSON.parse(a.body) as Candle[]).slice(-limit), src: "geckoterminal", as_of_ms: a.asOfMs! };
+      return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: a.asOfMs };
+    },
+  };
+}

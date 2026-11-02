@@ -18,6 +18,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { createSolanaLists } from "./data/solana/lists.ts";
+import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
@@ -30,12 +31,13 @@ type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
 type Watch = ReturnType<typeof createTokenWatch>;
 type Lists = ReturnType<typeof createSolanaLists>;
+type Token = ReturnType<typeof createSolanaToken>;
 type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw"] } as const satisfies Partial<Record<Part, readonly string[]>>;
-const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS] = MOUNTED.proxy;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW] = MOUNTED.relay;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -112,6 +114,7 @@ export function handler(
   lists: Lists = createSolanaLists(proxy, rpc),
   fee: Fee = feeQuoterFromEnv(process.env),
   withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status }),
+  token: Token = createSolanaToken(proxy, rpc),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
@@ -212,6 +215,35 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
+      if (path === MARKET_TOKEN || path === MARKET_HOLDERS || path === MARKET_CANDLES) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // the token page's reads (src/data/solana/token.ts): exactly one chain, Solana, and exactly one token; candles
+        // also exactly one tf, and at most one `to` (unix seconds) and one `limit` (1 to CANDLES_MAX, default it)
+        const q = new URL(req.url ?? "/", "http://helper.invalid").searchParams;
+        const one = (k: string) => (q.getAll(k).length === 1 ? q.get(k)! : null);
+        const most = (k: string) => (q.getAll(k).length === 0 ? "" : one(k));
+        const chain = one("chain");
+        const mint = one("token");
+        if (chain !== "solana" || mint === null) return send(404, { error: { code: "not_found" } }, cors(req));
+        let read: Promise<DataAnswer>;
+        if (path === MARKET_CANDLES) {
+          const tf = one("tf");
+          const to = most("to");
+          const limit = most("limit");
+          if (tf === null || to === null || limit === null || !/^(|[1-9]\d{0,10})$/.test(to) || !/^(|[1-9]\d{0,2})$/.test(limit) || Number(limit) > CANDLES_MAX) {
+            return send(404, { error: { code: "not_found" } }, cors(req));
+          }
+          read = token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit));
+        } else read = path === MARKET_TOKEN ? token.page(mint) : token.holders(mint);
+        void read
+          .then((a) => {
+            if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
+            const h: Headers = { [HELPER_SOURCE_HEADER]: a.src ?? "", [HELPER_FETCHED_AT_HEADER]: new Date(a.asOfMs).toISOString() };
+            reply({ status: 200, headers: h, body: a.body }); // node sends no body on a HEAD
+          })
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
       if (path.startsWith(PROXY_PREFIX)) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         // the raw path, never URL's normalised one: only a path written exactly as on the allowlist is served
@@ -255,12 +287,12 @@ export function handler(
   };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watch, lists, fee, withdraw),
+    handler(commit, proxy, rpc, watch, lists, fee, withdraw, token),
   );
   server.listen(port);
   // the withdrawal relayer starts with the helper: a restart resends its open sends and settles before any request
