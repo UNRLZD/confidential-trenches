@@ -36,7 +36,8 @@ docker build -q -f "$DF" --build-arg HELPER_COMMIT=main -t ct-helper:refused "$R
 echo "build rc=$? (want non-zero)"; grep -o "HELPER_COMMIT must be a full 40-hex commit" "$OUT/refused.log" | head -1
 echo "== stack: helper + caddy, plain http on 127.0.0.1:18080 (HELPER_SITE), the real Caddyfile otherwise"
 cd deploy
-export HELPER_COMMIT=$C HELPER_SITE=http://:80 HELPER_PORTS_HTTP=127.0.0.1:18080 HELPER_PORTS_HTTPS=127.0.0.1:18443
+# HELPER_RELEASE: the release /v1/health reports, which the live check reads (on the server, deploy/redeploy.sh writes it)
+export HELPER_COMMIT=$C HELPER_RELEASE=1 HELPER_SITE=http://:80 HELPER_PORTS_HTTP=127.0.0.1:18080 HELPER_PORTS_HTTPS=127.0.0.1:18443
 docker compose -p $P up -d --build 2>&1 | tail -2
 for _ in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:18080/v1/health 2>/dev/null && break; sleep 1; done
 echo "== live check through Caddy"

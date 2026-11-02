@@ -1,8 +1,8 @@
 {
  "good": {
-  "note": "apps/helper at 4222596 (card helper-testnet-carry) run by node src/server.ts on a Mac with only HELPER_COMMIT and PORT set (no relayer network), read 2026-11-02T14:49:28Z; the helper is not deployed at this commit yet",
-  "commit": "4222596dbe7ca34aadca97614cd02798f663b586",
-  "base": "http://127.0.0.1:18093",
+  "note": "apps/helper at 8d0257a (card helper-release-bump) run by node src/server.ts on a Mac with only HELPER_COMMIT, HELPER_RELEASE=2 and PORT set (no relayer network), read 2026-11-02T16:42Z; the release a first redeploy.sh run writes over a .env that held HELPER_RELEASE=1 and no HELPER_COMMIT; not deployed at this commit yet",
+  "commit": "8d0257ad5596cc6a104930f50bf56882d3d44931",
+  "base": "http://127.0.0.1:18192",
   "reads": [
    {
     "origin": "https://confidential.unrealized.trade",
@@ -12,15 +12,15 @@
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "161",
+     "content-length": "173",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
     },
-    "body": "{\"ok\":true,\"commit\":\"4222596dbe7ca34aadca97614cd02798f663b586\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":2,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://sign.confidential.unrealized.trade",
@@ -30,15 +30,15 @@
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "161",
+     "content-length": "173",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
     },
-    "body": "{\"ok\":true,\"commit\":\"4222596dbe7ca34aadca97614cd02798f663b586\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":2,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
    },
    {
     "origin": "https://example.com",
@@ -46,15 +46,15 @@
     "headers": {
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "161",
+     "content-length": "173",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
     },
-    "body": "{\"ok\":true,\"commit\":\"4222596dbe7ca34aadca97614cd02798f663b586\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":2,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
    }
   ],
   "bind": {
@@ -66,11 +66,239 @@
     "connection": "keep-alive",
     "content-length": "30",
     "content-type": "application/json; charset=utf-8",
-    "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+    "date": "Mon, 02 Nov 2026 16:42:51 GMT",
     "keep-alive": "timeout=65",
     "vary": "Origin",
     "x-content-type-options": "nosniff",
-    "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+    "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+   },
+   "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+  }
+ },
+ "since_before": {
+  "note": "the --since record for good: the same build run with HELPER_COMMIT=3e6cde6 (the commit the helper ran at the read) and HELPER_RELEASE=1 (the value its .env held), read 2026-11-02T16:42Z",
+  "commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b",
+  "base": "http://127.0.0.1:18191",
+  "reads": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "173",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
+    },
+    "body": "{\"ok\":true,\"commit\":\"3e6cde60b504c05ab3c44d05a0e4283edf6fc37b\",\"release\":1,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://sign.confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "173",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
+    },
+    "body": "{\"ok\":true,\"commit\":\"3e6cde60b504c05ab3c44d05a0e4283edf6fc37b\",\"release\":1,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://example.com",
+    "status": 200,
+    "headers": {
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "173",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
+    },
+    "body": "{\"ok\":true,\"commit\":\"3e6cde60b504c05ab3c44d05a0e4283edf6fc37b\",\"release\":1,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   }
+  ],
+  "bind": {
+   "status": 400,
+   "headers": {
+    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+    "cache-control": "no-store",
+    "connection": "keep-alive",
+    "content-length": "30",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Mon, 02 Nov 2026 16:42:51 GMT",
+    "keep-alive": "timeout=65",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
+   },
+   "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+  }
+ },
+ "bad_release_stuck": {
+  "note": "the same build run with the new commit 8d0257a and HELPER_RELEASE=1 again, as every deploy before this card left it, read 2026-11-02T16:42Z: against since_before, another commit with the same release",
+  "commit": "8d0257ad5596cc6a104930f50bf56882d3d44931",
+  "base": "http://127.0.0.1:18193",
+  "reads": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "173",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:52 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+    },
+    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":1,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://sign.confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "173",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:52 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+    },
+    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":1,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://example.com",
+    "status": 200,
+    "headers": {
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "173",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:52 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+    },
+    "body": "{\"ok\":true,\"commit\":\"8d0257ad5596cc6a104930f50bf56882d3d44931\",\"release\":1,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   }
+  ],
+  "bind": {
+   "status": 400,
+   "headers": {
+    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+    "cache-control": "no-store",
+    "connection": "keep-alive",
+    "content-length": "30",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Mon, 02 Nov 2026 16:42:52 GMT",
+    "keep-alive": "timeout=65",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-helper-commit": "8d0257ad5596cc6a104930f50bf56882d3d44931"
+   },
+   "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+  }
+ },
+ "deployed_no_release": {
+  "note": "the deployed helper at 3e6cde6, read on the live host 2026-11-02T16:42:24Z: it reports no release (before this card). A bad answer on its own, and a --since record that any whole number is up from",
+  "commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b",
+  "base": "https://api.confidential.unrealized.trade",
+  "reads": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "161",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:24 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
+    },
+    "body": "{\"ok\":true,\"commit\":\"3e6cde60b504c05ab3c44d05a0e4283edf6fc37b\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://sign.confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "161",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:25 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
+    },
+    "body": "{\"ok\":true,\"commit\":\"3e6cde60b504c05ab3c44d05a0e4283edf6fc37b\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://example.com",
+    "status": 200,
+    "headers": {
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "161",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 16:42:25 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
+    },
+    "body": "{\"ok\":true,\"commit\":\"3e6cde60b504c05ab3c44d05a0e4283edf6fc37b\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   }
+  ],
+  "bind": {
+   "status": 400,
+   "headers": {
+    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+    "alt-svc": "h3=\":443\"; ma=2592000",
+    "cache-control": "no-store",
+    "content-length": "30",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Mon, 02 Nov 2026 16:42:25 GMT",
+    "vary": "Origin",
+    "via": "1.1 Caddy",
+    "x-content-type-options": "nosniff",
+    "x-helper-commit": "3e6cde60b504c05ab3c44d05a0e4283edf6fc37b"
    },
    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
   }

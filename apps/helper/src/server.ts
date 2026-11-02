@@ -23,7 +23,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { createSolanaLists } from "./data/solana/lists.ts";
 import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
-import { health, type Part } from "./health.ts";
+import { health, releaseOf, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
@@ -135,6 +135,7 @@ export function handler(
   withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, statusesOf(watches)),
   token: Token = solanaTokenFromEnv(process.env, proxy, lists),
   bind: BindSender = bindSenderFromEnv(process.env, statusesOf(watches)),
+  release: number | null = releaseOf(process.env),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // GET /v1/token-status serves each network's token from that network's own watch
@@ -171,7 +172,7 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED), cors(req));
+        return send(200, health(commit, SERVED, release), cors(req));
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });

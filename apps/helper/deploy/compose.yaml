@@ -1,5 +1,6 @@
 # The helper and Caddy on one host. Only Caddy is published (80, 443 and 443/udp for HTTP/3).
 #   HELPER_COMMIT=<40 hex> docker compose up -d --build
+# On the server, deploy/redeploy.sh <40 hex> runs it, with HELPER_COMMIT and HELPER_RELEASE written to deploy/.env.
 name: ct-helper
 services:
   helper:
