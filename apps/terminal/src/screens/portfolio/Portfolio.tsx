@@ -206,7 +206,7 @@ function Equity({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps) {
         <span className="grow" />
         <div className="brk">
           <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null)}</div></div>
-          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (rows.length || t.realized30) ? t.realized30 : null)}</div></div>
+          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null)}</div></div>
         </div>
       </div>
       <div className="eqsplit">
@@ -528,7 +528,7 @@ function PhoneTop({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps)
       </div>
       <div className="brk two">
         <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null)}</div></div>
-        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (rows.length || t.realized30) ? t.realized30 : null)}</div></div>
+        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (src.data.closed.length || t.realized30) ? t.realized30 : null)}</div></div>
       </div>
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>
