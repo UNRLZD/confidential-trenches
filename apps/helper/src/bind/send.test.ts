@@ -2069,18 +2069,30 @@ test("the nonce counter: a restart while a transaction is in flight signs the ne
 test("the nonce counter: two signers on one key at once never both take n; the one that loses the compare-and-set takes the next", async () => {
   const node = new Node();
   node.landMs = () => 30;
+  assert.equal((await node.relayer(500).send(prepayAction(9n), open, () => undefined)).kind, "final"); // the counter holds 12
   const tx: TxRef[] = [];
   const outs = await Promise.all([node.relayer(500).send(prepayAction(1n), open, keep(tx)), node.relayer(500).send(prepayAction(2n), open, keep(tx))]);
   assert.deepEqual(outs.map((o) => o.kind), ["final", "final"]);
-  assert.deepEqual(tx.map((x) => x.nonce).sort(), ["11", "12"]);
+  assert.deepEqual(tx.map((x) => x.nonce).sort(), ["12", "13"]);
+  assert.equal(node.relayerStore.nonceNext(`${RELAYER}/ed25519:${base58(relayerKey(node.secret).pub)}`), 14n);
 });
 
 test("F58: the relayer refuses to sign a nonce at or above b0 x 10^6; nothing is written or sent", async () => {
   const node = new Node();
   const r = node.relayer(50);
-  node.keyNonce = 2_000_000_000n; // above (b0 = 1001) x 10^6
+  node.keyNonce = (node.final + 1n) * 1_000_000n - 2n; // n = b0 x 10^6 - 1, with b0 the block the key changed at
   const wrote: TxRef[] = [];
-  await assert.rejects(r.send(prepayAction(1n), open, keep(wrote)), /10\^6/);
+  assert.equal((await r.send(prepayAction(1n), open, keep(wrote))).kind, "final");
+  node.keyNonce = (node.final + 1n) * 1_000_000n - 1n; // n = b0 x 10^6
+  await assert.rejects(r.send(prepayAction(2n), open, keep(wrote)), /10\^6/);
+  assert.deepEqual([wrote.length, node.sent.length], [1, 1]);
+});
+
+test("a gas account key that is not full-access at final is refused at signing; nothing is written or sent", async () => {
+  const node = new Node();
+  const rs = edited(node, 0, async (m, p, real) => (m === "query" && p.request_type === "view_access_key" && p.finality === "final" ? { ...((await real()) as object), permission: { FunctionCall: { allowance: null, receiver_id: VAULT, method_names: [] } } } : real()));
+  const wrote: TxRef[] = [];
+  await assert.rejects(node.relayerOn(rs, 50).send(prepayAction(1n), open, keep(wrote)), /not a full-access key/);
   assert.deepEqual([wrote.length, node.sent.length], [0, 0]);
 });
 
