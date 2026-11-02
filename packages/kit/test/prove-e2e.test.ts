@@ -4,7 +4,9 @@
 // - In node, the prover is snarkjs's own fullProve in this process, the call worker.js makes (singleThread).
 // - In headless Chromium (KIT_PROVER_E2E=1, a heavy job: Playwright), the prover is the real worker, prover-worker.js
 //   built by build.mjs, started by client.ts under SIGN_HOST's own headers (packages/signpage/public/_headers, every
-//   header of its one /* rule on every response; the worker file also gets its own policy, wallet.md W:880). It prints
+//   header of its one /* rule on every response; the worker file also gets its own policy, wallet.md W:880, and the
+//   setup files the /assets/zk/* rule's Cache-Control with an ETag, as Pages caches them, so a retry meets the browser's
+//   HTTP cache as it will on SIGN_HOST: a setup file that once came back wrong is fetched again, not read from it). It prints
 //   each call's times with the CPU, the vault paper's V2.5 desktop row (docs/plan1/vault.md l.1199). With
 //   KIT_PROVER_E2E_OUT=<dir> it also writes the first proof as proof.json and public.json there, for the snarkjs CLI:
 //   snarkjs groth16 verify packages/kit/zk/withdraw.vkey <dir>/public.json <dir>/proof.json
@@ -138,6 +140,14 @@ test("node: the setup files load once per prover, and again after a failed load"
 
 const WORKER_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'"; // W:880
 
+/** The Cache-Control of _headers' /assets/zk/* rule. */
+function zkCacheControl(): string {
+  const text = readFileSync(join(KIT, "..", "signpage", "public", "_headers"), "utf8");
+  const m = /^\/assets\/zk\/\*\n\s+Cache-Control:\s*(.+)$/m.exec(text);
+  assert.ok(m, "_headers has no /assets/zk/* rule with a Cache-Control");
+  return m[1]!.trim();
+}
+
 /** The header lines of _headers' one /* rule. */
 function siteHeaders(): [string, string][] {
   const out: [string, string][] = [];
@@ -189,19 +199,43 @@ test(
       files.set(`/assets/zk/${pin.sha256}.${ext}`, { type: ext === "wasm" ? "application/wasm" : "application/octet-stream", body: read(`zk/${name}`) });
     }
     const siteCsp = headers.find(([k]) => k === "Content-Security-Policy")![1];
+    const zkCache = zkCacheControl();
+    const zkeyPath = `/assets/zk/${ZK_SETUP_FILES["withdraw.zkey"].sha256}.zkey`;
+    // the plant of the "once" case: the next withdraw.zkey answer has one byte changed, the ones after it are right
+    let badZkeyOnce = false;
+    let badEtag = ""; // the ETag the wrong answer went out with
+    const zkeyRequests: { ifNoneMatch: string | null; status: number }[] = [];
     const server: Server = createServer((req, res) => {
       const path = new URL(req.url ?? "/", "http://x").pathname;
       const f = files.get(path);
       for (const [k, v] of headers) res.setHeader(k, v);
       if (!f) return void res.writeHead(404).end();
       if (path === `/${PROVER_WORKER_FILE}`) res.setHeader("Content-Security-Policy", [siteCsp, WORKER_CSP]);
-      res.writeHead(200, { "Content-Type": f.type, "Content-Length": f.body.length, "Cache-Control": "no-store" }).end(f.body);
+      if (!path.startsWith("/assets/zk/")) return void res.writeHead(200, { "Content-Type": f.type, "Content-Length": f.body.length, "Cache-Control": "no-store" }).end(f.body);
+      let body = f.body;
+      if (path === zkeyPath && badZkeyOnce) {
+        badZkeyOnce = false;
+        body = Buffer.from(body);
+        const k = body.length >> 1;
+        body[k] = body[k]! ^ 0x01;
+      }
+      const etag = `"${sha256(body)}"`;
+      if (body !== f.body) badEtag = etag;
+      const status = req.headers["if-none-match"] === etag ? 304 : 200;
+      if (path === zkeyPath) zkeyRequests.push({ ifNoneMatch: (req.headers["if-none-match"] as string | undefined) ?? null, status });
+      res.setHeader("Cache-Control", zkCache);
+      res.setHeader("ETag", etag);
+      if (status === 304) return void res.writeHead(304).end();
+      res.writeHead(200, { "Content-Type": f.type, "Content-Length": body.length }).end(body);
     });
     await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
     const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     const browser = await chromium.launch();
-    const runPage = async (plant: string, times: number): Promise<PageRun> => {
-      const ctx = await browser.newContext();
+    // `disk`: a profile on disk, so the browser keeps a 17 MB answer in its HTTP cache as a phone does (a fresh
+    // context's cache is in memory and keeps no entry that large)
+    const runPage = async (plant: string, times: number, disk = false): Promise<PageRun> => {
+      const profile = disk ? mkdtempSync(join(tmpdir(), "kit-prove-e2e-profile-")) : null;
+      const ctx = profile ? await chromium.launchPersistentContext(profile) : await browser.newContext();
       const page = await ctx.newPage();
       const logs: string[] = [];
       page.on("pageerror", (e) => logs.push(`pageerror ${e.message}`));
@@ -214,6 +248,7 @@ test(
         );
       } finally {
         await ctx.close();
+        if (profile) rmSync(profile, { recursive: true, force: true });
       }
     };
     try {
@@ -248,6 +283,24 @@ test(
       t.diagnostic(JSON.stringify({ case: "answer-signal", error: answer.calls[0]?.error, posts: answer.posts }));
       assert.match(answer.calls[0]?.error ?? "", /worker answer: context is not the input's/);
       assert.deepEqual(answer.posts, ["load", "prove"]);
+
+      // withdraw.zkey comes back wrong once under its pinned name, cached for good: the first call is refused at load,
+      // and the second fetches the file from the server again (never the browser's cached copy) and proves
+      zkeyRequests.length = 0;
+      badZkeyOnce = true;
+      const once = await runPage("none", 2, true);
+      t.diagnostic(JSON.stringify({ case: "zkey-wrong-once", calls: once.calls.map((c) => c.error ?? "proof"), posts: once.posts, zkeyRequests }));
+      assert.match(once.calls[0]?.error ?? "", new RegExp(`withdraw\\.zkey: sha256 [0-9a-f]{64}, pinned ${ZK_SETUP_FILES["withdraw.zkey"].sha256}`));
+      assert.ok(once.calls[1]?.result, `the second call: ${once.calls[1]?.error}`);
+      assert.deepEqual(once.calls[1].result.publicSignals, SIGNALS);
+      assert.equal(await verify(once.calls[1].result.publicSignals, once.calls[1].result.proof), true);
+      assert.equal(zkeyRequests.length, 2, `withdraw.zkey reached the server ${zkeyRequests.length} time(s): ${JSON.stringify(zkeyRequests)}`);
+      assert.deepEqual(zkeyRequests.map((r) => r.status), [200, 200]);
+      // the browser had kept the wrong answer and asked the server about it: the cache was there, and was not trusted
+      assert.ok(badEtag, "the wrong answer was served");
+      assert.equal(zkeyRequests[1]!.ifNoneMatch, badEtag, "the second request did not revalidate the cached wrong answer");
+      assert.deepEqual(once.posts, ["load", "load", "prove"]);
+      assert.deepEqual(once.violations, []);
     } finally {
       await browser.close();
       server.close();
