@@ -9,7 +9,9 @@
 //     shell draws under the frame (packages/signpage/src/backdrop.ts): its id and the tab bar's ink, string literals
 //     the minifier keeps.
 // The hop itself is judged in a browser by apps/terminal/test/e2e/signin/run.mjs (BAR-03 at both widths).
-//   node scripts/live-checks/app-harness-signin-e2e.mjs [--sign <origin>] [--app <origin>] [--record <file>]
+//   node scripts/live-checks/app-harness-signin-e2e.mjs [--host app|sign] [--sign <origin>] [--app <origin>] [--record <file>]
+//   --host reads that host alone: each host's deploy runs the check on its own host (apps/terminal/scripts/deploy.mjs,
+//   packages/signpage/scripts/deploy.mjs), so a host that lags does not fail the other's deploy; with no --host, both.
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds paths, integrities, sizes, sha384s and marker counts,
 //   never the bytes.
 import "../net-window.mjs";
@@ -29,10 +31,19 @@ export const SIGN_MARKERS = ["`backdrop`", "`rgb(9,9,9)`"];
 const SRI = /^sha384-[A-Za-z0-9+/]{64}$/;
 const found = (counts, keys) => keys.filter((k) => !(Number.isSafeInteger(counts?.[k]) && counts[k] >= 1));
 
-/** The verdict on a record: { pass, lines }. */
-export function judge(rec) {
+export const HOST_KEYS = Object.freeze(["app", "sign"]);
+
+/** The verdict on a record, for the hosts it read (both when it names none): { pass, lines }. */
+export function judge(rec, hosts = rec?.hosts ?? HOST_KEYS) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  if (hosts.length === 0 || hosts.some((h) => !HOST_KEYS.includes(h))) say(false, `the hosts read are app, sign or both (${hosts.join(", ") || "none"})`);
+  if (hosts.includes("app")) judgeApp(rec, say);
+  if (hosts.includes("sign")) judgeSign(rec, say);
+  return { pass: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
+}
+
+function judgeApp(rec, say) {
   const ap = rec?.app?.page ?? {};
   const ac = rec?.app?.css ?? {};
   const missPage = found(ap.markers, APP_MARKERS.page);
@@ -41,24 +52,32 @@ export function judge(rec) {
     `APP_HOST / names one stylesheet, its sha384 the integrity (${ap.stylesheets ?? "?"} stylesheet(s), HTTP ${ac.status ?? "?"})`);
   const missCss = found(ac.markers, APP_MARKERS.css);
   say(missCss.length === 0, `APP_HOST's stylesheet draws and hides the boot frame (${missCss.length ? `missing ${missCss.join(", ")}` : `${APP_MARKERS.css.length} rules found`})`);
+}
+
+function judgeSign(rec, say) {
   const s = rec?.sign?.index ?? {};
   const a = rec?.sign?.app ?? {};
   say(s.scripts === 1 && s.src === "/app.js" && SRI.test(s.integrity ?? "") && a.status === 200 && a.sha384 === s.integrity,
     `SIGN_HOST / names one module script, /app.js, its sha384 the integrity (${s.scripts ?? "?"} script(s), HTTP ${a.status ?? "?"})`);
   const missSign = found(a.markers, SIGN_MARKERS);
   say(missSign.length === 0, `SIGN_HOST's /app.js draws the backdrop (${missSign.length ? `missing ${missSign.join(", ")}` : `${SIGN_MARKERS.length} marks found`})`);
-  return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
 const count = (text, keys) => Object.fromEntries(keys.map((k) => [k, text.split(k).length - 1]));
 const sha384 = (buf) => `sha384-${createHash("sha384").update(buf).digest("base64")}`;
 const attr = (tag, name) => new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1] ?? null;
 
-/** Reads both hosts as a browser does and returns the record. */
-export async function probe(sign, app, fetchFn = fetch) {
+/** Reads the hosts named as a browser does and returns the record. */
+export async function probe(sign, app, hosts = HOST_KEYS, fetchFn = fetch) {
   const get = (origin, p) => fetchFn(new URL(p, origin), { redirect: "error", headers: { accept: "*/*" }, signal: AbortSignal.timeout(20_000) });
-  const rec = { key: KEY, at: new Date().toISOString(), app: { url: app, page: {}, css: {} }, sign: { url: sign, index: {}, app: {} } };
+  const rec = { key: KEY, at: new Date().toISOString(), hosts: [...hosts] };
+  if (hosts.includes("app")) rec.app = await probeApp(app, get);
+  if (hosts.includes("sign")) rec.sign = await probeSign(sign, get);
+  return rec;
+}
 
+async function probeApp(app, get) {
+  const rec = { app: { url: app, page: {}, css: {} } };
   const page = await get(app, "/");
   const html = await page.text();
   const links = [...html.matchAll(/<link\b[^>]*>/g)].map((t) => t[0]).filter((t) => attr(t, "rel") === "stylesheet");
@@ -68,7 +87,11 @@ export async function probe(sign, app, fetchFn = fetch) {
     const body = Buffer.from(await res.arrayBuffer());
     rec.app.css = { status: res.status, bytes: body.length, sha384: sha384(body), markers: count(body.toString("utf8"), APP_MARKERS.css) };
   }
+  return rec.app;
+}
 
+async function probeSign(sign, get) {
+  const rec = { sign: { url: sign, index: {}, app: {} } };
   const index = await get(sign, "/");
   const shtml = await index.text();
   const tags = [...shtml.matchAll(/<script\b[^>]*>/g)].map((t) => t[0]);
@@ -78,18 +101,20 @@ export async function probe(sign, app, fetchFn = fetch) {
     const body = Buffer.from(await res.arrayBuffer());
     rec.sign.app = { status: res.status, bytes: body.length, sha384: sha384(body), markers: count(body.toString("utf8"), SIGN_MARKERS) };
   }
-  return rec;
+  return rec.sign;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
   try {
-    const rec = await probe(opt("--sign") ?? SIGN_ORIGIN, opt("--app") ?? APP_ORIGIN);
+    const host = opt("--host");
+    if (host !== undefined && !HOST_KEYS.includes(host)) throw new Error(`--host is app or sign, not ${host}`);
+    const rec = await probe(opt("--sign") ?? SIGN_ORIGIN, opt("--app") ?? APP_ORIGIN, host ? [host] : HOST_KEYS);
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     const r = judge(rec);
     for (const l of r.lines) console.log(l);
-    console.log(`${KEY}: ${r.pass ? "PASS" : "FAIL"} (${rec.app.url}, ${rec.sign.url})`);
+    console.log(`${KEY}: ${r.pass ? "PASS" : "FAIL"} (${[rec.app?.url, rec.sign?.url].filter(Boolean).join(", ")})`);
     process.exit(r.pass ? 0 : 1);
   } catch (e) {
     console.error(`${KEY}: error: ${e?.message ?? e}`);

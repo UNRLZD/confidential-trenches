@@ -2,7 +2,8 @@
 // with no network. Every record is a real run of the check:
 // - good: the card's builds (the ones release-3 lists) served at / on 127.0.0.1, which passes;
 // - bad: the live APP_HOST and SIGN_HOST before the deploy: it fails on the boot frame, its rules and the backdrop;
-// - badSign: the card's APP_HOST build beside the live SIGN_HOST: it fails on the backdrop alone.
+// - badSign: the card's APP_HOST build beside the live SIGN_HOST: it fails on the backdrop alone, and passes when
+//   APP_HOST's deploy reads its own host alone (--host app).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -31,6 +32,17 @@ test("the live hosts before the deploy fail: no boot frame, no rules for it, no 
 test("the card's APP_HOST beside the live SIGN_HOST fails on the backdrop alone", () => {
   assert.equal(answers.badSign.sign.url, SIGN_ORIGIN);
   assert.deepEqual(BAD(answers.badSign), [BACKDROP]);
+});
+
+test("each host's deploy reads its own host alone: a lagging other host does not fail it, its own missing part does", () => {
+  assert.equal(judge(answers.badSign, ["app"]).pass, true, judge(answers.badSign, ["app"]).lines.join("\n"));
+  assert.deepEqual(BAD({ ...answers.badSign, hosts: ["sign"] }), [BACKDROP]);
+  assert.deepEqual(BAD({ ...answers.bad, hosts: ["app"] }), [BOOT, RULES]);
+  assert.deepEqual(BAD({ ...answers.bad, hosts: ["sign"] }), [BACKDROP]);
+  assert.equal(judge({ app: answers.good.app, hosts: ["app"] }).pass, true);
+  assert.equal(judge({ app: answers.good.app, hosts: ["sign"] }).pass, false, "a record of APP_HOST judged as SIGN_HOST");
+  assert.equal(judge(answers.good, []).pass, false);
+  assert.equal(judge(answers.good, ["both"]).pass, false);
 });
 
 test("a stylesheet or script that is not the one the page names fails, and an empty record fails every line", () => {
