@@ -189,6 +189,7 @@ class Chain {
   relayer(): Relayer {
     return {
       account: RELAYER,
+      key: `${RELAYER}/ed25519:test`,
       balance: async () => this.balance,
       resolve: async (tx, opts) => {
         this.resolved.push(tx.tx_hash);
