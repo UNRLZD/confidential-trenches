@@ -15,7 +15,8 @@
 //!    builds equal, deploys that wasm and registers it on the token. The transaction holds exactly the four
 //!    recipe actions and no AddKey; `config()` answers; `view_access_key_list` reads `keys: []` at optimistic and at
 //!    final; the code hash is the wasm's; every function body is at most 196,608 B; the vault is registered on the
-//!    token; the wasm's size and sha256 are printed (2.11's code row). Then the vault's first state-writing call (a
+//!    token; the wasm's size and sha256 are printed (2.11's code row); its last line is exactly deploy.mjs's sandbox
+//!    `next:` line, which names no live check (`VT_S20_PLANT=next` wants another line, so the run must fail). Then the vault's first state-writing call (a
 //!    904 B `storage_prepay`) writes the contract's state record (2.3, 200 B), and the vault's free NEAR (amount less
 //!    storage) is still at least 0; then the first deposit lands on that prepay (a user's own `ft_transfer_call` of
 //!    1 USDC with the kit's message), and the free NEAR read after it is still at least 0.
@@ -222,7 +223,15 @@ async fn the_deploy_script_lands_the_recipe_keyless() -> R<()> {
     assert_eq!(run.code, 0, "deploy.mjs failed: {}", run.stderr);
     let rec = run.record.expect("deploy.mjs wrote no record");
     assert_eq!(rec["account_id"], json!(h.vault.as_str()));
-    assert!(run.stdout.contains("next: node scripts/live-checks/vault-skeleton.mjs --deployment "), "deploy.mjs printed no next command");
+    // a sandbox deploy has no live check: vault-testnet-t01.mjs reads public testnet RPCs only (deploy.mjs nextLine)
+    let mut want = "next: no live check (a sandbox deploy lives on this machine only; tests/s20.rs checks its end state)".to_string();
+    if std::env::var("VT_S20_PLANT").as_deref() == Ok("next") {
+        want.push('!');
+    }
+    let next = run.stdout.lines().filter(|l| l.starts_with("next: ")).collect::<Vec<_>>();
+    println!("deploy.mjs's next line: {next:?}");
+    assert_eq!(next, [want.as_str()], "deploy.mjs's next line for a sandbox deploy");
+    assert_eq!(run.stdout.lines().last(), Some(want.as_str()), "the next line is not deploy.mjs's last");
 
     // the transaction: exactly the four recipe actions, no AddKey
     let tx = rec["tx_hash"].as_str().expect("record.tx_hash");
