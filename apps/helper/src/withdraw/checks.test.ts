@@ -118,6 +118,14 @@ test("a vkey that is not the pinned file is refused at load", () => {
   assert.throws(() => loadWithdrawVkey(changed), /not the pinned/);
 });
 
+test("a vkey with a leading BOM, or not valid UTF-8, is refused at load by the sha256 pin, before any decode", () => {
+  const bytes = readFileSync(new URL("./withdraw.vkey", import.meta.url));
+  assert.throws(() => loadWithdrawVkey(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes])), /not the pinned/);
+  const bad = Buffer.from(bytes);
+  bad[bad.indexOf("{")] = 0xff;
+  assert.throws(() => loadWithdrawVkey(bad), /not the pinned/);
+});
+
 // ---- Check 2: VT-U02's vectors, the same file the kit's shapes.ts and the vault's context.rs are tested on ----
 
 const VECTORS = JSON.parse(readFileSync(join(ROOT, "packages/kit/test/vectors/vault-v1.json"), "utf8")) as {
