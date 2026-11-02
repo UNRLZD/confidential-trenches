@@ -60,6 +60,7 @@ test("planted: a worker that is not the release's, or without its own policy, or
   for (const [what, header] of [
     ["the site's policy only", site],
     ["its own policy only", WORKER_CSP],
+    ["its own policy and another in place of the site's", `${WORKER_CSP}, default-src *`],
     ["a third policy", `${csp}, default-src *`],
     ["its own policy with a remote connect-src", csp.replace(/connect-src 'self'\s*$/, "connect-src 'self' https://evil.ct.test")],
     ["its own policy with 'unsafe-eval'", csp.replace(/'wasm-unsafe-eval'; connect-src 'self'\s*$/, "'wasm-unsafe-eval' 'unsafe-eval'; connect-src 'self'")],

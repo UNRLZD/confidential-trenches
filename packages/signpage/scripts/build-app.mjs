@@ -58,12 +58,7 @@ export function copyServed(out, list = SERVED) {
     mkdirSync(dirname(join(out, e.to)), { recursive: true });
     copyFileSync(e.from, join(out, e.to), constants.COPYFILE_FICLONE); // a clone where the disk can, else a copy
   }
-  // the copies are what is served: read them back against their pins (a copy cut short, a file changed in between)
-  for (const e of list) {
-    if (e.sha256 === undefined) continue;
-    const p = pinProblems(e, readFileSync(join(out, e.to)));
-    if (p.length) throw new Error(p[0]);
-  }
+  // what is uploaded is read back against the pins by the deploy gate (deploy.mjs checkProver), after this copy
 }
 
 /** The page around the script: no inline script or style, nothing but the one module script with its integrity. */
