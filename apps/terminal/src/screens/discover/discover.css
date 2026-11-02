@@ -62,6 +62,9 @@
 /* BAR-10: the tap box is 44 px, the pill stays 36 (the tabs' own padding keeps the 4 px above and below it clear of the scroll clip) */
 .dsc-tab::before, .dsc-retry::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; transform: translateY(-50%); }
 .dsc-retry { position: relative; }
+/* the count's box holds three digits from its start, so "—" while loading and every count up to 999 draw the same tab and
+   start at the same x: a count that lands or changes never moves the tabs after it or its own text (BAR-04) */
+.dsc-tab .dsc-count { min-width: 3ch; text-align: left; }
 .dsc-tab[aria-selected="true"] { background: var(--text-1); border-color: var(--text-1); color: var(--bg-page); }
 .dsc-tab[aria-selected="true"] .dsc-count { color: #6e6e6e; }
 .dsc-prow { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border-row); }
