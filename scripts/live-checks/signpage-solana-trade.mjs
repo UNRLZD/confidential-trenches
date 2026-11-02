@@ -10,6 +10,7 @@
 //     error on two public RPCs (api.mainnet-beta.solana.com and solana-rpc.publicnode.com).
 //   node scripts/live-checks/signpage-solana-trade.mjs [--record-file <run.md>] [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the answer read; --answer replays one (the test's).
+import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 

@@ -38,6 +38,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-postmessage.mjs",
   "scripts/live-checks/signpage-prover-host.mjs",
   "scripts/live-checks/signpage-skeleton.mjs",
+  "scripts/live-checks/signpage-solana-trade.mjs",
   "scripts/live-checks/solana-jupiter-build.mjs",
   "scripts/live-checks/vault-setup-files.mjs",
   "scripts/live-checks/vault-skeleton.mjs",
