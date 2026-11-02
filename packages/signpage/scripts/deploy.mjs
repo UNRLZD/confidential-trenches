@@ -1,22 +1,28 @@
 #!/usr/bin/env node
 // Builds the signing page and deploys it to SIGN_HOST's Cloudflare Pages project, only after the gate passes it.
 //   node packages/signpage/scripts/deploy.mjs [--dry-run]     exit 0 ok, 1 refused or failed, 2 usage
-// The build is index.html and public/ copied into a fresh temp folder, so nothing else in the package is served. The
-// gate then reads the build's own _headers and runs the card's live check (scripts/live-checks/signpage-skeleton.mjs)
-// on the headers it sets for every path; any refusal stops here, before a token is read or a byte is uploaded.
+// The build is index.html and public/ copied into a fresh temp folder, so nothing else in the package is served, plus
+// the prover's setup files at assets/zk/<sha256>.<ext> and their licences (scripts/build-app.mjs copyServed, card
+// signpage-prover-host). The gate then reads the build's own _headers and runs the card's live check
+// (scripts/live-checks/signpage-skeleton.mjs) on the headers it sets for every path, checks the worker's own policy
+// rule (W:880), and reads every setup file back against its pin and the worker against a fresh build of the kit's;
+// any refusal stops here, before a token is read or a byte is uploaded.
 // --dry-run stops after the gate and keeps the build folder, so `wrangler pages dev` can serve it. The upload is
 // wrangler's `pages deploy`, at an exact version, run from an empty folder so no functions/ folder can ride along
 // (Pages applies no _headers rule to a Function's response). It needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 // in the environment; neither is printed.
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ABSENT, HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
+import { WORKER_CSP, WORKER_PATH } from "../../../scripts/live-checks/signpage-prover-host.mjs";
+import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
+import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell"];
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-prover-host"];
 export const PROJECT = "confidential-trenches-sign";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves SIGN_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
@@ -26,13 +32,16 @@ const REPO = dirname(dirname(PKG));
 // headers the policy sets; a rule other than /* may neither set nor remove one
 const POLICY = ["content-security-policy", ...Object.keys(HEADERS), ...ABSENT];
 
-/** Copies index.html and public/ into a fresh temp folder and returns its path. */
+/** Copies index.html, public/ and the prover's setup files and licences (SERVED) into a fresh temp folder and returns its path. */
 export function build(pkg = PKG) {
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-"));
   copyFileSync(join(pkg, "index.html"), join(out, "index.html"));
   cpSync(join(pkg, "public"), out, { recursive: true });
+  copyServed(out);
   return out;
 }
+
+const ws = (v) => v.trim().replace(/\s+/g, " ");
 
 /** Problems with a _headers file's text (empty = fine): one /* rule holding the whole policy, read as the live check reads a served answer. */
 export function checkHeadersFile(text) {
@@ -51,10 +60,14 @@ export function checkHeadersFile(text) {
     else p.push(`_headers line ${i + 1} cannot be read`);
   });
   if (rules.length > 100) p.push(`_headers has ${rules.length} rules, over Pages' 100`);
+  // the worker's own policy (W:880): one rule for its path, setting only the CSP, exactly; Pages joins it to /*'s
+  const worker = rules.filter((r) => r.path === WORKER_PATH);
+  const own = (r) => r.headers.length === 1 && r.removes.length === 0 && r.headers[0][0] === "content-security-policy" && ws(r.headers[0][1]) === WORKER_CSP;
+  if (worker.length !== 1 || !own(worker[0])) p.push(`_headers must hold one ${WORKER_PATH} rule that sets only Content-Security-Policy: ${WORKER_CSP}`);
   const all = rules.filter((r) => r.path === "/*");
   if (all.length !== 1) return [...p, `_headers must hold exactly one /* rule (has ${all.length})`];
   for (const r of rules) {
-    for (const [k] of r.headers) if (r.path !== "/*" && POLICY.includes(k)) p.push(`_headers rule ${r.path} sets ${k}: the policy is set on /* only`);
+    for (const [k] of r.headers) if (r.path !== "/*" && POLICY.includes(k) && !(r.path === WORKER_PATH && own(r))) p.push(`_headers rule ${r.path} sets ${k}: the policy is set on /* only`);
     for (const k of r.removes) if (POLICY.includes(k)) p.push(`_headers rule ${r.path} removes ${k}`);
   }
   const seen = {};
@@ -72,30 +85,51 @@ export function checkDir(dir) {
   if (!existsSync(join(dir, "index.html"))) p.push(`${dir} has no index.html`);
   if (existsSync(join(dir, "_worker.js"))) p.push(`${dir} carries _worker.js: Pages applies no _headers rule to a Function's response`);
   if (existsSync(join(dir, ".well-known", "webauthn"))) p.push(`${dir} carries .well-known/webauthn: no other origin may use SIGN_HOST's passkeys`);
+  p.push(...checkProver(dir));
   if (!existsSync(join(dir, "_headers"))) return [...p, `${dir} has no _headers file`];
   return [...p, ...checkHeadersFile(readFileSync(join(dir, "_headers"), "utf8"))];
+}
+
+/** Problems with a build folder's prover files (empty = fine): the worker is the kit's build, the setup files are exactly the pinned six. */
+export function checkProver(dir) {
+  const p = [];
+  const read = (f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f)) : null);
+  const worker = read(WORKER_PATH.slice(1));
+  if (!worker || !worker.equals(proverWorkerSource())) p.push(`${WORKER_PATH.slice(1)} is not the kit's prover worker build`);
+  for (const e of SERVED) {
+    const b = read(e.to);
+    if (!b) p.push(`${e.to}: missing`);
+    else if (e.sha256 !== undefined) p.push(...pinProblems(e, b));
+  }
+  const zk = existsSync(join(dir, "assets", "zk")) ? readdirSync(join(dir, "assets", "zk")) : [];
+  for (const f of zk) if (!SERVED.some((e) => e.to === `assets/zk/${f}`)) p.push(`assets/zk/${f}: not a pinned setup file`);
+  return p;
 }
 
 export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
   const dryRun = argv.includes("--dry-run");
   if (argv.some((a) => a !== "--dry-run")) return { code: 2, err: ["usage: node packages/signpage/scripts/deploy.mjs [--dry-run]"] };
   const dir = build(pkg);
-  const problems = checkDir(dir);
-  if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
-  if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded`] };
-  const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
-  if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
-  const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
-  const dirty = run("git", ["-C", REPO, "status", "--porcelain", "--", "packages/signpage"], { encoding: "utf8" }).stdout?.trim();
-  const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH];
-  if (sha) args.push("--commit-hash", sha, `--commit-dirty=${dirty ? "true" : "false"}`);
-  const r = run("pnpm", args, {
-    cwd: mkdtempSync(join(tmpdir(), "ct-deploy-")),
-    env: { ...env, WRANGLER_SEND_METRICS: "false" },
-    stdio: "inherit",
-  });
-  if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map((k) => `scripts/live-checks/${k}.mjs`).join(", ")} next`] };
+  try {
+    const problems = checkDir(dir);
+    if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
+    if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded`] };
+    const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
+    if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
+    const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
+    const dirty = run("git", ["-C", REPO, "status", "--porcelain", "--", "packages/signpage"], { encoding: "utf8" }).stdout?.trim();
+    const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH];
+    if (sha) args.push("--commit-hash", sha, `--commit-dirty=${dirty ? "true" : "false"}`);
+    const r = run("pnpm", args, {
+      cwd: mkdtempSync(join(tmpdir(), "ct-deploy-")),
+      env: { ...env, WRANGLER_SEND_METRICS: "false" },
+      stdio: "inherit",
+    });
+    if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
+    return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map((k) => `scripts/live-checks/${k}.mjs`).join(", ")} next`] };
+  } finally {
+    if (!dryRun) rmSync(dir, { recursive: true, force: true }); // the build holds 24 MB of setup files; --dry-run keeps it to serve
+  }
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,18 +1,70 @@
 #!/usr/bin/env node
 // Builds the signing page's one script: src/main.ts and the wallet code it imports, bundled by Vite (rolldown) into
 // public/app.js, and index.html with that file's sha384, since SIGN_HOST's Integrity-Policy blocks a script without
-// integrity metadata (public/_headers). Both files are committed, so the deploy's build (scripts/deploy.mjs, a copy of
-// index.html and public/) and every harness serve exactly these bytes, and a release can be checked byte for byte.
-//   node packages/signpage/scripts/build-app.mjs           writes public/app.js and index.html
+// integrity metadata (public/_headers). It also writes public/prover-worker.js, the kit's prover worker as the kit's
+// build.mjs makes it (snarkjs 0.7.5's pinned browser build, then worker.js with the setup files' pins), unchanged: the
+// prover runs on SIGN_HOST only (card signpage-prover-host; vault.md 2.14, M304 D-8). The three files are committed,
+// so the deploy's build (scripts/deploy.mjs, a copy of index.html and public/) and every harness serve exactly these
+// bytes, and a release can be checked byte for byte.
+// The six setup files (24 MB) are not copied into public/: the deploy's build copies them from packages/kit/zk/ to
+// /assets/zk/<sha256>.<ext> (vault.md V2's end state) with copyServed below, which refuses any whose size or sha256
+// is not its pin, and the licence texts beside them to /licenses/ (the worker's header names /licenses/GPL-3.0.txt).
+//   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html and public/prover-worker.js
 //   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the committed files differ from a fresh build
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PROVER_WORKER_FILE, proverWorkerSource } from "../../kit/src/prover/build.mjs";
+import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const KIT = join(dirname(PKG), "kit");
 export const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("base64")}`;
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+export const WORKER = `public/${PROVER_WORKER_FILE}`;
+
+/**
+ * What the deploy's build copies besides index.html and public/: { from, to, bytes?, sha256? }, `to` relative to the
+ * build folder. The six setup files go to assets/zk/<sha256>.<ext>, each with its pin (packages/kit/src/zk/setup-files.ts);
+ * the licences beside them (packages/kit/zk/NOTICE) and the GPL text the worker's header names go to licenses/.
+ */
+export const SERVED = Object.freeze([
+  ...Object.entries(ZK_SETUP_FILES).map(([name, pin]) =>
+    Object.freeze({ from: join(KIT, "zk", name), to: `assets/zk/${pin.sha256}.${name.slice(name.lastIndexOf(".") + 1)}`, bytes: pin.bytes, sha256: pin.sha256, name })),
+  Object.freeze({ from: join(KIT, "zk", "LICENSE-GPL-3.0.txt"), to: "licenses/GPL-3.0.txt" }),
+  Object.freeze({ from: join(KIT, "zk", "LICENSE-LGPL-3.0.txt"), to: "licenses/LGPL-3.0.txt" }),
+  Object.freeze({ from: join(dirname(dirname(PKG)), "LICENSE"), to: "licenses/Apache-2.0.txt" }),
+  Object.freeze({ from: join(KIT, "zk", "NOTICE"), to: "licenses/zk-NOTICE.txt" }),
+]);
+
+/** Problems with one setup file's bytes against its pin (empty = it is the pinned file), named `label`. */
+export function pinProblems(entry, bytes, label = entry.to) {
+  if (bytes.length !== entry.bytes) return [`${label}: ${bytes.length} B, pinned ${entry.bytes} B`];
+  const got = sha256(bytes);
+  return got === entry.sha256 ? [] : [`${label}: sha256 ${got}, pinned ${entry.sha256}`];
+}
+
+/** Copies `list` into `out`; throws before writing anything when a setup file is not its pin. */
+export function copyServed(out, list = SERVED) {
+  for (const e of list) {
+    if (e.sha256 === undefined) continue;
+    const p = pinProblems(e, readFileSync(e.from), e.name);
+    if (p.length) throw new Error(`${p[0]} (from ${e.from}); nothing was copied`);
+  }
+  for (const e of list) {
+    mkdirSync(dirname(join(out, e.to)), { recursive: true });
+    copyFileSync(e.from, join(out, e.to), constants.COPYFILE_FICLONE); // a clone where the disk can, else a copy
+  }
+  // the copies are what is served: read them back against their pins (a copy cut short, a file changed in between)
+  for (const e of list) {
+    if (e.sha256 === undefined) continue;
+    const p = pinProblems(e, readFileSync(join(out, e.to)));
+    if (p.length) throw new Error(p[0]);
+  }
+}
 
 /** The page around the script: no inline script or style, nothing but the one module script with its integrity. */
 export const page = (integrity) => `<!doctype html>
@@ -27,7 +79,7 @@ export const page = (integrity) => `<!doctype html>
 </html>
 `;
 
-/** A fresh bundle: { js, html } as bytes and text. */
+/** A fresh bundle: { js, html, worker } as bytes, text and bytes. */
 export async function bundle(pkg = PKG) {
   const { build } = await import("vite");
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-app-"));
@@ -51,7 +103,7 @@ export async function bundle(pkg = PKG) {
       },
     });
     const js = readFileSync(join(out, "app.js"));
-    return { js, html: page(sha384(js)) };
+    return { js, html: page(sha384(js)), worker: proverWorkerSource() };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
@@ -67,6 +119,11 @@ export async function check(pkg = PKG, committed = pkg) {
   } catch {}
   if (!js || !js.equals(fresh.js)) p.push("public/app.js is not the build of src/main.ts: run node packages/signpage/scripts/build-app.mjs");
   if (readFileSync(join(committed, "index.html"), "utf8") !== fresh.html) p.push("index.html is not the page around public/app.js with its sha384");
+  let worker = null;
+  try {
+    worker = readFileSync(join(committed, WORKER));
+  } catch {}
+  if (!worker || !worker.equals(fresh.worker)) p.push(`${WORKER} is not the kit's prover worker build: run node packages/signpage/scripts/build-app.mjs`);
   return p;
 }
 
@@ -74,11 +131,13 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   if (process.argv.includes("--check")) {
     const p = await check();
     for (const l of p) console.error(`build-app: ${l}`);
-    if (!p.length) console.log("build-app: public/app.js and index.html match a fresh build");
+    if (!p.length) console.log(`build-app: public/app.js, index.html and ${WORKER} match a fresh build`);
     process.exit(p.length ? 1 : 0);
   }
-  const { js, html } = await bundle();
+  const { js, html, worker } = await bundle();
   writeFileSync(join(PKG, "public/app.js"), js);
   writeFileSync(join(PKG, "index.html"), html);
+  writeFileSync(join(PKG, WORKER), worker);
   console.log(`build-app: public/app.js ${js.length} bytes, ${sha384(js)}`);
+  console.log(`build-app: ${WORKER} ${worker.length} bytes, sha256 ${sha256(worker)}`);
 }
