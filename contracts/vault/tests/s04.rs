@@ -12,8 +12,12 @@
 //!
 //! The gas each call needs is measured here, never written down: on a scout vault the call is sent at 10, 20, 30 ...
 //! Tgas until it lands at C; on the main vault it is sent again from C - 10 upward, one Tgas at a time, until it lands
-//! at G. So the main vault itself refused the call at G - 1 Tgas and took it at exactly G. Every refused send on the
-//! main vault must leave the vault as it was: the spends (the nullifier set) and this nullifier unspent, both trees'
+//! at G. So the main vault itself refused the call at G - 1 Tgas and took it at exactly G, and G must be 2.5.2's bound
+//! (V:408): the payouts' statics read from `config()` + 100 Tgas, while the landed call burns less than G in all. Every
+//! send under G must be refused by that pre-check (`InsufficientGas`), before any write. Before the scan, the call at
+//! C with row 14's requirement less one yocto is refused as `InsufficientStorageDeposit`, the one refusal that comes
+//! after the spend's writes (the tree, the nullifier, the spend record, `totals`), so a rollback is proven on it.
+//! Every refused send on the main vault must log nothing and leave the vault as it was: the spends (the nullifier set) and this nullifier unspent, both trees'
 //! root and size, `totals`, the vault's storage use and every raw state byte, the token balances of the vault, the
 //! recipient, the fee recipient and the sender, the recipient's token registration, the NEAR of the recipient and the
 //! fee recipient (when not the sender), the sender's NEAR less exactly the transaction's burnt tokens, and the vault's
@@ -22,6 +26,7 @@
 //!
 //! At G the call lands whole (every receipt succeeds): the recipient gets withdrawn - fee, the fee recipient the fee,
 //! the vault gives withdrawn, all to the base unit; the spend reads `paid` with its withdrawn, fee and recipient;
+//! its `reserve` is exactly REFUND_RESERVE_BYTES' worth (the attachment is exactly row 14's requirement);
 //! `totals.spent` rises by withdrawn; the state tree takes one leaf; for `register` the recipient's
 //! `storage_balance_of` goes from none to `register_deposit`. Then the same call again, at G, is refused as
 //! `NullifierAlreadySpent` with the vault as it was.
@@ -49,6 +54,8 @@ const REFUND_RESERVE_BYTES: u128 = blindfill_vault::constants::REFUND_RESERVE_BY
 const REGISTER: u128 = 1_250_000_000_000_000_000_000;
 /// The coarse step of the scout's scan, and where the scan stops.
 const COARSE_TGAS: u64 = 10;
+/// 2.5.2's pre-check keeps 100 Tgas for the vault's own work on top of the statics it hands on (V:408).
+const OWN_WORK_TGAS: u128 = 100;
 const MAX_TGAS: u64 = 300;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -285,11 +292,18 @@ async fn burnt(h: &Harness, o: &Outcome, sender: &AccountId) -> R<(u128, u128)> 
     Ok((all, vault))
 }
 
-/// The call failed whole: everything in `before` reads the same after, but the sender's NEAR (less exactly the burnt
-/// tokens) and the vault's NEAR (its gas share, at most what its receipt burnt).
-async fn unchanged(w: &World, c: &Case, step: &str, before: &Snap, o: &Outcome) -> R<()> {
-    let after = snap(w, c).await?;
+/// The call failed whole with `want` in its withdraw receipt, which logged nothing: everything in `before` reads the
+/// same after, but the sender's NEAR (less exactly the burnt tokens) and the vault's NEAR (its gas share, at most what
+/// its receipt burnt).
+async fn unchanged(w: &World, c: &Case, step: &str, before: &Snap, o: &Outcome, want: &str) -> R<()> {
     let k = |what: &str| format!("{}.{step}.{what}", c.key);
+    let r = o.calls_exactly(&w.h.vault, "withdraw", 1)?[0];
+    let f = r.failure().ok_or_else(|| format!("{}: the withdraw receipt landed", k("error")))?;
+    let want = if planted(&k("error")) { format!("{want}!") } else { want.to_string() };
+    println!("check {}: want {want}, got {}", k("error"), f.chars().take(160).collect::<String>());
+    assert!(f.contains(&want), "{}: want {want}, got {f}", k("error"));
+    num(&k("logs"), r.logs.len() as u128, 0);
+    let after = snap(w, c).await?;
     same(&k("spends"), &after.spends, &before.spends);
     num(&k("spent"), after.spent as u128, before.spent as u128);
     same(&k("state_tree"), &after.state_tree, &before.state_tree);
@@ -337,6 +351,14 @@ async fn scout(w: &World, c: &Case) -> R<u64> {
 /// landing at G; then the exact amounts, the registration, and the replay refused.
 async fn measured(w: &World, c: &Case, coarse: u64) -> R<u64> {
     let h = &w.h;
+    // row 14 one yocto short, at gas the scout saw land: refused after the spend's writes, and rolled back whole
+    let before = snap(w, c).await?;
+    let need = row14(w, c).await?;
+    let o = h.call_outcome(w.sender(c), &h.vault, "withdraw", args(c.spend), NearToken::from_yoctonear(need - 1), Gas::from_tgas(coarse)).await?;
+    assert!(!landed(w, c, &o)?, "{}: landed one yocto under row 14", c.key);
+    println!("{:?} {}: one yocto under row 14 at {coarse} Tgas: withdraw burnt {:.3} Tgas", w.kind, c.key, o.calls_exactly(&h.vault, "withdraw", 1)?[0].gas_burnt as f64 / 1e12);
+    unchanged(w, c, "storage_short", &before, &o, "InsufficientStorageDeposit").await?;
+
     let mut t = coarse.saturating_sub(COARSE_TGAS).max(1);
     let mut refused_below = None;
     let g = loop {
@@ -349,15 +371,27 @@ async fn measured(w: &World, c: &Case, coarse: u64) -> R<u64> {
             assert_eq!(refused_below, Some(t - 1), "{}: landed at {t} Tgas with no refusal at {} Tgas on this vault", c.key, t - 1);
             break (t, before, o);
         }
-        let f = o.calls_exactly(&h.vault, "withdraw", 1)?[0].failure().unwrap_or_default().to_string();
-        println!("{:?} {}: refused at {t} Tgas: {}", w.kind, c.key, f.chars().take(160).collect::<String>());
-        unchanged(w, c, &format!("short{t}"), &before, &o).await?;
+        println!("{:?} {}: refused at {t} Tgas", w.kind, c.key);
+        unchanged(w, c, &format!("short{t}"), &before, &o, "InsufficientGas").await?;
         refused_below = Some(t);
         t += 1;
     };
     let (g, before, o) = g;
-    // the measured need: the lowest Tgas that lands, one above the last refusal on this vault
-    num(&format!("{}.gas", c.key), g as u128, refused_below.unwrap() as u128 + 1);
+    // the measured need is 2.5.2's bound: the statics config() names for this call's payouts + 100 Tgas (V:408)
+    assert_eq!(refused_below, Some(g - 1));
+    let cfg = h.view(&h.vault, "config", json!({})).await?;
+    let st = |name: &str| -> u128 { cfg[name].as_u64().unwrap_or_else(|| panic!("config() has no {name}: {cfg}")) as u128 };
+    let bound = st("gas_ft_transfer_tgas")
+        + st("gas_on_payout_tgas")
+        + if c.register > 0 { st("gas_storage_deposit_tgas") } else { 0 }
+        + if c.fee > 0 { st("gas_ft_transfer_tgas") } else { 0 }
+        + OWN_WORK_TGAS;
+    num(&format!("{}.gas", c.key), g as u128, bound);
+    // and the call's real use is under it: every receipt's gas burnt, summed
+    let used: u128 = o.receipts.iter().map(|r| r.gas_burnt as u128).sum();
+    let cap = if planted(&format!("{}.burnt", c.key)) { used } else { g as u128 * 1_000_000_000_000 };
+    println!("check {}.burnt: the call burnt {used} gas in all, under {cap}", c.key);
+    assert!(used < cap, "{}.burnt: {used} gas burnt, not under {cap}", c.key);
     let wr = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
     let cb = o.calls_exactly(&h.vault, "on_payout", 1)?[0];
     println!("{:?} {}: measured: refused at {} Tgas, lands at exactly {g} Tgas; withdraw burnt {:.3} Tgas, on_payout {:.3} Tgas", w.kind, c.key, g - 1, wr.gas_burnt as f64 / 1e12, cb.gas_burnt as f64 / 1e12);
@@ -382,6 +416,7 @@ async fn measured(w: &World, c: &Case, coarse: u64) -> R<u64> {
     let n = args(c.spend)["public_signals"][1].clone();
     let row = after.spends.iter().find(|s| s["nullifier_hash"] == n).unwrap();
     same(&k("status"), &row["status"], &json!("paid"));
+    same(&k("reserve"), &row["reserve"], &json!((REFUND_RESERVE_BYTES * YOCTO_PER_BYTE).to_string()));
     same(&k("row"), &(row["withdrawn"].clone(), row["fee"].clone(), row["recipient"].clone(), row["refund_value"].clone()), &(json!(c.withdrawn.to_string()), json!(c.fee.to_string()), json!(c.recipient), json!("0")));
     let spent = |s: &Snap| -> u128 { s.totals["spent"].as_str().unwrap().parse().unwrap() };
     num(&k("totals_spent"), spent(&after), spent(&before) + c.withdrawn);
@@ -396,11 +431,7 @@ async fn measured(w: &World, c: &Case, coarse: u64) -> R<u64> {
     let before = after;
     let (o, _) = send(w, c, g).await?;
     assert!(!landed(w, c, &o)?, "{}: the replay landed", c.key);
-    let f = o.calls_exactly(&h.vault, "withdraw", 1)?[0].failure().unwrap_or_default().to_string();
-    let want = if planted(&format!("{}.replay.error", c.key)) { "NullifierAlreadySpent!" } else { "NullifierAlreadySpent" };
-    println!("check {}.replay.error: {}", c.key, f.chars().take(160).collect::<String>());
-    assert!(f.contains(want), "{}.replay.error: want {want}, got {f}", c.key);
-    unchanged(w, c, "replay", &before, &o).await?;
+    unchanged(w, c, "replay", &before, &o, "NullifierAlreadySpent").await?;
     Ok(g)
 }
 
