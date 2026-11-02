@@ -24,6 +24,7 @@ import {
   SETTLE_FLOOR_YOCTO,
   SETTLE_REFUND_ATTACH,
   WITHDRAW_GAS,
+  accountAt,
   carryWithdraw,
   check5,
   checkFunded,
@@ -75,6 +76,9 @@ type Chain = {
   account: ("absent" | { amount: bigint; keys: { public_key: string; permission: unknown }[] })[];
   /** Answers to storage_balance_of, overriding `registered` (a malformed one, for the shape check). */
   balanceAnswer?: unknown;
+  /** view_account's or view_access_key_list's answered block, per provider, when it is not the block asked. */
+  accountAt?: ({ block_height: number; block_hash: string } | undefined)[];
+  listAt?: ({ block_height: number; block_hash: string } | undefined)[];
   /** The second provider's final height, when it is not `height`. */
   height1?: number;
   down?: boolean;
@@ -113,8 +117,11 @@ function provider(c: Chain, i: 0 | 1): Rpc {
     if (method === "query" && (p.request_type === "view_account" || p.request_type === "view_access_key_list")) {
       const h = Number(p.block_id);
       const a = c.account[i]!;
-      if (a === "absent") throw new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} } });
       const at = { block_height: h, block_hash: hashOf(h) };
+      // an absent account as nearcore answers it: view_account UNKNOWN_ACCOUNT, view_access_key_list an empty list
+      if (a === "absent" && p.request_type === "view_account") throw new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} } });
+      if (a === "absent") return { keys: [], ...(c.listAt?.[i] ?? at) };
+      if (p.request_type === "view_account" && c.accountAt?.[i]) return { amount: a.amount.toString(), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, ...c.accountAt[i] };
       if (p.request_type === "view_account") return { amount: a.amount.toString(), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, ...at };
       return { keys: a.keys.map((k) => ({ public_key: k.public_key, access_key: { nonce: 0, permission: k.permission } })), ...at };
     }
@@ -335,6 +342,51 @@ test("fund_recipient true: carried only for an implicit A that exists with key l
   // a named recipient is never an A
   assert.equal(checkFunded({ fund_recipient: true, recipient: "a.near" } as CheckedWithdraw, reads({ recipient: A_OK && { kind: "account", ...A_OK } })), "recipient_refused");
   assert.equal(checkFunded({ fund_recipient: undefined, recipient: "a.near" } as CheckedWithdraw, reads()), null);
+});
+
+test("an absent A reads as nearcore answers it (view_account UNKNOWN_ACCOUNT, an empty key list) and is recipient_refused; any other mix, or an answer at another block, is 503 with nothing signed", async () => {
+  const b = { height: 1000n, hash: hashOf(1000), gasPrice: 100_000_000n, ms: 0n } as unknown as Parameters<typeof accountAt>[1];
+  const absent = chain({ account: ["absent", "absent"] });
+  assert.deepEqual(await accountAt([provider(absent, 0), provider(absent, 1)], b, W.recipient), { kind: "absent" });
+  const unknown = new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} } });
+  const at = { block_height: 1000, block_hash: hashOf(1000) };
+  const mix = (acc: "unknown" | "ok", list: "unknown" | "empty" | "one"): Rpc => async (_m, params) => {
+    const p = params as { request_type: string };
+    if (p.request_type === "view_account") {
+      if (acc === "unknown") throw unknown;
+      return { amount: A_STORE_YOCTO.toString(), locked: "0", storage_usage: 182, ...at };
+    }
+    if (list === "unknown") throw unknown;
+    return { keys: list === "empty" ? [] : [{ public_key: idKeyOf(W.recipient), access_key: { nonce: 0, permission: "FullAccess" } }], ...at };
+  };
+  for (const [acc, list] of [["unknown", "unknown"], ["unknown", "one"], ["ok", "unknown"]] as const) {
+    await assert.rejects(accountAt([mix(acc, list), mix(acc, list)], b, W.recipient), /neither absent nor an account/, `${acc} / ${list}`);
+  }
+  const route = setup(absent);
+  const a = await carryWithdraw(req(), route.deps);
+  assert.deepEqual([a.status, code(a), route.relayer.sent.length], [400, "recipient_refused", 0]);
+  // one provider answers view_account, or the key list, at another block (another height, or the height on another hash)
+  const other = { block_height: 999, block_hash: hashOf(999) };
+  const fork = { block_height: 1000, block_hash: hashOf(1001) }; // the height asked, another block's hash
+  for (const over of [{ accountAt: [undefined, other] }, { accountAt: [undefined, fork] }, { listAt: [undefined, other], account: ["absent", "absent"] as Chain["account"] }]) {
+    const x = setup(chain(over));
+    const r = await carryWithdraw(req(), x.deps);
+    assert.deepEqual([r.status, code(r), x.relayer.sent.length], [503, "upstream", 0], JSON.stringify(over));
+    assert.equal(x.store.get(NF), null);
+  }
+});
+
+test("check 5, row 12: the spends index's final height read again for the leaves fails: 503 index_behind, nothing signed", async () => {
+  const x = setup();
+  let reads = 0;
+  x.deps.index = { ...fakeIndex(), finalHeight: async () => {
+    if (reads++ === 0) return 1000n;
+    throw new Error("the two finals stand 11 blocks apart");
+  } };
+  const a = await carryWithdraw(req(), x.deps);
+  assert.deepEqual([a.status, code(a), x.relayer.sent.length], [503, "index_behind", 0]);
+  assert.equal(reads, 2, "checkNullifier's read passed, leafCheck's threw");
+  assert.equal(x.store.get(NF), null);
 });
 
 // ---- relayer_low ----

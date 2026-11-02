@@ -148,7 +148,11 @@ export type ChainReads = {
   recipient?: AccountRead;
 };
 
-/** One provider's view of `id` at block `b`: view_account and view_access_key_list, both answered at `b`. */
+/**
+ * One provider's view of `id` at block `b`: view_account and view_access_key_list, both answered at `b`. An absent
+ * account reads as nearcore answers it: view_account UNKNOWN_ACCOUNT and an empty key list (read on FastNEAR and dRPC,
+ * testnet and mainnet, 2026-11-02); any other mix is refused.
+ */
 async function accountOn(r: Rpc, i: number, b: Block, id: string): Promise<AccountRead> {
   const at = { block_id: Number(b.height), account_id: id };
   const ask = async (request_type: string) => {
@@ -162,7 +166,7 @@ async function accountOn(r: Rpc, i: number, b: Block, id: string): Promise<Accou
     }
   };
   const [acc, list] = await Promise.all([ask("view_account"), ask("view_access_key_list")]);
-  if (acc === null && list === null) return { kind: "absent" };
+  if (acc === null && list !== null && Array.isArray(list.keys) && list.keys.length === 0) return { kind: "absent" };
   const amount = acc === null ? null : decimal(acc.amount, U128);
   if (amount === null || list === null || !Array.isArray(list.keys)) throw new FeeReadRefused(`rpc ${i}: ${id} neither absent nor an account with a key list`);
   const keys = list.keys.map((k: unknown) => {
