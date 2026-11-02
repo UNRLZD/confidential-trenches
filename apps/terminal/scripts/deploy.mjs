@@ -20,8 +20,8 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 // every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs
 // and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
 // fail this deploy)
-export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "signpage-release"];
-export const LIVE_ARGS = { "signpage-release": "--host app" };
+export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-harness-signin-e2e", "signpage-release"];
+export const LIVE_ARGS = { "app-harness-signin-e2e": "--host app", "signpage-release": "--host app" };
 export const liveRun = (k) => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}`;
 
 export function deploy(argv, env = process.env, run = spawnSync) {

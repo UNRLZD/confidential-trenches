@@ -22,10 +22,10 @@ import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-release"];
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-release", "signpage-withdraw-form", "app-harness-signin-e2e"];
 // the arguments a check is run with after this deploy: signpage-release reads SIGN_HOST alone against this commit's
-// own build, so an APP_HOST that lags does not fail this deploy
-export const LIVE_ARGS = { "signpage-release": "--host sign" };
+// own build, and app-harness-signin-e2e SIGN_HOST's backdrop alone, so an APP_HOST that lags does not fail this deploy
+export const LIVE_ARGS = { "signpage-release": "--host sign", "app-harness-signin-e2e": "--host sign" };
 export const liveRun = (k) => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}`;
 export const PROJECT = "confidential-trenches-sign";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves SIGN_HOST

@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CARGO_NEAR, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, registrationProblems, repoRoots, rpcProblems } from "./deploy.mjs";
+import { CARGO_NEAR, LIVE_CHECK, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, nextLine, registrationProblems, repoRoots, rpcProblems } from "./deploy.mjs";
 import { b58encode } from "./near-tx.mjs";
 import { TESTNET_TOKEN } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
 
@@ -175,6 +175,15 @@ test("--network mainnet is refused before any build or send", () => {
   assert.match(r.stderr, /no mainnet: a mainnet vault deploy is the owner's/);
   neverSent(r);
   assert.equal(existsSync(buildDir), false, "a build ran");
+});
+
+test("the next line names testnet's live check for a testnet deploy, and no live check for a sandbox one", () => {
+  const rec = "contracts/vault/deployments/testnet-vault.json";
+  assert.equal(nextLine("testnet", rec), `next: node scripts/live-checks/vault-testnet-t01.mjs --deployment ${rec}`);
+  assert.ok(existsSync(path.join(fileURLToPath(new URL("../../..", import.meta.url)), LIVE_CHECK)), `${LIVE_CHECK} is not in the repo`);
+  // vault-testnet-t01.mjs reads public testnet RPCs only, so it can never check a sandbox deploy
+  assert.equal(nextLine("sandbox", "x/record.json"), "next: no live check (a sandbox deploy lives on this machine only; tests/s20.rs checks its end state)");
+  assert.throws(() => nextLine("mainnet", rec), /no network mainnet/);
 });
 
 // ---- the wasm ----
