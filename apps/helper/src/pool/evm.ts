@@ -11,23 +11,35 @@
 //   not_pool         the withdrawal's processooor is not the pool the body names, which this helper carries;
 //   fee_recipient    the request pays the fee to anyone but this release's fee recipient;
 //   epoch_off        the epoch is not inside the proof's life (deadlineMs - POOL_LIFE_MAX_MS up to the deadline), is
-//                    later than the epoch now, or the chain has no block in it yet;
+//                    outside [now - POOL_LIFE_MAX_MS, now], or the chain has no block in it yet;
+//   deadline_near    the deadline is under now + EVM_POOL_SEND_MARGIN_MS (these first checks make no RPC call);
+//   reverted         this nullifier's send in this epoch reverted on chain: it is never sent again in this epoch
+//                    (M356 (1)); a new proof in a later epoch is its own send;
 //   fee_off          the fee is not the fee this helper publishes for that epoch (M352 (2): max(the floor,
 //                    2 x EVM_WITHDRAW_GAS x the base fee of the epoch's first block), on its step);
 //   fee_over_cap     the fee is over the request's feeCap (the pool refuses it too: FeeOverCap);
-//   simulation_failed eth_call of the exact transaction from the sender reverts, or its gas is over EVM_GAS_MAX;
-//   upstream (503)   a read could not be made, or the two providers name different chains.
-// A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing, unless that send reverted. Each
-// send's maxFeePerGas is at most fee / gas limit, so the sender never pays more gas than the fee.
+//   recipient_code   the recipient holds code on either provider at pending or latest (an EIP-7702 delegation,
+//                    0xef0100..., too): a contract could revert the pool's push after the simulation;
+//   simulation_failed eth_estimateGas or eth_call of the exact transaction at "pending", from the sender with the gas,
+//                    maxFeePerGas and maxPriorityFeePerGas the send then signs, fails in execution, or its gas is over
+//                    EVM_GAS_MAX;
+//   fee_stale        the fee's cap per gas (fee / gas limit) is under the current base fee: it could not be mined, so
+//                    the device re-proves at a newer epoch's fee (M356 (2));
+//   busy (503)       EVM_QUEUE_MAX sends are already waiting;
+//   upstream (503)   a read could not be made (a transport error, an HTTP status such as 429, another JSON-RPC error),
+//                    or the two providers name different chains.
+// A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing; a repeat after that send
+// reverted is refused as reverted. Each send's maxFeePerGas is at most fee / gas limit, so the sender never pays more
+// gas than the fee, and a send the helper accepts either lands and spends or fails in the simulation.
 // Answer: 200 { hash }. pool-evm-buy adds buy() with W's EIP-712 signature: its selector goes in SELECTORS with its own
 // decoder, and the same fee, recipient, simulation and send rules apply.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { solanaJsonRpc } from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
-import { oncePerNullifier } from "./once.ts";
+import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 
-/** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 26 = 836 bytes). */
+/** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 27 = 868 bytes). */
 export const POOL_EVM_BODY_MAX = 4_096;
 export const EVM_BODY_DATA_MAX = 1_024;
 /** The most gas the helper pays for one withdraw: the measured Privacy Pools withdrawal is 611,391 (M349), so 2.5x [design]. */
@@ -110,6 +122,13 @@ export const EVM_FEE_STEP = 10n ** 13n;
 export const POOL_LIFE_MAX_MS = 600_000;
 /** How many epochs' fees each sender remembers [design: well past one proof life of 10 epochs]. */
 const EPOCH_MEMORY = 64;
+/**
+ * The least time, ms, between now and a request's deadline for the helper to send it (M356 (1)): a send needs time to
+ * be mined before the pool's deadline check, or the sender pays for a revert. It moves to the kit with the fee file.
+ */
+export const EVM_POOL_SEND_MARGIN_MS = 60_000;
+/** The most sends waiting behind the one in flight; past it 503 busy (M356 (3)) [design: about a minute of sends]. */
+export const EVM_QUEUE_MAX = 64;
 
 export type EvmBlock = { number: bigint; timestamp: bigint; hash: string; baseFeePerGas: bigint };
 const blockOf = (v: unknown): EvmBlock => {
@@ -158,7 +177,8 @@ export function evmEpochFee(floor: bigint, baseFeePerGas: bigint): bigint {
 // ---- The sender ----
 
 export type EvmRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
-export type PoolEvmCode = "bad_shape" | "not_pool" | "fee_recipient" | "fee_off" | "fee_over_cap" | "epoch_off" | "simulation_failed" | "upstream";
+export type PoolEvmCode =
+  | "bad_shape" | "not_pool" | "fee_recipient" | "fee_off" | "fee_over_cap" | "epoch_off" | "deadline_near" | "reverted" | "recipient_code" | "simulation_failed" | "fee_stale" | "busy" | "upstream";
 export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } } };
 export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
@@ -176,6 +196,16 @@ const HEX = /^0x([0-9a-f]{2})+$/;
 const qty = (v: unknown): bigint => {
   if (typeof v !== "string" || !/^0x(0|[1-9a-f][0-9a-f]{0,63})$/.test(v)) throw new Error("not a quantity");
   return BigInt(v);
+};
+/**
+ * The node ran the call and it failed in execution: a JSON-RPC error (the kit's client words it "RPC error <code>:
+ * <message>") with code 3 (execution reverted) or -32000 (insufficient funds, a fee under the base fee, out of gas),
+ * unless its message names a rate limit. Anything else (a transport error, an HTTP status such as 429, a timeout, another
+ * code) is the provider's, so it answers 503 upstream and never blames the request.
+ */
+const failedInExecution = (e: unknown): boolean => {
+  const m = String((e as Error | undefined)?.message ?? e);
+  return /^RPC error (3|-32000): /.test(m) && !/rate|limit exceeded|too many|capacity/i.test(m);
 };
 
 /**
@@ -197,6 +227,12 @@ export function evmPoolSender(
   let nextNonce = -1n;
   let queue: Promise<unknown> = Promise.resolve();
   const once = oncePerNullifier<PoolEvmAnswer>(cfg.memory);
+  /** Each remembered send's epoch, so a revert is held against the epoch whose proof reverted. */
+  const sentIn = new WeakMap<Promise<PoolEvmAnswer>, number>();
+  /** `${epoch}:${nullifier}` of every send that reverted on chain, the oldest dropped first (M356 (1)). */
+  const reverted = new Set<string>();
+  const revertMemory = cfg.memory ?? POOL_SEND_MEMORY;
+  let waiting = 0;
   const fees = new Map<number, Promise<{ block: EvmBlock; fee: bigint } | null>>();
   const no = (status: number, code: PoolEvmCode, detail?: string): PoolEvmAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
   const chain = (): Promise<bigint> => {
@@ -239,10 +275,14 @@ export function evmPoolSender(
     }
     if (w.processooor !== pool) return no(422, "not_pool");
     if (w.feeRecipient !== feeRecipient) return no(422, "fee_recipient");
-    // the proof's epoch: inside its life (at most POOL_LIFE_MAX_MS before its deadline, before the deadline) and never
-    // later than the epoch now
+    // the proof's epoch: inside its life (at most POOL_LIFE_MAX_MS before its deadline, before the deadline), never
+    // later than the epoch now nor older than a proof's life; then a deadline at least the send margin away. No RPC
+    // call before these, so an old or expired request costs no read (M356 (3)).
     const deadline = Number(w.deadlineMs);
-    if (epoch < deadline - POOL_LIFE_MAX_MS || epoch >= deadline || epoch > epochStartOf(now())) return no(422, "epoch_off");
+    const t = now();
+    if (epoch < deadline - POOL_LIFE_MAX_MS || epoch >= deadline || epoch > epochStartOf(t) || epoch < t - POOL_LIFE_MAX_MS) return no(422, "epoch_off");
+    if (deadline < t + EVM_POOL_SEND_MARGIN_MS) return no(422, "deadline_near", `deadline ${deadline}, now ${t}`);
+    if (reverted.has(`${epoch}:${w.nullifier}`)) return no(422, "reverted");
     let epochFee: { block: EvmBlock; fee: bigint } | null;
     try {
       epochFee = await feeOf(epoch);
@@ -252,32 +292,42 @@ export function evmPoolSender(
     if (epochFee === null) return no(422, "epoch_off", "no block in the epoch yet");
     if (w.fee !== epochFee.fee) return no(422, "fee_off", `fee ${w.fee}, published ${epochFee.fee} for epoch ${epoch}`);
     if (w.fee > w.feeCap) return no(422, "fee_over_cap", `fee ${w.fee}, cap ${w.feeCap}`);
-    // one send per nullifier (./once.ts): a repeat gets the first hash, unless that send reverted on chain
+    // one send per nullifier (./once.ts): a repeat gets the first hash; a repeat after that send reverted on chain is
+    // refused, and its epoch is remembered so that release is never sent again (M356 (1))
     const prior = once.get(w.nullifier);
     if (prior) {
       const first = await prior;
       const hash = (first.body as { hash?: string }).hash;
       const rc = hash ? await a("eth_getTransactionReceipt", [hash]).catch(() => null) : null;
       if ((rc as { status?: unknown } | null)?.status !== "0x0") return first;
-      once.forget(w.nullifier);
+      const was = sentIn.get(prior) ?? epoch;
+      reverted.add(`${was}:${w.nullifier}`);
+      while (reverted.size > revertMemory) reverted.delete(reverted.values().next().value as string);
+      once.forget(w.nullifier, prior);
+      if (was === epoch) return no(422, "reverted");
     }
-    return once.run(w.nullifier, () => {
-      const run = queue.then(() => simulateSignSend(data, bytes, w.fee));
+    const entry = once.run(w.nullifier, () => {
+      if (waiting >= EVM_QUEUE_MAX) return Promise.resolve(no(503, "busy"));
+      waiting++;
+      const run = queue.then(() => {
+        waiting--;
+        return simulateSignSend(data, bytes, w);
+      });
       queue = run.catch(() => {});
       return run;
     });
+    sentIn.set(entry, epoch);
+    return entry;
   };
-  async function simulateSignSend(data: string, bytes: Uint8Array, fee: bigint): Promise<PoolEvmAnswer> {
+  async function simulateSignSend(data: string, bytes: Uint8Array, w: EvmWithdraw): Promise<PoolEvmAnswer> {
     const call = { from: sender, to: pool, data, value: "0x0" };
-    let id: bigint, gas: bigint, base: bigint, tip: bigint, pending: bigint;
+    let id: bigint, base: bigint, tip: bigint, pending: bigint;
     try {
       id = await chain();
-      try {
-        await a("eth_call", [call, "latest"]);
-        gas = qty(await a("eth_estimateGas", [call, "latest"]));
-      } catch (e) {
-        return no(422, "simulation_failed", String((e as Error).message).slice(0, 200));
-      }
+      // a recipient with code could revert the pool's push after the simulation: refused on either provider, at
+      // pending and at latest; any answer but "0x" (an EIP-7702 delegation is 0xef0100 + an address) is code
+      const codes = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map((at) => r("eth_getCode", [w.recipient, at]))));
+      if (codes.some((c) => c !== "0x")) return no(422, "recipient_code");
       const [block, t, n] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), a("eth_getTransactionCount", [sender, "pending"])]);
       base = qty((block as { baseFeePerGas?: unknown })?.baseFeePerGas);
       tip = qty(t);
@@ -285,13 +335,27 @@ export function evmPoolSender(
     } catch {
       return no(503, "upstream");
     }
+    let gas: bigint;
+    try {
+      gas = qty(await a("eth_estimateGas", [call, "pending"]));
+    } catch (e) {
+      return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : no(503, "upstream");
+    }
     gas = (gas * 12n) / 10n;
     if (gas > EVM_GAS_MAX) return no(422, "simulation_failed", `gas ${gas} over ${EVM_GAS_MAX}`);
-    // the sender never pays more gas than the fee: maxFeePerGas at most fee / gas limit; past that the transaction
-    // waits in the mempool until the base fee comes back under it
-    const cap = fee / gas;
+    // the sender never pays more gas than the fee: maxFeePerGas at most fee / gas limit; a cap under the base fee now
+    // could not be mined and would hold every later nonce behind it, so it is refused and the device re-proves
+    const cap = w.fee / gas;
+    if (cap < base) return no(422, "fee_stale", `fee ${w.fee} / gas ${gas} = ${cap} under the base fee ${base}`);
     const maxFeePerGas = 2n * base + tip < cap ? 2n * base + tip : cap;
     const maxPriorityFeePerGas = tip < maxFeePerGas ? tip : maxFeePerGas;
+    // the simulation is the transaction as it will be signed: at pending, from the sender, with its gas and fee fields
+    // (a call that reverts only at a real gas price is caught here, not paid for on chain)
+    try {
+      await a("eth_call", [{ ...call, gas: tag(gas), maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(maxPriorityFeePerGas) }, "pending"]);
+    } catch (e) {
+      return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : no(503, "upstream");
+    }
     const nonce = pending > nextNonce ? pending : nextNonce;
     const { raw, hash } = signEvmTx({ chainId: id, nonce, maxPriorityFeePerGas, maxFeePerGas, gas, to: pool, data: bytes }, cfg.senderKey);
     const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);
@@ -305,6 +369,9 @@ export function evmPoolSender(
     sender,
     async fee(atMs) {
       const epoch = epochStartOf(atMs);
+      // an epoch no carry would take (older than a proof's life or later than now) is read nowhere (M356 (3))
+      const t = now();
+      if (epoch > t || epoch < t - POOL_LIFE_MAX_MS) return null;
       const f = await feeOf(epoch);
       if (f === null) return null;
       return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
