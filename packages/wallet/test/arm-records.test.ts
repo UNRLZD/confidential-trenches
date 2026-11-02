@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { base58 } from "@scure/base";
-import { ArmRefused, armKey, armRecordOf, armRecords, claimArm, moveArmRecord, settleArm, solanaArmedSigner, type ArmRecord } from "../src/arming/records.ts";
+import { ArmRefused, armKey, armRecordOf, armRecords, claimArm, moveArmRecord, settleArm, solanaArmedSigner, solanaMessageBlockhash, type ArmRecord } from "../src/arming/records.ts";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../src/derive/index.ts";
 
 const L = 0x223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32n; // a8.json l
@@ -19,7 +19,10 @@ const W1 = freshWallet(seed(), "sol", L, 1);
 W0.secretKey.fill(0);
 W1.secretKey.fill(0);
 const CONTEXT = "ab".repeat(32);
-const MSG = new TextEncoder().encode("a checked Solana message");
+// a legacy message's shape: header, no static keys, the blockhash, then the rest
+const BLOCKHASH = base58.encode(new Uint8Array(32).fill(9));
+const message = (text: string) => Uint8Array.from([1, 0, 0, 0, ...base58.decode(BLOCKHASH), ...new TextEncoder().encode(text)]);
+const MSG = message("a checked Solana message");
 const TX = { lastValidBlockHeight: 300_000_000 };
 
 const OP = "6f9619ff-8b86-4011-b42d-00c04fc964ff";
@@ -48,6 +51,20 @@ function store(entries: Record<string, unknown> = {}) {
       assert.equal(s, "wallets");
       writes.push(k);
       m.set(k, v);
+    },
+    // the store's compare-and-set: a turn of the event loop between the read and the write, and a lost race read again
+    async update(s: string, k: string, change: (v: unknown) => unknown) {
+      assert.equal(s, "wallets");
+      for (;;) {
+        const before = m.get(k);
+        const next = change(structuredClone(before));
+        await new Promise((r) => setTimeout(r, 1));
+        if (m.get(k) !== before) continue;
+        if (next === undefined) return undefined;
+        writes.push(k);
+        m.set(k, next);
+        return next;
+      }
     },
   };
 }
@@ -145,10 +162,11 @@ test("no source of the wallet or the signing page writes a `wallets` record but 
     }
   };
   roots.forEach(walk);
-  const writers = files.filter((f) => /\.put\(\s*["']wallets["']/.test(readFileSync(f, "utf8")));
+  const writers = files.filter((f) => /\.(put|update)\(\s*["']wallets["']/.test(readFileSync(f, "utf8")));
   assert.deepEqual(writers.map((f) => f.slice(f.lastIndexOf("/packages/") + 10)), ["wallet/src/arming/records.ts"]);
   const src = readFileSync(new URL("../src/arming/records.ts", import.meta.url), "utf8");
-  assert.equal(src.match(/\.put\(/g)?.length, 1, "records.ts writes only in rewriteArm");
+  assert.equal(src.match(/\.put\(/g), null, "records.ts never puts a record whole");
+  assert.equal(src.match(/\.update\(/g)?.length, 1, "records.ts writes only in rewriteArm, as one compare-and-set");
 });
 
 test("two records for one address are refused: the signer never picks one of them", async () => {
@@ -191,20 +209,20 @@ test("the signer signs only for this trade's mark, and gives the signature back 
   }
   const s = store({ [k]: record(0, W0.address) });
   let wrote!: () => void;
-  const slow = { ...s, put: async (st: string, key: string, v: unknown) => { await new Promise<void>((r) => (wrote = r)); return s.put(st, key, v); } };
+  const slow = { ...s, update: async (st: string, key: string, f: (v: unknown) => unknown) => { await new Promise<void>((r) => (wrote = r)); return s.update(st, key, f); } };
   let back = false;
   const asked = solanaArmedSigner(slow as never, opener().open, OP).sign(W0.address, MSG, TX).then((sig) => ((back = true), sig));
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(back, false, "no signature before the mark is written");
   wrote();
   const sig = await asked;
-  assert.deepEqual((s.m.get(k) as ArmRecord).inflight!.txs, [{ sig: base58.encode(sig), lvbh: 300_000_000 }]);
+  assert.deepEqual((s.m.get(k) as ArmRecord).inflight!.txs, [{ sig: base58.encode(sig), lvbh: 300_000_000, blockhash: BLOCKHASH }]);
   for (const bad of [undefined, { lastValidBlockHeight: -1 }, { lastValidBlockHeight: 1.5 }]) {
     const o = opener();
     await assert.rejects(solanaArmedSigner(store({ [k]: record(0, W0.address) }) as never, o.open, OP).sign(W0.address, MSG, bad as never), /lastValidBlockHeight/, "no height: no signature");
     assert.equal(o.opened(), 0);
   }
-  const failing = { ...store({ [k]: record(0, W0.address) }), put: async () => { throw new Error("QuotaExceededError"); } };
+  const failing = { ...store({ [k]: record(0, W0.address) }), update: async () => { throw new Error("QuotaExceededError"); } };
   await assert.rejects(solanaArmedSigner(failing as never, opener().open, OP).sign(W0.address, MSG, TX), /QuotaExceeded/, "a failed mark write gives no signature");
 });
 
@@ -221,6 +239,33 @@ test("claimArm marks only an unmarked READY or IN_POSITION record; settleArm tak
   const r = store({ [k]: { ...bare, state: "RETURNING" } });
   assert.equal(await claimArm(r as never, k, { op: OP, side: "sell", token: MINT }), false, "not a signing state");
   assert.equal(await claimArm(r as never, k, { op: "not an op id!", side: "sell", token: MINT }), false);
-  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: [{ sig: "not base58 0OIl", lvbh: 1 }] } }), null, "a malformed mark is no record");
-  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: [{ sig: base58.encode(new Uint8Array(64).fill(1)), lvbh: -1 }] } }), null, "a mark with no height is no record");
+  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: [{ sig: "not base58 0OIl", lvbh: 1, blockhash: BLOCKHASH }] } }), null, "a malformed mark is no record");
+  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: [{ sig: base58.encode(new Uint8Array(64).fill(1)), lvbh: -1, blockhash: BLOCKHASH }] } }), null, "a mark with no height is no record");
+  assert.equal(armRecordOf(k, { ...bare, inflight: { op: OP, side: "buy", token: MINT, txs: [{ sig: base58.encode(new Uint8Array(64).fill(1)), lvbh: 1 }] } }), null, "a mark with no blockhash is no record");
+});
+
+test("two signatures for one wallet at once (a teardown's frames) both stay in the mark: the write is a compare-and-set", async () => {
+  const k = armKey("sol", L, 0);
+  const s = store({ [k]: record(0, W0.address) });
+  const signer = solanaArmedSigner(s as never, opener().open, OP);
+  const [a, b] = await Promise.all([signer.sign(W0.address, MSG, TX), signer.sign(W0.address, message("frame 2"), TX)]);
+  assert.deepEqual((s.m.get(k) as ArmRecord).inflight!.txs.map((t) => t.sig).sort(), [base58.encode(a), base58.encode(b)].sort());
+});
+
+test("the mark keeps the blockhash the message signs; a message with no blockhash is never signed", async () => {
+  assert.equal(solanaMessageBlockhash(MSG), BLOCKHASH);
+  const v0 = Uint8Array.from([0x80, 1, 0, 0, 1, ...new Uint8Array(32).fill(4), ...base58.decode(BLOCKHASH), 0]);
+  assert.equal(solanaMessageBlockhash(v0), BLOCKHASH, "a v0 message with one static key");
+  assert.equal(solanaMessageBlockhash(Uint8Array.from([1, 0, 0, 2, 1, 2, 3])), null, "cut short");
+  const o = opener();
+  await assert.rejects(solanaArmedSigner(store({ [armKey("sol", L, 0)]: record(0, W0.address) }) as never, o.open, OP).sign(W0.address, Uint8Array.from([1, 0, 0, 5]), TX), /blockhash/);
+  assert.equal(o.opened(), 0);
+});
+
+test("settleArm moves the state only from `from`: a record in another state keeps it, its mark still goes", async () => {
+  const k = armKey("sol", L, 0);
+  const s = store({ [k]: record(0, W0.address, { state: "IN_POSITION", token: MINT }) });
+  assert.equal(await settleArm(s as never, k, OP, { from: "READY", to: "IN_POSITION", token: "Other1111111111111111111111111111111111111" }), true);
+  const r = s.m.get(k) as ArmRecord;
+  assert.deepEqual([r.state, r.token, r.inflight], ["IN_POSITION", MINT, undefined]);
 });

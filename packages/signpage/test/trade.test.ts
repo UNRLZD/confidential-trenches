@@ -19,7 +19,7 @@ import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
 import { readFileSync } from "node:fs";
-import { TRADE_HELPER, TRADE_PICK_LOCK, buyLegs, refusalCode, releaseTradeDeps, sellSplit, tradeKind } from "../src/trade.ts";
+import { TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, tradeKind } from "../src/trade.ts";
 
 // the skeleton check's pinned policy (an .mjs with no types: imported by a plain string)
 const SKELETON: string = "../../../scripts/live-checks/signpage-skeleton.mjs";
@@ -39,21 +39,40 @@ const rec = (j: number, size: bigint, over: Partial<ArmRecord> = {}): ArmRecord 
 });
 
 const tick = () => new Promise((r) => setTimeout(r, 1));
-/** The wallet store's get, put and keys over Maps; `failPut(n, store)` fails the n-th put (1-based) when it answers true. */
-function store(wallets: Record<string, unknown> = {}, opts: { failPut?: (n: number, s: string) => boolean; slowPut?: (s: string) => number } = {}) {
+/**
+ * The wallet store's get, put, keys and update over Maps; `failPut(n, store)` fails the n-th write (1-based, put or
+ * update) when it answers true, `slowPut` delays one, `hangPut` never answers it. update is the store's compare-and-set,
+ * with a turn of the event loop between its read and its write.
+ */
+function store(wallets: Record<string, unknown> = {}, opts: { failPut?: (n: number, s: string) => boolean; slowPut?: (s: string) => number; hangPut?: (s: string) => boolean } = {}) {
   const m = { wallets: new Map(Object.entries(wallets)), ops: new Map<string, unknown>() } as Record<string, Map<string, unknown>>;
   let puts = 0;
+  const gate = async (s: string) => {
+    await tick();
+    const slow = opts.slowPut?.(s) ?? 0;
+    if (slow) await new Promise((r) => setTimeout(r, slow));
+    if (opts.hangPut?.(s)) await new Promise(() => {});
+    if (opts.failPut?.(++puts, s)) throw new Error("QuotaExceededError");
+  };
   return {
     m,
     async get(s: string, k: string) { await tick(); return structuredClone(m[s]!.get(k)); },
     async put(s: string, k: string, v: unknown) {
-      await tick();
-      const slow = opts.slowPut?.(s) ?? 0;
-      if (slow) await new Promise((r) => setTimeout(r, slow));
-      if (opts.failPut?.(++puts, s)) throw new Error("QuotaExceededError");
+      await gate(s);
       m[s]!.set(k, structuredClone(v));
     },
     async keys(s: string) { await tick(); return [...m[s]!.keys()]; },
+    async update(s: string, k: string, change: (v: unknown) => unknown) {
+      for (;;) {
+        const before = m[s]!.get(k);
+        const next = change(structuredClone(before));
+        if (next === undefined) return undefined;
+        await gate(s);
+        if (m[s]!.get(k) !== before) continue;
+        m[s]!.set(k, structuredClone(next));
+        return next;
+      }
+    },
   };
 }
 
@@ -85,7 +104,7 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
       deps.onProgress?.("refused");
       return { side: req.side, token: req.token, reference: 1n, blockhash: null, legs };
     }
-    const msg = new TextEncoder().encode(`message of ${req.side}`);
+    const msg = message(`message of ${req.side}`);
     for (const l of legs) {
       const sig = await deps.sign!(script.signAs ?? l.wallet, msg, { lastValidBlockHeight: LVBH });
       assert.ok(ed25519.verify(sig, msg, base58.decode(script.signAs ?? l.wallet)));
@@ -102,9 +121,12 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
 }
 
 const LVBH = 1_000;
+// a legacy message's shape: header, no static keys, the blockhash, then the rest (the signer marks its blockhash)
+const BLOCKHASH = base58.encode(new Uint8Array(32).fill(9));
+const message = (text: string) => Uint8Array.from([1, 0, 0, 0, ...base58.decode(BLOCKHASH), ...new TextEncoder().encode(text)]);
 const noRpc: SolanaRpc = async () => { throw new Error("no read expected"); };
 const shaOf = (params: Record<string, unknown>) => createHash("sha256").update(JSON.stringify(params)).digest("hex");
-function page(s: ReturnType<typeof store>, script: Script, providers: readonly [SolanaRpc, SolanaRpc] = [noRpc, noRpc]) {
+function page(s: ReturnType<typeof store>, script: Script, providers: readonly [SolanaRpc, SolanaRpc] = [noRpc, noRpc], storeMs?: number) {
   const calls: SolanaTradeRequest[] = [];
   let opened = 0;
   const tab = tabLocks();
@@ -115,6 +137,7 @@ function page(s: ReturnType<typeof store>, script: Script, providers: readonly [
     run: standIn(script, calls) as never,
     now: () => 1_700_000_000_000,
     locks: tab.locks,
+    ...(storeMs ? { storeMs } : {}),
   });
   const progress: Stage[] = [];
   const ask = async (params: Record<string, unknown>, id: string = crypto.randomUUID()) => {
@@ -291,7 +314,7 @@ test("a sell's token account must be the wallet's own of that mint on both provi
 });
 
 test("a buy takes READY wallets only: an IN_POSITION, RETURNING or marked wallet is never a buy's", async () => {
-  for (const over of [{ state: "IN_POSITION" as const, token: MINT }, { state: "RETURNING" as const }, { inflight: { op: "0f9619ff-8b86-4011-b42d-00c04fc964ff", side: "buy" as const, token: MINT, txs: [{ sig: base58.encode(new Uint8Array(64).fill(1)), lvbh: LVBH }] } }]) {
+  for (const over of [{ state: "IN_POSITION" as const, token: MINT }, { state: "RETURNING" as const }, { inflight: { op: "0f9619ff-8b86-4011-b42d-00c04fc964ff", side: "buy" as const, token: MINT, txs: [{ sig: base58.encode(new Uint8Array(64).fill(1)), lvbh: LVBH, blockhash: BLOCKHASH }] } }]) {
     const p = page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n, over) }), { final: "filled" });
     assert.deepEqual((await p.ask(buy("10"))).answer, { error: "no_ready_set" }, JSON.stringify(Object.keys(over)));
     assert.equal(p.calls.length, 0);
@@ -364,14 +387,21 @@ test("a running trade's wallets are not picked by a second trade; one whose tx i
 });
 
 // the review's F1-F5 (Opus review of 974d724): each failed before the fold, as the reviewer's own test showed the fault
-/** A provider with one status for every signature (null: none) and its finalized block height. */
-const sigStatus = (state: "ok" | "err" | null, height = 0): SolanaRpc => async (method, params) => {
-  if (method === "getBlockHeight") {
+/**
+ * A provider for a dead tab's tx (06c A4's reads): one status for every signature (null: none), its finalized bank's
+ * height (slot 50), the blockhash's verdict at processed (slot 52) and the status read's bank (slot 53).
+ */
+const sigStatus = (state: "ok" | "err" | null, height = 0, valid = height <= LVBH): SolanaRpc => async (method, params) => {
+  if (method === "getLatestBlockhash") {
     assert.deepEqual(params, [{ commitment: "finalized" }]);
-    return height;
+    return { context: { slot: 50 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: height + 150 } };
+  }
+  if (method === "isBlockhashValid") {
+    assert.deepEqual(params, [BLOCKHASH, { commitment: "processed" }]);
+    return { context: { slot: 52 }, value: valid };
   }
   assert.equal(method, "getSignatureStatuses");
-  return { value: [state === null ? null : { confirmationStatus: "finalized", err: state === "ok" ? null : { InstructionError: [0, "Custom"] } }] };
+  return { context: { slot: 53 }, value: [state === null ? null : { confirmationStatus: "finalized", err: state === "ok" ? null : { InstructionError: [0, "Custom"] }, slot: 40 }] };
 };
 
 test("F1 a reload mid-trade: the reloaded page never re-picks the wallet whose buy is sent and unresolved; it resolves it on both providers", async () => {
@@ -403,13 +433,14 @@ test("a dead tab's tx that can never land frees its wallet: both providers' fina
   const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
   const before = page(s, { hold: new Promise<void>(() => {}) });
   const first = await before.ask(buy("10"));
-  assert.equal(mark(s, 0)!.txs[0]!.lvbh, LVBH, "the mark holds the tx's lastValidBlockHeight from the kit");
+  assert.deepEqual([mark(s, 0)!.txs[0]!.lvbh, mark(s, 0)!.txs[0]!.blockhash], [LVBH, BLOCKHASH], "the mark holds the tx's lastValidBlockHeight from the kit and the blockhash its message signs");
   before.die();
-  // the height not yet past on both, or past on one only: it may still land, so the wallet stays out
-  for (const heights of [[LVBH, LVBH], [LVBH + 1, LVBH], [LVBH, LVBH + 1]]) {
-    const q = page(s, { final: "filled" }, [sigStatus(null, heights[0]), sigStatus(null, heights[1])]);
-    assert.deepEqual((await q.ask(buy("10"))).answer, { error: "no_ready_set" }, JSON.stringify(heights));
-    assert.ok(mark(s, 0), JSON.stringify(heights));
+  // the height not yet past on both, or past on one only, or the blockhash still valid on one (provider B lowered the
+  // height the kit kept): it may still land, so the wallet stays out
+  for (const [pa, pb] of [[sigStatus(null, LVBH), sigStatus(null, LVBH)], [sigStatus(null, LVBH + 1), sigStatus(null, LVBH)], [sigStatus(null, LVBH), sigStatus(null, LVBH + 1)], [sigStatus(null, LVBH + 1, true), sigStatus(null, LVBH + 1)]] as const) {
+    const q = page(s, { final: "filled" }, [pa, pb]);
+    assert.deepEqual((await q.ask(buy("10"))).answer, { error: "no_ready_set" });
+    assert.ok(mark(s, 0));
   }
   // past on both, no status on both: it can never land; the mark goes, the wallet is READY and buys again
   const after = page(s, { final: "filled" }, [sigStatus(null, LVBH + 1), sigStatus(null, LVBH + 1)]);
@@ -418,6 +449,59 @@ test("a dead tab's tx that can never land frees its wallet: both providers' fina
   const op = s.m.ops!.get(first.id) as { stage: string; txs: { hash: string; state?: string }[] };
   assert.equal(op.stage, "not_landed", "the dead trade's op reads not_landed");
   assert.deepEqual(op.txs.map((t) => t.state), ["not_landed"]);
+});
+
+test("a store write that never answers refuses the trade within its bound, and sign out's lock is granted", async () => {
+  let hang = false;
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }, { hangPut: (st) => st === "wallets" && hang });
+  const p = page(s, { final: "filled", atStart: () => (hang = true) }, [noRpc, noRpc], 100);
+  const { answer } = await p.ask(buy("10"));
+  assert.deepEqual(answer, { error: "failed" }, "the signature's mark write never answered: nothing signed, refused");
+  let out = false;
+  await Promise.race([navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, async () => void (out = true)), new Promise((r) => setTimeout(r, 1_000))]);
+  assert.equal(out, true, "sign out is not held by the hung write");
+});
+
+test("a pick resolves every dead tab's mark at once, not one after another under the pick lock", async () => {
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 1_000n), [armKey("sol", L, 2)]: rec(2, 1_000n) });
+  const never = new Promise<void>(() => {});
+  const t1 = page(s, { hold: never });
+  const t2 = page(s, { hold: never });
+  await t1.ask(buy("10"));
+  await t2.ask(buy("10"));
+  t1.die();
+  t2.die();
+  let open = 0;
+  let most = 0;
+  const slow = (inner: SolanaRpc): SolanaRpc => async (method, params) => {
+    open++;
+    most = Math.max(most, open);
+    await new Promise((r) => setTimeout(r, 40));
+    open--;
+    return inner(method, params);
+  };
+  const q = page(s, { final: "filled" }, [slow(sigStatus(null)), slow(sigStatus(null))]);
+  await q.ask(buy("10"));
+  assert.ok(most >= 4, `${most} reads at once: the two marks' reads on both providers ran together`);
+  assert.equal(q.calls.length, 1, "the third wallet bought");
+});
+
+test("a sell skips a wallet a live trade has marked, as a buy does: it sells from the others, never fails at the claim", async () => {
+  const pos = { state: "IN_POSITION" as const, token: MINT };
+  const op = "0f9619ff-8b86-4011-b42d-00c04fc964ff";
+  const s = store({
+    [armKey("sol", L, 0)]: rec(0, 1_000n, { ...pos, inflight: { op, side: "sell", token: MINT, txs: [] } }),
+    [armKey("sol", L, 1)]: rec(1, 1_000n, pos),
+  });
+  let free!: () => void;
+  const live = new Promise<void>((r) => (free = r));
+  void navigator.locks.request(tradeLock(op), { mode: "exclusive" }, () => live); // that trade runs in another tab
+  const held = { [W[0]!.address]: 5_000n, [W[1]!.address]: 2_000n };
+  const p = page(s, { final: "filled" }, [provider(held), provider(held)]);
+  await p.ask(sell("2000"));
+  assert.deepEqual(p.calls[0]!.legs.map((l) => [l.wallet, l.amount]), [[W[1]!.address, 2_000n]]);
+  assert.deepEqual((await p.ask(sell("2001"))).answer, { error: "over_held" }, "the marked wallet's balance is not counted");
+  free();
 });
 
 test("F1 a mark of a trade still running in another tab is never resolved or taken, whatever the providers say", async () => {

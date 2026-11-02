@@ -59,6 +59,11 @@ export interface WalletStore {
   readonly lane: number;
   get(store: WalletStoreName, key: string): Promise<unknown>;
   put(store: WalletStoreName, key: string, value: unknown): Promise<void>;
+  // Read-modify-write of one record: `change` gets the stored value (undefined: none) and gives the next one, or
+  // undefined to write nothing. The write is a compare-and-set in one readwrite transaction (the record still as it was
+  // read), so two writers never lose one another's change: the one that loses reads again and changes that. Resolves
+  // with what was written (undefined when nothing).
+  update(store: WalletStoreName, key: string, change: (value: unknown) => unknown): Promise<unknown>;
   delete(store: WalletStoreName, key: string): Promise<void>;
   keys(store: WalletStoreName): Promise<string[]>;
   reserveDepositIndex(scope: bigint): Promise<number>;
@@ -366,6 +371,18 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       tx.objectStore(store).put(w, key);
       await done(tx);
       notify([store]);
+    },
+    async update(store, key, change) {
+      checkCallerKey(store, key);
+      for (;;) {
+        const before = await getRaw(store, key);
+        const next = change(await unwrap(store, key, before));
+        if (next === undefined) return undefined;
+        if (await casPut(store, key, before, await wrap(store, key, next))) {
+          notify([store]);
+          return next;
+        }
+      }
     },
     insertSeed(seed) {
       return seedLocked(async () => {

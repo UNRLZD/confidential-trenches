@@ -12,9 +12,11 @@
 //   id_reused while it is pending (a run that a reload cut short may have signed). "pending" is no TradeStage.
 // - Still under that lock, the legs come from the wallet store's arm records (packages/wallet/src/arming/records.ts)
 //   only, never from the request, and each is marked as this trade's on its record (claimArm) before the lock goes.
-//   A record already marked by a trade whose op lock is free (its tab closed or reloaded) is resolved first on both
-//   providers: every tx filled or failed, its mark goes (a buy's filled wallet goes IN_POSITION with the token);
-//   anything unknown keeps it out. A buy is the fewest unmarked READY fresh wallets whose sizes sum to the amount
+//   Every record already marked by a trade whose op lock is free (its tab closed or reloaded) is resolved first, all at
+//   once, on both providers by the kit's readSolanaTxEnd (06c A4, the send loop's own rule, from the mark's blockhash
+//   and lastValidBlockHeight): every tx filled, failed or dead, its mark goes (a buy's filled wallet goes IN_POSITION
+//   with the token; a dead one reads not_landed on its op); anything unknown keeps it out. Every store call is bounded
+//   (TRADE_STORE_MS), so a store that never answers refuses the trade instead of holding the seed lock. A buy is the fewest unmarked READY fresh wallets whose sizes sum to the amount
 //   (ladderSplit, wallet.md §2.5), each spending its record's `spend` (a_k); a sell takes the unmarked IN_POSITION
 //   wallets of that token, reads each one's token account on both providers, one address per request (wallet.md §2.9
 //   row 8; the lower), and splits the amount over them in proportion, so an amount equal to the held total sells
@@ -33,16 +35,37 @@
 //   resolved by a later pick. Nothing here logs.
 import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
-import { rereadSolanaSignature, runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
+import { runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
-import { solanaHelperRpc, solanaJsonRpc, solanaNeverLands, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { readSolanaTxEnd, solanaHelperRpc, solanaJsonRpc, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
 import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { HostAnswer, KindContext, Running } from "./api.ts";
 
-export type TradeStore = Pick<WalletStore, "get" | "put" | "keys">;
+export type TradeStore = Pick<WalletStore, "get" | "put" | "keys" | "update">;
+
+/** How long one store read or write may take before the trade is refused: a store that never answers would otherwise
+ * hold the seed lock (and so sign out and reload) for good. A mark write refused this way only keeps wallets out. */
+export const TRADE_STORE_MS = 10_000;
+
+/** `p`, or a rejection once `ms` have passed without it. */
+function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([p, new Promise<never>((_, no) => (t = setTimeout(() => no(new Error(`${what}: no answer in ${ms} ms`)), ms)))]).finally(() => clearTimeout(t));
+}
+
+/** The store with each call raced against `ms`: past it the call rejects (the trade then refuses or ends). */
+export function timedStore(store: TradeStore, ms: number): TradeStore {
+  const timed = <T>(p: Promise<T>, what: string): Promise<T> => within(p, ms, `the store's ${what}`);
+  return {
+    get: (s, k) => timed(store.get(s, k), "a read"),
+    put: (s, k, v) => timed(store.put(s, k, v), "a write"),
+    keys: (s) => timed(store.keys(s), "a read"),
+    update: (s, k, f) => timed(store.update(s, k, f), "a write"),
+  };
+}
 
 export interface TradeHost {
   /** The wallet store, opened top-level. */
@@ -54,6 +77,8 @@ export interface TradeHost {
   /** runSolanaTrade; a test's stand-in. */
   run?: typeof runSolanaTrade;
   now?: () => number;
+  /** TRADE_STORE_MS; a test's shorter one. */
+  storeMs?: number;
   /** Web Locks (navigator.locks); a test's stand-in. With none, a trade is refused "failed" (the store signs in only with them). */
   locks?: Pick<LockManager, "request"> | null;
 }
@@ -221,7 +246,8 @@ export function tradeKind(host: TradeHost): TradeKind {
     }
 
     async function trade(locks: Locks): Promise<void> {
-      const store = await host.store();
+      const ms = host.storeMs ?? TRADE_STORE_MS;
+      const store = timedStore(await within(host.store(), ms, "the store's open"), ms);
       const op: { kind: "buy" | "sell"; sha: string; stage: string; txs: TxRef[]; code?: ErrorCode; created_ms: number } = { kind: side, sha: ctx.sha, stage: "pending", txs: [], created_ms: now() };
       let writes: Promise<void> = Promise.resolve();
       const write = (patch: Partial<typeof op>): void => {
@@ -261,16 +287,19 @@ export function tradeKind(host: TradeHost): TradeKind {
      * each one is marked as this trade's before the lock is let go.
      */
     async function pick(store: TradeStore, locks: Locks): Promise<{ legs: SolanaTradeLeg[]; keys: string[]; all: string[] } | ErrorCode> {
-      for (const { key, rec } of await armRecords(store, "sol")) {
-        const m = rec.inflight;
-        if (!m) continue;
-        const live = await locks.request(tradeLock(m.op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
-        if (live) continue;
-        const states = await Promise.all(m.txs.map((t) => txEnd(host.deps.providers, t.sig, t.lvbh)));
-        if (states.includes("unknown")) continue;
-        await settleArm(store, key, m.op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
-        if (m.txs[0]) await noteLeg(store, m.op, m.txs[0].sig, states[0] as LegEnd).catch(() => {});
-      }
+      // every dead tab's mark at once (one Promise.all), so the pick lock is held for one round of reads, not one per mark
+      await Promise.all(
+        (await armRecords(store, "sol")).map(async ({ key, rec }) => {
+          const m = rec.inflight;
+          if (!m) return;
+          const live = await locks.request(tradeLock(m.op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
+          if (live) return;
+          const states = await Promise.all(m.txs.map((t) => txEnd(host.deps.providers, t)));
+          if (states.includes("unknown")) return;
+          await settleArm(store, key, m.op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
+          if (m.txs[0]) await noteLeg(store, m.op, m.txs[0].sig, states[0] as LegEnd).catch(() => {});
+        }),
+      );
       const records = await armRecords(store, "sol");
       const all = records.map((r) => r.rec.address);
       let set: { legs: SolanaTradeLeg[]; keys: string[] } | ErrorCode;
@@ -306,7 +335,7 @@ export function tradeKind(host: TradeHost): TradeKind {
       refuse: (code: ErrorCode) => Promise<void>,
     ): Promise<void> {
       const { legs, keys } = set;
-      const signer = solanaArmedSigner(store, host.seed64, ctx.id);
+      const signer = solanaArmedSigner(store, () => within(host.seed64(), host.storeMs ?? TRADE_STORE_MS, "the seed's open"), ctx.id);
       const signed: TxRef[] = [];
       let last: SolanaTradeStage | null = null;
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
@@ -372,20 +401,11 @@ export function tradeKind(host: TradeHost): TradeKind {
 
 type LegEnd = "filled" | "failed" | "not_landed";
 
-/**
- * How a tx a dead tab signed ended, on both providers: filled or failed as rereadSolanaSignature reads it; not_landed
- * when it can never land (the kit's solanaNeverLands: each provider's finalized height, read first, past its
- * lastValidBlockHeight, and then no status for it on that provider); unknown otherwise, which keeps its wallet out.
- */
-export async function txEnd(providers: readonly [SolanaRpc, SolanaRpc], sig: string, lvbh: number): Promise<LegEnd | "unknown"> {
-  const first = await rereadSolanaSignature(providers, sig);
-  if (first.state !== "unknown") return first.state;
-  const heights = await Promise.all(providers.map((p) => p("getBlockHeight", [{ commitment: "finalized" }]).then((h) => (typeof h === "number" ? h : null), () => null)));
-  const again = await rereadSolanaSignature(providers, sig);
-  if (again.state !== "unknown") return again.state;
-  // a read of [null] is "no status"; a status not yet confirmed is found; an error or another shape is no answer
-  const found = again.reads.map((r) => (r === null ? false : typeof r === "object" ? true : null));
-  return solanaNeverLands(lvbh, [{ finalizedHeight: heights[0]!, found: found[0]! }, { finalizedHeight: heights[1]!, found: found[1]! }]) ? "not_landed" : "unknown";
+/** How a tx a dead tab signed ended: the kit's readSolanaTxEnd on both providers (06c A4, the send loop's own rule),
+ * its expired read as not_landed; unknown keeps its wallet out. */
+export async function txEnd(providers: readonly [SolanaRpc, SolanaRpc], t: { sig: string; lvbh: number; blockhash: string }): Promise<LegEnd | "unknown"> {
+  const end = await readSolanaTxEnd(providers, { signature: t.sig, blockhash: t.blockhash, lastValidBlockHeight: t.lvbh });
+  return end === "expired" ? "not_landed" : end;
 }
 
 /** Records how a dead tab's leg ended on its op: the tx's state, and the op's stage once every tx of it has one. */

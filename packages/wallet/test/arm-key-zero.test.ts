@@ -27,9 +27,9 @@ test("the derived key is zero after the signature", async () => {
   const OP = "6f9619ff-8b86-4011-b42d-00c04fc964ff";
   const rec = { v: 1, chain: "sol", l: L, j: 0, address: W0.address, role: "fresh", size_cents: 1000n, state: "READY", own: { context: "ab".repeat(32) }, spend: 1n, inflight: { op: OP, side: "buy", token: "Mint1111111111111111111111111111111111111111", txs: [] } };
   const m = new Map([[armKey("sol", L, 0), rec]]);
-  const store = { keys: async () => [...m.keys()], get: async (_s: string, k: string) => m.get(k), put: async (_s: string, k: string, v: unknown) => void m.set(k, v as never) };
+  const store = { keys: async () => [...m.keys()], get: async (_s: string, k: string) => m.get(k), update: async (_s: string, k: string, f: (v: unknown) => unknown) => { const n = f(m.get(k)); if (n !== undefined) m.set(k, n as never); return n; } };
   const signer = solanaArmedSigner(store as never, async () => seed(), OP);
-  await signer.sign(W0.address, new Uint8Array([1, 2, 3]), { lastValidBlockHeight: 1 });
+  await signer.sign(W0.address, Uint8Array.from([1, 0, 0, 0, ...new Uint8Array(32).fill(9), 1, 2, 3]), { lastValidBlockHeight: 1 });
   signer.close();
   assert.equal(keysSeen.length, 1);
   assert.ok(keysSeen[0]!.every((x) => x === 0), "the signing key was left in memory");
