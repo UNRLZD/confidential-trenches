@@ -17,7 +17,7 @@
 // route and the token (S1 request match, S6 the output to the wallet's own account, S7 the floor, S10 the mint), on
 // either route instruction /build answers: route_v2 (discriminator bb64facc31c4af14) or shared_accounts_route_v2
 // (d19853937cfed8e9, which /build answers for many multi-hop routes). S7's minOut is the floor of the build's own
-// outAmount at the slippage this check asked for, so the floor decoded from the signed bytes must be exactly what was
+// outAmount at the slippage this check asked for, so the floor decoded from the signed bytes must be at least what was
 // asked. S11 and S12 need a funded simulation and the reference pool, the buy flow's.
 //   node scripts/live-checks/solana-jupiter-build.mjs [--base <helper origin>] [--token <mint>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes every answer the run read, so the test can replay it.

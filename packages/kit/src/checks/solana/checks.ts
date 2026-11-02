@@ -88,7 +88,9 @@ const ROUTE_V2 = [187, 100, 250, 204, 49, 196, 175, 20];
 // authority; on all 16 real builds read through the helper on 2026-11-02 05:05-06:34Z (ids 0 to 7, SPL Token and
 // Token-2022, buys and sells) it is Jupiter's PDA of ("authority", [id]), and each of its two accounts is its ATA of
 // that side's mint on every SPL Token side and the wallet's own account of that side on every Token-2022 side (Jupiter
-// then swaps that leg straight from or into the wallet's account). S6 takes either, and nothing else.
+// then swaps that leg straight from or into the wallet's account). S6 takes exactly that, and the wallet's own account
+// on an SPL Token side too. The id is not bounded: the device derives the authority from it, so any id's PDA is still
+// Jupiter's alone, and a bound would only refuse a future valid id.
 const SHARED_ROUTE_V2 = [209, 152, 83, 147, 124, 254, 216, 233];
 // The pump.fun bonding-curve step variants of the Swap enum (same IDL; checks.js:58-64), for S8's cap only.
 const PUMP_BUY_STEPS = new Set([49, 90, 97, 112, 149, 152, 187, 191]);
@@ -401,7 +403,10 @@ function s13(c: Ctx, wk: Walk): SolanaQuoteResult {
 
 // S6: the swap pays only into the wallet's own account of the output mint. On a shared route the legs run between the
 // program authority's accounts, so those must be Jupiter's or the wallet's own: the authority the PDA of the signed id,
-// and each of its two accounts its ATA of that side's mint or the wallet's own account of that side.
+// and each of its two accounts the wallet's own account of that side, or on an SPL Token side the authority's ATA too.
+// A Token-2022 side never goes through the authority's ATA: a fee-charging mint moved a second time, out of that account
+// after Jupiter's floor check, could leave the wallet below minOut (Jupiter builds every Token-2022 side through the
+// wallet's own account on all 16 recorded builds).
 function s6(c: Ctx): SolanaQuoteResult {
   const e = needRoute("S6", c);
   if (e) return e;
@@ -416,9 +421,16 @@ function s6(c: Ctx): SolanaQuoteResult {
   if (r.shared) {
     const pa = jupiterAuthority(r.shared.id);
     if (r.shared.authority.key !== pa) wrong.push(`program authority ${r.shared.authority.key} is not Jupiter's authority ${r.shared.id} (${pa})`);
-    const src = isToken(inTp) ? [solanaAta(pa, inMint, inTp), solanaAta(c.req.wallet, inMint, inTp)] : [];
-    if (!src.includes(r.shared.source.key)) wrong.push(`program source account ${r.shared.source.key} is neither Jupiter's authority's account of ${inMint} nor the wallet's`);
-    if (![solanaAta(pa, outMint, outTp), want].includes(r.shared.destination.key)) wrong.push(`program destination account ${r.shared.destination.key} is neither Jupiter's authority's account of ${outMint} nor the wallet's`);
+    // Each side's account of the program: the wallet's own on a Token-2022 side, the authority's ATA or the wallet's own
+    // on an SPL Token side (null: the side's token program is unknown, so nothing passes).
+    const side = (what: string, key: string, mint: string, tp: string | null): void => {
+      if (!isToken(tp)) { wrong.push(`program ${what} account ${key}: token program ${tp} unknown`); return; }
+      const own = solanaAta(c.req.wallet, mint, tp);
+      if (tp === SOLANA_TOKEN_2022_PROGRAM) { if (key !== own) wrong.push(`program ${what} account ${key} is not the wallet's own account of the Token-2022 mint ${mint}`); return; }
+      if (key !== own && key !== solanaAta(pa, mint, tp)) wrong.push(`program ${what} account ${key} is neither Jupiter's authority's account of ${mint} nor the wallet's`);
+    };
+    side("source", r.shared.source.key, inMint, inTp);
+    side("destination", r.shared.destination.key, outMint, outTp);
   }
   return wrong.length ? fail("S6", wrong.join("; ")) : pass("S6", `output to the wallet's account ${want}${r.shared ? ` through Jupiter's authority ${r.shared.id}` : ""}`);
 }

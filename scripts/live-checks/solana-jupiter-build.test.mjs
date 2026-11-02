@@ -9,7 +9,8 @@
 // PASS; a shape the helper answered 503; a record whose URL is not the kit's query: each FAIL. good_shared (06:34Z): the
 // Token-2022 token DEW9dSN6…WDP, whose two sells /build answered as shared_accounts_route_v2 (1,067 and 1,225 bytes), every
 // shape judged on S1, S6, S7 and S10 too: PASS. Made from it: the capped sell's destination changed to an account that
-// is not the wallet's: FAIL.
+// is not the wallet's: FAIL; the capped sell's outAmount raised 12 % in the answer, so the floor in the signed bytes is
+// below the floor this check asked for: FAIL on S7.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -90,4 +91,18 @@ test("made from the shared-route run: the capped sell's destination is not the w
   assert.equal(r.ok, false);
   assert.equal(bad(r).length, 1);
   assert.match(bad(r)[0], new RegExp(`^BAD S-2 sell, maxAccounts=40: .* by shared_accounts_route_v2, .*; refused: S6 destination ${planted} is not the wallet's account `));
+});
+
+test("made from the shared-route run: the capped sell's answered outAmount raised 12 %, above the signed floor: FAIL on S7", async () => {
+  const g = copy(A.good_shared);
+  const call = g.shapes[2].calls.at(-1);
+  const body = JSON.parse(call.body);
+  const raised = (BigInt(body.outAmount) * 112n) / 100n;
+  body.outAmount = raised.toString();
+  call.body = JSON.stringify(body);
+  const r = await judge(g);
+  assert.equal(r.ok, false);
+  assert.equal(bad(r).length, 1);
+  const minOut = (raised * 9_000n) / 10_000n;
+  assert.match(bad(r)[0], new RegExp(`^BAD S-2 sell, maxAccounts=40: .* by shared_accounts_route_v2, .*; refused: S7 floor \\d+ \\(quoted \\d+ at 1000 bps\\) vs minOut ${minOut}$`));
 });

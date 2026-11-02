@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
 import { assembleSolanaSwap, parseSolanaJupiterBuild, type SolanaBuildRequest } from "../src/trade/solana/build.ts";
-import { solanaDecodeLookupTable, type SolanaLookupTable } from "../src/checks/solana/message.ts";
+import { solanaAta, solanaDecodeLookupTable, solanaProgramAddress, type SolanaLookupTable } from "../src/checks/solana/message.ts";
 import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
@@ -99,8 +99,8 @@ const PICK = [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].flatMap((tp) => (
 // passes that check first, so a check that refuses every shared route fails here too.
 const REFUSALS: { what: string; id: SolanaQuoteCheckId; detail: RegExp; change?: (s: Swap, d: Buffer) => Buffer | void; minOut?: (c: Case) => bigint }[] = [
   { what: "the destination changed", id: "S6", detail: /^destination \w+ is not the wallet's account/, change: (s) => { s.accounts[5]!.pubkey = randomKey(); } },
-  { what: "the program destination account changed", id: "S6", detail: /program destination account \w+ is neither Jupiter's authority's account/, change: (s) => { s.accounts[4]!.pubkey = randomKey(); } },
-  { what: "the program source account changed", id: "S6", detail: /program source account \w+ is neither Jupiter's authority's account/, change: (s) => { s.accounts[3]!.pubkey = randomKey(); } },
+  { what: "the program destination account changed", id: "S6", detail: /program destination account \w+ is (neither Jupiter's authority's account|not the wallet's own account of the Token-2022 mint)/, change: (s) => { s.accounts[4]!.pubkey = randomKey(); } },
+  { what: "the program source account changed", id: "S6", detail: /program source account \w+ is (neither Jupiter's authority's account|not the wallet's own account of the Token-2022 mint)/, change: (s) => { s.accounts[3]!.pubkey = randomKey(); } },
   { what: "the program authority changed", id: "S6", detail: /program authority \w+ is not Jupiter's authority/, change: (s) => { s.accounts[0]!.pubkey = randomKey(); } },
   { what: "the authority id changed", id: "S6", detail: /program authority \w+ is not Jupiter's authority/, change: (_, d) => { d[8] = ((d[8] as number) + 1) % 8; } },
   { what: "a lower floor than minOut", id: "S7", detail: /^floor \d+ \(quoted \d+ at 1000 bps\) vs minOut \d+$/, minOut: (c) => floorOf(c.json) + 1n },
@@ -127,4 +127,23 @@ for (const c of PICK) {
       assert.match(got.detail, r.detail);
     });
   }
+}
+
+// A Token-2022 side goes through the wallet's own account only, as on every recorded build: a fee-charging mint moved a
+// second time, out of the program authority's account after Jupiter's floor check, can leave the wallet below minOut.
+// So a Token-2022 build rewritten to route that side through the authority's own ATA under Token-2022 is refused.
+const JUP = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+for (const c of CASES.filter((x) => x.tp === SOLANA_TOKEN_2022_PROGRAM)) {
+  const at = c.side === "buy" ? 4 : 3; // the program's account of the Token-2022 side: its destination on a buy, its source on a sell
+  test(`Token-2022 ${c.side} (${c.name}): the Token-2022 side routed through Jupiter's authority's own ATA is refused by S6`, () => {
+    const swap = c.json.swapInstruction as Swap;
+    const pa = solanaProgramAddress([new TextEncoder().encode("authority"), Uint8Array.of(Buffer.from(swap.data, "base64")[8] as number)], JUP);
+    assert.equal(swap.accounts[0]!.pubkey, pa);
+    assert.equal(swap.accounts[at]!.pubkey, solanaAta(c.run.wallet, c.run.mint, SOLANA_TOKEN_2022_PROGRAM), "the recorded build uses the wallet's own account");
+    assert.equal(result(check(c), "S6").ok, true, "the unchanged build passes S6");
+    const ata = solanaAta(pa, c.run.mint, SOLANA_TOKEN_2022_PROGRAM);
+    const got = result(check(c, (s) => { s.accounts[at]!.pubkey = ata; }), "S6");
+    assert.equal(got.ok, false, `S6 passed: ${got.detail}`);
+    assert.match(got.detail, new RegExp(`^program ${c.side === "buy" ? "destination" : "source"} account ${ata} is not the wallet's own account of the Token-2022 mint`));
+  });
 }
