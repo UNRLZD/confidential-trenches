@@ -5,7 +5,8 @@ pragma solidity 0.8.28;
 // Copyright 2025 0XBOW LTD, Apache-2.0. Changes (contracts/pool-evm/NOTICE): RelayData (from IEntrypoint's, with a
 // fee cap and a deadline), deposit(value, precommitment) with msg.sender the depositor, withdraw with the fee, the
 // Withdrawn event names the payees, the deposit and relay errors moved in from IEntrypoint, no windDown or PoolDied,
-// IncorrectASPRoot is UnknownLabelRoot, the unused ScopeMismatch removed.
+// IncorrectASPRoot is UnknownLabelRoot, the unused ScopeMismatch removed; no ragequit, Ragequit, InvalidCommitment or
+// OnlyOriginalDepositor.
 
 import {ProofLib} from '../lib/ProofLib.sol';
 import {IState} from 'interfaces/IState.sol';
@@ -82,15 +83,6 @@ interface IPrivacyPool is IState {
     uint256 _newCommitment
   );
 
-  /**
-   * @notice Emitted when ragequitting a commitment
-   * @param _ragequitter The address who ragequit
-   * @param _commitment The ragequit commitment
-   * @param _label The commitment label
-   * @param _value The ragequit amount
-   */
-  event Ragequit(address indexed _ragequitter, uint256 _commitment, uint256 _label, uint256 _value);
-
   /*///////////////////////////////////////////////////////////////
                               ERRORS
   //////////////////////////////////////////////////////////////*/
@@ -99,11 +91,6 @@ interface IPrivacyPool is IState {
    * @notice Thrown when failing to verify a withdrawal proof through the Groth16 verifier
    */
   error InvalidProof();
-
-  /**
-   * @notice Thrown when trying to spend a commitment that does not exist in the state
-   */
-  error InvalidCommitment();
 
   /**
    * @notice Thrown when the withdrawal's processooor is not this pool
@@ -134,11 +121,6 @@ interface IPrivacyPool is IState {
    * @notice Thrown when the provided ASP root is not one the label tree has had
    */
   error UnknownLabelRoot();
-
-  /**
-   * @notice Thrown when trying to ragequit while not being the original depositor
-   */
-  error OnlyOriginalDepositor();
 
   /**
    * @notice Thrown when a deposit is below MIN_DEPOSIT
@@ -207,12 +189,6 @@ interface IPrivacyPool is IState {
    */
   function withdraw(Withdrawal memory _w, ProofLib.WithdrawProof memory _p, uint256 _fee) external;
 
-  /**
-   * @notice Publicly withdraw funds to original depositor without exposing secrets
-   * @dev Only valid for the original depositor
-   * @param _p the `RagequitProof` struct containing the ragequit proof signals
-   */
-  function ragequit(ProofLib.RagequitProof memory _p) external;
 }
 
 /**

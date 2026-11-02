@@ -23,7 +23,9 @@ https://defi.sucks
 // - `usedPrecommitments` moved in from Entrypoint.sol:55 with the deposit;
 // - a second LeanIMT, the label tree, which the pool fills itself (the association set);
 // - every root of both trees kept in a set (no 64-slot ring), so a proof made against an older root still lands;
-// - a reentrancy guard in transient storage, in place of the Entrypoint's nonReentrant.
+// - a reentrancy guard in transient storage, in place of the Entrypoint's nonReentrant;
+// - no ragequit: no RAGEQUIT_VERIFIER and no depositors (the label tree holds every label, so a withdraw proof always
+//   works; ragequit would only add a public exit that links a deposit to its exit).
 
 import {Constants} from './lib/Constants.sol';
 import {InternalLeanIMT, LeanIMTData} from 'lean-imt/InternalLeanIMT.sol';
@@ -47,8 +49,6 @@ abstract contract State is IState {
   uint256 public immutable SCOPE;
   /// @inheritdoc IState
   IVerifier public immutable WITHDRAWAL_VERIFIER;
-  /// @inheritdoc IState
-  IVerifier public immutable RAGEQUIT_VERIFIER;
 
   /// @inheritdoc IState
   uint256 public nonce;
@@ -65,8 +65,6 @@ abstract contract State is IState {
 
   /// @inheritdoc IState
   mapping(uint256 _nullifierHash => bool _spent) public nullifierHashes;
-  /// @inheritdoc IState
-  mapping(uint256 _label => address _depositooor) public depositors;
   /// @inheritdoc IState
   mapping(uint256 _precommitment => bool _used) public usedPrecommitments;
 
@@ -86,10 +84,9 @@ abstract contract State is IState {
   /**
    * @notice Initialize the state addresses
    */
-  constructor(address _asset, address _withdrawalVerifier, address _ragequitVerifier) {
+  constructor(address _asset, address _withdrawalVerifier) {
     // Sanitize initial addresses
     if (_asset == address(0)) revert ZeroAddress();
-    if (_ragequitVerifier == address(0)) revert ZeroAddress();
     if (_withdrawalVerifier == address(0)) revert ZeroAddress();
 
     // Store asset address
@@ -98,7 +95,6 @@ abstract contract State is IState {
     SCOPE = uint256(keccak256(abi.encodePacked(address(this), block.chainid, _asset))) % Constants.SNARK_SCALAR_FIELD;
 
     WITHDRAWAL_VERIFIER = IVerifier(_withdrawalVerifier);
-    RAGEQUIT_VERIFIER = IVerifier(_ragequitVerifier);
   }
 
   /*///////////////////////////////////////////////////////////////
@@ -202,12 +198,4 @@ abstract contract State is IState {
     return knownLabelRoots[_root];
   }
 
-  /**
-   * @notice Returns whether a leaf is in the state
-   * @param _leaf The leaf to check
-   * @return Returns true if the leaf exists in the tree, false otherwise
-   */
-  function _isInState(uint256 _leaf) internal view returns (bool) {
-    return _merkleTree._has(_leaf);
-  }
 }

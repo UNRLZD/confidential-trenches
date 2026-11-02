@@ -6,7 +6,6 @@ import {console} from 'forge-std/console.sol';
 
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
 import {ProofLib} from '../src/lib/ProofLib.sol';
-import {CommitmentVerifier} from '../src/verifiers/CommitmentVerifier.sol';
 import {WithdrawalVerifier} from '../src/verifiers/WithdrawalVerifier.sol';
 import {IPrivacyPool, IPrivacyPoolSimple} from 'interfaces/IPrivacyPool.sol';
 import {IState} from 'interfaces/IState.sol';
@@ -29,13 +28,12 @@ contract PoolTest is Test {
     fx = vm.readFile('test/fixtures/pool-proofs.json');
     _deployPoseidon();
     WithdrawalVerifier _wv = new WithdrawalVerifier();
-    CommitmentVerifier _cv = new CommitmentVerifier();
     POOL = vm.parseJsonAddress(fx, '.pool');
     DEPOSITOR = vm.parseJsonAddress(fx, '.depositor');
     W = vm.parseJsonAddress(fx, '.relayed.request.recipient');
     RELAYER = vm.parseJsonAddress(fx, '.relayed.request.feeRecipient');
     assertEq(block.chainid, vm.parseJsonUint(fx, '.chainId'));
-    deployCodeTo('PrivacyPoolSimple.sol:PrivacyPoolSimple', abi.encode(address(_wv), address(_cv)), POOL);
+    deployCodeTo('PrivacyPoolSimple.sol:PrivacyPoolSimple', abi.encode(address(_wv)), POOL);
     pool = PrivacyPoolSimple(POOL);
     vm.warp(NOW);
     vm.deal(DEPOSITOR, 100 ether);
@@ -100,19 +98,6 @@ contract PoolTest is Test {
     for (uint256 _i; _i < 8; ++_i) _p.pubSignals[_i] = _s[_i];
   }
 
-  function _ragequitProof(string memory _name) internal view returns (ProofLib.RagequitProof memory _p) {
-    string memory _k = string.concat('.', _name, '.proof');
-    uint256[] memory _a = vm.parseJsonUintArray(fx, string.concat(_k, '.pA'));
-    uint256[] memory _b0 = vm.parseJsonUintArray(fx, string.concat(_k, '.pB[0]'));
-    uint256[] memory _b1 = vm.parseJsonUintArray(fx, string.concat(_k, '.pB[1]'));
-    uint256[] memory _c = vm.parseJsonUintArray(fx, string.concat(_k, '.pC'));
-    uint256[] memory _s = vm.parseJsonUintArray(fx, string.concat(_k, '.pubSignals'));
-    _p.pA = [_a[0], _a[1]];
-    _p.pB = [[_b0[0], _b0[1]], [_b1[0], _b1[1]]];
-    _p.pC = [_c[0], _c[1]];
-    for (uint256 _i; _i < 4; ++_i) _p.pubSignals[_i] = _s[_i];
-  }
-
   /// Submits `_name`'s proof from an address that is neither payee, with `_fee`.
   function _relay(
     IPrivacyPool.RelayData memory _r,
@@ -162,10 +147,6 @@ contract PoolTest is Test {
     ProofLib.WithdrawProof memory _p = _withdrawProof('relayed');
     assertEq(pool.currentRoot(), _p.pubSignals[3], 'the state root the kit computes');
     assertEq(pool.currentLabelRoot(), _p.pubSignals[5], 'the label root the kit computes');
-    for (uint256 _i; _i < 3; ++_i) {
-      uint256 _label = vm.parseJsonUint(fx, string.concat('.labels[', vm.toString(_i), ']'));
-      assertEq(pool.depositors(_label), DEPOSITOR);
-    }
   }
 
   function test_depositRefusesBelowMinimum() public {
@@ -391,60 +372,6 @@ contract PoolTest is Test {
   }
 
   /*///////////////////////////////////////////////////////////////
-                              RAGEQUIT
-  //////////////////////////////////////////////////////////////*/
-
-  function test_theDepositorRagequits() public {
-    _depositAll();
-    uint256 _before = DEPOSITOR.balance;
-    vm.prank(DEPOSITOR);
-    pool.ragequit(_ragequitProof('ragequit_note3'));
-    assertEq(DEPOSITOR.balance, _before + 2 ether);
-    vm.prank(DEPOSITOR);
-    vm.expectRevert(IState.NullifierAlreadySpent.selector);
-    pool.ragequit(_ragequitProof('ragequit_note3'));
-  }
-
-  function test_onlyTheDepositorRagequits() public {
-    _depositAll();
-    ProofLib.RagequitProof memory _p = _ragequitProof('ragequit_note3');
-    vm.prank(address(0xBEEF));
-    vm.expectRevert(IPrivacyPool.OnlyOriginalDepositor.selector);
-    pool.ragequit(_p);
-  }
-
-  function test_aRagequitWithAnotherValueIsRefused() public {
-    _depositAll();
-    ProofLib.RagequitProof memory _p = _ragequitProof('ragequit_note3');
-    _p.pubSignals[2] += 1;
-    vm.prank(DEPOSITOR);
-    vm.expectRevert(IPrivacyPool.InvalidProof.selector);
-    pool.ragequit(_p);
-  }
-
-  function test_aRagequitOfANoteNeverDepositedIsRefused() public {
-    _depositAll();
-    vm.prank(DEPOSITOR);
-    vm.expectRevert(IPrivacyPool.InvalidCommitment.selector);
-    pool.ragequit(_ragequitProof('ragequit_unknown'));
-  }
-
-  function test_aWithdrawnNoteCannotBeRagequit() public {
-    _depositAll();
-    _relay(_request('relayed'), _withdrawProof('relayed'), 0);
-    vm.prank(DEPOSITOR);
-    vm.expectRevert(IState.NullifierAlreadySpent.selector);
-    pool.ragequit(_ragequitProof('ragequit_note1'));
-  }
-
-  function test_aRagequitNoteCannotBeWithdrawn() public {
-    _depositAll();
-    vm.prank(DEPOSITOR);
-    pool.ragequit(_ragequitProof('ragequit_note1'));
-    _refusesRelay(_request('relayed'), _withdrawProof('relayed'), 0, IState.NullifierAlreadySpent.selector);
-  }
-
-  /*///////////////////////////////////////////////////////////////
                            REENTRANCY
   //////////////////////////////////////////////////////////////*/
 
@@ -476,14 +403,6 @@ contract PoolTest is Test {
     _relay(_request('relayed'), _withdrawProof('relayed'), 0);
     assertEq(bytes4(_r.err()), IState.Reentrancy.selector, 'the inner deposit is refused');
     assertEq(pool.nonce(), 3);
-  }
-
-  function test_aRagequitterCannotReenter() public {
-    _depositAll();
-    Reenter _r = _reenterAt(DEPOSITOR, _withdrawCall('old_root'), 0);
-    vm.prank(DEPOSITOR);
-    pool.ragequit(_ragequitProof('ragequit_note3'));
-    assertEq(bytes4(_r.err()), IState.Reentrancy.selector, 'the inner withdraw is refused');
   }
 
   function test_aPayeeThatRefusesEtherRevertsTheWithdrawal() public {

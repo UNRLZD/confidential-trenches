@@ -24,7 +24,8 @@ https://defi.sucks
 // - the withdrawal's processooor is the pool itself, so any relayer submits: the request names W (the recipient), the
 //   fee recipient, the fee cap and the deadline, and the context binds them; the fee comes out of withdrawnValue;
 // - the ASP root is a root the label tree has had, in place of ENTRYPOINT.latestRoot();
-// - no windDown;
+// - no windDown, and no ragequit (nor its depositors record): every label is in the pool's own label tree, so a
+//   withdraw proof always works, and ragequit would only add a public exit that links a deposit to its exit;
 // - the spend checks are one internal function, _spendChecked, for each method that spends a note.
 
 import {PoseidonT4} from 'poseidon-solidity/PoseidonT4.sol';
@@ -40,11 +41,10 @@ import {State} from './State.sol';
  * @title PrivacyPool
  * @notice Allows publicly depositing and privately withdrawing funds.
  * @dev Withdrawals require a valid proof that the note's label is in the pool's label tree. No key, owner or setter:
- *      nothing can stop deposits, withdrawals or ragequits.
+ *      nothing can stop deposits or withdrawals.
  */
 abstract contract PrivacyPool is State, IPrivacyPool {
   using ProofLib for ProofLib.WithdrawProof;
-  using ProofLib for ProofLib.RagequitProof;
 
   /// @inheritdoc IPrivacyPool
   uint256 public constant MIN_DEPOSIT = 0.0001 ether;
@@ -54,14 +54,12 @@ abstract contract PrivacyPool is State, IPrivacyPool {
   /**
    * @notice Initializes the contract state addresses
    * @param _withdrawalVerifier Address of the Groth16 verifier for withdrawal proofs
-   * @param _ragequitVerifier Address of the Groth16 verifier for ragequit proofs
    * @param _asset Address of the pool asset
    */
   constructor(
     address _withdrawalVerifier,
-    address _ragequitVerifier,
     address _asset
-  ) State(_asset, _withdrawalVerifier, _ragequitVerifier) {}
+  ) State(_asset, _withdrawalVerifier) {}
 
   /*///////////////////////////////////////////////////////////////
                              USER METHODS
@@ -81,9 +79,6 @@ abstract contract PrivacyPool is State, IPrivacyPool {
 
     // Compute label
     uint256 _label = uint256(keccak256(abi.encodePacked(SCOPE, ++nonce))) % Constants.SNARK_SCALAR_FIELD;
-    // Store depositor
-    depositors[_label] = msg.sender;
-
     // Compute commitment hash
     _commitment = PoseidonT4.hash([_value, _label, _precommitmentHash]);
 
@@ -129,27 +124,6 @@ abstract contract PrivacyPool is State, IPrivacyPool {
       _proof.existingNullifierHash(),
       _proof.newCommitmentHash()
     );
-  }
-
-  /// @inheritdoc IPrivacyPool
-  function ragequit(ProofLib.RagequitProof memory _proof) external nonReentrant {
-    // Check if caller is original depositor
-    uint256 _label = _proof.label();
-    if (depositors[_label] != msg.sender) revert OnlyOriginalDepositor();
-
-    // Verify proof with Groth16 verifier
-    if (!RAGEQUIT_VERIFIER.verifyProof(_proof.pA, _proof.pB, _proof.pC, _proof.pubSignals)) revert InvalidProof();
-
-    // Check commitment exists in state
-    if (!_isInState(_proof.commitmentHash())) revert InvalidCommitment();
-
-    // Mark existing commitment nullifier as spent
-    _spend(_proof.nullifierHash());
-
-    // Transfer out funds to ragequitter
-    _push(msg.sender, _proof.value());
-
-    emit Ragequit(msg.sender, _proof.commitmentHash(), _proof.label(), _proof.value());
   }
 
   /*///////////////////////////////////////////////////////////////

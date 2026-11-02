@@ -6,7 +6,7 @@
 // holds their commitments and the label tree their labels, in deposit order. Withdraw proofs come from the kit's own
 // trees (packages/kit/src/vault/inputs.ts, VaultTree.path) with the context the pool recomputes:
 //   context = keccak256(abi.encode(Withdrawal{processooor: POOL, data: abi.encode(RelayData)}, SCOPE)) mod p
-// (Privacy Pools v1.3.0 PrivacyPool.sol:48). Ragequit proofs are the commitment circuit's. Every proof is snarkjs 0.7.5
+// (Privacy Pools v1.3.0 PrivacyPool.sol:48). Every proof is snarkjs 0.7.5
 // groth16.fullProve with the pinned packages/kit/zk files, then checked with snarkjs groth16.verify.
 //
 // Run from the repo root after `pnpm install`: node contracts/pool-evm/test/fixtures/make-pool-proofs.mjs
@@ -69,7 +69,7 @@ const notes = VALUES.map((value, i) => {
 });
 
 const zk = (f) => join(kit, "zk", f);
-const vkeys = { withdraw: JSON.parse(readFileSync(zk("withdraw.vkey"), "utf8")), commitment: JSON.parse(readFileSync(zk("commitment.vkey"), "utf8")) };
+const vkeys = { withdraw: JSON.parse(readFileSync(zk("withdraw.vkey"), "utf8")) };
 
 async function prove(circuit, name, input) {
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, zk(`${circuit}.wasm`), zk(`${circuit}.zkey`));
@@ -137,20 +137,12 @@ async function spend(name, n, withdrawn, size, feeCap) {
   };
 }
 
-async function ragequit(name, n, other = null) {
-  const note = other ?? notes[n];
-  const proof = await prove("commitment", name, { value: note.value, label: note.label, nullifier: note.nullifier, secret: note.secret });
-  if (proof.pubSignals[0] !== String(poseidon3([note.value, note.label, poseidon2([note.nullifier, note.secret])]))) throw new Error(`${name}: not the note's commitment`);
-  console.error(`${name}: note ${n + 1}`);
-  return { name, proof };
-}
-
 const out = {
   notes: [
     "Real proofs for contracts/pool-evm's Foundry tests. Test notes only, never money.",
     "Made by contracts/pool-evm/test/fixtures/make-pool-proofs.mjs with snarkjs 0.7.5 groth16.fullProve and packages/kit/zk; snarkjs groth16.verify passes each.",
     "Three deposits by depositor on pool (chain 31337, native ETH), values in wei, in order. pB is in the Solidity verifier's order (each pair of snarkjs's pi_b swapped).",
-    "relayed: note 1 against all three deposits, fee cap 0.01 ETH. old_root: note 2 against the first two deposits' roots. big_cap: note 1, 0.1 ETH with a fee cap of all of it (for the backstop). zero_withdrawal: note 1, withdrawnValue 0. ragequit_note3 and ragequit_note1: the commitment proofs of notes 3 and 1. ragequit_unknown: a commitment proof under note 3's label for a note never deposited.",
+    "relayed: note 1 against all three deposits, fee cap 0.01 ETH. old_root: note 2 against the first two deposits' roots. big_cap: note 1, 0.1 ETH with a fee cap of all of it (for the backstop). zero_withdrawal: note 1, withdrawnValue 0.",
   ],
   pool: POOL,
   chainId: String(CHAIN_ID),
@@ -164,14 +156,6 @@ const out = {
   old_root: await spend("old_root", 1, 5n * 10n ** 17n, 2, 0n),
   big_cap: await spend("big_cap", 0, 10n ** 17n, 3, 10n ** 17n),
   zero_withdrawal: await spend("zero_withdrawal", 0, 0n, 3, 0n),
-  ragequit_note3: await ragequit("ragequit_note3", 2),
-  ragequit_note1: await ragequit("ragequit_note1", 0),
-  ragequit_unknown: await ragequit("ragequit_unknown", 2, {
-    value: VALUES[2],
-    label: notes[2].label,
-    nullifier: testField("unknown/nullifier"),
-    secret: testField("unknown/secret"),
-  }),
 };
 writeFileSync(join(here, "pool-proofs.json"), JSON.stringify(out, null, 2) + "\n");
 console.error("wrote pool-proofs.json");

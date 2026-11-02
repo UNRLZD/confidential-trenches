@@ -21,8 +21,7 @@ test("the pool's storage is exactly the listed slots", () => {
     "3 _merkleTree",
     "7 _labelTree",
     "11 nullifierHashes",
-    "12 depositors",
-    "13 usedPrecommitments",
+    "12 usedPrecommitments",
   ]);
 });
 
@@ -31,11 +30,11 @@ test("the pool's ABI is exactly the listed functions; only deposit takes value",
   assert.equal(abi.filter((e) => e.type === "receive" || e.type === "fallback").length, 0, "no receive, no fallback");
   const fns = abi.filter((e) => e.type === "function");
   assert.deepEqual(fns.map((f) => f.name).sort(), [
-    "ASSET", "MAX_RELAY_FEE_BPS", "MAX_TREE_DEPTH", "MIN_DEPOSIT", "RAGEQUIT_VERIFIER", "SCOPE", "WITHDRAWAL_VERIFIER",
+    "ASSET", "MAX_RELAY_FEE_BPS", "MAX_TREE_DEPTH", "MIN_DEPOSIT", "SCOPE", "WITHDRAWAL_VERIFIER",
     "currentLabelRoot", "currentLabelTreeDepth", "currentLabelTreeSize", "currentRoot", "currentTreeDepth",
-    "currentTreeSize", "deposit", "depositors", "knownLabelRoots", "knownStateRoots", "nonce", "nullifierHashes",
-    "ragequit", "usedPrecommitments", "withdraw",
+    "currentTreeSize", "deposit", "knownLabelRoots", "knownStateRoots", "nonce", "nullifierHashes",
+    "usedPrecommitments", "withdraw",
   ]);
   const writes = fns.filter((f) => f.stateMutability !== "view" && f.stateMutability !== "pure").map((f) => `${f.name} ${f.stateMutability}`);
-  assert.deepEqual(writes.sort(), ["deposit payable", "ragequit nonpayable", "withdraw nonpayable"]);
+  assert.deepEqual(writes.sort(), ["deposit payable", "withdraw nonpayable"]);
 });

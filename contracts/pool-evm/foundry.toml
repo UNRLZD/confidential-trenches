@@ -11,6 +11,8 @@ optimizer = true
 optimizer_runs = 10_000
 bytecode_hash = 'none'
 cbor_metadata = false
+# every build writes the storage layout, which test/layout.test.mjs reads
+extra_output = ['storageLayout']
 fs_permissions = [{ access = 'read', path = './test/fixtures' }]
 remappings = [
   'forge-std/=lib/forge-std/src/',

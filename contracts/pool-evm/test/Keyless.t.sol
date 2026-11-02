@@ -11,7 +11,7 @@ contract KeylessTest is Test {
   bytes internal code;
 
   function setUp() public {
-    code = address(new PrivacyPoolSimple(address(1), address(2))).code;
+    code = address(new PrivacyPoolSimple(address(1))).code;
     assertGt(code.length, 0);
   }
 
@@ -56,12 +56,11 @@ contract KeylessTest is Test {
   }
 
   function test_theDispatcherHasExactlyTheListedSelectors() public view {
-    bytes4[22] memory _want = [
+    bytes4[19] memory _want = [
       bytes4(0x4800d97f), // ASSET()
       0xc072c05c, // MAX_RELAY_FEE_BPS()
       0xe38df5f0, // MAX_TREE_DEPTH()
       0xe1e158a5, // MIN_DEPOSIT()
-      0xda662925, // RAGEQUIT_VERIFIER()
       0x33d09200, // SCOPE()
       0x8735eb2b, // WITHDRAWAL_VERIFIER()
       0x50f3e219, // currentLabelRoot()
@@ -71,12 +70,10 @@ contract KeylessTest is Test {
       0x4a2b75c8, // currentTreeDepth()
       0xa8f0f95a, // currentTreeSize()
       0xe2bbb158, // deposit(uint256,uint256)
-      0xe4b2fb79, // depositors(uint256)
       0xec93ff32, // knownLabelRoots(uint256)
       0xc196835a, // knownStateRoots(uint256)
       0xaffed0e0, // nonce()
       0x1f79a1e9, // nullifierHashes(uint256)
-      0x71235b34, // ragequit((uint256[2],uint256[2][2],uint256[2],uint256[4]))
       0xa1cc748b, // usedPrecommitments(uint256)
       0x8a3bff22 // withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)
     ];
@@ -91,8 +88,24 @@ contract KeylessTest is Test {
     }
   }
 
+  function test_ragequitIsAbsent() public {
+    // Privacy Pools' ragequit, its verifier and its depositors record: none is in the dispatcher, and a call fails
+    bytes4[3] memory _gone = [
+      bytes4(0x71235b34), // ragequit((uint256[2],uint256[2][2],uint256[2],uint256[4]))
+      0xda662925, // RAGEQUIT_VERIFIER()
+      0xe4b2fb79 // depositors(uint256)
+    ];
+    (, bytes4[] memory _got) = _walk();
+    address _pool = address(new PrivacyPoolSimple(address(1)));
+    for (uint256 _i; _i < 3; ++_i) {
+      for (uint256 _j; _j < _got.length; ++_j) assertTrue(_got[_j] != _gone[_i], 'a ragequit selector is in the code');
+      (bool _ok,) = _pool.call(abi.encodePacked(_gone[_i], new bytes(32 * 16)));
+      assertFalse(_ok, 'a ragequit call is refused');
+    }
+  }
+
   function test_anUnknownSelectorAndPlainValueAreRefused() public {
-    address _pool = address(new PrivacyPoolSimple(address(1), address(2)));
+    address _pool = address(new PrivacyPoolSimple(address(1)));
     (bool _ok,) = _pool.call(abi.encodeWithSignature('owner()'));
     assertFalse(_ok, 'no fallback');
     vm.deal(address(this), 1 ether);

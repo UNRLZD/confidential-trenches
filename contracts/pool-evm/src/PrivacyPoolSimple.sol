@@ -18,7 +18,7 @@ https://defi.sucks/
 
 // Blindfill: ported from Privacy Pools v1.3.0 (commit c312dcd,
 // packages/contracts/src/contracts/implementations/PrivacyPoolSimple.sol), Copyright 2025 0XBOW LTD, Apache-2.0.
-// Changes (contracts/pool-evm/NOTICE): no Entrypoint address in the constructor; import paths.
+// Changes (contracts/pool-evm/NOTICE): no Entrypoint or ragequit verifier address in the constructor; import paths.
 
 import {Constants} from './lib/Constants.sol';
 
@@ -32,9 +32,8 @@ import {IPrivacyPoolSimple} from 'interfaces/IPrivacyPool.sol';
 contract PrivacyPoolSimple is PrivacyPool, IPrivacyPoolSimple {
   // @notice Initializes the state addresses
   constructor(
-    address _withdrawalVerifier,
-    address _ragequitVerifier
-  ) PrivacyPool(_withdrawalVerifier, _ragequitVerifier, Constants.NATIVE_ASSET) {}
+    address _withdrawalVerifier
+  ) PrivacyPool(_withdrawalVerifier, Constants.NATIVE_ASSET) {}
 
   /**
    * @notice Handle receiving native asset asset

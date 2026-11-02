@@ -3,8 +3,9 @@ pragma solidity 0.8.28;
 
 // Blindfill: ported from Privacy Pools v1.3.0 (commit c312dcd, packages/contracts/src/interfaces/IState.sol),
 // Copyright 2025 0XBOW LTD, Apache-2.0. Changes (contracts/pool-evm/NOTICE): no ENTRYPOINT, dead, roots ring,
-// ROOT_HISTORY_SIZE or currentRootIndex; the root sets, the label tree's views, usedPrecommitments, LabelInserted and
-// Reentrancy added; the unused OnlyEntrypoint, PoolIsDead and NotYetRagequitteable removed.
+// ROOT_HISTORY_SIZE, currentRootIndex, RAGEQUIT_VERIFIER or depositors; the root sets, the label tree's views,
+// usedPrecommitments, LabelInserted and Reentrancy added; the unused OnlyEntrypoint, PoolIsDead and
+// NotYetRagequitteable removed.
 
 import {IVerifier} from 'interfaces/IVerifier.sol';
 
@@ -86,12 +87,6 @@ interface IState {
   function WITHDRAWAL_VERIFIER() external view returns (IVerifier _verifier);
 
   /**
-   * @notice Returns the configured Ragequit Verifier contract
-   * @return _verifier The Groth16 Ragequit Verifier
-   */
-  function RAGEQUIT_VERIFIER() external view returns (IVerifier _verifier);
-
-  /**
    * @notice Returns the current root of the state tree
    * @return _root The current root
    */
@@ -153,13 +148,6 @@ interface IState {
    * @return _spent The boolean indicating if it is spent
    */
   function nullifierHashes(uint256 _nullifierHash) external view returns (bool _spent);
-
-  /**
-   * @notice Returns the original depositor that generated a label
-   * @param _label The label
-   * @return _depositor The original depositor
-   */
-  function depositors(uint256 _label) external view returns (address _depositor);
 
   /**
    * @notice Returns whether a precommitment has been used by a deposit

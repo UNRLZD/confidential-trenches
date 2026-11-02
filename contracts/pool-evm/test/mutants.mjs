@@ -36,15 +36,10 @@ export const MUTANTS = [
   [PP, "_push(_data.recipient, _withdrawn - _fee);", "_push(_data.recipient, _withdrawn);", "test_depositThenRelayedWithdraw"],
   [PP, ") external nonReentrant {\n    RelayData", ") external {\n    RelayData", "test_aPayeeCannotReenterWithdraw"],
   [PP, ") external payable nonReentrant returns", ") external payable returns", "test_aPayeeCannotReenterDeposit"],
-  [PP, "function ragequit(ProofLib.RagequitProof memory _proof) external nonReentrant {", "function ragequit(ProofLib.RagequitProof memory _proof) external {", "test_aRagequitterCannotReenter"],
   [PP, "if (_value < MIN_DEPOSIT) revert MinimumDepositAmount();", "", "test_depositRefusesBelowMinimum"],
   [PP, "if (_value >= type(uint128).max) revert InvalidDepositValue();", "", "test_depositRefuses2To128"],
   [PP, "if (usedPrecommitments[_precommitmentHash]) revert PrecommitmentAlreadyUsed();", "", "test_depositRefusesAUsedPrecommitment"],
   [PP, "    _insertLabel(_label);", "", "test_depositFillsBothTrees"],
-  [PP, "if (depositors[_label] != msg.sender) revert OnlyOriginalDepositor();", "", "test_onlyTheDepositorRagequits"],
-  [PP, "if (!RAGEQUIT_VERIFIER.verifyProof(_proof.pA, _proof.pB, _proof.pC, _proof.pubSignals)) revert InvalidProof();", "", "test_aRagequitWithAnotherValueIsRefused"],
-  [PP, "if (!_isInState(_proof.commitmentHash())) revert InvalidCommitment();", "", "test_aRagequitOfANoteNeverDepositedIsRefused"],
-  [PP, "_spend(_proof.nullifierHash());", "", "test_theDepositorRagequits"],
   [ST, "if (nullifierHashes[_nullifierHash]) revert NullifierAlreadySpent();", "", "test_aSpentNullifierIsRefused"],
   [ST, "if (_merkleTree.depth > MAX_TREE_DEPTH) revert MaxTreeDepthReached();", "", "test_aStateTreePast32IsRefused"],
   [ST, "if (_labelTree.depth > MAX_TREE_DEPTH) revert MaxTreeDepthReached();", "", "test_aLabelTreePast32IsRefused"],
@@ -56,6 +51,7 @@ export const MUTANTS = [
   ["src/verifiers/WithdrawalVerifier.sol", "checkField(calldataload(add(_pubSignals, 32)))", "", "test_aSignalAtOrAbovePIsRefused"],
   // an added admin path: a selector, a DELEGATECALL, a storage slot
   [PP, "  /// @inheritdoc IPrivacyPool\n  function deposit(", "  function owner() external pure returns (address) {\n    return address(0);\n  }\n\n  /// @inheritdoc IPrivacyPool\n  function deposit(", "test_theDispatcherHasExactlyTheListedSelectors"],
+  [PP, "  /// @inheritdoc IPrivacyPool\n  function deposit(", "  function depositors(uint256) external pure returns (address) {\n    return address(0);\n  }\n\n  /// @inheritdoc IPrivacyPool\n  function deposit(", "test_ragequitIsAbsent"],
   ["src/poseidon/PoseidonT3.sol", "function hash(uint256[2] memory _inputs) internal pure returns (uint256) {", "function hash(uint256[2] memory _inputs) public pure returns (uint256) {", "test_noDelegatecallCallcodeSelfdestructOrCreate"],
   [ST, "  /// @inheritdoc IState\n  uint256 public nonce;", "  /// @inheritdoc IState\n  uint256 public nonce;\n  address internal admin;", "layout"],
 ];
@@ -78,7 +74,8 @@ function run(dir, test) {
     out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
   }
   const ran = out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? [];
-  if (ran.length === 1) return ran[0].startsWith("[PASS") ? "pass" : "fail";
+  // forge prints a failing test twice, in the run and in the summary
+  if (ran.length >= 1 && ran.every((r) => r === ran[0])) return ran[0].startsWith("[PASS") ? "pass" : "fail";
   throw new Error(`forge ran ${ran.length} tests named ${test}:\n${out.slice(-2000)}`);
 }
 
