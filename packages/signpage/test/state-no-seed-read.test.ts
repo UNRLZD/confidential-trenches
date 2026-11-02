@@ -12,7 +12,7 @@ import { frameState } from "../src/state.ts";
 const closers: (() => void)[] = [];
 after(() => closers.forEach((c) => c()));
 
-test("the frame's state path never calls get on meta/seed", async () => {
+test("the frame's state path and deposit.quote's read never call get on meta/seed", async () => {
   const idb = new IDBFactory();
   const name = `frame-no-seed-read-${process.pid}`;
   const reads: string[] = [];
@@ -45,11 +45,16 @@ test("the frame's state path never calls get on meta/seed", async () => {
   await tab.insertSeed({ v: 1, entropy: new Uint8Array(16).fill(0x7f), source: "random", code_saved: false, created_ms: 1 });
   await tab.put("ops", crypto.randomUUID(), { kind: "deposit", stage: "waiting", txs: [], created_ms: 2 });
   const signedIn = await fs.state();
+  // deposit.quote's read (src/deposit-wire.ts): U's public record, which the top-level page names; never the seed
+  assert.equal((await fs.depositRead())?.deposit, undefined);
+  const named = await tab.depositId({ entropy: new Uint8Array(16).fill(0x7f) }, 7n, () => "5d".repeat(32));
   await tab.setCodeSaved({ entropy: new Uint8Array(16).fill(0x7f) });
   const saved = await fs.state();
+  assert.deepEqual(await fs.depositRead(), { status: { source: "random", code_saved: true }, deposit: named });
   await tab.signOut();
   await new Promise((ok) => setTimeout(ok, 30));
   const out = await fs.state();
+  assert.equal(await fs.depositRead(), null);
 
   assert.equal(signedIn.signed_in, true);
   assert.equal(saved.code_saved, true);
