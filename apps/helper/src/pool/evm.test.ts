@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_GAS_MAX, evmAddressOf, evmPoolSender, evmReadWithdraw, rlp, signEvmTx, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
+import { EVM_FEE_STEP, EVM_GAS_MAX, EVM_WITHDRAW_GAS, evmAddressOf, evmEpochFee, evmFirstBlockAtOrAfter, evmPoolSender, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
@@ -30,100 +30,226 @@ const PROOF = [
   "3020212885829913070286059975715001976910762802925534191672966365795975638979", "2",
   "8424188727988631066893401000603797288753749629507407262343386519908765608178",
 ].map(BigInt);
-const FEE = 1_000_000_000_000_000n;
+
+// ---- a chain: block n at 1,999,999,000 + 2n seconds, 1 gwei base fee unless `base` says otherwise ----
+const T0 = 1_999_999_000n;
+const DEADLINE = Number(REQ.deadlineMs); // 2,000,000,000,000
+const NOW = DEADLINE - 100_000; // the epoch now starts at 1,999,999,860,000
+const EPOCH = 1_999_999_860_000;
+const GWEI = 1_000_000_000n;
+type Chain = { latest: bigint; base: (n: bigint) => bigint; hash?: (n: bigint) => string };
+const chainOf = (o: Partial<Chain> = {}): Chain => ({ latest: 600n, base: () => GWEI, ...o });
+const FLOOR = 10n ** 12n;
+const FEE = evmEpochFee(FLOOR, GWEI); // the epoch's fee at 1 gwei: ceilStep(2 x 611,391 x 1 gwei)
 
 const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
 const a32 = (a: string) => a.slice(2).padStart(64, "0");
 /** withdraw's calldata as solc's abi.encode writes it. */
-function calldata(o: { fee?: bigint; processooor?: string; feeRecipient?: string; feeCap?: bigint } = {}): string {
-  const relay = [a32(REQ.recipient), a32(o.feeRecipient ?? REQ.feeRecipient), w32(o.feeCap ?? REQ.feeCap), w32(REQ.deadlineMs), w32(REQ.refundPrecommitment), REQ.salt.padEnd(64, "0")];
-  return `0x${WITHDRAW_SELECTOR}${w32(18n * 32n)}${PROOF.map(w32).join("")}${w32(o.fee ?? FEE)}${a32(o.processooor ?? POOL)}${w32(64n)}${w32(192n)}${relay.join("")}`;
+function calldata(o: { fee?: bigint; processooor?: string; feeRecipient?: string; feeCap?: bigint; nullifier?: bigint; refund?: bigint } = {}): string {
+  const relay = [a32(REQ.recipient), a32(o.feeRecipient ?? REQ.feeRecipient), w32(o.feeCap ?? REQ.feeCap), w32(REQ.deadlineMs), w32(o.refund ?? REQ.refundPrecommitment), REQ.salt.padEnd(64, "0")];
+  const proof = PROOF.map((v, i) => (i === 9 && o.nullifier !== undefined ? o.nullifier : v));
+  return `0x${WITHDRAW_SELECTOR}${w32(18n * 32n)}${proof.map(w32).join("")}${w32(o.fee ?? FEE)}${a32(o.processooor ?? POOL)}${w32(64n)}${w32(192n)}${relay.join("")}`;
 }
 
-test("the selector is withdraw's, and the calldata reads back the request", () => {
-  assert.equal(WITHDRAW_SELECTOR, Buffer.from(keccak_256(new TextEncoder().encode("withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)"))).subarray(0, 4).toString("hex"));
-  const w = evmReadWithdraw(new Uint8Array(Buffer.from(calldata().slice(2), "hex")));
-  assert.deepEqual(w, { processooor: POOL, recipient: REQ.recipient, feeRecipient: FEE_TO, feeCap: REQ.feeCap, deadlineMs: REQ.deadlineMs, fee: FEE });
-});
-
 type Calls = { method: string; params: readonly unknown[] }[];
-function rpc(calls: Calls, opts: { revert?: boolean; gas?: bigint; chain?: string } = {}): EvmRpc {
+function rpc(calls: Calls, opts: { revert?: boolean; gas?: bigint; chain?: string; spike?: bigint; reverted?: boolean } = {}, c: Chain = chainOf()): EvmRpc {
+  const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: c.hash ? c.hash(n) : `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: `0x${c.base(n).toString(16)}` });
   return async (method, params) => {
     calls.push({ method, params });
     switch (method) {
       case "eth_chainId": return opts.chain ?? "0x7a69";
       case "eth_call": if (opts.revert) throw new Error("execution reverted: 0x8b1c4b0b"); return "0x";
       case "eth_estimateGas": return `0x${(opts.gas ?? 611_391n).toString(16)}`;
-      case "eth_getBlockByNumber": return { baseFeePerGas: "0x3b9aca00" };
+      case "eth_getBlockByNumber": {
+        if (params[0] === "latest") return { ...block(c.latest), ...(opts.spike ? { baseFeePerGas: `0x${opts.spike.toString(16)}` } : {}) };
+        const n = BigInt(params[0] as string);
+        return n <= c.latest ? block(n) : null;
+      }
       case "eth_maxPriorityFeePerGas": return "0x5f5e100";
       case "eth_getTransactionCount": return "0x7";
       case "eth_sendRawTransaction": return "0x";
+      case "eth_getTransactionReceipt": return { status: opts.reverted ? "0x0" : "0x1" };
       default: throw new Error(`unexpected ${method}`);
     }
   };
 }
-const sender = (calls: Calls = [], opts = {}, b: Calls = []) => evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, fee: FEE, feeRecipient: FEE_TO }, [rpc(calls, opts), rpc(b, opts)]);
+const sender = (calls: Calls = [], opts = {}, b: Calls = [], c: Chain = chainOf(), now = NOW) =>
+  evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [rpc(calls, opts, c), rpc(b, opts, c)], () => now);
 const code = (a: { body: unknown }) => ((a.body as { error?: { code: string } }).error?.code ?? "ok");
+const req = (data = calldata(), epoch = EPOCH) => ({ pool: POOL, data, epoch });
+const sends = (calls: Calls) => calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
 
-test("a withdraw at the published fee, under its cap, to this release's fee recipient: simulated, signed, sent with exactly its calldata", async () => {
+/** A type-2 transaction's fields: rlp([chainId, nonce, tip, maxFee, gas, to, value, data, accessList, v, r, s]). */
+function decodeTx(raw: string): Uint8Array[] {
+  const b = Buffer.from(raw.slice(2), "hex");
+  assert.equal(b[0], 2);
+  let at = 1;
+  const len = (short: number) => {
+    const x = b[at++]!;
+    if (x < short + 56) return x - short;
+    const n = x - short - 55;
+    let v = 0;
+    for (let i = 0; i < n; i++) v = v * 256 + b[at++]!;
+    return v;
+  };
+  assert.ok(b[at]! >= 0xc0);
+  const end = len(0xc0) + at;
+  const out: Uint8Array[] = [];
+  while (at < end) {
+    if (b[at]! < 0x80) out.push(b.subarray(at, ++at));
+    else if (b[at]! >= 0xc0) out.push(b.subarray(at, (at += 1 + len(0xc0)) ));
+    else {
+      const n = len(0x80);
+      out.push(b.subarray(at, (at += n)));
+    }
+  }
+  return out;
+}
+const num = (u: Uint8Array) => (u.length === 0 ? 0n : BigInt(`0x${Buffer.from(u).toString("hex")}`));
+
+test("the selector is withdraw's, and the calldata reads back the request and its nullifier", () => {
+  assert.equal(WITHDRAW_SELECTOR, Buffer.from(keccak_256(new TextEncoder().encode("withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)"))).subarray(0, 4).toString("hex"));
+  const w = evmReadWithdraw(new Uint8Array(Buffer.from(calldata().slice(2), "hex")));
+  assert.deepEqual(w, { processooor: POOL, recipient: REQ.recipient, feeRecipient: FEE_TO, feeCap: REQ.feeCap, deadlineMs: REQ.deadlineMs, fee: FEE, nullifier: PROOF[9]!.toString(16).padStart(64, "0") });
+});
+
+test("the epoch fee follows gas: max(floor, ceilStep(2 x withdraw gas x the epoch's first block's base fee))", async () => {
+  assert.equal(FEE, 1_230_000_000_000_000n, "2 x 611,391 x 1 gwei = 1,222,782 gwei, up to the 10,000 gwei step");
+  assert.equal(evmEpochFee(FLOOR, 1n), FLOOR > EVM_FEE_STEP ? FLOOR : EVM_FEE_STEP);
+  assert.equal(evmEpochFee(10n ** 18n, GWEI), 10n ** 18n, "the floor when gas is cheaper");
+  assert.equal(EVM_WITHDRAW_GAS, 611_391n);
+  // the first block at or after the epoch: 1,999,999,860 s is block 430 exactly; 1,999,999,861 s is block 431
+  const r = rpc([]);
+  assert.equal((await evmFirstBlockAtOrAfter(r, 1_999_999_860n))!.number, 430n);
+  assert.equal((await evmFirstBlockAtOrAfter(r, 1_999_999_861n))!.number, 431n);
+  assert.equal((await evmFirstBlockAtOrAfter(r, 1_000n))!.number, 0n);
+  assert.equal(await evmFirstBlockAtOrAfter(r, 2_000_000_201n), null, "after the newest block: none yet");
+});
+
+test("two callers and a restart get the same epoch fee; another epoch's base fee gives its own", async () => {
+  const c = chainOf({ base: (n) => (n >= 460n ? 3n * GWEI : GWEI) });
+  const s = sender([], {}, [], c);
+  const a = await s.fee(EPOCH + 1_234);
+  const b = await s.fee(EPOCH + 59_999);
+  const restarted = await sender([], {}, [], c).fee(EPOCH);
+  assert.deepEqual(a, b);
+  assert.deepEqual(restarted, a);
+  assert.deepEqual(a, { chain: "evm", network: "anvil", pool: POOL, fee_recipient: FEE_TO, epoch_ms: 60_000, epoch_start_ms: EPOCH, block: "0x1ae", fee: FEE.toString(), step: EVM_FEE_STEP.toString() });
+  const next = await s.fee(EPOCH + 60_000); // 1,999,999,920 s: block 460, 3 gwei
+  assert.equal(next!.fee, evmEpochFee(FLOOR, 3n * GWEI).toString());
+  assert.equal(await s.fee(DEADLINE + 600_000), null, "no block in that epoch yet");
+});
+
+test("a withdraw at its epoch's fee, under its cap, to this release's fee recipient: simulated, signed, sent with exactly its calldata", async () => {
   const calls: Calls = [];
-  const a = await sender(calls).carry({ pool: POOL, data: calldata() });
+  const a = await sender(calls).carry(req());
   assert.equal(a.status, 200, JSON.stringify(a.body));
-  const sent = calls.find((c) => c.method === "eth_sendRawTransaction")!.params[0] as string;
-  const raw = Buffer.from(sent.slice(2), "hex");
-  assert.equal((a.body as { hash: string }).hash, `0x${Buffer.from(keccak_256(raw)).toString("hex")}`);
-  assert.ok(raw.toString("hex").includes(calldata().slice(2)), "the calldata is in the transaction as received");
+  const raw = sends(calls)[0]!;
+  assert.equal((a.body as { hash: string }).hash, `0x${Buffer.from(keccak_256(Buffer.from(raw.slice(2), "hex"))).toString("hex")}`);
+  const f = decodeTx(raw);
+  assert.equal(`0x${Buffer.from(f[7]!).toString("hex")}`, calldata(), "the data is the calldata received");
+  assert.equal(`0x${Buffer.from(f[5]!).toString("hex")}`, POOL);
+  assert.equal(num(f[6]!), 0n, "value 0");
   const call = calls.find((c) => c.method === "eth_call")!.params[0] as { from: string; to: string; data: string };
   assert.deepEqual(call, { from: evmAddressOf(KEY), to: POOL, data: calldata(), value: "0x0" });
 });
 
-test("refusals: another pool, another fee recipient, a fee off the published one, a fee over feeCap, a revert, gas over the cap", async () => {
-  assert.equal(code(await sender().carry({ pool: POOL, data: calldata({ processooor: "0x00000000000000000000000000000000b1f1f002" }) })), "not_pool");
-  assert.equal(code(await sender().carry({ pool: POOL, data: calldata({ feeRecipient: "0x000000000000000000000000000000000000beef" }) })), "fee_recipient");
-  assert.equal(code(await sender().carry({ pool: POOL, data: calldata({ fee: FEE + 1n }) })), "fee_off");
-  assert.equal(code(await sender().carry({ pool: POOL, data: calldata({ feeCap: FEE - 1n }) })), "fee_over_cap");
-  const calls: Calls = [];
-  assert.equal(code(await sender(calls, { revert: true }).carry({ pool: POOL, data: calldata() })), "simulation_failed");
-  assert.equal(calls.filter((c) => c.method === "eth_sendRawTransaction").length, 0);
-  assert.equal(code(await sender([], { gas: EVM_GAS_MAX }).carry({ pool: POOL, data: calldata() })), "simulation_failed");
-  assert.equal(code(await sender([], {}, []).carry({ pool: POOL, data: calldata() })), "ok");
+test("a base fee spike past the fee's cap never overpays: maxFeePerGas x gas limit stays within the fee", async () => {
+  for (const spike of [GWEI / 2n, GWEI, 1_000n * GWEI, 10n ** 15n]) {
+    const calls: Calls = [];
+    const a = await sender(calls, { spike }).carry(req());
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    const f = decodeTx(sends(calls)[0]!);
+    const [tip, maxFee, gas] = [num(f[2]!), num(f[3]!), num(f[4]!)];
+    assert.ok(maxFee * gas <= FEE, `spike ${spike}: ${maxFee} x ${gas} = ${maxFee * gas} over the fee ${FEE}`);
+    assert.ok(tip <= maxFee);
+    // the fee prices 2 x 611,391 gas; the limit is the estimate x 1.2, so the cap is fee / 733,669 = 1,676,505,345 wei
+    if (spike === GWEI / 2n) assert.equal(maxFee, GWEI + 100_000_000n, "under the cap: 2 x base + tip");
+    else assert.equal(maxFee, FEE / gas, "past it: the cap");
+  }
 });
 
-test("bad_shape: another selector, a changed offset or padding, a byte more or less, another pool named in the body", async () => {
+test("refusals: another pool, another fee recipient, a fee off its epoch's, a fee over feeCap, a revert, gas over the cap", async () => {
+  assert.equal(code(await sender().carry(req(calldata({ processooor: "0x00000000000000000000000000000000b1f1f002" })))), "not_pool");
+  assert.equal(code(await sender().carry(req(calldata({ feeRecipient: "0x000000000000000000000000000000000000beef" })))), "fee_recipient");
+  assert.equal(code(await sender().carry(req(calldata({ fee: FEE + EVM_FEE_STEP })))), "fee_off");
+  assert.equal(code(await sender().carry(req(calldata({ fee: FEE - EVM_FEE_STEP })))), "fee_off");
+  assert.equal(code(await sender().carry(req(calldata({ feeCap: FEE - 1n })))), "fee_over_cap");
+  const calls: Calls = [];
+  assert.equal(code(await sender(calls, { revert: true }).carry(req())), "simulation_failed");
+  assert.equal(sends(calls).length, 0);
+  assert.equal(code(await sender([], { gas: EVM_GAS_MAX }).carry(req())), "simulation_failed");
+});
+
+test("epoch_off: an epoch later than now's, at or past the deadline, before the proof's life, or with no block yet", async () => {
+  assert.equal(code(await sender().carry(req(calldata(), EPOCH + 60_000))), "epoch_off", "later than the epoch now");
+  assert.equal(code(await sender([], {}, [], chainOf(), DEADLINE + 60_000).carry(req(calldata(), DEADLINE + 40_000))), "epoch_off", "the first epoch past the deadline");
+  // the life starts at deadline - 600,000 = 1,999,999,400,000; the grid's epochs either side of it
+  assert.equal(DEADLINE - POOL_LIFE_MAX_MS, 1_999_999_400_000);
+  assert.equal(code(await sender().carry(req(calldata(), 1_999_999_380_000))), "epoch_off", "before the life");
+  assert.equal(code(await sender().carry(req(calldata(), 1_999_999_440_000))), "ok", "the life's first epoch");
+  assert.equal(code(await sender([], {}, [], chainOf({ latest: 400n })).carry(req())), "epoch_off", "no block in it yet");
+  assert.equal(code(await sender().carry(req(calldata(), EPOCH + 1))), "bad_shape", "off the grid");
+});
+
+test("bad_shape: another selector, a changed offset or padding, a byte more or less, another pool, a missing epoch", async () => {
   const good = calldata();
   const flip = (at: number, ch: string) => `${good.slice(0, at)}${ch}${good.slice(at + 1)}`;
   for (const d of [flip(2, good[2] === "0" ? "1" : "0"), flip(2 + 8 + 63, "1"), `${good}00`, good.slice(0, -2), flip(2 + 8 + 64 * 18 + 2, "1"), flip(2 + 8 + 64 * 26 + 63, "1")]) {
-    assert.equal(code(await sender().carry({ pool: POOL, data: d })), "bad_shape", d.slice(0, 20));
+    assert.equal(code(await sender().carry(req(d))), "bad_shape", d.slice(0, 20));
   }
-  assert.equal(code(await sender().carry({ pool: "0x00000000000000000000000000000000b1f1f002", data: good })), "bad_shape");
-  assert.equal(code(await sender().carry({ pool: POOL, data: good, extra: 1 })), "bad_shape");
+  assert.equal(code(await sender().carry({ ...req(), pool: "0x00000000000000000000000000000000b1f1f002" })), "bad_shape");
+  assert.equal(code(await sender().carry({ pool: POOL, data: good })), "bad_shape");
+  assert.equal(code(await sender().carry({ ...req(), extra: 1 })), "bad_shape");
 });
 
-test("two providers on different chains: upstream, nothing sent", async () => {
+test("upstream: two providers on different chains, or holding different blocks; nothing sent", async () => {
   const b: Calls = [];
-  const s = evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, fee: FEE, feeRecipient: FEE_TO }, [rpc([]), rpc(b, { chain: "0x2105" })]);
-  assert.equal(code(await s.carry({ pool: POOL, data: calldata() })), "upstream");
-  assert.equal(b.filter((c) => c.method === "eth_sendRawTransaction").length, 0);
+  const s = evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [rpc([]), rpc(b, { chain: "0x2105" })], () => NOW);
+  assert.equal(code(await s.carry(req())), "upstream");
+  const other = chainOf({ hash: (n) => `0x${(n + 1n).toString(16).padStart(64, "0")}` });
+  const t = evmPoolSender({ network: "anvil", pool: POOL, senderKey: KEY, floor: FLOOR, feeRecipient: FEE_TO }, [rpc([]), rpc(b, {}, other)], () => NOW);
+  assert.equal(code(await t.carry(req())), "upstream");
+  assert.equal(sends(b).length, 0);
 });
 
-test("sends take consecutive nonces, one at a time", async () => {
+test("one send per nullifier: a repeat in flight or landed, even as other bytes, gets the first hash and sends nothing", async () => {
   const calls: Calls = [];
   const s = sender(calls);
-  await Promise.all([s.carry({ pool: POOL, data: calldata() }), s.carry({ pool: POOL, data: calldata() })]);
-  const raws = calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
-  assert.equal(raws.length, 2);
-  assert.notEqual(raws[0], raws[1], "the second send takes the next nonce");
-  assert.deepEqual([...rlp([])], [0xc0]);
-  assert.deepEqual([...rlp(new Uint8Array(56))].slice(0, 2), [0xb8, 56]);
+  const [a, b] = await Promise.all([s.carry(req()), s.carry(req())]);
+  const copy = await s.carry(req(calldata({ refund: 7n })));
+  assert.equal(a.status, 200);
+  assert.deepEqual(b, a);
+  assert.deepEqual(copy, a, "the same nullifier in other bytes");
+  assert.equal(sends(calls).length, 1);
+  const other = await s.carry(req(calldata({ nullifier: 5n })));
+  assert.notDeepEqual(other, a);
+  assert.equal(sends(calls).length, 2, "another nullifier is its own send, at the next nonce");
+  const f = sends(calls).map(decodeTx);
+  assert.equal(num(f[1]![1]!), num(f[0]![1]!) + 1n);
 });
 
-test("signEvmTx: the signature recovers to the sender", () => {
+test("a first send that reverted on chain, or a refused carry, frees the nullifier", async () => {
+  const calls: Calls = [];
+  const s = sender(calls, { reverted: true });
+  await s.carry(req());
+  await s.carry(req());
+  assert.equal(sends(calls).length, 2, "the first reverted: the retry is sent");
+  const calls2: Calls = [];
+  const r = sender(calls2, { revert: true });
+  assert.equal(code(await r.carry(req())), "simulation_failed");
+  assert.equal(code(await r.carry(req())), "simulation_failed");
+  assert.equal(calls2.filter((c) => c.method === "eth_call").length, 2, "refused, so simulated again");
+});
+
+test("signEvmTx: the signature recovers to the sender; rlp's short and long forms", () => {
   const tx = { chainId: 31337n, nonce: 7n, maxPriorityFeePerGas: 100_000_000n, maxFeePerGas: 2_100_000_000n, gas: 733_669n, to: POOL, data: new Uint8Array(Buffer.from(calldata().slice(2), "hex")) };
   const { raw } = signEvmTx(tx, KEY);
-  assert.equal(raw[0], 2);
-  // the last 3 rlp items are yParity, r (32), s (32): r and s are each 0xa0-prefixed when 32 bytes long
-  const hexRaw = Buffer.from(raw).toString("hex");
-  assert.ok(hexRaw.length > 1700);
-  assert.equal(secp256k1.getPublicKey(KEY).length, 33);
-  assert.match(evmAddressOf(KEY), /^0x[0-9a-f]{40}$/);
+  const f = decodeTx(`0x${Buffer.from(raw).toString("hex")}`);
+  const digest = keccak_256(Uint8Array.from([2, ...rlp([...f.slice(0, 8), []])]));
+  const sig = Uint8Array.from([Number(num(f[9]!)), ...Buffer.from(num(f[10]!).toString(16).padStart(64, "0"), "hex"), ...Buffer.from(num(f[11]!).toString(16).padStart(64, "0"), "hex")]);
+  const pub = secp256k1.recoverPublicKey(sig, digest, { prehash: false });
+  assert.deepEqual(Buffer.from(pub).toString("hex"), Buffer.from(secp256k1.getPublicKey(KEY, true)).toString("hex"));
+  assert.deepEqual([...rlp([])], [0xc0]);
+  assert.deepEqual([...rlp(new Uint8Array(56))].slice(0, 2), [0xb8, 56]);
 });

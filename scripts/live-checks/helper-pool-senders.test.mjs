@@ -9,8 +9,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
-import { SOLANA_RELEASE_COST_MAX } from "../../apps/helper/src/pool/fee.ts";
-import { b58decode, b58encode, COST_MAX, judge, plant, read } from "./helper-pool-senders.mjs";
+import { SOLANA_RELEASE_COST } from "../../apps/helper/src/pool/fee.ts";
+import { b58decode, b58encode, COST_MIN, judge, plant, read } from "./helper-pool-senders.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-pool-senders.answers.json"), "utf8"));
@@ -35,11 +35,11 @@ test("made from the good run: a planted transaction carried, two fees, a fee und
   assert.equal(judge(edit(g, "fee_off", (x) => ({ ...x, status: 422, body: '{"error":{"code":"simulation_failed"}}' }))).ok, false);
   let n = 0;
   assert.equal(judge(edit(g, "fee", (x) => (n++ === 1 ? body(x, (b) => ({ ...b, fee: "2100000" })) : x))).ok, false);
-  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "1700000" })))).ok, false);
+  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "1000000" })))).ok, false);
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "2000001" })))).ok, false);
   assert.equal(judge({ ...g, pool: "11111111111111111111111111111111" }).ok, false);
   assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.asked !== "fee_off") }).ok, false);
-  assert.equal(COST_MAX, SOLANA_RELEASE_COST_MAX, "the check's worst cost is the helper's");
+  assert.equal(COST_MIN, SOLANA_RELEASE_COST, "the check's floor is the helper's");
 });
 
 test("plant() builds what the helper's checks read: a changed byte is bad_signature, a fee one step off is fee_off, as is: ok", () => {

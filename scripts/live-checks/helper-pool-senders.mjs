@@ -8,7 +8,7 @@
 // Both are refused before any read or send, so the check never moves money. It passes only when:
 //   - the fee answers 200 with exactly the kit's 10 fields, the pool and program asked, a fee_payer address, a 60 s
 //     epoch with its start on the grid, a fee on its 100,000-lamport step and at least a release's worst cost
-//     (1,757,520 lamports, apps/helper/src/pool/fee.ts), and the same fee for both callers;
+//     (1,026,000 lamports, a release's cost, apps/helper/src/pool/fee.ts, M352 (1)), and the same fee for both callers;
 //   - "changed" answers 422 bad_signature and "fee_off" 422 fee_off;
 //   - every answer carries a full-sha X-Helper-Commit, and APP_HOST is echoed only to the read that sent it.
 //   node scripts/live-checks/helper-pool-senders.mjs --pool <address> [--base <url>] [--record <file>]
@@ -20,7 +20,7 @@ import { writeFileSync } from "node:fs";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 const FIELDS = ["chain", "cluster", "program", "pool", "fee_payer", "epoch_ms", "epoch_start_ms", "fee", "step"];
-export const COST_MAX = 1_757_520n;
+export const COST_MIN = 1_026_000n;
 const STEP = 100_000n;
 const SHA = /^[0-9a-f]{40}$/;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -50,7 +50,7 @@ export function judge(run) {
     say(b?.chain === "solana" && b?.pool === run.pool && B58.test(b?.program ?? "") && B58.test(b?.fee_payer ?? ""), `${tag} pool ${show(b?.pool)} (asked ${run.pool}), program ${show(b?.program)}, fee payer ${show(b?.fee_payer)}`);
     say(b?.epoch_ms === 60_000 && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms % 60_000 === 0, `${tag} epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
     const fee = typeof b?.fee === "string" && DEC.test(b.fee) ? BigInt(b.fee) : null;
-    say(fee !== null && b?.step === STEP.toString() && fee % STEP === 0n && fee >= COST_MAX, `${tag} fee ${show(b?.fee)} on its step ${show(b?.step)}, at least the worst release cost ${COST_MAX}`);
+    say(fee !== null && b?.step === STEP.toString() && fee % STEP === 0n && fee >= COST_MIN, `${tag} fee ${show(b?.fee)} on its step ${show(b?.step)}, at least a release cost ${COST_MIN}`);
     values.push(b?.fee);
   }
   say(values.length === 2 && values[0] === values[1], `the same fee for both callers: ${show(values)}`);

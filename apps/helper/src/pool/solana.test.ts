@@ -18,7 +18,7 @@ import {
   type SolanaRpc,
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import { POOL_EPOCH_MS, SOLANA_RELEASE_COST_MAX, solanaPoolFee } from "./fee.ts";
+import { POOL_EPOCH_MS, SOLANA_PAGE_RELEASE_COST, SOLANA_RELEASE_COST, solanaPoolFee } from "./fee.ts";
 import { checkSolanaPoolTx, feePayerKey, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
 
 const testKey = (name: string) => {
@@ -39,10 +39,10 @@ const FEE = 2_000_000n;
 const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE };
 
 const field = (n: number): Uint8Array => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
-const release = (relayFee = FEE): SolanaPoolRelease => ({
+const release = (relayFee = FEE, nullifier = 2): SolanaPoolRelease => ({
   proof: new Uint8Array(256).fill(7),
   newCommitmentHash: field(1),
-  existingNullifierHash: field(2),
+  existingNullifierHash: field(nullifier),
   withdrawnValue: 50_000_000n,
   stateRootIndex: 5,
   stateTreeDepth: 3,
@@ -76,12 +76,16 @@ type Build = {
   /** tag 3: accounts after the tip, which `inner` indexes from 9 */
   extra?: { key: string; signer: boolean; writable: boolean }[];
   tipTo?: string;
+  /** the release's nullifier hash (its last byte), the state tree's size (1,024 opens page 1) and the blockhash */
+  nullifier?: number;
+  stateSize?: number;
+  blockhash?: string;
 };
 /** A v0 transaction W signed, the fee payer's slot empty: what the device sends. */
 function build(o: Build = {}): Uint8Array {
-  const r = release(o.fee ?? FEE);
+  const r = release(o.fee ?? FEE, o.nullifier ?? 2);
   const cfg = { program: o.program ?? PROGRAM, pool: o.pool ?? POOL };
-  const accounts = solanaPoolReleaseAccounts(cfg, W.address, FP.address, r, 6);
+  const accounts = solanaPoolReleaseAccounts(cfg, W.address, FP.address, r, o.stateSize ?? 6);
   let data: Uint8Array;
   if ((o.tag ?? 2) === 2) data = solanaEncodePoolRelease(r);
   else {
@@ -90,7 +94,7 @@ function build(o: Build = {}): Uint8Array {
     data = solanaEncodePoolTag3(r, false, 10_000n, o.inner ?? [{ program: 7, accounts: [1, 9], data: transferData }]);
   }
   const ixs = [...(o.pre ?? [cuLimit(400_000), cuPrice(1_000n)]), { program: cfg.program, accounts, data }, ...(o.post ?? [])];
-  const { message } = solanaCompileV0(FP.address, ixs, BLOCKHASH, [], [FP.address, W.address]);
+  const { message } = solanaCompileV0(FP.address, ixs, o.blockhash ?? BLOCKHASH, [], [FP.address, W.address]);
   return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, W.seed), ...message]);
 }
 const refusal = (wire: Uint8Array) => {
@@ -148,9 +152,13 @@ test("the fee payer named anywhere but the payer and the pool's account 2 is ref
 test("a relay fee off the published one is refused (fee_off); one under the cost with W's priority fee too (fee_below_cost)", () => {
   assert.equal(refusal(build({ fee: FEE + 100_000n })), "fee_off");
   assert.equal(refusal(build({ fee: FEE - 100_000n })), "fee_off");
-  // 400,000 CU at 1,000,000 micro-lamports: 400,000 lamports of priority, over the 242,480 the fee leaves
-  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(1_000_000n)] })), "fee_below_cost");
-  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(606_200n)] })), "ok");
+  // the fee leaves 2,000,000 - 1,026,000 = 974,000 for W's priority fee: 400,000 CU at 2,435,000 micro-lamports is
+  // exactly that; one micro-lamport more per CU rounds up past it
+  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_000n)] })), "ok");
+  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_001n)] })), "fee_below_cost");
+  // no limit given: the runtime's 200,000 per instruction
+  assert.equal(refusal(build({ pre: [cuPrice(4_870_001n)] })), "fee_below_cost");
+  assert.equal(refusal(build({ pre: [cuPrice(4_870_000n)] })), "ok");
 });
 
 test("not a v0 transaction of the fee payer and W, or a fee payer slot already filled, is bad_shape", () => {
@@ -177,15 +185,17 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
     { url: `https://stub.invalid/${Math.random()}` },
   );
 }
-function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = []) {
+function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number } = {}) {
   return solanaPoolSender(
-    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: FEE },
+    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: o.fee ?? FEE },
     {
       providers: [rpcStub(simErr, calls), rpcStub()],
+      ...(o.memory ? { memory: o.memory } : {}),
       send: (set) => {
         sent.push(set[0]!.wire);
         const sig = base58(set[0]!.wire.subarray(1, 65));
-        return { signatures: [sig], done: Promise.resolve({ txs: [] }), stop() {} };
+        const done = (o.ends ?? (async () => "filled"))().then((state) => ({ txs: [{ signature: sig, state: state as "filled", sends: [] }] }));
+        return { signatures: [sig], done, stop() {} };
       },
     },
   );
@@ -233,14 +243,17 @@ test("every refusal of the checks reaches the route before any read", async () =
   assert.equal(sent.length, 0);
 });
 
-test("the published fee: on its step, the same for every caller in every epoch, never under the worst release cost", () => {
+test("the published fee: on its step, the same for every caller in every epoch, never under a release cost", () => {
   const s = sender();
   const a = s.fee(1_800_000_012_345);
   assert.deepEqual(a, { chain: "solana", cluster: "devnet", program: PROGRAM, pool: POOL, fee_payer: FP.address, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: 1_800_000_000_000, fee: "2000000", step: "100000" });
   assert.equal(s.fee(1_800_000_060_000).fee, a.fee);
   assert.equal(solanaPoolFee("1900001", "x"), 2_000_000n);
-  assert.equal(SOLANA_RELEASE_COST_MAX, 1_757_520n, "release.rs row 8's figure");
-  assert.equal(solanaPoolFee("1757519", "x"), 1_800_000n, "rounded up to the step, above the worst cost");
+  assert.equal(SOLANA_RELEASE_COST, 1_026_000n, "release.rs row 8: spent mark, page entry, two signatures");
+  assert.equal(SOLANA_PAGE_RELEASE_COST - SOLANA_RELEASE_COST, 731_520n, "a page's opening costs 731,520 more");
+  assert.equal(solanaPoolFee("1026000", "x"), 1_100_000n, "a release's cost, rounded up to the step");
+  assert.throws(() => solanaPoolFee("1025999", "x"), /cover a release's cost/);
+  assert.throws(() => solanaPoolFee("1000000", "x"), /cover a release's cost/);
   assert.throws(() => solanaPoolFee("0", "x"), /whole number/);
 });
 
@@ -298,4 +311,76 @@ test("GET /v1/pool/fee answers the pool's epoch fee; POST /v1/pool/solana/send c
   } finally {
     srv.close();
   }
+});
+
+// ---- M352: the average release's fee carries a page-opening one; one send per nullifier ----
+
+test("at the lowest fee (1,100,000), a release whose change opens a page is carried: simulated, signed, sent", async () => {
+  const calls: Calls = [];
+  const sent: Uint8Array[] = [];
+  const s = sender(null, calls, sent, { fee: 1_100_000n });
+  const wire = build({ fee: 1_100_000n, stateSize: 1024, pre: [cuLimit(400_000)] });
+  const opens = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, release(1_100_000n), 1024)[6]!.key;
+  assert.notEqual(opens, solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, release(1_100_000n), 1023)[6]!.key, "1,024 is page 1's first entry");
+  const a = await s.carry(body(wire));
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(calls.filter((c) => c.method === "simulateTransaction").length, 1);
+  assert.equal(sent.length, 1);
+  assert.ok(1_100_000n < SOLANA_PAGE_RELEASE_COST, "the fee is under this release's own cost, and it is carried");
+});
+
+test("one send per nullifier: a repeat in flight or landed, even as other bytes, gets the first signature and sends nothing", async () => {
+  const sent: Uint8Array[] = [];
+  const calls: Calls = [];
+  const s = sender(null, calls, sent);
+  const first = build({ tag: 3 });
+  const copy = build({ tag: 3, blockhash: testKey("BLOCKHASH_2").address }); // the same release, another blockhash
+  const [a, b] = await Promise.all([s.carry(body(first)), s.carry(body(first))]);
+  const c = await s.carry(body(copy));
+  assert.equal(a.status, 200);
+  assert.deepEqual(b, a, "a repeat in flight answers the first signature");
+  assert.deepEqual(c, a, "a copy with other bytes answers the first signature");
+  assert.equal(sent.length, 1);
+  assert.equal(calls.filter((x) => x.method === "simulateTransaction").length, 1);
+  const other = await s.carry(body(build({ tag: 3, nullifier: 3 })));
+  assert.equal(other.status, 200);
+  assert.notDeepEqual(other, a);
+  assert.equal(sent.length, 2, "another nullifier is its own send");
+});
+
+test("a refused carry, or a send that failed or expired on chain, frees the nullifier; a filled one never does", async () => {
+  const sent: Uint8Array[] = [];
+  const simCalls: Calls = [];
+  const failing = sender({ InstructionError: [1, { Custom: 4 }] }, simCalls, sent);
+  assert.equal(code(await failing.carry(body(build()))), "simulation_failed");
+  assert.equal(code(await failing.carry(body(build()))), "simulation_failed");
+  assert.equal(simCalls.filter((c) => c.method === "simulateTransaction").length, 2, "refused, so simulated again, not answered from memory");
+  for (const end of ["failed", "expired"]) {
+    const sentE: Uint8Array[] = [];
+    let finish!: (s: string) => void;
+    const s = sender(null, [], sentE, { ends: () => new Promise((r) => (finish = r)) });
+    await s.carry(body(build()));
+    await s.carry(body(build()));
+    assert.equal(sentE.length, 1, `${end}: in flight, one send`);
+    finish(end);
+    await new Promise((r) => setImmediate(r));
+    await s.carry(body(build({ blockhash: testKey("BLOCKHASH_2").address })));
+    assert.equal(sentE.length, 2, `${end}: freed, the retry is sent`);
+  }
+  const sentF: Uint8Array[] = [];
+  const filled = sender(null, [], sentF);
+  await filled.carry(body(build()));
+  await new Promise((r) => setImmediate(r));
+  await filled.carry(body(build({ blockhash: testKey("BLOCKHASH_2").address })));
+  assert.equal(sentF.length, 1, "landed: never sent again");
+});
+
+test("the memory is bounded: past it the oldest nullifier goes, and the chain's spent mark is what refuses it then", async () => {
+  const sent: Uint8Array[] = [];
+  const s = sender(null, [], sent, { memory: 2 });
+  for (const n of [2, 3, 4]) await s.carry(body(build({ nullifier: n })));
+  await s.carry(body(build({ nullifier: 4 })));
+  assert.equal(sent.length, 3, "the newest is remembered");
+  await s.carry(body(build({ nullifier: 2 })));
+  assert.equal(sent.length, 4, "the oldest was evicted: carried again, and its simulation is what would refuse a spent one");
 });

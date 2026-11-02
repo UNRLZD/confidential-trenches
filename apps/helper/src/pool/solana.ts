@@ -18,8 +18,8 @@
 //                       program, another account of any instruction, or an account a tag 3 inner instruction names
 //                       (lookup tables cannot name it: the runtime refuses a key loaded twice);
 //   fee_off             relay_fee is not the fee this helper publishes for the pool;
-//   fee_below_cost      relay_fee under the fee payer's worst cost (SOLANA_RELEASE_COST_MAX) plus the priority fee W
-//                       set;
+//   fee_below_cost      relay_fee under the fee payer's cost of a release (SOLANA_RELEASE_COST, 1,026,000) plus the
+//                       priority fee W set; a release whose change opens a page costs 731,520 more and is carried;
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
 //   upstream (503)      the simulation or the blockhash read could not be made.
 // Answer: 200 { signature } (the fee payer's, the transaction id). The device reads the fill itself.
@@ -41,7 +41,8 @@ import {
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
-import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, SOLANA_RELEASE_COST_MAX, solanaPoolFee, type PoolFeeAnswer } from "./fee.ts";
+import { oncePerNullifier } from "./once.ts";
+import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, SOLANA_RELEASE_COST, solanaPoolFee, type PoolFeeAnswer } from "./fee.ts";
 
 /** POST /v1/pool/solana/send's body limit: a 1,232-byte transaction in base64 and the JSON around it. */
 export const POOL_SOLANA_BODY_MAX = 4_096;
@@ -66,13 +67,13 @@ export type PoolSendCode =
 export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } } };
 
 /** What a pool instruction carries that the checks read: its tag, its relay fee and the accounts tag 3's inner instructions name. */
-export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; innerAccounts: number[]; innerPrograms: number[] };
+export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; nullifier: string; innerAccounts: number[]; innerPrograms: number[] };
 
 /** Tag 2's or tag 3's data, read; throws on any layout TAG3.md and release.rs do not allow. */
 export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   if (d[0] === SOLANA_POOL_TAG_RELEASE) {
     const r = solanaDecodePoolRelease(d); // exactly 387 bytes
-    return { tag: 2, relayFee: r.relayFee, innerAccounts: [], innerPrograms: [] };
+    return { tag: 2, relayFee: r.relayFee, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), innerAccounts: [], innerPrograms: [] };
   }
   if (d[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || d.length < 2) throw new Error("not tag 2 or tag 3");
   const flags = d[1]!;
@@ -101,13 +102,14 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
     if (at > d.length) throw new Error("tag 3 inner data truncated");
   }
   if (at !== d.length) throw new Error("tag 3 bytes after the last inner instruction");
-  return { tag: 3, relayFee, innerAccounts, innerPrograms };
+  return { tag: 3, relayFee, nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), innerAccounts, innerPrograms };
 }
 
 /** The priority fee W set, lamports: price (micro-lamports per CU) x limit, rounded up, as the runtime charges it. */
 const priorityFee = (price: bigint, limit: bigint): bigint => (price * limit + MICRO - 1n) / MICRO;
 
-export type SolanaPoolChecked = { wire: Uint8Array; messageBytes: Uint8Array; w: string; relayFee: bigint };
+/** A transaction that passed every check: its bytes, its message, W, its relay fee and its nullifier hash (64 hex). */
+export type SolanaPoolChecked = { wire: Uint8Array; messageBytes: Uint8Array; w: string; relayFee: bigint; nullifier: string };
 export type SolanaPoolCheck = { ok: true; tx: SolanaPoolChecked } | { ok: false; status: number; code: PoolSendCode; detail?: string };
 
 /** Every check before the simulation, on the bytes as received. Pure: no read, no clock. */
@@ -167,9 +169,9 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   if ([...p.innerAccounts, ...p.innerPrograms].some((i) => i >= pix.accounts.length)) return no("not_pool", "an inner index past the accounts");
 
   if (p.relayFee !== cfg.fee) return no("fee_off", `relay_fee ${p.relayFee}, published ${cfg.fee}`);
-  const cost = SOLANA_RELEASE_COST_MAX + priorityFee(price ?? 0n, limit ?? DEFAULT_CU_PER_IX);
+  const cost = SOLANA_RELEASE_COST + priorityFee(price ?? 0n, limit ?? DEFAULT_CU_PER_IX);
   if (p.relayFee < cost) return no("fee_below_cost", `relay_fee ${p.relayFee}, cost ${cost}`);
-  return { ok: true, tx: { wire, messageBytes: tx.messageBytes, w, relayFee: p.relayFee } };
+  return { ok: true, tx: { wire, messageBytes: tx.messageBytes, w, relayFee: p.relayFee, nullifier: p.nullifier } };
 }
 
 /** The fee payer's signature in slot 0; every other byte as received (checked, so a change here throws, never sends). */
@@ -187,6 +189,8 @@ export type SolanaPoolSenderDeps = {
   paths?: readonly SolanaSendPath[];
   /** The kit's sender; replaced in tests. */
   send?: typeof sendSolanaSet;
+  /** How many nullifiers ./once.ts remembers (POOL_SEND_MEMORY). */
+  memory?: number;
 };
 
 export type SolanaPoolSender = {
@@ -231,6 +235,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       send: async (tx: string) => String(await rpc("sendTransaction", [tx, { encoding: "base64", skipPreflight: true, maxRetries: 0 }])),
     }));
   const no = (status: number, code: PoolSendCode, detail?: string): PoolSendAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
+  const once = oncePerNullifier<PoolSendAnswer>(deps.memory);
   return {
     cluster: cfg.cluster,
     program: cfg.program,
@@ -255,6 +260,11 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (Buffer.from(wire).toString("base64") !== raw) return no(400, "bad_shape");
       const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee });
       if (!c.ok) return no(c.status, c.code, c.detail);
+      // one send per nullifier (./once.ts): a repeat gets the first answer and sends nothing
+      return once.run(c.tx.nullifier, () => simulateSignSend(raw, c.tx));
+    },
+  };
+  async function simulateSignSend(raw: string, tx: SolanaPoolChecked): Promise<PoolSendAnswer> {
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
       let sim: unknown;
@@ -273,12 +283,17 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
       if (v.err !== null) return no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200));
       if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
-      const signed: SolanaSignedTx = { wire: signAsFeePayer(c.tx, seed), lastValidBlockHeight: height };
+      const signed: SolanaSignedTx = { wire: signAsFeePayer(tx, seed), lastValidBlockHeight: height };
       const h = send([signed], { paths, providers: [a, b] });
-      void h.done.catch(() => {});
+      // a send the chain ended without the spend (failed, or its blockhash expired) frees the nullifier for a retry
+      void h.done
+        .then((r) => {
+          const state = r.txs[0]?.state;
+          if (state === "failed" || state === "expired") once.forget(tx.nullifier);
+        })
+        .catch(() => {});
       return { status: 200, body: { signature: h.signatures[0]! } };
-    },
-  };
+  }
 }
 
 /** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). */

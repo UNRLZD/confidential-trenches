@@ -213,7 +213,11 @@ export function handler(
         const epochs = q.getAll("epoch");
         if (pool === undefined || epochs.length > 1) return send(404, { error: { code: "not_found" } }, cors(req));
         if (epochs.length === 1 && (!/^[1-9][0-9]{0,15}$/.test(epochs[0]!) || Number(epochs[0]) % POOL_EPOCH_MS !== 0)) return send(404, { error: { code: "not_found" } }, cors(req));
-        return send(200, pool.fee(epochs.length === 1 ? Number(epochs[0]) : Date.now()), cors(req));
+        // a Solana fee is the host's; an EVM fee is read from the epoch's first block (null: no block in it yet)
+        void Promise.resolve(pool.fee(epochs.length === 1 ? Number(epochs[0]) : Date.now()))
+          .then((a) => (a === null ? send(404, { error: { code: "not_found" } }, cors(req)) : send(200, a, cors(req))))
+          .catch(() => (res.headersSent ? res.destroy() : send(503, { error: { code: "upstream" } }, cors(req))));
+        return;
       }
       if (path === POOL_SOLANA_SEND) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
