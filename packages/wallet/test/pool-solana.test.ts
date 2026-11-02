@@ -456,6 +456,19 @@ test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its
   }, { url: r.url })) as [SolanaRpc, SolanaRpc], gap: 4 }), /not (8|16) bytes/);
   // both RPCs: the nonce of another deposit (its label is not this note's), another value (not in the state tree)
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(other, other), gap: 4 }), /commitment is not in the state tree/);
+  // a mark of value 0 or nonce 0, which the program never writes (R11)
+  for (const z of [markData(0n, 3n), markData(10_000_000n, 0n)]) {
+    const c = edit((m) => m.set(key, z));
+    await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(c, c), gap: 4 }), /is not a label tree leaf/);
+  }
+  // one RPC lists a mark twice, or an account of another program (R2, R3)
+  const twist = (f: (v: { pubkey: string; account: { owner: string } }[]) => void): [SolanaRpc, SolanaRpc] => pair(chain, chain).map((r) => Object.assign(async (m: string, p: readonly unknown[]) => {
+    const a = (await r(m, p)) as { value?: { pubkey: string; account: { owner: string } }[] };
+    if (m === "getProgramAccounts" && a.value!.length > 0) f(a.value!);
+    return a;
+  }, { url: r.url })) as [SolanaRpc, SolanaRpc];
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: twist((v) => void v.push(v[0]!)), gap: 4 }), /an account twice/);
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: twist((v) => void (v[0]!.account = { ...v[0]!.account, owner: FEE_PAYER })), gap: 4 }), /not the program's account/);
   const far = edit((m) => m.set(key, markData(10_000_000n, 99n)));
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(far, far), gap: 4 }), /is not a label tree leaf/);
   // both RPCs serve another label at deposit 9's place in the label tree
@@ -636,4 +649,58 @@ test("RV12: each malformed page shape is refused (both RPCs serve it)", async ()
     return r;
   }, { url });
   await assert.rejects(poolWith([tag("https://a.example"), tag("https://b.example")]).trees(before), /not base64 data/);
+});
+
+test("R4: a state tree that holds one commitment twice stops the restore", () => {
+  const P = noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).precommitment;
+  const label = vaultLabelOf(keccak_256, SCOPE, 1n);
+  const c = noteCommitment(10_000_000n, label, P);
+  const marks = { pre: new Map([[solanaMarkOf(PROGRAM, "pre", P), { value: 10_000_000n, nonce: 1n }]]), spent: new Map<string, bigint>(), slot: 1 };
+  assert.equal(solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c], labelLeaves: [label], marks, gap: 2 }).notes.length, 1);
+  assert.throws(() => solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c, c], labelLeaves: [label], marks, gap: 2 }), /state leaf 1 repeats/);
+});
+
+test("S5: past a full page, the order of times is checked across the page edge", async () => {
+  const { state, label } = boundary();
+  const chain = { c: { accounts: new Map([...pages(0, state.slice(0, 1024)), ...pages(1, label.slice(0, 1024))]), slot: 900, time: () => 1_800_003_000n } as Chain };
+  const at = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => rpc(chain.c, MAINNET)(m, p), { url });
+  const sync = solanaTreeSync([at("https://a.example"), at("https://b.example")], PROGRAM);
+  await sync.trees(1_800_001_000_000n); // holds page 0, full: the next read starts at page 1
+  // page 1's first entry, on both RPCs, is older than page 0's last
+  chain.c = { ...chain.c, accounts: new Map([...pages(0, state.slice(0, 1025), (e, i) => { if (i === 1024) e.fill(0, 64, 72); }), ...pages(1, label.slice(0, 1024))]) };
+  await assert.rejects(sync.trees(1_800_001_000_000n), /tree 0: a time goes back at leaf 1024/);
+});
+
+test("S6: a behind RPC's shorter read never shrinks what the sync holds: an entry it held and both RPCs now change is refused", async () => {
+  const before = T(5) * 1000n + 1n;
+  const c = { a: relChain(), b: relChain() };
+  const at = (k: "a" | "b", url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => rpc(c[k], MAINNET)(m, p), { url });
+  const sync = solanaTreeSync([at("a", "https://a.example"), at("b", "https://b.example")], PROGRAM);
+  await sync.trees(before); // holds 7 state entries
+  c.b = { ...relChain(), accounts: new Map([...pages(0, REL_STATE.slice(0, 6)), ...pages(1, REL_LABELS)]) };
+  assert.equal((await sync.trees(before)).stateTree.size, 6); // b is behind: 6 agreed, 7 still held
+  // both RPCs now serve entry 6 (the release's change note, above the cut) changed
+  c.a = relChain(500, (e, i) => { if (i === 6) e[0] ^= 1; });
+  c.b = c.a;
+  await assert.rejects(sync.trees(before), /tree 0: page 0 changed since it was read/);
+});
+
+test("S4: a read over several batches is held at its lowest slot, so the next read asks each RPC from there", async () => {
+  // 25 pages a tree a batch: 25 full state pages and one more make two batches, the second answered a slot later
+  const many = Array.from({ length: 25 * 1024 + 3 }, (_, i) => ({ leaf: BigInt(i + 1), root: 0n, t: 1_800_000_000n }));
+  const chain: Chain = { accounts: new Map([...pages(0, many), ...pages(1, many.slice(0, 3))]), slot: 900, time: () => 1_800_000_100n };
+  const asked: (number | undefined)[] = [];
+  const at = (url: string): SolanaRpc => {
+    let calls = 0;
+    return Object.assign(async (m: string, p: readonly unknown[]) => {
+      if (m !== "getMultipleAccounts") return rpc(chain, MAINNET)(m, p);
+      asked.push((p[1] as { minContextSlot?: number }).minContextSlot);
+      return rpc({ ...chain, slot: 900 + (calls++ % 2) }, MAINNET)(m, p); // each read: its first batch at 900, its second at 901
+    }, { url });
+  };
+  const sync = solanaTreeSync([at("https://a.example"), at("https://b.example")], PROGRAM);
+  assert.equal((await sync.leaves(0)).state.length, many.length);
+  asked.length = 0;
+  await sync.leaves(0);
+  assert.deepEqual(asked, [900, 900], "the next read (one batch: the 25 full pages are held) asks each RPC from the lowest slot its last read was at");
 });
