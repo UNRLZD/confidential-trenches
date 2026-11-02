@@ -1980,6 +1980,120 @@ test("(a2) search: UNKNOWN_BLOCK at a height whose block the next block's prev_h
   assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
 });
 
+test("(a2) search: UNKNOWN_BLOCK at a height that is a block keeps that round even when a second read there answers; the next round finds D", async () => {
+  const node = new Node();
+  let first = 2; // one read on each provider
+  const lagOnce = (rs: [Rpc, Rpc]) =>
+    rs.map((r) => (async (m: string, p: unknown) => (m === "query" && (p as { block_id?: unknown }).block_id === 1010 && first-- > 0 ? Promise.reject(unknownBlock()) : r(m, p))) as Rpc) as [Rpc, Rpc];
+  const r = node.relayerOn(lagOnce(node.rpcs()), 50);
+  const tx = await unsent(node, r);
+  node.keyChanges.push({ height: 1011n, nonce: 50n, cause: { type: "transaction_processing", tx_hash: "another" } });
+  node.final = 1020n;
+  first = 2;
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+
+test("a stored D the providers now answer with another hash (both, alike) keeps the round", async () => {
+  const node = new Node();
+  const tx: TxRef[] = [];
+  const r = node.relayer(50);
+  sendDown(node, () => true);
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  node.fail = undefined;
+  node.hideTx.set(tx[0]!.tx_hash, 3);
+  await r.resolve(tx[0]!, resend);
+  await sleepMs(10);
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "D found and stored; lookups behind");
+  const d = Number(node.appliedAt(tx[0]!.tx_hash)!);
+  const fork = base58(createHash("sha256").update("another fork").digest());
+  const swapped = node.rpcs().map((x) => (async (m: string, p: unknown) => {
+    const a = await x(m, p);
+    const at = (p as { block_id?: unknown }).block_id;
+    if (m === "block" && at === d) return { header: { ...(a as { header: object }).header, hash: fork } };
+    if (m === "EXPERIMENTAL_changes" && at === d) return { ...(a as object), block_hash: fork };
+    return a;
+  }) as Rpc) as [Rpc, Rpc];
+  assert.equal((await node.relayerOn(swapped, 50).resolve(tx[0]!, noResend)).kind, "unknown");
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+});
+
+/** Both providers' answers passed through `edit`. */
+const bothEdited = (node: Node, edit: (method: string, params: Record<string, unknown>, real: () => Promise<unknown>) => Promise<unknown>): [Rpc, Rpc] =>
+  node.rpcs().map((r) => ((m: string, p: unknown) => edit(m, p as Record<string, unknown>, () => r(m, p))) as Rpc) as [Rpc, Rpc];
+/** A prepay that landed, then F moved past its validity period; the answers come through `rs` from then on. */
+async function landedPast(node: Node, edit: (method: string, params: Record<string, unknown>, real: () => Promise<unknown>) => Promise<unknown>, one?: 0 | 1) {
+  let on = false;
+  const rs = one === undefined ? bothEdited(node, (m, p, real) => (on ? edit(m, p, real) : real())) : edited(node, one, (m, p, real) => (on ? edit(m, p, real) : real()));
+  const r = node.relayerOn(rs, 50);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "final");
+  node.final += 150n;
+  on = true;
+  return { r, tx: tx[0]!, d: Number(node.appliedAt(tx[0]!.tx_hash)!), off: () => (on = false) };
+}
+
+test("one provider answering K at F as unspent while the other shows it spent keeps the round: a landed prepay past its window is never dropped on one provider's word", async () => {
+  const node = new Node();
+  const { r, tx, off } = await landedPast(node, async (m, p, real) => (m === "query" && typeof p.block_id === "number" ? { ...((await real()) as object), nonce: 10 } : real()), 0);
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  off();
+  assert.equal((await r.resolve(tx, noResend)).kind, "final");
+});
+
+test("view_access_key answered at another height than the one asked keeps the round", async () => {
+  const node = new Node();
+  const { r, tx, off } = await landedPast(node, async (m, p, real) => (m === "query" && typeof p.block_id === "number" ? { nonce: 10, permission: "FullAccess", block_height: 1000, block_hash: node.bh(1000n) } : real()));
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  off();
+  assert.equal((await r.resolve(tx, noResend)).kind, "final");
+});
+
+test("a change list at D answered under another block's hash keeps the round", async () => {
+  const node = new Node();
+  const { r, tx, d, off } = await landedPast(node, async (m, p, real) =>
+    m === "EXPERIMENTAL_changes" && p.block_id === d ? { block_hash: node.bh(BigInt(d) + 1n), changes: [{ cause: { type: "receipt_processing", receipt_hash: "x" }, type: "access_key_update", change: { account_id: RELAYER, public_key: (p.keys as { public_key: string }[])[0]!.public_key, access_key: { nonce: 99, permission: "FullAccess" } } }] } : real(),
+  );
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  off();
+  assert.equal((await r.resolve(tx, noResend)).kind, "final");
+});
+
+test("a change list at D naming another key keeps the round", async () => {
+  const node = new Node();
+  const { r, tx, d, off } = await landedPast(node, async (m, p, real) =>
+    m === "EXPERIMENTAL_changes" && p.block_id === d ? { block_hash: node.bh(BigInt(d)), changes: [{ cause: { type: "receipt_processing", receipt_hash: "x" }, type: "access_key_update", change: { account_id: RELAYER, public_key: "ed25519:11111111111111111111111111111111", access_key: { nonce: 99, permission: "FullAccess" } } }] } : real(),
+  );
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  off();
+  assert.equal((await r.resolve(tx, noResend)).kind, "final");
+});
+
+test("(a2): K turned into a function-call key below the transaction's nonce (not a plain key any more) fails P, and the change there names no transaction of ours", async () => {
+  const node = new Node();
+  const rs = bothEdited(node, async (m, p, real) => {
+    const a = await real();
+    return m === "query" && typeof p.block_id === "number" && p.block_id >= 1005 && isObjAnswer(a) ? { ...a, permission: { FunctionCall: { allowance: null, receiver_id: VAULT, method_names: [] } } } : a;
+  });
+  const r = node.relayerOn(rs, 50);
+  const tx = await unsent(node, r);
+  node.keyChanges.push({ height: 1005n, nonce: 10n, cause: { type: "receipt_processing", receipt_hash: "AddKey" } });
+  node.final = 1010n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+const isObjAnswer = (a: unknown): a is Record<string, unknown> => typeof a === "object" && a !== null && "nonce" in a;
+
+test("(a2) search: K answered at a height that has no block (the next block's prev_height skips it) keeps the round", async () => {
+  const node = new Node();
+  node.skipped.add(1009n);
+  const rs = bothEdited(node, async (m, p, real) => (m === "query" && p.block_id === 1009 ? { nonce: 10, permission: "FullAccess", block_height: 1009, block_hash: node.bh(1009n) } : real()));
+  const r = node.relayerOn(rs, 50);
+  const tx = await unsent(node, r);
+  node.keyChanges.push({ height: 1010n, nonce: 50n, cause: { type: "transaction_processing", tx_hash: "another" } });
+  node.final = 1020n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+});
+
 test("(a2): K deleted before the transaction was applied: the deletion at D names no transaction of ours, so it is dropped", async () => {
   const node = new Node();
   const r = node.relayer(50);
