@@ -1,0 +1,25 @@
+# The EVM pool (Privacy Pools v1.3.0 with no keys). solc and forge-std are pinned: solc 0.8.28, Privacy Pools' own
+# (packages/contracts/foundry.toml at c312dcd), and forge-std v1.9.7 (lib/forge-std, a submodule at 77041d2).
+# Optimizer and metadata as Privacy Pools builds them; Cancun for transient storage (Base and Robinhood run it).
+[profile.default]
+src = 'src'
+test = 'test'
+libs = ['lib']
+solc_version = '0.8.28'
+evm_version = 'cancun'
+optimizer = true
+optimizer_runs = 10_000
+bytecode_hash = 'none'
+cbor_metadata = false
+# every build writes the storage layout, which test/layout.test.mjs reads
+extra_output = ['storageLayout']
+fs_permissions = [{ access = 'read', path = './test/fixtures' }]
+remappings = [
+  'forge-std/=lib/forge-std/src/',
+  'poseidon-solidity/=src/poseidon/',
+  'lean-imt/=lib/lean-imt/',
+  'interfaces/=src/interfaces/',
+]
+
+[fuzz]
+runs = 1000

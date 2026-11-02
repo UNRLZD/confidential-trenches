@@ -3,7 +3,7 @@
 //
 // Run (keyless mainnet reads only, nothing is sent to any cluster):
 //   LITESVM_DIR=<a folder with `npm i --no-package-lock litesvm@1.5.0`> \
-//   POOL_SO=<blindfill_pool_solana.so from pool-sol-core, cargo-build-sbf> \
+//   POOL_SO=<blindfill_pool_solana.so of contracts/pool-solana at this tree (tag 3), cargo-build-sbf> \
 //   POOL_FIXTURE=<contracts/pool-solana/fixtures/release-spends.json> \
 //   node packages/kit/test/svm/pool-buy.svm.mjs pump-curve|pumpswap <mint> [--record <file>]
 //
@@ -12,8 +12,9 @@
 // - The pool is pool-sol-core's program at the fixture's test id, made and given the fixture's six deposits; the
 //   release is the fixture's "release" spend (a real proof bound to the test W and fee payer).
 // - The kit builds, checks and the test keys sign: readSolanaReference and readSolanaPoolBuyVenue answer from the
-//   recorded reads of the two providers, buildSolanaPoolBuy builds shape A, checkSolanaPoolBuy must pass on it and
-//   refuse it with min_out changed.
+//   recorded reads of the two providers, readSolanaRent reads the Rent sysvar on both (LiteSVM is set to it),
+//   buildSolanaPoolBuy builds tag 3 with the compressed proof, checkSolanaPoolBuy must pass on it and refuse it with
+//   min_out changed. Prints the bytes, the CU, and what W paid for each account the buy made.
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -90,6 +91,9 @@ const release = {
 
 // ------------------------------------------------------------------ mainnet copies
 const providers = [replay(0), replay(1)];
+const live = RPCS.map((url) => (method, params) => rpc(url, method, params));
+const rent = await kit.readSolanaRent(live);
+log(`rent (equal on both providers): ${rent.lamportsPerByte} lamports a byte, factor ${rent.factor}`);
 const venue = await kit.readSolanaPoolBuyVenue(providers, venueKind, mint);
 log("venue (equal on both providers):", JSON.stringify(venue));
 const cfg = { program: PROGRAM, pool: POOL };
@@ -104,13 +108,13 @@ log(`reference E for ${SPEND} lamports: ${refPool.expectedOut} (both providers' 
 const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 const FEES = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
-// The Jito tip (lamports from W, at most the proof's tip cap); POOL_BUY_TIP=0 builds without one.
+// The Jito tip (lamports the pool pays out of the chunk, at most the proof's tip cap); POOL_BUY_TIP=0 builds without one.
 const TIP = BigInt(process.env.POOL_BUY_TIP ?? "10000");
 const req0 = { wallet: W.address, feePayer: FEE_PAYER.address, token: mint, spend: SPEND, minOut, tip: TIP, cuPrice: 100_000n };
 const tableAccounts = kit.solanaPoolBuyTableAccounts(cfg, venue, kit.solanaPoolPages(PROGRAM, 7, 6));
 // every account of the instructions, to copy from mainnet (the pool's and W's own are made in LiteSVM)
-const ixsProbe = kit.solanaPoolBuyInstructions(cfg, release, venue, req0, 6, kit.SOLANA_JITO_TIP_ACCOUNTS[0]);
-const local = new Set([POOL, W.address, FEE_PAYER.address, PROGRAM, ...ixsProbe[2].accounts.map((a) => a.key)]);
+const ixsProbe = kit.solanaPoolBuyInstructions(cfg, release, venue, req0, 6, rent, TIP > 0n ? kit.SOLANA_JITO_TIP_ACCOUNTS[0] : null);
+const local = new Set([POOL, W.address, FEE_PAYER.address, PROGRAM, kit.SOLANA_COMPUTE_BUDGET_PROGRAM, ...ixsProbe[2].accounts.slice(0, 8).map((a) => a.key)]);
 const touched = [...new Set(ixsProbe.flatMap((x) => [x.program, ...x.accounts.map((a) => a.key)]))].filter((k) => !local.has(k));
 const programs = [venueKind === "pump-curve" ? PUMP : AMM, FEES];
 const accounts = new Map();
@@ -142,6 +146,9 @@ for (const p of programs) {
 
 // ------------------------------------------------------------------ LiteSVM
 const svm = new LiteSVM();
+const { Rent } = await import(pathToFileURL(req.resolve("litesvm")).href);
+svm.setRent(new Rent(rent.lamportsPerByte, Number(rent.factor), 50));
+if (svm.minimumBalanceForRentExemption(165n) !== kit.solanaRentMin(rent, 165)) throw new Error("LiteSVM's rent is not mainnet's");
 const addr = kitSol.address;
 svm.addProgramFromFile(addr(PROGRAM), need("POOL_SO"));
 for (const [p, elf] of code) svm.addProgram(addr(p), elf);
@@ -202,35 +209,16 @@ const tokenAmount = () => {
   return tok.exists === false ? 0n : new DataView(tok.data.buffer, tok.data.byteOffset).getBigUint64(64, true);
 };
 const blockhash = svm.latestBlockhash();
-if (process.argv.includes("--split")) {
-  // Not the product: shape A on PumpSwap is 1,408 bytes, so it waits for tag 3. This splits it in two transactions, the
-  // release and then W's buy, only to run the kit's PumpSwap instructions against mainnet's code with W as the user.
-  const all = kit.solanaPoolBuyInstructions(cfg, release, venue, req0, 6, null);
-  const head = all.slice(0, 2);
-  const one = kit.solanaCompileV0(FEE_PAYER.address, [...head, all[2]], blockhash, [{ address: tableAddr, table }], [FEE_PAYER.address, W.address]).message;
-  const r1 = signSend(one);
-  if (r1 instanceof FailedTransactionMetadata) { log(r1.meta().logs().join("\n")); log(`split release: FAIL ${r1.err()}`); process.exit(1); }
-  svm.expireBlockhash();
-  const two = kit.solanaCompileV0(FEE_PAYER.address, [...head, ...all.slice(3)], svm.latestBlockhash(), [{ address: tableAddr, table }], [FEE_PAYER.address, W.address]);
-  log(`split: release ${1 + 128 + one.length} B, then buy ${1 + 128 + two.message.length} B`);
-  const r2 = signSend(two.message);
-  if (r2 instanceof FailedTransactionMetadata) { log(r2.meta().logs().join("\n")); log(`split buy: FAIL ${r2.err()}`); process.exit(1); }
-  const cu = r2.logs().filter((l) => l.startsWith(`Program ${AMM} consumed`)).map((l) => l.match(/consumed (\d+)/)[1]).join("+");
-  const amount = tokenAmount();
-  log(`split buy: OK; PumpSwap CU ${cu}; W holds ${amount} of ${mint} (min out ${minOut}, E ${refPool.expectedOut}); W's wrapped SOL account ${svm.getAccount(addr(kit.solanaAta(W.address, kit.SOLANA_SOL_MINT, kit.SOLANA_TOKEN_PROGRAM))).exists === false ? "closed" : "open"}`);
-  if (amount < minOut || amount === 0n) { log("FAIL: W holds less than min out"); process.exit(1); }
-  if (recordAt > 0) writeFileSync(process.argv[recordAt + 1], JSON.stringify({ venueKind, mint, providers: RPCS, reads: [Object.fromEntries(recorded[0]), Object.fromEntries(recorded[1])] }, null, 1) + "\n");
-  log("PASS (split)");
-  process.exit(0);
-}
-const built = kit.buildSolanaPoolBuy(cfg, release, venue, req0, { blockhash, lastValidBlockHeight: 1_000_000, table: { address: tableAddr, table }, stateSize: 6 }, { pick: () => 0 });
-const reads = { tables: { [tableAddr]: [{ owner: "AddressLookupTab1e1111111111111111111111111", data: tableData }, { owner: "AddressLookupTab1e1111111111111111111111111", data: tableData }] }, stateSize: 6, reference: { amount: SPEND, ref, slippageBps: SLIPPAGE_BPS } };
+const chain = { blockhash, lastValidBlockHeight: 1_000_000, table: { address: tableAddr, table }, stateSize: 6, rent };
+const built = kit.buildSolanaPoolBuy(cfg, release, venue, req0, chain, { pick: () => 0 });
+const slot = await rpc(RPCS[0], "getSlot", [{ commitment: "confirmed" }]);
+const reads = { blockhash, slot: Math.min(slot, ref.slot + kit.SOLANA_POOL_QUOTE_MAX_AGE_SLOTS), tables: { [tableAddr]: [{ owner: "AddressLookupTab1e1111111111111111111111111", data: tableData }, { owner: "AddressLookupTab1e1111111111111111111111111", data: tableData }] }, stateSize: 6, rent, reference: { amount: SPEND, ref, slippageBps: SLIPPAGE_BPS } };
 const verdict = kit.checkSolanaPoolBuy(built.wire, cfg, release, venue, req0, reads);
-log(`built shape A: ${built.size} B, ${built.instructions.length} instructions; check ${verdict.ok ? "PASS" : "FAIL"}`);
+log(`built tag 3 (compressed proof, tip ${TIP}): ${built.size} B, ${built.instructions.length} instructions; check ${verdict.ok ? "PASS" : "FAIL"}`);
 for (const r of verdict.results) log(`  ${r.ok ? "ok  " : "FAIL"} ${r.id}: ${r.detail}`);
 if (!verdict.ok) process.exit(1);
 // the same transaction with min_out lowered by one: the check refuses it
-const bent = kit.buildSolanaPoolBuy(cfg, release, venue, { ...req0, minOut: minOut - 1n }, { blockhash, lastValidBlockHeight: 1_000_000, table: { address: tableAddr, table }, stateSize: 6 }, { pick: () => 0 });
+const bent = kit.buildSolanaPoolBuy(cfg, release, venue, { ...req0, minOut: minOut - 1n }, chain, { pick: () => 0 });
 const bentVerdict = kit.checkSolanaPoolBuy(bent.wire, cfg, release, venue, req0, reads);
 log(`min_out changed: check ${bentVerdict.ok ? "PASS (wrong)" : "FAIL (refused): " + bentVerdict.results.filter((r) => !r.ok).map((r) => r.id).join(",")}`);
 if (bentVerdict.ok) process.exit(1);
@@ -241,6 +229,9 @@ wire.set(ed25519.sign(built.message, W.seed), 65);
 const tx = kitSol.getTransactionDecoder().decode(wire);
 const ata = kit.solanaAta(W.address, mint, venue.tokenProgram);
 const before = svm.getBalance(addr(W.address)) ?? 0n;
+const vol = kit.solanaVolumeAccumulator(W.address, venueKind === "pump-curve" ? PUMP : AMM);
+const sizeOf = (k) => { const a = svm.getAccount(addr(k)); return !a || a.exists === false ? null : a.data.length; };
+const volBefore = sizeOf(vol);
 const t0 = performance.now();
 const r = svm.sendTransaction(tx);
 const ms = performance.now() - t0;
@@ -256,10 +247,17 @@ const amount = new DataView(tok.data.buffer, tok.data.byteOffset).getBigUint64(6
 const spent = svm.getAccount(addr(kit.solanaPoolSpentMark(PROGRAM, release.existingNullifierHash)));
 log(`release and buy: OK in ${ms.toFixed(1)} ms; CU total ${r.computeUnitsConsumed()} (pool ${cuOf(PROGRAM)}, venue ${cuOf(venueKind === "pump-curve" ? PUMP : AMM)})`);
 log(`W ${W.address}: ${amount} of ${mint} (min out ${minOut}, E ${refPool.expectedOut}); W lamports ${before} -> ${svm.getBalance(addr(W.address))}; spent mark ${spent?.exists === false || !spent ? "missing" : "made"}`);
+const f = kit.solanaPoolBuyFunds(release, venue, req0, rent);
+log(`funds: chunk ${f.chunk}, peak ${f.peak}, W keeps ${f.left} by the rule; W's token account ${sizeOf(ata)} B (rule ${venue.tokenAccountSize}); W's volume account ${volBefore ?? "none"} -> ${sizeOf(vol) ?? "none"} B (rule ${kit.SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venueKind]}); W's wrapped SOL ${sizeOf(kit.solanaAta(W.address, kit.SOLANA_SOL_MINT, kit.SOLANA_TOKEN_PROGRAM)) ?? "closed"}`);
+log(`BYTES tag3 ${venueKind} compressed tip ${TIP}: ${built.size}; CU ${r.computeUnitsConsumed()}`);
+// W's ending balance is exactly what the funds rule says W keeps (W starts with `before`, every account made new)
+const after = svm.getBalance(addr(W.address)) ?? 0n;
+if (after !== before + f.left) { log(`FAIL: W ends with ${after}, the funds rule says ${before + f.left}`); process.exit(1); }
+log(`W's ending balance ${after} = the funds rule's ${f.left} (plus the ${before} W held)`);
 if (amount < minOut || amount === 0n) { log("FAIL: W holds less than min out"); process.exit(1); }
 // the same release again: the spent mark refuses it
 svm.expireBlockhash();
-const again = kit.buildSolanaPoolBuy(cfg, release, venue, req0, { blockhash: svm.latestBlockhash(), lastValidBlockHeight: 1_000_000, table: { address: tableAddr, table }, stateSize: 7 }, { pick: () => 0 });
+const again = kit.buildSolanaPoolBuy(cfg, release, venue, req0, { ...chain, blockhash: svm.latestBlockhash(), stateSize: 7 }, { pick: () => 0 });
 const w2 = again.wire.slice();
 w2.set(ed25519.sign(again.message, FEE_PAYER.seed), 1);
 w2.set(ed25519.sign(again.message, W.seed), 65);

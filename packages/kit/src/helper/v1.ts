@@ -106,6 +106,11 @@ export const HELPER_V1_PATHS = [
   { method: "GET", path: "/v1/withdraw/fee", part: "relay", limitBytes: 1024 },
   { method: "POST", path: "/v1/withdraw", part: "relay", limitBytes: 8192 },
   { method: "GET", path: "/v1/withdraw/{tx_hash}", part: "relay", limitBytes: 1024 },
+  // the pool relayers (card helper-pool-senders, apps/helper/src/pool/): the epoch's fee, then a pool release or buy
+  // the device signed, carried as is (POOL_SOLANA_BODY_MAX and POOL_EVM_BODY_MAX, 4 KB each)
+  { method: "GET", path: "/v1/pool/fee", part: "relay", limitBytes: 1024 },
+  { method: "POST", path: "/v1/pool/solana/send", part: "relay", limitBytes: 4096 },
+  { method: "POST", path: "/v1/pool/evm/send", part: "relay", limitBytes: 4096 },
   { method: "POST", path: "/v1/bind", part: "delegate", limitBytes: 4096 },
   { method: "POST", path: "/v1/intents", part: "intents", limitBytes: 8192 },
   { method: "POST", path: "/v1/orders", part: "orders", limitBytes: 65536 },

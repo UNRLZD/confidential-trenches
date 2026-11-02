@@ -1,105 +1,68 @@
-// Card sol-pool-buy-tx: the one transaction W signs to release a chunk from the Solana pool and buy (src/trade/solana/
-// pool-buy.ts). Replays the two providers' reads recorded in the LiteSVM run (test/svm/pool-buy.svm.mjs, which landed
-// shape A on a copy of mainnet's pump program and accounts) and the pool fixture's real release proof.
+// Card sol-pool-buy-tx: the one transaction W signs to release a chunk from the Solana pool and buy, as tag 3
+// release-and-buy with the compressed proof (src/trade/solana/pool-buy.ts, contracts/pool-solana/TAG3.md). The setup
+// (recorded reads of two providers, the Rent sysvar, the pool fixture's real proof) is solana-pool-buy-fx.ts; the
+// review's attacks are solana-pool-buy-attacks.test.ts.
 //   node --test test/solana-pool-buy.test.ts
 import { test } from "node:test";
-import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import assert from "node:assert/strict";
 import { base58 } from "@scure/base";
 import {
+  HELPER_V1_PATHS,
   SOLANA_JITO_TIP_ACCOUNTS,
+  SOLANA_POOL_QUOTE_MAX_AGE_SLOTS,
   SOLANA_POOL_RELEASE_LEN,
+  SOLANA_POOL_VOLUME_ACCOUNT_SIZE,
+  SOLANA_PUMP_AMM_PROGRAM,
+  SOLANA_PUMP_PROGRAM,
   buildSolanaPoolBuy,
-  buildSolanaPoolBuyTag3,
   checkSolanaPoolBuy,
   readSolanaPoolBuyVenue,
   readSolanaReference,
-  solanaCompileV0,
-  solanaDecodeLookupTable,
+  solanaCompressPoolProof,
   solanaDecodePoolRelease,
   solanaEncodePoolRelease,
   solanaPoolAccount,
+  solanaPoolBuyFunds,
   solanaPoolBuyInstructions,
-  solanaPoolBuyTableAccounts,
+  solanaPoolBuySteps,
+  solanaPoolReleaseCost,
+  readSolanaRent,
+  solanaDecodeMessage,
+  solanaDecodeLookupTable,
+  solanaPoolSellMinOut,
+  solanaPoolSellSteps,
   solanaPoolPage,
-  solanaPoolPages,
   solanaPoolReleaseAccounts,
   solanaPoolSpentMark,
   solanaProgramAddress,
-  type SolanaPoolBuyRequest,
+  solanaRentMin,
+  solanaRentOf,
+  solanaTokenAccountSize,
   type SolanaPoolBuyVenue,
-  type SolanaPoolRelease,
   type SolanaRpc,
 } from "../src/index.ts";
+import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, SPEND, TIP, W, cfg, fx, providers, release, rent, replay, setup, unhex, wireOf } from "./solana-pool-buy-fx.ts";
 
-const fx = JSON.parse(readFileSync(new URL("./fixtures/solana-pool-buy.json", import.meta.url), "utf8"));
-const unhex = (s: string): Uint8Array => Uint8Array.from(Buffer.from(s, "hex"));
-const key = (h: string): string => base58.encode(unhex(h));
-const PROGRAM = key(fx.program);
-const POOL = key(fx.pool);
-const W = key(fx.w);
-const FEE_PAYER = key(fx.fee_payer);
-const ALT = "AddressLookupTab1e1111111111111111111111111";
-const cfg = { program: PROGRAM, pool: POOL };
-const r = fx.release;
-const release: SolanaPoolRelease = {
-  proof: unhex(r.proof), newCommitmentHash: unhex(r.new_commitment), existingNullifierHash: unhex(r.nullifier_hash),
-  withdrawnValue: BigInt(r.withdrawn), stateRootIndex: r.state_root_index, stateTreeDepth: r.state_depth,
-  labelRootIndex: r.label_root_index, labelTreeDepth: r.label_depth, relayFee: 2_000_000n,
-  relayFeeCap: BigInt(fx.relay_fee_cap), tipCap: BigInt(fx.tip_cap), deadlineMs: BigInt(fx.deadline_ms), salt: unhex(r.salt),
+const failed = (v: ReturnType<typeof checkSolanaPoolBuy>) => v.results.filter((x) => !x.ok).map((x) => x.id);
+const Q = 21888242871839275222246405745257275088696311157297823662689037894645226208583n;
+const be = (b: Uint8Array): bigint => b.reduce((v, x) => (v << 8n) | BigInt(x), 0n);
+const pow = (b: bigint, e: bigint): bigint => {
+  let r = 1n;
+  for (b %= Q; e > 0n; e >>= 1n, b = (b * b) % Q) if (e & 1n) r = (r * b) % Q;
+  return r;
 };
-// a provider that answers getMultipleAccounts from the run's recorded reads
-const replay = (rec: { reads: Record<string, unknown>[] }, p: 0 | 1, edit?: (list: string[], ans: any) => any): SolanaRpc =>
-  (async (method: string, params: readonly unknown[]) => {
-    assert.equal(method, "getMultipleAccounts");
-    const k = JSON.stringify(params[0]);
-    const ans = rec.reads[p]![k];
-    assert.ok(ans, `no recorded read of ${k}`);
-    const copy = structuredClone(ans);
-    return edit ? edit(params[0] as string[], copy) : copy;
-  }) as SolanaRpc;
-const providers = (v: "pump" | "pumpswap") => [replay(fx[v], 0), replay(fx[v], 1)] as const;
-const SPEND = 5_000_000n;
-const BLOCKHASH = base58.encode(new Uint8Array(32).fill(7));
-
-async function setup(v: "pump" | "pumpswap") {
-  const kind = v === "pump" ? "pump-curve" : "pumpswap";
-  const mint = fx[v].mint as string;
-  const venue = await readSolanaPoolBuyVenue(providers(v), kind, mint, () => 2);
-  const ref = await readSolanaReference(providers(v), { side: "buy", token: mint, amount: SPEND });
-  const E = ref!.pools.find((p) => p.venue === kind)!.expectedOut;
-  const minOut = (E * 9_700n) / 10_000n;
-  const addresses = solanaPoolBuyTableAccounts(cfg, venue, solanaPoolPages(PROGRAM, 7, 6));
-  const tableAddr = base58.encode(new Uint8Array(32).fill(9));
-  const meta = new Uint8Array(56);
-  const dv = new DataView(meta.buffer);
-  dv.setUint32(0, 1, true);
-  dv.setBigUint64(4, (1n << 64n) - 1n, true);
-  const tableData = Uint8Array.from([...meta, ...addresses.flatMap((k) => [...base58.decode(k)])]);
-  const table = solanaDecodeLookupTable(tableData);
-  const req: SolanaPoolBuyRequest = { wallet: W, feePayer: FEE_PAYER, token: mint, spend: SPEND, minOut, tip: 10_000n, cuPrice: 100_000n };
-  const chain = { blockhash: BLOCKHASH, lastValidBlockHeight: 100, table: { address: tableAddr, table }, stateSize: 6 };
-  const reads = { tables: { [tableAddr]: [{ owner: ALT, data: tableData }, { owner: ALT, data: tableData }] as const }, stateSize: 6, reference: { amount: SPEND, ref, slippageBps: 300 } };
-  return { venue, ref, E, minOut, req, chain, reads, tableData, tableAddr };
-}
 
 test("tag 2 is release.rs's 387 bytes: the proof, then each field in order, little-endian integers", () => {
   const d = solanaEncodePoolRelease(release);
   assert.equal(d.length, SOLANA_POOL_RELEASE_LEN);
   assert.equal(d[0], 2);
   assert.deepEqual(d.subarray(1, 257), release.proof);
-  assert.deepEqual(d.subarray(257, 289), release.newCommitmentHash);
-  assert.deepEqual(d.subarray(289, 321), release.existingNullifierHash);
   const v = new DataView(d.buffer);
   assert.equal(v.getBigUint64(321, true), 15_000_000n);
   assert.equal(v.getUint32(329, true), 5); // state root index
-  assert.equal(d[333], release.stateTreeDepth);
-  assert.equal(v.getUint32(334, true), 5); // label root index
-  assert.equal(d[338], release.labelTreeDepth);
   assert.equal(v.getBigUint64(339, true), 2_000_000n); // relay fee
-  assert.equal(v.getBigUint64(347, true), 2_500_000n); // relay fee cap
   assert.equal(v.getBigUint64(355, true), 1_000_000n); // tip cap
-  assert.equal(v.getBigUint64(363, true), 4_102_444_800_000n); // deadline
   assert.deepEqual(d.subarray(371, 387), release.salt);
   assert.deepEqual(solanaDecodePoolRelease(d), release);
 });
@@ -111,39 +74,107 @@ test("a release the pool would refuse is refused before it is built", () => {
   assert.throws(() => solanaEncodePoolRelease({ ...release, stateTreeDepth: 33 }), /at most 32/);
   assert.throws(() => solanaEncodePoolRelease({ ...release, relayFee: release.relayFeeCap + 1n }), /over its cap/);
   assert.throws(() => solanaEncodePoolRelease({ ...release, withdrawnValue: 0n }), /not be 0/);
-  assert.throws(() => solanaEncodePoolRelease({ ...release, proof: release.proof.subarray(0, 128) }), /256 bytes/);
 });
 
 test("the release's accounts: the fixture's pool PDA, W and the fee payer signing, the nullifier's spent mark, the pages", () => {
-  assert.equal(solanaPoolAccount(PROGRAM), POOL);
+  assert.equal(solanaPoolAccount(PROGRAM), cfg.pool);
   const a = solanaPoolReleaseAccounts(cfg, W, FEE_PAYER, release, 1024);
   assert.deepEqual(a.map((x) => [x.signer, x.writable]), [[false, true], [true, true], [true, true], [false, true], [false, false], [false, false], [false, true], [false, false]]);
   assert.equal(a[3]!.key, solanaPoolSpentMark(PROGRAM, release.existingNullifierHash));
   assert.equal(a[4]!.key, solanaPoolPage(PROGRAM, 0, 5));
-  assert.equal(a[5]!.key, solanaPoolPage(PROGRAM, 1, 5));
-  // entry 1,024 opens page 1 of the state tree: ["page", 0, 1 as u32 LE]
   assert.equal(a[6]!.key, solanaProgramAddress([new TextEncoder().encode("page"), Uint8Array.of(0), Uint8Array.of(1, 0, 0, 0)], PROGRAM));
-  assert.notEqual(a[6]!.key, a[4]!.key);
+});
+
+test("the compressed proof: A and C are x with y's sign in bit 7 and decompress to the proof's points; B is x.c1 x.c0", () => {
+  const c = solanaCompressPoolProof(release.proof);
+  assert.equal(c.length, 128);
+  for (const [raw, comp] of [[0, 0], [192, 96]] as const) {
+    const x = be(release.proof.subarray(raw, raw + 32));
+    const y = be(release.proof.subarray(raw + 32, raw + 64));
+    const cx = c.slice(comp, comp + 32);
+    const neg = (cx[0]! & 0x80) !== 0;
+    cx[0] = cx[0]! & 0x3f;
+    assert.equal(be(cx), x);
+    // decompress as solana-bn254 does: y = sqrt(x^3 + 3), the root above q - root when bit 7 is set
+    const root = pow((x * x * x + 3n) % Q, (Q + 1n) / 4n);
+    assert.equal((root * root) % Q, (x * x * x + 3n) % Q, "x is on the curve");
+    const big = root > Q - root ? root : Q - root;
+    assert.equal(neg ? big : Q - big, y);
+  }
+  const b = c.slice(32, 96);
+  const neg = (b[0]! & 0x80) !== 0;
+  b[0] = b[0]! & 0x3f;
+  assert.deepEqual(b, release.proof.subarray(64, 128));
+  const y1 = be(release.proof.subarray(128, 160));
+  const y0 = be(release.proof.subarray(160, 192));
+  assert.equal(neg, y1 !== 0n ? y1 > Q - y1 : y0 > Q - y0);
+  assert.throws(() => solanaCompressPoolProof(new Uint8Array(256)), /infinity/);
+  assert.throws(() => solanaCompressPoolProof(release.proof.subarray(0, 128)), /256 bytes/);
+});
+
+test("tag 3: CU limit, CU price and one instruction into the pool; tag, flags, compressed proof, tag 2's fields, tip, the inner steps", async () => {
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue, req, chain } = await setup(v);
+    const ixs = solanaPoolBuyInstructions(cfg, release, venue, req, 6, rent, SOLANA_JITO_TIP_ACCOUNTS[3]!);
+    assert.equal(ixs.length, 3);
+    const t = ixs[2]!;
+    assert.equal(t.program, PROGRAM);
+    assert.deepEqual([t.data[0], t.data[1]], [3, 1]);
+    assert.deepEqual(t.data.subarray(2, 130), solanaCompressPoolProof(release.proof));
+    assert.deepEqual(t.data.subarray(130, 260), solanaEncodePoolRelease(release).subarray(257));
+    assert.equal(new DataView(t.data.buffer, t.data.byteOffset).getBigUint64(260, true), TIP);
+    const steps = solanaPoolBuySteps(venue, W, SPEND, req.minOut);
+    assert.equal(t.data[268], steps.length);
+    assert.deepEqual(t.accounts.slice(0, 8), solanaPoolReleaseAccounts(cfg, W, FEE_PAYER, release, 6));
+    assert.deepEqual(t.accounts[8], { key: SOLANA_JITO_TIP_ACCOUNTS[3], signer: false, writable: true });
+    // the first inner step, read back: its program and accounts by index into tag 3's accounts, then its data
+    const first = steps[0]!;
+    assert.equal(t.accounts[t.data[269]!]!.key, first.program);
+    assert.equal(t.data[270], first.accounts.length);
+    assert.deepEqual(Array.from(t.data.subarray(271, 271 + first.accounts.length), (i) => t.accounts[i]!.key), first.accounts.map((a) => a.key));
+    // without a tip there is no tip account and the tip is 0
+    const none = solanaPoolBuyInstructions(cfg, release, venue, { ...req, tip: 0n }, 6, rent, null)[2]!;
+    assert.equal(none.accounts.length, t.accounts.length - 1);
+    assert.ok(!SOLANA_JITO_TIP_ACCOUNTS.includes(none.accounts[8]!.key));
+    assert.throws(() => solanaPoolBuyInstructions(cfg, release, venue, req, 6, rent, FEE_PAYER), /not a Jito tip account/);
+    assert.throws(() => solanaPoolBuyInstructions(cfg, release, venue, req, 6, rent, null), /tip account goes with a tip/);
+    assert.ok(buildSolanaPoolBuy(cfg, release, venue, req, chain).size <= 1232);
+  }
 });
 
 test("pump's buy carries the bonding-curve-v2 PDA and one of Global's buyback recipients (mainnet code refuses it without: 6062)", async () => {
   const { venue, req } = await setup("pump");
-  assert.equal(venue.kind, "pump-curve");
-  const ixs = solanaPoolBuyInstructions(cfg, release, venue, req, 6, null);
-  const buy = ixs.find((x) => x.program === "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")!;
+  const buy = solanaPoolBuySteps(venue, W, SPEND, req.minOut).find((x) => x.program === SOLANA_PUMP_PROGRAM)!;
   assert.equal(buy.accounts.length, 18);
-  assert.equal(buy.accounts[16]!.key, solanaProgramAddress([new TextEncoder().encode("bonding-curve-v2"), base58.decode(req.token)], "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"));
+  assert.equal(buy.accounts[16]!.key, solanaProgramAddress([new TextEncoder().encode("bonding-curve-v2"), base58.decode(req.token)], SOLANA_PUMP_PROGRAM));
   assert.ok(venue.buybackFeeRecipients.includes(buy.accounts[17]!.key) && buy.accounts[17]!.writable);
-  assert.equal(buy.accounts[6]!.key, W);
-  assert.ok(buy.accounts[6]!.signer);
 });
 
-test("the venue is read on both providers, and refused when they disagree", async () => {
+// @pump-fun/pump-sdk 4.3.1 src/idl/pump.json (sha256 c53b8f5d…6a01) buy_exact_sol_in and @pump-fun/pump-swap-sdk 2.2.0
+// src/idl/pump_amm.json (sha256 c2f8ce0b…ce61) buy_exact_quote_in: each account's [signer, writable], in order
+const IDL = {
+  "pump-curve": [[0, 0], [0, 1], [0, 0], [0, 1], [0, 1], [0, 1], [1, 1], [0, 0], [0, 0], [0, 1], [0, 0], [0, 0], [0, 0], [0, 1], [0, 0], [0, 0]],
+  pumpswap: [[0, 1], [1, 1], [0, 0], [0, 0], [0, 0], [0, 1], [0, 1], [0, 1], [0, 1], [0, 0], [0, 1], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 1], [0, 0], [0, 0], [0, 1], [0, 0], [0, 0]],
+} as const;
+
+test("both venues' buy accounts and flags are their IDL's, then the SDKs' remaining accounts", async () => {
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue, req } = await setup(v);
+    const buy = solanaPoolBuySteps(venue, W, SPEND, req.minOut).find((x) => x.program === (v === "pump" ? SOLANA_PUMP_PROGRAM : SOLANA_PUMP_AMM_PROGRAM))!;
+    const idl = IDL[venue.kind];
+    assert.deepEqual(buy.accounts.slice(0, idl.length).map((a) => [a.signer ? 1 : 0, a.writable ? 1 : 0]), idl.map((x) => [...x]), `${v}: the IDL's flags`);
+    // remaining: pump bonding-curve-v2 (read-only), buyback recipient (writable); PumpSwap (not a cashback coin, a coin
+    // creator set) pool-v2 (read-only), buyback recipient (read-only), its wSOL account (writable)
+    const rest = buy.accounts.slice(idl.length).map((a) => [a.signer ? 1 : 0, a.writable ? 1 : 0]);
+    assert.deepEqual(rest, v === "pump" ? [[0, 0], [0, 1]] : [[0, 0], [0, 0], [0, 1]]);
+    assert.equal(buy.accounts[v === "pump" ? 6 : 1]!.key, W);
+  }
+});
+
+test("the venue is read on both providers at confirmed, and refused when they disagree", async () => {
   const { venue } = await setup("pump");
   const v = venue as Extract<SolanaPoolBuyVenue, { kind: "pump-curve" }>;
   assert.equal(v.feeRecipient, "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV");
-  assert.equal(v.buybackFeeRecipient, v.buybackFeeRecipients[2]);
-  // provider B names another creator in the curve
   const bent = replay(fx.pump, 1, (list, ans) => {
     const i = list.indexOf(v.curve);
     if (i >= 0 && ans.value[i]) {
@@ -154,81 +185,363 @@ test("the venue is read on both providers, and refused when they disagree", asyn
     return ans;
   });
   await assert.rejects(readSolanaPoolBuyVenue([replay(fx.pump, 0), bent], "pump-curve", fx.pump.mint, () => 2), /disagree/);
+  // every read the venue and the reference make asks for `confirmed`
+  const seen: unknown[] = [];
+  const spy = (p: 0 | 1): SolanaRpc => (async (m: string, params: readonly unknown[]) => { seen.push((params[1] as { commitment?: string }).commitment); return replay(fx.pump, p)(m, params); }) as SolanaRpc;
+  await readSolanaPoolBuyVenue([spy(0), spy(1)], "pump-curve", fx.pump.mint, () => 2);
+  await readSolanaReference([spy(0), spy(1)], { side: "buy", token: fx.pump.mint, amount: SPEND });
+  assert.ok(seen.length >= 4 && seen.every((c) => c === "confirmed"), JSON.stringify(seen));
 });
 
-test("size table: shapes A and B x pump and PumpSwap x raw and compressed proof x with and without tip", async () => {
-  const rows: { shape: string; venue: string; proof: string; tip: string; bytes: number; fits: boolean }[] = [];
+// The eight buyback recipients pump's Global (at 741) and PumpSwap's GlobalConfig (at 643) both list, read on two
+// providers 2026-11-02 21:00Z; the same eight @pump-fun/pump-sdk 4.3.1 CURRENT_FEE_RECIPIENTS_FOR_BUYBACK lists.
+const BUYBACK = [
+  "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD", "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7", "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+  "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR", "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6", "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+  "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD", "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+];
+
+test("Global is exactly 1,088 bytes and GlobalConfig 949, and both list the same eight buyback recipients", async () => {
   for (const v of ["pump", "pumpswap"] as const) {
-    const { venue, req, chain } = await setup(v);
-    for (const tip of [0n, 10_000n]) {
-      const rq = { ...req, tip };
-      // shape A: tag 2 has the raw proof only
-      const ixs = solanaPoolBuyInstructions(cfg, release, venue, rq, 6, tip > 0n ? SOLANA_JITO_TIP_ACCOUNTS[0]! : null);
-      const a = 1 + 128 + solanaCompileV0(FEE_PAYER, ixs, BLOCKHASH, [chain.table], [FEE_PAYER, W]).message.length;
-      rows.push({ shape: "A", venue: v, proof: "raw", tip: tip > 0n ? "yes" : "no", bytes: a, fits: a <= 1232 });
-      for (const compressed of [false, true]) {
-        const rel = compressed ? { ...release, proof: release.proof.subarray(0, 128) } : release;
-        const b = buildSolanaPoolBuyTag3(cfg, rel, venue, rq, chain, { compressed, pick: () => 0 }).size;
-        rows.push({ shape: "B", venue: v, proof: compressed ? "compressed" : "raw", tip: tip > 0n ? "yes" : "no", bytes: b, fits: b <= 1232 });
-      }
+    const kind = v === "pump" ? "pump-curve" : "pumpswap";
+    const venue = await readSolanaPoolBuyVenue(providers(v), kind, fx[v].mint, () => 0);
+    assert.deepEqual(venue.buybackFeeRecipients, BUYBACK, v);
+    // a Global one byte longer or shorter on both providers (a layout change) is refused
+    for (const delta of [1, -1]) {
+      const resized = (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
+        const d = Buffer.from(ans.value[2].data[0], "base64");
+        ans.value[2].data[0] = (delta > 0 ? Buffer.concat([d, Buffer.alloc(1)]) : d.subarray(0, d.length - 1)).toString("base64");
+        return ans;
+      });
+      await assert.rejects(readSolanaPoolBuyVenue([resized(0), resized(1)], kind, fx[v].mint, () => 0), /bytes, not/, `${v} ${delta}`);
     }
   }
-  for (const x of rows) console.log(`size ${x.shape} ${x.venue.padEnd(8)} ${x.proof.padEnd(10)} tip ${x.tip.padEnd(3)} ${x.bytes} B ${x.fits ? "fits" : "OVER"}`);
-  const at = (shape: string, venue: string, proof: string, tip: string) => rows.find((x) => x.shape === shape && x.venue === venue && x.proof === proof && x.tip === tip)!.bytes;
-  // shape A lands on pump, with or without a tip; on PumpSwap it overflows either way (the wrap's programs and the venue
-  // are static keys when invoked at the top level)
-  assert.deepEqual([at("A", "pump", "raw", "no"), at("A", "pump", "raw", "yes")], [1138, 1187]);
-  assert.deepEqual([at("A", "pumpswap", "raw", "no"), at("A", "pumpswap", "raw", "yes")], [1346, 1364]);
-  // shape B (tag 3): pump fits with either proof; PumpSwap fits only with the compressed proof (TAG3.md)
-  assert.deepEqual([at("B", "pump", "raw", "no"), at("B", "pump", "raw", "yes"), at("B", "pump", "compressed", "no"), at("B", "pump", "compressed", "yes")], [1105, 1107, 977, 979]);
-  assert.deepEqual([at("B", "pumpswap", "raw", "no"), at("B", "pumpswap", "raw", "yes"), at("B", "pumpswap", "compressed", "no"), at("B", "pumpswap", "compressed", "yes")], [1262, 1264, 1134, 1136]);
+});
+
+test("rent is read from the sysvar (5,080 a byte on 2 Nov), and a token account's size from its mint", async () => {
+  assert.deepEqual(rent, { lamportsPerByte: 5_080n, factor: 1n });
+  assert.equal(solanaRentMin(rent, 0), 650_240n);
+  assert.equal(solanaRentMin({ lamportsPerByte: 3_480n, factor: 2n }, 165), 2_039_280n); // the pre-SIMD-0194 figure
+  const raw = Uint8Array.from(Buffer.from(fx.rent.answers[0].data, "base64"));
+  assert.throws(() => solanaRentOf({ owner: ALT, data: raw }), /not the Rent sysvar/);
+  const odd = raw.slice();
+  new DataView(odd.buffer).setFloat64(8, 1.5, true);
+  assert.throws(() => solanaRentOf({ owner: "Sysvar1111111111111111111111111111111111111", data: odd }), /factor/);
+  // the recorded pump mint is Token-2022 with MetadataPointer and TokenMetadata: 165 + 1 + ImmutableOwner's head
+  const { venue } = await setup("pump");
+  assert.equal(venue.tokenAccountSize, 170);
+  const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+  const mint = (ext: number[][]) => Uint8Array.from([...new Uint8Array(165), 1, ...ext.flatMap(([t, n]) => [t! & 0xff, t! >> 8, n! & 0xff, n! >> 8, ...new Uint8Array(n!)])]);
+  assert.equal(solanaTokenAccountSize({ owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: new Uint8Array(82) }), 165);
+  assert.equal(solanaTokenAccountSize({ owner: T22, data: new Uint8Array(82) }), 170);
+  assert.equal(solanaTokenAccountSize({ owner: T22, data: mint([[1, 108], [18, 64]]) }), 182); // TransferFeeConfig adds TransferFeeAmount
+  assert.equal(solanaTokenAccountSize({ owner: T22, data: mint([[14, 64]]) }), 175); // TransferHook adds TransferHookAccount
+  assert.throws(() => solanaTokenAccountSize({ owner: T22, data: mint([[99, 4]]) }), /not known/);
+  assert.throws(() => solanaTokenAccountSize({ owner: T22, data: mint([[18, 64]]).subarray(0, 200) }), /runs past/);
+});
+
+test("a chunk too small to land is refused: W's token account, the volume account, the wrapped SOL at its peak, W's floor", async () => {
+  const chunk = release.withdrawnValue - release.relayFee - TIP;
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue } = await setup(v);
+    const ata = solanaRentMin(rent, venue.tokenAccountSize);
+    const vol = solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venue.kind]);
+    const wsol = v === "pumpswap" ? solanaRentMin(rent, 165) : 0n;
+    const at = (spend: bigint) => solanaPoolBuyFunds(release, venue, { spend, tip: TIP }, rent);
+    // the review's GAP-2: the spend takes the whole chunk, nothing for W's accounts
+    assert.match(at(chunk).problem ?? "", /does not cover/);
+    // the review's GAP-3: W would keep 1 lamport (on PumpSwap the wrapped SOL account's rent is not there at the peak)
+    assert.match(at(chunk - ata - vol - 1n).problem ?? "", v === "pump" ? /under the 650240/ : /does not cover/);
+    // W keeps exactly 0: lands, unless the wrapped SOL account's rent is not there at the peak (PumpSwap)
+    assert.equal(at(chunk - ata - vol).problem, v === "pump" ? null : `the chunk ${chunk} does not cover the spend and W's new accounts (${chunk + wsol})`);
+    // W keeps rent(0), or more than the wrapped SOL: lands
+    assert.equal(at(chunk - ata - vol - wsol - 650_240n).problem, null);
+    assert.equal(at(chunk - ata - vol - 650_240n).left, 650_240n);
+    assert.match(solanaPoolBuyFunds(release, venue, { spend: 1n, tip: release.withdrawnValue }, rent).problem ?? "", /more than the release/);
+  }
+});
+
+test("size table: tag 3 with the compressed proof, pump and PumpSwap, with and without a tip", async () => {
+  const rows: string[] = [];
+  const sizes: Record<string, number> = {};
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue, req, chain } = await setup(v);
+    for (const tip of [0n, TIP]) {
+      const b = buildSolanaPoolBuy(cfg, release, venue, { ...req, tip }, chain, { pick: () => 0 }).size;
+      sizes[`${v} ${tip > 0n ? "tip" : "none"}`] = b;
+      rows.push(`size tag3 ${v.padEnd(8)} compressed tip ${tip > 0n ? "yes" : "no "} ${b} B`);
+    }
+  }
+  console.log(rows.join("\n"));
+  assert.deepEqual(sizes, { "pump none": 977, "pump tip": 979, "pumpswap none": 1134, "pumpswap tip": 1136 });
 });
 
 test("the check passes the built transaction and names each check", async () => {
-  const { venue, req, chain, reads } = await setup("pump");
-  const built = buildSolanaPoolBuy(cfg, release, venue, req, chain, { pick: () => 3 });
-  const v = checkSolanaPoolBuy(built.wire, cfg, release, venue, req, reads);
-  assert.ok(v.ok, JSON.stringify(v.results));
-  assert.deepEqual(v.results.map((x) => x.id), ["SIZE", "TABLES", "SIGNERS", "RELEASE", "BUY", "FRAME", "PRIVILEGES", "QUOTE"]);
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue, req, chain, reads } = await setup(v);
+    const built = buildSolanaPoolBuy(cfg, release, venue, req, chain, { pick: () => 3 });
+    const verdict = checkSolanaPoolBuy(built.wire, cfg, release, venue, req, reads);
+    assert.ok(verdict.ok, JSON.stringify(verdict.results));
+    assert.deepEqual(verdict.results.map((x) => x.id), ["SIZE", "TABLES", "BLOCKHASH", "SIGNERS", "FUNDS", "FEE", "FRAME", "RELEASE", "BUY", "PRIVILEGES", "QUOTE"]);
+  }
 });
 
-test("the check refuses a changed min_out, a changed curve, a changed pool and a quote under the user's slippage", async () => {
+test("the check refuses a changed min_out, a changed curve, a quote under the user's slippage or for another amount", async () => {
   const { venue, req, chain, reads, minOut, E } = await setup("pump");
   const v = venue as Extract<SolanaPoolBuyVenue, { kind: "pump-curve" }>;
-  const failed = (wire: Uint8Array, q = req, vv: SolanaPoolBuyVenue = venue, rd = reads) =>
-    checkSolanaPoolBuy(wire, cfg, release, vv, q, rd).results.filter((x) => !x.ok).map((x) => x.id);
-  // min_out lowered in the message (a server's edit): the device's own buy differs
-  assert.deepEqual(failed(buildSolanaPoolBuy(cfg, release, venue, { ...req, minOut: minOut - 1n }, chain).wire), ["BUY"]);
-  // another curve named in the message
+  const ids = (wire: Uint8Array, q = req, vv: SolanaPoolBuyVenue = venue, rd = reads) => failed(checkSolanaPoolBuy(wire, cfg, release, vv, q, rd));
+  assert.deepEqual(ids(buildSolanaPoolBuy(cfg, release, venue, { ...req, minOut: minOut - 1n }, chain).wire), ["BUY"]);
   const bentCurve = { ...v, curve: base58.encode(new Uint8Array(32).fill(5)) };
-  assert.ok(failed(buildSolanaPoolBuy(cfg, release, bentCurve, req, chain).wire).includes("BUY"));
-  // a venue that names another curve than the one read on both providers: no reference for it
-  assert.ok(failed(buildSolanaPoolBuy(cfg, release, bentCurve, req, chain).wire, req, bentCurve).includes("QUOTE"));
-  // another Blindfill pool in the release
-  const otherPool = { program: PROGRAM, pool: base58.encode(new Uint8Array(32).fill(6)) };
-  const bentPool = solanaCompileV0(FEE_PAYER, solanaPoolBuyInstructions(cfg, release, venue, req, 6, SOLANA_JITO_TIP_ACCOUNTS[0]!).map((x, i) =>
-    i === 2 ? { ...x, accounts: x.accounts.map((a, j) => (j === 0 ? { ...a, key: otherPool.pool } : a)) } : x), BLOCKHASH, [chain.table], [FEE_PAYER, W]).message;
-  const wire = new Uint8Array(1 + 128 + bentPool.length);
-  wire[0] = 2;
-  wire.set(bentPool, 129);
-  assert.ok(failed(wire).includes("RELEASE"));
-  // the user's own min_out under E x (1 - slippage)
+  assert.ok(ids(buildSolanaPoolBuy(cfg, release, bentCurve, req, chain).wire).includes("BUY"));
+  assert.ok(ids(buildSolanaPoolBuy(cfg, release, bentCurve, req, chain).wire, req, bentCurve).includes("QUOTE"));
   const low = (E * 9_000n) / 10_000n;
-  assert.deepEqual(failed(buildSolanaPoolBuy(cfg, release, venue, { ...req, minOut: low }, chain).wire, { ...req, minOut: low }), ["QUOTE"]);
-  // a reference read for another amount than the spend
-  assert.deepEqual(failed(buildSolanaPoolBuy(cfg, release, venue, req, chain).wire, req, venue, { ...reads, reference: { ...reads.reference, amount: SPEND + 1n } }), ["QUOTE"]);
+  assert.deepEqual(ids(buildSolanaPoolBuy(cfg, release, venue, { ...req, minOut: low }, chain).wire, { ...req, minOut: low }), ["QUOTE"]);
+  assert.deepEqual(ids(buildSolanaPoolBuy(cfg, release, venue, req, chain).wire, req, venue, { ...reads, reference: { ...reads.reference, amount: SPEND + 1n } }), ["QUOTE"]);
 });
 
-test("the check refuses a table the providers disagree on, a third signer and a tip over the proof's cap", async () => {
+test("the check refuses a blockhash that is not the device's own read (the review's GAP-1)", async () => {
+  const { venue, req, chain, reads } = await setup("pump");
+  const built = buildSolanaPoolBuy(cfg, release, venue, req, { ...chain, blockhash: base58.encode(new Uint8Array(32).fill(0x33)) }, { pick: () => 0 });
+  assert.deepEqual(failed(checkSolanaPoolBuy(built.wire, cfg, release, venue, req, reads)), ["BLOCKHASH"]);
+  assert.deepEqual(failed(checkSolanaPoolBuy(built.wire, cfg, release, venue, req, { ...reads, blockhash: "" })), ["BLOCKHASH"]);
+});
+
+test("the check refuses a chunk too small to land, though the message is the device's own (the review's GAP-2 and GAP-3)", async () => {
+  const chunk = release.withdrawnValue - release.relayFee - TIP;
+  const { venue, chain, reads } = await setup("pump");
+  const ata = solanaRentMin(rent, venue.tokenAccountSize);
+  const vol = solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE["pump-curve"]);
+  // built on a rent of 1 lamport a byte, as a server that lies about rent would; checked on the rent the device read
+  const cheap = { lamportsPerByte: 1n, factor: 1n } as const;
+  for (const spend of [chunk - 2_000n, chunk - ata - vol - 1n]) {
+    const s = await setup("pump", spend);
+    const built = buildSolanaPoolBuy(cfg, release, venue, s.req, { ...chain, rent: cheap });
+    assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, s.req, chain), /does not cover|under the/);
+    assert.deepEqual(failed(checkSolanaPoolBuy(built.wire, cfg, release, venue, s.req, { ...s.reads, rent })), ["FUNDS"]);
+  }
+  void reads;
+});
+
+test("the check refuses a reference older than SOLANA_POOL_QUOTE_MAX_AGE_SLOTS or with no slot, and takes one newer than its slot read", async () => {
+  const { venue, req, chain, reads, ref } = await setup("pump");
+  const wire = buildSolanaPoolBuy(cfg, release, venue, req, chain).wire;
+  const at = (slot: number, r = ref) => failed(checkSolanaPoolBuy(wire, cfg, release, venue, req, { ...reads, slot, reference: { ...reads.reference, ref: r } }));
+  assert.deepEqual(at(ref.slot! + SOLANA_POOL_QUOTE_MAX_AGE_SLOTS), []);
+  assert.deepEqual(at(ref.slot! + SOLANA_POOL_QUOTE_MAX_AGE_SLOTS + 1), ["QUOTE"]);
+  // a reference newer than the device's slot read is fresher, not staler (the review's R8, inverted)
+  assert.deepEqual(at(ref.slot! - 1), []);
+  assert.deepEqual(at(ref.slot! - 6), []);
+  const { slot: _, ...noSlot } = ref;
+  assert.deepEqual(at(ref.slot!, noSlot), ["QUOTE"]);
+});
+
+test("the check refuses a table the providers disagree on, another W, a tip over the proof's cap", async () => {
   const { venue, req, chain, reads, tableData, tableAddr } = await setup("pump");
   const built = buildSolanaPoolBuy(cfg, release, venue, req, chain);
   const other = tableData.slice();
   other[56] = other[56]! ^ 1; // entry 0, the pool, differs on provider B
-  const v1 = checkSolanaPoolBuy(built.wire, cfg, release, venue, req, { ...reads, tables: { [tableAddr]: [{ owner: ALT, data: tableData }, { owner: ALT, data: other }] } });
-  assert.deepEqual(v1.results.filter((x) => !x.ok).map((x) => x.id), ["TABLES"]);
-  // the request names another W than the one that signs the message
+  assert.deepEqual(failed(checkSolanaPoolBuy(built.wire, cfg, release, venue, req, { ...reads, tables: { [tableAddr]: [{ owner: ALT, data: tableData }, { owner: ALT, data: other }] } })), ["TABLES"]);
   const v2 = checkSolanaPoolBuy(built.wire, cfg, release, venue, { ...req, wallet: base58.encode(new Uint8Array(32).fill(8)) }, reads);
-  assert.ok(!v2.ok && v2.results.some((x) => x.id === "SIGNERS" && !x.ok));
+  assert.ok(failed(v2).includes("SIGNERS"));
   assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, tip: release.tipCap + 1n }, chain), /tip cap/);
-  assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, spend: release.withdrawnValue }, chain), /more than the chunk/);
+  void BLOCKHASH;
+});
+
+test("the kit's helper paths name the pool relayers' three routes, as apps/helper mounts them (card helper-pool-senders)", () => {
+  const row = (path: string) => HELPER_V1_PATHS.find((r) => r.path === path);
+  assert.deepEqual(row("/v1/pool/fee"), { method: "GET", path: "/v1/pool/fee", part: "relay", limitBytes: 1024 });
+  assert.deepEqual(row("/v1/pool/solana/send"), { method: "POST", path: "/v1/pool/solana/send", part: "relay", limitBytes: 4096 });
+  assert.deepEqual(row("/v1/pool/evm/send"), { method: "POST", path: "/v1/pool/evm/send", part: "relay", limitBytes: 4096 });
+});
+
+test("a sell's min out comes from the two-provider quote less the user's slippage, never 1 lamport; its steps are the ones the pool ran", async () => {
+  for (const v of ["pump", "pumpswap"] as const) {
+    const kind = v === "pump" ? "pump-curve" : "pumpswap";
+    const ran = JSON.parse(readFileSync(new URL(`../../../contracts/pool-solana/fixtures/venues/${v}.json`, import.meta.url), "utf8"));
+    const venue = await readSolanaPoolBuyVenue(providers(v), kind, fx[v].mint, () => 0);
+    const amount = BigInt(ran.min_out);
+    // the pool's LiteSVM sell (dump.mjs, min out 1) with the kit's steps: the same programs, keys, flags and data but min out
+    const steps = solanaPoolSellSteps(venue, W, amount, 1n);
+    assert.deepEqual(steps.map((x) => ({ program: x.program, accounts: x.accounts.map((a) => ({ address: a.key, signer: a.signer, writable: a.writable })), data: Buffer.from(x.data).toString("hex") })), ran.sell, v);
+    const ref = await readSolanaReference(providers(v), { side: "sell", token: fx[v].mint, amount });
+    const E = ref!.pools.find((p) => p.venue === kind)!.expectedOut;
+    const minOut = solanaPoolSellMinOut(venue, amount, { amount, ref, slippageBps: 300 }, ref!.slot!);
+    assert.equal(minOut, (E * 9_700n) / 10_000n);
+    assert.ok(minOut > 1_000_000n, `${v}: ${minOut}`);
+    const sell = solanaPoolSellSteps(venue, W, amount, minOut).find((x) => x.program !== "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL" && x.program !== "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")!;
+    assert.equal(new DataView(sell.data.buffer, sell.data.byteOffset).getBigUint64(16, true), minOut);
+    assert.throws(() => solanaPoolSellMinOut(venue, amount, { amount: amount + 1n, ref, slippageBps: 300 }, ref!.slot!), /not for the amount/);
+    assert.throws(() => solanaPoolSellMinOut(venue, amount, { amount, ref: null, slippageBps: 300 }, ref!.slot!), /no slot/);
+    assert.throws(() => solanaPoolSellMinOut(venue, amount, { amount, ref: { ...ref!, pools: [] }, slippageBps: 300 }, ref!.slot!), /no reference/);
+    assert.throws(() => solanaPoolSellMinOut(venue, amount, { amount, ref, slippageBps: 10_000 }, ref!.slot!), /slippage/);
+    assert.throws(() => solanaPoolSellSteps(venue, W, amount, 0n), /above 0/);
+  }
+});
+
+test("the build refuses a pool that is not the program's, W as the fee payer and a CU price over its cap", async () => {
+  const { venue, req, chain } = await setup("pump");
+  assert.throws(() => buildSolanaPoolBuy({ ...cfg, pool: base58.encode(new Uint8Array(32).fill(6)) }, release, venue, req, chain), /not the program's pool account/);
+  assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, feePayer: W }, chain), /must differ/);
+  assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, cuPrice: 10n ** 12n }, chain), /CU price/);
+});
+
+test("the venue read refuses a Mayhem curve, a complete curve, an unset buyback recipient and a PumpSwap pool that is not the mint's", async () => {
+  const flip = (v: "pump" | "pumpswap", i: number, at: number, byte: number) => (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
+    const d = Buffer.from(ans.value[i].data[0], "base64");
+    if (byte < 0) d.fill(0, at, at + 32);
+    else d[at] = byte;
+    ans.value[i].data[0] = d.toString("base64");
+    return ans;
+  });
+  const read = (v: "pump" | "pumpswap", f: (p: 0 | 1) => SolanaRpc) => readSolanaPoolBuyVenue([f(0), f(1)], v === "pump" ? "pump-curve" : "pumpswap", fx[v].mint, () => 0);
+  await assert.rejects(read("pump", flip("pump", 1, 81, 1)), /Mayhem/);
+  await assert.rejects(read("pump", flip("pump", 1, 48, 1)), /complete/);
+  await assert.rejects(read("pump", flip("pump", 2, 741 + 32 * 5, -1)), /buyback recipient is unset/);
+  await assert.rejects(read("pumpswap", flip("pumpswap", 1, 9, 1)), /canonical pool/);
+});
+
+test("the check refuses a deactivated table or one not owned by the table program, and a wire without two signature slots", async () => {
+  const { venue, req, chain, reads, tableData, tableAddr } = await setup("pump");
+  const built = buildSolanaPoolBuy(cfg, release, venue, req, chain);
+  const off = tableData.slice();
+  new DataView(off.buffer).setBigUint64(4, 5n, true); // deactivated at slot 5
+  const ids = (t: { owner: string; data: Uint8Array }) => failed(checkSolanaPoolBuy(built.wire, cfg, release, venue, req, { ...reads, tables: { [tableAddr]: [t, t] } }));
+  assert.deepEqual(ids({ owner: ALT, data: off }), ["TABLES"]);
+  assert.deepEqual(ids({ owner: "11111111111111111111111111111111", data: tableData }), ["TABLES"]);
+  const three = built.wire.slice();
+  three[0] = 3;
+  assert.deepEqual(failed(checkSolanaPoolBuy(three, cfg, release, venue, req, reads)), ["DECODE"]);
+});
+
+test("QUOTE refuses a min out of 0 even when the floor is 0, and a slippage of 10,000 bps or more (the review's R7, inverted)", async () => {
+  const { venue, req, chain, reads, ref } = await setup("pump");
+  const zero = { ...ref, pools: ref.pools.map((p) => ({ ...p, expectedOut: 0n })) };
+  const q0 = { ...req, minOut: 0n };
+  assert.deepEqual(failed(checkSolanaPoolBuy(buildSolanaPoolBuy(cfg, release, venue, q0, chain).wire, cfg, release, venue, q0, { ...reads, reference: { ...reads.reference, ref: zero } })), ["QUOTE"]);
+  const wire = buildSolanaPoolBuy(cfg, release, venue, req, chain).wire;
+  for (const slippageBps of [10_000, 10_001]) assert.deepEqual(failed(checkSolanaPoolBuy(wire, cfg, release, venue, req, { ...reads, reference: { ...reads.reference, slippageBps } })), ["QUOTE"]);
+  // a sell whose reference gives 0 has no floor: refused
+  assert.throws(() => solanaPoolSellMinOut(venue, SPEND, { amount: SPEND, ref: zero, slippageBps: 300 }, ref.slot!), /floor is 0/);
+});
+
+test("the compressed point's bit 7 is y's sign: set for y above q - y, clear below", () => {
+  const p = new Uint8Array(256);
+  const put = (at: number, x: bigint) => p.set(Uint8Array.from(Buffer.from(x.toString(16).padStart(64, "0"), "hex")), at);
+  put(0, 1n); put(32, Q - 2n); // A = (1, -2): the larger root
+  put(64, 1n); put(96, 1n); put(128, 1n); put(160, 1n); // B, any nonzero point
+  put(192, 1n); put(224, 2n); // C = (1, 2): the smaller root
+  const c = solanaCompressPoolProof(p);
+  assert.equal(c[0], 0x80);
+  assert.equal(c[96], 0);
+});
+
+// ------------------------------------------------------------------------------------------------- fold 2
+
+test("the priority fee must fit in the relay fee less the release's cost, or the helper refuses what W signed (M353, the review's R1 inverted)", async () => {
+  assert.equal(solanaPoolReleaseCost(rent), 1_026_000n); // rent(0) 650,240 + 72 x 5,080 + 2 signatures
+  const rel = { ...release, relayFee: 1_300_000n }; // leaves 274,000 lamports for priority
+  for (const v of ["pump", "pumpswap"] as const) {
+    const s = await setup(v);
+    const req = { ...s.req, cuPrice: 1_000_000n }; // 300,000 or 400,000 CU x 1 lamport: over 274,000
+    assert.throws(() => buildSolanaPoolBuy(cfg, rel, s.venue, req, s.chain), /priority fee/, v);
+    const cheap = { lamportsPerByte: 1n, factor: 1n } as const; // a server that lies about rent builds it
+    const wire = buildSolanaPoolBuy(cfg, rel, s.venue, req, { ...s.chain, rent: cheap }).wire;
+    assert.deepEqual(failed(checkSolanaPoolBuy(wire, cfg, rel, s.venue, req, s.reads)), ["FEE"], v);
+    // exactly at the edge: limit x price = (relay_fee - cost) x 1e6 is carried
+    const cu = BigInt(v === "pump" ? 300_000 : 400_000);
+    const edge = { ...release, relayFee: 1_026_000n + (cu * 100_000n) / 1_000_000n };
+    const ok = { ...s.req, cuPrice: 100_000n };
+    assert.ok(checkSolanaPoolBuy(buildSolanaPoolBuy(cfg, edge, s.venue, ok, s.chain).wire, cfg, edge, s.venue, ok, s.reads).ok, v);
+    assert.throws(() => buildSolanaPoolBuy(cfg, { ...edge, relayFee: edge.relayFee - 1n }, s.venue, ok, s.chain), /priority fee/, v);
+  }
+});
+
+test("a duplicate key (the compute budget program again, loaded from the table) is refused by the key count (the review's R2)", async () => {
+  const CB = "ComputeBudget111111111111111111111111111111";
+  const s = await setup("pump");
+  const m = buildSolanaPoolBuy(cfg, release, s.venue, s.req, s.chain, { pick: () => 0 }).message;
+  const dec = solanaDecodeMessage(m);
+  assert.ok(dec.staticKeys.includes(CB));
+  const table2 = Uint8Array.from([...s.tableData, ...base58.decode(CB)]);
+  const at = m.length - dec.lookups[0]!.readonly.length - 1;
+  const bent = Uint8Array.from([...m.subarray(0, at), m[at]! + 1, ...m.subarray(at + 1), s.addresses.length]);
+  const reads2 = { ...s.reads, tables: { [s.tableAddr]: [{ owner: ALT, data: table2 }, { owner: ALT, data: table2 }] as const } };
+  assert.ok(checkSolanaPoolBuy(wireOf(m), cfg, release, s.venue, s.req, reads2).ok);
+  assert.deepEqual(failed(checkSolanaPoolBuy(wireOf(bent), cfg, release, s.venue, s.req, reads2)), ["PRIVILEGES"]);
+});
+
+test("a venue read naming the pool, its accounts or the fee payer is refused at build, wherever tag 3 would place it (the review's R5 inverted)", async () => {
+  const s = await setup("pump");
+  const spent = solanaPoolReleaseAccounts(cfg, W, FEE_PAYER, release, 6)[3]!.key;
+  for (const k of [FEE_PAYER, POOL, PROGRAM, spent]) {
+    const bent = { ...s.venue, feeRecipient: k } as SolanaPoolBuyVenue;
+    assert.throws(() => solanaPoolBuyInstructions(cfg, release, bent, s.req, 6, rent, SOLANA_JITO_TIP_ACCOUNTS[0]!), /names the pool, its accounts or the fee payer/, k);
+  }
+});
+
+test("a sell's min out refuses a reference older than 25 slots and takes a newer one (the review's R6 inverted)", async () => {
+  const s = await setup("pump");
+  const amount = 1_000_000_000n;
+  const ref = (await readSolanaReference(providers("pump"), { side: "sell", token: fx.pump.mint, amount }))!;
+  const at = (slot: number) => solanaPoolSellMinOut(s.venue, amount, { amount, ref, slippageBps: 300 }, slot);
+  assert.ok(at(ref.slot! + 25) > 0n);
+  assert.ok(at(ref.slot! - 4) > 0n);
+  assert.throws(() => at(ref.slot! + 26), /26 slots before/);
+  assert.throws(() => at(ref.slot! + 1_000_000), /slots before/);
+});
+
+test("pump's cashback flag is the curve's own is_cashback_coin byte (82): a cashback coin's sell names W's volume accumulator", async () => {
+  for (const byte of [0, 1]) {
+    const f = (p: 0 | 1) => replay(fx.pump, p, (_list, ans) => {
+      const d = Buffer.from(ans.value[1].data[0], "base64");
+      d[82] = byte;
+      ans.value[1].data[0] = d.toString("base64");
+      return ans;
+    });
+    const venue = await readSolanaPoolBuyVenue([f(0), f(1)], "pump-curve", fx.pump.mint, () => 0);
+    assert.equal(venue.cashback, byte === 1);
+    const sell = solanaPoolSellSteps(venue, W, 1_000n, 1_000n)[0]!;
+    const vol = solanaProgramAddress([new TextEncoder().encode("user_volume_accumulator"), base58.decode(W)], SOLANA_PUMP_PROGRAM);
+    assert.equal(sell.accounts.length, byte ? 17 : 16);
+    assert.equal(sell.accounts.some((a) => a.key === vol && a.writable), byte === 1);
+  }
+});
+
+test("the venue read refuses a Mayhem PumpSwap pool, vaults that are not the pool's, a cashback byte that is not a bool, a curve not in SOL, unset fee recipients", async () => {
+  const edit = (v: "pump" | "pumpswap", i: number, at: number, bytes: number[]) => (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
+    const d = Buffer.from(ans.value[i].data[0], "base64");
+    d.set(bytes, at);
+    ans.value[i].data[0] = d.toString("base64");
+    return ans;
+  });
+  const read = (v: "pump" | "pumpswap", f: (p: 0 | 1) => SolanaRpc) => readSolanaPoolBuyVenue([f(0), f(1)], v === "pump" ? "pump-curve" : "pumpswap", fx[v].mint, () => 0);
+  const zeros = Array(32).fill(0);
+  const key5 = Array(32).fill(5);
+  await assert.rejects(read("pumpswap", edit("pumpswap", 1, 243, [1])), /Mayhem/);
+  await assert.rejects(read("pumpswap", edit("pumpswap", 1, 139, key5)), /vaults/);
+  await assert.rejects(read("pumpswap", edit("pumpswap", 1, 171, key5)), /vaults/);
+  await assert.rejects(read("pumpswap", edit("pumpswap", 1, 244, [2])), /not a bool/);
+  await assert.rejects(read("pump", edit("pump", 1, 83, key5)), /not quoted in SOL/);
+  await assert.rejects(read("pump", edit("pump", 2, 41, zeros)), /no fee recipient/);
+  await assert.rejects(read("pumpswap", edit("pumpswap", 2, 57, zeros)), /no protocol fee recipient/);
+});
+
+test("rent read on two providers that disagree is refused; a deactivated table is refused at build; a cashback pool counts its wSOL account", async () => {
+  const sysvar = (lpb: number) => (async () => {
+    const d = new Uint8Array(17);
+    new DataView(d.buffer).setBigUint64(0, BigInt(lpb), true);
+    new DataView(d.buffer).setFloat64(8, 1, true);
+    return { context: { slot: 1 }, value: { owner: "Sysvar1111111111111111111111111111111111111", data: [Buffer.from(d).toString("base64"), "base64"] } };
+  }) as unknown as SolanaRpc;
+  assert.deepEqual(await readSolanaRent([sysvar(5_080), sysvar(5_080)]), rent);
+  await assert.rejects(readSolanaRent([sysvar(5_080), sysvar(5_081)]), /disagree on rent/);
+  const s = await setup("pump");
+  const off = s.tableData.slice();
+  new DataView(off.buffer).setBigUint64(4, 5n, true);
+  assert.throws(() => buildSolanaPoolBuy(cfg, release, s.venue, s.req, { ...s.chain, table: { address: s.tableAddr, table: solanaDecodeLookupTable(off) } }), /deactivated/);
+  const p = await setup("pumpswap");
+  const plain = solanaPoolBuyFunds(release, p.venue, p.req, rent);
+  const cb = solanaPoolBuyFunds(release, { ...p.venue, cashback: true } as SolanaPoolBuyVenue, p.req, rent);
+  assert.equal(cb.peak - plain.peak, solanaRentMin(rent, 165));
+  assert.equal(plain.left - cb.left, solanaRentMin(rent, 165));
 });

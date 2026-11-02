@@ -707,5 +707,27 @@
     }
    }
   ]
+ },
+ "rent": {
+  "read_at": "2026-11-02T22:19:19Z",
+  "account": "SysvarRent111111111111111111111111111111111",
+  "providers": [
+   "https://api.mainnet-beta.solana.com",
+   "https://solana-rpc.publicnode.com"
+  ],
+  "slots": [
+   464660625,
+   464660626
+  ],
+  "answers": [
+   {
+    "owner": "Sysvar1111111111111111111111111111111111111",
+    "data": "2BMAAAAAAAAAAAAAAADwPzI="
+   },
+   {
+    "owner": "Sysvar1111111111111111111111111111111111111",
+    "data": "2BMAAAAAAAAAAAAAAADwPzI="
+   }
+  ]
  }
 }

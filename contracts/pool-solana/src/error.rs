@@ -58,6 +58,15 @@ pub enum PoolError {
     Poseidon = 25,
     /// a lamport sum would overflow
     Overflow = 26,
+    /// tag 3's tip is over the tip cap the proof binds
+    TipOverCap = 27,
+    /// a tag 3 inner instruction's program is this program
+    InnerInvokesPool = 28,
+    /// a tag 3 inner instruction (or its tip account) names the pool, its spent mark, its pages or any account this
+    /// program owns
+    InnerNamesPoolAccount = 29,
+    /// a tag 3 inner instruction names a signer that is not W
+    InnerSignerNotW = 30,
 }
 
 impl From<PoolError> for ProgramError {
