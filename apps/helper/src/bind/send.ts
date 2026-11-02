@@ -195,6 +195,8 @@ export type DepositStore = {
   /** D, the block that spent one of the relayer's transactions' nonce, once found: final, so found once. */
   foundAt(tx_hash: string): { height: string; hash: string } | null;
   setFoundAt(tx_hash: string, d: { height: string; hash: string }): void;
+  /** The U's whose record has a prepay or a send whose outcome is not known yet (the background round's work). */
+  open(): string[];
   /** Gives the store's lock up (a test's restart; the process's exit does it too). */
   close(): void;
 };
@@ -312,6 +314,16 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     return JSON.parse(text) as T;
   };
 
+  // the U's with an open record: read once as the lock is taken, then kept by create and put (one process holds the store)
+  const openUs = new Set<string>();
+  const track = (rec: DepositRecord) => {
+    if (isOpen(rec)) openUs.add(rec.u);
+    else openUs.delete(rec.u);
+  };
+  for (const f of fs.readdirSync(dir)) {
+    const m = /^u-([0-9a-f]{64})\.json$/.exec(f);
+    if (m) track(JSON.parse(fs.readFileSync(path(f), "utf8")) as DepositRecord);
+  }
   const uName = (u: string) => {
     if (!/^[0-9a-f]{64}$/.test(u)) throw new Error("store: U is not a 64-hex id");
     return `u-${u}.json`;
@@ -329,12 +341,16 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     get: (u) => read<DepositRecord>(uName(u)),
     create(rec) {
       held();
-      if (createOnce(uName(rec.u), JSON.stringify(rec))) return { created: true, rec };
+      if (createOnce(uName(rec.u), JSON.stringify(rec))) {
+        track(rec);
+        return { created: true, rec };
+      }
       return { created: false, rec: read<DepositRecord>(uName(rec.u))! };
     },
     put(rec) {
       held();
       replace(uName(rec.u), JSON.stringify(rec));
+      track(rec);
     },
     bind(p, u) {
       held();
@@ -357,9 +373,13 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
       held();
       createOnce(dName(tx), JSON.stringify({ height: d.height, hash: d.hash }));
     },
+    open: () => [...openUs],
     close: release,
   };
 }
+
+/** A record with a prepay or a send whose outcome is not known yet. */
+const isOpen = (rec: DepositRecord) => rec.prepays.some((x) => x.ok === null) || rec.sends.some((x) => x.state === "pending");
 
 // ---- R5's size ----
 
@@ -525,6 +545,48 @@ async function prepayDone(deps: SendDeps, rec: DepositRecord, pre: PrepayEntry, 
   if (ok) return { ...rec, prepays };
   const closed = (await deps.reads.deposit(p)) !== null;
   return tally({ ...rec, prepays, prepaid_bytes: rec.prepaid_bytes - pre.bytes, p_closed: rec.p_closed || closed });
+}
+
+/** markets.md l.1192-1193: the relayer reads every open record every 10 s on its own, not only when U calls again. */
+export const LOCK_ROUND_MS = 10_000;
+
+/**
+ * One background round: every open record settled as step 6 settles it (re-sent under R4 and (f), read, its verdict
+ * written), each under its U's in-flight slot; a U being carried right now is left to that call. An error on one
+ * record keeps it for the next round.
+ */
+export async function lockRound(deps: SendDeps): Promise<void> {
+  for (const u of deps.store.open()) {
+    if (inFlight.has(u)) continue;
+    const rec = deps.store.get(u);
+    if (rec === null) continue;
+    inFlight.set(u, BigInt(rec.p));
+    try {
+      await settle(deps, rec, u, BigInt(rec.p));
+    } catch {
+      // kept: read again next round
+    } finally {
+      inFlight.delete(u);
+    }
+  }
+}
+
+/** Starts the background rounds: one at once (a restart reads and rebroadcasts first), then one every `everyMs`; the stop function ends them. */
+export function startLockRounds(deps: SendDeps, everyMs = LOCK_ROUND_MS): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tick = async () => {
+    try {
+      await lockRound(deps);
+    } finally {
+      if (!stopped) timer = setTimeout(tick, everyMs);
+    }
+  };
+  void tick();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
 }
 
 async function carryChecked(deps: SendDeps, d: Checked, sha: string): Promise<Answer> {

@@ -34,6 +34,7 @@ import {
   relayerKey,
   remember,
   CACHE_MAX,
+  startLockRounds,
   startRelayer,
   transactionValidityPeriod,
   type Answer,
@@ -2112,6 +2113,78 @@ test("(a2) search: K answered at a height that has no block (the next block's pr
   node.keyChanges.push({ height: 1010n, nonce: 50n, cause: { type: "transaction_processing", tx_hash: "another" } });
   node.final = 1020n;
   assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+});
+
+// ---- the f487d98 re-check (RC3): the background round settles open records inside the providers' garbage collection ----
+
+/** Regular providers that garbage-collect: blocks, keys and changes below `gc` blocks under their final are gone. */
+const gcRpcs = (node: Node, gc: bigint): [Rpc, Rpc] =>
+  node.rpcs().map((r, i) => async (m: string, p: unknown) => {
+    const id = (p as { block_id?: unknown })?.block_id;
+    if (typeof id === "number" && BigInt(id) < node.final - node.finalLag[i]! - gc) {
+      if (m === "query") throw new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "GARBAGE_COLLECTED_BLOCK", info: {} } });
+      throw unknownBlock();
+    }
+    return r(m, p as never);
+  }) as [Rpc, Rpc];
+
+test("RC3-4: a prepay that landed but read unknown in the call's wait is settled by the background round with no call from U, inside the providers' garbage collection; U's next call after it lands", async () => {
+  const node = new Node();
+  node.landMs = () => 1_500; // lands after the call's 300 ms wait
+  const GC = 500n; // regular providers keep this many blocks (about 5 epochs on mainnet)
+  const store = newStore();
+  const deps = node.deps(store, node.relayerOn(gcRpcs(node, GC), 300));
+  const u = node.user();
+  const answers = [code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps))];
+  assert.deepEqual(store.open(), [u.id]);
+  const stop = startLockRounds(deps, 100);
+  await until(() => store.get(u.id)!.prepays[0]!.ok !== null);
+  stop();
+  assert.equal(store.get(u.id)!.prepays[0]!.ok, true, "settled by the background round");
+  assert.deepEqual(store.open(), []);
+  node.final += GC + 50n; // U returns after the regular providers forgot b0 and D
+  answers.push(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)));
+  assert.deepEqual(answers, ["in_flight", "ok"]);
+  assert.equal(node.prepaid.get(P.toString()), PREPAY_BYTES);
+  store.close();
+});
+
+test("RC3-5: a prepay that never landed is settled dropped by (b) in the background round, past its validity period and inside the garbage collection; U's call after the collection prepays afresh", async () => {
+  const node = new Node();
+  const GC = 500n;
+  const store = newStore();
+  const deps = node.deps(store, node.relayerOn(gcRpcs(node, GC), 300));
+  const u = node.user();
+  let down = true;
+  sendDown(node, () => down);
+  const answers = [code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps))];
+  down = false;
+  node.final += 150n; // past b0 + validity (100), inside the collection
+  const stop = startLockRounds(deps, 100);
+  await until(() => store.get(u.id)!.prepays.length === 0);
+  stop();
+  assert.deepEqual([store.get(u.id)!.prepays.length, store.get(u.id)!.prepaid_bytes, store.open().length], [0, 0, 0]);
+  node.final += GC + 50n;
+  answers.push(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)));
+  assert.deepEqual(answers, ["in_flight", "ok"]);
+  assert.equal(node.prepaid.get(P.toString()), PREPAY_BYTES);
+  store.close();
+});
+
+test("the store's open records survive a restart: read once as the lock is taken", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-open-"));
+  const s = createFileStore(dir);
+  const u = "ab".repeat(32);
+  const pending = { ...emptyRecord(u), prepays: [{ tx_hash: "t", nonce: "1", height: "1", block_hash: "h", signed_tx: "", bytes: 756, ok: null }] };
+  s.put(pending);
+  s.put({ ...emptyRecord("cd".repeat(32)) });
+  assert.deepEqual(s.open(), [u]);
+  s.close();
+  const t = createFileStore(dir);
+  assert.deepEqual(t.open(), [u]);
+  t.put({ ...pending, prepays: [{ ...pending.prepays[0]!, ok: true }] });
+  assert.deepEqual(t.open(), []);
+  t.close();
 });
 
 test("(a2): K deleted before the transaction was applied: the deletion at D names no transaction of ours, so it is dropped", async () => {
