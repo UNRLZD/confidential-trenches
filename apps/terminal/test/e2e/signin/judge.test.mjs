@@ -1,5 +1,5 @@
 // Replays the sign-in e2e's recorded launches through its verdict (card app-harness-signin-e2e): the good launches
-// recorded on the box pass, and each planted launch fails on the line its plant breaks.
+// recorded pass, and each planted launch fails on the line its plant breaks.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";

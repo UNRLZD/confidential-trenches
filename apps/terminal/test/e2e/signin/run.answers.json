@@ -1,5 +1,5 @@
 {
- "note": "Recorded on the box (unrlzd-pc-ct) 2026-11-02T09:36Z by run.mjs --record: good is the three launches, bad each planted prf launch. States, counts, times and boxes only.",
+ "note": "recorded-run: good is the three launches, bad each planted prf launch, written by run.mjs --record. States, counts, times and boxes only.",
  "good": [
   {
    "run": "prf",
