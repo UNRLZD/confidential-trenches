@@ -63,7 +63,9 @@ export const FUND = AMOUNTS.note1 + AMOUNTS.note2;
 export const REGISTER = 1_250_000_000_000_000_000_000n; // the token's storage_balance_bounds (testnet-usdc.json)
 export const D_NEAR = NEAR;
 export const B_NEAR = NEAR / 100n;
-export const S_NEAR = NEAR / 10n;
+// a FunctionCall's prepaid gas is charged up front at the gas price (testnet 1e9 yocto/gas: 100 Tgas = 0.1 NEAR) and
+// refunded after, so S holds well above settle's 100 Tgas (a first run's 0.1 NEAR was refused NotEnoughBalance)
+export const S_NEAR = NEAR / 2n;
 export const REFUND_RESERVE_BYTES = 389n; // constants.rs
 export const LEVEL_BYTES = 74n; // vault.md 2.3: what a tree that grows a level adds to an insert
 const GAS = { prepay: 30n * TGAS, deposit: 180n * TGAS, ragequit: 300n * TGAS, withdraw: 300n * TGAS, settle: 100n * TGAS, plain: 30n * TGAS };
@@ -454,7 +456,9 @@ async function main() {
     finish("bounce", { nullifier_hash: String(N2.nullifierHash), prove_ms: w.proveMs });
   }
   if (!done("settle")) {
-    if ((await nearOf(acc.S)) === null) await tx("settle", P, acc.S, [act.create(), act.transfer(S_NEAR), act.fullKey(S.key.pub)], { method: "CreateAccount (S)" });
+    const sNear = await nearOf(acc.S);
+    if (sNear === null) await tx("settle", P, acc.S, [act.create(), act.transfer(S_NEAR), act.fullKey(S.key.pub)], { method: "CreateAccount (S)" });
+    else if (sNear < S_NEAR) await tx("settle", P, acc.S, [act.transfer(S_NEAR - sNear)], { method: "Transfer (S, to S_NEAR)" });
     const s = await synced(k, VAULT);
     const row = s.spends.find((x) => x.nullifierHash === N2.nullifierHash);
     if (!row || row.status !== "refund_pending" || row.refundValue !== AMOUNTS.note2 - AMOUNTS.fee) throw new Error(`settle: the bounce's row is ${row?.status} ${row?.refundValue}, want refund_pending ${AMOUNTS.note2 - AMOUNTS.fee}`);
