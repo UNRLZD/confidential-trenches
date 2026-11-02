@@ -1,5 +1,5 @@
 // The order record: what the device sends the order sender for each order it signs in advance (wallet.md §7 item 3,
-// in the shape of markets.md H5.1; the CO's call of 2026-11-01 00:35Z). POST /v1/orders carries one group of one or two
+// in the shape of markets.md H5.1; decided 2026-11-01 00:35Z). POST /v1/orders carries one group of one or two
 // records. Each exit sells from the fresh wallet W, its output goes to W itself, and min_out is fixed inside the signed
 // bytes, so a server that holds this record can only send the order early, at the user's price or better
 // (wallet.md §2.6).

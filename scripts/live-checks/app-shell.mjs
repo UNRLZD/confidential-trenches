@@ -45,7 +45,7 @@ export const ROUTES = [
 ];
 export const WIDTHS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, nav: ".tabbar a" },
-  { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false, nav: ".tb .nav a, .ft a" },
+  { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false, nav: ".tb .nav a, .ft .links a" },
 ];
 const SETTLE_MS = 2000;
 

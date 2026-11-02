@@ -19,12 +19,14 @@
 // cannot price, a bad amount), "quote_check_failed" for an answer that fails a check (W:888: nothing shown), "busy" and
 // "down" for a helper that is rate-limited or not answering, "not_available" for any other helper status.
 //
-// Not here: the postMessage wiring (src/api.ts answers a refused kind "not_allowed" only, so this kind's codes need it
-// to carry them) and the deposit's op record; the price reads for an asset other than USDC (the caller's `priced`).
+// The backup gate is the wallet store's one predicate, backupFirst, as sign out and the deposit quote rule ask it.
+// Not here: the postMessage wiring (src/deposit-wire.ts, with U from the store's public record) and the deposit's op
+// record; the price reads for an asset other than USDC (the caller's `priced`).
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../../kit/src/checks/oneclick.ts";
 import type { ErrorCode, SignpageResults } from "../../../kit/src/signpage/messages.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
 import { askDepositQuote, depositQuoteRequest } from "../../../wallet/src/deposit/quote.ts";
+import { backupFirst } from "../../../wallet/src/store/index.ts";
 import { checkDepositQuote, DepositRuleRefused, type DepositQuoteContext } from "./deposit.ts";
 
 /** USDC's decimals on every chain the release lists it (kit ONECLICK_USDC_ASSETS); the vault's asset is one of them. */
@@ -93,7 +95,7 @@ function decimal(v: bigint, decimals: number): string {
 /** Answers the deposit.quote kind: an address only from a quote that passed every check, else a code. */
 export async function depositQuoteKind(params: Record<string, unknown>, ctx: DepositQuoteKindContext): Promise<DepositQuoteKindAnswer> {
   // 1. The backup gate, before anything leaves the device. checkDepositQuote holds the same gate again at step 4.
-  if (ctx.seed.source !== "prf" && ctx.seed.code_saved !== true) return no("not_allowed");
+  if (!ctx.seed || backupFirst(ctx.seed)) return no("not_allowed");
 
   // 2. The asset and the amount, by the device's own list and price reads.
   const origin = params.origin_asset;

@@ -5,13 +5,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
+import { build as buildSign } from "./deploy.mjs";
 import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
-import { diffLists, headersFor, HOSTS, listDir, makeList, matches, parseRules, publishedPath } from "./release-list.mjs";
+import { diffLists, headersFor, HOSTS, listDir, main as listMain, makeList, matches, parseRules, publishedPath, RELEASED, releaseProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -149,7 +151,6 @@ test("the committed release-1 names both hosts' pages and scripts, the worker an
     assert.deepEqual([f.bytes, f.sha256, f.headers["cache-control"]], [pin.bytes, pin.sha256, "public, max-age=31536000, immutable"]);
   }
   assert.equal(sign["/prover-worker.js"].headers["content-security-policy"].split(", default-src").length, 2, "the worker's two policies");
-  assert.equal(sign["/"].sha256, createHash("sha256").update(readFileSync(join(PKG, "index.html"))).digest("hex"));
   const app = list.hosts.APP_HOST.files;
   assert.ok(app.some((f) => f.path === "/") && app.some((f) => /^\/assets\/index-[\w-]+\.js$/.test(f.path)));
   for (const h of Object.values(list.hosts)) {
@@ -157,6 +158,118 @@ test("the committed release-1 names both hosts' pages and scripts, the worker an
     for (const f of h.files) assert.ok(f.headers["content-security-policy"], `${f.path} has the site's policy`);
   }
   assert.ok(!existsSync(join(PKG, "releases", "release-0.json")));
+});
+
+// ---------- the ledger: old releases never change, the newest is this checkout's SIGN_HOST build ----------
+
+const sha256 = (b) => createHash("sha256").update(b).digest("hex");
+const STALE = "is not this checkout's SIGN_HOST build";
+/** A copy of the package's served sources (index.html and public/), the folder deploy.mjs build() reads, to plant in. */
+function pkgCopy() {
+  const dir = mkdtempSync(join(tmpdir(), "ct-signpage-pkg-"));
+  writeFileSync(join(dir, "index.html"), readFileSync(join(PKG, "index.html")));
+  cpSync(join(PKG, "public"), join(dir, "public"), { recursive: true });
+  return dir;
+}
+/** A copy of releases/ to plant in. */
+function releasesCopy() {
+  const dir = mkdtempSync(join(tmpdir(), "ct-releases-"));
+  for (const f of readdirSync(join(PKG, "releases"))) writeFileSync(join(dir, f), readFileSync(join(PKG, "releases", f)));
+  return dir;
+}
+
+test("every committed release is as written, and the newest is this checkout's SIGN_HOST build", () => {
+  assert.deepEqual(releaseProblems(), []);
+  for (const [tag, sha] of Object.entries(RELEASED)) assert.equal(sha256(readFileSync(join(PKG, "releases", `${tag}.json`))), sha, tag);
+});
+
+test("planted: an old release edited after it was written fails", () => {
+  const dir = releasesCopy();
+  try {
+    const f = join(dir, "release-1.json");
+    writeFileSync(f, readFileSync(f, "utf8").replace(/"bytes": (\d+)/, (_, n) => `"bytes": ${Number(n) + 1}`));
+    assert.deepEqual(releaseProblems(dir).filter((l) => !l.includes(STALE)).map((l) => l.split(" (")[0]), ["release-1 was edited after it was written"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("planted: any change to what SIGN_HOST serves, with no new release, fails: /, /app.js, the worker, a header", () => {
+  const newest = Object.keys(RELEASED).at(-1);
+  const next = `release-${Number(newest.slice(8)) + 1}`;
+  const planted = (file, edit) => {
+    const pkg = pkgCopy();
+    try {
+      const f = join(pkg, file);
+      writeFileSync(f, edit(readFileSync(f, "utf8")));
+      return releaseProblems(undefined, undefined, pkg);
+    } finally {
+      rmSync(pkg, { recursive: true, force: true });
+    }
+  };
+  const one = (p, what) => {
+    assert.equal(p.length, 1, p.join("\n"));
+    assert.ok(p[0].startsWith(`${newest} ${STALE} (SIGN_HOST ${what}`) && p[0].endsWith(`: write ${next}`), p[0]);
+  };
+  one(planted("public/app.js", (t) => `${t} `), "/app.js:");
+  one(planted("index.html", () => "<!doctype html>"), "/:");
+  one(planted("public/prover-worker.js", (t) => t.replace("{", "{ ")), "/prover-worker.js:");
+  // a connect-src added to the page's policy: the _headers file and every file's headers differ
+  const wider = planted("public/_headers", (t) => {
+    assert.ok(t.includes("connect-src "));
+    return t.replace("connect-src ", "connect-src https://evil.example ");
+  });
+  assert.ok(wider.some((l) => l.startsWith(`${newest} ${STALE} (SIGN_HOST _headers:`)), wider.join("\n"));
+  assert.ok(wider.some((l) => l.startsWith(`${newest} ${STALE} (SIGN_HOST /app.js:`)), wider.join("\n"));
+  // a file served that the list does not name
+  const pkg = pkgCopy();
+  try {
+    writeFileSync(join(pkg, "public", "extra.js"), "steal()");
+    one(releaseProblems(undefined, undefined, pkg), "/extra.js: built, not in the list");
+  } finally {
+    rmSync(pkg, { recursive: true, force: true });
+  }
+});
+
+test("planted: the newest list is picked by N, not by text (release-10 after release-9)", () => {
+  const dir = releasesCopy();
+  try {
+    const newest = Object.keys(RELEASED).at(-1);
+    // release-9 an old list (release-1's, not this build), release-10 this build's: release-10 is the newest
+    writeFileSync(join(dir, "release-9.json"), readFileSync(join(dir, "release-1.json")));
+    writeFileSync(join(dir, "release-10.json"), readFileSync(join(dir, `${newest}.json`)));
+    const ledger = { ...RELEASED, "release-9": RELEASED["release-1"], "release-10": RELEASED[newest] };
+    assert.deepEqual(releaseProblems(dir, ledger), []);
+    // and the other way round, release-10 the stale one, fails on release-10
+    writeFileSync(join(dir, "release-9.json"), readFileSync(join(dir, `${newest}.json`)));
+    writeFileSync(join(dir, "release-10.json"), readFileSync(join(dir, "release-1.json")));
+    const p = releaseProblems(dir, { ...RELEASED, "release-9": RELEASED[newest], "release-10": RELEASED["release-1"] });
+    assert.ok(p.length && p.every((l) => l.startsWith(`release-10 ${STALE}`) && l.endsWith(": write release-11")), p.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("planted: a list not in the ledger, and a ledger entry whose list is gone, fail; a written release is never written again", () => {
+  const dir = releasesCopy();
+  try {
+    writeFileSync(join(dir, "release-99.json"), readFileSync(join(dir, "release-1.json")));
+    assert.ok(releaseProblems(dir).some((l) => l.startsWith("release-99 is not in RELEASED")));
+    assert.ok(releaseProblems(dir, { ...RELEASED, "release-98": "0".repeat(64) }).includes("release-98 is in RELEASED but its list is gone"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const copy = releasesCopy();
+  try {
+    const tag = Object.keys(RELEASED).at(-1);
+    assert.deepEqual(listMain([tag], copy), { code: 1, err: [`${tag} is already written: a release is never written again`] });
+    // and in the default folder, releases/ itself: refused before any build or write, the list as written
+    assert.deepEqual(listMain([tag]), { code: 1, err: [`${tag} is already written: a release is never written again`] });
+    assert.equal(sha256(readFileSync(join(PKG, "releases", `${tag}.json`))), RELEASED[tag]);
+    assert.equal(sha256(readFileSync(join(copy, `${tag}.json`))), RELEASED[tag]);
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
 });
 
 // ---------- the comparer ----------
@@ -290,4 +403,22 @@ test("--print --host builds and lists only the host asked; a bad argument is a u
   assert.deepEqual(Object.keys(JSON.parse(p.stdout).hosts), ["APP_HOST"]);
   assert.deepEqual(p.left, []);
   for (const args of [["--print", "--host", "helper"], ["--check"], ["v1"], ["--print", "x"]]) assert.equal(gen(args).status, 2, args.join(" "));
+});
+
+test("SIGN_HOST's build reads only SIGN_BUILD_INPUTS, the paths the verify gate compares a list's tree on, and each of them", () => {
+  const repo = dirname(dirname(PKG));
+  const reads = ["packages/signpage/index.html", "packages/signpage/public", ...SERVED.map((e) => relative(repo, e.from).split(sep).join("/"))];
+  for (const p of reads) assert.ok(SIGN_BUILD_INPUTS.some((i) => p === i || p.startsWith(`${i}/`)), `${p} is read by the build, not in SIGN_BUILD_INPUTS`);
+  for (const i of SIGN_BUILD_INPUTS) assert.ok(reads.some((p) => p === i || p.startsWith(`${i}/`)), `${i} is in SIGN_BUILD_INPUTS, read by no build step`);
+  // deploy.mjs build() copies exactly index.html, public/ and SERVED: its built folder holds nothing else
+  const built = buildSign();
+  try {
+    const served = new Set(["index.html", ...readdirSync(join(PKG, "public"), { recursive: true }).map(String), ...SERVED.map((e) => e.to)]);
+    for (const f of readdirSync(built, { recursive: true }).map(String)) {
+      if (statSync(join(built, f)).isDirectory()) continue;
+      assert.ok(served.has(f.split(sep).join("/")), `build() wrote ${f}, from no input named`);
+    }
+  } finally {
+    rmSync(built, { recursive: true, force: true });
+  }
 });

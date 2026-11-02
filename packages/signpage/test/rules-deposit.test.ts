@@ -39,7 +39,7 @@ const small = JSON.parse(readFileSync(new URL("../../kit/test/fixtures/deposit-q
 };
 
 const SEED = new Uint8Array(64).fill(0x42); // the wallet's public test seed (its vectors' made_by)
-const TOKEN = NEAR_NETWORKS.testnet.token;
+const TOKEN = NEAR_NETWORKS.testnet.usdc;
 const VAULT = NEAR_NETWORKS.testnet.vault as string;
 const ATTACKER = "cd".repeat(32);
 

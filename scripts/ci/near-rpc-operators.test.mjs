@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ALLOW, NEAR_RPC_OPERATORS, SKIP, isNearRpc, lineProblems, networkOf, operatorOf, scanTree } from "./near-rpc-operators.mjs";
+import { ALLOW, BUNDLES, NEAR_RPC_OPERATORS, SKIP, fileProblems, isNearRpc, lineProblems, networkOf, operatorOf, scanTree } from "./near-rpc-operators.mjs";
 import { RPCS, operatorOf as gateOperatorOf } from "./money-gate.mjs";
 import { RPC_OPERATORS } from "./rpc-operators.mjs";
 import { WATCH_RPCS } from "../../apps/helper/src/token-status/status.ts";
@@ -109,6 +109,17 @@ test("a mainnet host and a testnet host of one operator are no pair; a unit with
 
 test("every file the scan skips says why", () => {
   for (const [f, why] of Object.entries(SKIP)) assert.ok(typeof why === "string" && why.length > 10, f);
+  for (const [f, why] of Object.entries(BUNDLES)) assert.ok(typeof why === "string" && why.length > 10, f);
+});
+
+test("planted: a listed bundle's pair, its marker minified away, passes; its unmapped host is refused; elsewhere both are refused", () => {
+  const pair = "fastnear:[`https://test.rpc.fastnear.com`,`https://rpc.testnet.near.org`],drpc:`https://near-testnet.drpc.org`";
+  const stray = "const a=[`https://rpc.ankr.com/near`]";
+  const bundle = Object.keys(BUNDLES)[0];
+  assert.deepEqual(fileProblems(pair, bundle), []);
+  assert.equal(fileProblems(stray, bundle).length, 1);
+  assert.match(fileProblems(pair, "packages/signpage/src/x.ts").join("\n"), /are one operator \(fastnear\)/);
+  assert.match(fileProblems(pair, "packages/signpage/public/other.js").join("\n"), /are one operator \(fastnear\)/);
 });
 
 test("planted: a NEAR RPC the map does not hold is refused, alone or in a list", () => {

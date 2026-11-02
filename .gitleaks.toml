@@ -30,3 +30,14 @@ id = "tailnet-host"
 description = "Tailscale machine or tailnet name"
 regex = '''(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net\b'''
 keywords = [".ts.net"]
+
+# Circle's native USDC on NEAR mainnet is a public account id (packages/kit/src/vault/shapes.ts VAULT_CONSTANTS.TOKEN,
+# read on chain). Its source line carries gitleaks:allow, but a bundle that compiles it (SIGN_HOST's public/app.js)
+# drops the comment and keeps `TOKEN:` beside it, which the default generic-api-key rule reads as a key. Only that exact
+# value passes, and only for that rule; another value under a token-like name, or this one with a character more, is
+# still found (scripts/ci/gitleaks-config.test.mjs).
+[[allowlists]]
+description = "Circle's native USDC account id on NEAR mainnet, a public value"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1$''']

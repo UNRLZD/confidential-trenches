@@ -1,12 +1,18 @@
 // node --test apps/helper/src/server.test.ts: the helper answers /v1/health with the six parts and its commit, and
 // allows cross-origin reads for exactly the two origins (markets paper H7), on a real server on a free port.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
-import { after, before, test } from "node:test";
-import { PARTS } from "./health.ts";
+import { join } from "node:path";
+import { after, before, mock, test } from "node:test";
+import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
+import { PARTS, releaseOf } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
-import { handler, start } from "./server.ts";
+import type { BindSender } from "./bind/env.ts";
+import { BIND_BODY_MAX, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
+import { FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
+import type { WithdrawSender } from "./withdraw/send.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://confidential.unrealized.trade";
@@ -27,17 +33,39 @@ function call(method: string, path: string, headers: Record<string, string> = {}
   });
 }
 
-test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status) and the other four down, the commit in the body and in X-Helper-Commit", async () => {
+test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status), delegate up (/v1/bind) and the other three down, the commit in the body and in X-Helper-Commit", async () => {
   const r = await call("GET", "/v1/health");
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
-  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" ? "up" : "down"])) });
+  // release: null, as this test's environment sets no HELPER_RELEASE
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])) });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
   assert.equal(r.headers["cache-control"], "no-store");
   assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   assert.equal(r.headers["set-cookie"], undefined);
+});
+
+// card helper-release-bump: the release HELPER_RELEASE names (deploy/redeploy.sh raises it per new commit) is in the
+// answer, so the live check can read that a deploy raised it
+test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the relayers would refuse is null", async () => {
+  assert.equal(releaseOf({ HELPER_RELEASE: "12" }), 12);
+  assert.equal(releaseOf({ HELPER_RELEASE: "999999999" }), 999999999);
+  for (const v of [undefined, "", "0", "07", "1.5", "-1", " 3", "3\n", "1000000000", "abc"]) assert.equal(releaseOf({ HELPER_RELEASE: v }), null, JSON.stringify(v));
+  const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 12));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  try {
+    const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+    assert.equal(r.status, 200);
+    const b = JSON.parse(r.body);
+    assert.equal(b.release, 12);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "parts"]);
+    assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
 });
 
 test("each of the two origins is echoed byte for byte, with Vary: Origin and no credentials", async () => {
@@ -167,5 +195,218 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
     helper.closeAllConnections();
     stub.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => stub.close(() => ok())));
+  }
+});
+
+test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async () => {
+  const ANSWER = { relayer_account: "relayer.confidential.unrlzd.near", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "207609", gp: "100000000", px: "4.135781763845", g_w: "92505000000000", valid_until_block: 222699586 };
+  let failing = false;
+  const fee: FeeQuoter = {
+    networkOf: (t) => (t === "carried.near" ? "mainnet" : null),
+    quote: async () => {
+      if (failing) throw new FeeReadRefused("the providers' gas prices differ");
+      return ANSWER;
+    },
+    reads: () => ({ feeMin: async () => 0n }),
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, fee);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  try {
+    const r = await call("GET", "/v1/withdraw/fee?token=carried.near", { origin: APP }, undefined, to);
+    assert.equal(r.status, 200);
+    assert.deepEqual(JSON.parse(r.body), ANSWER);
+    assert.equal(r.headers["x-helper-commit"], COMMIT);
+    assert.equal(r.headers["access-control-allow-origin"], APP);
+    for (const q of ["?token=other.near", "?token=carried.near&token=carried.near", ""]) {
+      const n = await call("GET", `/v1/withdraw/fee${q}`, { origin: APP }, undefined, to);
+      assert.equal(n.status, 404, q);
+      assert.deepEqual(JSON.parse(n.body), { error: { code: "not_found" } }, q);
+    }
+    failing = true;
+    const u = await call("GET", "/v1/withdraw/fee?token=carried.near", { origin: APP }, undefined, to);
+    assert.equal(u.status, 503);
+    assert.deepEqual(JSON.parse(u.body), { error: { code: "upstream" } });
+    const p = await call("POST", "/v1/withdraw/fee?token=carried.near", JSON_H, "{}", to);
+    assert.equal(p.status, 405);
+    assert.equal(p.headers["allow"], "GET, HEAD, OPTIONS");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/withdraw: the body parsed and handed to the sender, its status and code answered; not JSON 400 bad_shape; over 8 KB 413 too_large; GET 405", async () => {
+  const seen: unknown[] = [];
+  const withdraw: WithdrawSender = {
+    carry: async (body) => {
+      seen.push(body);
+      const t = (body as { token?: unknown }).token;
+      if (t === "halted.near") return { status: 503, body: { error: { code: "token_halted" } } };
+      if (t === "carried.near") return { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" } };
+      return { status: 400, body: { error: { code: "bad_shape" } } };
+    },
+    warm: () => void warmed++,
+    stop: () => undefined,
+  };
+  let warmed = 0;
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw);
+  assert.equal(warmed, 1, "start warms the withdrawal relayer: a restart resends its open sends before any request");
+  // and the helper's main starts the server with the relayer it built
+  const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
+  assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, statusesOf\(watches\)\);/);
+  assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind\);/);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  try {
+    const ok = await call("POST", "/v1/withdraw", { ...JSON_H, origin: APP }, JSON.stringify({ token: "carried.near" }), to);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(JSON.parse(ok.body), { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" });
+    assert.equal(ok.headers["x-helper-commit"], COMMIT);
+    assert.equal(ok.headers["access-control-allow-origin"], APP);
+    const h = await call("POST", "/v1/withdraw", JSON_H, JSON.stringify({ token: "halted.near" }), to);
+    assert.equal(h.status, 503);
+    assert.deepEqual(JSON.parse(h.body), { error: { code: "token_halted" } });
+    const n = await call("POST", "/v1/withdraw", JSON_H, "{not json", to);
+    assert.equal(n.status, 400);
+    assert.deepEqual(JSON.parse(n.body), { error: { code: "bad_shape" } });
+    assert.equal(seen.length, 2, "a body that does not parse never reaches the sender");
+    const big = await call("POST", "/v1/withdraw", JSON_H, JSON.stringify({ pad: "x".repeat(WITHDRAW_BODY_MAX) }), to);
+    assert.equal(big.status, 413);
+    assert.deepEqual(JSON.parse(big.body), { error: { code: "too_large" } });
+    assert.equal(seen.length, 2);
+    const g = await call("GET", "/v1/withdraw", {}, undefined, to);
+    assert.equal(g.status, 405);
+    assert.equal(g.headers["allow"], "POST, OPTIONS");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/bind: mounted; with no network set the helper starts and a body that does not decode is 400 bad_shape (networks.test.ts: a delegate on no carried token is token_not_accepted); over 4 KB 413; GET 405", async () => {
+  // the deployed composition (no sender handed in, nothing set): the helper starts and answers its not-configured codes
+  const decodable = "AAAAAA=="; // not one SignedDelegateAction: check 1
+  const a = await call("POST", "/v1/bind", { ...JSON_H, origin: APP }, JSON.stringify({ signed_delegate: decodable }));
+  assert.deepEqual([a.status, JSON.parse(a.body)], [400, { error: { code: "bad_shape" } }]);
+  assert.equal(a.headers["x-helper-commit"], COMMIT);
+  assert.equal(a.headers["access-control-allow-origin"], APP);
+  const n = await call("POST", "/v1/bind", JSON_H, "{not json");
+  assert.deepEqual([n.status, JSON.parse(n.body)], [400, { error: { code: "bad_shape" } }]);
+  const big = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "A".repeat(BIND_BODY_MAX) }));
+  assert.deepEqual([big.status, JSON.parse(big.body)], [413, { error: { code: "too_large" } }]);
+  const g = await call("GET", "/v1/bind");
+  assert.deepEqual([g.status, g.headers["allow"]], [405, "POST, OPTIONS"]);
+  // a sender handed in gets the parsed body, and start warms it
+  const seen: unknown[] = [];
+  let warmed = 0;
+  const bind: BindSender = {
+    carry: async (body) => (seen.push(body), { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" } }),
+    warm: () => void warmed++,
+    stop: () => undefined,
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  assert.equal(warmed, 1, "start warms the deposit relayer: a restart reads its open records before any request");
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  try {
+    const ok = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: decodable }), (helper.address() as AddressInfo).port);
+    assert.deepEqual([ok.status, JSON.parse(ok.body)], [200, { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" }]);
+    assert.deepEqual(seen, [{ signed_delegate: decodable }]);
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the device's send waits for: a carry still running then answers in_flight and goes on to its own end; one that ends inside it answers its own", async () => {
+  const TX = "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL";
+  const turns = async (n = 50) => {
+    for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok));
+  };
+  let entered: () => void = () => undefined;
+  let finish: () => void = () => undefined;
+  let finished = 0;
+  const bind: BindSender = {
+    carry: async () => {
+      const gate = new Promise<void>((ok) => (finish = ok));
+      entered();
+      await gate; // the prepay and the delegate, read at final
+      finished++;
+      return { status: 200, body: { tx_hash: TX } };
+    },
+    warm: () => undefined,
+    stop: () => undefined,
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    // a carry still running at the bound
+    let inside = new Promise<void>((ok) => (entered = ok));
+    let answered: { status: number; body: string } | null = null;
+    const slow = call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "AAAA" }), to).then((r) => (answered = r));
+    await inside;
+    mock.timers.tick(HELPER_BIND_ANSWER_MS - 1);
+    await turns();
+    assert.equal(answered, null, "answered before the bound");
+    mock.timers.tick(1);
+    await turns();
+    if (answered === null) finish(); // no answer at the bound: let the carry end, so the assertion below names what came
+    const a = (await slow) as { status: number; body: string };
+    assert.deepEqual([a.status, JSON.parse(a.body)], [400, { error: { code: "in_flight" } }]);
+    assert.equal(finished, 0, "the carry was still running when the helper answered");
+    finish();
+    await turns();
+    assert.equal(finished, 1, "the carry went on to its own end");
+    // a carry that ends inside the bound answers its own
+    inside = new Promise<void>((ok) => (entered = ok));
+    const fast = call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "AAAA" }), to);
+    await inside;
+    mock.timers.tick(HELPER_BIND_ANSWER_MS - 1);
+    finish();
+    const b = await fast;
+    assert.deepEqual([b.status, JSON.parse(b.body)], [200, { tx_hash: TX }]);
+  } finally {
+    mock.timers.reset();
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/bind is not tied to the request: a client that closes at 1 s does not cancel the carry, which runs to its answer and its record; the helper keeps serving", async () => {
+  const records: string[] = [];
+  let finished = 0;
+  const bind: BindSender = {
+    carry: async (body) => {
+      await new Promise((ok) => setTimeout(ok, 2_000)); // longer than the client waits
+      records.push(JSON.stringify(body)); // what the carry writes to its store
+      finished++;
+      return { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" } };
+    },
+    warm: () => undefined,
+    stop: () => undefined,
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  try {
+    const closed = await new Promise<string>((ok) => {
+      const r = request({ host: "127.0.0.1", port: to, method: "POST", path: "/v1/bind", headers: JSON_H }, () => ok("answered"));
+      r.on("error", () => ok("closed"));
+      r.end(JSON.stringify({ signed_delegate: "AAAA" }));
+      setTimeout(() => r.destroy(), 1_000); // the device's send gives up
+    });
+    assert.equal(closed, "closed", "the client gave up before the answer");
+    assert.equal(finished, 0, "the carry was still running when the client closed");
+    await new Promise((ok) => setTimeout(ok, 1_500));
+    assert.equal(finished, 1, "the carry ran to its answer after the client closed");
+    assert.deepEqual(records, ['{"signed_delegate":"AAAA"}']);
+    const h = await call("GET", "/v1/health", {}, undefined, to);
+    assert.equal(h.status, 200, "the helper still serves");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
   }
 });

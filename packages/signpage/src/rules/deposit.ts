@@ -20,7 +20,8 @@
 //   backup (OD:20).
 //
 // Not here: the reads themselves (packages/wallet/src/deposit/account.ts reads them on two RPCs), the signing, and the
-// postMessage wiring (src/api.ts refuses every signing kind until it is wired). A pending `Pause` request on USDC is not
+// postMessage wiring (src/deposit-wire.ts for the quote; src/api.ts refuses every signing kind until it is wired). The
+// backup gate is the wallet store's one predicate, backupFirst. A pending `Pause` request on USDC is not
 // readable on chain yet (vault SB run (4); M333): `pausePending` is refused when a read says so.
 import {
   checkOneClickQuote,
@@ -32,6 +33,7 @@ import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
 import { VAULT_CONSTANTS, VAULT_DEPOSIT_CARRIER, VAULT_TOKEN_CODE_HASH } from "../../../kit/src/vault/shapes.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../../wallet/src/deposit/account.ts";
 import { RELEASE_BIND_URL } from "../../../wallet/src/deposit/delegate.ts";
+import { backupFirst } from "../../../wallet/src/store/index.ts";
 
 /** Wd: max_block_height is the lower of the two RPC heights + this (W:413: 120 blocks until vault SB run (6) sets it). */
 export const DEPOSIT_WINDOW_BLOCKS = 120n;
@@ -198,7 +200,7 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   const d = decodeDepositDelegate(bytes);
   if (d.sender_id !== signer.id) refuse("sender_id");
   if (!sameBytes(d.public_key, signer.publicKey)) refuse("public_key");
-  if (d.receiver_id !== release.token) refuse("receiver_id");
+  if (d.receiver_id !== release.usdc) refuse("receiver_id");
   if (d.method_name !== VAULT_DEPOSIT_CARRIER.method) refuse("method");
   if (d.deposit !== VAULT_DEPOSIT_CARRIER.deposit_yocto) refuse("deposit");
   if (d.gas !== DEPOSIT_GAS) refuse("gas");
@@ -284,7 +286,7 @@ export interface DepositQuoteContext {
  */
 export function checkDepositQuote(request: OneClickRequest, answer: unknown, ctx: DepositQuoteContext): OneClickChecked {
   // The backup gate (OD:20): a swapped app cannot skip it.
-  if (ctx.seed.source !== "prf" && ctx.seed.code_saved !== true) refuse("backup");
+  if (!ctx.seed || backupFirst(ctx.seed)) refuse("backup");
   const u = ctx.depositId;
   if (!IMPLICIT.test(u)) refuse("deposit_id");
   if (!isObj(request)) refuse("request");

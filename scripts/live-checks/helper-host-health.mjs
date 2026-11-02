@@ -7,12 +7,20 @@
 //     changed one of the image's inputs (IMAGE_INPUTS, apps/helper/deploy/image-inputs.mjs: the helper, the kit, the
 //     root manifests, the lockfile and .dockerignore), or --commit;
 //   - APP_HOST and SIGN_HOST are each echoed exactly in Access-Control-Allow-Origin; example.com gets none; no answer
-//     carries `*` or Access-Control-Allow-Credentials; every answer has Vary: Origin.
-//   node scripts/live-checks/helper-host-health.mjs [--base <url>] [--commit <sha>] [--record <file>]
+//     carries `*` or Access-Control-Allow-Credentials; every answer has Vary: Origin;
+//   - deposits are carried (card helper-testnet-carry): every answer lists the delegate part (POST /v1/bind) "up",
+//     and POST /v1/bind with a body that is no SignedDelegateAction answers the route's own 400 bad_shape, not 404.
+//     That read sends nothing anywhere: check 1 refuses the body before any chain read;
+//   - every answer carries the release (card helper-release-bump: HELPER_RELEASE, which deploy/redeploy.sh raises by
+//     one for every new commit), a whole number, 1 or more, the same in each; and with --since <record> (an earlier
+//     run's --record, taken before the deploy), it went up from the record's when the commit is another, and is the
+//     record's when the commit is the same. A record from a helper that reported no release holds none, so any whole
+//     number is up from it. Without --since the comparison is not made, and the run says so.
+//   node scripts/live-checks/helper-host-health.mjs [--base <url>] [--commit <sha>] [--since <record>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { IMAGE_INPUTS } from "../../apps/helper/deploy/image-inputs.mjs";
 
@@ -22,12 +30,26 @@ export const APP = "https://confidential.unrealized.trade";
 export const SIGN = "https://sign.confidential.unrealized.trade";
 export const OTHER = "https://example.com";
 export const PARTS = ["proxy", "relay", "intents", "delegate", "orders", "log"];
+/** POST /v1/bind's probe: not one SignedDelegateAction, so the route answers check 1's bad_shape and reads nothing. */
+export const BIND_PROBE = JSON.stringify({ signed_delegate: "AAAA" });
 const SHA = /^[0-9a-f]{40}$/;
 
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 
-/** The check on one recorded run: { reads: [{ origin, status, headers, body }] }, against the expected commit. */
-export function judge({ reads }, commit) {
+const bodyOf = (r) => {
+  try {
+    return JSON.parse(r?.body ?? "");
+  } catch {
+    return undefined;
+  }
+};
+const isRelease = (n) => Number.isSafeInteger(n) && n >= 1;
+
+/**
+ * The check on one recorded run: { reads: [{ origin, status, headers, body }], bind }, against the expected commit;
+ * with `since`, an earlier run's record, the release is compared with that record's.
+ */
+export function judge({ reads, bind }, commit, since) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   say(SHA.test(commit ?? ""), `expected commit ${show(commit)} is a full sha`);
@@ -52,8 +74,10 @@ export function judge({ reads }, commit) {
     say(sameParts, `${tag} parts are exactly ${PARTS.join(", ")}: ${keys.join(", ") || "none"}`);
     const states = keys.every((k) => b.parts[k] === "up" || b.parts[k] === "down");
     say(sameParts && states, `${tag} each part is "up" or "down"`);
+    say(b?.parts?.delegate === "up", `${tag} delegate (POST /v1/bind) is ${show(b?.parts?.delegate)}, want "up"`);
     say(h["x-helper-commit"] === commit, `${tag} X-Helper-Commit: ${show(h["x-helper-commit"])}${h["x-helper-commit"] === commit ? "" : `, want ${show(commit)}`}`);
     say(b?.commit === commit, `${tag} body commit equals it`);
+    say(isRelease(b?.release), `${tag} release ${show(b?.release)} is a whole number, 1 or more`);
     const acao = h["access-control-allow-origin"];
     const wantAcao = want === OTHER ? undefined : want;
     say(acao === wantAcao, `${tag} Access-Control-Allow-Origin: ${show(acao)}${acao === wantAcao ? "" : `, want ${show(wantAcao)}`}`);
@@ -62,7 +86,32 @@ export function judge({ reads }, commit) {
     const vary = (h["vary"] ?? "").split(",").map((s) => s.trim().toLowerCase());
     say(vary.includes("origin"), `${tag} Vary: ${show(h["vary"])} names Origin`);
   }
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+  let code;
+  try {
+    code = JSON.parse(bind?.body ?? "").error?.code;
+  } catch {
+    code = undefined;
+  }
+  say(bind?.status === 400 && code === "bad_shape", `POST /v1/bind with no SignedDelegateAction answers ${show(bind?.status)} ${show(code)}, want 400 "bad_shape"`);
+  say(bind !== undefined && bind.headers["x-helper-commit"] === commit, `POST /v1/bind's X-Helper-Commit: ${show(bind?.headers["x-helper-commit"])}`);
+  const now = reads.map((r) => bodyOf(r)?.release);
+  say(now.length > 0 && now.every((n) => n === now[0]), `every answer carries the same release: ${now.map(show).join(", ")}`);
+  if (since === undefined) lines.push("--  release not compared with an earlier run: no --since record");
+  else {
+    const was = bodyOf(since.reads?.find((r) => r.origin === APP));
+    const release = now[0];
+    if (!was || !SHA.test(was.commit ?? "")) say(false, `the --since record holds no health answer with a commit`);
+    else if (was.release === undefined || was.release === null) say(isRelease(release), `release ${show(release)} is up from the record's none (commit ${was.commit.slice(0, 12)}, a helper before release reporting)`);
+    else if (!isRelease(was.release)) say(false, `the --since record's release ${show(was.release)} is no whole number`);
+    else if (was.commit === commit) {
+      const kept = release === was.release;
+      say(kept, `the same commit as the record: release ${show(release)}${kept ? " kept at" : ", want kept at"} ${show(was.release)}`);
+    } else {
+      const up = isRelease(release) && release > was.release;
+      say(up, `another commit than the record's (${was.commit.slice(0, 12)}): release ${show(release)}${up ? " went up from" : ", want above"} ${show(was.release)}`);
+    }
+  }
+  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
 export async function read(base = BASE, fetchFn = fetch) {
@@ -73,7 +122,11 @@ export async function read(base = BASE, fetchFn = fetch) {
     for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
     reads.push({ origin, status: r.status, headers, body: await r.text() });
   }
-  return { base, reads };
+  const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/bind`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: BIND_PROBE });
+  const headers = {};
+  for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
+  const bind = { status: r.status, headers, body: await r.text() };
+  return { base, reads, bind };
 }
 
 export function mainCommit() {
@@ -91,9 +144,10 @@ if (import.meta.main) {
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
     const commit = opt("--commit") ?? mainCommit();
+    const since = opt("--since") ? JSON.parse(readFileSync(opt("--since"), "utf8")) : undefined;
     const answer = await read(opt("--base", BASE));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ commit, ...answer }, null, 1)}\n`);
-    const { ok, lines } = judge(answer, commit);
+    const { ok, lines } = judge(answer, commit, since);
     for (const l of lines) console.log(l);
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${answer.base}, commit ${commit})`);
     process.exit(ok ? 0 : 1);

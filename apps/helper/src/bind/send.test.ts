@@ -52,7 +52,9 @@ import {
   type TxOutcome,
   type TxRef,
 } from "./send.ts";
-import { USDC_CODE_HASH, pausedAt, type TokenStatus } from "../token-status/status.ts";
+import { createTokenWatch, pausedFrom, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
+import { A, B, hashOf, nearPair, PAUSED } from "../../test/token-status/near.ts";
+import { watchDeps } from "./env.ts";
 
 const VAULT = "vault.confidential.unrlzd.near";
 const RELAYER = "bind.test.near";
@@ -115,8 +117,10 @@ class Chain {
   resolved: string[] = [];
   statuses: TokenStatus[] = [OPEN];
   statusAsks = 0;
-  /** The watch's pause history's answer for a height (status.ts pausedAt). */
-  pausedAt: (height: bigint) => boolean | null = () => false;
+  /** Each hold's H rule as asked (status.ts HoldAt). */
+  holds: HoldAt[] = [];
+  /** The watch's answer for a height (status.ts pausedAt). */
+  pausedAt: (height: bigint) => boolean | null | Promise<boolean | null> = () => false;
   resolveOpts: { resend: boolean }[] = [];
   /** Runs inside a relayer send, after its durable write (a race). */
   during?: () => Promise<void>;
@@ -189,6 +193,7 @@ class Chain {
   relayer(): Relayer {
     return {
       account: RELAYER,
+      key: `${RELAYER}/ed25519:test`,
       balance: async () => this.balance,
       resolve: async (tx, opts) => {
         this.resolved.push(tx.tx_hash);
@@ -217,7 +222,8 @@ class Chain {
       reads: this.reads(),
       store,
       relayer: this.relayer(),
-      tokenStatus: async () => {
+      tokenStatus: async (at) => {
+        this.holds.push(at);
         const s = this.statuses[Math.min(this.statusAsks, this.statuses.length - 1)]!;
         this.statusAsks++;
         return { ...s, block_height: s.block_height === -1 ? Number(this.final + this.ahead) : s.block_height };
@@ -327,6 +333,34 @@ test("H1: R4 runs at the send's turn in the queue: the final passing the margin 
   assert.deepEqual([w.chain.sends().length, rec(w).sends.length, rec(w).failed], [0, 0, 0]);
 });
 
+test("R4 after (f): a hold that waits at the send's turn while the final passes the margin answers resign_needed, nothing sent; and a re-send the same way", async () => {
+  const w = world();
+  const real = w.deps.relayer.send;
+  const hold = w.deps.tokenStatus;
+  let queued = false;
+  w.deps.relayer.send = async (action, guard, before) => {
+    queued = action.kind === "delegate";
+    return real(action, guard, before);
+  };
+  w.deps.tokenStatus = async (at) => {
+    if (queued) w.chain.final += 200n; // the hold waited (a lagging provider, a 429) while the chain moved on
+    return hold(at);
+  };
+  assert.equal(code(await w.carry(next(w))), "resign_needed");
+  assert.deepEqual([w.chain.sends().length, rec(w).sends.length, rec(w).failed], [0, 0, 0]);
+  // the settle's re-send: K ahead before the hold, under K after it: read, never re-sent
+  const v = world();
+  v.chain.fates = ["unknown", "lands"];
+  ok(await v.carry(next(v)));
+  const mbh = BigInt(rec(v).sends[0]!.max_block_height);
+  v.chain.final = mbh - 20n; // K ahead
+  const vh = v.deps.tokenStatus;
+  v.deps.tokenStatus = async (at) => ((v.chain.final += 1n), vh(at)); // the hold waits a block
+  v.chain.resolveOpts = [];
+  await lockRound(v.deps); // the background round: the settle's own hold, then its margin
+  assert.deepEqual(v.chain.resolveOpts, [{ resend: false }]);
+});
+
 // ---- the idempotent answer and U's in-flight slot ----
 
 test("a re-send of carried bytes answers 200 with that tx_hash, before check 3 (U's nonce moved), and sends nothing; after a restart too", async () => {
@@ -426,6 +460,16 @@ test("R3-3: a second call for U while one is carried: in_flight on the same P, p
 });
 
 // ---- (f) the token's hold ----
+
+test("(f) every hold of a deposit asks at the higher of the two finals (markets.md check 10's H for the ids' calls): before the checks, check 9, the prepay's and the send's turns, a re-send", async () => {
+  const w = world();
+  w.chain.fates = ["paused", "lands"];
+  w.chain.pausedAt = () => null; // the paused send stays pending: the next call re-reads it under the hold
+  ok(await w.carry(next(w)));
+  await w.carry(next(w));
+  assert.ok(w.chain.holds.length >= 5, String(w.chain.holds.length));
+  assert.deepEqual([...new Set(w.chain.holds)], ["higher"]);
+});
 
 test("(f) held before the checks: 503 token_halted, nothing prepaid, sent or counted, no record", async () => {
   const w = world();
@@ -586,25 +630,55 @@ test("(i) R3's exception: USDC's own receipt failed with its paused error and th
   assert.equal(rec(w).landed, true);
 });
 
-test("PROBE N6: paused at the failure, unpaused, then a blocklist and another pause: the history still says paused there, not counted", async () => {
+test("PROBE N6, by views: paused at the failure, unpaused two blocks later, then another pause: the views at the failure's block and the one before still say paused there, not counted", async () => {
   const w = world();
   w.chain.fates = ["paused"];
   let failAt = 0n;
   w.chain.pausedAt = (h) => {
     failAt = h;
-    const at = Number(h);
-    return pausedAt({ from: 0, pausedAtFrom: false, caughtUpTo: at + 50, events: [{ name: "paused", block_height: at - 3 }, { name: "unpaused", block_height: at + 2 }, { name: "paused", block_height: at + 9 }] }, at);
+    // the halt switches at h-3 (paused), h+2 (unpaused), h+9 (paused): only h-1 and h are read
+    const open = (x: bigint) => !(x >= h - 3n && x < h + 2n) && x < h + 9n;
+    const o = (x: bigint) => (open(x) ? { at: Number(x), answer: '"5"' } : { at: Number(x), panic: "FiatToken: paused" });
+    return pausedFrom([o(h - 1n), o(h)], [o(h - 1n), o(h)]);
   };
   ok(await w.carry(next(w)));
   assert.ok(failAt > 0n);
   assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state], [0, "exempt"]);
 });
 
-test("status.ts pausedAt: the state at a height from the history; a pause or unpause in that block is paused; null outside what was read", () => {
-  const h = { from: 100, pausedAtFrom: false, caughtUpTo: 200, events: [{ name: "unpaused" as const, block_height: 150 }, { name: "paused" as const, block_height: 120 }] };
-  assert.deepEqual([110, 119, 120, 121, 149, 150, 151, 200].map((x) => pausedAt(h, x)), [false, false, true, true, true, true, false, false]);
-  assert.deepEqual([pausedAt(h, 99), pausedAt(h, 201)], [null, null]);
-  assert.equal(pausedAt({ ...h, pausedAtFrom: true, events: [] }, 150), true);
+test("status.ts pausedFrom: paused at the block before or at the block; null unless all four reads are known and the providers agree", () => {
+  const open = (at: number) => ({ at, answer: '"20000"' });
+  const paused = (at: number) => ({ at, panic: "FiatToken: paused" });
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), open(10)]), false);
+  assert.equal(pausedFrom([paused(9), open(10)], [paused(9), open(10)]), true, "paused before the block, unpaused in it: the receipt may have run before the unpause");
+  assert.equal(pausedFrom([open(9), paused(10)], [open(9), paused(10)]), true, "paused in the block");
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), paused(10)]), null, "the providers disagree");
+  assert.equal(pausedFrom([open(9), undefined], [open(9), open(10)]), null, "a read missing");
+  assert.equal(pausedFrom([open(9), { at: 10, panic: "FiatToken: paused!" }], [open(9), open(10)]), null, "a panic that is not exactly USDC's");
+  assert.equal(pausedFrom([open(9), { at: 10, answer: "null" }], [open(9), { at: 10, answer: "null" }]), null, "an answer that is not a balance");
+  // named limit: a pause and an unpause inside one block read as open at both heights
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), open(10)]), false);
+});
+
+test("(i) through the network's own watch (env.ts watchDeps, status.ts pausedAt on two providers): a send that failed on USDC's paused error while USDC's views show it paused there is resolved exempt, and U is free again", async () => {
+  const w = world();
+  w.chain.fates = ["paused", "lands"];
+  // two providers answering as nearcore does: USDC paused from the failure's block on, its code the pin
+  const near = nearPair({ final: () => Number(w.chain.final) + 3, balance: (h) => (BigInt(h) >= w.chain.final ? { error: PAUSED } : '"5"') });
+  const watch = createTokenWatch("mainnet", { NEAR_RPC_URL: A, NEAR_RPC_URL_B: B, BIND_VAULT_MAINNET: VAULT }, { fetch: near.fetch });
+  const deps = watchDeps(watch, USDC);
+  w.chain.pausedAt = (h) => deps.pausedAt(h);
+  ok(await w.carry(next(w)));
+  assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state, rec(w).sends[0]!.counted], [0, "exempt", false], "resolved, not counted");
+  const f = Number(w.chain.final);
+  const [before, at] = [hashOf(f - 1), hashOf(f)];
+  assert.deepEqual(
+    [...new Set(near.seen.map((r) => `${r.url === A ? "A" : "B"} ${r.method === "block" ? "block" : String(r.params.method_name ?? r.params.request_type)} ${String(r.params.block_id)}`))].sort(),
+    ["A", "B"].flatMap((p) => [`${p} block ${f}`, `${p} ft_balance_of ${before}`, `${p} ft_balance_of ${at}`, `${p} view_account ${before}`, `${p} view_account ${at}`]).sort(),
+  );
+  // U is free again: the next deposit from U is carried and lands (no in_flight on its P, no prepay_open for a new one)
+  ok(await w.carry(next(w)));
+  assert.equal(rec(w).landed, true);
 });
 
 test("(i) R3's exception waits for the watch: no answer at the failure's height leaves the send pending; a later call settles it", async () => {
@@ -1312,6 +1386,8 @@ type KeyChange = { height: bigint; nonce: bigint | null; cause: Record<string, s
 
 /** One ledger behind two regular providers and an archival one. */
 class Node {
+  /** lookups by hash (the tx method) answered so far */
+  lookups = 0;
   final = 1_000n;
   /**
    * The relayer key's history: each change in the block that made it, as EXPERIMENTAL_changes lists it (a nonce of
@@ -1324,6 +1400,8 @@ class Node {
   vaultChanges: { height: bigint; cause: Record<string, string> }[] = [];
   /** providers (by index) that answer every EXPERIMENTAL_changes with an empty list (save_state_changes off, F54) */
   noChanges = new Set<number>();
+  /** ms added to every block's time on a provider (by index): two providers that disagree on a block's time */
+  msSkew = [0n, 0n, 0n];
   nonceAt(h: bigint): bigint | null {
     let n: bigint | null = 10n;
     for (const c of this.keyChanges) if (c.height <= h) n = c.nonce;
@@ -1442,7 +1520,8 @@ class Node {
         if (this.skipped.has(h) || h > top) throw unknownBlock();
         return h;
       };
-      const header = (h: bigint) => ({ header: { height: Number(h), hash: this.bh(h), prev_height: Number(this.prevOf(h)) } });
+      // timestamp_nanosec as nearcore writes it (a decimal string): 600 ms a block from 1.7e12 ms; timestamp (a JSON number past 2^53) is never read
+      const header = (h: bigint) => ({ header: { height: Number(h), hash: this.bh(h), prev_height: Number(this.prevOf(h)), timestamp_nanosec: ((1_700_000_000_000n + h * 600n + (this.msSkew[i] ?? 0n)) * 1_000_000n + 999_999n).toString(), timestamp: 9_007_199_254_740_993_000 } });
       if (method === "query") {
         const q = params as { request_type: string; block_id?: unknown; public_key?: string };
         if (q.request_type === "view_access_key") {
@@ -1491,6 +1570,7 @@ class Node {
         return { final_execution_status: "NONE" };
       }
       if (method === "tx") {
+        this.lookups++;
         const h = (params as { tx_hash: string }).tx_hash;
         const hid = this.hideTx.get(h) ?? 0;
         if (hid > 0) {
@@ -1669,10 +1749,13 @@ test("RECHECK R4: the settle never re-sends U's stored delegate once the token w
   assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "ok"); // answered as sent; the delegate reached no node
   assert.equal(store.get(u.id)!.sends[0]!.state, "pending");
   cut = false;
-  // the watch turns halted after check 9 read it open, while the settle runs
-  const reads = deps.reads;
-  deps.reads = { ...reads, newestFinalHeight: async () => ((halted = true), reads.newestFinalHeight()) };
+  // the watch turns halted after check 9 read it open, while the settle runs: the call's first two holds (before the
+  // checks, check 9) read open, the settle's own hold reads halted (the hold comes before R4's margin, guardFor)
+  let asks = 0;
+  const watch = deps.tokenStatus;
+  deps.tokenStatus = async (at) => ((halted ||= ++asks > 2), watch(at));
   assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 90n), deps)), "in_flight");
+  assert.equal(asks, 3);
   assert.equal(sentWhileHalted, 0);
   store.close();
 });
@@ -2728,4 +2811,58 @@ test("base58decode inverts the checks' base58", () => {
   const b = createHash("sha256").update("x").digest();
   assert.deepEqual(Buffer.from(base58decode(base58(b))), b);
   assert.deepEqual(Buffer.from(base58decode("11" + base58(Buffer.from([1, 2])))), Buffer.from([0, 0, 1, 2]));
+});
+
+test("a vault call read from blocks only (the withdrawal relayer's fromBlocks): no lookup by hash, its receipt found at E with E's time from timestamp_nanosec; wait false answers once sent", async () => {
+  const node = new Node();
+  const r = node.relayer(2_000);
+  const sent = await r.send(prepayAction(1n), open, () => undefined, { wait: false });
+  assert.equal(sent.kind, "unknown");
+  const tx: TxRef[] = [];
+  const out = await r.send(prepayAction(2n), open, keep(tx), { fromBlocks: true });
+  assert.equal(out.kind, "final");
+  if (out.kind !== "final") return;
+  assert.equal(out.receipts.length, 1);
+  const e = out.receipts[0]!;
+  assert.equal(e.executor, VAULT);
+  assert.equal(e.ok, true);
+  assert.equal(e.ms, 1_700_000_000_000n + e.height * 600n, "E's time: timestamp_nanosec / 10^6, the sub-ms part dropped");
+  assert.equal(node.lookups, 0, "never a lookup by hash");
+  const again = await r.resolve(tx[0]!, { resend: false, fromBlocks: true });
+  assert.equal(again.kind, "final");
+  assert.equal(node.lookups, 0);
+});
+
+test("from blocks, the two providers' block times must agree: a block whose time differs on them gives no final outcome", async () => {
+  const node = new Node();
+  const r = node.relayer(2_000);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx), { fromBlocks: true })).kind, "final");
+  node.msSkew[1] = 1n;
+  const out = await r.resolve(tx[0]!, { resend: false, fromBlocks: true }).catch((e: Error) => ({ kind: "threw", why: e.message }));
+  assert.notEqual(out.kind, "final", JSON.stringify(out));
+  node.msSkew[1] = 0n;
+  assert.equal((await r.resolve(tx[0]!, { resend: false, fromBlocks: true })).kind, "final");
+});
+
+test("from blocks reads only a transaction to the vault: one to any other receiver is refused", async () => {
+  const node = new Node();
+  const r = node.relayer(2_000);
+  const tx: TxRef[] = [];
+  const call = (receiver: string) => r.send({ kind: "call", receiver, method: "m", args: "{}", gas: 30_000_000_000_000n, deposit: 0n }, open, keep(tx), { fromBlocks: true }).catch((e: Error) => ({ kind: "threw", why: e.message }));
+  // the same call to the vault reads final from its receipt in the vault's changes; to another receiver, the vault's
+  // changes are never read for it, however they read
+  assert.equal((await call(VAULT)).kind, "final");
+  const out = await call("other.test.near");
+  assert.notEqual(out.kind, "final", JSON.stringify(out));
+  assert.notEqual((await r.resolve(tx[1]!, { resend: false, fromBlocks: true })).kind, "final");
+});
+
+test("a FunctionCall encodes as nearcore's Action::FunctionCall: tag 2, method, args, gas u64, deposit u128; gas past 300 Tgas or a deposit past u128 refused", () => {
+  const a = encodeAction({ kind: "call", receiver: VAULT, method: "settle", args: '{"nullifier_hash":"1"}', gas: 150_000_000_000_000n, deposit: 148n * 10n ** 19n });
+  const le = (n: bigint, len: number) => Buffer.from(Array.from({ length: len }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn)));
+  const str = (x: string) => Buffer.concat([le(BigInt(Buffer.byteLength(x)), 4), Buffer.from(x)]);
+  assert.deepEqual(a, Buffer.concat([Buffer.from([2]), str("settle"), str('{"nullifier_hash":"1"}'), le(150_000_000_000_000n, 8), le(148n * 10n ** 19n, 16)]));
+  assert.throws(() => encodeAction({ kind: "call", receiver: VAULT, method: "m", args: "{}", gas: 300_000_000_000_001n, deposit: 0n }), /gas/);
+  assert.throws(() => encodeAction({ kind: "call", receiver: VAULT, method: "m", args: "{}", gas: 1n, deposit: 1n << 128n }), /deposit/);
 });

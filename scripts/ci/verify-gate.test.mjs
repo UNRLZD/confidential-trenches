@@ -156,3 +156,239 @@ test("a merge of main into the card branch names no card and passes; an empty pu
     r.done();
   }
 });
+
+// ---------- SIGN_HOST's release lists and their ledger: what main holds never changes ----------
+
+const LEDGER = "packages/signpage/scripts/release-list.mjs";
+const ledgerText = (entries) => `export const RELEASED = Object.freeze({\n${Object.entries(entries).map(([k, v]) => `  "${k}": "${v}",\n`).join("")}});\n`;
+const H1 = "1".repeat(64);
+const H2 = "2".repeat(64);
+/** main with release-1 and its ledger entry, then a card branch: { r, base }. */
+function released() {
+  const r = repo();
+  const base = r.commit("Card kickoff-kit: release-1", {
+    "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"x","hosts":{}}\n`,
+    [LEDGER]: ledgerText({ "release-1": H1 }),
+    "scripts/live-checks/signpage-release.mjs": check,
+  });
+  r.g("checkout", "-q", "-b", "card/signpage-release");
+  return { r, base };
+}
+const cut = (r, extra = {}) => {
+  const tree = r.g("rev-parse", "HEAD^{tree}");
+  return `${JSON.stringify({ release: "release-2", commit: null, tree, hosts: {}, ...extra })}\n`;
+};
+
+test("a new release list with its tree and a new ledger entry passes; old ones untouched", () => {
+  const { r, base } = released();
+  try {
+    r.commit("Card signpage-release: a page change", { "packages/signpage/index.html": "<!doctype html>\n" });
+    const list = cut(r);
+    const head = r.commit("Card signpage-release: release-2", { "packages/signpage/releases/release-2.json": list, [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) });
+    assert.equal(refusals(r, base, head), "");
+    // the same list naming the commit it was cut at (a Mac cut) passes too
+    const named = r.commit("Card signpage-release: release-3", { "packages/signpage/releases/release-3.json": cut(r, { release: "release-3", commit: r.g("rev-parse", "HEAD") }) });
+    assert.equal(refusals(r, base, named), "");
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: a release list on main changed or removed, or its ledger entry changed or removed, is refused", () => {
+  const { r, base } = released();
+  try {
+    const edited = r.commit("Card signpage-release: edit", { "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"y","hosts":{}}\n` });
+    assert.match(refusals(r, base, edited), /release-1\.json is on main and was changed/);
+    r.g("rm", "-q", "--", "packages/signpage/releases/release-1.json");
+    r.g("commit", "-q", "-m", "Card signpage-release: remove");
+    assert.match(refusals(r, base, r.g("rev-parse", "HEAD")), /release-1\.json is on main and was removed/);
+  } finally {
+    r.done();
+  }
+  const b = released();
+  try {
+    // the list and its ledger hash changed together in one commit: still refused (the review's L3)
+    const both = b.r.commit("Card signpage-release: both", {
+      "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"y","hosts":{}}\n`,
+      [LEDGER]: ledgerText({ "release-1": H2 }),
+    });
+    const got = refusals(b.r, b.base, both);
+    assert.match(got, /release-1\.json is on main and was changed/);
+    assert.match(got, /RELEASED release-1 is on main and was changed/);
+    const gone = b.r.commit("Card signpage-release: drop the entry", { [LEDGER]: ledgerText({}) });
+    assert.match(refusals(b.r, b.base, gone), /RELEASED release-1 is on main and was removed/);
+  } finally {
+    b.r.done();
+  }
+});
+
+test("planted: a new release list with no tree, a tree of no commit here, or a commit that has not its tree, is refused", () => {
+  const { r, base } = released();
+  try {
+    const add = (list) => r.commit("Card signpage-release: release-2", { "packages/signpage/releases/release-2.json": list });
+    assert.match(refusals(r, base, add(`{"release":"release-2","commit":null,"hosts":{}}\n`)), /release-2\.json names no tree/);
+    // no commit key at all is not null: refused (the review's G9)
+    const noCommit = JSON.parse(cut(r));
+    delete noCommit.commit;
+    assert.match(refusals(r, base, add(`${JSON.stringify(noCommit)}\n`)), /release-2\.json names a commit that is not null and has not its tree/);
+    assert.match(refusals(r, base, add(cut(r, { tree: "f".repeat(40) }))), /release-2\.json names no tree/);
+    assert.match(refusals(r, base, add(cut(r, { commit: base }))), /release-2\.json names a commit that is not null and has not its tree/);
+    assert.match(refusals(r, base, add(cut(r, { commit: "e".repeat(40) }))), /names a commit that is not null and has not its tree/);
+    assert.match(refusals(r, base, add("not json")), /release-2\.json is not JSON/);
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: a new list naming a tree whose SIGN_HOST build inputs are not the head's is refused (the review's repro)", () => {
+  for (const input of ["packages/signpage/index.html", "packages/signpage/public/app.js", "packages/kit/zk/NOTICE", "LICENSE"]) {
+    const { r, base } = released();
+    try {
+      // the PR ships page v1, then v2, then adds a list naming v1's tree
+      r.commit("Card signpage-release: v1", { [input]: "v1 (say, a script that sends the words out)\n" });
+      const v1 = r.g("rev-parse", "HEAD^{tree}");
+      r.commit("Card signpage-release: v2", { [input]: "v2, the page shipped\n" });
+      const head = r.commit("Card signpage-release: release-2", { "packages/signpage/releases/release-2.json": cut(r, { tree: v1 }), [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) });
+      assert.match(refusals(r, base, head), /release-2\.json names a tree whose SIGN_HOST build inputs \(packages\/signpage\/index\.html, packages\/signpage\/public, packages\/kit\/zk, LICENSE\) are not the pull request's/, input);
+      // the base's tree while the PR changes the page: refused too
+      const baseTree = r.g("rev-parse", `${base}^{tree}`);
+      const head2 = r.commit("Card signpage-release: release-3", { "packages/signpage/releases/release-3.json": cut(r, { release: "release-3", tree: baseTree }) });
+      assert.match(refusals(r, base, head2), /release-3\.json names a tree whose SIGN_HOST build inputs/, input);
+      // a change outside the inputs after the cut (the ledger, a test) still passes
+      const v2 = r.g("rev-parse", "HEAD^{tree}");
+      const head3 = r.commit("Card signpage-release: release-4", { "packages/signpage/releases/release-4.json": cut(r, { release: "release-4", tree: v2 }), "packages/signpage/test/x.test.ts": "export {}\n" });
+      assert.doesNotMatch(refusals(r, base, head3), /release-4/, input);
+    } finally {
+      r.done();
+    }
+  }
+});
+
+// ---------- a branch cut before main wrote a release is judged from its merge base, not from main's tip ----------
+
+const LIST2 = "packages/signpage/releases/release-2.json";
+/** main with release-1, a card branch cut there with one commit (head), then main writes release-2 (base). */
+function stale() {
+  const { r, base: from } = released();
+  const head = r.commit("Card signpage-release: a test", { "packages/signpage/test/y.test.ts": "export {}\n" });
+  r.g("checkout", "-q", "main");
+  const base = r.commit("Card signpage-release: release-2", { [LIST2]: cut(r), [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) });
+  r.g("checkout", "-q", "card/signpage-release");
+  return { r, from, base, head };
+}
+
+test("a branch cut before main wrote release-2, untouched, passes without a main merge", () => {
+  const { r, base, head } = stale();
+  try {
+    assert.equal(refusals(r, base, head), "");
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: that branch removing or editing a list or a ledger line it had is refused, and main's newer one is not named", () => {
+  for (const [what, files, want] of [
+    ["edit the list", { "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"y","hosts":{}}\n` }, /release-1\.json is on main and was changed/],
+    ["edit the ledger line", { [LEDGER]: ledgerText({ "release-1": H2 }) }, /RELEASED release-1 is on main and was changed/],
+    ["drop the ledger line", { [LEDGER]: ledgerText({}) }, /RELEASED release-1 is on main and was removed/],
+  ]) {
+    const { r, base } = stale();
+    try {
+      const got = refusals(r, base, r.commit(`Card signpage-release: ${what}`, files));
+      assert.match(got, want, what);
+      assert.doesNotMatch(got, /release-2/, what);
+    } finally {
+      r.done();
+    }
+  }
+  const { r, base } = stale();
+  try {
+    r.g("rm", "-q", "--", "packages/signpage/releases/release-1.json");
+    r.g("commit", "-q", "-m", "Card signpage-release: remove");
+    const got = refusals(r, base, r.g("rev-parse", "HEAD"));
+    assert.match(got, /release-1\.json is on main and was removed/);
+    assert.doesNotMatch(got, /release-2/);
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: a branch that writes release-2 while main wrote another release-2 is refused (a name clash); main's own bytes are no clash", () => {
+  const { r, base } = stale();
+  try {
+    const clash = r.commit("Card signpage-release: release-2", { [LIST2]: cut(r), [LEDGER]: ledgerText({ "release-1": H1, "release-2": "3".repeat(64) }) });
+    const got = refusals(r, base, clash);
+    assert.match(got, /release-2\.json is on main as another list: a release name is never used twice/);
+    assert.match(got, /RELEASED release-2 is on main with another hash/);
+  } finally {
+    r.done();
+  }
+  const b = stale();
+  try {
+    // the branch takes main's own list and ledger, byte for byte (a cherry-pick): nothing clashes
+    b.r.g("checkout", b.base, "--", LIST2, LEDGER);
+    b.r.g("commit", "-q", "-m", "Card signpage-release: main's release-2");
+    assert.equal(refusals(b.r, b.base, b.r.g("rev-parse", "HEAD")), "");
+  } finally {
+    b.r.done();
+  }
+});
+
+test("PR 120 replayed: a branch cut where the ledger held no entry, judged against a main that wrote release-2 and its ledger, passes", () => {
+  // branch 1405633 cut from 19ecd8d (release-1, a ledger file with no RELEASED), base 6a64dcd (release-2, RELEASED 1 and 2)
+  const r = repo();
+  try {
+    const from = r.commit("Card kickoff-kit: release-1", {
+      "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"x","hosts":{}}\n`,
+      [LEDGER]: "export const listPath = (tag) => tag;\n",
+    });
+    r.g("checkout", "-q", "-b", "card/vault-s20-deploy-line");
+    const head = r.commit("Card vault-s20-deploy-line: s20 follows deploy.mjs's next line", { "contracts/vault/tests/s20.mjs": "export {}\n" });
+    r.g("checkout", "-q", "main");
+    const tree = r.g("rev-parse", `${from}^{tree}`);
+    const base = r.commit("Card signpage-withdraw-form: merge", {
+      [LIST2]: `${JSON.stringify({ release: "release-2", commit: null, tree, hosts: {} })}\n`,
+      [LEDGER]: `export const listPath = (tag) => tag;\n${ledgerText({ "release-1": H1, "release-2": H2 })}`,
+      "scripts/live-checks/signpage-withdraw-form.mjs": check,
+    });
+    const body = "Live check: none (a sandbox test and the deploy script's last printed line, no deploy behaviour changes)";
+    assert.equal(refusals(r, base, head, body), "");
+  } finally {
+    r.done();
+  }
+});
+
+test("a merge of main into that branch passes; deleting main's list or ledger line after the merge, or in the merge itself, is refused", () => {
+  const { r, base } = stale();
+  try {
+    r.g("merge", "-q", "--no-edit", "main");
+    assert.equal(refusals(r, base, r.g("rev-parse", "HEAD")), "");
+    r.g("rm", "-q", "--", LIST2);
+    r.g("commit", "-q", "-m", "Card signpage-release: drop main's release-2");
+    assert.match(refusals(r, base, r.g("rev-parse", "HEAD")), /release-2\.json is on main and was removed/);
+    const led = r.commit("Card signpage-release: drop main's ledger line", { [LEDGER]: ledgerText({ "release-1": H1 }) });
+    assert.match(refusals(r, base, led), /RELEASED release-2 is on main and was removed/);
+  } finally {
+    r.done();
+  }
+  const b = stale();
+  try {
+    b.r.g("merge", "-q", "--no-commit", "--no-ff", "main");
+    b.r.g("rm", "-q", "-f", "--", LIST2);
+    b.r.g("commit", "-q", "-m", "Merge main");
+    assert.match(refusals(b.r, b.base, b.r.g("rev-parse", "HEAD")), /release-2\.json is on main and was removed/);
+  } finally {
+    b.r.done();
+  }
+});
+
+test("a new list on that branch may name the merge base's tree when its SIGN_HOST build inputs are the head's", () => {
+  const { r, from, base } = stale();
+  try {
+    const tree = r.g("rev-parse", `${from}^{tree}`);
+    const head = r.commit("Card signpage-release: release-3", { "packages/signpage/releases/release-3.json": cut(r, { release: "release-3", tree }) });
+    assert.equal(refusals(r, base, head), "");
+  } finally {
+    r.done();
+  }
+});
