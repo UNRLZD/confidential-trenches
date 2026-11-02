@@ -1,8 +1,9 @@
 // The owner's final words (card words-final-nov2): test/words-final.json lists every word the owner picked on the Nov 2
 // words page (owner 2 Nov 06:08Z, all approved; with the five that page left out as already kept or signed) and the
 // new draft words kept on 1 Nov 16:45Z, each with its screen, key, text and pick. Each must read its text byte for byte,
-// be no draft (so no data-draft-copy on its element) and name its pick in its source. The trade box's words are not
-// on the list and stay drafts until the next words page.
+// be no draft (so no data-draft-copy on its element) and name its pick in its source. The trade box's own words are not
+// on the list and stay drafts until the next words page; the ones it shares with Portfolio (Sending, Landing) are
+// Portfolio's approved entries themselves, so an approved word never goes back to draft.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -52,9 +53,14 @@ test("each screen's drafts: only the words not on the list", () => {
   }
 });
 
-test("the trade box's words stay drafts: none is on the list or names a pick", () => {
+test("the trade box's own words stay drafts: none names a pick unless it is Portfolio's approved entry itself", () => {
   assert.ok(trade.DRAFTS.length > 0);
-  for (const [k, w] of Object.entries(trade.WORDS as Record<string, Word>)) for (const p of PICKS) assert.ok(!w.source.includes(p), `trade.${k}`);
+  const shared = new Set(Object.values(portfolio.WORDS as Record<string, Word>).filter((w) => !w.draft));
+  for (const [k, w] of Object.entries(trade.WORDS as Record<string, Word>)) {
+    if (shared.has(w)) continue;
+    for (const p of PICKS) assert.ok(!w.source.includes(p), `trade.${k}`);
+  }
+  assert.deepEqual(Object.entries(trade.WORDS as Record<string, Word>).filter(([, w]) => shared.has(w)).map(([k]) => k), ["sending", "landing"]);
 });
 
 test("data-draft-copy is drawn only for a word whose draft flag is set, on every listed screen", () => {
