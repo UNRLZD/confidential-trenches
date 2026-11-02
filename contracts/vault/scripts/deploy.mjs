@@ -107,9 +107,15 @@ function runBuild(cmd, args, opts, children) {
   });
 }
 
+// The signals that stop a build: Ctrl-C, kill, a closed terminal and Ctrl-\. The build runs in its own process group
+// (so a terminal's signal reaches only this process), and each of these is caught to stop that group too.
+export const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
+
 // Two clean builds in two new target dirs under buildDir; the wasm and its sha256 when they are equal, else an error
-// naming both. The tools are checked first. Both target dirs are removed on every exit, a SIGINT or SIGTERM included:
-// the handler stops the build's process group, the build then fails, and the finally removes the dirs.
+// naming both. The tools are checked first. Both target dirs are removed on every exit, any STOP_SIGNALS included:
+// the handler stops the build's process group, the build then fails, and the finally removes the dirs. The handlers
+// stay on until the dirs are gone and one more turn of the event loop has run, so a signal that arrives while the
+// script is busy (reading build b's wasm, or removing a dir) is still seen, and the run stops before any send.
 export async function reproducibleBuild({ flavor, buildDir, log = console.log }) {
   buildDir = path.resolve(buildDir);
   if (existsSync(buildDir) && readdirSync(buildDir).length) throw new Error(`--build-dir ${buildDir} is not empty: each build starts from a new target dir`);
@@ -134,8 +140,7 @@ export async function reproducibleBuild({ flavor, buildDir, log = console.log })
       } catch {}
     }
   };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
+  for (const s of STOP_SIGNALS) process.on(s, onSignal);
   try {
     for (const name of ["a", "b"]) {
       const target = path.join(buildDir, name);
@@ -150,9 +155,11 @@ export async function reproducibleBuild({ flavor, buildDir, log = console.log })
     if (out[0].sha !== out[1].sha) throw new Error(`the two clean builds differ: ${out[0].sha} (${out[0].wasm.length} B) and ${out[1].sha} (${out[1].wasm.length} B); nothing was sent`);
     writeFileSync(file, out[0].wasm);
   } finally {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
     for (const name of ["a", "b"]) rmSync(path.join(buildDir, name), { recursive: true, force: true });
+    // one full loop turn: a signal caught by libuv during the sync work above runs onSignal before the handlers go
+    // (one setImmediate let a signal through in one run on 2 Nov, so two)
+    await new Promise((r) => setImmediate(() => setImmediate(r)));
+    for (const s of STOP_SIGNALS) process.off(s, onSignal);
   }
   if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}`), { signal: interrupted });
   return { file, wasm: out[0].wasm, sha: out[0].sha, shas: out.map((o) => o.sha), build: `${shown} (${near}, ${rustc}, ${os.platform()} ${os.arch()})` };
@@ -307,12 +314,20 @@ function signTx(tx, privateKey) {
 }
 
 async function rpc(url, method, params) {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "deploy", method, params }),
-    signal: AbortSignal.timeout(180_000),
-  });
+  let r;
+  try {
+    r = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "deploy", method, params }),
+      signal: AbortSignal.timeout(180_000),
+      // an answer comes from the URL asked, never from where a redirect points
+      redirect: "error",
+    });
+  } catch (e) {
+    // fetch says only "fetch failed"; its cause names why (a redirect, a refused connection)
+    throw new Error(`${method} on ${url}: ${e.message}${e.cause?.message ? `: ${e.cause.message}` : ""}`);
+  }
   const j = await r.json();
   if (j.error) throw new Error(`${method} on ${url}: ${JSON.stringify(j.error).slice(0, 400)}`);
   if (j.result?.error) throw new Error(`${method} on ${url}: ${String(j.result.error).slice(0, 400)}`);
