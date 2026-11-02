@@ -643,3 +643,259 @@ export function checkSolanaQuote(txBytes: Uint8Array, req: SolanaQuoteRequest, r
   ];
   return { ok: results.every((r) => r.ok), results };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// The teardown after a full sell (markets paper M1.4; 06c §3.1 S-4 and S-5). A sell never closes an account (06c A9,
+// MM SEL-13, SEL-14): the sell lands on its own, then the teardown frames close what the wallet still holds, so a close
+// that fails can never hold back a sell. S-4 closes every token account of the wallet that holds no tokens, each
+// Token-2022 account with the transfer-fee extension harvested to its mint right before its close; S-5 closes the
+// wallet's own volume accounts under pump.fun's bonding curve and PumpSwap. The rent goes to the wallet, every lamport.
+// ---------------------------------------------------------------------------------------------------------------
+
+export const SOLANA_PUMP_AMM_PROGRAM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+// close_user_volume_accumulator, the same on both pump programs (their on-chain Anchor IDLs: pump's at
+// AYgC53tU5BbP2NAnv5nConJxAdpQZctvmZK88pu69xRs, account data sha256 5a8e78dd…f5a9, and PumpSwap's at
+// 5fLnXNNoZcZt9Qku6HARM3un3Ttm2cGsR7gN9Zp1R7h3, sha256 d7202589…b9d3, read 2026-11-02 07:46Z at slot 464411630 on
+// api.mainnet-beta.solana.com): no args; accounts user (writable, signer), user_volume_accumulator (writable, PDA of
+// "user_volume_accumulator" and the user), event_authority (PDA of "__event_authority"), program.
+export const SOLANA_CLOSE_VOLUME_ACCUMULATOR: readonly number[] = [249, 69, 164, 218, 150, 103, 84, 138];
+export const SOLANA_VOLUME_PROGRAMS: readonly string[] = [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM];
+/** The wallet's volume account under one pump program. */
+export const solanaVolumeAccumulator = (wallet: string, program: string): string =>
+  solanaProgramAddress([new TextEncoder().encode("user_volume_accumulator"), base58.decode(wallet)], program);
+export const solanaEventAuthority = (program: string): string => solanaProgramAddress([new TextEncoder().encode("__event_authority")], program);
+// Token-2022 ExtensionType TransferFeeAmount (interface/src/extension/mod.rs, as EXT_* above) and ConfidentialTransferAccount.
+// ConfidentialTransferFeeAmount 17: CloseAccount refuses an account with a confidential withheld amount.
+const EXT_TRANSFER_FEE_AMOUNT = 2;
+const EXT_CONFIDENTIAL_ACCOUNT = 5;
+const EXT_CONFIDENTIAL_FEE_AMOUNT = 17;
+/**
+ * Compute units per teardown instruction, the bound each frame's limit must stay within (2 x budget + the sum over its
+ * instructions): the recorded simulations used 270 (an SPL Token close), 1,616 (a Token-2022 close) and 10,396 to
+ * 13,396 per volume close.
+ */
+export const SOLANA_TEARDOWN_CU = { budget: 300, close: 6_000, harvest: 8_000, volume: 25_000 } as const;
+const TOKEN_ACCOUNT_LEN = 165;
+
+/** One account as a provider answered it (getMultipleAccounts, base64). */
+export type SolanaHeldRead = { owner: string; lamports: bigint; data: Uint8Array };
+export type SolanaHeld =
+  | { kind: "token"; address: string; program: string; mint: string; native: boolean; harvest: boolean; lamports: bigint }
+  | { kind: "volume"; address: string; program: string; lamports: bigint };
+export type SolanaTeardownPlan = { close: SolanaHeld[]; keep: { address: string; why: string }[] };
+
+/**
+ * The addresses the wallet may hold after its trades: its account of each mint it traded (under that mint's program),
+ * its wSOL account, and its volume account under each pump program. The device reads exactly these on two providers.
+ */
+export function solanaTeardownAddresses(wallet: string, mints: readonly { mint: string; program: string }[]): string[] {
+  const out = [solanaAta(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), ...mints.map((m) => {
+    if (!isToken(m.program)) throw new Error(`mint ${m.mint}: program ${m.program} is not Token or Token-2022`);
+    return solanaAta(wallet, m.mint, m.program);
+  }), ...SOLANA_VOLUME_PROGRAMS.map((p) => solanaVolumeAccumulator(wallet, p))];
+  return [...new Set(out)];
+}
+
+/**
+ * What the teardown closes and what stays, from the device's own reads of the wallet's accounts on two providers.
+ * Throws when the providers disagree on any account (the caller re-reads) or an address is not the wallet's.
+ */
+export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>): SolanaTeardownPlan {
+  const plan: SolanaTeardownPlan = { close: [], keep: [] };
+  const volumes = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [solanaVolumeAccumulator(wallet, p), p]));
+  for (const [address, [a, b]] of Object.entries(accounts)) {
+    if (!a !== !b || (a && b && (a.owner !== b.owner || a.lamports !== b.lamports || !eqBytes(a.data, b.data)))) throw new Error(`the providers disagree on ${address}`);
+    if (!a) continue;
+    if (volumes.has(address)) {
+      if (a.owner !== volumes.get(address)) throw new Error(`${address} is owned by ${a.owner}, not ${volumes.get(address)}`);
+      // UserVolumeAccumulator (the same IDLs, fields in order after the 8-byte discriminator): user @8, needs_claim bool
+      // @40, total_unclaimed_tokens u64 @41, total_claimed_tokens @49, current_sol_volume @57, last_update_timestamp i64
+      // @65, has_total_claimed_tokens bool @73, cashback_earned u64 @74, total_cashback_claimed @82; pump's alone then
+      // stable_cashback_earned @90, total_stable_cashback_claimed @98. Closing it pays out only its own lamports, so it
+      // stays open while anything is owed elsewhere: incentive tokens to claim, volume still to settle, PumpSwap cashback
+      // (claim_cashback pays it from the account's own WSOL account) or pump's stable cashback (claim_cashback_v2 pays
+      // it from the account's own quote-mint account). Pump's other cashback is paid from the account's lamports
+      // (claim_cashback: user, the account, System), which the close returns to the wallet.
+      const v = a.data;
+      if (v.length < 90 || base58.encode(v.subarray(8, 40)) !== wallet) throw new Error(`${address} is not the wallet's volume account`);
+      const owed: string[] = [];
+      if (v[40] !== 0 || u64(v, 41) > 0n) owed.push(`unclaimed incentive tokens ${u64(v, 41)}`);
+      if (u64(v, 57) > 0n) owed.push(`volume ${u64(v, 57)} not settled`);
+      if (a.owner === SOLANA_PUMP_AMM_PROGRAM && u64(v, 74) > u64(v, 82)) owed.push(`cashback ${u64(v, 74) - u64(v, 82)} unclaimed`);
+      if (a.owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98)) owed.push(`stable cashback ${u64(v, 90) - u64(v, 98)} unclaimed`);
+      if (owed.length) { plan.keep.push({ address, why: owed.join(", ") }); continue; }
+      plan.close.push({ kind: "volume", address, program: a.owner, lamports: a.lamports });
+      continue;
+    }
+    if (!isToken(a.owner)) throw new Error(`${address} is owned by ${a.owner}, not a token program`);
+    const d = a.data;
+    if (d.length < TOKEN_ACCOUNT_LEN || (a.owner === SOLANA_TOKEN_PROGRAM && d.length !== TOKEN_ACCOUNT_LEN)) throw new Error(`${address}: ${d.length} bytes is not a token account`);
+    if (base58.encode(d.subarray(32, 64)) !== wallet) throw new Error(`${address} is not the wallet's`);
+    const mint = base58.encode(d.subarray(0, 32));
+    const amount = u64(d, 64);
+    const state = d[108];
+    const native = u32(d, 109) === 1;
+    const closeAuth = u32(d, 129) === 1 ? base58.encode(d.subarray(133, 165)) : null;
+    let harvest = false;
+    let confidential = false;
+    if (d.length > TOKEN_ACCOUNT_LEN) {
+      if (d[TOKEN_ACCOUNT_LEN] !== 2) throw new Error(`${address}: account type ${d[TOKEN_ACCOUNT_LEN]} is not a token account`);
+      for (let o = TOKEN_ACCOUNT_LEN + 1; o + 4 <= d.length; ) {
+        const type = u16(d, o);
+        const len = u16(d, o + 2);
+        if (type === 0) break;
+        if (o + 4 + len > d.length) throw new Error(`${address}: extension ${type} runs past the data`);
+        // TransferFeeAmount { withheld_amount u64 }: harvest only fees there are (a harvest into a closed mint fails).
+        if (type === EXT_TRANSFER_FEE_AMOUNT && len === 8 && u64(d, o + 4) > 0n) harvest = true;
+        if (type === EXT_CONFIDENTIAL_ACCOUNT || type === EXT_CONFIDENTIAL_FEE_AMOUNT) confidential = true;
+        o += 4 + len;
+      }
+    }
+    // CloseAccount refuses a frozen account, a non-native account holding tokens, and any authority but the close
+    // authority (or the owner when none is set); a confidential balance needs steps the device never signs.
+    if (state !== 1) plan.keep.push({ address, why: state === 2 ? "frozen" : `state ${state}` });
+    else if (!native && amount > 0n) plan.keep.push({ address, why: `holds ${amount} of ${mint}` });
+    else if (closeAuth !== null && closeAuth !== wallet) plan.keep.push({ address, why: `close authority ${closeAuth}` });
+    else if (confidential) plan.keep.push({ address, why: "confidential balance" });
+    else plan.close.push({ kind: "token", address, program: a.owner, mint, native, harvest: harvest && a.owner === SOLANA_TOKEN_2022_PROGRAM, lamports: a.lamports });
+  }
+  return plan;
+}
+
+/** One provider's simulation of one teardown frame (simulateTransaction, sigVerify false), post-state only. */
+export type SolanaTeardownSimulation = {
+  err: unknown;
+  /** The wallet's lamports after the frame. */
+  wallet: bigint;
+  /** Each account the frame closes, by address: its lamports after the frame, null when the account is gone. */
+  accounts: Readonly<Record<string, bigint | null>>;
+};
+export type SolanaTeardownReads = {
+  /** solanaTeardownAddresses' accounts, read on provider A and B (null: no account). */
+  accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>;
+  /** The wallet's own lamports on A and B, read with the accounts. */
+  wallet: readonly [bigint, bigint];
+  /** Per frame, in order: its simulation on provider A and B. */
+  simulations: readonly (readonly [SolanaTeardownSimulation | null, SolanaTeardownSimulation | null])[];
+};
+export type SolanaTeardownCheckId = "READ" | "DECODE" | "FRAME" | "COVER" | "SIM";
+export type SolanaTeardownVerdict = { ok: boolean; plan: SolanaTeardownPlan | null; results: { id: SolanaTeardownCheckId; ok: boolean; detail: string }[] };
+
+/**
+ * The device's check on the teardown frames before it signs them: the frames close every account the plan closes,
+ * exactly once, to the wallet; a Token-2022 fee account is harvested right before its close; nothing else runs; every
+ * frame closes something and asks no more compute than SOLANA_TEARDOWN_CU allows its instructions; and on
+ * both providers every frame simulates clean, every account it closes is gone after it, and the wallet gains exactly
+ * their lamports less the frame's fee. Any account the plan closes and the frames leave open is refused.
+ */
+export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string, reads: SolanaTeardownReads): SolanaTeardownVerdict {
+  const r = (id: SolanaTeardownCheckId, ok: boolean, detail: string) => ({ id, ok, detail });
+  let plan: SolanaTeardownPlan;
+  try {
+    plan = solanaTeardownPlan(wallet, reads.accounts);
+    if (reads.wallet[0] !== reads.wallet[1]) throw new Error(`the providers disagree on the wallet's lamports: ${reads.wallet[0]}/${reads.wallet[1]}`);
+  } catch (err) {
+    return { ok: false, plan: null, results: [r("READ", false, (err as Error).message)] };
+  }
+  const byAddress = new Map(plan.close.map((h) => [h.address, h]));
+  type Frame = { closes: string[]; fee: bigint };
+  const frames: Frame[] = [];
+  const wrong: string[] = [];
+  const closed = new Map<string, number>();
+  const harvested = new Map<string, number>();
+  try {
+    for (const [f, wire] of wires.entries()) {
+      const tx = solanaDecodeTransaction(wire);
+      const m = tx.message;
+      if (m.lookups.length) throw new Error(`frame ${f}: lookup tables`);
+      const keys = solanaResolveKeys(m, {});
+      if (m.requiredSignatures !== 1 || m.readonlySigned !== 0 || keys[0]?.key !== wallet) wrong.push(`frame ${f}: signers ${m.staticKeys.slice(0, m.requiredSignatures).join(",")} (want only the wallet, paying)`);
+      const ixs: Ix[] = m.instructions.map((x, index) => {
+        const k = (i: number) => {
+          const v = keys[i];
+          if (!v) throw new Error(`frame ${f}: account index ${i} out of range`);
+          return v;
+        };
+        return { index, program: k(x.programIndex).key, accounts: x.accounts.map(k), data: x.data };
+      });
+      let limit: number | null = null;
+      let price = 0n;
+      const closes: string[] = [];
+      for (const [k, ix] of ixs.entries()) {
+        const at = `frame ${f} ix ${k}`;
+        const a = ix.accounts;
+        const d = ix.data;
+        if (ix.program === SOLANA_COMPUTE_BUDGET_PROGRAM) {
+          if (d.length === 5 && d[0] === 2 && limit === null) limit = u32(d, 1);
+          else if (d.length === 9 && d[0] === 3 && price === 0n && u64(d, 1) <= SOLANA_CU_PRICE_MAX) price = u64(d, 1);
+          else wrong.push(`${at}: compute budget ${hex(d)}`);
+          continue;
+        }
+        if (isToken(ix.program) && d.length === 1 && d[0] === 9 && a.length === 3) {
+          const h = byAddress.get(a[0]?.key as string);
+          if (!h || h.kind !== "token" || h.program !== ix.program || a[1]?.key !== wallet || a[2]?.key !== wallet || !a[0]?.writable || !a[1]?.writable) { wrong.push(`${at}: close of ${a[0]?.key} to ${a[1]?.key}`); continue; }
+          closed.set(h.address, (closed.get(h.address) ?? 0) + 1);
+          closes.push(h.address);
+          continue;
+        }
+        if (ix.program === SOLANA_TOKEN_2022_PROGRAM && d.length === 2 && d[0] === 26 && d[1] === 4 && a.length === 2) {
+          const h = byAddress.get(a[1]?.key as string);
+          const next = ixs[k + 1];
+          const nextCloses = next?.program === SOLANA_TOKEN_2022_PROGRAM && next.data.length === 1 && next.data[0] === 9 && next.accounts[0]?.key === h?.address;
+          if (!h || h.kind !== "token" || !h.harvest || h.mint !== a[0]?.key || !nextCloses) { wrong.push(`${at}: harvest of ${a[1]?.key} not right before its close`); continue; }
+          harvested.set(h.address, (harvested.get(h.address) ?? 0) + 1);
+          continue;
+        }
+        if (SOLANA_VOLUME_PROGRAMS.includes(ix.program)) {
+          const uva = solanaVolumeAccumulator(wallet, ix.program);
+          const h = byAddress.get(uva);
+          const want = [wallet, uva, solanaEventAuthority(ix.program), ix.program];
+          const shape = a.length === 4 && a.every((x, i) => x.key === want[i]) && a[0]?.signer && a[0]?.writable && a[1]?.writable;
+          if (!h || h.kind !== "volume" || !shape || !eqBytes(d, Uint8Array.from(SOLANA_CLOSE_VOLUME_ACCUMULATOR))) { wrong.push(`${at}: ${ix.program} instruction ${hex(d)}`); continue; }
+          closed.set(uva, (closed.get(uva) ?? 0) + 1);
+          closes.push(uva);
+          continue;
+        }
+        wrong.push(`${at}: program ${ix.program} instruction ${hex(d)}`);
+      }
+      const fee = SOLANA_LAMPORTS_PER_SIGNATURE * BigInt(tx.signatures) + (price * BigInt(limit ?? 0) + 999_999n) / 1_000_000n;
+      // A frame closes something, and asks no more compute than its instructions are allowed.
+      const cap = 2 * SOLANA_TEARDOWN_CU.budget + ixs.reduce((n, x) => n + (x.program === SOLANA_COMPUTE_BUDGET_PROGRAM ? 0 : SOLANA_VOLUME_PROGRAMS.includes(x.program) ? SOLANA_TEARDOWN_CU.volume : x.data[0] === 26 ? SOLANA_TEARDOWN_CU.harvest : SOLANA_TEARDOWN_CU.close), 0);
+      if (closes.length === 0) wrong.push(`frame ${f}: closes nothing`);
+      if (limit === null || limit > cap) wrong.push(`frame ${f}: compute limit ${limit ?? "unset"} (want at most ${cap})`);
+      frames.push({ closes, fee });
+    }
+  } catch (err) {
+    return { ok: false, plan, results: [r("READ", true, `${plan.close.length} to close, ${plan.keep.length} stay`), r("DECODE", false, (err as Error).message)] };
+  }
+  const cover: string[] = [];
+  for (const h of plan.close) {
+    const n = closed.get(h.address) ?? 0;
+    if (n !== 1) cover.push(`${h.address} closed ${n} times (want 1)`);
+    if (h.kind === "token" && h.harvest && (harvested.get(h.address) ?? 0) !== 1) cover.push(`${h.address} harvested ${harvested.get(h.address) ?? 0} times before its close (want 1)`);
+  }
+  const sim: string[] = [];
+  if (reads.simulations.length !== frames.length) sim.push(`${reads.simulations.length} simulations for ${frames.length} frames`);
+  for (const [f, fr] of frames.entries()) {
+    const gain = fr.closes.reduce((s, x) => s + (byAddress.get(x) as SolanaHeld).lamports, 0n);
+    for (const [p, s] of (reads.simulations[f] ?? [null, null]).entries()) {
+      const at = `frame ${f} provider ${p === 0 ? "A" : "B"}`;
+      if (!s) { sim.push(`${at}: no simulation`); continue; }
+      if (s.err !== null) { sim.push(`${at}: simulation error ${JSON.stringify(s.err)}`); continue; }
+      for (const x of fr.closes) {
+        const post = Object.hasOwn(s.accounts, x) ? s.accounts[x] : undefined;
+        if (post === undefined) sim.push(`${at}: ${x} not read after`);
+        else if (post !== null && post !== 0n) sim.push(`${at}: ${x} still holds ${post} lamports`);
+      }
+      if (s.wallet - reads.wallet[0] !== gain - fr.fee) sim.push(`${at}: the wallet gains ${s.wallet - reads.wallet[0]} (want ${gain} less the fee ${fr.fee})`);
+    }
+  }
+  const results = [
+    r("READ", true, `${plan.close.length} to close, ${plan.keep.length} stay${plan.keep.length ? ` (${plan.keep.map((k) => `${k.address}: ${k.why}`).join("; ")})` : ""}`),
+    r("DECODE", true, `${frames.length} frame(s)`),
+    r("FRAME", wrong.length === 0, wrong.join("; ") || "only closes to the wallet, harvests right before their close, and the compute budget"),
+    r("COVER", cover.length === 0, cover.join("; ") || `every one of ${plan.close.length} closed once`),
+    r("SIM", sim.length === 0, sim.join("; ") || "every frame clean on both providers, every closed account gone, every lamport back less the fee"),
+  ];
+  return { ok: results.every((x) => x.ok), plan, results };
+}
