@@ -4,44 +4,77 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/solana.ts`, R = `${W}/src/pool/solana-restore.ts`;
+const Q = `${W}/src/pool/queue.ts`, K = `${W}/../kit/src/trade/solana/pool-buy.ts`;
+const T = "test/pool-solana.test.ts";
+// [file, find, replace, test file, test name pattern]
 const M = [
-  [S, "if (a?.owner !== program)", "if (false)", "another owner"],
-  [S, "if (!same(d.subarray(0, 8), PAGE_DISC) || d[8] !== tree || !same(d.subarray(9, 13), u32le(pageNo)))", "if (!same(d.subarray(0, 8), PAGE_DISC) || d[8] !== tree)", "another owner"],
-  [S, "if (l[i]!.t < l[i - 1]!.t) throw", "if (false) throw", "has not reached the cut"],
-  [S, "if (beforeMs !== null && ms < beforeMs) throw", "if (false) throw", "has not reached the cut"],
-  [S, "if (!same(x[i]!.bytes, y[i]!.bytes)) throw", "if (false) throw", "has not reached the cut"],
-  [S, "if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw", "if (false) throw", "has not reached the cut"],
-  [S, "if (n === 0) throw", "if (false) throw", "has not reached the cut"],
-  [S, "if (t.root !== cut[cut.length - 1]!.root) throw", "if (false) throw", "has not reached the cut"],
-  [S, "if (fresh[i - start] === undefined || !same(fresh[i - start]!.bytes, kept[i]!.bytes)) throw", "if (false) throw", "has changed in a later read"],
-  [S, "const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;", "const from = [0, 0] as const;", "a full page is read once"],
-  [S, "if (fee > bound) throw", "if (false) throw", "the fee bound"],
-  [S, "if (fee < cost) throw", "if (false) throw", "the fee bound"],
-  [S, "if (fee % SOL_FEE_STEP !== 0n) throw", "if (false) throw", "the fee bound"],
-  [S, "export const SOL_FEE_HEADROOM = 2n * SOL_FEE_STEP;", "export const SOL_FEE_HEADROOM = 3n * SOL_FEE_STEP;", "the fee bound"],
-  [S, "|| f.fee_payer !== feePayer)", ")", "the fee bound"],
-  [S, "if (a.rent0 !== b.rent0 || a.rent72 !== b.rent72 || a.baseFee !== b.baseFee) throw", "if (false) throw", "the fee bound"],
-  [S, "if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw", "if (false) throw", "backstop"],
-  [S, "if (chunk - fee - SOL_TIP_CAP < reads.rent0) throw", "if (false) throw", "backstop"],
-  [S, "const cost = c.rent0 + (c.rent72 - c.rent0) + c.baseFee;", "const cost = c.rent72 + c.baseFee + 1n;", "the fee bound"],
-  [S, "return a.ms < b.ms ? a.ms : b.ms;", "return a.ms;", "lower of the two"],
-  [R, "if (p.size !== q.size || [...p].some(([key, d]) => q.get(key) !== d)) throw", "if (false) throw", "restore refuses"],
-  [R, "if (m.value === 0n || m.nonce === 0n || m.nonce > BigInt(a.labelLeaves.length)) throw", "if (false) throw", "restore refuses"],
-  [R, "if (a.labelLeaves[Number(m.nonce - 1n)] !== label) throw", "if (false) throw", "restore refuses"],
-  [R, "if (at === undefined) throw", "if (false) throw", "restore refuses"],
+  [S, "if (a?.owner !== program)", "if (false)", T, "another owner"],
+  [S, "if (!same(d.subarray(0, 8), PAGE_DISC) || d[8] !== tree || !same(d.subarray(9, 13), u32le(pageNo)))", "if (!same(d.subarray(0, 8), PAGE_DISC) || d[8] !== tree)", T, "another owner"],
+  [S, "if (l[i]!.t < l[i - 1]!.t) throw", "if (false) throw", T, "has not reached the cut"],
+  [S, "if (ms < beforeMs) throw", "if (false) throw", T, "has not reached the cut"],
+  [S, "if (ms < beforeMs) throw", "if (ms + 1000n < beforeMs) throw", T, "S9"],
+  [S, "if (!same(x[i]!.bytes, y[i]!.bytes)) throw", "if (false) throw", T, "has not reached the cut"],
+  [S, "if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw", "if ((x.length > n && x[n]!.t < beforeMs)) throw", T, "RV2"],
+  [S, "if (n === 0) throw", "if (false) throw", T, "has not reached the cut"],
+  [S, "if (t.root !== cut[cut.length - 1]!.root) throw", "if (tree === 0 && t.root !== cut[cut.length - 1]!.root) throw", T, "RV2"],
+  [S, "if (!same(fresh[i - start]!.bytes, kept[i]!.bytes)) throw", "if (false) throw", T, "has changed in a later read"],
+  [S, "const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;", "const from = [0, 0] as const;", T, "a full page is read once"],
+  [S, "Math.max(minSlot, lastSlot[k]!)", "minSlot", T, "RV11"],
+  [S, "if (at < minContextSlot) throw", "if (false) throw", T, "RV7"],
+  [S, "opts?.newest === true ? \"confirmed\" : \"finalized\"", "\"finalized\"", T, "RV9"],
+  [S, "if (commitment === \"finalized\") {", "if (true) {", T, "RV9"],
+  [S, "if (typeof f.fee !== \"string\" || f.fee !== fee.toString()) throw", "if (false) throw", T, "the epoch fee is the device's own"],
+  [K, "export const SOLANA_POOL_FEE_HEADROOM = 2n * SOLANA_POOL_FEE_STEP;", "export const SOLANA_POOL_FEE_HEADROOM = 3n * SOLANA_POOL_FEE_STEP;", T, "the epoch fee is the device's own"],
+  [K, "export const SOLANA_POOL_SEND_MARGIN_MS = 90_000n;", "export const SOLANA_POOL_SEND_MARGIN_MS = 30_000n;", T, "the epoch fee is the device's own"],
+  [K, "const room = solanaPoolPriorityBudget(rent, release.relayFee);", "const room = release.relayFee - solanaPoolReleaseCost(rent);", "../kit/test/solana-pool-buy.test.ts", "priority budget"],
+  [K, "return (open + n - 1n) / n;", "return open / n;", "../kit/test/solana-pool-buy.test.ts", "priority budget"],
+  [S, "if (f?.chain !== \"solana\" || f.program !== program ||", "if (", T, "the epoch fee is the device's own"],
+  [S, "|| f.fee_payer !== feePayer)", ")", T, "the epoch fee is the device's own"],
+  [S, "|| f.step !== SOL_FEE_STEP.toString())", ")", T, "the epoch fee is the device's own"],
+  [S, "if (f.epoch_ms !== Number(SOL_EPOCH_MS) || ", "if (", T, "the epoch fee is the device's own"],
+  [S, "if (a !== b) throw new Error(\"the two RPCs' base fee differ\")", "if (false) throw new Error(\"\")", T, "the epoch fee is the device's own"],
+  [S, "if (a !== SOL_TWO_SIGNATURES) throw", "if (false) throw", T, "the epoch fee is the device's own"],
+  [S, "base64.encode(cat(Uint8Array.of(2, 0, 0, 2), feePayer, pool, blockhash, Uint8Array.of(0)))", "base64.encode(cat(Uint8Array.of(2, 0, 0, 2), feePayer, feePayer, blockhash, Uint8Array.of(0)))", T, "RV1"],
+  [S, "if (f === undefined) {", "if (true) {", T, "RV1"],
+  [S, "|| deadlineMs <= nowMs + SOL_SEND_MARGIN_MS)", ")", T, "bind refuses a deadline"],
+  [S, "if (typeof epochStartMs !== \"bigint\" || epochStartMs % SOL_EPOCH_MS !== 0n) throw", "if (false) throw", T, "bind refuses a deadline"],
+  [S, "if (wallet.address === pool || wallet.address === feePayer) throw", "if (false) throw", T, "bind refuses a deadline"],
+  [S, "if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw", "if (false) throw", T, "backstop"],
+  [S, "if (chunk - fee - SOL_TIP_CAP < solanaRentMin(rent, 0)) throw", "if (false) throw", T, "backstop"],
+  [S, "return a.ms < b.ms ? a.ms : b.ms;", "return a.ms;", T, "lower of the two"],
+  [S, "if (solanaSameProvider(rpcs[0], rpcs[1])) throw", "if (rpcs[0] === rpcs[1]) throw", T, "RV10"],
+  [S, "if (feePayer === pool) throw", "if (false) throw", T, "RV10"],
+  [K, "solanaRentMin(rent, SOLANA_POOL_SPENT_MARK_LEN)", "solanaRentMin(rent, 0)", T, "the epoch fee is the device's own"],
+  [R, "if (have !== undefined && have !== d) throw", "if (false) throw", T, "restore refuses"],
+  [R, "for (const [key, d] of reads[1]![i].marks) {", "for (const [key, d] of [] as [string, string][]) {", T, "RV5"],
+  [R, "if (base64.decode(d[0]).length !== size) throw", "if (false) throw", T, "restore refuses"],
+  [R, "const slot = Math.max(...reads.flatMap((r) => [r[0].slot, r[1].slot]));", "const slot = Math.min(...reads.flatMap((r) => [r[0].slot, r[1].slot]));", T, "RV7"],
+  [R, "if (m.value === 0n || m.nonce === 0n || m.nonce > BigInt(a.labelLeaves.length)) throw", "if (false) throw", T, "restore refuses"],
+  [R, "if (a.labelLeaves[Number(m.nonce - 1n)] !== label) throw", "if (false) throw", T, "restore refuses"],
+  [R, "if (at === undefined) throw", "if (false) throw", T, "restore refuses"],
+  [R, "if (withdrawn === 0n || withdrawn > note.leaf.value) throw", "if (false) throw", T, "restore refuses"],
+  [R, "const cValue = note.leaf.value - withdrawn;", "const cValue = 0n;", T, "R5"],
+  [R, "const j = ref.kind === \"change\" ? ref.j + 1 : 0;", "const j = ref.kind === \"change\" ? ref.j : 0;", T, "R5"],
+  [R, "    asDeposit({ kind: \"move\", l, j });\n", "", T, "RV6"],
+  [R, "    seconds({ id: \"V\", l, j });\n", "", T, "RV6"],
+  [R, "    seconds({ id: \"A\", l, j });\n", "", T, "RV6"],
+  [R, "      seconds({ id: \"R\", c, l, j });\n", "", T, "RV6"],
+  [R, "    w.secretKey.fill(0);\n", "", "test/key-zeroing.test.ts", "solanaRestore zeroes"],
+  [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
+  [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];
 let ok = 0;
-for (const [f, find, repl, pat] of M) {
+for (const [f, find, repl, file, pat] of M) {
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
   writeFileSync(f, src.replace(find, repl));
-  const r = spawnSync("node", ["--test", `--test-name-pattern=${pat}`, "test/pool-solana.test.ts"], { cwd: W, encoding: "utf8", timeout: 120_000 });
+  const r = spawnSync("node", ["--test", `--test-name-pattern=${pat}`, file], { cwd: W, encoding: "utf8", timeout: 120_000 });
   writeFileSync(f, src);
   const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
   const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
   const killed = r.status !== 0 && Number(fail) > 0;
   if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${pass} fail ${fail}: ${f.endsWith("restore.ts") ? "solana-restore.ts" : "solana.ts"}: ${find.slice(0, 70)}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${pass} fail ${fail}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;

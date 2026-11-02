@@ -49,6 +49,10 @@ const { depositDelegate, DepositDelegateRefused } = await import("../src/deposit
 const keys = await import("../src/derive/keys.ts");
 const { noteSecretsFromWords } = await import("../src/notes/secrets.ts");
 const { replayDepositReads } = await import("./replay-deposit-reads.ts");
+const { solanaRestore, solanaMarkOf } = await import("../src/pool/solana-restore.ts");
+const { noteSecrets, noteCommitment } = await import("../src/notes/secrets.ts");
+const { vaultLabelOf } = await import("@blindfill/kit");
+const { keccak_256 } = await import("@noble/hashes/sha3.js");
 
 const SEED = new Uint8Array(64).fill(0x42); // the public test seed
 const zero = (b: Uint8Array) => b.every((x) => x === 0);
@@ -117,6 +121,26 @@ test("noteSecretsFromWords zeroes the seed it makes from the words, and the mast
   const got = only(() => noteSecretsFromWords(words, { kind: "deposit", s: 1n, i: 0 }));
   assert.ok(got.some((b) => b.length === 64), "no seed recorded");
   for (const b of got) assert.ok(zero(b), `a ${b.length}-byte derive was left`);
+});
+
+test("solanaRestore zeroes each spent note's W key it derives for the W's address (card notes-per-pool-sol)", () => {
+  const program = "GrhFJ6E7xdXj4Yf6zxwKEdcHPVJKDTRd3sYNkKYdKbt6"; // any base58 32-byte key: a test program id
+  const scope = 7n;
+  const P = noteSecrets(SEED, { kind: "deposit", s: scope, i: 0 }).precommitment;
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const cP = noteSecrets(SEED, { kind: "change", l: label, j: 0 }).precommitment;
+  const marks = {
+    pre: new Map([[solanaMarkOf(program, "pre", P), { value: 10_000_000n, nonce: 1n }]]),
+    spent: new Map([[solanaMarkOf(program, "spent", noteSecrets(SEED, { kind: "deposit", s: scope, i: 0 }).nullifierHash), 10_000_000n]]),
+    slot: 1,
+  };
+  const leaves = [noteCommitment(10_000_000n, label, P), noteCommitment(0n, label, cP)];
+  let spends = 0;
+  const got = only(() => (spends = solanaRestore({ seed64: SEED, program, scope, stateLeaves: leaves, labelLeaves: [label], marks, gap: 2 }).spends.length));
+  assert.equal(spends, 1);
+  const keys = got.filter((b) => b.length === 32 || b.length === 64);
+  assert.ok(keys.length > 0, "the hook saw the W derive");
+  assert.ok(got.every(zero), "solanaRestore left a derived secret in memory");
 });
 
 test("SLIP-10 zeroes every step's HMAC output; a fresh ed25519 wallet zeroes its path bytes and chain code", () => {

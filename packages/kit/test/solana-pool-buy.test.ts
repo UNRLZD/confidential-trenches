@@ -26,7 +26,7 @@ import {
   solanaPoolBuyFunds,
   solanaPoolBuyInstructions,
   solanaPoolBuySteps,
-  solanaPoolReleaseCost,
+  solanaPoolReleaseCost, solanaPoolFee, solanaPoolPageReserve, solanaPoolPriorityBudget, SOLANA_POOL_SEND_MARGIN_MS,
   readSolanaRent,
   solanaDecodeMessage,
   solanaDecodeLookupTable,
@@ -437,23 +437,34 @@ test("the compressed point's bit 7 is y's sign: set for y above q - y, clear bel
 
 // ------------------------------------------------------------------------------------------------- fold 2
 
-test("the priority fee must fit in the relay fee less the release's cost, or the helper refuses what W signed (M353, the review's R1 inverted)", async () => {
-  assert.equal(solanaPoolReleaseCost(rent), 1_026_000n); // rent(0) 650,240 + 72 x 5,080 + 2 signatures
-  const rel = { ...release, relayFee: 1_300_000n }; // leaves 274,000 lamports for priority
+test("the priority fee must fit in the priority budget: the relay fee less the release's cost and the page reserve, or the helper refuses what W signed (M353, M356 (5))", async () => {
+  assert.equal(solanaPoolReleaseCost(rent), 1_066_640n); // rent(8) 690,880 + 72 x 5,080 + 2 signatures (M355 (3))
+  assert.equal(solanaPoolPageReserve(rent), 715n); // ceil((128 + 16) x 5,080 / 1,024) = ceil(731,520 / 1,024)
+  assert.equal(solanaPoolFee(rent), 1_300_000n); // 1,066,640 up to 1,100,000, plus two steps
+  assert.equal(solanaPoolPriorityBudget(rent), 232_645n); // 1,300,000 - 1,066,640 - 715
+  const rel = { ...release, relayFee: 1_300_000n };
   for (const v of ["pump", "pumpswap"] as const) {
     const s = await setup(v);
-    const req = { ...s.req, cuPrice: 1_000_000n }; // 300,000 or 400,000 CU x 1 lamport: over 274,000
+    const req = { ...s.req, cuPrice: 1_000_000n }; // 300,000 or 400,000 CU x 1 lamport: over 232,645
     assert.throws(() => buildSolanaPoolBuy(cfg, rel, s.venue, req, s.chain), /priority fee/, v);
     const cheap = { lamportsPerByte: 1n, factor: 1n } as const; // a server that lies about rent builds it
     const wire = buildSolanaPoolBuy(cfg, rel, s.venue, req, { ...s.chain, rent: cheap }).wire;
     assert.deepEqual(failed(checkSolanaPoolBuy(wire, cfg, rel, s.venue, req, s.reads)), ["FEE"], v);
-    // exactly at the edge: limit x price = (relay_fee - cost) x 1e6 is carried
+    // exactly at the edge: limit x price = (relay_fee - cost - 715) x 1e6 is carried; one lamport less is refused
     const cu = BigInt(v === "pump" ? 300_000 : 400_000);
-    const edge = { ...release, relayFee: 1_026_000n + (cu * 100_000n) / 1_000_000n };
+    const edge = { ...release, relayFee: 1_066_640n + 715n + (cu * 100_000n) / 1_000_000n };
     const ok = { ...s.req, cuPrice: 100_000n };
+    assert.equal(solanaPoolPriorityBudget(rent, edge.relayFee) * 1_000_000n, cu * 100_000n);
     assert.ok(checkSolanaPoolBuy(buildSolanaPoolBuy(cfg, edge, s.venue, ok, s.chain).wire, cfg, edge, s.venue, ok, s.reads).ok, v);
     assert.throws(() => buildSolanaPoolBuy(cfg, { ...edge, relayFee: edge.relayFee - 1n }, s.venue, ok, s.chain), /priority fee/, v);
+    // the reserve is the difference: a relay fee that covers the cost and priority but not the page's share is refused
+    const noReserve = { ...edge, relayFee: edge.relayFee - 715n };
+    assert.throws(() => buildSolanaPoolBuy(cfg, noReserve, s.venue, ok, s.chain), /page reserve 715/, v);
+    const signed = buildSolanaPoolBuy(cfg, edge, s.venue, ok, s.chain).wire;
+    assert.deepEqual(failed(checkSolanaPoolBuy(signed, cfg, noReserve, s.venue, ok, s.reads)).includes("FEE"), true, v);
   }
+  // the send margin outlives a blockhash: 150 blocks at 400 ms is 60 s
+  assert.equal(SOLANA_POOL_SEND_MARGIN_MS, 90_000n);
 });
 
 test("a duplicate key (the compute budget program again, loaded from the table) is refused by the key count (the review's R2)", async () => {
