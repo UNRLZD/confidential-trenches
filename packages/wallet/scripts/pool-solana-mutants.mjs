@@ -59,7 +59,7 @@ const M = [
   [R, "    seconds({ id: \"V\", l, j });\n", "", T, "RV6"],
   [R, "    seconds({ id: \"A\", l, j });\n", "", T, "RV6"],
   [R, "      seconds({ id: \"R\", c, l, j });\n", "", T, "RV6"],
-  [R, "    w.secretKey.fill(0);\n", "", "test/key-zeroing.test.ts", "solanaRestore zeroes"],
+  [R, "    w.secretKey.fill(0);\n", "", "test/pool-zeroing.test.ts", "solanaRestore zeroes"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];

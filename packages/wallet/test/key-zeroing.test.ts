@@ -123,7 +123,7 @@ test("noteSecretsFromWords zeroes the seed it makes from the words, and the mast
   for (const b of got) assert.ok(zero(b), `a ${b.length}-byte derive was left`);
 });
 
-test("solanaRestore zeroes each spent note's W key it derives for the W's address (card notes-per-pool-sol)", () => {
+test("solanaRestore zeroes the HKDF and HMAC bytes of each W it derives (card notes-per-pool-sol; the W key itself: pool-zeroing.test.ts)", () => {
   const program = "GrhFJ6E7xdXj4Yf6zxwKEdcHPVJKDTRd3sYNkKYdKbt6"; // any base58 32-byte key: a test program id
   const scope = 7n;
   const P = noteSecrets(SEED, { kind: "deposit", s: scope, i: 0 }).precommitment;

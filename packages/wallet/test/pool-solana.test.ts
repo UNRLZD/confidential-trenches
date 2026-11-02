@@ -549,6 +549,13 @@ test("RV7: two honest RPCs at different finalized slots still restore, and the p
   assert.ok(asked.length > 0 && asked.every((x) => x === chain.slot + 3), "every page read is at the higher marks slot");
   // an RPC that cannot reach that slot is refused, never read below it
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(ahead, chain), gap: 4 }), /Minimum context slot/);
+  // an RPC that ignores minContextSlot and answers from its own lower slot is refused by the device all the same
+  const deaf: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m !== "getMultipleAccounts") return rpc(chain, MAINNET)(m, p);
+    const { minContextSlot: _, ...cfg } = p[1] as { minContextSlot?: number };
+    return rpc(chain, MAINNET)(m, [p[0], cfg]);
+  }, { url: "https://b.example" });
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [rpc(ahead, { ...MAINNET, url: "https://a.example" }), deaf], gap: 4 }), new RegExp(`answered at slot ${chain.slot}, below ${chain.slot + 3}`));
 });
 
 test("RV2, RV3, RV4: one RPC short below the cut (either side); the reached check reads its own slot's time; a forged label root", async () => {
