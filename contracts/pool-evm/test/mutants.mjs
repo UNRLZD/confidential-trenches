@@ -4,7 +4,7 @@
 // mutant, fails on the pool as it is, or a mutant's text is not found exactly once. Needs forge (Foundry).
 //   node contracts/pool-evm/test/mutants.mjs
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PP = "src/PrivacyPool.sol";
 const ST = "src/State.sol";
 const SIMPLE = "src/PrivacyPoolSimple.sol";
+// lib/forge-std's submodule commit (v1.9.7), fetched into the copy when the checkout has no submodule files
+const FORGE_STD = "77041d2ce690e692d6e03cc812b57d1ddaa4d505";
 
 // [file, text, replacement, the test that must fail]; "layout" runs test/layout.test.mjs in place of a forge test
 export const MUTANTS = [
@@ -73,12 +75,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let bad = 0;
   try {
     cpSync(ROOT, dir, { recursive: true, filter: (f) => !/[/\\](out|cache)$/.test(f) });
+    const std = path.join(dir, "lib/forge-std");
+    if (!existsSync(path.join(std, "src/Test.sol"))) {
+      rmSync(std, { recursive: true, force: true });
+      const git = (...a) => execFileSync("git", a, { cwd: std, stdio: "pipe" });
+      execFileSync("git", ["init", "-q", std]);
+      git("fetch", "-q", "--depth", "1", "https://github.com/foundry-rs/forge-std.git", FORGE_STD);
+      git("checkout", "-q", FORGE_STD);
+    }
     for (const t of new Set(MUTANTS.map((m) => m[3]))) {
       if (run(dir, t) !== "pass") {
         console.log(`FAIL ${t} fails on the pool as it is`);
         bad++;
       }
     }
+    if (bad > 0) throw new Error(`${bad} named test(s) fail on the pool as it is: no mutant is run`);
     MUTANTS.forEach(([file, find, repl, t], i) => {
       const f = path.join(dir, file);
       const src = readFileSync(f, "utf8");
