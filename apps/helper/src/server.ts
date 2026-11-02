@@ -24,6 +24,7 @@ import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { createTokenWatch, USDC } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused } from "./withdraw/fee.ts";
+import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
@@ -33,9 +34,11 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists"], relay: ["/v1/token-status", "/v1/withdraw/fee"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS] = MOUNTED.proxy;
-const [TOKEN_STATUS, WITHDRAW_FEE] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW] = MOUNTED.relay;
+/** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
+export const WITHDRAW_BODY_MAX = 8_192;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
@@ -108,6 +111,7 @@ export function handler(
   watch: Watch = createTokenWatch(process.env),
   lists: Lists = createSolanaLists(proxy, rpc),
   fee: Fee = feeQuoterFromEnv(process.env),
+  withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status }),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
@@ -165,6 +169,25 @@ export function handler(
           .quote(tokens[0]!)
           .then((a) => send(200, a, cors(req)))
           .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? send(503, { error: { code: "upstream" } }, cors(req)) : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path === WITHDRAW) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // checks 1-10 and the send (withdraw/send.ts); a body that is not one JSON value is check 1's bad_shape
+        void readBody(req, WITHDRAW_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            const a = await withdraw.carry(body);
+            return { status: a.status, body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
       if (path === MARKET_LISTS) {
@@ -232,14 +255,16 @@ export function handler(
   };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists, fee?: Fee): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watch, lists, fee),
+    handler(commit, proxy, rpc, watch, lists, fee, withdraw),
   );
   server.listen(port);
+  // the withdrawal relayer starts with the helper: a restart resends its open sends and settles before any request
+  withdraw?.warm();
   return server;
 }
 
@@ -255,7 +280,10 @@ if (import.meta.main) {
     const proxy = createProxy(process.env);
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);
-    server = start(commit, port, proxy, rpc, undefined, lists);
+    const watch = createTokenWatch(process.env);
+    const fee = feeQuoterFromEnv(process.env);
+    const withdraw = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status });
+    server = start(commit, port, proxy, rpc, watch, lists, fee, withdraw); // warms the withdrawal relayer
     lists.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);

@@ -101,7 +101,8 @@ export type SendReads = BindReads & {
  * (its validity runs from there) and its signed bytes (base64), kept to resend.
  */
 export type TxRef = { tx_hash: string; nonce: string; height: string; block_hash: string; signed_tx: string };
-export type Receipt = { executor: string; ok: boolean; failure: string; height: bigint };
+/** A receipt's outcome; `ms` is its block's time (header.timestamp_nanosec / 10^6) when it was read from blocks. */
+export type Receipt = { executor: string; ok: boolean; failure: string; height: bigint; ms?: bigint };
 
 /** One relayer transaction's outcome. */
 export type TxOutcome =
@@ -111,10 +112,19 @@ export type TxOutcome =
   /** Not known yet: it may still land. */
   | { kind: "unknown"; tx_hash: string; why: string };
 
-export type RelayerAction = { kind: "storage_prepay"; precommitment: bigint; bytes: bigint } | { kind: "delegate"; signed: Uint8Array; receiver: string };
+export type RelayerAction =
+  | { kind: "storage_prepay"; precommitment: bigint; bytes: bigint }
+  | { kind: "delegate"; signed: Uint8Array; receiver: string }
+  /** One FunctionCall on `receiver` (the withdrawal relayer's withdraw and settle): `args` the JSON bytes as sent. */
+  | { kind: "call"; receiver: string; method: string; args: string; gas: bigint; deposit: bigint };
+
+/** How a send or a resolve reads: `wait` false answers once the bytes are sent; `fromBlocks` reads a call's receipt on the vault from blocks only. */
+export type ReadOpts = { wait?: boolean; fromBlocks?: boolean };
 
 export type Relayer = {
   account: string;
+  /** The key's nonce counter id, `<account>/<public key>`, as send records name it. */
+  key: string;
   /** The gas account's NEAR, at final. */
   balance(): Promise<bigint>;
   /**
@@ -122,12 +132,12 @@ export type Relayer = {
    * written. Else one transaction of one action is signed, `before` writes it durably, it goes to both providers, the
    * queue moves on, and its outcome is awaited.
    */
-  send(action: RelayerAction, guard: () => Promise<BindCode | null>, before: (tx: TxRef) => void): Promise<TxOutcome | { kind: "guarded"; code: BindCode }>;
+  send<C extends string = BindCode>(action: RelayerAction, guard: () => Promise<C | null>, before: (tx: TxRef) => void, opts?: ReadOpts): Promise<TxOutcome | { kind: "guarded"; code: C }>;
   /**
    * A transaction of ours whose outcome was not read: its bytes sent again (unless `resend` is false), then read on
    * both providers and the archival one.
    */
-  resolve(tx: TxRef, opts: { resend: boolean }): Promise<TxOutcome>;
+  resolve(tx: TxRef, opts: { resend: boolean; fromBlocks?: boolean }): Promise<TxOutcome>;
 };
 
 export type SendDeps = {
@@ -792,6 +802,11 @@ export function encodeTransaction(t: { signer: string; publicKey: Uint8Array; no
 }
 
 export function encodeAction(a: RelayerAction): Buffer {
+  if (a.kind === "call") {
+    if (a.gas <= 0n || a.gas > 300_000_000_000_000n) throw new Error("call: gas outside 1..300 Tgas");
+    if (a.deposit < 0n || a.deposit >= 1n << 128n) throw new Error("call: deposit not a u128");
+    return Buffer.concat([Buffer.from([2]), bstr(a.method), bstr(a.args), le(a.gas, 8), le(a.deposit, 16)]);
+  }
   if (a.kind === "storage_prepay") {
     if (a.bytes <= 0n || a.bytes > PREPAY_MAX_BYTES) throw new Error("storage_prepay: bytes outside 1..904");
     const args = JSON.stringify({ precommitment: a.precommitment.toString() });
@@ -914,11 +929,14 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     return h;
   };
 
-  type Block = { height: bigint; hash: string; prev: bigint };
+  // ms: header.timestamp_nanosec (a decimal string) / 10^6, never header.timestamp (a JSON number past 2^53); null when absent
+  type Block = { height: bigint; hash: string; prev: bigint; ms: bigint | null };
   const header = (a: unknown): Block => {
     const h = isObj(a) && isObj(a.header) ? a.header : {};
     if (typeof h.hash !== "string") throw new Error("block: no hash");
-    return { height: u64(h.height, "block.height"), hash: h.hash, prev: u64(h.prev_height, "block.prev_height") };
+    const ns = h.timestamp_nanosec;
+    if (ns !== undefined && (typeof ns !== "string" || !/^(0|[1-9][0-9]{0,19})$/.test(ns))) throw new Error("block: timestamp_nanosec not a decimal");
+    return { height: u64(h.height, "block.height"), hash: h.hash, prev: u64(h.prev_height, "block.prev_height"), ms: ns === undefined ? null : BigInt(ns) / 1_000_000n };
   };
   const unknownBlock = (e: unknown) => e instanceof RpcError && e.cause_name === "UNKNOWN_BLOCK";
   /** The block at height h on both providers, its hash and prev_height the same on both; null when neither has one. */
@@ -936,7 +954,7 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
       }),
     );
     if (a === null && b === null) return null;
-    if (a === null || b === null || a!.hash !== b!.hash || a!.prev !== b!.prev) throw new Error(`the providers disagree on block ${h}`);
+    if (a === null || b === null || a!.hash !== b!.hash || a!.prev !== b!.prev || a!.ms !== b!.ms) throw new Error(`the providers disagree on block ${h}`);
     return a!;
   };
   const mustBlock = async (h: bigint): Promise<Block> => {
@@ -1047,7 +1065,7 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
       if (v0 !== v1) throw new Error(`the providers disagree on the vault's changes at ${h} (${v0}, ${v1})`);
       if (v0 === "ran" || v0 === "failed") {
         scanned.delete(tx.tx_hash);
-        return { executor: vault, ok: v0 === "ran", failure: v0 === "ran" ? "" : `receipt ${r} failed at ${h} (read from blocks)`, height: h };
+        return { executor: vault, ok: v0 === "ran", failure: v0 === "ran" ? "" : `receipt ${r} failed at ${h} (read from blocks)`, height: h, ...(b.ms !== null && { ms: b.ms }) };
       }
       last = b;
       remember(scanned, tx.tx_hash, { last, next: h + 1n });
@@ -1071,7 +1089,7 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
       return null; // UNKNOWN_TRANSACTION, a forgotten one, or an error: nothing read
     }
   };
-  const judge = async (tx: TxRef): Promise<TxOutcome> => {
+  const judge = async (tx: TxRef, fromBlocks = false): Promise<TxOutcome> => {
     const keep = (why: string): TxOutcome => ({ kind: "unknown", tx_hash: tx.tx_hash, why });
     const finals = await Promise.all(rpcs.map(async (r) => header(await r("block", { finality: "final" })).height));
     const f = finals[0]! < finals[1]! ? finals[0]! : finals[1]!;
@@ -1097,6 +1115,12 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     if (c0 !== c1) throw new Error(`the providers disagree on the changes at D (${c0}, ${c1})`);
     if (c0 === "empty") return keep("an empty change list at D: a node that does not save state changes, or did not apply D's chunk (F54)");
     if (c0 === "other") return { kind: "dropped", tx_hash: tx.tx_hash, why: "(a2): K's nonce passed it at D, whose changes do not name it" };
+    // a call on the vault read from blocks only (the withdrawal's send record, markets.md "Its outcome"): never a lookup
+    if (fromBlocks) {
+      if (receiverOf(tx.signed_tx) !== vault) throw new Error("fromBlocks: not a transaction to the vault");
+      const e = await receiptFromBlocks(tx, d, f);
+      return e === null ? keep("applied at D; its receipt not found in a block up to F yet") : { kind: "final", tx_hash: tx.tx_hash, receipts: [e] };
+    }
     // applied at D: its outcome from a lookup on any provider, the archival one included, that names D
     const reads = await Promise.all([...rpcs, archival].map((r) => readTx(r, tx)));
     if (reads.some((x) => x !== null && x.at !== d.hash)) {
@@ -1110,17 +1134,17 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     return found ? { kind: "final", tx_hash: tx.tx_hash, receipts: found.receipts } : keep("applied at D; its outcome is not final on any provider yet");
   };
   /** One round; any error, missing answer or disagreement keeps it. */
-  const readOnce = async (tx: TxRef): Promise<TxOutcome> => {
+  const readOnce = async (tx: TxRef, fromBlocks = false): Promise<TxOutcome> => {
     try {
-      return await judge(tx);
+      return await judge(tx, fromBlocks);
     } catch (e) {
       return { kind: "unknown", tx_hash: tx.tx_hash, why: `kept: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) };
     }
   };
-  const wait = async (tx: TxRef): Promise<TxOutcome> => {
+  const wait = async (tx: TxRef, fromBlocks = false): Promise<TxOutcome> => {
     const until = Date.now() + waitMs;
     for (;;) {
-      const out = await readOnce(tx);
+      const out = await readOnce(tx, fromBlocks);
       if (out.kind !== "unknown" || Date.now() >= until) return out;
       await sleep(POLL_MS);
     }
@@ -1128,12 +1152,13 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
 
   return {
     account,
+    key: counterKey,
     async balance() {
       const a = (await rpcs[0]("query", { request_type: "view_account", finality: "final", account_id: account })) as { amount?: unknown };
       return u128(a.amount, "relayer amount");
     },
-    async send(action, guard, before) {
-      const turn = queue.then(async (): Promise<{ guarded: BindCode } | { tx: TxRef }> => {
+    async send<C extends string = BindCode>(action: RelayerAction, guard: () => Promise<C | null>, before: (tx: TxRef) => void, opts: ReadOpts = {}) {
+      const turn = queue.then(async (): Promise<{ guarded: C } | { tx: TxRef }> => {
         const code = await guard();
         if (code !== null) return { guarded: code };
         let c = store.nonceNext(counterKey); // read before the key: the compare-and-set below is on this value
@@ -1157,12 +1182,13 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
       });
       queue = turn.catch(() => undefined);
       const t = await turn;
-      if ("guarded" in t) return { kind: "guarded", code: t.guarded };
-      return wait(t.tx);
+      if ("guarded" in t) return { kind: "guarded" as const, code: t.guarded };
+      if (opts.wait === false) return { kind: "unknown" as const, tx_hash: t.tx.tx_hash, why: "sent; not read yet" };
+      return wait(t.tx, opts.fromBlocks === true);
     },
     async resolve(tx, opts) {
       if (opts.resend) await broadcast(tx.signed_tx);
-      return readOnce(tx);
+      return readOnce(tx, opts.fromBlocks === true);
     },
   };
 }
