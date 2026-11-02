@@ -21,7 +21,7 @@
 //!   with `refund_value = r`, or `paid` when `r = 0`; `totals.returned += r`; event `payout`.
 //!
 //! No event or log comes before the last refusal of a call (NEAR keeps a failed receipt's logs): `withdraw` logs
-//! `leaf_inserted`, `withdrawn` and `withdrawal_relayed` only after row 14.
+//! `leaf_inserted`, `withdrawn` and `withdrawal_relayed` only after row 14 and the promises of row 15.
 //!
 //! Ported from Privacy Pools v1.3.0's fee split (`Entrypoint.sol:159-169`, two transfers, `WithdrawalRelayed` at
 //! :175) and `_push` (`PrivacyPoolComplex.sol:64-67`), Copyright 2025 0XBOW LTD, Apache-2.0. Deviations (vault.md

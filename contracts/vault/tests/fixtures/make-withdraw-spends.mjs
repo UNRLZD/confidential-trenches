@@ -105,6 +105,11 @@ const spends = [
     recipient: "newcomer.test.near",
     registerDeposit: "1250000000000000000000",
   }),
+  // a registration of 1 yocto, below the token's minimum: part 0 [storage_deposit, ft_transfer] fails whole
+  await spend("short_registration", 5, 4_000_000n, "short_registration", notes.length, "0", {
+    recipient: "fresh.test.near",
+    registerDeposit: "1",
+  }),
 ];
 for (const s of spends.slice(1)) if (s.public_signals[1] === spends[0].public_signals[1]) throw new Error("note 1's nullifier repeats");
 if (spends[1].public_signals[1] !== spends[2].public_signals[1]) throw new Error("same_nullifier: two nullifier hashes");

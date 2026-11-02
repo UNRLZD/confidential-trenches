@@ -295,8 +295,8 @@ mod tests {
         );
     }
 
-    // near-sdk's mock takes several promise results only with a RuntimeFeesConfig, which it does not re-export, so the
-    // host read is tested with one result and the two-part rule through read_parts.
+    // The host read with one result here, the two-part rule through read_parts; src/payout.rs's tests run on_payout
+    // on two mocked results (testing_env! with near_sdk::RuntimeFeesConfig::test()).
 
     #[test]
     fn payout_results_reads_one_result_as_success_or_failure_only() {

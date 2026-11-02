@@ -20,6 +20,11 @@
 //!    paid 6,900,000, the relayer 100,000, the spend `paid` with REFUND_RESERVE_BYTES' worth in its reserve. Then a
 //!    self withdrawal (fee 0, the recipient signs) lands at its own bound (145 Tgas) and requirement. Then `on_payout`
 //!    called by anyone but the vault is refused.
+//! 3. `a_registration_below_the_minimum_returns_part_0_*`: short_registration (4,000,000, no fee) attaches a
+//!    `register_deposit` of 1 yocto, below the token's 0.00125 NEAR: part 0's storage_deposit fails, so its
+//!    ft_transfer in the same receipt moves nothing; the spend reads `refund_pending` with the whole to_recipient,
+//!    the token stays in the vault, and the NEAR the part carried (register_deposit + the transfer's 1 yocto) comes
+//!    back to the vault as the refund receipt.
 //!
 //! Each prints its gas table: `vault::withdraw` (the vault's own work, the promises included, depth 3) and
 //! `vault::on_payout`.
@@ -281,6 +286,57 @@ async fn vt_s04(kind: TokenKind) -> R<()> {
     assert_eq!(vault_state(&h).await?, state, "a stranger's on_payout changed state");
     println!("{kind:?}: VT-S04 holds\n{}", h.gas_table());
     Ok(())
+}
+
+/// The NEAR the runtime's refund receipts (predecessor `system`) gave `to` in transaction `tx`.
+async fn refunded_to(h: &Harness, tx: &str, signer: &str, to: &str) -> R<u128> {
+    let v = h.rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": tx, "sender_account_id": signer, "wait_until": "FINAL"})).await?;
+    let mut sum = 0u128;
+    for rc in v["result"]["receipts"].as_array().ok_or_else(|| format!("tx {tx}: {v}"))? {
+        if rc["predecessor_id"] != "system" || rc["receiver_id"] != to {
+            continue;
+        }
+        for a in rc["receipt"]["Action"]["actions"].as_array().into_iter().flatten() {
+            if let Some(d) = a["Transfer"]["deposit"].as_str() {
+                sum += d.parse::<u128>()?;
+            }
+        }
+    }
+    Ok(sum)
+}
+
+async fn a_registration_below_the_minimum_returns_part_0(kind: TokenKind) -> R<()> {
+    let (h, relayer, _alice) = deposited(kind).await?;
+    let fresh = h.account("fresh", 5).await?;
+    let need = row14_need(relayer.id().as_str(), fresh.id().as_str(), 1, 1);
+    // no fee, a registration: 15 + 10 + 30 + 100 Tgas
+    let o = withdraw(&h, &relayer, args("short_registration"), need, 155).await?;
+    landed(&h, &o, "short_registration", &[("fresh.test.near", false)], 0, 4_000_000)?;
+    let part0 = o.receipts.iter().find(|r| r.methods == ["storage_deposit", "ft_transfer"]).ok_or("no [storage_deposit, ft_transfer] part")?;
+    let f = part0.failure().ok_or("part 0 landed")?;
+    println!("part 0 failed at its storage_deposit: {f}");
+    assert!(f.contains(r#""index":0"#), "part 0 did not fail at its first action, storage_deposit: {f}");
+    h.wait_final(&h.vault).await?;
+    assert!(h.view(&h.token, "storage_balance_of", json!({"account_id": fresh.id()})).await?.is_null(), "fresh got registered");
+    assert_eq!(h.token_balance(fresh.id()).await?, 0);
+    assert_eq!(h.token_balance(&h.vault).await?, 31_000_000, "the token left the vault");
+    let r = spend_row(&h, "short_registration").await?;
+    assert_eq!((r["status"].as_str(), r["refund_value"].as_str()), (Some("refund_pending"), Some("4000000")), "{r}");
+    assert_eq!(h.view(&h.vault, "totals", json!({})).await?["returned"], "4000000");
+    let back = refunded_to(&h, &o.tx_hash, relayer.id().as_str(), h.vault.as_str()).await?;
+    println!("{kind:?}: refund receipts to the vault: {back} yocto (register_deposit 1 + 1 yocto)\n{}", h.gas_table());
+    assert_eq!(back, 2, "the vault did not get back register_deposit + the transfer's yocto");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_registration_below_the_minimum_returns_part_0_mock() -> R<()> {
+    a_registration_below_the_minimum_returns_part_0(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn a_registration_below_the_minimum_returns_part_0_usdc() -> R<()> {
+    a_registration_below_the_minimum_returns_part_0(TokenKind::Usdc).await
 }
 
 #[tokio::test]

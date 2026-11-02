@@ -39,7 +39,7 @@
 //!
 //! Between rows 3 and 4 the gas pre-check, and after row 12 rows 13-15 (src/payout.rs): the fee split, the storage
 //! charge (`InsufficientStorageDeposit`, the last refusal, which rolls back every write above it) and the payouts with
-//! `on_payout`. Only then does the call log exactly `leaf_inserted` (the change leaf), `withdrawn` and
+//! `on_payout`. Only after the promises are made does the call log exactly `leaf_inserted` (the change leaf), `withdrawn` and
 //! `withdrawal_relayed`; a refused call logs nothing.
 //!
 //! Ported from Privacy Pools v1.3.0 `packages/contracts/src/contracts/PrivacyPool.sol:44-59` and `:115-128`
@@ -265,7 +265,7 @@ impl Vault {
             context: field::to_be(&c.signals[SIGNAL_CONTEXT]),
         });
         self.totals.spent = U128(spent);
-        // its leaf_inserted is logged by withdraw, after row 14
+        // its leaf_inserted is logged by withdraw, after rows 14 and 15
         (index, ins)
     }
 }
@@ -273,8 +273,8 @@ impl Vault {
 #[near]
 impl Vault {
     /// 2.5.2 at this block's time: rows 1-3, the gas pre-check, rows 4-12 (every refusal before any write), row 13,
-    /// row 14 (the last refusal: it rolls the writes back), then the three events, then row 15's payouts and
-    /// `on_payout` (src/payout.rs).
+    /// row 14 (the last refusal: it rolls the writes back), row 15's payouts and `on_payout` (src/payout.rs), then
+    /// the three events, so nothing that could still fail the receipt comes after a log.
     #[payable]
     #[deny_unknown_arguments]
     pub fn withdraw(&mut self, withdrawal: Withdrawal, proof: Proof, public_signals: [String; 8]) {
@@ -300,7 +300,10 @@ impl Vault {
         let to_recipient = payout::split(withdrawn, fee);
         // row 14
         self.charge_storage(index, usage0, register_deposit, fee);
-        // every check has passed: the change leaf's leaf_inserted, withdrawn, withdrawal_relayed
+        // row 15
+        promise::pay_then_on_payout(index, &c.fields.recipient, to_recipient, register_deposit, &c.fields.fee_recipient, fee);
+        // every check has passed and the promises are made: the change leaf's leaf_inserted, withdrawn,
+        // withdrawal_relayed
         ins.event().emit();
         Event::Withdrawn {
             processor: &c.fields.processor,
@@ -317,8 +320,6 @@ impl Vault {
             refund_precommitment: &c.fields.refund_precommitment,
         }
         .emit();
-        // row 15
-        promise::pay_then_on_payout(index, &c.fields.recipient, to_recipient, register_deposit, &c.fields.fee_recipient, fee);
     }
 }
 
@@ -1262,15 +1263,22 @@ mod spend_tests {
 
     /// The vault reads the 8 public signals at the positions the kit's VAULT_WITHDRAW_SIGNALS names, read from the
     /// kit's own source, so a change on either side fails here.
-    /// Row 14 (V:394) on a real spend: exactly (614 B + REFUND_RESERVE_BYTES) x the byte price + 1 yocto per
-    /// ft_transfer lands and keeps REFUND_RESERVE_BYTES' worth as the reserve; one yocto less, or nothing, is refused
-    /// with nothing logged and no payout made. same_call pays a fee (two transfers), same_nullifier_a none (one). The
+    /// Row 14 (V:394) on a real spend: exactly (bytes written + REFUND_RESERVE_BYTES) x the byte price +
+    /// register_deposit + 1 yocto per ft_transfer lands and keeps REFUND_RESERVE_BYTES' worth as the reserve; one yocto
+    /// less, or nothing, is refused with nothing logged and no payout made. same_call pays a fee (two transfers),
+    /// same_nullifier_a none (one), new_account a fee and a registration of 0.00125 NEAR. The
     /// mocked chain keeps a panicking call's writes, so "nothing written" is read on chain in tests/payouts.rs.
     #[test]
     fn row_14_one_yocto_short_is_refused_and_logs_nothing() {
         let price = 10_000_000_000_000_000_000u128;
-        for (name, transfers) in [("same_call", 2u128), ("same_nullifier_a", 1)] {
-            let need = (614 + crate::constants::REFUND_RESERVE_BYTES as u128) * price + transfers;
+        // (name, yocto for the transfers, register_deposit, bytes written: relayer.test.near pays, the recipient is
+        // alice.test.near, or newcomer.test.near with its registration)
+        for (name, transfers, register, bytes) in [
+            ("same_call", 2u128, 0u128, 614u128),
+            ("same_nullifier_a", 1, 0, 614),
+            ("new_account", 2, 1_250_000_000_000_000_000_000, 617),
+        ] {
+            let need = (bytes + crate::constants::REFUND_RESERVE_BYTES as u128) * price + register + transfers;
             for short in [need - 1, 0] {
                 let mut v = vault();
                 ATTACH.set((short, Gas::from_tgas(300)));
