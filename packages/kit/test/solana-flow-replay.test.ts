@@ -16,6 +16,7 @@ import {
   SOLANA_TOKEN_PROGRAM,
   runSolanaTrade,
   solanaAta,
+  solanaDecodeMessage,
   solanaRouteAmounts,
   solanaVolumeAccumulator,
   type SolanaRpc,
@@ -36,21 +37,23 @@ const askOf = (method: string, params: readonly unknown[]): string =>
 
 type Edit = (at: "A" | "B", method: string, n: number, answer: unknown, params: readonly unknown[]) => unknown;
 /** A provider answering from the recording: the n-th ask of a key gets the n-th recorded answer (the last repeats). */
-function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x): SolanaRpc & { asks: string[] } {
+function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x): SolanaRpc & { asks: string[]; times: number[] } {
   const by = new Map<string, unknown[]>();
   for (const r of fx.rpc) if (r.at === at) by.set(r.ask, [...(by.get(r.ask) ?? []), r.answer]);
   const seen = new Map<string, number>();
   const asks: string[] = [];
+  const times: number[] = [];
   const fn = async (method: string, params: readonly unknown[]): Promise<unknown> => {
     const k = askOf(method, params);
     asks.push(k);
+    times.push(Date.now());
     const list = by.get(k);
     if (!list) throw new Error(`not recorded on ${at}: ${k.slice(0, 160)}`);
     const n = seen.get(k) ?? 0;
     seen.set(k, n + 1);
     return edit(at, method, n, clone(list[Math.min(n, list.length - 1)]), params);
   };
-  return Object.assign(fn, { asks });
+  return Object.assign(fn, { asks, times });
 }
 /** The helper's builds from the recording, by URL without slippageBps; a build asked at another slippage gets the
  * recorded route with that slippage written into it, as Jupiter answers. */
@@ -74,7 +77,7 @@ const request = (i: number): SolanaTradeRequest & { legs: SolanaTradeRequest["le
   const r = fx.requests[i]!;
   return { side: r.side, token: r.mint, slippageBps: r.slippageBps, wallets: r.wallets, legs: r.legs.map((l) => ({ wallet: l.wallet, amount: BigInt(l.amount), arm: l.arm })) };
 };
-function deps(i: number, o: { edit?: Edit; scale?: bigint; urls?: string[]; keepSlippage?: boolean } = {}): SolanaTradeDeps & { providers: readonly [SolanaRpc & { asks: string[] }, SolanaRpc & { asks: string[] }] } {
+function deps(i: number, o: { edit?: Edit; scale?: bigint; urls?: string[]; keepSlippage?: boolean } = {}): SolanaTradeDeps & { providers: readonly [SolanaRpc & { asks: string[]; times: number[] }, SolanaRpc & { asks: string[]; times: number[] }] } {
   const ref = fx.references[i]!.answer!;
   const k = o.scale ?? 10_000n;
   return {
@@ -170,6 +173,34 @@ test("one wallet a request: every read and simulation of a buy and a three-walle
       assert.ok(named <= 1, `${named} wallets in ${a.slice(0, 200)}`);
     }
   }
+});
+
+test("one queue a provider: every call of a three-wallet sell, its teardowns' included, stays within the provider's rate", async () => {
+  const d = { ...deps(SELL), providerRps: [20, 20] as const };
+  const r = await runSolanaTrade(request(SELL), d);
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+  assert.ok(r.legs.filter((l) => l.sellsAll).every((l) => l.teardown), "the teardowns were planned and simulated");
+  for (const p of d.providers) {
+    const ts = p.times;
+    const most = Math.max(...ts.map((x) => ts.filter((y) => y >= x && y < x + 1_000).length));
+    assert.ok(ts.length > 30, `${ts.length} calls`);
+    assert.ok(most <= 20, `${most} calls in one second`);
+  }
+});
+
+test("the flow hands the signer each tx's own lastValidBlockHeight: the height of the blockhash in the message it signs", async () => {
+  const dry = await runSolanaTrade(request(SELL), deps(SELL));
+  const h = dry.blockhash?.lastValidBlockHeight;
+  assert.ok(Number.isSafeInteger(h) && (h as number) > 0);
+  const got: { wallet: string; blockhash: string; h: number }[] = [];
+  // No key here: the stand-in records what it is handed and answers no signature, so nothing is sent.
+  const sign = async (wallet: string, m: Uint8Array, tx: { lastValidBlockHeight: number }) => {
+    got.push({ wallet, blockhash: solanaDecodeMessage(m).blockhash, h: tx.lastValidBlockHeight });
+    return new Uint8Array(64);
+  };
+  await assert.rejects(runSolanaTrade(request(SELL), { ...deps(SELL), dry: false, sign }), /does not verify/);
+  assert.equal(got.length, request(SELL).legs.length);
+  for (const g of got) assert.deepEqual([g.blockhash, g.h], [dry.blockhash?.blockhash, h], g.wallet);
 });
 
 test("S11 refuses a leg whose tx names another of the user's wallets; the user's other wallets elsewhere change nothing", async () => {

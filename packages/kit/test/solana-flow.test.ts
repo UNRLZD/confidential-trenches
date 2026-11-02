@@ -214,25 +214,41 @@ const MSG = Uint8Array.from([0x80, 1, 2, 3, 4, 5]);
 const WIRE = Uint8Array.from([1, ...new Uint8Array(64), ...MSG]);
 
 test("the signer's answer goes into the slot only when it verifies against the wallet's key", async () => {
-  const wire = await solanaSignedWire({ sign: async (w, m) => { assert.equal(w, PK); return ed25519.sign(m, SK); } }, PK, { wire: WIRE, message: MSG });
+  const wire = await solanaSignedWire({ sign: async (w, m) => { assert.equal(w, PK); return ed25519.sign(m, SK); } }, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: MSG });
   assert.ok(ed25519.verify(wire.subarray(1, 65), MSG, base58.decode(PK)));
   assert.deepEqual(wire.subarray(65), MSG);
   const other = hexToBytes("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
-  await assert.rejects(solanaSignedWire({ sign: async (_, m) => ed25519.sign(m, other) }, PK, { wire: WIRE, message: MSG }), /does not verify/);
-  await assert.rejects(solanaSignedWire({ sign: async (_, m) => ed25519.sign(Uint8Array.from([...m, 0]), SK) }, PK, { wire: WIRE, message: MSG }), /does not verify/);
-  await assert.rejects(solanaSignedWire({ sign: async () => new Uint8Array(63) }, PK, { wire: WIRE, message: MSG }), /does not verify/);
-  await assert.rejects(solanaSignedWire({}, PK, { wire: WIRE, message: MSG }), /no signer/);
-  const dry = await solanaSignedWire({ dry: true, sign: async () => assert.fail("dry never signs") }, PK, { wire: WIRE, message: MSG });
+  await assert.rejects(solanaSignedWire({ sign: async (_, m) => ed25519.sign(m, other) }, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: MSG }), /does not verify/);
+  await assert.rejects(solanaSignedWire({ sign: async (_, m) => ed25519.sign(Uint8Array.from([...m, 0]), SK) }, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: MSG }), /does not verify/);
+  await assert.rejects(solanaSignedWire({ sign: async () => new Uint8Array(63) }, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: MSG }), /does not verify/);
+  await assert.rejects(solanaSignedWire({}, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: MSG }), /no signer/);
+  const dry = await solanaSignedWire({ dry: true, sign: async () => assert.fail("dry never signs") }, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: MSG });
   assert.equal(dry.length, WIRE.length);
 });
 
 test("the message signed is the checked wire's own message: any other is refused before the signer is asked", async () => {
   const never = { sign: async () => assert.fail("never signed") };
   const other = Uint8Array.from([0x80, 1, 2, 3, 4, 6]);
-  await assert.rejects(solanaSignedWire(never, PK, { wire: WIRE, message: other }), /not the checked wire's message/);
-  await assert.rejects(solanaSignedWire(never, PK, { wire: WIRE, message: MSG.subarray(1) }), /not the checked wire's message/);
-  await assert.rejects(solanaSignedWire(never, PK, { wire: Uint8Array.from([2, ...new Uint8Array(128), ...MSG]), message: MSG }), /not the checked wire's message/);
-  await assert.rejects(solanaSignedWire({ dry: true }, PK, { wire: WIRE, message: other }), /not the checked wire's message/);
+  await assert.rejects(solanaSignedWire(never, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: other }), /not the checked wire's message/);
+  await assert.rejects(solanaSignedWire(never, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: MSG.subarray(1) }), /not the checked wire's message/);
+  await assert.rejects(solanaSignedWire(never, PK, { lastValidBlockHeight: 1_000, wire: Uint8Array.from([2, ...new Uint8Array(128), ...MSG]), message: MSG }), /not the checked wire's message/);
+  // two signature slots, the length and the message otherwise right: only the first byte refuses it
+  await assert.rejects(solanaSignedWire(never, PK, { lastValidBlockHeight: 1_000, wire: Uint8Array.from([2, ...new Uint8Array(64), ...MSG]), message: MSG }), /not the checked wire's message/);
+  await assert.rejects(solanaSignedWire({ dry: true }, PK, { lastValidBlockHeight: 1_000, wire: WIRE, message: other }), /not the checked wire's message/);
+});
+
+test("the signer is handed the lastValidBlockHeight of the very tx it signs, and a tx without one is never signed", async () => {
+  const MSG2 = Uint8Array.from([0x80, 9, 8, 7]);
+  const WIRE2 = Uint8Array.from([1, ...new Uint8Array(64), ...MSG2]);
+  const got: { m: string; h: number }[] = [];
+  const signer = { sign: async (_w: string, m: Uint8Array, tx: { lastValidBlockHeight: number }) => { got.push({ m: Buffer.from(m).toString("hex"), h: tx.lastValidBlockHeight }); return ed25519.sign(m, SK); } };
+  await solanaSignedWire(signer, PK, { wire: WIRE, message: MSG, lastValidBlockHeight: 1_000 });
+  await solanaSignedWire(signer, PK, { wire: WIRE2, message: MSG2, lastValidBlockHeight: 2_000 });
+  assert.deepEqual(got, [{ m: Buffer.from(MSG).toString("hex"), h: 1_000 }, { m: Buffer.from(MSG2).toString("hex"), h: 2_000 }]);
+  const never = { sign: async () => assert.fail("never signed") };
+  for (const h of [undefined, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "1000"]) {
+    await assert.rejects(solanaSignedWire(never, PK, { wire: WIRE, message: MSG, lastValidBlockHeight: h as number }), /no lastValidBlockHeight/);
+  }
 });
 
 // ---- after the send
@@ -319,6 +335,25 @@ test("the stage goes out as soon as the fills are read, before any teardown read
   const firstTeardown = log.findIndex((x) => / getMultipleAccounts$/.test(x));
   assert.ok(at >= 0 && firstTeardown > at, log.join(" | "));
   assert.ok(r[0]?.teardown, "the teardown still ran, after the stage");
+});
+
+test("one queue a provider: called on its own, the settle reads and three teardowns stay within the provider's rate", async () => {
+  const atas = new Map([W1, W2, W3].map((w) => [solanaAta(w, TOKEN, T), w]));
+  const mk = () => {
+    const p = after(() => ok, (k) => (atas.has(k) ? tokenAcc(0n, atas.get(k)) : null));
+    const times: number[] = [];
+    return Object.assign(async (m: string, params: readonly unknown[]) => { times.push(Date.now()); return p(m, params); }, { times });
+  };
+  const a = mk();
+  const b = mk();
+  const r = [rec(W1), rec(W2), rec(W3)];
+  assert.equal(await finishSolanaSet(sellReq, r, [tx(1, "unknown"), tx(2, "unknown"), tx(3, "unknown")], { ...fdeps(a, b), providerRps: [4, 4] }, T), "filled");
+  assert.ok(r.every((x) => x.teardown), "three teardowns read and checked");
+  for (const p of [a, b]) {
+    assert.ok(p.times.length > 8, `${p.times.length} calls`);
+    const most = Math.max(...p.times.map((x) => p.times.filter((y) => y >= x && y < x + 1_000).length));
+    assert.ok(most <= 4, `${most} calls in one second`);
+  }
 });
 
 test("a filled sell of part of a balance is not torn down; only a sell of the whole balance is", async () => {

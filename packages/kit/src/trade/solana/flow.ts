@@ -21,6 +21,9 @@
 // - One wallet a request (wallet.md §2.9 request table, rows 8 and 15): every read, simulation and status read names
 //   one wallet and its own accounts only, never two of the user's wallets. That another wallet is untouched is S11's
 //   static rule over the tx's keys, against the caller's full list of the user's wallets (`wallets`), not a read.
+// - One queue a provider (send.ts solanaPacedRpc): every call of the trade on a provider, the settle reads and every
+//   teardown's included, is in that provider's one queue, held to its published limit (SOLANA_KEYLESS_RPC_LIMIT) or to
+//   a keyed provider's providerRps.
 // - Fill: sendSolanaSet's two-provider rule. A tx still "unknown" at the send's deadline is read again on both
 //   providers (searchTransactionHistory); it is filled or failed only when both say so, and otherwise stays unknown:
 //   never a fill, never dead, and no teardown runs behind it.
@@ -37,6 +40,7 @@ import {
   solanaRouteAmounts,
   solanaTeardownAddresses,
   solanaTeardownPlan,
+  SolanaWalletLinks,
   type SolanaAccountRead,
   type SolanaHeldRead,
   type SolanaQuoteVerdict,
@@ -55,7 +59,7 @@ import {
   type SolanaBlockhash,
   type SolanaBuildRequest,
 } from "./build.ts";
-import { dryRunSolanaSet, sendSolanaSet, type SolanaDryTx, type SolanaFetch, type SolanaRpc, type SolanaSendPath, type SolanaTxOutcome } from "./send.ts";
+import { dryRunSolanaSet, sendSolanaSet, solanaPacedRpc, solanaProviderLimits, type SolanaProviderRps, type SolanaDryTx, type SolanaFetch, type SolanaRpc, type SolanaSendPath, type SolanaTxOutcome } from "./send.ts";
 
 export type SolanaTradeLeg = {
   readonly wallet: string;
@@ -83,8 +87,10 @@ export type SolanaTradeDeps = {
   /** S12's reference from the device's own pool read (pool.ts readSolanaReference): expectedOut = E(A) for the whole
    * size A, expectedOuts = E(a_k) for each leg's exact input from the same read; null when there is no reference pool. */
   readonly reference: (q: { side: "buy" | "sell"; token: string; amount: bigint; amounts: readonly bigint[] }) => Promise<{ expectedOut: bigint; expectedOuts?: readonly bigint[] } | null>;
-  /** Signs a message with the wallet's key, on the device; answers the 64-byte ed25519 signature. Unused when dry. */
-  readonly sign?: (wallet: string, message: Uint8Array) => Promise<Uint8Array>;
+  /** Signs a message with the wallet's key, on the device; answers the 64-byte ed25519 signature. Unused when dry.
+   * `lastValidBlockHeight` is the height of the very tx signed: past it the tx can never land, so the signer can free
+   * the wallet once its chain passes it. */
+  readonly sign?: (wallet: string, message: Uint8Array, tx: { readonly lastValidBlockHeight: number }) => Promise<Uint8Array>;
   readonly paths: readonly SolanaSendPath[];
   /** Simulate the signed set instead of sending it (row M1.3's --dry): no key is used and nothing is sent. */
   readonly dry?: boolean;
@@ -94,9 +100,9 @@ export type SolanaTradeDeps = {
   /** sendSolanaSet's deadline, for tests. */
   readonly deadlineMs?: number;
   readonly pollMs?: number;
-  /** Each provider's most requests a second for the fill reads (sendSolanaSet's providerRps; the keyless default when
-   * absent). A keyed provider names its own plan's rate. */
-  readonly providerRps?: readonly [number, number];
+  /** A keyed provider's requests a second, every call of the trade on it counted (sendSolanaSet's providerRps; a
+   * provider not named here is held to SOLANA_KEYLESS_RPC_LIMIT). A keyed provider names its own plan's rate. */
+  readonly providerRps?: SolanaProviderRps;
 };
 
 export type SolanaLegRecord = {
@@ -274,7 +280,7 @@ async function prepareLeg(
   req: SolanaTradeRequest,
   leg: SolanaTradeLeg,
   rec: SolanaLegRecord,
-  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[] },
+  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks },
 ): Promise<Prepared | null> {
   const { deps, blockhash } = ctx;
   const [pa, pb] = deps.providers;
@@ -319,7 +325,11 @@ async function prepareLeg(
   rec.buildMs = now() - tb0;
   // The tables the build names, read on both providers; assembly uses provider A's, S2 holds B's to the same bytes.
   const tableKeys = [...built.build.tables];
-  const [ta, tb] = tableKeys.length ? await both((r) => readAccounts(r, tableKeys, "confirmed"), deps.providers) : [[], []];
+  const tableReads = tableKeys.length ? both((r) => readAccounts(r, tableKeys, "confirmed"), deps.providers) : Promise.resolve([[], []] as [(Acc | null)[], (Acc | null)[]]);
+  // While the tables are read: S11's map grows by the keys the build names (its check adds any the tx names beyond).
+  const b = built.build;
+  ctx.links.add([...b.setup, b.swap, ...(b.cleanup ? [b.cleanup] : []), ...b.other].flatMap((ix) => [ix.program, ...ix.accounts.map((a) => a.key)]));
+  const [ta, tb] = await tableReads;
   const tables: Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]> = {};
   const decoded: Record<string, SolanaLookupTable> = {};
   tableKeys.forEach((k, i) => {
@@ -371,7 +381,7 @@ async function prepareLeg(
   const spend = (x: (Acc | null)[]) => (req.side === "buy" ? (x[0]?.lamports ?? 0n) : tokenAmount(x[1] ?? null));
   const spendable = spend(pre[0]) < spend(pre[1]) ? spend(pre[0]) : spend(pre[1]);
   rec.sellsAll = req.side === "sell" && leg.amount === spendable;
-  const verdict = checkSolanaQuote(assembled.wire, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable, minOut, otherWallets: ctx.otherWallets }, {
+  const verdict = checkSolanaQuote(assembled.wire, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable, minOut, otherWallets: ctx.otherWallets, links: ctx.links }, {
     tables,
     mint: [ctx.mint[0], ctx.mint[1]],
     rent: { tokenAccount: [rent[0][0], rent[1][0]], pumpVolumeAccumulator: [rent[0][1], rent[1][1]] },
@@ -385,8 +395,13 @@ async function prepareLeg(
   return { leg, rec, assembled };
 }
 
+/** Each tx signed, and sent with the very height its signer was handed: one path for the trade and its teardowns. */
+function signSet(deps: Pick<SolanaTradeDeps, "dry" | "sign">, items: readonly { wallet: string; tx: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number } }[]): Promise<{ wire: Uint8Array; lastValidBlockHeight: number }[]> {
+  return Promise.all(items.map(async ({ wallet, tx }) => ({ wire: await solanaSignedWire(deps, wallet, tx), lastValidBlockHeight: tx.lastValidBlockHeight })));
+}
+
 /** The signature into the wire's one slot, checked against the wallet's key before anything is sent. */
-export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array }): Promise<Uint8Array> {
+export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }): Promise<Uint8Array> {
   // The bytes signed are the bytes checked: one signature slot, and the message is the wire's own message.
   if (a.wire[0] !== 1 || a.wire.length !== 65 + a.message.length || a.wire.subarray(65).some((b, i) => b !== a.message[i])) throw new Error("the message is not the checked wire's message");
   let sig: Uint8Array;
@@ -397,7 +412,8 @@ export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign
     sig = placeholder;
   } else {
     if (!deps.sign) throw new Error("no signer");
-    sig = await deps.sign(wallet, a.message);
+    if (!Number.isSafeInteger(a.lastValidBlockHeight) || a.lastValidBlockHeight <= 0) throw new Error("the tx has no lastValidBlockHeight");
+    sig = await deps.sign(wallet, a.message, { lastValidBlockHeight: a.lastValidBlockHeight });
     if (!(sig instanceof Uint8Array) || sig.length !== 64 || !ed25519.verify(sig, a.message, base58.decode(wallet))) throw new Error(`the signature for ${wallet} does not verify`);
   }
   const wire = Uint8Array.from(a.wire);
@@ -440,7 +456,7 @@ async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps:
   const simulations = await Promise.all(frames.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers)));
   const verdict = checkSolanaTeardown(frames.map((f) => f.wire), w, { accounts, wallet: [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], simulations });
   if (!verdict.ok || frames.length === 0) return { verdict, frames: frames.length, ...(verdict.ok ? {} : { refused: "teardown checks" }) };
-  const set = await Promise.all(frames.map(async (f) => ({ wire: await solanaSignedWire(deps, w, f), lastValidBlockHeight: f.lastValidBlockHeight })));
+  const set = await signSet(deps, frames.map((f) => ({ wallet: w, tx: f })));
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };
   if (deps.dry) return { verdict, frames: frames.length, dry: (await dryRunSolanaSet(set, sendOpts)).txs };
   return { verdict, frames: frames.length, outcomes: (await sendSolanaSet(set, sendOpts).done).txs };
@@ -450,7 +466,15 @@ async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps:
  * The trade: every leg quoted, built, checked, signed and sent at once, and its fill read. Legs from a wallet not armed
  * by the device's own withdrawal, and legs whose checks fail, are refused and never signed; the others go on.
  */
-export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeDeps): Promise<SolanaTradeRecord> {
+/** Every call of a trade on a provider, the teardowns' included, in that provider's one shared queue (send.ts). */
+function pacedDeps(deps: SolanaTradeDeps): SolanaTradeDeps {
+  const p = deps.providers;
+  if (!Array.isArray(p) || p.length !== 2 || typeof p[0] !== "function" || typeof p[1] !== "function") throw new Error("two providers are needed");
+  const limits = solanaProviderLimits(deps.providerRps);
+  return { ...deps, providers: [solanaPacedRpc(p[0], limits[0]), solanaPacedRpc(p[1], limits[1])] };
+}
+
+export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTradeDeps): Promise<SolanaTradeRecord> {
   if (req.side !== "buy" && req.side !== "sell") throw new Error("side must be buy or sell");
   if (!isKey(req.token)) throw new Error("the token must be an address");
   if (!Number.isInteger(req.slippageBps) || req.slippageBps < 0 || req.slippageBps >= 10_000) throw new Error("slippageBps must be 0 to 9,999");
@@ -465,6 +489,7 @@ export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeD
     seen.add(l.wallet);
     if (typeof l.amount !== "bigint" || l.amount <= 0n || l.amount > 0xffff_ffff_ffff_ffffn) throw new Error("every amount must be a u64 above 0");
   }
+  const deps = pacedDeps(bareDeps);
   if (!deps.dry && typeof deps.sign !== "function") throw new Error("no signer");
   const progress = (s: SolanaTradeStage) => { try { deps.onProgress?.(s); } catch { /* the caller's display never stops a trade */ } };
   const recs: SolanaLegRecord[] = req.legs.map((l) => ({ wallet: l.wallet, amount: l.amount, expectedOut: null, minOut: null }));
@@ -477,11 +502,16 @@ export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeD
   if (live.length === 0) { progress("refused"); return record; }
   const total = live.reduce((n, i) => n + (req.legs[i] as SolanaTradeLeg).amount, 0n);
   const amounts = live.map((i) => (req.legs[i] as SolanaTradeLeg).amount);
-  const [ref, blockhash, mint] = await Promise.all([
+  const first = Promise.all([
     deps.reference({ side: req.side, token: req.token, amount: total, amounts }),
     readSolanaBlockhashBoth(deps.providers),
     both((r) => readAccounts(r, [req.token], "processed").then((x) => x[0] ?? null), deps.providers),
   ]);
+  first.catch(() => undefined); // awaited next
+  // While those are read: S11's map of every wallet's accounts, the token's included (SolanaWalletLinks).
+  const links = new SolanaWalletLinks(req.wallets);
+  links.add([req.token]);
+  const [ref, blockhash, mint] = await first;
   const e = ref?.expectedOut ?? null;
   record.reference = e;
   record.blockhash = blockhash;
@@ -503,7 +533,7 @@ export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeD
         const rec = recs[i] as SolanaLegRecord;
         if (rec.refused) return null;
         try {
-          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet) });
+          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links });
         } catch (err) {
           rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
           return null;
@@ -512,7 +542,7 @@ export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeD
     )
   ).filter((x): x is Prepared => x !== null);
   if (prepared.length === 0) { progress("refused"); return record; }
-  const set = await Promise.all(prepared.map(async (p) => ({ wire: await solanaSignedWire(deps, p.leg.wallet, p.assembled), lastValidBlockHeight: p.assembled.lastValidBlockHeight })));
+  const set = await signSet(deps, prepared.map((p) => ({ wallet: p.leg.wallet, tx: p.assembled })));
   prepared.forEach((p, i) => { p.rec.signature = base58.encode((set[i] as { wire: Uint8Array }).wire.subarray(1, 65)); });
   progress("signed");
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };
@@ -539,8 +569,9 @@ export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeD
  * the wallet's whole balance, and only those; it reads the token account empty on both providers first, and never
  * throws (a failed read is recorded on rec.teardown).
  */
-export async function finishSolanaSet(req: SolanaTradeRequest, recs: readonly SolanaLegRecord[], txs: readonly SolanaTxOutcome[], deps: SolanaTradeDeps, tokenProgram: string, onStage: (s: SolanaTradeStage) => void = () => {}): Promise<SolanaTradeStage | null> {
+export async function finishSolanaSet(req: SolanaTradeRequest, recs: readonly SolanaLegRecord[], txs: readonly SolanaTxOutcome[], bareDeps: SolanaTradeDeps, tokenProgram: string, onStage: (s: SolanaTradeStage) => void = () => {}): Promise<SolanaTradeStage | null> {
   if (recs.length !== txs.length) throw new Error("one outcome a signed leg");
+  const deps = pacedDeps(bareDeps);
   const settled = await settleSolanaSet(deps.providers, txs);
   recs.forEach((rec, i) => {
     const st = settled[i] as Awaited<ReturnType<typeof settleSolanaSet>>[number];

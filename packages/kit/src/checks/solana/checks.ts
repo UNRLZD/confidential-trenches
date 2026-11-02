@@ -112,7 +112,47 @@ export type SolanaQuoteRequest = {
   // Every other Solana wallet of this user (all of them, not only the set's): S11 refuses a tx that names any of them or
   // its accounts for this trade, in any role, since even a read-only key links two of the user's wallets on chain.
   otherWallets: readonly string[];
+  // The trade's SolanaWalletLinks, built while the build and reads are in flight; S11 uses it only when it holds every
+  // wallet in otherWallets, and otherwise builds its own.
+  links?: SolanaWalletLinks;
 };
+
+// The accounts of the user's wallets a tx could name, by address, built once per trade and grown with each leg's keys:
+// each wallet, its pump and PumpSwap volume accounts, the PumpSwap cashback account (the WSOL account of its PumpSwap
+// volume account, which PumpSwap adds on a cashback coin: pump-swap-sdk 2.2.0 offlinePumpAmm.ts, buy 797-808, sell
+// 1055-1070), and its associated token account, under Token and Token-2022, for WSOL, the token, and every key any of
+// the trade's txs names. Creator vaults are not in it: no wallet of the user can create a coin yet.
+export class SolanaWalletLinks {
+  readonly wallets: ReadonlySet<string>;
+  readonly #owner = new Map<string, string>();
+  readonly #added = new Set<string>();
+  constructor(wallets: readonly string[]) {
+    this.wallets = new Set(wallets);
+    for (const w of this.wallets) {
+      const sva = solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM);
+      for (const k of [w, solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), sva, solanaAta(sva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)]) this.#set(k, w);
+    }
+    this.add([SOLANA_SOL_MINT]);
+  }
+  #set(k: string, w: string): void {
+    if (!this.#owner.has(k)) this.#owner.set(k, w);
+  }
+  /** Each wallet's associated token accounts for these keys, once per key. */
+  add(keys: Iterable<string>): void {
+    for (const k of keys) {
+      if (this.#added.has(k)) continue;
+      this.#added.add(k);
+      for (const w of this.wallets) {
+        this.#set(solanaAta(w, k, SOLANA_TOKEN_PROGRAM), w);
+        this.#set(solanaAta(w, k, SOLANA_TOKEN_2022_PROGRAM), w);
+      }
+    }
+  }
+  /** The wallet whose account this is, if any. */
+  ownerOf(key: string): string | undefined {
+    return this.#owner.get(key);
+  }
+}
 export type SolanaAccountRead = { owner: string; data: Uint8Array };
 // One provider's simulation of the whole tx at `confirmed` with sigVerify off, as the device read it.
 export type SolanaSimulation = {
@@ -530,17 +570,20 @@ function s10(c: Ctx): SolanaQuoteResult {
 // + each of the wallet's own volume accounts (pump's and PumpSwap's), if the route funds it, each up to its rent; and its
 // token in reaches minOut_k. A sell's token out is exactly a_k, its native in, before fees and tips, reaches minOut_k,
 // and it funds neither volume account. No other wallet of this user is touched, read statically: the tx names none of
-// the user's other wallets, nor any of their accounts for this trade (the token account under either token program,
-// the WSOL account, the pump and PumpSwap volume accounts), in any role, statically or through a lookup table. So no
-// simulation ever needs another wallet in its request.
+// the user's other wallets, nor any of their accounts in SolanaWalletLinks (the volume accounts, the PumpSwap cashback
+// account, the associated token account for any mint the tx names), in any role, statically or through a lookup table.
+// So no simulation ever needs another wallet in its request.
 function s11(c: Ctx): SolanaQuoteResult {
   const others = c.req.otherWallets;
   if (!Array.isArray(others)) return fail("S11", "no list of the user's other wallets");
-  const named = new Set(c.keys);
+  const given = c.req.links;
+  const links = given instanceof SolanaWalletLinks && others.every((o) => given.wallets.has(o)) ? given : new SolanaWalletLinks(others);
+  links.add([c.req.token, ...c.keys]);
+  const otherSet = new Set(others);
   const linked: string[] = [];
-  for (const o of others) {
-    const accounts = [o, solanaAta(o, c.req.token, SOLANA_TOKEN_PROGRAM), solanaAta(o, c.req.token, SOLANA_TOKEN_2022_PROGRAM), solanaAta(o, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), solanaVolumeAccumulator(o, SOLANA_PUMP_PROGRAM), solanaVolumeAccumulator(o, SOLANA_PUMP_AMM_PROGRAM)];
-    for (const k of accounts) if (named.has(k)) linked.push(k === o ? `another wallet of this user ${o}` : `${o}'s account ${k}`);
+  for (const k of new Set(c.keys)) {
+    const o = links.ownerOf(k);
+    if (o !== undefined && otherSet.has(o)) linked.push(k === o ? `another wallet of this user ${o}` : `${o}'s account ${k}`);
   }
   if (linked.length) return fail("S11", `the tx names ${linked.join("; ")}`);
   const b = budget(c);

@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
 import {
   SOLANA_PUMP_AMM_PROGRAM,
+  SolanaWalletLinks,
   checkSolanaQuote,
   solanaPumpVolumeAccumulator,
   solanaVolumeAccumulator,
@@ -165,6 +166,22 @@ test("the real buy passes every check", () => {
   assert.equal(v.results.length, 13);
 });
 
+test("the trade's map of the user's wallets: the real buy passes with it, and it holds every account S11 looks for", () => {
+  const links = new SolanaWalletLinks([W, OTHER]);
+  const v = checkSolanaQuote(Uint8Array.from(Buffer.from(BUY.tx, "base64")), { ...buyCase().req, links }, buyCase().reads);
+  assert.equal(v.ok, true, v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | "));
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const sva = solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM);
+  for (const k of [OTHER, solanaVolumeAccumulator(OTHER, PUMP), sva, solanaAta(sva, WSOL, TOKEN), solanaAta(OTHER, WSOL, TOKEN), solanaAta(OTHER, WSOL, T22), solanaAta(OTHER, F.mint, TOKEN), solanaAta(OTHER, F.mint, T22)]) assert.equal(links.ownerOf(k), OTHER, k);
+  // before any tx's keys: the wallet, its volume accounts, its cashback account and its WSOL accounts (a tx can name a
+  // WSOL account without the WSOL mint, as a close or a sync does)
+  const fresh = new SolanaWalletLinks([OTHER]);
+  for (const k of [OTHER, solanaVolumeAccumulator(OTHER, PUMP), sva, solanaAta(sva, WSOL, TOKEN), solanaAta(OTHER, WSOL, TOKEN), solanaAta(OTHER, WSOL, T22)]) assert.equal(fresh.ownerOf(k), OTHER, k);
+  const any = allKeys(buyCase().m).at(-1) as string;
+  assert.equal(links.ownerOf(solanaAta(OTHER, any, TOKEN)), OTHER, "grown by the check with the tx's own keys");
+  assert.equal(links.ownerOf(solanaAta(W, F.mint, TOKEN)), W);
+});
+
 test("the paper's sell shape passes every check", () => {
   const v = run(sellCase());
   assert.equal(v.ok, true, v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | "));
@@ -248,6 +265,13 @@ const CASES: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uin
   ["S11 the tx names another wallet's WSOL account", "S11", (c) => { addKey(c.m, solanaAta(OTHER, "So11111111111111111111111111111111111111112", TOKEN)); }],
   ["S11 the tx names another wallet's pump volume account", "S11", (c) => { addKey(c.m, solanaVolumeAccumulator(OTHER, PUMP)); }],
   ["S11 the tx names another wallet's PumpSwap volume account", "S11", (c) => { addKey(c.m, solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM)); }],
+  // PumpSwap adds this on a cashback coin (pump-swap-sdk 2.2.0 offlinePumpAmm.ts, buy 797-808, sell 1055-1070).
+  ["S11 the tx names another wallet's PumpSwap cashback account (the WSOL account of its PumpSwap volume account)", "S11", (c) => { addKey(c.m, solanaAta(solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM), "So11111111111111111111111111111111111111112", TOKEN)); }],
+  // Another wallet's associated token account for any mint the tx names: here a pool key named statically, and one
+  // named only through the lookup table, under each token program.
+  ["S11 the tx names another wallet's token account for another key of the tx (Token)", "S11", (c) => { const k = c.m.staticKeys[c.m.staticKeys.length - 1] as string; assert.ok(k !== F.mint); addKey(c.m, solanaAta(OTHER, k, TOKEN)); }],
+  ["S11 the tx names another wallet's token account for a lookup-table key (Token-2022)", "S11", (c) => { const k = allKeys(c.m)[c.m.staticKeys.length] as string; assert.ok(!c.m.staticKeys.includes(k)); addKey(c.m, solanaAta(OTHER, k, T22)); }],
+  ["S11 a map without the other wallet in it is not used: S11 builds its own", "S11", (c) => { (c.req as { links?: SolanaWalletLinks }).links = new SolanaWalletLinks([W]); addKey(c.m, OTHER); }],
   ["S11 the wallet in its own list of other wallets", "S11", (c) => { (c.req as { otherWallets: readonly string[] }).otherWallets = [W]; }],
   ["S11 no list of the user's other wallets", "S11", (c) => { (c.req as { otherWallets: unknown }).otherWallets = undefined; }],
   ["S11 the pump volume account takes more than its rent", "S11", (c) => { (c.reads.simulations[0] as SolanaSimulation).pumpVolumeAccumulator.post = 1_346_201n; }],

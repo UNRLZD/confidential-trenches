@@ -377,6 +377,36 @@ test("the set is refused before any send: unsigned, duplicate, too large, bad la
   for (const p of paths) assert.equal(p.calls.length, 0, "nothing was sent");
 });
 
+test("an RPC path's sends are in that URL's queue: 40 sendTransaction in any 10 s on a keyless one, the rest wait", async () => {
+  let fetched = 0;
+  const fakeFetch = (_url: string, init: RequestInit) => {
+    fetched++;
+    const body = JSON.parse(String(init.body)) as { id: string; params: [string] };
+    const sig = base58.encode(base64.decode(body.params[0]).subarray(1, 65));
+    return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: sig }), { headers: { "content-type": "application/json" } }));
+  };
+  const rpcPath = solanaSendPaths({ rpcUrl: "https://send-queue.example", fetch: fakeFetch }).find((p) => p.name === "rpc")!;
+  const b64 = base64.encode(tx(82).wire);
+  for (let i = 0; i < 45; i++) void rpcPath.send(b64).catch(() => null);
+  assert.equal(fetched, kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod, "the first 40 start at once, the other 5 wait for the window");
+  // the queue is the URL's: another set of paths to the same URL waits behind the same 40
+  void solanaSendPaths({ rpcUrl: "https://send-queue.example", fetch: fakeFetch }).find((p) => p.name === "rpc")!.send(b64).catch(() => null);
+  assert.equal(fetched, kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod);
+});
+
+test("one queue a provider: a call that started late moves the next one back, so the limit holds on the times calls went out", async () => {
+  const at: number[] = [];
+  const rpc: SolanaRpc = async () => { at.push(Date.now()); return null; };
+  const paced = kit.solanaPacedRpc(rpc, { windowMs: 300, total: 1, perMethod: 1 });
+  const calls = [paced("getSlot", []), paced("getSlot", []), paced("getSlot", [])];
+  // the page is busy past the second call's time: it starts late, at about 500 ms
+  const until = Date.now() + 500;
+  while (Date.now() < until) { /* busy */ }
+  await Promise.all(calls);
+  const gaps = at.slice(1).map((x, i) => x - at[i]!);
+  assert.ok(gaps.every((g) => g > 300), `gaps ${gaps.join(",")} ms`);
+});
+
 test("the default paths: the paper's three keyless URLs and the helper's /v1/rpc/solana, one fetch each, same bytes, in one tick", async () => {
   const seen: { url: string; init: RequestInit }[] = [];
   const fakeFetch = (url: string, init: RequestInit) => {
@@ -855,7 +885,30 @@ test("the fill poll is spread over the interval: one tx a call, in turn, never t
   assert.deepEqual(sigs.slice(0, 6), [...set, ...set].map(sigOf), "in turn");
 });
 
-test("a provider's request rate stays within its cap, every method counted", async (t) => {
+test("a keyless provider stays within its published limit: 100 calls in any 10 s, 40 of one method", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: { t: number; m: string }[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); };
+  a.height = 2_000;
+  const set = [tx(97), tx(98), tx(99), tx(100), tx(101)];
+  const h = sendSolanaSet(set, { paths: [path("rpc").path], providers: [rpc, b.rpc], deadlineMs: 25_000 });
+  for (let ms = 0; ms < 25_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await h.done;
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  assert.ok(at.filter((c) => c.m === "getSignatureStatuses").length > L.perMethod, `${at.length} calls`);
+  for (const x of at) {
+    const win = at.filter((y) => y.t >= x.t && y.t < x.t + L.windowMs);
+    assert.ok(win.length <= L.total, `${win.length} calls in the 10 s from ${x.t} ms`);
+    assert.ok(win.filter((y) => y.m === x.m).length <= L.perMethod, `${x.m} over its limit from ${x.t} ms`);
+  }
+});
+
+const perSecond = (at: readonly number[]): number => Math.max(0, ...at.map((x) => at.filter((y) => y >= x && y < x + 1_000).length));
+
+test("one queue a provider: two sets in flight on it stay within its rate together", async (t) => {
   t.after(() => mock.timers.reset());
   mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
   const a = provider();
@@ -863,13 +916,32 @@ test("a provider's request rate stays within its cap, every method counted", asy
   const at: number[] = [];
   const rpc: SolanaRpc = async (m, p) => { at.push(Date.now()); return a.rpc(m, p); };
   a.height = 2_000;
-  const set = [tx(97), tx(98), tx(99), tx(100), tx(101)];
-  const h = sendSolanaSet(set, { paths: [path("rpc").path], providers: [rpc, b.rpc], deadlineMs: 10_000 });
-  for (let ms = 0; ms < 10_000; ms += 10) { mock.timers.tick(10); await flush(); }
-  await h.done;
-  assert.ok(at.length >= 30, `${at.length} calls`);
-  for (const x of at) {
-    const inWindow = at.filter((y) => y >= x && y < x + 1_000).length;
-    assert.ok(inWindow <= kit.SOLANA_KEYLESS_RPC_RPS, `${inWindow} calls in the second from ${x} ms`);
-  }
+  const opts = { paths: [path("rpc").path], providers: [rpc, b.rpc] as const, deadlineMs: 5_000, providerRps: [5, 5] as const };
+  const h1 = sendSolanaSet([tx(110), tx(111), tx(112)], opts);
+  const h2 = sendSolanaSet([tx(113), tx(114), tx(115)], opts);
+  for (let ms = 0; ms < 5_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([h1.done, h2.done]);
+  assert.ok(at.length >= 20, `${at.length} calls`);
+  assert.ok(perSecond(at) <= 5, `${perSecond(at)} calls in one second`);
+});
+
+test("one queue a provider: another caller's reads through solanaPacedRpc and a set share it, first come first served", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: { t: number; m: string }[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); };
+  a.height = 2_000;
+  const paced = kit.solanaPacedRpc(rpc, kit.solanaRpsLimit(5));
+  assert.equal(kit.solanaPacedRpc(paced, kit.solanaRpsLimit(5)).length, paced.length);
+  const reads = Array.from({ length: 10 }, () => paced("getMinimumBalanceForRentExemption", [165]).catch(() => null));
+  const h = sendSolanaSet([tx(116), tx(117)], { paths: [path("rpc").path], providers: [paced, b.rpc], deadlineMs: 5_000, providerRps: [5, 5] });
+  for (let ms = 0; ms < 5_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([h.done, ...reads]);
+  const ts = at.map((c) => c.t);
+  assert.ok(perSecond(ts) <= 5, `${perSecond(ts)} calls in one second`);
+  // the ten reads asked first go first, two seconds of the rate; the set's calls queue behind them
+  assert.deepEqual(at.slice(0, 10).map((c) => c.m), Array(10).fill("getMinimumBalanceForRentExemption"));
+  assert.ok(at.length > 12);
 });
