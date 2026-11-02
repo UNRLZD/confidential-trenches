@@ -20,7 +20,7 @@
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
+import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { createSolanaLists } from "./data/solana/lists.ts";
 import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { health, type Part } from "./health.ts";
@@ -49,6 +49,17 @@ const [BIND] = MOUNTED.delegate;
 export const WITHDRAW_BODY_MAX = 8_192;
 /** POST /v1/bind's body limit: the kit's HELPER_V1_PATHS row, as bind/checks.ts reads it (4 KB). */
 export const BIND_BODY_MAX = BIND_MAX_BYTES;
+/**
+ * POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the device's send waits for: a carry still running
+ * then answers in_flight (the call is out and its end not known yet, so the device reads the deposits pages) and goes on
+ * to its own end and record, as it does when the client closes.
+ */
+function bindAnswerWithin<A>(carry: Promise<A>, late: A): Promise<A> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<A>((ok) => (timer = setTimeout(() => ok(late), HELPER_BIND_ANSWER_MS)));
+  return Promise.race([carry, bound]).finally(() => clearTimeout(timer));
+}
+const BIND_LATE = { status: (HELPER_CODE_STATUS as Record<string, number>).in_flight ?? 400, body: { error: { code: "in_flight" as const } } };
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
@@ -218,7 +229,7 @@ export function handler(
             } catch {
               return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
             }
-            const a = await bind.carry(body);
+            const a = await bindAnswerWithin(bind.carry(body), BIND_LATE);
             return { status: a.status, body: JSON.stringify(a.body) };
           })
           .then(reply)

@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
-import { HELPER_CODE_STATUS } from "@blindfill/kit";
+import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS } from "@blindfill/kit";
 import { base58 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
 import { decodeSignedDelegate } from "../../../apps/helper/src/bind/checks.ts";
@@ -36,6 +36,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, type NoteRecord, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { replayDepositReads } from "./replay-deposit-reads.ts";
+import { withSendClock } from "./send-clock.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const PAGES = JSON.parse(readFileSync(new URL("./vectors/deposit-bind-pages.json", import.meta.url), "utf8"));
@@ -1496,4 +1497,69 @@ test("every exported read refuses a pair that is not a release pair, before any 
   await assert.rejects(bindDeposit(SEED, t.args, { ...t.deps, rpcs: as([NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc]) }), input);
   assert.equal(reads, 0);
   assert.equal(t.sent.length, 0);
+});
+
+// ---------- the carry's own time (card wallet-bind-carry-wait) ----------
+// The helper's carry answers once the prepay and the delegate are read at final, often past 10 s. The device waits for
+// the kit's HELPER_BIND_ANSWER_MS and the way back, so every answer given in time is heard and acted on at once; one
+// later than that is unsure, and the pages settle it. The send's clock is send-clock.ts's: no real wait.
+const tx = (o: BindOutcome) => (landed(o).calls ?? []).flatMap((c) => c.tx_hashes);
+
+test("carry wait: resign_needed at 15 s is heard, and the call is signed again at once at the same nonce, inside the first call's window", async () => {
+  const t = await setup(["resign_needed", "tx"]);
+  t.chain.tick = () => t.chain.blocks(3n);
+  const n0 = t.chain.a.nonce;
+  const note = landed(await withSendClock((clock) => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: clock.late([15_000], t.deps.fetchFn) })));
+  assert.equal(t.sent.length, 2);
+  for (const s of t.sent) assert.equal(s.nonce, n0 + 1n);
+  assert.notEqual(t.sent[1]!.bytes, t.sent[0]!.bytes);
+  assert.ok(t.sent[1]!.low <= t.sent[0]!.mbh, `signed again at ${t.sent[1]!.low}, after the first window (${t.sent[0]!.mbh}) ran out`);
+  assert.equal(note.state, "UNSPENT");
+});
+
+test("carry wait: a tx_hash at 15 s is written with the call on the note", async () => {
+  const t = await setup(["tx"]);
+  const o = await withSendClock((clock) => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: clock.late([15_000], t.deps.fetchFn) }));
+  assert.equal(t.sent.length, 1);
+  assert.deepEqual(tx(o), [t.sent[0]!.hash]);
+});
+
+test("carry wait: sender_struck at 15 s stops at once and opens the way out; nothing more is signed for U", async () => {
+  const t = await setup(["sender_struck"]);
+  const o = await withSendClock((clock) => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: clock.late([15_000], t.deps.fetchFn) }));
+  assert.deepEqual(o, { kind: "struck", account: t.u });
+  assert.equal(t.sent.length, 1);
+});
+
+test("carry wait: token_halted at 15 s: the device waits and sends the same signed bytes again while their window is ahead", async () => {
+  const t = await setup(["token_halted", "tx"]);
+  landed(await withSendClock((clock) => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: clock.late([15_000], t.deps.fetchFn) })));
+  assert.equal(t.sent.length, 2);
+  assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes);
+});
+
+test("carry wait: an answer at the helper's own bound, HELPER_BIND_ANSWER_MS, is heard", async () => {
+  const t = await setup(["tx"]);
+  const o = await withSendClock((clock) => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: clock.late([HELPER_BIND_ANSWER_MS], t.deps.fetchFn) }));
+  assert.deepEqual(tx(o), [t.sent[0]!.hash]);
+});
+
+test("carry wait: no answer past the device's wait is unsure, never failed: the pages settle it, and nothing more is sent", async () => {
+  const t = await setup(["tx"]);
+  const o = await withSendClock((clock) => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: clock.late([HELPER_BIND_ANSWER_MS + 10_001], t.deps.fetchFn) }));
+  assert.deepEqual(tx(o), []); // the answer was never heard
+  assert.equal(t.sent.length, 1);
+});
+
+test("carry wait: the bind's stop reaches the send: an abort while the carry is out ends the bind at once", async () => {
+  const t = await setup();
+  const stop = new AbortController();
+  const silent = (async (_: unknown, init?: RequestInit) => {
+    queueMicrotask(() => stop.abort(new Error("caller stopped")));
+    return new Promise<Response>((_ok, fail) => init?.signal?.addEventListener("abort", () => fail(init.signal!.reason)));
+  }) as unknown as typeof fetch;
+  const run = withSendClock(() => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: silent, signal: stop.signal }));
+  const ended = await Promise.race([run.then(() => "answered", (e: unknown) => (e as Error).message), new Promise<string>((ok) => setTimeout(() => ok("still waiting"), 2_000))]);
+  assert.equal(ended, "caller stopped");
+  assert.equal((await t.store.get(t.note.id))!.state, "INCOMING"); // the money is in U or on its way: the pages settle it later
 });
