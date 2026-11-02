@@ -857,11 +857,10 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   if (funds.problem) { fail("FUNDS", funds.problem); return done(); }
   pass("FUNDS", `chunk ${funds.chunk}, W pays out ${funds.peak} at most, keeps ${funds.left}`);
   const got = m.instructions.map((x) => ({ program: keys[x.programIndex]?.key ?? "?", accounts: x.accounts.map((i) => keys[i] ?? { key: "?", signer: false, writable: false }), data: x.data }));
-  // the tip account the message names (tag 3's ninth account), held to the baked Jito accounts
+  // the tip account the message names (tag 3's ninth account); the rebuild holds it to the baked Jito accounts
   const tipTo = req.tip > 0n ? got[2]?.accounts[8]?.key ?? null : null;
   let want: SolanaApiInstruction[];
   try {
-    if (req.tip > 0n && (!tipTo || !SOLANA_JITO_TIP_ACCOUNTS.includes(tipTo))) throw new Error(`the tip goes to ${tipTo}, not a Jito tip account`);
     want = solanaPoolBuyInstructions(cfg, release, venue, req, reads.stateSize, reads.rent, tipTo);
   } catch (e) {
     fail("RELEASE", `the request itself is refused: ${(e as Error).message}`);
