@@ -35,13 +35,14 @@
 // transactions, whose only actions are storage_prepay on the vault and a Delegate carrying U's signed bytes as they
 // came. The store is one directory of small JSON files, each written by write, fsync, rename (or link, for a
 // create-if-absent) and fsync of the directory, owned by one process through an exclusive lock the kernel holds.
-import { createHash, createPrivateKey, createPublicKey, randomBytes, sign as edSign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign as edSign } from "node:crypto";
 import * as nodeFs from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
 import { HELPER_CODE_STATUS } from "@blindfill/kit";
 import { base58, checkBindDeposit, decodeSignedDelegate, type BindCode, type BindConfig, type BindLedger, type BindReads, type KeyRead } from "./checks.ts";
 import { tokenHeld, type TokenStatus } from "../token-status/status.ts";
+import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
+
+export type { StoreFs };
 
 // ---- The papers' values ----
 
@@ -201,115 +202,19 @@ export type DepositStore = {
   close(): void;
 };
 
-/** The fs calls the store makes; a test passes a recorder to check their order. */
-export type StoreFs = Pick<typeof nodeFs, "closeSync" | "fsyncSync" | "linkSync" | "mkdirSync" | "openSync" | "readFileSync" | "readdirSync" | "renameSync" | "unlinkSync" | "writeSync">;
-
-/** How long a start waits for another holder's lock before it refuses (two simultaneous starts: one holds). */
-const LOCK_WAIT_MS = 250;
 /**
- * Every lock this process holds, until its store's close(): a DatabaseSync nothing references is closed by the garbage
- * collector, and its lock with it (the f487d98 re-check's gc-child), so a store the caller dropped keeps its lock.
- */
-const HELD_LOCKS = new Set<DatabaseSync>();
-
-/**
- * A store of small JSON files in `dir`, owned by one process. The owner holds an exclusive SQLite lock on `dir/lock`
- * (node:sqlite, a BEGIN EXCLUSIVE never ended): an fcntl lock the kernel keeps for the life of the
- * process and drops when it dies, however it dies, so a killed process never leaves a stale lock and two starts at
- * once leave one holder. Every write is whole and durable: a replace is write, fsync, rename, fsync of the directory;
- * a create-if-absent is write and fsync of a temp file, link to the name (EEXIST: it is there), unlink of the temp,
- * fsync of the directory, so no name ever holds a partial file. Temp names are random; the holder sweeps any left.
+ * The deposit relayer's store: one directory of small JSON files owned by one process, every write whole and durable
+ * (store/durable.ts holds the lock and the write rule, shared with the withdrawal send records).
  */
 export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore {
-  fs.mkdirSync(dir, { recursive: true });
-  const path = (name: string) => join(dir, name);
+  return openDurableDir(dir, fs, (d) => fileStoreOn(d));
+}
 
-  // The lock: one process per store. Only take() opens this path: POSIX drops all of a process's fcntl locks on a
-  // file when any descriptor of that file in the process closes, so nothing else in this process may ever open it
-  // (no record name can be "lock"; the truncate below runs only before the lock is held).
-  const take = (): DatabaseSync => {
-    const db = new DatabaseSync(path("lock"), { timeout: LOCK_WAIT_MS });
-    try {
-      db.exec("BEGIN EXCLUSIVE");
-      return db;
-    } catch (e) {
-      db.close();
-      throw e;
-    }
-  };
-  let lock: DatabaseSync;
-  try {
-    try {
-      lock = take();
-    } catch (e) {
-      // a holder never writes to the file (it stays an empty database), so content that is not a database was left by
-      // something else: emptied in place, the same file, so a holder that took it meanwhile keeps it
-      if (!(e instanceof Error && /not a database/.test(e.message))) throw e;
-      nodeFs.truncateSync(path("lock"), 0);
-      lock = take();
-    }
-  } catch (e) {
-    throw new Error(`store: ${dir} is held by another process (${e instanceof Error ? e.message : String(e)})`);
-  }
-  HELD_LOCKS.add(lock);
-  let open = true;
-  const release = () => {
-    if (!open) return;
-    open = false;
-    HELD_LOCKS.delete(lock);
-    lock.close();
-  };
-  const held = () => {
-    if (!open) throw new Error("store: closed");
-  };
-
-  const syncDir = () => {
-    const fd = fs.openSync(dir, "r");
-    try {
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-  };
-  const writeTemp = (v: string): string => {
-    const tmp = path(`.tmp-${randomBytes(16).toString("hex")}`);
-    const fd = fs.openSync(tmp, "wx");
-    try {
-      fs.writeSync(fd, v);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    return tmp;
-  };
-
-  /** Create-if-absent: false when the name is there. */
-  const createOnce = (name: string, v: string): boolean => {
-    const tmp = writeTemp(v);
-    try {
-      fs.linkSync(tmp, path(name));
-      return true;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
-      throw e;
-    } finally {
-      fs.unlinkSync(tmp);
-      syncDir();
-    }
-  };
-  const replace = (name: string, v: string) => {
-    fs.renameSync(writeTemp(v), path(name));
-    syncDir();
-  };
+function fileStoreOn(d: DurableDir): DepositStore {
+  const { held } = d;
   const read = <T>(name: string): T | null => {
-    let text: string;
-    try {
-      text = fs.readFileSync(path(name), "utf8");
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw e;
-    }
-    return JSON.parse(text) as T;
+    const text = d.text(name);
+    return text === null ? null : (JSON.parse(text) as T);
   };
 
   // the U's with an open record: read once as the lock is taken, then kept by create and put (one process holds the store)
@@ -318,27 +223,19 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     if (isOpen(rec)) openUs.add(rec.u);
     else openUs.delete(rec.u);
   };
-  // everything a start reads once the lock is held: a throw gives the lock up, so this process can open the store again
-  try {
-    // temps a crash left behind: never a record, swept once the lock is held
-    for (const f of fs.readdirSync(dir)) if (f.startsWith(".tmp-")) fs.unlinkSync(path(f));
-    for (const f of fs.readdirSync(dir)) {
-      const m = /^u-([0-9a-f]{64})\.json$/.exec(f);
-      if (m === null) continue;
-      let rec: DepositRecord | null = null;
-      try {
-        rec = JSON.parse(fs.readFileSync(path(f), "utf8")) as DepositRecord;
-        if (rec.u !== m[1]) rec = null;
-        else track(rec);
-      } catch {
-        rec = null;
-      }
-      // unreadable: counted open, so each round tries it and its own catch keeps it
-      if (rec === null) openUs.add(m[1]!);
+  for (const f of d.names()) {
+    const m = /^u-([0-9a-f]{64})\.json$/.exec(f);
+    if (m === null) continue;
+    let rec: DepositRecord | null = null;
+    try {
+      rec = JSON.parse(d.text(f) ?? "") as DepositRecord;
+      if (rec.u !== m[1]) rec = null;
+      else track(rec);
+    } catch {
+      rec = null;
     }
-  } catch (e) {
-    release();
-    throw e;
+    // unreadable: counted open, so each round tries it and its own catch keeps it
+    if (rec === null) openUs.add(m[1]!);
   }
   const uName = (u: string) => {
     if (!/^[0-9a-f]{64}$/.test(u)) throw new Error("store: U is not a 64-hex id");
@@ -351,11 +248,7 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
   };
   const forget = (tx: string) => {
     if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tx)) return; // never a D's name: setFoundAt refuses it
-    try {
-      fs.unlinkSync(path(dName(tx)));
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-    }
+    d.remove(dName(tx));
   };
   const counter = (key: string): bigint | null => {
     const c = read<{ next: string }>(kName(key));
@@ -365,7 +258,7 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     get: (u) => read<DepositRecord>(uName(u)),
     create(rec) {
       held();
-      if (createOnce(uName(rec.u), JSON.stringify(rec))) {
+      if (d.createOnce(uName(rec.u), JSON.stringify(rec))) {
         track(rec);
         return { created: true, rec };
       }
@@ -379,7 +272,7 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
       } catch {
         // an unreadable record is still replaced; its entries' D, if any, stay
       }
-      replace(uName(rec.u), JSON.stringify(rec));
+      d.replace(uName(rec.u), JSON.stringify(rec));
       track(rec);
       // a D is read only while its entry is open (the relayer's judge): once the entry has a verdict or has left the
       // record, its file goes
@@ -388,7 +281,7 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     },
     bind(p, u) {
       held();
-      if (createOnce(`p-${p}.json`, JSON.stringify({ u }))) return u;
+      if (d.createOnce(`p-${p}.json`, JSON.stringify({ u }))) return u;
       return read<{ u: string }>(`p-${p}.json`)!.u;
     },
     boundTo: (p) => read<{ u: string }>(`p-${p}.json`)?.u ?? null,
@@ -398,17 +291,17 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
       // one process holds the store and this runs with no await, so the read and the write are one step
       if (counter(key) !== expected) return false;
       const v = JSON.stringify({ next: next.toString() });
-      if (expected === null) return createOnce(kName(key), v);
-      replace(kName(key), v);
+      if (expected === null) return d.createOnce(kName(key), v);
+      d.replace(kName(key), v);
       return true;
     },
     foundAt: (tx) => read<{ height: string; hash: string }>(dName(tx)),
-    setFoundAt(tx, d) {
+    setFoundAt(tx, at) {
       held();
-      createOnce(dName(tx), JSON.stringify({ height: d.height, hash: d.hash }));
+      d.createOnce(dName(tx), JSON.stringify({ height: at.height, hash: at.hash }));
     },
     open: () => [...openUs],
-    close: release,
+    close: d.close,
   };
 }
 
