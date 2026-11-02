@@ -12,8 +12,9 @@
 // - The recipient is this note's own arming account A_{l,j} (markets.md l.989 and l.1534, "The kit makes every
 //   withdrawal's `recipient` this note's `A_{l,j}` (W:671)"; wallet.md l.645 step 5, the l.907 row), derived here after the pick, never taken
 //   from the caller, so no caller can pay another note's A or any other account. A's secret key is zeroed at once:
-//   only its id is used. register_deposit is the caller's two-RPC read of A's registration (registerDepositOf),
-//   asked for A's id after the pick and before anything is written.
+//   only its id is used. register_deposit is the caller's two-RPC read of A's registration (registerDepositOf,
+//   arming/accounts.ts armingRegisterDepositOf), asked for A's id and this withdrawal's token after the pick and
+//   before anything is written, so the read is refused when it would be made on another token.
 // - The withdrawal and its context are the kit's vaultWithdrawRequest: a fresh 16-byte salt from the device, the
 //   vault's own scope, the context the vault recomputes (vaultContextOf over vaultContextInput, the vault as processor).
 //   The proof is the kit's vaultProveWithdraw, through the prover worker the caller passes; it refuses a worker answer
@@ -78,9 +79,10 @@ export type WithdrawRequestArgs = {
   newestLabelRoot: bigint;
   /**
    * NEAR, in yocto, for A_{l,j}'s token registration, read on two RPCs for the id it is given: 0 when
-   * storage_balance_of(A) is set, storage_balance_bounds.min when it is null (wallet.md l.907).
+   * storage_balance_of(A) is set, storage_balance_bounds.min when it is null (wallet.md l.907), on `token`: the
+   * read refuses a token other than its own (armingRegisterDepositOf).
    */
-  registerDepositOf: (accountId: string) => Promise<bigint>;
+  registerDepositOf: (accountId: string, token: string) => Promise<bigint>;
   /** The release's relayer fee recipient, never a helper's answer. */
   feeRecipient: string;
   /** The fee, in the token's base units, taken from the note on top of the amount. */
@@ -151,7 +153,7 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     const arm = armAccount(seed, leaf.label, j);
     const recipient = arm.id;
     arm.secretKey.fill(0);
-    const registerDeposit = await registerDepositOf(recipient);
+    const registerDeposit = await registerDepositOf(recipient, token);
     if (typeof registerDeposit !== "bigint") throw new Error("registerDepositOf: not a bigint");
     const spent = noteSecrets(seed, note.ref);
     const next = noteSecrets(seed, change);
