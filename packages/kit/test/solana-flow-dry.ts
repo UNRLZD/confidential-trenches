@@ -129,7 +129,7 @@ const leg = (l: SolanaTradeRecord["legs"][number]) => ({
 const out = {
   dry: true,
   at: new Date().toISOString(),
-  token: TOKEN,
+  mint: TOKEN,
   helper: HELPER,
   providers: [PROVIDER_A, PROVIDER_B],
   slippageBps: SLIPPAGE_BPS,
