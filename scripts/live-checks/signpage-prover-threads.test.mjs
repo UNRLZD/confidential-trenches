@@ -1,12 +1,10 @@
 // node --test scripts/live-checks/signpage-prover-threads.test.mjs: the live check replays recorded answers
 // (signpage-prover-threads.answers.json), each the harness run on a build served under its own _headers (SIGN_HOST does
 // not serve the thread file before this card's deploy), on the test box. good: a fresh `deploy.mjs --dry-run` build of
-// this branch, in Playwright's WebKit: PASS. bad and badWebkit: main's build before this card (no thread file, the
+// this branch, in Playwright's WebKit; goodChromium: the same in Chromium (over the harness's local HTTPS server): PASS. bad and badWebkit: main's build before this card (no thread file, the
 // worker on one thread), in Chromium and WebKit: FAIL. badLoose: this branch's build with the site's worker-src loosened
 // to 'self' data: blob:, the change the card refuses: the planted data: worker runs: FAIL. The other bad answers are
-// the good one with one fault planted each: FAIL. (The harness's threaded run in Chromium hangs on Playwright's request
-// routing of the nested thread workers; the same build and policies over a real server prove in Chromium:
-// packages/kit/test/prover/chromium.e2e.mjs.)
+// the good one with one fault planted each: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -34,12 +32,12 @@ test("threads = min(hardwareConcurrency - 1, 4), single thread below 2", () => {
   assert.deepEqual([16, 12, 8, 5, 4, 3, 2, 1, 0, undefined].map(threadsFor), [4, 4, 4, 4, 3, 2, 1, 1, 1, 1]);
 });
 
-for (const name of ["good"])
+for (const name of ["good", "goodChromium"])
   test(`recorded ${name} answer: the pinned thread file under both policies, planted workers refused, threaded proofs snarkjs accepts: PASS`, async () => {
     const a = ANSWERS[name];
     const r = await judge(a);
     assert.equal(r.ok, true, r.lines.join("\n"));
-    assert.match(a.browser, /^webkit /);
+    assert.match(a.browser, name === "good" ? /^webkit / : /^chromium /);
     assert.ok(r.lines.includes(`ok  ${THREAD_PATH}: ${THREAD_PIN.bytes} B sha256 ${THREAD_PIN.sha256}`));
     assert.ok(r.lines.includes(`ok  ${THREAD_PATH}: 2 CSP policies, the site's 1, its own 1; want exactly one of each`));
     assert.ok(a.page.proofs.length >= 3 && a.page.proofs.every((p) => p.threads === threadsFor(a.page.cores) && p.threads > 1));

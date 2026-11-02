@@ -287,26 +287,57 @@ const RUN = `async ([input, pins]) => {
   }
 }`;
 
-/** The browser run on SIGN_HOST's page: the live one, or `serve`'s. */
-async function readPage(serve) {
+const APP_PAGE = { status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `frame-ancestors ${SIGN}` }, body: Buffer.from("<!doctype html><title>app</title>") };
+
+/**
+ * A browser and context on SIGN_HOST: the live one, or, with `serve`, the harness's. In the harness WebKit gets every
+ * request answered by Playwright's routing; Chromium gets a local HTTPS server (a one-day self-signed certificate made
+ * here, the browser told to accept it) that SIGN_HOST and APP_HOST resolve to, every other host unresolved, since
+ * Chromium's routing never answers the script of a worker made inside a worker (the prover's threads, card
+ * signpage-prover-threads). Either way SIGN_HOST answers from `serve`, APP_HOST a blank page, and nothing else.
+ */
+export async function openBrowser(engine, serve) {
   const pw = createRequire(path.join(REPO, "packages/signpage/package.json"))("playwright");
-  const browser = await pw.chromium.launch();
-  try {
+  const signHost = new URL(SIGN).host;
+  const appHost = new URL(APP).host;
+  const answer = (host, p) => (host === signHost ? serve(decodeURIComponent(p)) : host === appHost ? APP_PAGE : { status: 404, headers: {}, body: Buffer.alloc(0) });
+  if (!serve || engine !== "chromium") {
+    const browser = await pw[engine].launch();
     const ctx = await browser.newContext();
-    await ctx.addInitScript(INIT);
-    if (serve) {
-      const signHost = new URL(SIGN).host;
-      const appHost = new URL(APP).host;
+    if (serve)
       await ctx.route("**/*", async (r) => {
         const u = new URL(r.request().url());
-        if (u.host === signHost) {
-          const a = serve(decodeURIComponent(u.pathname));
-          return r.fulfill({ status: a.status, headers: a.headers, body: a.body });
-        }
-        if (u.host === appHost) return r.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `frame-ancestors ${SIGN}` }, body: "<!doctype html><title>app</title>" });
-        return r.abort("blockedbyclient");
+        if (u.host !== signHost && u.host !== appHost) return r.abort("blockedbyclient");
+        const a = answer(u.host, u.pathname);
+        return r.fulfill({ status: a.status, headers: a.headers, body: a.body });
       });
-    }
+    return { browser, ctx, close: () => browser.close() };
+  }
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const https = await import("node:https");
+  const tls = mkdtempSync(path.join(tmpdir(), "ct-harness-tls-"));
+  const key = path.join(tls, "key.pem");
+  const cert = path.join(tls, "cert.pem");
+  const r = spawnSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", `/CN=${signHost}`, "-addext", `subjectAltName=DNS:${signHost},DNS:${appHost}`], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`openssl: ${(r.stderr || "").trim().split("\n").at(-1)}`);
+  const server = https.createServer({ key: readFileSync(key), cert: readFileSync(cert) }, (req, res) => {
+    const a = answer(String(req.headers.host ?? "").replace(/:\d+$/, ""), new URL(req.url ?? "/", "https://x").pathname);
+    res.writeHead(a.status, { ...a.headers, "content-length": a.body.length }).end(a.body);
+  });
+  rmSync(tls, { recursive: true, force: true }); // the key is read; nothing of it stays on disk
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  const port = server.address().port;
+  const browser = await pw.chromium.launch({ args: [`--host-resolver-rules=MAP ${signHost} 127.0.0.1:${port},MAP ${appHost} 127.0.0.1:${port},MAP * ~NOTFOUND`] });
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
+  return { browser, ctx, close: async () => (await browser.close(), server.close()) };
+}
+
+/** The browser run on SIGN_HOST's page: the live one, or `serve`'s. */
+async function readPage(serve) {
+  const { browser, ctx, close } = await openBrowser("chromium", serve);
+  try {
+    await ctx.addInitScript(INIT);
     const page = await ctx.newPage();
     await page.goto(`${SIGN}/`, { waitUntil: "load" });
     if (!(await page.evaluate(() => !!window.__ph))) throw new Error("the init script did not run on SIGN_HOST's page");
@@ -317,7 +348,7 @@ async function readPage(serve) {
     out.violations = await page.evaluate(() => window.__ph.violations);
     return { browser: `chromium ${browser.version()} (Playwright)`, page: out };
   } finally {
-    await browser.close();
+    await close();
   }
 }
 

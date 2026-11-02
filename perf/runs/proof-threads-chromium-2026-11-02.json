@@ -5,35 +5,40 @@
  "network": "device",
  "signer": "script",
  "date": "2026-11-02",
- "source": "packages/kit/test/prover/chromium.e2e.mjs",
- "note": "Signing page prover on 4 threads, headless chromium 153.0.8010.12, test box (i5-14600K, 8-core cap), 5 fresh pages, each proof cold; all verified. Same box and browser, one thread before this card: median 4819 ms (2.7x slower).",
+ "source": "scripts/live-checks/signpage-prover-threads.answers.json",
+ "note": "Signing page prover on 4 threads, headless chromium 153.0.8010.12, test box (i5-14600K, 8-core cap), 6 proofs in one page, first cold; all verified. Same box and browser, one thread before this card: median 4819 ms (2.8x slower).",
  "series": [
   {
    "step": "proof-withdraw-browser",
    "samples": [
     {
      "ok": true,
-     "value": 1754,
+     "value": 2134,
      "txs": []
     },
     {
      "ok": true,
-     "value": 1760,
+     "value": 1888,
      "txs": []
     },
     {
      "ok": true,
-     "value": 1752,
+     "value": 1756,
      "txs": []
     },
     {
      "ok": true,
-     "value": 1760,
+     "value": 1751,
      "txs": []
     },
     {
      "ok": true,
-     "value": 1785,
+     "value": 1694,
+     "txs": []
+    },
+    {
+     "ok": true,
+     "value": 1652,
      "txs": []
     }
    ]

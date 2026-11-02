@@ -7,7 +7,7 @@
 //     0.7.5's own thread code byte for byte after a licence header; the kit's build.mjs refuses any other), under two
 //     policies at once: the site's (signpage-skeleton's CSP, every directive) and its own, exactly THREAD_CSP;
 //   - in a headless browser on https://SIGN_HOST/ (WebKit, Safari's engine, or Chromium with --browser chromium; the
-//     harness's routed answers stall Chromium's nested thread workers, so the harness runs in WebKit): planted workers from a
+//     harness serves Chromium from a local HTTPS server, signpage-prover-host's openBrowser): planted workers from a
 //     data: URL and from a blob: URL, each made a TrustedScriptURL by the page's one prover-worker policy so that only
 //     the CSP stands in their way, are refused and never run; then the prover worker, made through that policy, loads
 //     the pinned withdraw files and proves the fixed input (packages/kit/test/prover/withdraw.input.json) on
@@ -28,7 +28,7 @@ import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expected, gateBuild, PINS, policies, siteServer, WORKER_PATH, zkPath } from "./signpage-prover-host.mjs";
+import { expected, gateBuild, openBrowser, PINS, policies, siteServer, WORKER_PATH, zkPath } from "./signpage-prover-host.mjs";
 import { APP, CSP as SITE_CSP, SIGN } from "./signpage-skeleton.mjs";
 
 const KEY = "signpage-prover-threads";
@@ -214,29 +214,14 @@ const RUN = `async ([input, pins, proofs]) => {
 
 /** The browser run on SIGN_HOST's page: the live one, or `serve`'s. */
 async function readPage(serve, engine, proofs) {
-  const pw = createRequire(path.join(REPO, "packages/signpage/package.json"))("playwright");
-  const browser = await pw[engine].launch();
+  const { browser, ctx, close } = await openBrowser(engine, serve);
   try {
-    const ctx = await browser.newContext();
     await ctx.addInitScript(INIT);
     const workerScripts = [];
     ctx.on("request", (r) => {
       const u = r.url();
       if (/^(data|blob):/.test(u) || (new URL(u).origin === SIGN && /\.js$/.test(new URL(u).pathname) && new URL(u).pathname !== "/app.js")) workerScripts.push(u);
     });
-    if (serve) {
-      const signHost = new URL(SIGN).host;
-      const appHost = new URL(APP).host;
-      await ctx.route("**/*", async (r) => {
-        const u = new URL(r.request().url());
-        if (u.host === signHost) {
-          const a = serve(decodeURIComponent(u.pathname));
-          return r.fulfill({ status: a.status, headers: a.headers, body: a.body });
-        }
-        if (u.host === appHost) return r.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `frame-ancestors ${SIGN}` }, body: "<!doctype html><title>app</title>" });
-        return r.abort("blockedbyclient");
-      });
-    }
     const page = await ctx.newPage();
     const consoleLines = [];
     page.on("console", (m) => consoleLines.length < 50 && consoleLines.push(`${m.type()} ${m.text()}`.slice(0, 300)));
@@ -253,7 +238,7 @@ async function readPage(serve, engine, proofs) {
     out.workerScripts = workerScripts; // every script on SIGN_HOST but the page's app.js, and every data: or blob: one
     return { browser: `${engine} ${browser.version()} (Playwright)`, page: out };
   } finally {
-    await browser.close();
+    await close();
   }
 }
 
