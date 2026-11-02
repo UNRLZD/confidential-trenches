@@ -360,3 +360,26 @@ test("a kind whose handler answers later is answered with its result once it set
   assert.deepEqual(answers, [{ v: 1, id: a, ok: true, result: { pending: true } }, stateAnswer(b)]);
   assert.deepEqual(ran, ["then"]);
 });
+
+test("a host kind's refusal carries its own code; busy and down are not kept, so the same request runs again", async () => {
+  const codes = ["busy", "down", "quote_check_failed", "above_max"];
+  let runs = 0;
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: () => signedOutState(),
+    kinds: { "deposit.quote": (p) => (runs++, { error: codes[Number(p.amount) - 1] as string }) },
+  });
+  for (const [i, code] of codes.entries()) {
+    const id = uuid();
+    const m = { v: 1, id, type: "deposit.quote", origin_asset: "nep141:a", amount: String(i + 1) };
+    const before = runs;
+    for (let k = 0; k < 2; k++) listener!({ origin: APP_ORIGIN, source: parent, data: m });
+    await api.idle();
+    assert.deepEqual(posted.slice(-2), [{ v: 1, id, ok: false, error: { code } }, { v: 1, id, ok: false, error: { code } }], code);
+    assert.equal(runs - before, code === "busy" || code === "down" ? 2 : 1, code);
+  }
+});
