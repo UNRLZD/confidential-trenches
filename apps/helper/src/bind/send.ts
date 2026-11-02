@@ -390,10 +390,13 @@ export function ledgerOf(store: DepositStore, reads: SendReads): BindLedger {
 // check 10's H for the ids' deposit calls: the higher of the two finals (markets.md check 10)
 const held = async (deps: SendDeps) => tokenHeld(await deps.tokenStatus("higher"));
 
-/** R4 and (f), run inside the relayer's queue right before a transaction is signed. */
+/**
+ * (f) then R4, run inside the relayer's queue right before a transaction is signed. The hold first: it may wait (check
+ * 10's 2 s for H, a 429 waited out), so the margin is read after it, the last thing before the signature.
+ */
 const guardFor = (deps: SendDeps, maxBlockHeight: bigint) => async (): Promise<BindCode | null> => {
-  if (maxBlockHeight - (await deps.reads.newestFinalHeight()) < deps.cfg.marginK) return "resign_needed";
   if (await held(deps)) return "token_halted";
+  if (maxBlockHeight - (await deps.reads.newestFinalHeight()) < deps.cfg.marginK) return "resign_needed";
   return null;
 };
 
@@ -469,9 +472,11 @@ async function settle(deps: SendDeps, rec: DepositRecord, u: string, p: bigint):
   for (const s of rec.sends.filter((x) => x.state === "pending")) {
     // R4 and (f) hold for a re-send as for the first: once U's delegate is within K of its max_block_height, or the
     // token is held, its bytes do not go out again. It is still read: it may have landed, and an expired one counts.
+    // The hold first, the margin last (guardFor).
+    const open = !(await held(deps));
     const newest = await deps.reads.newestFinalHeight();
     const mbh = BigInt(s.max_block_height);
-    const out = await deps.relayer.resolve(s, { resend: mbh - newest >= deps.cfg.marginK && !(await held(deps)) });
+    const out = await deps.relayer.resolve(s, { resend: open && mbh - newest >= deps.cfg.marginK });
     if (out.kind === "unknown") continue;
     const state = out.kind === "dropped" ? "dropped" : await sendState(deps, u, p, BigInt(s.amount), out);
     rec = tally({ ...rec, landed: rec.landed || state === "landed", sends: rec.sends.map((x) => (x.tx_hash === s.tx_hash ? { ...x, state } : x)) });

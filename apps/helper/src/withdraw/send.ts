@@ -305,7 +305,16 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   try {
     const out = await relayer.send<HelperWithdrawCode>(
       action,
-      async () => ((await held(deps)) ? "token_halted" : (await relayer.balance()) < withdrawFloor(deposit) ? "relayer_low" : null),
+      // the hold first, check 9's margin last: a hold that waits (check 10's wait for H, a 429 waited out) never spends
+      // the margin it was checked against at the reads above
+      async () =>
+        (await held(deps))
+          ? "token_halted"
+          : (await relayer.balance()) < withdrawFloor(deposit)
+            ? "relayer_low"
+            : BigInt(w.deadline_ms) < (await newestFinalMs(deps.rpcs)) + SEND_MARGIN_MS
+              ? "deadline_too_close"
+              : null,
       (tx) => {
         const claim = deps.store.claim({ ...tx, nullifier: nullifierKey(nf), key: relayer.key, deadline_ms: w.deadline_ms });
         if (!claim.ok) throw new ClaimLost(claim.code);

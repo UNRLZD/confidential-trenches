@@ -333,6 +333,34 @@ test("H1: R4 runs at the send's turn in the queue: the final passing the margin 
   assert.deepEqual([w.chain.sends().length, rec(w).sends.length, rec(w).failed], [0, 0, 0]);
 });
 
+test("R4 after (f): a hold that waits at the send's turn while the final passes the margin answers resign_needed, nothing sent; and a re-send the same way", async () => {
+  const w = world();
+  const real = w.deps.relayer.send;
+  const hold = w.deps.tokenStatus;
+  let queued = false;
+  w.deps.relayer.send = async (action, guard, before) => {
+    queued = action.kind === "delegate";
+    return real(action, guard, before);
+  };
+  w.deps.tokenStatus = async (at) => {
+    if (queued) w.chain.final += 200n; // the hold waited (a lagging provider, a 429) while the chain moved on
+    return hold(at);
+  };
+  assert.equal(code(await w.carry(next(w))), "resign_needed");
+  assert.deepEqual([w.chain.sends().length, rec(w).sends.length, rec(w).failed], [0, 0, 0]);
+  // the settle's re-send: K ahead before the hold, under K after it: read, never re-sent
+  const v = world();
+  v.chain.fates = ["unknown", "lands"];
+  ok(await v.carry(next(v)));
+  const mbh = BigInt(rec(v).sends[0]!.max_block_height);
+  v.chain.final = mbh - 20n; // K ahead
+  const vh = v.deps.tokenStatus;
+  v.deps.tokenStatus = async (at) => ((v.chain.final += 1n), vh(at)); // the hold waits a block
+  v.chain.resolveOpts = [];
+  await lockRound(v.deps); // the background round: the settle's own hold, then its margin
+  assert.deepEqual(v.chain.resolveOpts, [{ resend: false }]);
+});
+
 // ---- the idempotent answer and U's in-flight slot ----
 
 test("a re-send of carried bytes answers 200 with that tx_hash, before check 3 (U's nonce moved), and sends nothing; after a restart too", async () => {
@@ -1721,10 +1749,13 @@ test("RECHECK R4: the settle never re-sends U's stored delegate once the token w
   assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "ok"); // answered as sent; the delegate reached no node
   assert.equal(store.get(u.id)!.sends[0]!.state, "pending");
   cut = false;
-  // the watch turns halted after check 9 read it open, while the settle runs
-  const reads = deps.reads;
-  deps.reads = { ...reads, newestFinalHeight: async () => ((halted = true), reads.newestFinalHeight()) };
+  // the watch turns halted after check 9 read it open, while the settle runs: the call's first two holds (before the
+  // checks, check 9) read open, the settle's own hold reads halted (the hold comes before R4's margin, guardFor)
+  let asks = 0;
+  const watch = deps.tokenStatus;
+  deps.tokenStatus = async (at) => ((halted ||= ++asks > 2), watch(at));
   assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 90n), deps)), "in_flight");
+  assert.equal(asks, 3);
   assert.equal(sentWhileHalted, 0);
   store.close();
 });

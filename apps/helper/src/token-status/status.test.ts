@@ -449,3 +449,71 @@ test("(r1) one 429 is waited out (Retry-After, at most BACKOFF_429_MS) and the r
     assert.deepEqual(waits, [retry === null ? BACKOFF_429_MS : 2_000]);
   }
 });
+
+// ---- review round 2 (a3fb4a3): each test fails with its plant ----
+
+test("(r2) PROBE: a hold that starts while another's read is in flight reads its own finals: X at 500 open, the chain moves to 505 paused from 503, Y reads halted", async () => {
+  let final = 500;
+  let gate: (() => void) | undefined;
+  const gated = new Promise<void>((ok) => (gate = ok));
+  const p = nearPair({ final: () => final, balance: (h) => (h >= 503 ? { error: PAUSED } : '"5"') });
+  const fetch = async (u: string, init: RequestInit) => {
+    if (String(init.body).includes('"query"')) await gated; // X's views wait at the provider
+    return p.fetch(u, init);
+  };
+  const w = createTokenWatch("mainnet", WITH_VAULT, { fetch });
+  const x = w.statusAt("lower");
+  for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok)); // X has read its finals at 500
+  final = 505;
+  const y = w.statusAt("lower");
+  for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok));
+  gate!();
+  const [sx, sy] = await Promise.all([x, y]);
+  assert.deepEqual([sx.block_height, sx.halted], [500, false]);
+  assert.deepEqual([sy.block_height, sy.halted], [505, true], "Y's own H, not X's");
+});
+
+test("(r2) one read of H's block at a time whichever rule names it: a lower and a higher hold at one H share the views' read", async () => {
+  const p = nearPair({ final: 500 });
+  const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: p.fetch });
+  const [l, h] = await Promise.all([w.statusAt("lower"), w.statusAt("higher")]);
+  assert.deepEqual([l.caught_up, h.caught_up, l.block_height, h.block_height], [true, true, 500, 500]);
+  assert.equal(p.seen.filter((c) => c.method === "query").length, 6, "three views on each provider, once");
+});
+
+test("(r2) PROBE: both providers frozen 60 s with the wall clock stepped back 60 s (the block time looks fresh): not caught up, held", async () => {
+  let t = 0;
+  const wall = Date.now() - 60_000; // the host's clock stepped back to the frozen block's time
+  const p = nearPair({ final: 1000, ms: wall });
+  const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: p.fetch, now: () => wall, clock: () => t });
+  assert.equal((await w.status()).caught_up, true, "first read: nothing yet says the final stands still");
+  t += FINAL_AGE_MAX_MS + 1; // 30 s of the monotonic clock with the final unmoved
+  assert.equal((await w.status()).caught_up, false);
+  assert.equal(await w.held("lower"), true);
+  assert.equal(await w.held("higher"), true);
+  // and a final that moves within FINAL_AGE_MAX_MS is not frozen
+  let f = 1000;
+  let u = 0;
+  const q = createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair({ final: () => f }).fetch, clock: () => u });
+  for (let i = 0; i < 3; i++) {
+    assert.equal((await q.statusAt("lower")).caught_up, true);
+    u += FINAL_AGE_MAX_MS - 1;
+    f += 1;
+  }
+});
+
+test("(r2) a kept answer never outlives the age check: H read and kept, then its block over FINAL_AGE_MAX_MS old on the wall clock: not caught up", async () => {
+  let wall = Date.now();
+  const p = nearPair({ final: 700, ms: () => Date.now() });
+  const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: p.fetch, now: () => wall });
+  assert.equal((await w.statusAt("lower")).caught_up, true);
+  wall += 60_000; // the providers' final unchanged, the wall clock a minute on
+  assert.equal((await w.statusAt("lower")).caught_up, false);
+});
+
+test("(r2) pausedAt: the two providers must name one block h and one parent; a header of another height is no answer", async () => {
+  const v: Views = { balance: (h) => (h >= 101 ? { error: PAUSED } : '"5"') };
+  assert.equal(await createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair(v, { ...v, fork: "x" }).fetch }).pausedAt(100n), null, "B on another chain");
+  assert.equal(await createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair({ ...v, shift: 1 }).fetch }).pausedAt(100n), null, "both answer block 101 for 100");
+  assert.equal(await createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair(v).fetch }).pausedAt(101n), true, "the same chain, asked right");
+});

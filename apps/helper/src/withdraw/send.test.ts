@@ -249,6 +249,21 @@ test("check 10's H for a withdrawal: every hold asks at the lower of the two fin
   assert.deepEqual([...new Set(holds)], ["lower"]);
 });
 
+test("check 9 after check 10 at the relayer's turn: a hold that waits while the chain passes the deadline's margin answers deadline_too_close, nothing sent or claimed", async () => {
+  const { c, deps, relayer, store } = setup();
+  const open = deps.tokenStatus;
+  let asks = 0;
+  deps.tokenStatus = async (at) => {
+    if (++asks === 2) c.ms += 60_001n; // the relayer's turn: the hold waited (a lagging provider, a 429) past the margin
+    return open(at);
+  };
+  const a = await carryWithdraw(req(), deps);
+  assert.equal(asks, 2);
+  assert.deepEqual([a.status, code(a)], [400, "deadline_too_close"]);
+  assert.equal(relayer.sent.length, 0);
+  assert.equal(store.get(NF), null);
+});
+
 test("check 6 after a send: the same note again answers in_flight and nothing more is signed; two at once send once", async () => {
   const { deps, relayer } = setup();
   const [x, y] = await Promise.all([carryWithdraw(req(), deps), carryWithdraw(req(), deps)]);

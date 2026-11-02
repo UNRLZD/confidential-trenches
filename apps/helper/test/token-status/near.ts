@@ -33,6 +33,8 @@ export type Views = {
   skip?: readonly number[];
   /** Another chain: every block hash its own (a provider on a fork, or on another network). */
   fork?: string;
+  /** A provider that answers `block` by height with the header this many heights on (a wrong answer). */
+  shift?: number;
 };
 
 const unknownBlock = { jsonrpc: "2.0", id: 1, error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK", info: {} }, code: -32000, message: "Server error" } };
@@ -55,6 +57,7 @@ export function nearChain(v: Views) {
     const h = p.finality === "final" ? final() : typeof id === "number" ? id : typeof id === "string" ? (heights.get(id) ?? -1) : -1;
     if (!has(h)) return json(unknownBlock);
     // one chunk header per shard, as nearcore lists them: about 19 KB on mainnet's nine shards (read 2026-11-03)
+    if (body.method === "block" && typeof id === "number" && v.shift !== undefined) return json({ jsonrpc: "2.0", id: 1, result: { header: header(h + v.shift), chunks: [] } });
     if (body.method === "block") return json({ jsonrpc: "2.0", id: 1, result: { author: "x.near", header: header(h), chunks: Array.from({ length: 9 }, (_, shard_id) => ({ shard_id, pad: "x".repeat(2_000) })) } });
     const at = { block_height: h, block_hash: hashOf(h, v.fork) };
     const value = (x: unknown) => (typeof x === "object" && x !== null && "error" in x ? { ...at, logs: [], ...x } : { ...at, logs: [], result: [...Buffer.from(String(x))] });

@@ -8,7 +8,9 @@
 // fail with its own panic "FiatToken: paused" (the real wasm in a sandbox, research RESULT 3.1), so on each of the
 // network's two providers, at the move's own block H (markets.md check 10: the two finals at most HEIGHT_SPREAD_MAX
 // apart; H the lower for a withdrawal, the higher for a deposit, its provider one or a few blocks behind given up to
-// H_WAIT_MS to reach it; H's block at most FINAL_AGE_MAX_MS behind the wall clock, so two frozen providers never answer):
+// H_WAIT_MS to reach it; H's block at most FINAL_AGE_MAX_MS behind the wall clock and neither final standing still for
+// more than FINAL_AGE_MAX_MS of a monotonic clock, so two frozen providers never answer; each caller reads its own finals,
+// and callers whose H is one block share one read of it):
 //   - ft_balance_of(vault): a balance is open, exactly the paused panic is halted, anything else is not known;
 //   - is_blocklisted(vault): exactly true or false, anything else is not known;
 //   - view_account: the code hash;
@@ -240,7 +242,8 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
   const notCaughtUp = statusFrom(undefined, undefined, token);
   const byBlock = new Map<string, TokenStatus>(); // a final block's status never changes: kept by its height and hash
   const pausedCache = new Map<bigint, boolean>(); // a known answer for a past height never changes
-  const inflight = new Map<HoldAt, Promise<TokenStatus>>();
+  const inflight = new Map<string, Promise<TokenStatus>>(); // one read of a block's views at a time, by its height and hash
+  const moved = new Map<string, { height: number; since: number }>(); // each provider's final and when it last moved (monotonic)
   let shown: { at: number; status: TokenStatus } | undefined;
   let showing: Promise<TokenStatus> | undefined;
 
@@ -319,35 +322,54 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
    * one block where they meet; H the lower for a withdrawal, the higher for a deposit, its block at most
    * FINAL_AGE_MAX_MS behind the wall clock; then both providers' views at H, each answer of H's own hash.
    */
+  /** Whether `url`'s final has stood still for over FINAL_AGE_MAX_MS of the monotonic clock: a frozen provider. */
+  function frozen(url: string, f: Head): boolean {
+    const t = clock();
+    const was = moved.get(url);
+    if (was === undefined || f.height > was.height) {
+      moved.set(url, { height: f.height, since: t });
+      return false;
+    }
+    return t - was.since > FINAL_AGE_MAX_MS;
+  }
+
   async function readAt(at: HoldAt): Promise<TokenStatus> {
+    // each caller reads its own finals, so its H is the move's own
     const [fa, fb] = await Promise.all(urls.map((u) => head(u, { finality: "final" })));
     if (fa === undefined || fb === undefined) return notCaughtUp;
     if (Math.abs(fa.height - fb.height) > HEIGHT_SPREAD_MAX) return notCaughtUp;
     const h = (at === "lower") === fa.height <= fb.height ? fa : fb;
-    if (now() - h.ms > FINAL_AGE_MAX_MS) return notCaughtUp; // two frozen providers never answer for now
+    // two frozen providers never answer for now: H's block time on the wall clock, and each final's last move on the
+    // monotonic clock (a wall clock stepped back hides a stale block time); both before any kept answer
+    const still = [frozen(urls[0], fa), frozen(urls[1], fb)];
+    if (now() - h.ms > FINAL_AGE_MAX_MS || still.includes(true)) return notCaughtUp;
     const key = `${h.height} ${h.hash}`;
     const kept = byBlock.get(key);
     if (kept !== undefined) return kept;
-    const behind = [fa, fb].findIndex((f) => f.height < h.height);
+    // one read of H's block at a time, whichever rule named it
+    let p = inflight.get(key);
+    if (p === undefined) {
+      p = readBlock(h, [fa, fb]).finally(() => inflight.delete(key));
+      inflight.set(key, p);
+    }
+    return p;
+  }
+
+  /** Both providers' views at block `h`, a provider whose final is below it given H_WAIT_MS to reach it; kept when caught up. */
+  async function readBlock(h: Head, finals: readonly [Head, Head]): Promise<TokenStatus> {
+    const behind = finals.findIndex((f) => f.height < h.height);
     if (behind !== -1 && !(await reaches(urls[behind]!, h.height))) return notCaughtUp;
     const [a, b] = await Promise.all(urls.map((u) => read(u, h)));
     const s = statusFrom(a, b, token);
     if (s.caught_up) {
-      byBlock.set(key, s);
+      byBlock.set(`${h.height} ${h.hash}`, s);
       if (byBlock.size > BLOCKS_KEPT) byBlock.delete(byBlock.keys().next().value!);
     }
     return s;
   }
 
-  /** The hold's read (H3.4 check 10, H4.3 step 9) at the move's H; one read per rule at a time. */
-  function statusAt(at: HoldAt): Promise<TokenStatus> {
-    let p = inflight.get(at);
-    if (p === undefined) {
-      p = readAt(at).finally(() => inflight.delete(at));
-      inflight.set(at, p);
-    }
-    return p;
-  }
+  /** The hold's read (H3.4 check 10, H4.3 step 9) at the move's own H: its own finals, a read of H's block shared. */
+  const statusAt = (at: HoldAt): Promise<TokenStatus> => readAt(at);
 
   /** /v1/token-status (display only): the status at the lower final, read at most once per CACHE_MS of the monotonic clock. */
   function status(): Promise<TokenStatus> {
