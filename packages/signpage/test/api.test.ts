@@ -415,7 +415,7 @@ test("a running id's answer refreshes its place among the remembered ids, so ids
   const held = new Promise<void>((r) => (release = r));
   const runs: string[] = [];
   const shas = new Map<string, string>();
-  startApi({
+  const api = startApi({
     parent,
     listen: (fn) => (listener = fn),
     state: signedOutState,
@@ -433,12 +433,12 @@ test("a running id's answer refreshes its place among the remembered ids, so ids
   const a = uuid();
   send({ ...buy, id: a, side: "buy" });
   for (let i = 0; i < REMEMBERED_IDS - 1; i++) send({ ...buy, id: uuid(), side: "sell" });
-  await new Promise((r) => setTimeout(r, 50));
+  await api.idle();
   release();
   await new Promise((r) => setTimeout(r, 20));
   send({ ...buy, id: uuid(), side: "sell" }); // one more: the oldest remembered id goes, which is no longer a
   send({ ...buy, id: a, side: "buy" });
-  await new Promise((r) => setTimeout(r, 50));
+  await api.idle();
   assert.equal(runs.filter((x) => x === a).length, 1, "a was remembered: its repeat got its answer, not a second run");
   assert.deepEqual(posted.at(-1), { v: 1, id: a, ok: true, result: { stage: "sent", txs: [] } });
   const bytes = new TextEncoder().encode(JSON.stringify({ ...buy, id: a, side: "buy" }));

@@ -121,7 +121,8 @@ function page(s: ReturnType<typeof store>, script: Script, providers: readonly [
     if (!d) return { id, answer: null };
     await d.after;
     const answer = d.answer();
-    await new Promise((r) => setTimeout(r, 30));
+    // a trade that ends: its end; one held open (a reload's tab, a fill never read) is past its answer by then
+    await Promise.race([handler.idle(), new Promise((r) => setTimeout(r, 200))]);
     return { id, answer };
   };
   return { ask, calls, progress, opened: () => opened, die: tab.die, idle: () => handler.idle() };
