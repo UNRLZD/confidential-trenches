@@ -1,10 +1,11 @@
-// The NEAR networks the release reads, and the one rule for a pair of their RPCs (split out of ../deposit/account.ts by
-// card signpage-withdraw-form, which re-exports all of it, so no caller changes). This module imports nothing: the
-// signing page takes the table, the pair rule and nearRpc from here and so carries no kit code it does not use. Each
+// The NEAR networks the release reads, and the one rule for a pair of their RPCs (split out of the wallet's deposit/account.ts
+// by card signpage-withdraw-form, which re-exports all of it, and moved here by card app-verify-pair-rule so the kit's
+// entry can export the pair rule without the kit importing the wallet). This module imports nothing: the signing page
+// takes the table, the pair rule and nearRpc from here and so carries no kit code it does not use. Each
 // network has one USDC contract (`usdc`, the vault's asset), the release's vault (null until written) and two
-// operators: the pair is exactly one of its FastNEAR URLs and its dRPC URL (../deposit/account.ts's header has the
+// operators: the pair is exactly one of its FastNEAR URLs and its dRPC URL (the wallet's deposit/account.ts header has the
 // node-key reads that show the two FastNEAR URLs are one operator). What this file copies from the kit is held to it by
-// test/near-networks.test.ts: mainnet's usdc equals VAULT_CONSTANTS.TOKEN, and NEAR_RPC_METHOD is on
+// test/near-networks.test.ts (this package): mainnet's usdc equals VAULT_CONSTANTS.TOKEN, and NEAR_RPC_METHOD is on
 // HELPER_RPC_METHODS.near.
 
 /** RPC_A, RPC_B, RPC_C (M306 (5)): mainnet. */

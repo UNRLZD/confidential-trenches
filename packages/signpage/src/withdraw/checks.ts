@@ -13,7 +13,7 @@
 // - A named account must exist: view_account on two RPCs, both answering its view (W:927-928). Both answering
 //   UNKNOWN_ACCOUNT refuses it. Anything else (one says absent and one exists, an RPC down, any other answer) is unread
 //   and never passes: no account is taken on one RPC's word. The two RPCs are the network's release pair by the
-//   wallet's one rule (../../../wallet/src/near/networks.ts nearPairNetwork), so one operator never counts as two.
+//   the kit's one rule (../../../kit/src/near/networks.ts nearPairNetwork), so one operator never counts as two.
 // - An implicit id (64 hex, or 0x and 40 hex) passes with no read, existing or not: no stranger can create it, so a
 //   typo never pays a name someone else can (W:928; WU-05: "to an absent 64-hex implicit id (signed)").
 // - The amount is USDC typed as a decimal with at most the token's 6 places, in base units. One withdrawal spends one
@@ -28,7 +28,7 @@
 // (WM-06) and withdraw.open from a one-time id.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultScopeOf } from "../../../kit/src/vault/shapes.ts";
-import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../../../wallet/src/near/networks.ts";
+import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../../../kit/src/near/networks.ts";
 import type { NoteRecord } from "../../../wallet/src/notes/store.ts";
 
 /** intents.near: an ft_withdraw out of it may never name it (W:930), and nothing sent to it is the user's. */

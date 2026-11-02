@@ -3,7 +3,7 @@
 // is unread until the device's fee_max reads are built). Testnet, so the vault refusal is reachable: the stub RPCs carry
 // the testnet pair's exact names, and they answer as the real ones do (view_account, 2026-11-02T08:11Z reads):
 // alice.near exists; down.near is unanswered on both; every other named account is UNKNOWN_ACCOUNT.
-import { NEAR_NETWORKS, type NearRpc } from "../../../wallet/src/near/networks.ts";
+import { NEAR_NETWORKS, type NearRpc } from "../../../kit/src/near/networks.ts";
 import { drawWithdrawForm, type CheckedWithdraw } from "../../src/withdraw/form.ts";
 
 const T = NEAR_NETWORKS.testnet;

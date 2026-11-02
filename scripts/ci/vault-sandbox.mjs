@@ -30,8 +30,6 @@ export const PATHS = [
   "packages/kit/zk/",
   "packages/kit/test/vectors/",
   "packages/kit/package.json",
-  // the one wallet file the kit's entry re-exports (kit/src/near/pair.ts), so every script that imports the kit reads it
-  "packages/wallet/src/near/networks.ts",
   "apps/helper/src/bind/",
   "apps/helper/src/near/",
   "apps/helper/src/store/",

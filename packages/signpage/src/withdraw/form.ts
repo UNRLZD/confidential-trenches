@@ -17,7 +17,7 @@
 //   (data-pending, as New account is on the sign-in choices).
 // - Every word is a draft until the owner picks it (data-draft-copy names its key in WITHDRAW_WORDS).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
-import type { NearNetwork, NearRpc } from "../../../wallet/src/near/networks.ts";
+import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
 import { type AddressCode, type AmountCheck, type AmountCode, checkAmount, checkRecipient, type RecipientCheck, TOKEN_DECIMALS } from "./checks.ts";
 
 // DRAFT COPY: every word here is drawn with data-draft-copy until the owner picks it, each with its source on its line.
