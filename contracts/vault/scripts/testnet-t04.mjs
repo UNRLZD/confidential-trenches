@@ -504,7 +504,7 @@ async function main() {
     card: "vault-testnet-t04",
     network: "testnet",
     vault: VAULT,
-    token: TOKEN,
+    asset: TOKEN, // "asset", as testnet-v1.json names it ("token" with this id reads as a key to gitleaks in JSON)
     accounts: { parent: acc.P, depositor: acc.D, bounce: acc.B, settler: acc.S },
     amounts: { note1: String(AMOUNTS.note1), note2: String(AMOUNTS.note2), fee: String(AMOUNTS.fee), refund: String(AMOUNTS.note2 - AMOUNTS.fee) },
     ragequit: { nullifier_hash: st.steps.ragequit.nullifier_hash, label: st.steps.deposit1.label },

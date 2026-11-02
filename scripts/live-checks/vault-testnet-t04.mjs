@@ -64,7 +64,7 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS }) {
   };
   for (const p of operatorProblems(rpcs)) say(false, p);
   rpcs = rpcs.slice(0, 2);
-  say(run.vault === VAULT && run.token === TOKEN, `the run record names the testnet vault ${VAULT} on ${TOKEN}: ${run.vault} on ${run.token}`);
+  say(run.vault === VAULT && run.asset === TOKEN, `the run record names the testnet vault ${VAULT} on ${TOKEN}: ${run.vault} on ${run.asset}`);
   const D = run.accounts?.depositor;
   const B = run.accounts?.bounce;
   const amt = Object.fromEntries(Object.entries(run.amounts ?? {}).map(([k, v]) => [k, BigInt(v)]));
