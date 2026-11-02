@@ -1,7 +1,9 @@
 # CI needs no secret and no token beyond the read-only one GitHub gives every run.
 # Every action is pinned by commit sha, each read from its own repo on 2026-10-26 at 11:24Z:
-#   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0.
+#   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0;
+#   actions/cache v6.1.0 read from its repo on 2026-11-02 at 12:40Z.
 # The five job ids are the required checks of main's ruleset: gitleaks, deep-import, verify-gate, money-gate, test.
+# The sixth, vault-sandbox, joins them when the owner adds it to the ruleset.
 name: ci
 
 on:
@@ -9,6 +11,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # nightly on main: the vault's sandbox suite only (every other job skips a scheduled run)
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -21,6 +26,7 @@ concurrency:
 
 jobs:
   gitleaks:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -51,6 +57,7 @@ jobs:
         run: GITLEAKS="$RUNNER_TEMP/gitleaks" pnpm run test:gates
 
   deep-import:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -111,6 +118,7 @@ jobs:
   # holds, or about 30 proven ones, or one wait chain of up to 5 waits of 600 s on a tx FastNEAR's archive gave no answer
   # for; past that the check fails closed and is run again.
   money-gate:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -155,6 +163,7 @@ jobs:
   # cargo test target with required-features = ["sandbox"], which a plain cargo test skips) and Playwright (a
   # package's test:e2e script, never its test script), but for the terminal's in-shell run below.
   test:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -198,3 +207,117 @@ jobs:
         run: |
           rustup toolchain install 1.96.0 --profile minimal
           cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
+
+  # The vault's near-sandbox suite (contracts/vault/tests/harness/run.sh: the vault, the mock token and the harness's
+  # probe built with cargo-near, the pinned mainnet USDC and intents.near wasm, near-sandbox 2.13.4), which the test
+  # job's plain cargo test builds empty. It runs when a change touches a file the suite reads (scripts/ci/vault-sandbox.mjs,
+  # whose planted tests fail on a file the suite reads and the rule misses), on every push to main that does, nightly
+  # and by hand; otherwise vault-sandbox passes with a printed skip. The targets run on four shards
+  # (vault-sandbox.mjs SHARDS, each target in exactly one), each with its own cache of cargo's registry, its target dirs
+  # (near-sandbox's binary is downloaded into the vault's) and the pinned wasm. vault-sandbox is the one check to require.
+  vault-sandbox-plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # On a pull request the rule runs as main has it (see verify-gate), so a pull request cannot edit the rule to skip
+      # its own suite; it reads the head checkout, its working directory. While main has no rule yet, the suite runs.
+      # scripts/ci/vault-sandbox.test.mjs fails when this step runs the head's copy on a pull request, and
+      # scripts/ci/base-gate.test.mjs replays the pull_request lines (each names $RUNNER_TEMP, so it takes them all).
+      - name: does this change touch what the suite reads
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request)
+              mkdir -p "$RUNNER_TEMP/base"
+              git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
+              [ -e "$RUNNER_TEMP/base/scripts/ci/vault-sandbox.mjs" ] || { echo "run=true: main has no scripts/ci/vault-sandbox.mjs yet, so the suite runs"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; }
+              node "$RUNNER_TEMP/base/scripts/ci/vault-sandbox.mjs" decide "$EVENT" "$BASE" "$HEAD" ;;
+            *) node scripts/ci/vault-sandbox.mjs decide "$EVENT" "$BASE" "$HEAD" ;;
+          esac
+
+  vault-sandbox-shard:
+    needs: vault-sandbox-plan
+    if: needs.vault-sandbox-plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      # smaller target dirs to cache; neither changes what a test does
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # relayer_send and s02 start the helper's TypeScript, which imports the workspace's packages
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      # rustc 1.96.0 with the wasm target the three contracts build for (rustup is on the image, see the test job)
+      - name: rust 1.96.0
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
+      - name: install cargo-near
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cargo-near.tgz" \
+            https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          echo "9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a  $RUNNER_TEMP/cargo-near.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-near.tgz" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
+          cargo +1.96.0 near --version
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            contracts/vault/target
+            contracts/vault/tests/mock-token/target
+            contracts/vault/tests/harness/probe/target
+            ~/.cache/blindfill-vault-harness
+          key: vault-sandbox-${{ matrix.shard }}-${{ hashFiles('contracts/vault/Cargo.lock', 'contracts/vault/tests/mock-token/Cargo.lock', 'contracts/vault/tests/harness/probe/Cargo.lock', 'contracts/vault/tests/fixtures/real-wasm.json') }}-${{ github.sha }}
+          restore-keys: |
+            vault-sandbox-${{ matrix.shard }}-${{ hashFiles('contracts/vault/Cargo.lock', 'contracts/vault/tests/mock-token/Cargo.lock', 'contracts/vault/tests/harness/probe/Cargo.lock', 'contracts/vault/tests/fixtures/real-wasm.json') }}-
+            vault-sandbox-${{ matrix.shard }}-
+      - name: the shard's sandbox tests
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          read -ra ARGS <<<"$(node scripts/ci/vault-sandbox.mjs shard "$SHARD")"
+          contracts/vault/tests/harness/run.sh "${ARGS[@]}"
+
+  vault-sandbox:
+    needs: [vault-sandbox-plan, vault-sandbox-shard]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every shard passed, or the change touches nothing the suite reads
+        env:
+          PLAN: ${{ needs.vault-sandbox-plan.result }}
+          RUN: ${{ needs.vault-sandbox-plan.outputs.run }}
+          SHARDS: ${{ needs.vault-sandbox-shard.result }}
+        run: |
+          if [ "$PLAN" != success ]; then echo "the plan job ended $PLAN"; exit 1; fi
+          if [ "$RUN" != true ]; then echo "skip: this change touches no file the vault's sandbox suite reads"; exit 0; fi
+          if [ "$SHARDS" != success ]; then echo "a shard ended $SHARDS"; exit 1; fi
+          echo "every shard passed"
