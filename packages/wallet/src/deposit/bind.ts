@@ -522,14 +522,17 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       const mine = calls.length === seen + 1 && last.signed_delegate === c.signed_delegate;
       return { call: mine ? c : callOf(last), send: mine };
     };
-    // A tx hash the relayer gives is written with the call before anything else (a failed write stops the bind).
+    // A tx hash the relayer gives is written with the call before anything else (a failed write stops the bind). The
+    // send waits as long as the helper may carry the call (the kit's HELPER_BIND_ANSWER_MS and the way back), so every
+    // answer the carry gives is heard and acted on below; the bind's stop ends that wait.
     const send = async (c: SignedDepositDelegate): Promise<BindAnswer | null> => {
       stopped();
       let a: BindAnswer | null;
       try {
-        a = await sendDepositDelegate(c, fetchFn);
+        a = await sendDepositDelegate(c, fetchFn, signal);
       } catch {
-        a = null; // no answer: the relayer may hold it, so the pages and U's nonce settle it
+        stopped();
+        a = null; // no answer, a timeout included: unsure, never failed. The relayer may hold it, so the pages and U's nonce settle it
       }
       if (a?.ok) calls = (await store.addCallTx(own.noteId, c, a.tx_hash)).calls ?? [];
       return a;
