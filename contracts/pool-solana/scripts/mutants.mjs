@@ -35,6 +35,9 @@ export const MUTANTS = [
   ["fee backstop", "src/release.rs", "if !fee_within_backstop(r.relay_fee, r.withdrawn) {", "if false {", "a_zero_withdrawal_and_a_fee_over_the_backstop_are_refused"],
   ["a new page at its address", "src/state.rs", "        if addr != *page.key {\n            return Err(PoolError::WrongAccount.into());", "        if false {\n            return Err(PoolError::WrongAccount.into());", "inserts_cross_the_page_boundary_in_both_trees"],
   ["entry time", "src/state.rs", "    d[at + 64..at + 72].copy_from_slice(&now.to_le_bytes());", "    let _ = now;", "each_page_entry_holds_the_clock_at_its_insert"],
+  ["change page is the tree's current page", "src/state.rs", "if page_entries(program_id, page, tree, page_no) != Some(slot) {", "if false {", "a_wrong_change_page_is_refused"],
+  ["funded address topped up", "src/state.rs", "        if rent > have {\n            transfer(payer, target, system, rent - have)?;", "        if false {\n            transfer(payer, target, system, rent - have)?;", "a_funded_pool_or_page_address_blocks_nothing"],
+  ["spent counted", "src/release.rs", "pool.spent = pool.spent.checked_add(r.withdrawn as u128).ok_or(PoolError::Overflow)?;", "let _ = PoolError::Overflow;", "a_release_counts_what_it_spends"],
   ["init once", "src/state.rs", "    if target.owner == program_id {\n        return Err(exists.into());", "    if false {\n        return Err(exists.into());", "init_twice_is_refused"],
 ];
 

@@ -31,6 +31,18 @@
 //! - No ragequit. The pool puts every deposit's label into its own label tree, so a release proof always exists for
 //!   every note; ragequit would add a public exit that links a deposit to its exit, and a depositor record per label,
 //!   and buy nothing a release does not.
+//!
+//! Deploy rule: a fresh program keypair per cluster. The scope binds the program id and the pool address (itself
+//! derived from the program id) but no cluster, so one id on devnet and mainnet would give the same scopes, and a
+//! devnet spend would publish the nullifier hash of the same note on mainnet. The deploy's live check asserts the
+//! mainnet id differs from the devnet id.
+//!
+//! Smallest release: W (a fresh system account) must end at least the rent-exempt minimum of 0 bytes, so
+//! `withdrawnValue - relay_fee >= rent(0)`, and the backstop needs `withdrawnValue >= 2 * relay_fee`. With the relay
+//! fee at the fee payer's floor (src/release.rs, row 8), the smallest chunk is `max(rent(0) + floor, 2 * floor)`. At
+//! mainnet rent that is max(650,240 + 1,026,000, 2,052,000) = 2,052,000 lamports, or 3,515,040 when the change opens
+//! a page (floor 1,757,520). The device's Solana adapter holds its smallest rung to that; below it the runtime refuses
+//! a W left under rent(0), and the program refuses a fee over the backstop.
 
 // solana-poseidon 3.1.6 marks its API deprecated ahead of 4.0.0's `agave-unstable-api` feature; 3.1.6 is the version
 // pinned here.

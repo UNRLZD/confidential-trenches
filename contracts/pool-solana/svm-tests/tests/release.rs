@@ -751,3 +751,84 @@ fn inserts_cross_the_page_boundary_in_both_trees() {
     assert_eq!(lamports(&env, &env.w.pubkey()), w0 + r2.withdrawn - FEE);
     assert_eq!(state_size(&env), 1027);
 }
+
+// Ported from the independent review of c53a7f9: three checks that had no test failing without them.
+
+/// The pool account's size (src/state.rs POOL_LEN): header 49 bytes, then two trees of size, depth and 33 side nodes.
+const POOL_LEN: usize = 49 + 2 * (8 + 1 + 33 * 32);
+
+fn pool_u128(env: &Env, off: usize) -> u128 {
+    let a = env.svm.get_account(&env.pool).unwrap();
+    u128::from_le_bytes(a.data[off..off + 16].try_into().unwrap())
+}
+
+/// The change note's page when it is not a page's first entry: the label tree's page, or the state tree's next page,
+/// in its place is refused, and the label page is untouched (else a relayer could write the change note into the
+/// other tree's history).
+#[test]
+fn a_wrong_change_page_is_refused() {
+    let mut env = with_deposits();
+    let r = rel(&env, "release");
+    let label0 = env.svm.get_account(&page(&env, 1, 0)).unwrap().data;
+    let fp = env.fee_payer.insecure_clone();
+    let w = env.w.insecure_clone();
+    let payer = fp.pubkey();
+    let mut ix = release_ix(&env, &r);
+    ix.accounts[6] = AccountMeta::new(page(&env, 1, 0), false);
+    assert_eq!(send(&mut env, &[compute_limit(400_000), ix], &payer, &[&fp, &w]).err(), Some(WRONG_ACCOUNT));
+    assert_eq!(env.svm.get_account(&page(&env, 1, 0)).unwrap().data, label0, "the label page is untouched");
+    let mut ix = release_ix(&env, &r);
+    ix.accounts[6] = AccountMeta::new(page(&env, 0, 1024), false);
+    assert_eq!(send(&mut env, &[compute_limit(400_000), ix], &payer, &[&fp, &w]).err(), Some(WRONG_ACCOUNT));
+    release(&mut env, &r).expect("the right page lands");
+}
+
+/// Anyone can fund an address before the program makes its account there, with at least the rent-exempt minimum of
+/// 0 bytes. The pool's address and each tree's first page funded so: init and the first deposit land, each account
+/// topped up to exactly its own size's minimum.
+#[test]
+fn a_funded_pool_or_page_address_blocks_nothing() {
+    let f = fx();
+    let program = key_of(&f["program"]);
+    let mut svm = LiteSVM::new();
+    svm.add_program_from_file(program, so_path()).unwrap();
+    let min0 = svm.minimum_balance_for_rent_exemption(0);
+    let pool = key_of(&f["pool"]);
+    let p0 = pda(&[b"page", &[0], &0u32.to_le_bytes()], &program);
+    let p1 = pda(&[b"page", &[1], &0u32.to_le_bytes()], &program);
+    for a in [pool, p0, p1] {
+        svm.airdrop(&a, min0).unwrap();
+    }
+    let depositor = Keypair::new();
+    svm.airdrop(&depositor.pubkey(), 10_000_000_000).unwrap();
+    let (w, w2, fee_payer) = (test_key("W"), test_key("W2"), test_key("FEE_PAYER"));
+    let mut env = Env { svm, program, pool, depositor, w, w2, fee_payer, f };
+    let init = Instruction {
+        program_id: program,
+        accounts: vec![AccountMeta::new(pool, false), AccountMeta::new(env.depositor.pubkey(), true), AccountMeta::new_readonly(SYSTEM, false)],
+        data: vec![0],
+    };
+    let d = env.depositor.insecure_clone();
+    send(&mut env, &[init], &d.pubkey(), &[&d]).expect("init on a funded address");
+    assert_eq!(lamports(&env, &pool), env.svm.minimum_balance_for_rent_exemption(POOL_LEN));
+    let pre = h32(&format!("{:064x}", 4244));
+    deposit(&mut env, 1_000_000, &pre, 0, 0).expect("the first deposit on funded page addresses");
+    for a in [p0, p1] {
+        let acc = env.svm.get_account(&a).unwrap();
+        assert_eq!((acc.owner, acc.data.len(), acc.lamports), (program, 16 + ENTRY, env.svm.minimum_balance_for_rent_exemption(16 + ENTRY)));
+    }
+}
+
+/// Row 13's books: `spent` grows by withdrawnValue, and the pool holds exactly its rent plus what the notes hold.
+#[test]
+fn a_release_counts_what_it_spends() {
+    let mut env = with_deposits();
+    let deposited: u128 =
+        env.f["deposits"].as_array().unwrap().iter().map(|d| d["value"].as_str().unwrap().parse::<u128>().unwrap()).sum();
+    assert_eq!((pool_u128(&env, 17), pool_u128(&env, 33)), (deposited, 0));
+    let r = rel(&env, "release");
+    release(&mut env, &r).expect("release");
+    assert_eq!((pool_u128(&env, 17), pool_u128(&env, 33)), (deposited, r.withdrawn as u128));
+    let rent = env.svm.minimum_balance_for_rent_exemption(POOL_LEN) as u128;
+    assert_eq!(lamports(&env, &env.pool) as u128, rent + deposited - r.withdrawn as u128);
+}
