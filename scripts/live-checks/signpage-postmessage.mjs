@@ -29,13 +29,12 @@
 //     (default: packages/signpage built as packages/signpage/scripts/deploy.mjs builds it), as frame.e2e.mjs does
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
 import "../net-window.mjs";
-import { copyFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readList } from "../../packages/signpage/scripts/check-signpage.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -54,6 +53,18 @@ export const QUOTE_CODES = ["not_allowed", "above_max", "busy", "down", "quote_c
 // ------------------------------------------------------------------------------------------------ the verdict
 /** Each parent and the headers it is judged under: APP_HOST as served, every stranger as served and lifted. */
 const CASES = [[APP_HOST, ["served"]], ...STRANGERS.map((p) => [p, ["served", "lifted"]])];
+
+/** The release lists, read as data (packages/signpage/releases/release-<N>.json; the newest by N by default). */
+const RELEASES = path.join(REPO, "packages/signpage/releases");
+function readList(tag) {
+  if (!tag) {
+    const n = readdirSync(RELEASES).map((f) => /^release-([1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean).map(Number);
+    if (!n.length) throw new Error(`no release list in ${RELEASES}`);
+    tag = `release-${Math.max(...n)}`;
+  }
+  if (!/^release-[1-9][0-9]*$/.test(tag)) throw new Error(`${tag}: a release is named release-<N>`);
+  return JSON.parse(readFileSync(path.join(RELEASES, `${tag}.json`), "utf8"));
+}
 
 /** SIGN_HOST's /app.js pin in the release list `tag` (the newest by default): { release, sha256 }. */
 export function releasePin(tag = null) {
