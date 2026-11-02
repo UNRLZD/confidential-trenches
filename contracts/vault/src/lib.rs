@@ -20,6 +20,7 @@ pub mod payout;
 pub mod poseidon;
 pub mod prepay;
 pub mod promise;
+pub mod settle;
 pub mod tree;
 pub mod verifier;
 pub mod verifier_keys;
