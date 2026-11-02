@@ -173,6 +173,23 @@ test("HELD until sent or dropped: take writes RESERVED before handing out; drop 
   assert.deepEqual(q2.ready(), []);
 });
 
+test("a ready proof whose note the store moved elsewhere is let go: spent by another device, or freed by another tab", async () => {
+  const v = await vaultWith([usd(2), usd(5)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool);
+  await q.refresh();
+  const [a, b] = q.ready();
+  // the sync saw another device's spend of a; another tab freed b past its deadline less the 30 s send margin
+  await v.ns.move(a!.noteId, "HELD", "SPENT");
+  await v.ns.move(b!.noteId, "HELD", "UNSPENT", { blockTimeMs: b!.binding.deadlineMs - 29_999n });
+  const pass = await q.refresh();
+  assert.deepEqual(pass.failed, []);
+  assert.deepEqual(pass.made, [b!.noteId]); // proved again under a new attempt
+  assert.deepEqual(q.ready().map((r) => r.noteId), [b!.noteId]);
+  assert.notEqual(q.ready()[0]!.attempt, b!.attempt);
+  await assert.rejects(q.take(a!.noteId), /no ready proof/);
+});
+
 test("a proof dropped while it is made is not kept, and its note is freed", async () => {
   const v = await vaultWith([usd(2)]);
   let release = (): void => {};
@@ -180,7 +197,10 @@ test("a proof dropped while it is made is not kept, and its note is freed", asyn
   const slow: VaultProver = { load: inner.load, prove: async (c, i) => (await new Promise<void>((r) => (release = r)), inner.prove(c, i)) };
   const q = queue(v, fakePool(v), [slow]);
   const running = q.refresh();
-  while ((await v.ns.list())[0]!.state !== "HELD") await new Promise((r) => setTimeout(r, 1));
+  for (let k = 0; (await v.ns.list())[0]!.state !== "HELD"; k++) {
+    assert.ok(k < 2_000, "the note is HELD before its proof starts");
+    await new Promise((r) => setTimeout(r, 1));
+  }
   await q.drop(v.notes[0]!.id);
   release();
   const pass = await running;
@@ -294,6 +314,23 @@ test("another pool's notes are not this pool's: the queue proves only notes of i
   const pool = { ...fakePool(v), scope: SCOPE + 1n };
   const q = queue(v, pool);
   assert.deepEqual((await q.refresh()).made, []);
+});
+
+test("a pool whose fixed fields are not what the queue relies on is refused when the queue opens", async () => {
+  const v = await vaultWith([usd(2)]);
+  const good = fakePool(v);
+  const cases: [string, object, RegExp][] = [
+    ["no id", { id: "" }, /no id/],
+    ["unknown chain", { chain: "btc" }, /unknown chain/],
+    ["scope at p", { scope: VAULT_FIELD_P }, /scope is not a field element/],
+    ["no margin", { remakeMarginMs: 0n }, /remakeMarginMs/],
+    ["no context function", { bind: undefined }, /bind is not a function/],
+    ["no tree source", { trees: undefined }, /trees is not a function/],
+    ["no time", { now: undefined }, /now is not a function/],
+    ["ladder off the rungs", { ladder: { one: 1_000_000n, min: 3_000_000n } }, /min is not a rung/],
+  ];
+  for (const [what, over, err] of cases) assert.throws(() => queue(v, { ...good, ...over } as Fake), err, what);
+  assert.throws(() => queue(v, good, []), /provers: at least one/);
 });
 
 // ---------- the NEAR vault as the first pool ----------

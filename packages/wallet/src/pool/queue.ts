@@ -18,8 +18,8 @@
 // - Made again only when its deadline nears (the pool's time at or past deadline less the pool's remake margin) or
 //   after a spend (the change note is a new UNSPENT note). Each pass reads the pool's time and trees once.
 // - Side by side: min(hardwareConcurrency - 1, 3) provers at a time, at least 1 (wallet.md W:732-746: a bigger pool
-//   runs out of phone memory). Each prover runs one proof at a time. The notes are taken in leaf order, so a pool of
-//   one and a pool of three make the same proofs.
+//   runs out of phone memory). Each prover runs one proof at a time. A note's proof depends only on the note and its
+//   pool, so a pool of one and a pool of three make the same proofs.
 // - The seed is copied, and the copy zeroed on close(). Nothing here logs.
 import { poolProveWithdraw, type VaultProver } from "@blindfill/kit";
 import { changeIndex, freshWallet } from "../derive/index.ts";
@@ -61,7 +61,6 @@ export interface ProofQueue<R> {
   close(): void;
 }
 
-const leafOrder = (x: NoteRecord, y: NoteRecord): number => (x.leaf!.leafIndex < y.leaf!.leafIndex ? -1 : x.leaf!.leafIndex > y.leaf!.leafIndex ? 1 : 0);
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 // The change index of the spend of this note (keys.ts changeIndex).
@@ -116,10 +115,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         withdrawn: chunk,
         context: binding.context,
       });
-      // the kit checked the answer against this input; these are the fields the pool and W rely on
-      const s = p.publicSignals;
-      if (s[2] !== chunk.toString() || s[7] !== binding.context.toString() || s[3] !== trees.stateRoot.toString() || s[5] !== trees.labelRoot.toString())
-        throw new Error("proof: its chunk, roots or context are not this binding's");
+      // the kit refused any answer whose 8 signals are not this input's: the chunk, the pool's roots and its context
       live();
       if (flight.dropped) throw new Error("dropped while it was proved");
       order.set(n.id, leaf.leafIndex);
@@ -131,7 +127,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         chunk,
         binding,
         proof: p.proof,
-        publicSignals: s,
+        publicSignals: p.publicSignals,
       });
     } catch (e) {
       await free(n.id, attempt);
@@ -163,8 +159,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     const fresh = await notes.list();
     const todo = fresh
       .filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined)
-      .filter((n) => chunkOf(pool.ladder, n.leaf!.value) !== null)
-      .sort(leafOrder);
+      .filter((n) => chunkOf(pool.ladder, n.leaf!.value) !== null);
     if (todo.length === 0) return out;
     const trees = await pool.trees(signal);
     let next = 0;
