@@ -30,8 +30,9 @@ if (!process.argv.includes("--dry")) {
   console.error("this script runs only with --dry: it simulates and never sends");
   process.exit(2);
 }
-// The two providers are neither of the send paths: provider A is PublicNode's keyless Solana RPC (answered
-// getBlockHeight and isBlockhashValid from the Mac on 2026-11-02 02:58Z), provider B the second public RPC the kit's
+// The two providers are neither of the send paths: provider A is PublicNode's keyless Solana RPC (from the Mac between
+// 2026-11-02T03:06:03Z and 03:06:04Z by date -u, isBlockhashValid and getSignatureStatuses with
+// searchTransactionHistory true answered, slots 464337815-16, each echoing its string id), provider B the second public RPC the kit's
 // quote fixtures were read on (test/fixtures/solana-capture.mjs:7). The public RPC stays a send path only.
 const PROVIDER_A = "https://solana-rpc.publicnode.com";
 const PROVIDER_B = "https://public.rpc.solanavibestation.com";

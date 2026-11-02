@@ -40,12 +40,15 @@ type Status = null | { confirmationStatus: "processed" | "confirmed" | "finalize
 // A fake provider, one bank: its finalized block height and slot (getLatestBlockhash at finalized answers the slot and
 // height + 150, Agave's MAX_PROCESSING_AGE), the processed slot its status and isBlockhashValid answers carry, whether
 // the tx's blockhash is still valid at processed, and per-signature statuses, with a separate answer under
-// searchTransactionHistory: true when `hist` has one. It records every call.
+// searchTransactionHistory: true when `hist` has one. Its first isBlockhashValid answer is true (`trueFirst`), as for
+// a fresh blockhash, so a later false reads as "valid, then expired"; a test of a hash never read valid turns it off.
+// It records every call.
 type FakeProvider = {
   height: number;
   slot: number;
   statusSlot: number;
   validSlot: number | null;
+  trueFirst: boolean;
   valid: boolean;
   statusAnswer: unknown;
   hang: boolean;
@@ -61,6 +64,7 @@ function provider(): FakeProvider {
     slot: 1_000,
     statusSlot: 2_000,
     validSlot: null, // isBlockhashValid answers from statusSlot unless set
+    trueFirst: true,
     valid: true,
     statusAnswer: undefined as unknown, // when set, answered as is (a hostile reply)
     hang: false,
@@ -83,7 +87,8 @@ function provider(): FakeProvider {
       }
       if (method === "isBlockhashValid") {
         if (params[0] !== BLOCKHASH) throw new Error(`isBlockhashValid on ${String(params[0])}`);
-        return { context: { slot: p.validSlot ?? p.statusSlot }, value: p.valid };
+        const first = !p.calls.slice(0, -1).some((c) => c.method === "isBlockhashValid");
+        return { context: { slot: p.validSlot ?? p.statusSlot }, value: first && p.trueFirst ? true : p.valid };
       }
       if (method === "simulateTransaction") return { context: { slot: 1 }, value: { err: null, unitsConsumed: 450, logs: [] } };
       throw new Error(`unexpected ${method}`);
@@ -456,7 +461,7 @@ test("High (R1): a tx that landed at 1 s and left the status cache is read with 
     if (now < downUntil) throw new Error("HTTP 429");
     if (method === "getBlockHeight") return 600;
     if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "h", lastValidBlockHeight: 750 } };
-    if (method === "isBlockhashValid") return { context: { slot: 2_000 }, value: false };
+    if (method === "isBlockhashValid") return { context: { slot: 2_000 }, value: now < 30_000 }; // a blockhash lives ~32 s
     if (method === "getSignatureStatuses") {
       const hist = (params[1] as { searchTransactionHistory?: boolean }).searchTransactionHistory;
       flags.push(hist);
@@ -609,5 +614,147 @@ test("a provider that once read the tx landed never calls it dead, even when a l
   a.height = b.height = 600;
   a.valid = b.valid = false;
   await advance(20_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
+});
+
+// ---- the Opus re-check of 8bdcb6c (N1 ported from its repro2)
+
+test("Medium (N1): a false isBlockhashValid from a provider that never read the hash as valid is not expiry", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  // Agave answers false for a hash its bank does not hold at all (blockhash_queue.rs:98-108 at v4.3.2), the same as
+  // for an expired one: a node a few slots behind the fresh hash's block answers false. B is hostile.
+  const honestA: SolanaRpc = async (method, params) => {
+    if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "f", lastValidBlockHeight: 750 } };
+    if (method === "isBlockhashValid") return { context: { slot: 2_090 }, value: false };
+    if (method === "getSignatureStatuses") return { context: { slot: 2_110 }, value: (params[0] as string[]).map(() => null) };
+    throw new Error(method);
+  };
+  const hostileB: SolanaRpc = async (method, params) => {
+    if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "f", lastValidBlockHeight: 750 } };
+    if (method === "isBlockhashValid") return { context: { slot: 1_000 }, value: false };
+    if (method === "getSignatureStatuses") return { context: { slot: 9_999 }, value: (params[0] as string[]).map(() => null) };
+    throw new Error(method);
+  };
+  const h = sendSolanaSet([tx(121, 500)], { ...opts, providers: [honestA, hostileB], deadlineMs: 10_000 });
+  await advance(10_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
+});
+
+test("Medium (N1 control): valid at slot 1500, then false at 2500, on both providers, is expiry", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const seen = [0, 0];
+  const prov = (k: 0 | 1): SolanaRpc => async (method, params) => {
+    if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "f", lastValidBlockHeight: 750 } };
+    if (method === "isBlockhashValid") return seen[k]!++ === 0 ? { context: { slot: 1_500 }, value: true } : { context: { slot: 2_500 }, value: false };
+    if (method === "getSignatureStatuses") return { context: { slot: 2_600 }, value: (params[0] as string[]).map(() => null) };
+    throw new Error(method);
+  };
+  const h = sendSolanaSet([tx(122, 500)], { ...opts, providers: [prov(0), prov(1)], deadlineMs: 10_000 });
+  await advance(10_000);
+  assert.equal((await h.done).txs[0]!.state, "expired");
+});
+
+test("Medium: the blockhash is read from the first dead cycle on, before the height is past", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const h = sendSolanaSet([tx(123, 5_000)], { ...opts, deadlineMs: 3_000 }); // heights 0: far from past
+  await advance(3_000);
+  await h.done;
+  for (const p of [a, b]) assert.ok(p.calls.some((c) => c.method === "isBlockhashValid"), "isBlockhashValid read at the first cycle");
+});
+
+test("a valid answer from a bank above the later false one does not make it valid-then-expired", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const seen = [0, 0];
+  const prov = (k: 0 | 1): SolanaRpc => async (method, params) => {
+    if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "f", lastValidBlockHeight: 750 } };
+    if (method === "isBlockhashValid") return seen[k]!++ === 0 ? { context: { slot: 3_000 }, value: true } : { context: { slot: 2_500 }, value: false };
+    if (method === "getSignatureStatuses") return { context: { slot: 2_600 }, value: (params[0] as string[]).map(() => null) };
+    throw new Error(method);
+  };
+  const h = sendSolanaSet([tx(124, 500)], { ...opts, providers: [prov(0), prov(1)], deadlineMs: 10_000 });
+  await advance(10_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
+});
+
+// ---- the 1-rps lanes, through solanaSendPaths' own Sender and Jito objects and a fake fetch that refuses a second
+// request to one URL within 1 s (Helius and Jito count refused requests too)
+function oneRpsFetch() {
+  const last = new Map<string, number>();
+  const log: { url: string; at: number; b64: string; ok: boolean }[] = [];
+  const fetchFn = (url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { id: string; params: [string] };
+    const now = Date.now();
+    const limited = url === SOLANA_SENDER_FAST_URL || url === SOLANA_JITO_TRANSACTIONS_URL;
+    const ok = !limited || now - (last.get(url) ?? -Infinity) >= 1_000;
+    if (limited) last.set(url, now);
+    log.push({ url, at: now, b64: body.params[0], ok });
+    if (!ok) return Promise.resolve(new Response("{}", { status: 429 }));
+    const sig = base58.encode(base64.decode(body.params[0]).subarray(1, 65));
+    return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: sig })));
+  };
+  return { fetchFn, log };
+}
+
+test("solanaSendPaths' Sender and Jito through sendSolanaSet on a 1-rps fake: no refusal, every tx on both within 4 s, never the same tx in the same second", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const { fetchFn, log } = oneRpsFetch();
+  const set = [tx(131), tx(132), tx(133)];
+  const h = sendSolanaSet(set, { ...opts, paths: solanaSendPaths({ fetch: fetchFn }) });
+  await advance(4_000);
+  h.stop();
+  await h.done;
+  const lane = (u: string) => log.filter((l) => l.url === u);
+  for (const u of [SOLANA_SENDER_FAST_URL, SOLANA_JITO_TRANSACTIONS_URL]) {
+    assert.ok(lane(u).every((l) => l.ok), `${u}: nothing refused`);
+    for (const s of set) assert.ok(lane(u).some((l) => l.b64 === base64.encode(s.wire)), `${u} carried every tx`);
+  }
+  for (const s of lane(SOLANA_SENDER_FAST_URL)) {
+    const j = lane(SOLANA_JITO_TRANSACTIONS_URL).find((l) => Math.floor(l.at / 1_000) === Math.floor(s.at / 1_000));
+    if (j) assert.notEqual(j.b64, s.b64, `second ${Math.floor(s.at / 1_000)}: Sender and Jito carry different txs`);
+  }
+});
+
+test("two sets at once on the same 1-rps URLs stay at 1 request a second per URL together", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const { fetchFn, log } = oneRpsFetch();
+  const h1 = sendSolanaSet([tx(141), tx(142)], { ...opts, paths: solanaSendPaths({ fetch: fetchFn }) });
+  const h2 = sendSolanaSet([tx(143), tx(144)], { ...opts, paths: solanaSendPaths({ fetch: fetchFn }) });
+  await advance(6_000);
+  h1.stop();
+  h2.stop();
+  await Promise.all([h1.done, h2.done]);
+  for (const u of [SOLANA_SENDER_FAST_URL, SOLANA_JITO_TRANSACTIONS_URL]) {
+    const at = log.filter((l) => l.url === u).map((l) => l.at);
+    assert.ok(log.filter((l) => l.url === u).every((l) => l.ok), `${u}: nothing refused`);
+    assert.ok(at.length >= 5, `${u} kept sending: ${at.length}`);
+    for (const x of [141, 142, 143, 144]) assert.ok(log.some((l) => l.url === u && l.b64 === base64.encode(tx(x).wire)), `${u} carried tx ${x}`);
+  }
+});
+
+test("a later valid read clears an earlier expired one: a provider that reads the hash valid again is not dead", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts } = setup();
+  const seen = [0, 0];
+  const answers = [{ slot: 1_500, value: true }, { slot: 2_500, value: false }];
+  const prov = (k: 0 | 1): SolanaRpc => async (method, params) => {
+    if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "f", lastValidBlockHeight: 750 } };
+    if (method === "isBlockhashValid") {
+      const n = seen[k]!++;
+      // A: valid, expired, then valid again from the next bank on (a fork, or a node ahead). B: valid twice, then
+      // expired. Without the clear, A's one expired read and B's later one would together make it dead.
+      const a = k === 0 ? (n < 2 ? answers[n]! : { slot: 2_600, value: true }) : n < 2 ? answers[0]! : answers[1]!;
+      return { context: { slot: a.slot }, value: a.value };
+    }
+    if (method === "getSignatureStatuses") return { context: { slot: 2_700 }, value: (params[0] as string[]).map(() => null) };
+    throw new Error(method);
+  };
+  const h = sendSolanaSet([tx(125, 500)], { ...opts, providers: [prov(0), prov(1)], deadlineMs: 12_000 });
+  await advance(12_000);
   assert.equal((await h.done).txs[0]!.state, "unknown");
 });

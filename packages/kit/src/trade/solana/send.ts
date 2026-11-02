@@ -5,19 +5,22 @@
 //
 // - Send: in the first tick, before sendSolanaSet returns, every tx goes to every path without a rate limit (a public
 //   RPC, and the helper's `/v1/rpc/solana` `sendTransaction`, keyed on the helper's side, when the app has a helper),
-//   and the set's first tx to each 1-request-a-second path (keyless Helius Sender `/fast?swqos_only=true` and the Jito
-//   block engine `/api/v1/transactions`, whose limits count refused requests too). A path that is down, refusing or
-//   slow is recorded and holds nothing else back.
-// - Rebroadcast: every SOLANA_REBROADCAST_MS (2 s, the paper's DESIGN interval from P4S) on the unlimited paths; one tx
-//   a second on each 1-rps path, rotating through the undecided txs. A tx is never sent again once it is decided, or
+//   and one tx to each 1-request-a-second path whose URL has had no request in the last second (keyless Helius Sender
+//   `/fast?swqos_only=true` gets the set's first tx, the Jito block engine `/api/v1/transactions` its second; both
+//   limits count refused requests too). A path that is down, refusing or slow is recorded and holds nothing back.
+// - Rebroadcast: every SOLANA_REBROADCAST_MS (2 s, the paper's DESIGN interval from P4S) on the unlimited paths; on
+//   each 1-rps URL one request a second, shared by every set in flight on this page (one pacer per URL), each set
+//   rotating through its undecided txs. A tx is never sent again once it is decided, or
 //   once both providers' finalized height is past its lastValidBlockHeight and both read its blockhash as no longer
 //   valid at `processed` (06c §3.4).
 // - Fill: read on two providers (the same [A, B] pair the quote checks read, checks/solana/checks.ts SolanaQuoteReads;
 //   §2.0 LD1: at least one device-direct, the second may be the helper's /v1/rpc), never the same one twice. A tx is
 //   filled only when both have read it at `confirmed` or `finalized` with no error, failed only when both read it
 //   landed with an error. Dead (expired) follows 06c A4 (06c-chain-adapters.md l.98), on each provider: its finalized
-//   height past lastValidBlockHeight, its blockhash not valid at `processed` (so a lowered lastValidBlockHeight from
-//   whoever built the tx cannot make a live tx look dead), and then a status read with searchTransactionHistory: true
+//   height past lastValidBlockHeight, its blockhash read valid and then, from a bank at or above that one, no longer
+//   valid at `processed` (so a lowered lastValidBlockHeight from whoever built the tx cannot make a live tx look dead;
+//   valid first, because Agave answers false alike for an expired hash and for one its bank does not hold yet,
+//   accounts-db blockhash_queue.rs:98-108 at v4.3.2), and then a status read with searchTransactionHistory: true
 //   (so a landing older than the status cache's 300 roots is still found) that has no signature, taken from a bank at
 //   or past the slot the height and the blockhash check were read at (so a node behind a load balancer that has not
 //   replayed the landing block cannot answer it). Anything else, one provider's word included, decides nothing; at
@@ -34,14 +37,14 @@ import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
 // Helius Sender, the global HTTPS endpoint with the SWQoS-only route: https://www.helius.dev/docs/sending-transactions/sender.md
 // ("https://sender.helius-rpc.com/fast # Global HTTPS endpoint", which "resolves CORS preflight failures ... with
 // browser-based applications"; "Add `?swqos_only=true` to any endpoint URL"; keyless "limited to 1 request per second").
-// Its preflight answered Access-Control-Allow-Origin: * on 2026-11-02 01:56Z.
+// Its preflight answered Access-Control-Allow-Origin: * between 2026-11-02 01:54Z and 01:57Z (date -u before and after the read).
 export const SOLANA_SENDER_FAST_URL = "https://sender.helius-rpc.com/fast?swqos_only=true";
 // The Jito block engine's sendTransaction: https://docs.jito.wtf/lowlatencytxnsend/ ("this method always sets
 // skip_preflight=true"; its examples send params [tx, { encoding }] only). Its preflight from the app's origin answered
-// that origin on 2026-11-02 01:56Z.
+// that origin between 2026-11-02 01:54Z and 01:57Z (date -u before and after the read).
 export const SOLANA_JITO_TRANSACTIONS_URL = "https://mainnet.block-engine.jito.wtf/api/v1/transactions";
 // The public mainnet RPC: https://solana.com/docs/references/clusters (100 requests per 10 s per IP). Its preflight
-// from the app's origin answered that origin on 2026-11-02 01:56Z.
+// from the app's origin answered that origin between 2026-11-02 01:54Z and 01:57Z (date -u before and after the read).
 export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com";
 
 /** The paper's rebroadcast interval (T2.1, DESIGN from P4S). */
@@ -75,7 +78,13 @@ export type SolanaFetch = (url: string, init: RequestInit) => Promise<Response>;
 export type SolanaRpc = ((method: string, params: readonly unknown[]) => Promise<unknown>) & { readonly url?: string };
 /** One send path: posts the base64 bytes, resolves the signature the path answered. A path with `minIntervalMs` gets
  * one tx per that interval, rotating through the set; one without gets every tx every rebroadcast. */
-export type SolanaSendPath = { readonly name: string; readonly send: (base64Tx: string) => Promise<string>; readonly minIntervalMs?: number };
+export type SolanaSendPath = {
+  readonly name: string;
+  readonly send: (base64Tx: string) => Promise<string>;
+  readonly minIntervalMs?: number;
+  /** Paths with the same paceKey (the URL, for solanaSendPaths' own) share one pacer across every set in flight. */
+  readonly paceKey?: string;
+};
 /** A tx the device signed, and the lastValidBlockHeight of its blockhash from the device's own getLatestBlockhash. */
 export type SolanaSignedTx = { readonly wire: Uint8Array; readonly lastValidBlockHeight: number };
 
@@ -195,7 +204,7 @@ const SEND_CONFIG = { encoding: "base64", skipPreflight: true, maxRetries: 0 } a
 function rpcPath(name: string, rpc: SolanaRpc, config: Record<string, unknown>, minIntervalMs?: number): SolanaSendPath {
   return {
     name,
-    ...(minIntervalMs === undefined ? {} : { minIntervalMs }),
+    ...(minIntervalMs === undefined ? {} : { minIntervalMs, ...(rpc.url ? { paceKey: rpc.url } : {}) }),
     send: (b64) => rpc("sendTransaction", [b64, config]).then((sig) => {
       if (typeof sig !== "string") throw new Error("the path answered no signature");
       return sig;
@@ -216,6 +225,69 @@ export function solanaSendPaths(opts: { helper?: SolanaRpc | null; rpcUrl?: stri
   ];
   if (opts.helper) paths.push(rpcPath("helper", opts.helper, SEND_CONFIG));
   return paths;
+}
+
+// One pacer per 1-rps URL (or per path object without a paceKey), shared by every set in flight: at most one request
+// per interval, each turn going to the next set that has a tx to send. A request is never sent sooner than one
+// interval after the last; a set that joins a pacer idle for an interval sends at once.
+type PaceClient = () => (() => void) | null;
+type Pacer = { interval: number; last: number; idleUntil: number; clients: PaceClient[]; turn: number; timer: ReturnType<typeof setTimeout> | undefined };
+const pacers = new Map<unknown, Pacer>();
+
+function paceFire(p: Pacer): boolean {
+  const n = p.clients.length;
+  for (let k = 0; k < n; k++) {
+    const send = p.clients[(p.turn + k) % n]!();
+    if (send) {
+      p.turn = (p.turn + k + 1) % n;
+      p.last = Date.now();
+      send();
+      return true;
+    }
+  }
+  return false;
+}
+
+function paceArm(p: Pacer): void {
+  if (p.timer !== undefined || p.clients.length === 0) return;
+  const now = Date.now();
+  if (p.last > now) p.last = -Infinity; // a clock that went back
+  if (p.idleUntil > now + p.interval) p.idleUntil = 0;
+  p.timer = setTimeout(() => {
+    p.timer = undefined;
+    const t = Date.now();
+    // A timer that fires early (some browsers do, by a millisecond) sends nothing and re-arms for the rest.
+    if (t - p.last >= p.interval && !paceFire(p)) p.idleUntil = t + p.interval; // nothing to send: look again in one interval
+    paceArm(p);
+  }, Math.max(0, p.last + p.interval - now, p.idleUntil - now));
+}
+
+/** Joins `client` to the pacer of `key`; returns the leave call. */
+function paceJoin(key: unknown, interval: number, client: PaceClient): () => void {
+  let p = pacers.get(key);
+  if (!p) {
+    p = { interval, last: -Infinity, idleUntil: 0, clients: [], turn: 0, timer: undefined };
+    pacers.set(key, p);
+  }
+  const pacer = p;
+  pacer.interval = Math.max(pacer.interval, interval);
+  pacer.clients.push(client);
+  const now = Date.now();
+  if (pacer.last > now) pacer.last = -Infinity;
+  pacer.idleUntil = 0;
+  if (now - pacer.last >= pacer.interval && paceFire(pacer) && pacer.timer !== undefined) {
+    clearTimeout(pacer.timer);
+    pacer.timer = undefined;
+  }
+  paceArm(pacer);
+  return () => {
+    const i = pacer.clients.indexOf(client);
+    if (i >= 0) pacer.clients.splice(i, 1);
+    if (pacer.clients.length === 0 && pacer.timer !== undefined) {
+      clearTimeout(pacer.timer);
+      pacer.timer = undefined;
+    }
+  };
 }
 
 type Prepared = { signature: string; b64: string; lvbh: number; blockhash: string };
@@ -312,10 +384,13 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   // - landed: the first landed read of each signature (ok or err). A confirmed tx stays confirmed, so a later null
   //   from a node behind a load balancer, or from a status cache that has dropped it, never takes a landing back.
   // - anchor: its finalized bank's slot and block height (one getLatestBlockhash answer, one bank).
-  // - invalidAt: per blockhash, the slot of the bank that read it as no longer valid at processed.
+  // - validMin: per blockhash, the lowest slot of a bank that read it valid at processed.
+  // - invalidAt: per blockhash, the slot of the bank that read it as no longer valid at processed, counted only after
+  //   a valid read from a bank at or below that slot: valid, then expired. A first-ever false is no answer.
   // - histNone: per signature, the slot of the bank of the latest searchTransactionHistory: true read that had none.
   const landed = [new Map<string, StatusRead>(), new Map<string, StatusRead>()] as const;
   const anchor: [{ slot: number; height: number } | null, { slot: number; height: number } | null] = [null, null];
+  const validMin = [new Map<string, number>(), new Map<string, number>()] as const;
   const invalidAt = [new Map<string, number>(), new Map<string, number>()] as const;
   const histNone = [new Map<string, number>(), new Map<string, number>()] as const;
   const fastInFlight = [false, false];
@@ -377,18 +452,22 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
     for (let i = 0; i < txs.length; i++) if (eligible(i)) for (const p of unlimited) sendOne(i, p, n);
   }
 
-  // Each 1-rps path: one tx per interval, the next eligible one after the last it was given.
-  const cursor = limited.map(() => -1);
+  // Each 1-rps path: when its pacer gives this set a turn, the next eligible tx after the last it was given. The k-th
+  // such path starts at tx k, so Sender and Jito carry different txs of a set in the same second.
+  const cursor = limited.map((_, k) => k - 1);
   const limitedSent = limited.map(() => 0);
-  function sendNext(k: number): void {
+  const nextFor = (k: number): (() => void) | null => {
+    if (over) return null;
     for (let step = 1; step <= txs.length; step++) {
-      const i = (cursor[k]! + step) % txs.length;
+      const i = (((cursor[k]! + step) % txs.length) + txs.length) % txs.length;
       if (!eligible(i)) continue;
-      cursor[k] = i;
-      sendOne(i, limited[k]!, limitedSent[k]!++);
-      return;
+      return () => {
+        cursor[k] = i;
+        sendOne(i, limited[k]!, limitedSent[k]!++);
+      };
     }
-  }
+    return null;
+  };
 
   function record(p: 0 | 1, sig: string, r: StatusRead): void {
     if (r.kind !== "ok" && r.kind !== "err") return;
@@ -452,25 +531,34 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       .finally(() => { fastInFlight[p] = false; });
   }
 
-  // The dead check on p, every rebroadcast: the finalized bank's height and slot; for each undecided tx past its
-  // lastValidBlockHeight there, its blockhash at processed; for each whose blockhash is no longer valid, a status read
-  // with searchTransactionHistory: true. Each step's answer carries its bank's slot, which deadOn compares.
+  // The dead check on p, every rebroadcast: the finalized bank's height and slot; every undecided tx's blockhash at
+  // processed; for each tx past its lastValidBlockHeight there, a status read with searchTransactionHistory: true. Each step's answer carries its bank's slot, which deadOn compares.
   function readDead(p: 0 | 1): void {
     if (deadInFlight[p] || over || backedOff(p)) return;
     deadInFlight[p] = true;
     (async () => {
       const a = readAnchor(await call(p, "getLatestBlockhash", [{ commitment: "finalized" }]));
       if (a && (anchor[p] === null || (a.height >= anchor[p]!.height && a.slot >= anchor[p]!.slot))) anchor[p] = a; // never goes back
-      const cur = anchor[p];
-      if (over || cur === null) return;
-      const behind = txs.map((_, i) => i).filter((i) => !decided[i] && cur.height > txs[i]!.lvbh);
-      for (const bh of new Set(behind.map((i) => txs[i]!.blockhash))) {
+      if (over) return;
+      // Every undecided tx's blockhash, from the first cycle on, so a fresh hash is read valid before it can read expired.
+      const open = txs.map((_, i) => i).filter((i) => !decided[i]);
+      for (const bh of new Set(open.map((i) => txs[i]!.blockhash))) {
         const v = readValid(await call(p, "isBlockhashValid", [bh, { commitment: "processed" }]));
         if (!v) continue;
-        if (v.valid) invalidAt[p].delete(bh);
-        else invalidAt[p].set(bh, v.slot);
+        if (v.valid) {
+          invalidAt[p].delete(bh);
+          const m = validMin[p].get(bh);
+          if (m === undefined || v.slot < m) validMin[p].set(bh, v.slot);
+        } else {
+          const m = validMin[p].get(bh);
+          if (m !== undefined && m <= v.slot) invalidAt[p].set(bh, v.slot);
+        }
       }
-      const check = behind.filter((i) => invalidAt[p].has(txs[i]!.blockhash));
+      const cur = anchor[p];
+      if (over || cur === null) return;
+      // Every tx past its lastValidBlockHeight on this bank is read with the history: it can find a landing the status
+      // cache has dropped (a fill) whatever the blockhash reads; it counts toward dead only through deadOn's gates.
+      const check = open.filter((i) => !decided[i] && cur.height > txs[i]!.lvbh);
       if (over || check.length === 0) return;
       const got = await statuses(p, check, true);
       if (over || !got) return;
@@ -487,11 +575,10 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   }
 
   broadcast(); // the first send, in this tick, before anything is awaited
-  limited.forEach((_, k) => sendNext(k));
+  const leaves = limited.map((p, k) => paceJoin(p.paceKey ?? p, p.minIntervalMs!, () => nextFor(k)));
   const timers = [
     setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs),
     setInterval(() => { readFast(0); readFast(1); }, pollMs),
-    ...limited.map((p, k) => setInterval(() => sendNext(k), p.minIntervalMs)),
   ];
   const deadline = setTimeout(end, deadlineMs);
 
@@ -499,6 +586,7 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
     if (over) return;
     over = true;
     for (const t of timers) clearInterval(t);
+    for (const leave of leaves) leave();
     clearTimeout(deadline);
     finish({ txs: outcomes });
   }
