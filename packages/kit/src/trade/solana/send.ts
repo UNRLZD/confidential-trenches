@@ -94,6 +94,9 @@ const queueOfUrl = new Map<string, RpcQueue>();
 const queueOfFn = new WeakMap<SolanaRpc, RpcQueue>();
 const bareOf = new WeakMap<SolanaRpc, SolanaRpc>();
 const WINDOW_MAX_MS = 60_000;
+// The queue's clock: monotonic, so a step of the wall clock (an NTP fix, a user changing the time) can never make the
+// calls in a window look older than they are and let one more through.
+const queueNow = (): number => performance.now();
 // A URL as one key whatever its spelling (a trailing slash, the case of the host), so one provider is one queue.
 const urlKeys = new Map<string, string>();
 function urlKey(u: string): string {
@@ -133,39 +136,66 @@ function queueWith(rpc: SolanaRpc, limit: SolanaRpcLimit): RpcQueue {
 function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: (params: readonly unknown[]) => Promise<unknown>; wait: Promise<void> | null } {
   const queue = queueWith(rpc, limit);
   const bare = bareOf.get(rpc) ?? rpc;
-  const now = Date.now();
+  const now = queueNow();
   queue.slots = queue.slots.filter((x) => !x.started || x.t > now - WINDOW_MAX_MS);
   const slot: RpcSlot = { t: fitsAt(queue.slots, queue.limits.values(), method, Math.max(now, queue.lastOf.get(method) ?? 0)), method, started: false };
   queue.lastOf.set(method, slot.t);
   queue.slots.push(slot);
-  // Started only when the calls that really went out leave room for it.
-  const ready = (): number => {
-    const at = Date.now();
-    const t = fitsAt(queue.slots.filter((x) => x.started), queue.limits.values(), method, at);
-    if (t <= at) { slot.t = at; slot.started = true; }
-    return t - at;
+  // How long until the calls that really went out leave room for this one (0: now).
+  const room = (): number => {
+    const at = queueNow();
+    return fitsAt(queue.slots.filter((x) => x.started), queue.limits.values(), method, at) - at;
   };
-  // The call itself, its start time taken again as it goes out (a later one is counted from then, never sooner).
+  // The call itself: checked against the calls that went out, then marked started and sent in the same tick, so no
+  // other call is let through on a start time this one has not kept (a caller that runs it late waits again).
   const run = (params: readonly unknown[]): Promise<unknown> => {
-    slot.t = Math.max(slot.t, Date.now());
-    return bare(method, params);
+    const ms = room();
+    if (ms > 0) return new Promise<void>((r) => setTimeout(r, ms)).then(() => run(params));
+    slot.t = queueNow();
+    slot.started = true;
+    // Stamped again once the call has been handed over: a pause in between (a GC, a slow tick) then makes the call look
+    // later, never earlier, than it really went out, so the window is counted from the provider's side.
+    try {
+      return bare(method, params);
+    } finally {
+      slot.t = queueNow();
+    }
   };
-  if (slot.t <= now && ready() <= 0) return { run, wait: null };
+  if (slot.t <= now && room() <= 0) return { run, wait: null };
   return {
     run,
     wait: new Promise<void>((resolve) => {
-      const go = () => { const ms = ready(); if (ms <= 0) resolve(); else setTimeout(go, ms); };
+      const go = () => { const ms = room(); if (ms <= 0) resolve(); else setTimeout(go, ms); };
       setTimeout(go, Math.max(0, slot.t - now));
     }),
   };
 }
 /** How long a call of `method` on the provider would wait if asked now (0: it starts at once, behind no call of the
- * method that waits there); it asks nothing and books nothing. */
-function methodWaitMs(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): number {
+ * method that waits there), and how many calls of it, by any caller, are in this limit's window; it asks nothing and
+ * books nothing. */
+function methodRoom(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { waitMs: number; used: number } {
   const queue = queueWith(rpc, limit);
-  const now = Date.now();
-  return Math.max(0, fitsAt(queue.slots, queue.limits.values(), method, Math.max(now, queue.lastOf.get(method) ?? 0)) - now);
+  const now = queueNow();
+  return {
+    waitMs: Math.max(0, fitsAt(queue.slots, queue.limits.values(), method, Math.max(now, queue.lastOf.get(method) ?? 0)) - now),
+    used: queue.slots.filter((x) => x.method === method && x.t > now - limit.windowMs).length,
+  };
 }
+// The fill poll's share of a provider's budget for getSignatureStatuses (keyless: 40 in any 10 s, one signature a read).
+// Young, its first 2 s (most txs land within it), a set reads as fast as its one read in flight a provider allows, held
+// to the budget less the reserve. Then it reads each tx again about every 1.4 s, so a tx that lands is read filled
+// within 2 s with the round trip (a 9-tx set landing at 2.5 s or 4.0 s at 120 ms a call: all 9 in +1.4 s); a 9-tx set
+// still open at 6 s has reached the cap below and reads only as its old reads leave the window (landing at 6 s: +5.7 s;
+// at 8 s: +3.7 s). A set past its young phase leaves 1/10 of the method's budget unread (4 of
+// 40), the reserve: a set that starts later reads from it and from what the older set has not spent at once, through
+// its own young phase (a 3-tx sell landing 0.8 s in beside a stuck 5-tx buy is read filled about 0.4 s after). The txs of
+// one set mostly land in the same or the next slots, so once any of them is read landed the rest are read at the young
+// pace for FILL_HOT_MS, within the budget less the reserve: the reads speed up as the set lands, not slow down as fewer
+// are left to read.
+const FILL_YOUNG_MS = 2_000;
+const FILL_REVISIT_MS = 1_400;
+const FILL_HOT_MS = 1_000;
+const fillReserve = (l: SolanaRpcLimit): number => Math.max(1, Math.floor(l.perMethod / 10));
 /** Provider A's and B's requests a second when keyed; undefined in a place holds that provider to the keyless limit. */
 export type SolanaProviderRps = readonly [number | undefined, number | undefined];
 /** Each provider's limit: its requests a second when the caller names them (a keyed provider), else the keyless one. */
@@ -530,6 +560,7 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const txs = prepare(set, opts);
   const rebroadcastMs = opts.rebroadcastMs ?? SOLANA_REBROADCAST_MS;
   const pollMs = opts.pollMs ?? SOLANA_STATUS_POLL_MS;
+  if (!(typeof pollMs === "number" && Number.isFinite(pollMs) && pollMs > 0)) throw new Error("pollMs must be a number of ms above 0");
   const deadlineMs = opts.deadlineMs ?? SOLANA_SET_DEADLINE_MS;
   const callTimeoutMs = opts.callTimeoutMs ?? SOLANA_CALL_TIMEOUT_MS;
   const limits = solanaProviderLimits(opts.providerRps);
@@ -546,6 +577,8 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   //   answer.
   // - histNone: per signature, the slot of the bank of the latest searchTransactionHistory: true read that had none.
   const landed = [new Map<string, StatusRead>(), new Map<string, StatusRead>()] as const;
+  let landedAt = -Infinity; // when a tx of the set was last first read landed, on either provider
+  const chased = [new Set<string>(), new Set<string>()] as const; // txs read on p first because the other read them landed
   const anchor: [{ slot: number; height: number } | null, { slot: number; height: number } | null] = [null, null];
   const validMin = [new Map<string, number>(), new Map<string, number>()] as const;
   const invalidAt = [new Map<string, number>(), new Map<string, number>()] as const;
@@ -634,7 +667,7 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
 
   function record(p: 0 | 1, sig: string, r: StatusRead): void {
     if (r.kind !== "ok" && r.kind !== "err") return;
-    if (!landed[p].has(sig)) landed[p].set(sig, r);
+    if (!landed[p].has(sig)) { landed[p].set(sig, r); landedAt = Date.now(); }
   }
 
   function deadOn(p: 0 | 1, i: number): boolean {
@@ -678,13 +711,20 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   // is read about every pollMs and the calls are spread over it (fastPeriod), never sent in a burst.
   function readFast(p: 0 | 1): void {
     if (fastInFlight[p] || over || backedOff(p)) return;
-    let i = -1;
-    for (let step = 1; step <= txs.length; step++) {
-      const k = (fastCursor[p]! + step) % txs.length;
-      if (!decided[k]) { i = k; break; }
+    // A tx p has read landed is not read again on p (its first read is the one kept); one the other provider has read
+    // landed goes first, once, so the second read a fill needs follows the first at once; the rest in turn, so a tx
+    // one provider never sees land never holds the others back.
+    const open = (k: number): boolean => !decided[k] && !landed[p].has(txs[k]!.signature);
+    let i = txs.findIndex((t, k) => open(k) && landed[p === 0 ? 1 : 0].has(t.signature) && !chased[p].has(t.signature));
+    if (i >= 0) chased[p].add(txs[i]!.signature);
+    else {
+      for (let step = 1; step <= txs.length; step++) {
+        const k = (fastCursor[p]! + step) % txs.length;
+        if (open(k)) { i = k; break; }
+      }
+      if (i < 0) return;
+      fastCursor[p] = i;
     }
-    if (i < 0) return;
-    fastCursor[p] = i;
     fastInFlight[p] = true;
     status(p, i, false)
       .then((got) => {
@@ -694,8 +734,19 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       }, () => {})
       .finally(() => { fastInFlight[p] = false; });
   }
-  /** The fill poll's period: pollMs over the undecided txs, one read in flight a provider. */
-  const fastPeriod = (): number => pollMs / Math.max(1, decided.filter((d) => !d).length);
+  /** The fill poll's period: pollMs over the txs p still reads, one read in flight a provider, while the set is young
+   * (most txs land within FILL_YOUNG_MS) or one of its txs was just read landed, held to the budget less the reserve;
+   * then each tx read again about every FILL_REVISIT_MS, or as often as the provider's budget for the method less the
+   * reserve sustains for this many txs, whichever is more often (a keyed provider). */
+  const fastPeriod = (p: 0 | 1, young: boolean): number => {
+    const n = Math.max(1, txs.filter((t, k) => !decided[k] && !landed[p].has(t.signature)).length); // the txs p still reads
+    const l = limits[p];
+    // Young, never faster than the budget less the reserve over the young phase (or the window, when shorter), so a set
+    // alone on a provider that answers at once still leaves the reserve unread (keyless: 36 reads in 2 s at most).
+    if (young) return Math.max(pollMs / n, Math.min(FILL_YOUNG_MS, l.windowMs) / Math.max(1, l.perMethod - fillReserve(l)));
+    const sustained = (n * l.windowMs) / Math.max(1, l.perMethod - fillReserve(l));
+    return Math.max(pollMs, Math.min(FILL_REVISIT_MS, sustained)) / n;
+  };
 
   // The dead check on p, every rebroadcast: the finalized bank's height and slot; every undecided tx's blockhash at
   // processed; for each tx past its lastValidBlockHeight there, a status read with searchTransactionHistory: true. Each step's answer carries its bank's slot, which deadOn compares.
@@ -752,18 +803,19 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const leaves = limited.map((p, k) => paceJoin(p.paceKey ?? p, p.minIntervalMs!, () => nextFor(k)));
   const timers = [setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs)];
   const fastTimers: (ReturnType<typeof setTimeout> | undefined)[] = [undefined, undefined];
-  // A fill read is asked only when the provider can start it at once: it never books a later turn, so a lone set reads
-  // at the rate the provider's budget for the method allows, and any other call of the method that waits there (a
-  // history read, another caller's) goes first; with no room the poll waits for the first.
+  // A fill read is asked only when the provider can start it at once: it never books a later turn, so any other call of
+  // the method that waits there (a history read, another caller's) goes first. A set past FILL_YOUNG_MS also leaves the
+  // method's reserve (fillReserve) unread, whoever spent the rest, so a set that starts later always has reads at once.
   const fastTick = (p: 0 | 1): void => {
     if (over) return;
-    const waitMs = methodWaitMs(opts.providers[p], limits[p], "getSignatureStatuses");
-    if (waitMs > 0) { fastTimers[p] = setTimeout(() => fastTick(p), waitMs); return; }
-    readFast(p);
-    fastTimers[p] = setTimeout(() => fastTick(p), fastPeriod());
+    const young = Date.now() - t0 < FILL_YOUNG_MS;
+    const room = methodRoom(opts.providers[p], limits[p], "getSignatureStatuses");
+    if (room.waitMs > 0) { fastTimers[p] = setTimeout(() => fastTick(p), room.waitMs); return; }
+    if (young || room.used < limits[p].perMethod - fillReserve(limits[p])) readFast(p);
+    fastTimers[p] = setTimeout(() => fastTick(p), fastPeriod(p, young || Date.now() - landedAt < FILL_HOT_MS));
   };
-  fastTimers[0] = setTimeout(() => fastTick(0), fastPeriod());
-  fastTimers[1] = setTimeout(() => fastTick(1), fastPeriod());
+  fastTimers[0] = setTimeout(() => fastTick(0), fastPeriod(0, true));
+  fastTimers[1] = setTimeout(() => fastTick(1), fastPeriod(1, true));
   const deadline = setTimeout(end, deadlineMs);
 
   function end(): void {
