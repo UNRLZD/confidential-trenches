@@ -22,7 +22,7 @@ import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-release"];
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-release", "signpage-solana-trade"];
 // the arguments a check is run with after this deploy: signpage-release reads SIGN_HOST alone against this commit's
 // own build, so an APP_HOST that lags does not fail this deploy
 export const LIVE_ARGS = { "signpage-release": "--host sign" };
