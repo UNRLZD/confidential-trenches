@@ -179,6 +179,8 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
   // the arm records of wallets a trade of this page is using: no second trade picks one until the first has ended, and
   // one whose tx is still unknown stays out for the page's life (its money may yet move)
   const busy = new Set<string>();
+  // the picks run one at a time, from the records read to the keys marked busy, so two trades never pick one wallet
+  let picking: Promise<unknown> = Promise.resolve();
   return (params, ctx) => {
     if (params.chain !== "solana") return null;
     const side = params.side as "buy" | "sell";
@@ -226,23 +228,28 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
 
       // a read that fails before the answer refuses the trade; the op says so
       try {
-        const records = (await armRecords(store, "sol")).filter((r) => !busy.has(r.key));
-        let legs: SolanaTradeLeg[];
-        let keys: string[] = [];
-        if (side === "buy") {
-          const set = buyLegs(records, cents);
-          if (!set) return refuse("no_ready_set");
-          ({ legs, keys } = set);
-        } else {
+        const pick = async (): Promise<{ legs: SolanaTradeLeg[]; keys: string[] } | ErrorCode> => {
+          const records = (await armRecords(store, "sol")).filter((r) => !busy.has(r.key));
+          if (side === "buy") return buyLegs(records, cents) ?? "no_ready_set";
           const pos = records.filter((r) => r.rec.role === "fresh" && r.rec.state === "IN_POSITION" && r.rec.token === token);
-          if (pos.length === 0) return refuse("no_position");
+          if (pos.length === 0) return "no_position";
           const held = await heldOnBoth(host.deps.providers, token, pos.map((r) => r.rec.address));
           const split = sellSplit(units, held);
-          if (!split) return refuse("over_held");
-          legs = pos.flatMap((r, i) => (split[i]! > 0n ? [{ wallet: r.rec.address, amount: split[i]!, arm: { own: true } }] : []));
-          keys = pos.flatMap((r, i) => (split[i]! > 0n ? [r.key] : []));
-        }
-        for (const k of keys) busy.add(k);
+          if (!split) return "over_held";
+          return {
+            legs: pos.flatMap((r, i) => (split[i]! > 0n ? [{ wallet: r.rec.address, amount: split[i]!, arm: { own: true } }] : [])),
+            keys: pos.flatMap((r, i) => (split[i]! > 0n ? [r.key] : [])),
+          };
+        };
+        const picked = picking.then(async () => {
+          const p = await pick();
+          if (typeof p !== "string") for (const k of p.keys) busy.add(k);
+          return p;
+        });
+        picking = picked.catch(() => {});
+        const set = await picked;
+        if (typeof set === "string") return refuse(set);
+        const { legs, keys } = set;
         let keep = keys;
         try {
           keep = await legsRun(store, legs, keys, write, refuse);

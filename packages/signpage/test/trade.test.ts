@@ -228,9 +228,8 @@ test("a running trade's wallets are not picked by a second trade; one whose tx i
   const hold = new Promise<void>((r) => (release = r));
   const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 1_000n) });
   const p = page(s, { legState: () => "unknown", hold });
-  await p.ask(buy("10"));
-  await p.ask(buy("10"));
-  assert.deepEqual(p.calls.map((c) => c.legs[0]!.wallet), [W[0]!.address, W[1]!.address], "two trades, two wallets");
+  await Promise.all([p.ask(buy("10")), p.ask(buy("10"))]);
+  assert.deepEqual(p.calls.map((c) => c.legs[0]!.wallet).sort(), [W[0]!.address, W[1]!.address].sort(), "two trades at once, two wallets");
   assert.deepEqual((await p.ask(buy("10"))).answer, { error: "no_ready_set" }, "both in use");
   release();
   await new Promise((r) => setTimeout(r, 20));
