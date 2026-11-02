@@ -44,6 +44,7 @@ if (m.${name}.create) ${name}.create = m.${name}.create;`;
 });
 
 const { depositAccount, NEAR_NETWORKS } = await import("../src/deposit/account.ts");
+const { armingAccount } = await import("../src/arming/accounts.ts");
 const { depositDelegate, DepositDelegateRefused } = await import("../src/deposit/delegate.ts");
 const keys = await import("../src/derive/keys.ts");
 const { noteSecretsFromWords } = await import("../src/notes/secrets.ts");
@@ -77,6 +78,13 @@ test("depositAccount zeroes the copy of U's key it derives for the public side",
   assert.equal(got.length, 1);
   assert.equal(got[0]!.length, 32);
   assert.ok(zero(got[0]!), "depositAccount left U's secret key in memory");
+});
+
+test("armingAccount zeroes the copy of A's key it derives for the public side", () => {
+  const got = only(() => armingAccount(SEED, 1n, 0));
+  assert.equal(got.length, 1);
+  assert.equal(got[0]!.length, 32);
+  assert.ok(zero(got[0]!), "armingAccount left A's secret key in memory");
 });
 
 test("depositDelegate zeroes both copies of U's key: the read's and the signer's, signed or refused", async () => {
