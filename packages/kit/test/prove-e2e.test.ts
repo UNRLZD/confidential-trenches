@@ -203,6 +203,7 @@ test(
     const zkeyPath = `/assets/zk/${ZK_SETUP_FILES["withdraw.zkey"].sha256}.zkey`;
     // the plant of the "once" case: the next withdraw.zkey answer has one byte changed, the ones after it are right
     let badZkeyOnce = false;
+    let badEtag = ""; // the ETag the wrong answer went out with
     const zkeyRequests: { ifNoneMatch: string | null; status: number }[] = [];
     const server: Server = createServer((req, res) => {
       const path = new URL(req.url ?? "/", "http://x").pathname;
@@ -219,6 +220,7 @@ test(
         body[k] = body[k]! ^ 0x01;
       }
       const etag = `"${sha256(body)}"`;
+      if (body !== f.body) badEtag = etag;
       const status = req.headers["if-none-match"] === etag ? 304 : 200;
       if (path === zkeyPath) zkeyRequests.push({ ifNoneMatch: (req.headers["if-none-match"] as string | undefined) ?? null, status });
       res.setHeader("Cache-Control", zkCache);
@@ -294,6 +296,9 @@ test(
       assert.equal(await verify(once.calls[1].result.publicSignals, once.calls[1].result.proof), true);
       assert.equal(zkeyRequests.length, 2, `withdraw.zkey reached the server ${zkeyRequests.length} time(s): ${JSON.stringify(zkeyRequests)}`);
       assert.deepEqual(zkeyRequests.map((r) => r.status), [200, 200]);
+      // the browser had kept the wrong answer and asked the server about it: the cache was there, and was not trusted
+      assert.ok(badEtag, "the wrong answer was served");
+      assert.equal(zkeyRequests[1]!.ifNoneMatch, badEtag, "the second request did not revalidate the cached wrong answer");
       assert.deepEqual(once.posts, ["load", "load", "prove"]);
       assert.deepEqual(once.violations, []);
     } finally {

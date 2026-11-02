@@ -99,6 +99,8 @@ test("other policy breaks are refused", () => {
     "/assets/zk/* no-store": swap(ZK_RULE, ZK_RULE.replace("public, max-age=31536000, immutable", "no-store")),
     "/assets/zk/* a second max-age": swap(ZK_RULE, ZK_RULE.replace("immutable", "immutable, max-age=0")),
     "/assets/zk/* twice": `${REAL}${ZK_RULE}`,
+    // Pages trims only a value's ends, and the live check reads the value exactly: inner spaces would deploy, then fail it
+    "/assets/zk/* with inner double spaces": swap(ZK_RULE, ZK_RULE.replace("public, max-age", "public,  max-age")),
     "/assets/zk/* sets its Cache-Control twice": swap(ZK_RULE, `${ZK_RULE}  Cache-Control: public, max-age=31536000, immutable\n`),
     "/assets/zk/* removes a header": swap(ZK_RULE, `${ZK_RULE}  ! X-Content-Type-Options\n`),
   };

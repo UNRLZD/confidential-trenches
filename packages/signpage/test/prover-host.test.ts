@@ -109,6 +109,53 @@ test("stop() ends the worker; the next proof starts a new one", async () => {
   assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "stop 1", "start 2", "load 2 withdraw", "prove 2 withdraw"]);
 });
 
+test("stop() refuses the proof in the worker and every proof queued before it, and starts no worker", async () => {
+  // a worker whose proof waits until it is ended, as client.ts's does
+  const log: string[] = [];
+  let n = 0;
+  const start = (): Prover => {
+    const k = ++n;
+    let end: (e: Error) => void = () => {};
+    log.push(`start ${k}`);
+    return {
+      async load(c) {
+        log.push(`load ${k} ${c}`);
+      },
+      prove(c) {
+        log.push(`prove ${k} ${c}`);
+        return new Promise((_, fail) => (end = fail));
+      },
+      terminate() {
+        log.push(`stop ${k}`);
+        end(new Error("prover worker: terminated"));
+      },
+    };
+  };
+  const host = proverHost(start);
+  const dead = (e: unknown) => isProverDead(e);
+  // a proof that is still waiting after 200 ms was not refused: fail, not hang
+  const soon = (p: Promise<unknown>) =>
+    Promise.race([p, new Promise((_, fail) => setTimeout(() => fail(new Error("still running")), 200))]);
+  // three asked, stop() before any starts
+  const three = [host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV))];
+  host.stop();
+  for (const p of three) await assert.rejects(soon(p), dead);
+  assert.deepEqual(log, []);
+  // one running in the worker and two queued behind it: all three refused, no second worker
+  const more = [host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV))];
+  for (let i = 0; i < 50 && !log.includes("prove 1 withdraw"); i++) await new Promise((ok) => setTimeout(ok, 1));
+  assert.deepEqual(log, ["start 1", "load 1 withdraw", "prove 1 withdraw"]);
+  host.stop();
+  for (const p of more) await assert.rejects(soon(p), dead);
+  assert.deepEqual(log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "stop 1"]);
+  // a proof asked after stop() runs on a new worker
+  const after = host.proveWithdraw(fixtureArgs(CV));
+  for (let i = 0; i < 50 && !log.includes("prove 2 withdraw"); i++) await new Promise((ok) => setTimeout(ok, 1));
+  assert.deepEqual(log.slice(4), ["start 2", "load 2 withdraw", "prove 2 withdraw"]);
+  host.stop();
+  await assert.rejects(soon(after), dead);
+});
+
 test("proofs run one at a time: a second proof asked while one runs waits for it", async () => {
   let running = 0;
   let most = 0;
