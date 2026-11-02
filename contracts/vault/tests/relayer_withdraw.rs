@@ -48,10 +48,15 @@ fn spend(name: &str) -> Value {
     f["spends"].as_array().unwrap().iter().find(|s| s["name"] == name).unwrap().clone()
 }
 
-/// The /v1/withdraw body for the fixture's spend `name`, as the kit sends it.
+/// The /v1/withdraw body for the fixture's spend `name`: a plain send to a named account (fund_recipient false), or,
+/// for `fund:<name>`, with fund_recipient true as the kit sends it for an A.
 fn request(name: &str, token: &str) -> Value {
+    let (fund, name) = match name.strip_prefix("fund:") {
+        Some(n) => (true, n),
+        None => (false, name),
+    };
     let s = spend(name);
-    json!({"withdrawal": s["withdrawal"], "proof": s["proof"], "public_signals": s["public_signals"], "fund_recipient": true, "token": token})
+    json!({"withdrawal": s["withdrawal"], "proof": s["proof"], "public_signals": s["public_signals"], "fund_recipient": fund, "token": token})
 }
 
 fn nullifier(name: &str) -> String {
@@ -213,6 +218,11 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!(code(&v, 0), (503, "token_halted".into()));
     assert!(row(&v, "same_call").is_null(), "no record for a halted request");
     assert_eq!(w.key_nonce().await?, n0, "a halted request signs nothing");
+
+    // 2b. fund_recipient true to a named account (not an implicit A with its own id key): recipient_refused, nothing signed
+    let v = w.carry(&["ok"], &["fund:same_call"], 0).await?;
+    assert_eq!(code(&v, 0), (400, "recipient_refused".into()), "{}", v["answers"]);
+    assert_eq!(w.key_nonce().await?, n0, "a refused fund_recipient request signs nothing");
 
     // 3. same_call carried, its fee bouncing (the relayer not registered): refund_pending, settled with a refund note
     let alice0 = w.h.token_balance(w.alice.id()).await?;

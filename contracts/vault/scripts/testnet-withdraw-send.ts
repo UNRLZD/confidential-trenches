@@ -43,7 +43,7 @@ import { DEPLOYMENT, RPCS, TOKEN, REGISTER, keyOf, successProblems, view2, nearO
 import { createFileStore, nearRpc, relayerKey, startRelayer, type Rpc } from "../../../apps/helper/src/bind/send.ts";
 import { isAccountId } from "../../../apps/helper/src/withdraw/checks.ts";
 import { createFeeQuoter, TESTNET_TOKEN } from "../../../apps/helper/src/withdraw/fee.ts";
-import { createSpendsIndex, createWithdrawSendStore } from "../../../apps/helper/src/withdraw/index.ts";
+import { createLeavesIndex, createSpendsIndex, createWithdrawSendStore } from "../../../apps/helper/src/withdraw/index.ts";
 import { carryWithdraw, outcomeRound, type WithdrawSendDeps } from "../../../apps/helper/src/withdraw/send.ts";
 import { USDC_CODE_HASH } from "../../../apps/helper/src/token-status/status.ts";
 
@@ -290,6 +290,7 @@ async function main() {
     rpcs: tRpcs,
     reads: quoter.reads("testnet"),
     index: createSpendsIndex(tRpcs, VAULT),
+    leaves: createLeavesIndex(tRpcs, VAULT),
     store,
     relayers: [relayer],
     // check 10's watch: a stand-in answering a caught-up open token (the event watch is not built)

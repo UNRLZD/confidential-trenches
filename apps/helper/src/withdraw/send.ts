@@ -4,6 +4,11 @@
 //
 //   1-4. checks.ts (shape, context, fee, proof), with the fee quoter's fee_min (fee.ts).
 //   5-6. index.ts checkNullifier: spent / index_behind / in_flight / withdraw_failed (advice; the claim decides).
+//   5.   then, at one agreed final block on two NEAR RPCs: stateRoot is not 0 and is_known_state_root(stateRoot) and
+//        is_known_label_root(ASPRoot) are true, else unknown_root (rows 5 and 6); withdrawnValue is at most deposited -
+//        spent + returned from totals(), else bad_proof (row 9); and newCommitmentHash is not a leaf in the leaves index
+//        (caught up at the spends index's final height H, as it is), which holds fewer than 2^32 leaves, else bad_proof
+//        (row 12) (M:1129-1135). A proof over a tree the vault never had is refused here with nothing signed.
 //   7.   register_deposit is 0 when storage_balance_of(recipient) is set, and the token's storage_balance_bounds().min
 //        when it is null, both read at one agreed final block on two NEAR RPCs (fee.ts agreedBlock and viewAt); else
 //        register_deposit_wrong. A send of a stored withdrawal (H3.7's send after done, a carry of the stored request,
@@ -14,6 +19,12 @@
 //        (a JSON number past 2^53) and never the helper's clock; else deadline_too_close.
 //   10.  the token watch (token-status/status.ts tokenHeld): anything but a caught-up open token is 503 token_halted,
 //        checked again inside the relayer's queue right before the transaction is signed.
+//   A request with fund_recipient true (the kit sends it on every withdrawal): until H3.7's funding is built, it is
+//   carried only when its recipient is an implicit A (64 lowercase hex) that exists with key list exactly [A's own id
+//   key] and holds at least A_store, read at the same block on both providers (H3.7 item 1's resend rule, M:1567-1572);
+//   anything else is recipient_refused, nothing sent (CO call on card relayer-withdraw-send).
+//   relayer_low (H3.5, M:1511): in the queue, before signing, the gas account must hold one more withdraw's gas bought
+//   up front, its attachment and one settle's gas and attachment (WITHDRAW_FLOOR), else 503 relayer_low.
 //   The send: one FunctionCall withdraw(withdrawal, proof, public_signals) on the vault, 300 Tgas, the storage the
 //   vault asks attached (the kit's vaultWithdrawYocto, a tree that may grow always counted: settle returns the rest),
 //   signed by one of the relayer's keys (several keys are nonce lanes, M:1044-1054), the send record claimed in one
@@ -27,17 +38,19 @@
 // number, check 6); never applied (deleted). Then every send that succeeded is settled: the vault's spends row for its
 // nullifier, read at one final block on both providers, reads paid or refund_pending (its callback has run) and the
 // relayer sends settle(nullifier_hash), with 148 B x 1e19 attached for a refund note whose tree may grow (the vault
-// returns what it does not use); settled already (anyone may settle) ends it.
+// returns what it does not use); settled already (anyone may settle) ends it. A settle that fails on chain is kept with
+// the release that signed it and is not signed again by that release (a failure that repeats would burn gas every
+// round); a settle never applied is signed again.
 //
-// Not here: H3.7's funding of A and its relayed call (fund_recipient_wrong, recipient_refused), H3.5's relayer_low,
-// check 5's unknown_root.
+// Not here: H3.7's funding of A and its relayed call (fund_recipient_wrong, and the Transfer of A_store).
 import { join } from "node:path";
 import { vaultWithdrawYocto, type HelperWithdrawCode } from "@blindfill/kit";
-import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, startRelayer, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
+import { base58 } from "../bind/checks.ts";
+import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, RpcError, startRelayer, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { createTokenWatch, readUrls, tokenHeld, USDC, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, decimal, isAccountId, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
-import { agreedBlock, FeeReadRefused, HEIGHT_SPREAD_MAX, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type FeeNetwork, type FeeQuoter } from "./fee.ts";
-import { checkNullifier, createSpendsIndex, createWithdrawSendStore, nullifierKey, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
+import { agreedBlock, FeeReadRefused, HEIGHT_SPREAD_MAX, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type Block, type FeeNetwork, type FeeQuoter } from "./fee.ts";
+import { checkNullifier, createLeavesIndex, createSpendsIndex, createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
 import { pagesAt } from "../near/pages.ts";
 
 // ---- Values ----
@@ -56,6 +69,14 @@ export const SETTLE_GAS = 150_000_000_000_000n;
 export const SETTLE_REFUND_ATTACH = 148n * 10n ** 19n;
 /** The outcome rounds' period: the stored bytes go out again this often until the outcome is final (M:1337). */
 export const OUTCOME_ROUND_MS = 10_000;
+/** A_store: the storage of A's record and one key, 182 B x 1e19 (M:1586; W:742; the wallet's FEE_A_FUND counts it). */
+export const A_STORE_YOCTO = 182n * 10n ** 19n;
+/** Prepaid gas is bought at up to 1e9 yocto per gas up front (F10, M:1480; bind/send.ts RELAYER_FLOOR_YOCTO). */
+const GAS_PRICE_MAX = 1_000_000_000n;
+/** One settle's worst: its gas bought up front and the refund note's attachment. */
+export const SETTLE_FLOOR_YOCTO = SETTLE_GAS * GAS_PRICE_MAX + SETTLE_REFUND_ATTACH;
+/** relayer_low's floor for one more withdrawal (H3.5): its gas bought up front, what it attaches, and its settle. */
+export const withdrawFloor = (attach: bigint): bigint => WITHDRAW_GAS * GAS_PRICE_MAX + attach + SETTLE_FLOOR_YOCTO;
 
 const U128 = 1n << 128n;
 const TOKENS: Record<FeeNetwork, string> = { mainnet: USDC, testnet: TESTNET_TOKEN };
@@ -70,6 +91,8 @@ export type WithdrawSendDeps = {
   /** Check 3's fee_min (fee.ts FeeQuoter.reads). */
   reads: WithdrawReads;
   index: SpendsIndex;
+  /** Check 5's row 12: the vault's state-tree leaves, read as the spends index is. */
+  leaves: LeavesIndex;
   store: WithdrawSendStore;
   /** One per relayer key (nonce lanes); each send takes the next in turn. */
   relayers: readonly Relayer[];
@@ -110,16 +133,97 @@ export async function newestFinalMs(rpcs: readonly [Rpc, Rpc]): Promise<bigint> 
   return a.ms > b.ms ? a.ms : b.ms;
 }
 
-export type ChainReads = { registered: boolean; registerMin: bigint; finalMs: bigint };
+/** An account read at one block on both providers: absent (UNKNOWN_ACCOUNT on both), or its NEAR and its keys. */
+export type AccountRead = { kind: "absent" } | { kind: "account"; amount: bigint; keys: { public_key: string; permission: unknown }[] };
 
-/** Checks 7's two views at one agreed final block, and check 9's time, all on both providers. */
-export async function readChecks(rpcs: readonly [Rpc, Rpc], token: string, recipient: string, now: () => number = Date.now): Promise<ChainReads> {
+export type ChainReads = {
+  registered: boolean;
+  registerMin: bigint;
+  finalMs: bigint;
+  /** Check 5's views (rows 5, 6 and 9). */
+  stateKnown: boolean;
+  labelKnown: boolean;
+  totals: { deposited: bigint; spent: bigint; returned: bigint };
+  /** The recipient, read only for a request with fund_recipient true. */
+  recipient?: AccountRead;
+};
+
+/** One provider's view of `id` at block `b`: view_account and view_access_key_list, both answered at `b`. */
+async function accountOn(r: Rpc, i: number, b: Block, id: string): Promise<AccountRead> {
+  const at = { block_id: Number(b.height), account_id: id };
+  const ask = async (request_type: string) => {
+    try {
+      const a = await r("query", { request_type, ...at });
+      if (!isObj(a) || a.block_height !== Number(b.height) || a.block_hash !== b.hash) throw new FeeReadRefused(`rpc ${i}: ${request_type} not answered at block ${b.height}`);
+      return a;
+    } catch (e) {
+      if (e instanceof RpcError && e.cause_name === "UNKNOWN_ACCOUNT") return null;
+      throw e;
+    }
+  };
+  const [acc, list] = await Promise.all([ask("view_account"), ask("view_access_key_list")]);
+  if (acc === null && list === null) return { kind: "absent" };
+  const amount = acc === null ? null : decimal(acc.amount, U128);
+  if (amount === null || list === null || !Array.isArray(list.keys)) throw new FeeReadRefused(`rpc ${i}: ${id} neither absent nor an account with a key list`);
+  const keys = list.keys.map((k: unknown) => {
+    if (!isObj(k) || typeof k.public_key !== "string" || !isObj(k.access_key)) throw new FeeReadRefused(`rpc ${i}: ${id}'s key list is malformed`);
+    return { public_key: k.public_key, permission: k.access_key.permission };
+  });
+  return { kind: "account", amount, keys };
+}
+
+/** The account `id` at block `b`, the same on both providers. */
+export async function accountAt(rpcs: readonly [Rpc, Rpc], b: Block, id: string): Promise<AccountRead> {
+  const [x, y] = await Promise.all(rpcs.map((r, i) => accountOn(r, i, b, id)));
+  const text = (a: AccountRead) => JSON.stringify(a, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+  if (text(x!) !== text(y!)) throw new FeeReadRefused(`${id} at block ${b.height}: the providers disagree`);
+  return x!;
+}
+
+/**
+ * Check 5's views, check 7's two views and the recipient (fund_recipient only) at one agreed final block, and check 9's
+ * time, all on both providers, read at once.
+ */
+export async function readChecks(rpcs: readonly [Rpc, Rpc], vault: string, token: string, w: CheckedWithdraw, now: () => number = Date.now): Promise<ChainReads> {
   const [block, finalMs] = await Promise.all([agreedBlock(rpcs, now), newestFinalMs(rpcs)]);
-  const [bal, bounds] = await Promise.all([viewAt(rpcs, block, token, "storage_balance_of", { account_id: recipient }), viewAt(rpcs, block, token, "storage_balance_bounds", {})]);
+  const [bal, bounds, stateKnown, labelKnown, totals, recipient] = await Promise.all([
+    viewAt(rpcs, block, token, "storage_balance_of", { account_id: w.recipient }),
+    viewAt(rpcs, block, token, "storage_balance_bounds", {}),
+    viewAt(rpcs, block, vault, "is_known_state_root", { root: w.stateRoot.toString() }),
+    viewAt(rpcs, block, vault, "is_known_label_root", { root: w.ASPRoot.toString() }),
+    viewAt(rpcs, block, vault, "totals", {}),
+    w.fund_recipient === true ? accountAt(rpcs, block, w.recipient) : Promise.resolve(undefined),
+  ]);
   if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of: neither null nor a balance");
   const registerMin = isObj(bounds) ? decimal(bounds.min, U128) : null;
   if (registerMin === null) throw new FeeReadRefused("storage_balance_bounds: no u128 min");
-  return { registered: bal !== null, registerMin, finalMs };
+  if (typeof stateKnown !== "boolean" || typeof labelKnown !== "boolean") throw new FeeReadRefused("is_known_*_root: not a boolean");
+  const t = isObj(totals) ? { deposited: decimal(totals.deposited, U128), spent: decimal(totals.spent, U128), returned: decimal(totals.returned, U128) } : null;
+  if (t === null || t.deposited === null || t.spent === null || t.returned === null) throw new FeeReadRefused("totals: not three u128");
+  return { registered: bal !== null, registerMin, finalMs, stateKnown, labelKnown, totals: t as ChainReads["totals"], ...(recipient !== undefined && { recipient }) };
+}
+
+/** Check 5's rows 5, 6 and 9 on what was read; null when they pass. */
+export function check5(w: CheckedWithdraw, r: ChainReads): HelperWithdrawCode | null {
+  if (w.stateRoot === 0n || !r.stateKnown || !r.labelKnown) return "unknown_root";
+  if (w.withdrawnValue > r.totals.deposited - r.totals.spent + r.totals.returned) return "bad_proof";
+  return null;
+}
+
+/** A's own id key: the ed25519 key whose 32 bytes are A's implicit id. */
+export const idKeyOf = (a: string): string => `ed25519:${base58(Buffer.from(a, "hex"))}`;
+
+/**
+ * fund_recipient true, until H3.7 funds A: null when A is an implicit account that exists with key list exactly
+ * [A's own id key, full access] and holds at least A_store (carried with no Transfer); else recipient_refused.
+ */
+export function checkFunded(w: CheckedWithdraw, r: ChainReads): HelperWithdrawCode | null {
+  if (w.fund_recipient !== true) return null;
+  const a = r.recipient;
+  if (!/^[0-9a-f]{64}$/.test(w.recipient) || a === undefined || a.kind !== "account") return "recipient_refused";
+  const [k, ...more] = a.keys;
+  if (k === undefined || more.length > 0 || k.public_key !== idKeyOf(w.recipient) || k.permission !== "FullAccess") return "recipient_refused";
+  return a.amount >= A_STORE_YOCTO ? null : "recipient_refused";
 }
 
 /**
@@ -170,29 +274,38 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   const n = await checkNullifier(nf, { index: deps.index, store: deps.store });
   if (!n.ok) return no(n.code, n.code === "index_behind" ? 503 : 400);
 
-  let reads: ChainReads;
-  try {
-    reads = await readChecks(deps.rpcs, deps.cfg.token, w.recipient, deps.now);
-  } catch {
-    return no("upstream", 503);
-  }
-  const c = checks7to9(w, deps.cfg.vault, reads);
+  // check 5's row 12 (the leaves index, at the spends index's H) and the chain's reads, at once
+  const leafCheck = async (): Promise<HelperWithdrawCode | "index_behind" | null> => {
+    let h: bigint;
+    try {
+      h = await deps.index.finalHeight();
+    } catch {
+      return "index_behind";
+    }
+    if (!(await deps.leaves.reach(h))) return "index_behind";
+    return deps.leaves.has(w.newCommitmentHash) || deps.leaves.count() >= TREE_CAPACITY ? "bad_proof" : null;
+  };
+  const [leaf, reads] = await Promise.all([leafCheck(), readChecks(deps.rpcs, deps.cfg.vault, deps.cfg.token, w, deps.now).catch(() => null)]);
+  if (leaf === "index_behind") return no("index_behind", 503);
+  if (reads === null) return no("upstream", 503);
+  const c = check5(w, reads) ?? leaf ?? checks7to9(w, deps.cfg.vault, reads) ?? checkFunded(w, reads);
   if (c !== null) return no(c);
   if (await held(deps)) return no("token_halted", 503);
 
   const relayer = deps.relayers[turn++ % deps.relayers.length]!;
-  const action = { kind: "call" as const, receiver: deps.cfg.vault, method: "withdraw", args: withdrawArgs(w), gas: WITHDRAW_GAS, deposit: vaultWithdrawYocto(w.register_deposit, w.relay_fee, true) };
+  const deposit = vaultWithdrawYocto(w.register_deposit, w.relay_fee, true);
+  const action = { kind: "call" as const, receiver: deps.cfg.vault, method: "withdraw", args: withdrawArgs(w), gas: WITHDRAW_GAS, deposit };
   try {
     const out = await relayer.send<HelperWithdrawCode>(
       action,
-      async () => ((await held(deps)) ? "token_halted" : null),
+      async () => ((await held(deps)) ? "token_halted" : (await relayer.balance()) < withdrawFloor(deposit) ? "relayer_low" : null),
       (tx) => {
         const claim = deps.store.claim({ ...tx, nullifier: nullifierKey(nf), key: relayer.key, deadline_ms: w.deadline_ms });
         if (!claim.ok) throw new ClaimLost(claim.code);
       },
       { wait: false },
     );
-    if (out.kind === "guarded") return no(out.code, out.code === "token_halted" ? 503 : 400);
+    if (out.kind === "guarded") return no(out.code, out.code === "token_halted" || out.code === "relayer_low" ? 503 : 400);
     return { status: 200, body: { tx_hash: out.tx_hash, state: "submitted" } };
   } catch (e) {
     if (e instanceof ClaimLost) return no(e.code);
@@ -252,24 +365,34 @@ export async function outcomeRound(deps: WithdrawSendDeps): Promise<void> {
 async function settleOne(deps: WithdrawSendDeps, nf: bigint, byKey: Map<string, Relayer>): Promise<void> {
   const rec = deps.store.get(nf);
   if (rec === null || rec === "unreadable" || rec.outcome !== "succeeded" || rec.settle?.done === true) return;
-  const mine = rec.settle?.tx ?? null;
+  let mine = rec.settle?.tx ?? null;
+  if (rec.settle?.failed !== undefined) {
+    if (rec.settle.failed.release >= deps.store.release) return; // failed on chain under this release: not signed again
+    deps.store.setSettle(nf, null); // a higher release tries once more
+    mine = null;
+  }
   if (mine !== null) {
     const relayer = byKey.get(mine.key);
     if (relayer === undefined) return;
     const out = await relayer.resolve(mine, { resend: true, fromBlocks: true });
     if (out.kind === "unknown") return;
     if (out.kind === "final" && out.receipts.length === 1 && out.receipts[0]!.ok) return deps.store.setSettle(nf, { tx: mine, done: true });
-    // failed or never landed: settled by another caller, else signed again next round
+    // settled by another caller; else a failure on chain is kept (this release signs no more), a dropped one signed again
     const s = await spendStatus(deps, nf);
-    return deps.store.setSettle(nf, s === "settled" ? { tx: mine, done: true } : null);
+    if (s === "settled") return deps.store.setSettle(nf, { tx: mine, done: true });
+    if (out.kind === "final") {
+      const error = out.receipts.find((r) => !r.ok)?.failure ?? "settle: not one successful receipt";
+      return deps.store.setSettle(nf, { tx: mine, done: false, failed: { release: deps.store.release, error: error.slice(0, 2_000) } });
+    }
+    return deps.store.setSettle(nf, null);
   }
   const status = await spendStatus(deps, nf);
   if (status === "settled") return deps.store.setSettle(nf, { tx: null, done: true }); // another caller settled it (anyone may)
   if (status !== "paid" && status !== "refund_pending") return; // in_flight: its callback has not run yet
   const relayer = deps.relayers[turn++ % deps.relayers.length]!;
-  await relayer.send<never>(
+  await relayer.send<"relayer_low">(
     { kind: "call", receiver: deps.cfg.vault, method: "settle", args: JSON.stringify({ nullifier_hash: nf.toString() }), gas: SETTLE_GAS, deposit: status === "refund_pending" ? SETTLE_REFUND_ATTACH : 0n },
-    async () => null,
+    async () => ((await relayer.balance()) < SETTLE_FLOOR_YOCTO ? "relayer_low" : null),
     (tx: TxRef) => deps.store.setSettle(nf, { tx: { ...tx, key: relayer.key }, done: false }),
     { wait: false },
   );
@@ -328,6 +451,7 @@ export function withdrawSenderFromEnv(
   env: Record<string, string | undefined>,
   fee: FeeQuoter,
   status: Partial<Record<FeeNetwork, () => Promise<TokenStatus>>> = { mainnet: createTokenWatch(env).status },
+  fetchFn: typeof fetch = fetch,
 ): WithdrawSender {
   const release = env[RELEASE_ENV] ?? "";
   const storeDir = env[STORE_ENV] ?? "";
@@ -355,27 +479,36 @@ export function withdrawSenderFromEnv(
   const ready = new Map<FeeNetwork, Promise<WithdrawSendDeps>>();
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<WithdrawSendDeps> => {
-    const rpcs = urls[net.network].map((u) => nearRpc(u, fetch, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
+    const rpcs = urls[net.network].map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
     const block = await agreedBlock(rpcs, Date.now);
     const c = await viewAt(rpcs, block, net.vault, "config", {});
     const scope = isObj(c) ? decimal(c.scope, 1n << 256n) : null;
     if (!isObj(c) || scope === null || c.asset !== TOKENS[net.network]) throw new Error("the vault's config() names another token or no scope");
     const nonces = createFileStore(join(storeDir, `withdraw-keys-${net.network}`));
-    const store = createWithdrawSendStore(join(storeDir, `withdraw-send-${net.network}`), { release: Number(release), keys: nonces });
-    const relayers = await Promise.all(net.keys.map((k) => startRelayer(rpcs, rpcs[0], relayerOf[net.network], k, net.vault, nonces)));
-    const watch = status[net.network];
-    const deps: WithdrawSendDeps = {
-      cfg: { vault: net.vault, token: TOKENS[net.network], scope, feeRecipient: feeTo[net.network] },
-      rpcs,
-      reads: fee.reads(net.network),
-      index: createSpendsIndex(rpcs, net.vault),
-      store,
-      relayers,
-      // no watch for this network's token: held (token_halted), as the watch holds while it is not caught up
-      tokenStatus: watch ?? (async () => ({ token: TOKENS[net.network], caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
-    };
-    stops.push(await startOutcomeRounds(deps));
-    return deps;
+    const opened: { close(): void }[] = [nonces];
+    // a start that fails after the stores open closes them, so the next try can take their locks again
+    try {
+      const store = createWithdrawSendStore(join(storeDir, `withdraw-send-${net.network}`), { release: Number(release), keys: nonces });
+      opened.push(store);
+      const relayers = await Promise.all(net.keys.map((k) => startRelayer(rpcs, rpcs[0], relayerOf[net.network], k, net.vault, nonces)));
+      const watch = status[net.network];
+      const deps: WithdrawSendDeps = {
+        cfg: { vault: net.vault, token: TOKENS[net.network], scope, feeRecipient: feeTo[net.network] },
+        rpcs,
+        reads: fee.reads(net.network),
+        index: createSpendsIndex(rpcs, net.vault),
+        leaves: createLeavesIndex(rpcs, net.vault),
+        store,
+        relayers,
+        // no watch for this network's token: held (token_halted), as the watch holds while it is not caught up
+        tokenStatus: watch ?? (async () => ({ token: TOKENS[net.network], caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
+      };
+      stops.push(await startOutcomeRounds(deps));
+      return deps;
+    } catch (e) {
+      for (const s of opened.reverse()) s.close();
+      throw e;
+    }
   };
   const started = (net: Net): Promise<WithdrawSendDeps> => {
     let p = ready.get(net.network);

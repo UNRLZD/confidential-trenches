@@ -32,13 +32,23 @@ async function pageOf(r: Rpc, account: string, method: string, h: bigint, from: 
  * row i holds `index` = from + i. A short page is the list's end.
  */
 export async function pagesAt(rpcs: readonly [Rpc, Rpc], account: string, method: string, h: bigint, from: number, limit: number): Promise<Record<string, unknown>[]> {
+  const page = await listAt(rpcs, account, method, h, from, limit);
+  page.forEach((x, i) => {
+    if (!isObj(x) || x.index !== from + i) throw new Error(`${method}: a row not at its index`);
+  });
+  return page as Record<string, unknown>[];
+}
+
+/**
+ * The entries `from..from+limit` of `account`'s paged list `method` at block `h` as JSON values (the vault's `leaves`
+ * pages are bare decimals, with no index field), read on both providers. Throws unless both answer at `h` with one
+ * block hash and the same bytes, and the bytes are a JSON list of at most `limit` entries.
+ */
+export async function listAt(rpcs: readonly [Rpc, Rpc], account: string, method: string, h: bigint, from: number, limit: number): Promise<unknown[]> {
   const [a, b] = await Promise.all(rpcs.map((r) => pageOf(r, account, method, h, from, limit)));
   if (a!.hash !== b!.hash) throw new Error(`${method}: the two providers name different blocks`);
   if (!a!.bytes.equals(b!.bytes)) throw new Error(`${method}: the two providers disagree on a page`);
   const page = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(a!.bytes)) as unknown;
   if (!Array.isArray(page) || page.length > limit) throw new Error(`${method}: not a page`);
-  page.forEach((x, i) => {
-    if (!isObj(x) || x.index !== from + i) throw new Error(`${method}: a row not at its index`);
-  });
-  return page as Record<string, unknown>[];
+  return page;
 }

@@ -11,22 +11,30 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { VAULT_CONSTANTS, vaultWithdrawYocto } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import type { Relayer, RelayerAction, Rpc, TxOutcome, TxRef } from "../bind/send.ts";
+import { RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { USDC_CODE_HASH, type TokenStatus } from "../token-status/status.ts";
 import type { CheckedWithdraw, WithdrawConfig } from "./checks.ts";
-import { createWithdrawSendStore, nullifierKey, type SpendsIndex } from "./index.ts";
+import { TESTNET_TOKEN } from "./fee.ts";
+import { createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex } from "./index.ts";
 import {
+  A_STORE_YOCTO,
   FUND_MARGIN_MS,
   INTENTS,
   SEND_MARGIN_MS,
+  SETTLE_FLOOR_YOCTO,
   SETTLE_REFUND_ATTACH,
   WITHDRAW_GAS,
   carryWithdraw,
+  check5,
+  checkFunded,
   checks7to9,
+  idKeyOf,
+  withdrawFloor,
   newestFinalMs,
   outcomeOf,
   outcomeRound,
   withdrawSenderFromEnv,
+  type ChainReads,
   type WithdrawSendDeps,
 } from "./send.ts";
 
@@ -57,9 +65,34 @@ type Chain = {
   min: bigint;
   spendStatus: string;
   spendIndex: number;
+  /** The nullifier the spends row at spendIndex names (NF unless a test plants another). */
+  spendNf?: bigint;
+  /** Check 5's views: is_known_state_root, is_known_label_root, totals (deposited, spent, returned). */
+  stateKnown: boolean;
+  labelKnown: boolean;
+  totals: [bigint, bigint, bigint];
+  /** The recipient A, per provider: absent, or its NEAR and its key list. */
+  account: ("absent" | { amount: bigint; keys: { public_key: string; permission: unknown }[] })[];
+  /** Answers to storage_balance_of, overriding `registered` (a malformed one, for the shape check). */
+  balanceAnswer?: unknown;
+  /** The second provider's final height, when it is not `height`. */
+  height1?: number;
   down?: boolean;
 };
-const chain = (over: Partial<Chain> = {}): Chain => ({ height: 1000, ms: DEADLINE - SEND_MARGIN_MS - 60_000n, registered: [false, false], min: MIN, spendStatus: "in_flight", spendIndex: 0, ...over });
+const A_OK = { amount: A_STORE_YOCTO, keys: [{ public_key: idKeyOf(W.recipient), permission: "FullAccess" }] };
+const chain = (over: Partial<Chain> = {}): Chain => ({
+  height: 1000,
+  ms: DEADLINE - SEND_MARGIN_MS - 60_000n,
+  registered: [false, false],
+  min: MIN,
+  spendStatus: "in_flight",
+  spendIndex: 0,
+  stateKnown: true,
+  labelKnown: true,
+  totals: [10n ** 12n, 0n, 0n],
+  account: [A_OK, A_OK],
+  ...over,
+});
 
 function provider(c: Chain, i: 0 | 1): Rpc {
   const header = (h: number) => ({
@@ -76,14 +109,25 @@ function provider(c: Chain, i: 0 | 1): Rpc {
   return async (method, params) => {
     if (c.down) throw new Error("fetch failed");
     const p = params as Record<string, unknown>;
-    if (method === "block") return header(p.finality === "final" ? c.height : Number(p.block_id));
+    if (method === "block") return header(p.finality === "final" ? (i === 1 && c.height1 !== undefined ? c.height1 : c.height) : Number(p.block_id));
+    if (method === "query" && (p.request_type === "view_account" || p.request_type === "view_access_key_list")) {
+      const h = Number(p.block_id);
+      const a = c.account[i]!;
+      if (a === "absent") throw new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} } });
+      const at = { block_height: h, block_hash: hashOf(h) };
+      if (p.request_type === "view_account") return { amount: a.amount.toString(), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 182, ...at };
+      return { keys: a.keys.map((k) => ({ public_key: k.public_key, access_key: { nonce: 0, permission: k.permission } })), ...at };
+    }
     if (method === "query" && p.request_type === "call_function") {
       const h = Number(p.block_id);
       const args = JSON.parse(Buffer.from(String(p.args_base64), "base64").toString("utf8")) as Record<string, unknown>;
       let v: unknown;
-      if (p.method_name === "storage_balance_of") v = c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
+      if (p.method_name === "storage_balance_of") v = c.balanceAnswer !== undefined ? c.balanceAnswer : c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "storage_balance_bounds") v = { min: c.min.toString(), max: c.min.toString() };
-      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: NF.toString(), status: c.spendStatus }] : [];
+      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus }] : [];
+      else if (p.method_name === "is_known_state_root") v = c.stateKnown;
+      else if (p.method_name === "is_known_label_root") v = c.labelKnown;
+      else if (p.method_name === "totals") v = { deposited: c.totals[0].toString(), spent: c.totals[1].toString(), returned: c.totals[2].toString() };
       else throw new Error(`no view ${String(p.method_name)}`);
       return { result: [...Buffer.from(JSON.stringify(v))], block_height: h, block_hash: hashOf(h), logs: [] };
     }
@@ -97,14 +141,16 @@ type Sent = { action: RelayerAction; tx: TxRef };
 const counters = new Map<string, bigint>();
 const nonceStore = { nonceNext: (k: string) => counters.get(k) ?? null };
 
-function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & { sent: Sent[]; resolved: string[] } {
+function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & { sent: Sent[]; resolved: string[]; resends: boolean[]; near: bigint } {
   const key = `${name}/ed25519:test`;
   const r = {
     account: name,
     key,
     sent: [] as Sent[],
     resolved: [] as string[],
-    balance: async () => 10n ** 24n,
+    resends: [] as boolean[],
+    near: 10n ** 24n,
+    balance: async () => r.near,
     async send<C extends string>(action: RelayerAction, guard: () => Promise<C | null>, before: (tx: TxRef) => void) {
       const code = await guard();
       if (code !== null) return { kind: "guarded" as const, code };
@@ -118,6 +164,7 @@ function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & 
     async resolve(tx: TxRef, opts: { resend: boolean; fromBlocks?: boolean }) {
       assert.equal(opts.fromBlocks, true, "a vault call's outcome is read from blocks only");
       r.resolved.push(tx.tx_hash);
+      r.resends.push(opts.resend);
       return outcomes.get(tx.tx_hash) ?? { kind: "unknown" as const, tx_hash: tx.tx_hash, why: "not yet" };
     },
   };
@@ -126,6 +173,10 @@ function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & 
 
 function fakeIndex(spent = false): SpendsIndex {
   return { finalHeight: async () => 1000n, reach: async () => true, holds: () => spent, at: () => 1000n, indexOf: () => 0 };
+}
+
+function fakeLeaves(leaves: bigint[] = [], count?: bigint, caught = true): LeavesIndex {
+  return { reach: async () => caught, has: (x) => leaves.includes(x), count: () => count ?? BigInt(leaves.length) };
 }
 
 const open: TokenStatus = { token: VAULT_CONSTANTS.TOKEN, caught_up: true, halted: false, vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height: 1000, last_event: null };
@@ -140,6 +191,7 @@ function setup(c = chain(), opts: { status?: () => TokenStatus; release?: number
     rpcs: [provider(c, 0), provider(c, 1)],
     reads: { feeMin: async () => opts.feeMin ?? BigInt(W.relay_fee) },
     index: fakeIndex(),
+    leaves: fakeLeaves(),
     store,
     relayers: [relayer],
     tokenStatus: async () => (opts.status ?? (() => open))(),
@@ -149,6 +201,9 @@ function setup(c = chain(), opts: { status?: () => TokenStatus; release?: number
 }
 
 const code = (a: Awaited<ReturnType<typeof carryWithdraw>>) => ("error" in a.body ? a.body.error.code : "ok");
+
+/** What readChecks returns, for the checks on what was read. */
+const reads = (over: Partial<ChainReads> = {}): ChainReads => ({ registered: true, registerMin: MIN, finalMs: 0n, stateKnown: true, labelKnown: true, totals: { deposited: 10n ** 12n, spent: 0n, returned: 0n }, ...over });
 
 // ---- The send ----
 
@@ -193,6 +248,116 @@ test("check 5: a spent nullifier answers spent and sends nothing", async () => {
   assert.equal(relayer.sent.length, 0);
 });
 
+// ---- Check 5: the roots, totals and leaves (rows 5, 6, 9 and 12) ----
+
+test("check 5 at the chain: a state root or a label root the vault never had is unknown_root, nothing signed", async () => {
+  for (const over of [{ stateKnown: false }, { labelKnown: false }]) {
+    const x = setup(chain(over));
+    const a = await carryWithdraw(req(), x.deps);
+    assert.deepEqual([a.status, code(a)], [400, "unknown_root"], JSON.stringify(over));
+    assert.equal(x.relayer.sent.length, 0);
+    assert.equal(x.store.get(NF), null);
+  }
+});
+
+test("check 5 on what was read: stateRoot 0 is unknown_root; withdrawnValue above deposited - spent + returned is bad_proof (row 9), at it passes", () => {
+  const w = { stateRoot: 5n, ASPRoot: 6n, withdrawnValue: 100n } as CheckedWithdraw;
+  const t = (deposited: bigint, spent: bigint, returned: bigint) => reads({ totals: { deposited, spent, returned } });
+  assert.equal(check5(w, t(100n, 0n, 0n)), null);
+  assert.equal(check5({ ...w, stateRoot: 0n }, t(100n, 0n, 0n)), "unknown_root");
+  assert.equal(check5(w, reads({ stateKnown: false })), "unknown_root");
+  assert.equal(check5(w, reads({ labelKnown: false })), "unknown_root");
+  assert.equal(check5(w, t(150n, 60n, 10n)), null);
+  assert.equal(check5(w, t(150n, 60n, 9n)), "bad_proof");
+  assert.equal(check5(w, t(99n, 0n, 0n)), "bad_proof");
+});
+
+test("check 5, row 9 at the chain: a pool that holds less than withdrawnValue is bad_proof; totals that do not read are 503 upstream", async () => {
+  const withdrawn = BigInt(fixture.request.public_signals[2]!); // snarkjs order: newCommitmentHash, existingNullifierHash, withdrawnValue, stateRoot, ...
+  const thin = setup(chain({ totals: [withdrawn - 1n, 0n, 0n] }));
+  assert.equal(code(await carryWithdraw(req(), thin.deps)), "bad_proof");
+  const exact = setup(chain({ totals: [withdrawn, 0n, 0n] }));
+  assert.equal(code(await carryWithdraw(req(), exact.deps)), "ok");
+  const off = setup(chain({ totals: [1n << 128n, 0n, 0n] })); // not a u128
+  const a = await carryWithdraw(req(), off.deps);
+  assert.deepEqual([a.status, code(a)], [503, "upstream"]);
+  assert.equal(thin.relayer.sent.length + off.relayer.sent.length, 0);
+});
+
+test("check 5, row 12: newCommitmentHash already a leaf, or a full tree, is bad_proof; a leaves index that cannot catch up is 503 index_behind; nothing signed", async () => {
+  const leaf = BigInt(fixture.request.public_signals[0]!); // newCommitmentHash
+  const known = setup();
+  known.deps.leaves = fakeLeaves([leaf]);
+  assert.equal(code(await carryWithdraw(req(), known.deps)), "bad_proof");
+  const full = setup();
+  full.deps.leaves = fakeLeaves([], TREE_CAPACITY);
+  assert.equal(code(await carryWithdraw(req(), full.deps)), "bad_proof");
+  const room = setup();
+  room.deps.leaves = fakeLeaves([], TREE_CAPACITY - 1n);
+  assert.equal(code(await carryWithdraw(req(), room.deps)), "ok");
+  const behind = setup();
+  behind.deps.leaves = fakeLeaves([], 0n, false);
+  const a = await carryWithdraw(req(), behind.deps);
+  assert.deepEqual([a.status, code(a)], [503, "index_behind"]);
+  assert.equal(known.relayer.sent.length + full.relayer.sent.length + behind.relayer.sent.length, 0);
+});
+
+// ---- fund_recipient (until H3.7 funds A) ----
+
+test("fund_recipient true: carried only for an implicit A that exists with key list exactly [its own id key, full access] and at least A_store; else recipient_refused, nothing signed", async () => {
+  const idKey = idKeyOf(W.recipient);
+  const cases: [string, Chain["account"][number], string][] = [
+    ["absent", "absent", "recipient_refused"],
+    ["below A_store", { amount: A_STORE_YOCTO - 1n, keys: [{ public_key: idKey, permission: "FullAccess" }] }, "recipient_refused"],
+    ["a second key", { amount: A_STORE_YOCTO, keys: [{ public_key: idKey, permission: "FullAccess" }, { public_key: idKeyOf("11".repeat(32)), permission: "FullAccess" }] }, "recipient_refused"],
+    ["another key", { amount: A_STORE_YOCTO, keys: [{ public_key: idKeyOf("11".repeat(32)), permission: "FullAccess" }] }, "recipient_refused"],
+    ["a function-call key", { amount: A_STORE_YOCTO, keys: [{ public_key: idKey, permission: { FunctionCall: { allowance: null, receiver_id: "x.near", method_names: [] } } }] }, "recipient_refused"],
+    ["no key", { amount: A_STORE_YOCTO, keys: [] }, "recipient_refused"],
+    ["A_store exactly", { amount: A_STORE_YOCTO, keys: [{ public_key: idKey, permission: "FullAccess" }] }, "ok"],
+  ];
+  for (const [name, a, want] of cases) {
+    const x = setup(chain({ account: [a, a] }));
+    const got = await carryWithdraw(req(), x.deps);
+    assert.equal(code(got), want, name);
+    assert.equal(x.relayer.sent.length, want === "ok" ? 1 : 0, name);
+  }
+  // the two providers disagree on A: 503 upstream
+  const split = setup(chain({ account: [A_OK, "absent"] }));
+  assert.deepEqual([(await carryWithdraw(req(), split.deps)).status, split.relayer.sent.length], [503, 0]);
+  // fund_recipient false (a plain send) reads no account: an absent recipient is not refused for it
+  const plain = setup(chain({ account: ["absent", "absent"] }));
+  assert.equal(code(await carryWithdraw({ ...req(), fund_recipient: false }, plain.deps)), "ok");
+  // a named recipient is never an A
+  assert.equal(checkFunded({ fund_recipient: true, recipient: "a.near" } as CheckedWithdraw, reads({ recipient: A_OK && { kind: "account", ...A_OK } })), "recipient_refused");
+  assert.equal(checkFunded({ fund_recipient: undefined, recipient: "a.near" } as CheckedWithdraw, reads()), null);
+});
+
+// ---- relayer_low ----
+
+test("relayer_low: under one withdraw's gas bought up front, its attachment and a settle's worst, 503 relayer_low in the queue with nothing signed; at the floor it sends; a settle under its floor is not signed", async () => {
+  const deposit = vaultWithdrawYocto(MIN, BigInt(W.relay_fee), true);
+  assert.equal(withdrawFloor(deposit), WITHDRAW_GAS * 1_000_000_000n + deposit + SETTLE_FLOOR_YOCTO);
+  const low = setup();
+  low.relayer.near = withdrawFloor(deposit) - 1n;
+  const a = await carryWithdraw(req(), low.deps);
+  assert.deepEqual([a.status, code(a)], [503, "relayer_low"]);
+  assert.equal(low.relayer.sent.length, 0);
+  assert.equal(low.store.get(NF), null);
+  const at = setup();
+  at.relayer.near = withdrawFloor(deposit);
+  assert.equal(code(await carryWithdraw(req(), at.deps)), "ok");
+  // the settle's own floor
+  const tx = at.relayer.sent[0]!.tx.tx_hash;
+  at.outcomes.set(tx, final(tx, true, DEADLINE - 1n));
+  at.c.spendStatus = "paid";
+  at.relayer.near = SETTLE_FLOOR_YOCTO - 1n;
+  await outcomeRound(at.deps);
+  assert.equal(at.relayer.sent.length, 1, "no settle under its floor");
+  at.relayer.near = SETTLE_FLOOR_YOCTO;
+  await outcomeRound(at.deps);
+  assert.equal(at.relayer.sent.length, 2);
+});
+
 // ---- Check 7 ----
 
 test("check 7: an unregistered recipient takes exactly the token's minimum; a registered one 0, else register_deposit_wrong", async () => {
@@ -206,7 +371,7 @@ test("check 7: an unregistered recipient takes exactly the token's minimum; a re
   assert.equal(code(await carryWithdraw(req(), moved.deps)), "register_deposit_wrong");
   // on what was read
   const w = { register_deposit: 0n, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
-  const r = { registered: true, registerMin: MIN, finalMs: 0n };
+  const r = reads();
   assert.equal(checks7to9(w, CFG.vault, r), null);
   assert.equal(checks7to9({ ...w, register_deposit: 1n }, CFG.vault, r), "register_deposit_wrong");
   assert.equal(checks7to9(w, CFG.vault, { ...r, registered: false }), "register_deposit_wrong");
@@ -215,7 +380,7 @@ test("check 7: an unregistered recipient takes exactly the token's minimum; a re
 
 test("check 7's exception: a stored withdrawal's minimum stands for a recipient registered since; a fresh request's does not", () => {
   const w = { register_deposit: MIN, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
-  const r = { registered: true, registerMin: MIN, finalMs: 0n };
+  const r = reads();
   assert.equal(checks7to9(w, CFG.vault, r), "register_deposit_wrong");
   assert.equal(checks7to9(w, CFG.vault, r, { stored: true }), null);
   assert.equal(checks7to9({ ...w, register_deposit: MIN - 1n }, CFG.vault, r, { stored: true }), "register_deposit_wrong");
@@ -233,7 +398,7 @@ test("check 7's reads: the two providers disagree on the registration, or one is
 
 test("check 8: recipient or fee_recipient the vault or intents.near is bad_recipient", () => {
   const w = { register_deposit: 0n, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
-  const r = { registered: true, registerMin: MIN, finalMs: 0n };
+  const r = reads();
   assert.equal(checks7to9({ ...w, recipient: CFG.vault }, CFG.vault, r), "bad_recipient");
   assert.equal(checks7to9({ ...w, recipient: INTENTS }, CFG.vault, r), "bad_recipient");
   assert.equal(checks7to9({ ...w, fee_recipient: CFG.vault }, CFG.vault, r), "bad_recipient");
@@ -267,7 +432,7 @@ test("check 9 pins the time: header.timestamp_nanosec (a decimal string) / 10^6 
 
 test("check 9's margin: 30 s for a send, 120 s for a request that funds A", () => {
   const w = { register_deposit: 0n, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: 1_000_000 } as CheckedWithdraw;
-  const r = (finalMs: bigint) => ({ registered: true, registerMin: MIN, finalMs });
+  const r = (finalMs: bigint) => reads({ finalMs });
   assert.equal(checks7to9(w, CFG.vault, r(1_000_000n - SEND_MARGIN_MS)), null);
   assert.equal(checks7to9(w, CFG.vault, r(1_000_000n - SEND_MARGIN_MS + 1n)), "deadline_too_close");
   assert.equal(checks7to9(w, CFG.vault, r(1_000_000n - FUND_MARGIN_MS), { funds: true }), null);
@@ -381,7 +546,7 @@ test("settle after a success: nothing while the callback has not run; then settl
   assert.equal(relayer.sent.length, 2);
 });
 
-test("settle of a refund note attaches 148 B x 1e19; a settle that failed is signed again; one settled by another caller ends with no transaction of ours", async () => {
+test("settle of a refund note attaches 148 B x 1e19; a dropped settle is signed again; one settled by another caller ends with no transaction of ours", async () => {
   const { deps, relayer, store, outcomes, c } = setup();
   const tx = ((await carryWithdraw(req(), deps)).body as { tx_hash: string }).tx_hash;
   outcomes.set(tx, final(tx, true, DEADLINE - 1n));
@@ -389,8 +554,8 @@ test("settle of a refund note attaches 148 B x 1e19; a settle that failed is sig
   await outcomeRound(deps);
   const s1 = relayer.sent[1]!;
   assert.ok(s1.action.kind === "call" && s1.action.deposit === SETTLE_REFUND_ATTACH);
-  outcomes.set(s1.tx.tx_hash, final(s1.tx.tx_hash, false));
-  await outcomeRound(deps); // failed while the spend is not settled: cleared
+  outcomes.set(s1.tx.tx_hash, { kind: "dropped", tx_hash: s1.tx.tx_hash, why: "(b)" });
+  await outcomeRound(deps); // never applied while the spend is not settled: cleared
   assert.equal((store.get(NF) as { settle: unknown }).settle, null);
   await outcomeRound(deps); // signed again
   assert.equal(relayer.sent.length, 3);
@@ -406,6 +571,55 @@ test("settle of a refund note attaches 148 B x 1e19; a settle that failed is sig
   await outcomeRound(other.deps);
   assert.deepEqual((other.store.get(NF) as { settle: unknown }).settle, { tx: null, done: true });
   assert.equal(other.relayer.sent.length, 1);
+});
+
+test("a settle that fails on chain is kept with its release: N failing rounds sign exactly one settle", async () => {
+  const { deps, relayer, store, outcomes, c } = setup();
+  const tx = ((await carryWithdraw(req(), deps)).body as { tx_hash: string }).tx_hash;
+  outcomes.set(tx, final(tx, true, DEADLINE - 1n));
+  c.spendStatus = "paid";
+  await outcomeRound(deps);
+  assert.equal(relayer.sent.length, 2);
+  const s1 = relayer.sent[1]!;
+  outcomes.set(s1.tx.tx_hash, final(s1.tx.tx_hash, false));
+  for (let i = 0; i < 6; i++) await outcomeRound(deps);
+  assert.equal(relayer.sent.length, 2, "one settle signed in six rounds of a settle that fails on chain");
+  const rec = store.get(NF) as { settle: { tx: TxRef; done: boolean; failed: { release: number; error: string } } };
+  assert.equal(rec.settle.done, false);
+  assert.equal(rec.settle.tx.tx_hash, s1.tx.tx_hash);
+  assert.deepEqual(rec.settle.failed, { release: 1, error: "receipt failed (read from blocks)" });
+  assert.deepEqual(store.toSettle(), []);
+});
+
+test("a settle failure kept under release 1: a restart under release 1 signs none, a restart under release 2 signs one more", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "wsettle-"));
+  const one = setup();
+  one.store.close();
+  const s1store = createWithdrawSendStore(dir, { release: 1, keys: nonceStore });
+  one.deps.store = s1store;
+  const tx = ((await carryWithdraw(req(), one.deps)).body as { tx_hash: string }).tx_hash;
+  one.outcomes.set(tx, final(tx, true, DEADLINE - 1n));
+  one.c.spendStatus = "paid";
+  await outcomeRound(one.deps);
+  const st = one.relayer.sent[1]!.tx.tx_hash;
+  one.outcomes.set(st, final(st, false));
+  await outcomeRound(one.deps);
+  s1store.close();
+  const again = createWithdrawSendStore(dir, { release: 1, keys: nonceStore });
+  assert.deepEqual(again.toSettle(), [], "the same release does not settle it again after a restart");
+  one.deps.store = again;
+  await outcomeRound(one.deps);
+  assert.equal(one.relayer.sent.length, 2);
+  again.close();
+  const next = createWithdrawSendStore(dir, { release: 2, keys: nonceStore });
+  assert.deepEqual(next.toSettle(), [NF]);
+  one.deps.store = next;
+  await outcomeRound(one.deps);
+  assert.equal(one.relayer.sent.length, 3, "a higher release signs one more settle");
+  const s3 = one.relayer.sent[2]!;
+  assert.ok(s3.action.kind === "call" && s3.action.method === "settle");
+  assert.equal((next.get(NF) as { settle: { failed?: unknown } }).settle.failed, undefined);
+  next.close();
 });
 
 test("a send never applied deletes its row; a row whose key is no longer served stays open", async () => {
@@ -444,4 +658,85 @@ test("the host's configuration: nothing set carries nothing (bad_shape); a netwo
   assert.throws(() => withdrawSenderFromEnv({ ...good, WITHDRAW_RELAYER_TESTNET: "" }, quoter, {}), /WITHDRAW_RELAYER_TESTNET/);
   // a token of another network, or none, is check 1's bad_shape, with nothing read
   assert.equal(code(await withdrawSenderFromEnv(good, quoter, {}).carry({ ...req(), token: VAULT_CONSTANTS.TOKEN })), "bad_shape");
+});
+
+// ---- Planted removals that survived the review, each held here ----
+
+test("check 9's time: two finals more than 30 blocks apart are refused; 30 apart is read", async () => {
+  await assert.rejects(newestFinalMs([provider(chain(), 0), provider(chain({ height1: 1031 }), 1)]), /31 blocks apart/);
+  assert.equal(await newestFinalMs([provider(chain(), 0), provider(chain({ height1: 1030 }), 1)]), chain().ms);
+});
+
+test("storage_balance_of answered as anything but null or a balance is 503 upstream, nothing signed", async () => {
+  for (const bad of [{ total: "x" }, { available: "0" }, 5, true, []]) {
+    const x = setup(chain({ balanceAnswer: bad }));
+    const a = await carryWithdraw(req(), x.deps);
+    assert.deepEqual([a.status, code(a)], [503, "upstream"], JSON.stringify(bad));
+    assert.equal(x.relayer.sent.length, 0);
+  }
+});
+
+test("the rounds resend: an open send's stored bytes and our own open settle's go out again each round (resend true)", async () => {
+  const { deps, relayer, outcomes, c } = setup();
+  const tx = ((await carryWithdraw(req(), deps)).body as { tx_hash: string }).tx_hash;
+  await outcomeRound(deps);
+  assert.deepEqual([relayer.resolved, relayer.resends], [[tx], [true]]);
+  outcomes.set(tx, final(tx, true, DEADLINE - 1n));
+  c.spendStatus = "paid";
+  await outcomeRound(deps); // succeeded, settle signed
+  const st = relayer.sent[1]!.tx.tx_hash;
+  await outcomeRound(deps); // the settle's outcome unknown: resent
+  const i = relayer.resolved.lastIndexOf(st);
+  assert.ok(i >= 0, "the settle was read");
+  assert.equal(relayer.resends[i], true, "our own settle's bytes are resent");
+});
+
+test("the settle reads the spends row of its own nullifier: a row at the index naming another nullifier settles nothing", async () => {
+  const { deps, relayer, store, outcomes, c } = setup(chain({ spendNf: NF + 1n }));
+  const tx = ((await carryWithdraw(req(), deps)).body as { tx_hash: string }).tx_hash;
+  outcomes.set(tx, final(tx, true, DEADLINE - 1n));
+  c.spendStatus = "paid";
+  await outcomeRound(deps);
+  await outcomeRound(deps);
+  assert.equal(relayer.sent.length, 1, "no settle on another nullifier's row");
+  assert.equal((store.get(NF) as { settle?: unknown }).settle, undefined);
+  c.spendNf = NF;
+  await outcomeRound(deps);
+  assert.equal(relayer.sent.length, 2);
+});
+
+test("a start that fails after the stores open closes them: the next try starts", async () => {
+  const seed = Buffer.alloc(32, 9);
+  const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+  const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+  const env = {
+    WITHDRAW_RELAYER_TESTNET: "relay.test.testnet",
+    WITHDRAW_FEE_RECIPIENT_TESTNET: "relay.test.testnet",
+    HELPER_RELEASE: "1",
+    HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "wstart-")),
+    WITHDRAW_VAULT_TESTNET: "vault.test.testnet",
+    WITHDRAW_RELAYER_KEYS_TESTNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`,
+  };
+  let protocolReads = 0;
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { method, params } = JSON.parse(init.body) as { method: string; params: Record<string, unknown> };
+    const h = 1000;
+    const head = { header: { height: h, hash: hashOf(h), prev_height: h - 1, gas_price: "100000000", timestamp_nanosec: (BigInt(Date.now()) * 1_000_000n).toString() } };
+    let result: unknown;
+    if (method === "block") result = head;
+    else if (method === "query" && params.method_name === "config") result = { result: [...Buffer.from(JSON.stringify({ scope: "7", asset: TESTNET_TOKEN }))], block_height: h, block_hash: hashOf(h), logs: [] };
+    else if (method === "EXPERIMENTAL_protocol_config") {
+      if (protocolReads++ === 0) return new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", error: { name: "INTERNAL_ERROR", cause: { name: "INTERNAL_ERROR" } } }));
+      result = { transaction_validity_period: 86400 };
+    } else return new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", error: { name: "HANDLER_ERROR", cause: { name: "NOT_SERVED" } } }));
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", result }));
+  }) as unknown as typeof fetch;
+  const quoter = { networkOf: () => null, quote: async () => { throw new Error("no"); }, reads: () => ({ feeMin: async () => 0n }) };
+  const sender = withdrawSenderFromEnv(env, quoter, {}, fetchFn);
+  const body = { ...req(), token: TESTNET_TOKEN };
+  const first = await sender.carry(body);
+  assert.deepEqual([first.status, code(first)], [503, "upstream"], "the first start fails at the protocol read");
+  const second = await sender.carry(body);
+  assert.notEqual(code(second), "upstream", `the second start takes the stores' locks again: ${JSON.stringify(second.body)}`);
+  sender.stop();
 });

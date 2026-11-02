@@ -29,7 +29,7 @@
 import * as nodeFs from "node:fs";
 import { VAULT_FIELD_P } from "@blindfill/kit";
 import type { RelayerStore, TxRef } from "../bind/send.ts";
-import { pagesAt, type Rpc } from "../near/pages.ts";
+import { listAt, pagesAt, type Rpc } from "../near/pages.ts";
 import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
 import { decimal } from "./checks.ts";
 
@@ -88,7 +88,12 @@ export type WithdrawSend = TxRef & {
  * The relayer's settle transaction (null when none is signed: another caller settled the spend first, which anyone
  * may) and whether the spend reads settled.
  */
-export type SettleRecord = { tx: (TxRef & { key: string }) | null; done: boolean };
+export type SettleRecord = { tx: (TxRef & { key: string }) | null; done: boolean; failed?: SettleFailure };
+/**
+ * A settle that failed on chain, with the release that signed it: no release at or below it signs another settle for
+ * that nullifier (a failure that repeats would burn gas every round); a higher release may try once more.
+ */
+export type SettleFailure = { release: number; error: string };
 
 /** A send's outcome as read from blocks. A deadline failure and a send never applied delete the row. */
 export type SendOutcome = { kind: "succeeded" } | { kind: "failed"; error: string } | { kind: "deadline" } | { kind: "never_applied" };
@@ -115,8 +120,9 @@ export type WithdrawSendStore = {
   /** The nullifiers whose row is open or unreadable: the restart's rebroadcast and the outcome rounds' work. */
   open(): bigint[];
   /**
-   * Writes a succeeded send's settle (its transaction, durable before it is broadcast, or done), or clears one that
-   * never landed or failed while the spend is not settled, so the next round signs again. Throws unless the row reads
+   * Writes a succeeded send's settle (its transaction, durable before it is broadcast, or done), records its open
+   * settle's failure on chain under the running release (no more settles for it in this release), or clears one that
+   * never landed (or failed under a lower release), so the next round signs again. Throws unless the row reads
    * succeeded and, for a new settle transaction, holds none still open; and unless the key's counter is past its nonce.
    */
   setSettle(nf: bigint, settle: SettleRecord | null): void;
@@ -133,7 +139,13 @@ const DEC = /^(0|[1-9][0-9]{0,19})$/;
 function settleOk(s: unknown): boolean {
   if (typeof s !== "object" || s === null || Array.isArray(s)) return false;
   const r = s as Record<string, unknown>;
-  if (Object.keys(r).length !== 2 || typeof r.done !== "boolean") return false;
+  const n = Object.keys(r).length;
+  if (!(n === 2 || (n === 3 && "failed" in r)) || typeof r.done !== "boolean") return false;
+  if (n === 3) {
+    const f = r.failed as Record<string, unknown> | null;
+    if (r.done || r.tx === null || typeof f !== "object" || f === null || Array.isArray(f) || Object.keys(f).length !== 2) return false;
+    if (!Number.isSafeInteger(f.release) || (f.release as number) < 1 || typeof f.error !== "string") return false;
+  }
   if (r.tx === null) return r.done; // no transaction of ours: only "settled by another"
   if (typeof r.tx !== "object" || Array.isArray(r.tx)) return false;
   const x = r.tx as Record<string, unknown>;
@@ -199,7 +211,7 @@ function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): Withdr
     if (m === null) continue;
     const rec = parseSend(d.text(f) ?? "", m[1]!);
     if (rec === null || rec.outcome === "open") openRows.add(m[1]!);
-    else if (rec.outcome === "succeeded" && rec.settle?.done !== true) settleRows.add(m[1]!);
+    else if (rec.outcome === "succeeded" && rec.settle?.done !== true && !((rec.settle?.failed?.release ?? 0) >= release)) settleRows.add(m[1]!);
   }
   return {
     release,
@@ -246,7 +258,10 @@ function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): Withdr
       if (held === null || held === "unreadable" || held.outcome !== "succeeded") throw new Error("setSettle: no succeeded send record");
       if (held.settle?.done === true) throw new Error("setSettle: already settled");
       const was = held.settle?.tx ?? null;
-      if (settle !== null && !settle.done) {
+      if (settle?.failed !== undefined) {
+        if (settle.tx === null || was === null || was.tx_hash !== settle.tx.tx_hash) throw new Error("setSettle: a failure names another settle transaction");
+        if (settle.failed.release !== release) throw new Error("setSettle: a failure is recorded under the running release only");
+      } else if (settle !== null && !settle.done) {
         if (settle.tx === null) throw new Error("setSettle: an open settle names no transaction");
         if (was !== null && was.tx_hash !== settle.tx.tx_hash) throw new Error("setSettle: a settle transaction is still open");
         const counter = keys.nonceNext(settle.tx.key);
@@ -256,7 +271,7 @@ function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): Withdr
       const v = JSON.stringify({ ...held, settle });
       if (parseSend(v, held.nullifier) === null) throw new Error("setSettle: not a settle record");
       d.replace(name(nf), v);
-      if (settle?.done === true) settleRows.delete(held.nullifier);
+      if (settle?.done === true || settle?.failed !== undefined) settleRows.delete(held.nullifier);
     },
     toSettle: () => [...settleRows].map((k) => BigInt(`0x${k}`)),
     close: d.close,
@@ -301,25 +316,11 @@ function nullifiersOf(page: Record<string, unknown>[]): bigint[] {
 }
 
 /**
- * The index of the vault's spends pages on two providers of two operators (`rpcs`). Reads run one at a time, each at a
- * final height at or above the last, so the cursor never skips a row.
+ * The "caught up" rule for one of the vault's append-only lists: `reach(h)` reads the pages at h (readAt, one read at a
+ * time, each at a height at or above the last) until the list is read whole at h, or answers false once waitMs passes.
  */
-export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, waitMs = INDEX_WAIT_MS, now: () => number = Date.now): SpendsIndex {
-  const spent = new Map<string, number>();
-  let next = 0;
+function caughtUp(readAt: (h: bigint) => Promise<void>, waitMs: number): { reach(h: bigint): Promise<boolean>; at(): bigint | null } {
   let caughtAt: bigint | null = null;
-
-  /** Every page from the cursor at `h` on both providers; the cursor moves only on a page both answer alike. */
-  const readAt = async (h: bigint) => {
-    for (;;) {
-      const from = next;
-      const nfs = nullifiersOf(await pagesAt(rpcs, vault, "spends", h, from, SPENDS_PAGE));
-      nfs.forEach((nf, i) => spent.set(nullifierKey(nf), from + i));
-      next = from + nfs.length;
-      if (nfs.length < SPENDS_PAGE) return;
-    }
-  };
-
   let chain: Promise<unknown> = Promise.resolve();
   const reach = (h: bigint): Promise<boolean> => {
     const until = Date.now() + waitMs;
@@ -343,6 +344,29 @@ export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, wait
     });
     return Promise.race([run, late]).finally(() => clearTimeout(timer));
   };
+  return { reach, at: () => caughtAt };
+}
+
+/**
+ * The index of the vault's spends pages on two providers of two operators (`rpcs`). Reads run one at a time, each at a
+ * final height at or above the last, so the cursor never skips a row.
+ */
+export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, waitMs = INDEX_WAIT_MS, now: () => number = Date.now): SpendsIndex {
+  const spent = new Map<string, number>();
+  let next = 0;
+
+  /** Every page from the cursor at `h` on both providers; the cursor moves only on a page both answer alike. */
+  const readAt = async (h: bigint) => {
+    for (;;) {
+      const from = next;
+      const nfs = nullifiersOf(await pagesAt(rpcs, vault, "spends", h, from, SPENDS_PAGE));
+      nfs.forEach((nf, i) => spent.set(nullifierKey(nf), from + i));
+      next = from + nfs.length;
+      if (nfs.length < SPENDS_PAGE) return;
+    }
+  };
+
+  const { reach, at } = caughtUp(readAt, waitMs);
 
   return {
     async finalHeight() {
@@ -356,9 +380,46 @@ export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, wait
     },
     reach,
     holds: (nf) => spent.has(nullifierKey(nf)),
-    at: () => caughtAt,
+    at,
     indexOf: (nf) => spent.get(nullifierKey(nf)) ?? null,
   };
+}
+
+// ---- The leaves index (check 5, row 12) ----
+
+/** Leaves per `leaves` page read (a page of bare decimals; the vault caps a page at PAGE_MAX, 1,000). */
+export const LEAVES_PAGE = 500;
+/** The state tree's capacity: depth 32 (row 12's tree-full rule, V@93b827c:233). */
+export const TREE_CAPACITY = 1n << 32n;
+
+export type LeavesIndex = {
+  /** Reads the `leaves` pages at H until the index is caught up at H (the spends index's rule); false when INDEX_WAIT_MS passes first. */
+  reach(h: bigint): Promise<boolean>;
+  /** The pages read so far hold this value as a leaf. */
+  has(leaf: bigint): boolean;
+  /** How many leaves the pages read so far hold. */
+  count(): bigint;
+};
+
+/** The index of the vault's state-tree `leaves` pages on two providers of two operators, read as the spends index is. */
+export function createLeavesIndex(rpcs: readonly [Rpc, Rpc], vault: string, waitMs = INDEX_WAIT_MS): LeavesIndex {
+  const leaves = new Set<string>();
+  let next = 0;
+  const readAt = async (h: bigint) => {
+    for (;;) {
+      const from = next;
+      const page = (await listAt(rpcs, vault, "leaves", h, from, LEAVES_PAGE)).map((x) => {
+        const v = decimal(x, VAULT_FIELD_P);
+        if (v === null) throw new Error("leaves: an entry not one canonical decimal below p");
+        return v;
+      });
+      page.forEach((v) => leaves.add(nullifierKey(v)));
+      next = from + page.length;
+      if (page.length < LEAVES_PAGE) return;
+    }
+  };
+  const { reach } = caughtUp(readAt, waitMs);
+  return { reach, has: (leaf) => leaves.has(nullifierKey(leaf)), count: () => BigInt(next) };
 }
 
 // ---- Checks 5 and 6 on the nullifier ----

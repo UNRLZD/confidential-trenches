@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { createFileStore, nearRpc, startRelayer } from "../../src/bind/send.ts";
 import { USDC_CODE_HASH, type TokenStatus } from "../../src/token-status/status.ts";
-import { createSpendsIndex, createWithdrawSendStore } from "../../src/withdraw/index.ts";
+import { createLeavesIndex, createSpendsIndex, createWithdrawSendStore } from "../../src/withdraw/index.ts";
 import { carryWithdraw, outcomeRound, type WithdrawSendDeps } from "../../src/withdraw/send.ts";
 
 type Input = {
@@ -43,6 +43,7 @@ const deps: WithdrawSendDeps = {
   rpcs,
   reads: { feeMin: async () => BigInt(input.feeMin ?? "0") },
   index: createSpendsIndex(rpcs, input.vault),
+  leaves: createLeavesIndex(rpcs, input.vault),
   store,
   relayers: [relayer],
   tokenStatus,
