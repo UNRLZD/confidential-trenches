@@ -396,11 +396,11 @@ test("the seed record is never written by put or removed by delete: insertSeed a
   await assert.rejects(s.delete("meta", "seed"), /insertSeed and setCodeSaved only/);
   assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(7), source: "random", code_saved: false });
   // setCodeSaved changes code_saved only
-  await s.setCodeSaved();
+  await s.setCodeSaved({ entropy: new Uint8Array(16).fill(7) });
   assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(7), source: "random", code_saved: true });
-  await s.setCodeSaved();
+  await s.setCodeSaved({ entropy: new Uint8Array(16).fill(7) });
   assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(7), source: "random", code_saved: true });
-  await assert.rejects((await openWalletStore({ indexedDB: new IDBFactory() })).setCodeSaved(), /no seed is stored/);
+  await assert.rejects((await openWalletStore({ indexedDB: new IDBFactory() })).setCodeSaved({ entropy: new Uint8Array(16).fill(7) }), /no seed is stored/);
   // settings stay writable
   await s.put("meta", "settings", { x: 1 });
   assert.deepEqual(await s.get("meta", "settings"), { x: 1 });
@@ -437,6 +437,24 @@ async function failingPut<T>(key: string, body: () => Promise<T>): Promise<T> {
 }
 const SEED = (code_saved = false) => ({ v: 1, entropy: new Uint8Array(16).fill(0x7f), source: "random", code_saved, created_ms: 1 });
 
+test("setCodeSaved marks only the seed whose 12 words were shown: another seed stored since is refused, unchanged", async () => {
+  const idb = new IDBFactory();
+  const a = await openWalletStore({ indexedDB: idb });
+  const shownS1 = new Uint8Array(16).fill(0x11);
+  // S1 was shown in one tab; meanwhile another tab signed S1 out and stored S2, whose words were never shown here
+  await a.insertSeed({ v: 1, entropy: new Uint8Array(16).fill(0x22), source: "random", code_saved: false, created_ms: 2 });
+  await assert.rejects(a.setCodeSaved({ entropy: shownS1 }), /not the seed shown/);
+  assert.equal(((await a.get("meta", "seed")) as { code_saved: boolean }).code_saved, false, "S2 marked saved by S1's Saved");
+  assert.equal(((await a.get("meta", "status")) as { code_saved: boolean }).code_saved, false);
+  await assert.rejects(a.signOut(), /back up the 12 words/);
+  // the words shown are S2's: marked
+  await a.setCodeSaved({ entropy: new Uint8Array(16).fill(0x22) });
+  assert.equal(((await a.get("meta", "seed")) as { code_saved: boolean }).code_saved, true);
+  // a call naming no seed, or not 16 bytes, is refused before any read
+  await assert.rejects(a.setCodeSaved(undefined as never), /the seed shown/);
+  await assert.rejects(a.setCodeSaved({ entropy: new Uint8Array(15) }), /the seed shown/);
+});
+
 test("status: insertSeed and setCodeSaved write it with the seed, in one transaction; no caller puts or deletes it", async () => {
   const idb = new IDBFactory();
   const s = await openWalletStore({ indexedDB: idb });
@@ -446,9 +464,9 @@ test("status: insertSeed and setCodeSaved write it with the seed, in one transac
   assert.equal(await s.get("meta", "status"), undefined);
   await s.insertSeed(SEED());
   assert.deepEqual(await s.get("meta", "status"), { v: 1, source: "random", code_saved: false });
-  await failingPut("status", () => assert.rejects(s.setCodeSaved()));
+  await failingPut("status", () => assert.rejects(s.setCodeSaved(SEED())));
   assert.equal(((await s.get("meta", "seed")) as { code_saved: boolean }).code_saved, false);
-  await s.setCodeSaved();
+  await s.setCodeSaved(SEED());
   assert.equal(((await s.get("meta", "seed")) as { code_saved: boolean }).code_saved, true);
   assert.deepEqual(await s.get("meta", "status"), { v: 1, source: "random", code_saved: true });
   await assert.rejects(s.put("meta", "status", { v: 1, source: "prf", code_saved: true }), /is the store's own/);
@@ -477,7 +495,7 @@ test("syncStatus: writes a missing or behind status from the seed, and nothing w
   assert.equal(await s.get("meta", "status"), undefined);
   await s.insertSeed(SEED());
   const early = await rawGet(idb, "ct-wallet", "meta", "status");
-  await s.setCodeSaved();
+  await s.setCodeSaved(SEED());
   // a database from before the status record: none stored
   await rawDelete(idb, "ct-wallet", "meta", "status");
   seen.length = 0;
@@ -556,7 +574,7 @@ test("sign out refuses while a no-PRF seed's 12 words are the only copy and not 
   // nothing was deleted and the store still answers
   assert.deepEqual(await s.get("meta", "seed"), { entropy: new Uint8Array(16).fill(5), source: "random", code_saved: false });
   assert.deepEqual(await rawKeys(idb), true);
-  await s.setCodeSaved();
+  await s.setCodeSaved({ entropy: new Uint8Array(16).fill(5) });
   await s.signOut();
   assert.deepEqual(await rawKeys(idb), false);
   // a PRF seed signs out with code_saved false: the passkey gives the words back
@@ -601,7 +619,7 @@ test("wrap's encoded plaintext and unwrap's decrypted buffer are zeroed after us
     // the seed's plaintext held its entropy as hex until it was wiped
     for (const b of given) assert.ok(zero(b), "wrap's plaintext not zeroed");
     for (const b of got) assert.ok(zero(b), "unwrap's plaintext not zeroed");
-    await s.setCodeSaved();
+    await s.setCodeSaved({ entropy: new Uint8Array(16).fill(0xab) });
     await s.get("meta", "seed");
     await s.put("notes", "n1", { precommitment: new Uint8Array(32).fill(7) });
     await s.get("notes", "n1");

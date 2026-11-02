@@ -270,7 +270,7 @@ test("with no Web Locks, sign out, insertSeed and setCodeSaved refuse: never unl
   const idb = new IDBFactory();
   const s = await openWalletStore({ indexedDB: idb, name: "nolocks", locks: null });
   await assert.rejects(s.insertSeed(PRF), /no Web Locks/);
-  await assert.rejects(s.setCodeSaved(), /no Web Locks/);
+  await assert.rejects(s.setCodeSaved({ entropy: new Uint8Array(16) }), /no Web Locks/);
   await assert.rejects(s.signOut(), /no Web Locks/);
   assert.equal(await s.get("meta", "seed"), undefined);
   s.close();
