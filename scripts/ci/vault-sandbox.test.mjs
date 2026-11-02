@@ -109,11 +109,23 @@ test("a copy of the rule outside the checkout reads the change in its working di
   const dir = mkdtempSync(path.join(tmpdir(), "vault-sandbox-base-"));
   try {
     copyFileSync(path.join(ROOT, "scripts/ci/vault-sandbox.mjs"), path.join(dir, "vault-sandbox.mjs"));
-    const sha = (r) => execFileSync("git", ["rev-parse", r], { cwd: ROOT, encoding: "utf8" }).trim();
-    const file = execFileSync("git", ["log", "-1", "--format=", "--name-only", "--", "contracts/vault"], { cwd: ROOT, encoding: "utf8" }).split("\n")[0];
-    const commit = execFileSync("git", ["log", "-1", "--format=%H", "--", file], { cwd: ROOT, encoding: "utf8" }).trim();
-    const out = execFileSync("node", [path.join(dir, "vault-sandbox.mjs"), "decide", "pull_request", sha(`${commit}~1`), commit], { cwd: ROOT, encoding: "utf8", env: { ...process.env, GITHUB_OUTPUT: "" } });
-    assert.match(out, /^run=true: \d+ changed file\(s\) the suite reads/, out);
+    const repo = path.join(dir, "repo");
+    mkdirSync(repo);
+    const git = (...a) => execFileSync("git", ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid", ...a], { cwd: repo, encoding: "utf8" }).trim();
+    const commit = (f) => {
+      mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+      writeFileSync(path.join(repo, f), "x\n");
+      git("add", "--", f);
+      git("commit", "--quiet", "--no-verify", "-m", f);
+      return git("rev-parse", "HEAD");
+    };
+    git("init", "--quiet");
+    const c0 = commit("README.md");
+    const c1 = commit("contracts/vault/src/lib.rs");
+    const c2 = commit("apps/terminal/src/App.tsx");
+    const decide = (a, b) => execFileSync("node", [path.join(dir, "vault-sandbox.mjs"), "decide", "pull_request", a, b], { cwd: repo, encoding: "utf8", env: { ...process.env, GITHUB_OUTPUT: "" } });
+    assert.match(decide(c0, c1), /^run=true: 1 changed file\(s\) the suite reads, first contracts\/vault\/src\/lib\.rs/);
+    assert.match(decide(c1, c2), /^run=false: none of the 1 changed file\(s\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
