@@ -22,7 +22,8 @@ https://defi.sucks
 // - no `dead`: nothing can stop deposits;
 // - `usedPrecommitments` moved in from Entrypoint.sol:55 with the deposit;
 // - a second LeanIMT, the label tree, which the pool fills itself (the association set);
-// - every root of both trees kept in a set (no 64-slot ring), so a proof made against an older root still lands;
+// - every root of both trees kept with the block time it was made at (no 64-slot ring), so a proof made against an
+//   older root still lands and any client reads each root's chain time;
 // - a reentrancy guard in transient storage, in place of the Entrypoint's nonReentrant;
 // - no ragequit: no RAGEQUIT_VERIFIER and no depositors (the label tree holds every label, so a withdraw proof always
 //   works; ragequit would only add a public exit that links a deposit to its exit).
@@ -54,9 +55,9 @@ abstract contract State is IState {
   uint256 public nonce;
 
   /// @inheritdoc IState
-  mapping(uint256 _root => bool _known) public knownStateRoots;
+  mapping(uint256 _root => uint256 _time) public stateRootTimes;
   /// @inheritdoc IState
-  mapping(uint256 _root => bool _known) public knownLabelRoots;
+  mapping(uint256 _root => uint256 _time) public labelRootTimes;
 
   // @notice The state merkle tree containing all commitments
   LeanIMTData internal _merkleTree;
@@ -158,8 +159,8 @@ abstract contract State is IState {
 
     if (_merkleTree.depth > MAX_TREE_DEPTH) revert MaxTreeDepthReached();
 
-    // Keep the root, with every root before it
-    knownStateRoots[_updatedRoot] = true;
+    // Keep the root and its block time, with every root before it
+    stateRootTimes[_updatedRoot] = block.timestamp;
 
     emit LeafInserted(_merkleTree.size, _leaf, _updatedRoot);
   }
@@ -174,8 +175,8 @@ abstract contract State is IState {
 
     if (_labelTree.depth > MAX_TREE_DEPTH) revert MaxTreeDepthReached();
 
-    // Keep the root, with every root before it
-    knownLabelRoots[_updatedRoot] = true;
+    // Keep the root and its block time, with every root before it
+    labelRootTimes[_updatedRoot] = block.timestamp;
 
     emit LabelInserted(_labelTree.size, _label, _updatedRoot);
   }
@@ -186,7 +187,7 @@ abstract contract State is IState {
    * @return Returns true if the state tree has had this root, false otherwise
    */
   function _isKnownRoot(uint256 _root) internal view returns (bool) {
-    return knownStateRoots[_root];
+    return stateRootTimes[_root] != 0;
   }
 
   /**
@@ -195,7 +196,7 @@ abstract contract State is IState {
    * @return Returns true if the label tree has had this root, false otherwise
    */
   function _isKnownLabelRoot(uint256 _root) internal view returns (bool) {
-    return knownLabelRoots[_root];
+    return labelRootTimes[_root] != 0;
   }
 
 }

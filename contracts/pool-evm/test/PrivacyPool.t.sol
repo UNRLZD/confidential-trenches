@@ -263,6 +263,34 @@ contract PoolTest is Test {
     assertEq(W.balance, 0.5 ether);
   }
 
+  function test_aRootFrom100LeavesBackStillVerifies() public {
+    // old_root is made against the roots after deposit 2; deposit 3 and 99 more come after it: 100 newer leaves
+    _depositAll();
+    vm.deal(address(0xD1), 10 ether);
+    for (uint256 _i; _i < 99; ++_i) {
+      vm.prank(address(0xD1));
+      pool.deposit{value: 0.01 ether}(0.01 ether, uint256(keccak256(abi.encode('pool-evm/filler', _i))) % P);
+    }
+    assertEq(pool.currentTreeSize(), 102);
+    _relay(_request('old_root'), _withdrawProof('old_root'), 0);
+    assertEq(W.balance, 0.5 ether);
+  }
+
+  function test_eachRootKeepsItsBlockTime() public {
+    // two clients read the same time for a root with one call each; a root the tree never had reads 0
+    for (uint256 _i; _i < 3; ++_i) {
+      vm.warp(NOW + 60 * _i);
+      _deposit(_i);
+    }
+    ProofLib.WithdrawProof memory _old = _withdrawProof('old_root');
+    ProofLib.WithdrawProof memory _new = _withdrawProof('relayed');
+    assertEq(pool.stateRootTimes(_old.pubSignals[3]), NOW + 60, 'the state root after deposit 2');
+    assertEq(pool.labelRootTimes(_old.pubSignals[5]), NOW + 60, 'the label root after deposit 2');
+    assertEq(pool.stateRootTimes(_new.pubSignals[3]), NOW + 120, 'the state root after deposit 3');
+    assertEq(pool.labelRootTimes(_new.pubSignals[5]), NOW + 120, 'the label root after deposit 3');
+    assertEq(pool.stateRootTimes(_new.pubSignals[3] + 1), 0);
+  }
+
   function test_aFeeOverTheCapIsRefused() public {
     _depositAll();
     IPrivacyPool.RelayData memory _r = _request('relayed');

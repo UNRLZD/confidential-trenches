@@ -35,8 +35,9 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
   3. The pool approves every deposit: it puts each label in its own label tree (a second LeanIMT), and a withdrawal's
      ASP root must be a root that tree has had, in place of ENTRYPOINT.latestRoot(). The circuit is unchanged: the ASP
      tree is a LeanIMT of labels either way.
-  4. Every root of both trees is kept (a mapping), in place of the 64-root ring, so a proof made against an older
-     root still lands.
+  4. Every root of both trees is kept with the block time it was made at (root => unix seconds, 0 for a root the
+     tree never had), in place of the 64-root ring, so a proof made against an older root still lands and any client
+     reads each root's chain time with one call.
   5. No windDown and no dead: nothing can stop deposits. No ragequit, RAGEQUIT_VERIFIER or depositors record: every
      label is in the pool's own label tree, so a withdraw proof always works, and ragequit would only add a public
      exit that links a deposit to its exit.

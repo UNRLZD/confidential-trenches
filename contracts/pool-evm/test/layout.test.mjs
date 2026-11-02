@@ -16,8 +16,8 @@ test("the pool's storage is exactly the listed slots", () => {
   const got = inspect("storageLayout").storage.map((s) => `${s.slot} ${s.label}`);
   assert.deepEqual(got, [
     "0 nonce",
-    "1 knownStateRoots",
-    "2 knownLabelRoots",
+    "1 stateRootTimes",
+    "2 labelRootTimes",
     "3 _merkleTree",
     "7 _labelTree",
     "11 nullifierHashes",
@@ -32,7 +32,7 @@ test("the pool's ABI is exactly the listed functions; only deposit takes value",
   assert.deepEqual(fns.map((f) => f.name).sort(), [
     "ASSET", "MAX_RELAY_FEE_BPS", "MAX_TREE_DEPTH", "MIN_DEPOSIT", "SCOPE", "WITHDRAWAL_VERIFIER",
     "currentLabelRoot", "currentLabelTreeDepth", "currentLabelTreeSize", "currentRoot", "currentTreeDepth",
-    "currentTreeSize", "deposit", "knownLabelRoots", "knownStateRoots", "nonce", "nullifierHashes",
+    "currentTreeSize", "deposit", "labelRootTimes", "nonce", "nullifierHashes", "stateRootTimes",
     "usedPrecommitments", "withdraw",
   ]);
   const writes = fns.filter((f) => f.stateMutability !== "view" && f.stateMutability !== "pure").map((f) => `${f.name} ${f.stateMutability}`);

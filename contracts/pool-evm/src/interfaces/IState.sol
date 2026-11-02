@@ -129,18 +129,18 @@ interface IState {
   function nonce() external view returns (uint256 _nonce);
 
   /**
-   * @notice Returns whether the state tree has ever had this root
+   * @notice Returns the block time (unix seconds) the state tree first had this root at; 0 if it never had it
    * @param _root The root
-   * @return _known True if the state tree has had it
+   * @return _time The root's block time
    */
-  function knownStateRoots(uint256 _root) external view returns (bool _known);
+  function stateRootTimes(uint256 _root) external view returns (uint256 _time);
 
   /**
-   * @notice Returns whether the label tree has ever had this root
+   * @notice Returns the block time (unix seconds) the label tree first had this root at; 0 if it never had it
    * @param _root The root
-   * @return _known True if the label tree has had it
+   * @return _time The root's block time
    */
-  function knownLabelRoots(uint256 _root) external view returns (bool _known);
+  function labelRootTimes(uint256 _root) external view returns (uint256 _time);
 
   /**
    * @notice Returns the spending status of a nullifier hash
