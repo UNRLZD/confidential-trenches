@@ -17,7 +17,7 @@ import {
   readWithdrawFeeMax,
   withdrawFeeMax,
 } from "../src/withdraw/feemax.ts";
-import { askWithdrawFee, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
+import { askWithdrawFee, RELEASE_HELPER, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
 import { withdrawRequest } from "../src/withdraw/request.ts";
 import { argsFor, closeVaults, FEE_MAX, FEE_READS, type FeeEdit, feeReplay, REGISTER_DEPOSIT, signalsProver, TOKEN, vaultWith } from "./withdraw-fixture.ts";
 
@@ -113,7 +113,7 @@ test("the pairs are release pairs: one operator, a helper URL or the testnet pai
   const net = NEAR_NETWORKS.mainnet;
   const bad: [FeeRpc, FeeRpc][] = [
     [fa, renamed(fb, net.fastnear[1])], // two FastNEAR URLs: one operator
-    [fa, renamed(fb, "https://api.confidential.unrealized.trade/v1/rpc/near")], // through the helper
+    [fa, renamed(fb, `${RELEASE_HELPER}/v1/rpc/near`)], // through the helper
   ];
   for (const pair of bad) {
     await refused(readWithdrawFeeMax({ network: "mainnet", rpcs: pair, priceRpcs: feeReplay("mainnet"), registerDeposit: 0n }), "input", /exactly/);
