@@ -1313,6 +1313,8 @@ type KeyChange = { height: bigint; nonce: bigint | null; cause: Record<string, s
 
 /** One ledger behind two regular providers and an archival one. */
 class Node {
+  /** lookups by hash (the tx method) answered so far */
+  lookups = 0;
   final = 1_000n;
   /**
    * The relayer key's history: each change in the block that made it, as EXPERIMENTAL_changes lists it (a nonce of
@@ -1443,7 +1445,8 @@ class Node {
         if (this.skipped.has(h) || h > top) throw unknownBlock();
         return h;
       };
-      const header = (h: bigint) => ({ header: { height: Number(h), hash: this.bh(h), prev_height: Number(this.prevOf(h)) } });
+      // timestamp_nanosec as nearcore writes it (a decimal string): 600 ms a block from 1.7e12 ms; timestamp (a JSON number past 2^53) is never read
+      const header = (h: bigint) => ({ header: { height: Number(h), hash: this.bh(h), prev_height: Number(this.prevOf(h)), timestamp_nanosec: ((1_700_000_000_000n + h * 600n) * 1_000_000n + 999_999n).toString(), timestamp: 9_007_199_254_740_993_000 } });
       if (method === "query") {
         const q = params as { request_type: string; block_id?: unknown; public_key?: string };
         if (q.request_type === "view_access_key") {
@@ -1492,6 +1495,7 @@ class Node {
         return { final_execution_status: "NONE" };
       }
       if (method === "tx") {
+        this.lookups++;
         const h = (params as { tx_hash: string }).tx_hash;
         const hid = this.hideTx.get(h) ?? 0;
         if (hid > 0) {
@@ -2729,4 +2733,33 @@ test("base58decode inverts the checks' base58", () => {
   const b = createHash("sha256").update("x").digest();
   assert.deepEqual(Buffer.from(base58decode(base58(b))), b);
   assert.deepEqual(Buffer.from(base58decode("11" + base58(Buffer.from([1, 2])))), Buffer.from([0, 0, 1, 2]));
+});
+
+test("a vault call read from blocks only (the withdrawal relayer's fromBlocks): no lookup by hash, its receipt found at E with E's time from timestamp_nanosec; wait false answers once sent", async () => {
+  const node = new Node();
+  const r = node.relayer(2_000);
+  const sent = await r.send(prepayAction(1n), open, () => undefined, { wait: false });
+  assert.equal(sent.kind, "unknown");
+  const tx: TxRef[] = [];
+  const out = await r.send(prepayAction(2n), open, keep(tx), { fromBlocks: true });
+  assert.equal(out.kind, "final");
+  if (out.kind !== "final") return;
+  assert.equal(out.receipts.length, 1);
+  const e = out.receipts[0]!;
+  assert.equal(e.executor, VAULT);
+  assert.equal(e.ok, true);
+  assert.equal(e.ms, 1_700_000_000_000n + e.height * 600n, "E's time: timestamp_nanosec / 10^6, the sub-ms part dropped");
+  assert.equal(node.lookups, 0, "never a lookup by hash");
+  const again = await r.resolve(tx[0]!, { resend: false, fromBlocks: true });
+  assert.equal(again.kind, "final");
+  assert.equal(node.lookups, 0);
+});
+
+test("a FunctionCall encodes as nearcore's Action::FunctionCall: tag 2, method, args, gas u64, deposit u128; gas past 300 Tgas or a deposit past u128 refused", () => {
+  const a = encodeAction({ kind: "call", receiver: VAULT, method: "settle", args: '{"nullifier_hash":"1"}', gas: 150_000_000_000_000n, deposit: 148n * 10n ** 19n });
+  const le = (n: bigint, len: number) => Buffer.from(Array.from({ length: len }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn)));
+  const str = (x: string) => Buffer.concat([le(BigInt(Buffer.byteLength(x)), 4), Buffer.from(x)]);
+  assert.deepEqual(a, Buffer.concat([Buffer.from([2]), str("settle"), str('{"nullifier_hash":"1"}'), le(150_000_000_000_000n, 8), le(148n * 10n ** 19n, 16)]));
+  assert.throws(() => encodeAction({ kind: "call", receiver: VAULT, method: "m", args: "{}", gas: 300_000_000_000_001n, deposit: 0n }), /gas/);
+  assert.throws(() => encodeAction({ kind: "call", receiver: VAULT, method: "m", args: "{}", gas: 1n, deposit: 1n << 128n }), /deposit/);
 });
