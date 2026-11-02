@@ -911,6 +911,28 @@ const SKIP_MAX = 64n;
 const SEARCH_MAX = 200;
 /** Changes to one key in one block that a change list may hold. */
 const CHANGES_MAX = 1_000;
+/** Heights after D one round reads for a receipt's block E (the rest go on next round, from where this one stopped). */
+const RECEIPT_SCAN_MAX = 200n;
+
+/**
+ * The id nearcore gives a transaction's receipt: sha256 of the hash's 32 bytes, the height of the block that applied
+ * it as a u64 little-endian, and 0 as a u64 little-endian (F64; nearcore create_receipt_id_from_transaction). Live:
+ * 6jvSQwan375v77pzg53GGnbGGKjQEoq7THEmjnSGCwzV at 221,384,610 gives A2mdwHyTn7Thxtk4AF8MbN2ahqftwh5xVWrozdLseoAo.
+ */
+export function receiptIdOf(txHash: string, height: bigint): string {
+  const h = base58decode(txHash);
+  if (h.length !== 32) throw new Error("receipt id: not a 32-byte hash");
+  return base58(createHash("sha256").update(Buffer.concat([Buffer.from(h), le(height, 8), le(0n, 8)])).digest());
+}
+
+/** The receiver of a transaction the relayer signed (borsh Transaction V0: signer, key, nonce, receiver). */
+function receiverOf(signedTx: string): string {
+  const b = Buffer.from(signedTx, "base64");
+  const sl = b.readUInt32LE(0);
+  const at = 4 + sl + 33 + 8;
+  const rl = b.readUInt32LE(at);
+  return b.subarray(at + 4, at + 4 + rl).toString("utf8");
+}
 
 /** The relayer as it starts: the validity period read from both providers first, then the gas account. */
 export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Promise<Relayer> {
@@ -937,7 +959,8 @@ export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, acc
  *     search by block_id (UNKNOWN_BLOCK counts as a skipped height only when the next block's prev_height shows the
  *     gap), its hash the same on both; final, so found once and kept in the store. EXPERIMENTAL_changes for K at D on
  *     both: a change caused by this transaction means it was applied at D, and its outcome is read from a lookup that
- *     names D (a lookup naming any other block keeps); a list that does not name it means K can never verify these
+ *     names D (a lookup naming any other block: a prepay's receipt is read from blocks, F56 and T1b; a delegate's
+ *     keeps); a list that does not name it means K can never verify these
  *     bytes, (a2), dropped; an empty list keeps (a node that does not save state changes, F54).
  * Nothing else drops one: not UNKNOWN_TRANSACTION, not a failed outcome on its own, not a timer.
  */
@@ -1054,6 +1077,48 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     }
     return a.changes.length === 0 ? "empty" : ours ? "ours" : "other";
   };
+  /** How far each transaction's receipt has been looked for: the last block read, so the next round goes on from it. */
+  const scanned = new Map<string, Block>();
+  /**
+   * The outcome of a prepay's receipt read from blocks, never from a lookup (markets.md l.1240-1262, T1b): r computed
+   * from the hash and D's height; E the first block in (D, F] whose account_changes for the vault, the same on both,
+   * name r under receipt_processing (it succeeded) or only under action_receipt_gas_reward (it failed and was rolled
+   * back, the s8 rule). A height with no block is passed only when the next block's prev_height shows the gap; null
+   * until E is found (r pending).
+   */
+  const receiptFromBlocks = async (tx: TxRef, d: Block, f: bigint): Promise<Receipt | null> => {
+    const r = receiptIdOf(tx.tx_hash, d.height);
+    let last = scanned.get(tx.tx_hash) ?? d;
+    const end = f < last.height + RECEIPT_SCAN_MAX ? f : last.height + RECEIPT_SCAN_MAX;
+    for (let h = last.height + 1n; h <= end; h++) {
+      const b = await blockAt(h);
+      if (b === null) continue;
+      if (b.prev !== last.height) throw new Error(`block ${h}: its prev_height ${b.prev} is not ${last.height}`);
+      const [v0, v1] = await Promise.all(
+        rpcs.map(async (q) => {
+          const a = await q("EXPERIMENTAL_changes", { changes_type: "account_changes", account_ids: [vault], block_id: Number(h) });
+          if (!isObj(a) || a.block_hash !== b.hash || !Array.isArray(a.changes) || a.changes.length > CHANGES_MAX) throw new Error(`account_changes at ${h}: not that block's list`);
+          let ran = false;
+          let reward = false;
+          for (const c of a.changes) {
+            if (!isObj(c) || !isObj(c.cause) || !isObj(c.change) || c.change.account_id !== vault) throw new Error(`account_changes at ${h}: not a change to the vault`);
+            if (c.cause.receipt_hash !== r) continue;
+            if (c.cause.type === "receipt_processing") ran = true;
+            if (c.cause.type === "action_receipt_gas_reward") reward = true;
+          }
+          return ran ? "ran" : reward ? "failed" : a.changes.length === 0 ? "empty" : "other";
+        }),
+      );
+      if (v0 !== v1) throw new Error(`the providers disagree on the vault's changes at ${h} (${v0}, ${v1})`);
+      if (v0 === "ran" || v0 === "failed") {
+        scanned.delete(tx.tx_hash);
+        return { executor: vault, ok: v0 === "ran", failure: v0 === "ran" ? "" : `receipt ${r} failed at ${h} (read from blocks)`, height: h };
+      }
+      last = b;
+      remember(scanned, tx.tx_hash, b);
+    }
+    return null;
+  };
   /** A lookup by hash, a node's own view: its receipts and the block its transaction_outcome names, once FINAL. */
   const readTx = async (r: Rpc, tx: TxRef): Promise<{ at: unknown; receipts: Receipt[] } | null> => {
     try {
@@ -1099,7 +1164,13 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     if (c0 === "other") return { kind: "dropped", tx_hash: tx.tx_hash, why: "(a2): K's nonce passed it at D, whose changes do not name it" };
     // applied at D: its outcome from a lookup on any provider, the archival one included, that names D
     const reads = await Promise.all([...rpcs, archival].map((r) => readTx(r, tx)));
-    if (reads.some((x) => x !== null && x.at !== d.hash)) return keep("a lookup names a block other than D");
+    if (reads.some((x) => x !== null && x.at !== d.hash)) {
+      // F56: one hash can carry two outcomes, and a lookup can name the failed one at another block for good, so a
+      // prepay's outcome is read from blocks; a delegate's (its receipts run on U, the token and the vault) keeps
+      if (receiverOf(tx.signed_tx) !== vault) return keep("a lookup names a block other than D");
+      const e = await receiptFromBlocks(tx, d, f);
+      return e === null ? keep("a lookup names a block other than D; the prepay's receipt not found in a block up to F yet") : { kind: "final", tx_hash: tx.tx_hash, receipts: [e] };
+    }
     const found = reads.find((x) => x !== null);
     return found ? { kind: "final", tx_hash: tx.tx_hash, receipts: found.receipts } : keep("applied at D; its outcome is not final on any provider yet");
   };

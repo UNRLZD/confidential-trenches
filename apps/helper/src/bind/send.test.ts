@@ -34,6 +34,7 @@ import {
   relayerKey,
   remember,
   CACHE_MAX,
+  receiptIdOf,
   startLockRounds,
   startRelayer,
   transactionValidityPeriod,
@@ -1268,6 +1269,8 @@ class Node {
   keyChanges: KeyChange[] = [];
   /** heights with no block */
   skipped = new Set<bigint>();
+  /** the vault's account changes (EXPERIMENTAL_changes account_changes), each in the block of the receipt that made it */
+  vaultChanges: { height: bigint; cause: Record<string, string> }[] = [];
   /** providers (by index) that answer every EXPERIMENTAL_changes with an empty list (save_state_changes off, F54) */
   noChanges = new Set<number>();
   nonceAt(h: bigint): bigint | null {
@@ -1354,7 +1357,10 @@ class Node {
     };
     if (tx.action === 2) {
       this.prepaid.set(tx.precommitment, (this.prepaid.get(tx.precommitment) ?? 0n) + tx.bytes);
-      this.landed.set(tx.hash, { final_execution_status: "FINAL", transaction_outcome, receipts_outcome: [r(VAULT, true), r(RELAYER, true)] });
+      const id = receiptIdOf(tx.hash, this.final);
+      const vaultReceipt = r(VAULT, true);
+      for (const type of ["receipt_processing", "action_receipt_gas_reward"]) this.vaultChanges.push({ height: this.final, cause: { type, receipt_hash: id } });
+      this.landed.set(tx.hash, { final_execution_status: "FINAL", transaction_outcome, receipts_outcome: [vaultReceipt, r(RELAYER, true)] });
       this.log.push({ hash: tx.hash, kind, nonce: tx.nonce });
       return;
     }
@@ -1399,9 +1405,13 @@ class Node {
       }
       if (method === "EXPERIMENTAL_protocol_config") return { transaction_validity_period: Number(this.validity) };
       if (method === "EXPERIMENTAL_changes") {
-        const q = params as { changes_type: string; keys: { account_id: string; public_key: string }[]; block_id: unknown };
-        assert.equal(q.changes_type, "single_access_key_changes");
+        const q = params as { changes_type: string; keys: { account_id: string; public_key: string }[]; account_ids?: string[]; block_id: unknown };
         const h = at(q.block_id);
+        if (q.changes_type === "account_changes") {
+          assert.deepEqual(q.account_ids, [VAULT]);
+          return { block_hash: this.bh(h), changes: this.vaultChanges.filter((c) => c.height === h).map((c) => ({ cause: c.cause, type: "account_update", change: { account_id: VAULT, amount: "1" } })) };
+        }
+        assert.equal(q.changes_type, "single_access_key_changes");
         const k = q.keys[0]!;
         const changes = this.noChanges.has(i)
           ? []
@@ -2187,6 +2197,105 @@ test("the store's open records survive a restart: read once as the lock is taken
   t.close();
 });
 
+// ---- F56: one hash, two outcomes; a prepay's receipt read from blocks ----
+
+test("receiptIdOf: nearcore's receipt id for a transaction at a height (F64's live vector)", () => {
+  assert.equal(receiptIdOf("6jvSQwan375v77pzg53GGnbGGKjQEoq7THEmjnSGCwzV", 221_384_610n), "A2mdwHyTn7Thxtk4AF8MbN2ahqftwh5xVWrozdLseoAo");
+  assert.notEqual(receiptIdOf("6jvSQwan375v77pzg53GGnbGGKjQEoq7THEmjnSGCwzV", 221_384_611n), "A2mdwHyTn7Thxtk4AF8MbN2ahqftwh5xVWrozdLseoAo");
+});
+
+type Edit = (method: string, params: Record<string, unknown>, real: () => Promise<unknown>) => Promise<unknown>;
+/**
+ * Every provider, the archival one included, answering `tx` with the transaction_outcome at another block (F56); `edit`
+ * then changes the regular providers' answers (provider `one` only, when given).
+ */
+function x1Relayer(node: Node, edit?: Edit, one?: 0 | 1) {
+  const x1 = node.bh(990n);
+  const named = (q: Rpc): Rpc => async (m, p) => {
+    const a = await q(m, p);
+    return m === "tx" ? { ...(a as object), transaction_outcome: { ...(a as { transaction_outcome: object }).transaction_outcome, block_hash: x1 } } : a;
+  };
+  const rs = node.rpcs().map(named).map((q, i) => (edit === undefined || (one !== undefined && one !== i) ? q : (((m: string, p: unknown) => edit(m, p as Record<string, unknown>, () => q(m, p as never))) as Rpc)));
+  return createRelayer([rs[0]!, rs[1]!], named(node.archival()), RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50);
+}
+/** A prepay applied at D with its vault receipt at E, sent and read final by a relayer whose lookups name D. */
+async function prepaid(node: Node) {
+  const tx: TxRef[] = [];
+  assert.equal((await node.relayer(50).send(prepayAction(1n), open, keep(tx))).kind, "final");
+  const r = receiptIdOf(tx[0]!.tx_hash, node.appliedAt(tx[0]!.tx_hash)!);
+  return { tx: tx[0]!, r, e: node.vaultChanges.find((c) => c.cause.receipt_hash === r)!.height };
+}
+
+test("RC3-6 (F56): a prepay applied at D whose every lookup names another block is read final from blocks: r from its hash and D's height, E where the vault's changes name r", async () => {
+  const node = new Node();
+  const tx: TxRef[] = [];
+  assert.equal((await node.relayer(50).send(prepayAction(1n), open, keep(tx))).kind, "final");
+  const out = await x1Relayer(node).resolve(tx[0]!, noResend);
+  assert.equal(out.kind, "final");
+  const rs = (out as { receipts: Receipt[] }).receipts;
+  assert.deepEqual(rs.map((x) => [x.executor, x.ok]), [[VAULT, true]]);
+  assert.equal(rs[0]!.height, node.vaultChanges.find((c) => c.cause.receipt_hash === receiptIdOf(tx[0]!.tx_hash, node.appliedAt(tx[0]!.tx_hash)!))!.height);
+});
+
+test("F56: no block up to F naming r keeps the round (r pending); the vault's changes naming r only under its gas reward (F61: a failed call is rolled back, its reward kept) read the receipt as failed", async () => {
+  const node = new Node();
+  const tx: TxRef[] = [];
+  assert.equal((await node.relayer(50).send(prepayAction(1n), open, keep(tx))).kind, "final");
+  node.vaultChanges = node.vaultChanges.filter((c) => c.cause.type === "action_receipt_gas_reward");
+  const e = node.vaultChanges[0]!.height;
+  node.vaultChanges.push({ height: e, cause: { type: "receipt_processing", receipt_hash: "another receipt in E" } });
+  const d = node.appliedAt(tx[0]!.tx_hash)!;
+  node.finalLag = [node.final - d, node.final - d]; // F = D: E is not final yet
+  const r = x1Relayer(node);
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "r pending");
+  node.finalLag = [0n, 0n];
+  const out = await r.resolve(tx[0]!, noResend);
+  assert.equal(out.kind, "final");
+  assert.deepEqual((out as { receipts: Receipt[] }).receipts.map((x) => [x.executor, x.ok]), [[VAULT, false]]);
+});
+
+test("F56: a delegate whose every lookup names another block keeps the round (its receipts run on U, the token and the vault, so no single block read gives its outcome)", async () => {
+  const node = new Node();
+  const tx: TxRef[] = [];
+  const signedDelegate = Buffer.from(signed(node.user(), P, 101n, node.final + 100n).signed_delegate, "base64");
+  assert.equal((await node.relayer(50).send({ kind: "delegate", signed: signedDelegate, receiver: "ab".repeat(32) }, open, keep(tx))).kind, "final");
+  const d = node.appliedAt(tx[0]!.tx_hash)!;
+  node.vaultChanges.push({ height: d + 1n, cause: { type: "receipt_processing", receipt_hash: receiptIdOf(tx[0]!.tx_hash, d) } });
+  assert.equal((await x1Relayer(node).resolve(tx[0]!, noResend)).kind, "unknown");
+});
+
+test("F56: block reads that cannot be trusted keep the round: another hash, the providers disagreeing, a gap the next block does not show, a block past F", async () => {
+  const cases: [string, (node: Node, e: bigint) => [Edit, (0 | 1)?]][] = [
+    ["account_changes at E under another block's hash", (node, e) => [async (m, p, real) => {
+      const a = await real();
+      return m === "EXPERIMENTAL_changes" && p.changes_type === "account_changes" && p.block_id === Number(e) ? { ...(a as object), block_hash: node.bh(e + 7n) } : a;
+    }, 1]],
+    ["the first provider's list at E empty while the other's names r", (_node, e) => [async (m, p, real) => {
+      const a = await real();
+      return m === "EXPERIMENTAL_changes" && p.changes_type === "account_changes" && p.block_id === Number(e) ? { ...(a as object), changes: [] } : a;
+    }, 0]],
+    ["the second provider's list at E empty while the other's names r", (_node, e) => [async (m, p, real) => {
+      const a = await real();
+      return m === "EXPERIMENTAL_changes" && p.changes_type === "account_changes" && p.block_id === Number(e) ? { ...(a as object), changes: [] } : a;
+    }, 1]],
+    ["block E's prev_height naming a gap that is not there, on both", (_node, e) => [async (m, p, real) => {
+      const a = (await real()) as { header?: Record<string, unknown> };
+      return m === "block" && p.block_id === Number(e) ? { header: { ...a.header, prev_height: Number(e) - 2 } } : a;
+    }]],
+    ["E above F (final on both is D), though both serve E by height", (_node, e) => [async (m, p, real) => {
+      if (m === "block" && p.block_id === undefined) return real().then(() => ({ header: { height: Number(e) - 1, hash: _node.bh(e - 1n), prev_height: Number(_node.prevOf(e - 1n)) } }));
+      return real();
+    }]],
+  ];
+  for (const [name, make] of cases) {
+    const node = new Node();
+    const { tx, e } = await prepaid(node);
+    const [edit, one] = make(node, e);
+    assert.equal((await x1Relayer(node, edit, one).resolve(tx, noResend)).kind, "unknown", name);
+    assert.equal((await x1Relayer(node).resolve(tx, noResend)).kind, "final", `${name}: the same record read final once the answers are good`);
+  }
+});
+
 test("(a2): K deleted before the transaction was applied: the deletion at D names no transaction of ours, so it is dropped", async () => {
   const node = new Node();
   const r = node.relayer(50);
@@ -2207,18 +2316,17 @@ test("K deleted after the transaction was applied: D is its block, the change th
   assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
 });
 
-test("an applied transaction whose lookup names a block other than D keeps the round", async () => {
+test("an applied prepay whose one provider's lookup names a block other than D is read from blocks (F56), never from that lookup", async () => {
   const node = new Node();
-  let other = true;
   const rs = edited(node, 0, async (m, _p, real) => {
     const a = await real();
-    return other && m === "tx" ? { ...(a as object), transaction_outcome: { block_hash: node.bh(999n) } } : a;
+    return m === "tx" ? { ...(a as object), transaction_outcome: { block_hash: node.bh(999n) } } : a;
   });
   const r = node.relayerOn(rs, 50);
   const tx: TxRef[] = [];
-  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
-  other = false;
-  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+  const out = await r.send(prepayAction(1n), open, keep(tx));
+  assert.equal(out.kind, "final");
+  assert.deepEqual((out as { receipts: Receipt[] }).receipts.map((x) => [x.executor, x.ok]), [[VAULT, true]]);
 });
 
 test("an empty change list at D, on one provider or on both (save_state_changes off, F54), keeps the round", async () => {
