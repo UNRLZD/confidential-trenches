@@ -60,7 +60,6 @@ function App() {
     snapshot,
     moneyOn: snapshot.status === "ready",
     locked: null,
-    restored: null,
     hop: async (kind, params, view) => {
       window.__calls.push({ kind, params, view });
       return null;

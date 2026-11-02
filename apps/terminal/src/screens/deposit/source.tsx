@@ -27,7 +27,11 @@ export interface DepositSource {
   status(id: string): DepositStatus | null;
   hop: ReturnHopView["hop"];
   locked: string | null;
-  restored: ReturnHopView["restored"];
+  /**
+   * The amount the sheet opens with: a fixture's; null on the live source. Inside SIGN_HOST's shell an open kind draws
+   * over the app's frame, which stays, so a typed amount survives the backup gate in the sheet's own state (AE-02).
+   */
+  start: { amount: string } | null;
   /** Unix ms; a fixture sets its own clock. */
   now(): number;
   /** Copies the address to the clipboard. */
@@ -45,7 +49,7 @@ const noDryQuote: DepositSource["dryQuote"] = async () => ({ ok: false, code: "n
 export function useDepositSource(): DepositSource {
   const fixture = useContext(Fixture);
   const { client, snapshot, moneyOn } = useSignpage();
-  const { hop, locked, restored } = useReturnHop();
+  const { hop, locked } = useReturnHop();
   const quote = useCallback<DepositSource["quote"]>(
     async (asset, amount) => {
       if (!client) return { id: null, reply: { ok: false, code: "down" } };
@@ -71,7 +75,7 @@ export function useDepositSource(): DepositSource {
     status,
     hop,
     locked,
-    restored,
+    start: null,
     now: Date.now,
     copy: (t) => void navigator.clipboard?.writeText(t).catch(() => {}),
   };

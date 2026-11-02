@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Live check of card app-release-sri: APP_HOST frames SIGN_HOST, refuses 'wasm-unsafe-eval' and serves every script
+// Live check of card app-release-sri: APP_HOST may be framed only by SIGN_HOST's shell (card app-in-shell), refuses
+// 'wasm-unsafe-eval' and serves every script
 // with matching integrity (A1.1, app.md:1439; AX-02 and AX-11, app.md:1387 and :1396). It GETs the page, then every
 // script and stylesheet the page names (and any modulepreload or script/style preload), and checks:
-//   - the page answers 200 with one Content-Security-Policy whose frame-src is exactly SIGN_HOST;
+//   - the page answers 200 with one Content-Security-Policy whose frame-ancestors is exactly SIGN_HOST;
 //   - no response header holds 'wasm-unsafe-eval';
 //   - Integrity-Policy is blocked-destinations=(script);
 //   - the page loads at least one script, has no inline script, and every script and stylesheet tag is on APP_HOST's
@@ -62,8 +63,8 @@ export function judge({ url, status, headers, html = "", files = {} }) {
   const csp = headers["content-security-policy"];
   if (csp === undefined) say(false, "Content-Security-Policy: none sent");
   else {
-    const frame = csp.split(/[;,]/).map((d) => d.trim().split(/\s+/)).filter(([k]) => k?.toLowerCase() === "frame-src");
-    say(!csp.includes(",") && frame.length === 1 && frame[0].slice(1).join(" ") === SIGN, `CSP frame-src is exactly ${SIGN}${frame.length === 1 ? ` (got ${JSON.stringify(frame[0].slice(1).join(" "))})` : ` (${frame.length} frame-src directives${csp.includes(",") ? ", more than one policy" : ""})`}`);
+    const frame = csp.split(/[;,]/).map((d) => d.trim().split(/\s+/)).filter(([k]) => k?.toLowerCase() === "frame-ancestors");
+    say(!csp.includes(",") && frame.length === 1 && frame[0].slice(1).join(" ") === SIGN, `CSP frame-ancestors is exactly ${SIGN}${frame.length === 1 ? ` (got ${JSON.stringify(frame[0].slice(1).join(" "))})` : ` (${frame.length} frame-ancestors directives${csp.includes(",") ? ", more than one policy" : ""})`}`);
   }
   const wasm = Object.entries(headers).filter(([, v]) => String(v).toLowerCase().includes("'wasm-unsafe-eval'")).map(([k]) => k);
   say(wasm.length === 0, `no header holds 'wasm-unsafe-eval'${wasm.length ? `: ${wasm.join(", ")}` : ""}`);

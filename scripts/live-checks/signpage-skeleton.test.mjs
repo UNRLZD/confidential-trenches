@@ -2,7 +2,8 @@
 // (signpage-skeleton.answers.json). good: packages/signpage built by deploy.mjs --dry-run and served by the Pages
 // runtime of wrangler 4.151.1 on a Mac (SIGN_HOST answered 522 before any deploy, so no served answer exists
 // yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
-// frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL.
+// frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
+// card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -28,24 +29,46 @@ const replay = (a) => async () => ({ status: a.status, headers: new Headers(a.he
 test("recorded good answer: every header equals the policy: PASS", async () => {
   const r = judge(await read(undefined, replay(GOOD)));
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.ok(r.lines.includes(`ok  CSP frame-ancestors: "${APP}"`));
-  assert.ok(r.lines.includes(`ok  framed from ${APP}: allowed`));
+  assert.ok(r.lines.includes(`ok  CSP frame-ancestors: "'none'"`));
+  assert.ok(r.lines.includes(`ok  CSP frame-src: "${APP}"`));
+  assert.ok(r.lines.includes(`ok  framed from ${APP}: blocked`));
+  assert.ok(r.lines.includes('ok  origin-agent-cluster: "?1"'));
   assert.ok(r.lines.includes("ok  framed from https://example.com: blocked"));
   assert.ok(r.lines.includes('ok  integrity-policy: "blocked-destinations=(script)"'));
 });
 
 test("recorded bad answer: a CSP with no frame-ancestors: FAIL", async () => {
-  const r = judge(await read(undefined, replay(withCsp(` frame-ancestors ${APP};`, ""))));
+  const r = judge(await read(undefined, replay(withCsp(" frame-ancestors 'none';", ""))));
   assert.equal(r.ok, false);
-  assert.ok(r.lines.includes(`BAD CSP frame-ancestors: none, want "${APP}"`), r.lines.join("\n"));
+  assert.ok(r.lines.includes(`BAD CSP frame-ancestors: none, want "'none'"`), r.lines.join("\n"));
   assert.ok(r.lines.includes("BAD framed from https://example.com: allowed (no frame-ancestors)"));
-  assert.ok(r.lines.includes(`BAD framed from ${APP}: blocked`));
+  assert.ok(r.lines.includes(`BAD framed from ${APP}: allowed (no frame-ancestors)`));
 });
 
 test("recorded bad answer: frame-ancestors *: FAIL", async () => {
-  const r = judge(await read(undefined, replay(withCsp(`frame-ancestors ${APP}`, "frame-ancestors *"))));
+  const r = judge(await read(undefined, replay(withCsp("frame-ancestors 'none'", "frame-ancestors *"))));
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes("BAD framed from https://example.com: allowed"), r.lines.join("\n"));
+});
+
+test("recorded bad answer: the live SIGN_HOST before the shell (APP_HOST framed it): FAIL on the frame policy only", () => {
+  const r = judge(ANSWERS.framed);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [
+    `BAD CSP frame-src: none, want "${APP}"`,
+    `BAD CSP frame-ancestors: "${APP}", want "'none'"`,
+    `BAD framed from ${APP}: allowed`,
+    'BAD origin-agent-cluster: none, want "?1"',
+  ]);
+});
+
+test("frame-src other than APP_HOST alone, and Origin-Agent-Cluster gone: FAIL", () => {
+  for (const to of ["frame-src *", `frame-src ${APP} https://example.com`, "frame-src 'self'"]) {
+    const r = judge(withCsp(`frame-src ${APP}`, to));
+    assert.equal(r.ok, false, to);
+  }
+  const { "origin-agent-cluster": _, ...noOac } = GOOD.headers;
+  assert.ok(judge({ ...GOOD, headers: noOac }).lines.includes('BAD origin-agent-cluster: none, want "?1"'));
 });
 
 test("recorded bad answers: font-src https: and font-src *: FAIL", async () => {
