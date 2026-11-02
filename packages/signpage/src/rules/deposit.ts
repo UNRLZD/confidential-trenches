@@ -198,7 +198,7 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   const d = decodeDepositDelegate(bytes);
   if (d.sender_id !== signer.id) refuse("sender_id");
   if (!sameBytes(d.public_key, signer.publicKey)) refuse("public_key");
-  if (d.receiver_id !== release.token) refuse("receiver_id");
+  if (d.receiver_id !== release.usdc) refuse("receiver_id");
   if (d.method_name !== VAULT_DEPOSIT_CARRIER.method) refuse("method");
   if (d.deposit !== VAULT_DEPOSIT_CARRIER.deposit_yocto) refuse("deposit");
   if (d.gas !== DEPOSIT_GAS) refuse("gas");

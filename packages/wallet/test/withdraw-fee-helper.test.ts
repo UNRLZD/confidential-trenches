@@ -33,7 +33,7 @@ const AMOUNT = 10_000_000n; // 10 USDC
 
 test("askWithdrawFee takes the helper's recorded answers, mainnet and testnet, from the release's relayer", async () => {
   for (const network of ["mainnet", "testnet"] as const) {
-    const got = await askWithdrawFee({ token: NEAR_NETWORKS[network].token, relayer: REC.relayer, amount: AMOUNT, fetchFn: answering(REC.answers[network]) });
+    const got = await askWithdrawFee({ token: NEAR_NETWORKS[network].usdc, relayer: REC.relayer, amount: AMOUNT, fetchFn: answering(REC.answers[network]) });
     assert.deepEqual(got, { relayFee: BigInt(REC.answers[network].relay_fee as string), feeRecipient: REC.relayer.fee_recipient, validUntilBlock: REC.answers[network].valid_until_block });
   }
 });
@@ -65,7 +65,7 @@ function inputsAt(token: string) {
 
 test("P1 at the helper's recorded reads: the device's fee_max is 438,172, the quote 207,609 at most half of it, on both networks", () => {
   for (const network of ["mainnet", "testnet"] as const) {
-    const max = withdrawFeeMax(inputsAt(NEAR_NETWORKS[network].token));
+    const max = withdrawFeeMax(inputsAt(NEAR_NETWORKS[network].usdc));
     const fee = BigInt(REC.answers[network].relay_fee as string);
     assert.equal(max, 438_172n);
     assert.equal(fee, 207_609n);

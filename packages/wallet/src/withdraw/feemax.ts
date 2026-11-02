@@ -37,7 +37,7 @@ export const FEE_A_FUND = 182n * STORAGE_YOCTO_PER_BYTE + 7_000_000_000_000_000_
 /** The price pool: Ref's USDC / wNEAR SIMPLE_POOL on mainnet, its token order as the pool lists it. */
 export const FEE_POOL_CONTRACT = "v2.ref-finance.near";
 export const FEE_POOL_ID = 4512;
-export const FEE_POOL_TOKENS = [NEAR_NETWORKS.mainnet.token, "wrap.near"] as const;
+export const FEE_POOL_TOKENS = [NEAR_NETWORKS.mainnet.usdc, "wrap.near"] as const;
 /**
  * The pool's USDC side must hold at least 250,000 USDC (a quarter of the 1,017,547 read 2026-11-02), else no cap and
  * no relayed withdrawal (fail closed). On a constant-product pool, raising the read price k-fold in one block takes

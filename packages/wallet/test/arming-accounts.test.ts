@@ -135,7 +135,7 @@ function replay(network: NearNetwork, side: Side, o: Opts = {}): NearRpc {
       o.seen?.push(params);
       if (o.down) throw new Error("fetch failed");
       const p = params as { request_type: string; account_id: string; method_name: string; args_base64: string; finality: string };
-      fits(p.request_type === "call_function" && p.account_id === net.token && p.finality === "final", `a view on ${network}'s token at final`);
+      fits(p.request_type === "call_function" && p.account_id === net.usdc && p.finality === "final", `a view on ${network}'s token at final`);
       const r: Read = p.method_name === "storage_balance_of" ? "reg" : "bounds";
       const name = r === "reg" ? (o.reg ?? "reg_null") : (o.bounds ?? "bounds");
       if (r === "reg" && name !== "reg_panic") fits(decode(p.args_base64).account_id === ANS[name]!.for, `the ${name} answer is for the account asked`);
@@ -275,7 +275,7 @@ test("armingRegisterDepositOf is withdrawRequest's registerDepositOf", async () 
   await refused(armingRegisterDepositOf("mainnet", pair("mainnet", {}, { down: true }))(rec.test_a, VAULT_CONSTANTS.TOKEN), "rpc");
   // the withdrawal's token must be the token the read is made on, and nothing is read otherwise
   const seen: unknown[] = [];
-  for (const [net, token] of [["mainnet", NEAR_NETWORKS.testnet.token], ["testnet", NEAR_NETWORKS.mainnet.token], ["mainnet", undefined]] as const)
+  for (const [net, token] of [["mainnet", NEAR_NETWORKS.testnet.usdc], ["testnet", NEAR_NETWORKS.mainnet.usdc], ["mainnet", undefined]] as const)
     await refused(armingRegisterDepositOf(net, pair(net, { seen }))(rec.test_a, token as unknown as string), "input", /token/);
   assert.equal(seen.length, 0);
 });

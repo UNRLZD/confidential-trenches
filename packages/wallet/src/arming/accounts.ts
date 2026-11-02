@@ -74,7 +74,7 @@ export async function readArmingRegistration(
 
   const view = (method_name: string, args: Obj) => ({
     request_type: "call_function",
-    account_id: net.token,
+    account_id: net.usdc,
     method_name,
     args_base64: base64.encode(new TextEncoder().encode(JSON.stringify(args))),
     finality: "final",
@@ -135,7 +135,7 @@ export async function readArmingRegistration(
  */
 export function armingRegisterDepositOf(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): (account: string, token: string) => Promise<bigint> {
   return async (account, token) => {
-    if (typeof network === "string" && Object.hasOwn(NEAR_NETWORKS, network) && token !== NEAR_NETWORKS[network].token)
+    if (typeof network === "string" && Object.hasOwn(NEAR_NETWORKS, network) && token !== NEAR_NETWORKS[network].usdc)
       throw new ArmingRegistrationRefused("input", `the withdrawal's token ${String(token)} is not the ${network} token the read is made on`);
     return (await readArmingRegistration(account, network, rpcs)).registerDeposit;
   };
