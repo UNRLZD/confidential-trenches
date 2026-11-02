@@ -215,7 +215,8 @@ test(
       if (path === zkeyPath && badZkeyOnce) {
         badZkeyOnce = false;
         body = Buffer.from(body);
-        body[body.length >> 1] ^= 0x01;
+        const k = body.length >> 1;
+        body[k] = body[k]! ^ 0x01;
       }
       const etag = `"${sha256(body)}"`;
       const status = req.headers["if-none-match"] === etag ? 304 : 200;

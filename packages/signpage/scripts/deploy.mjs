@@ -16,8 +16,8 @@ import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ABSENT, HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
-import { WORKER_CSP, WORKER_PATH } from "../../../scripts/live-checks/signpage-prover-host.mjs";
+import { HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
+import { WORKER_CSP, WORKER_PATH, ZK_CACHE } from "../../../scripts/live-checks/signpage-prover-host.mjs";
 import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
@@ -29,8 +29,16 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
 
-// headers the policy sets; a rule other than /* may neither set nor remove one
-const POLICY = ["content-security-policy", ...Object.keys(HEADERS), ...ABSENT];
+// The whole _headers file, as an allow-list: these three rules, each exactly once, each setting exactly its own
+// headers and removing none; any other rule, header or removal is refused. /* holds the site's policy (judged below by
+// signpage-skeleton's check); the worker's rule its own CSP (W:880), which Pages joins to /*'s; the setup files' rule
+// their one Cache-Control (vault.md 2.14).
+export const RULES = {
+  "/*": ["content-security-policy", ...Object.keys(HEADERS)],
+  [WORKER_PATH]: ["content-security-policy"],
+  "/assets/zk/*": ["cache-control"],
+};
+const EXACT = { [WORKER_PATH]: { "content-security-policy": WORKER_CSP }, "/assets/zk/*": { "cache-control": ZK_CACHE } };
 
 /** Copies index.html, public/ and the prover's setup files and licences (SERVED) into a fresh temp folder and returns its path. */
 export function build(pkg = PKG) {
@@ -60,16 +68,23 @@ export function checkHeadersFile(text) {
     else p.push(`_headers line ${i + 1} cannot be read`);
   });
   if (rules.length > 100) p.push(`_headers has ${rules.length} rules, over Pages' 100`);
-  // the worker's own policy (W:880): one rule for its path, setting only the CSP, exactly; Pages joins it to /*'s
-  const worker = rules.filter((r) => r.path === WORKER_PATH);
-  const own = (r) => r.headers.length === 1 && r.removes.length === 0 && r.headers[0][0] === "content-security-policy" && ws(r.headers[0][1]) === WORKER_CSP;
-  if (worker.length !== 1 || !own(worker[0])) p.push(`_headers must hold one ${WORKER_PATH} rule that sets only Content-Security-Policy: ${WORKER_CSP}`);
+  for (const r of rules) {
+    const allowed = Object.hasOwn(RULES, r.path) ? RULES[r.path] : null;
+    if (!allowed) {
+      p.push(`_headers rule ${r.path} is not one of the policy's rules (${Object.keys(RULES).join(", ")})`);
+      continue;
+    }
+    for (const [k] of r.headers) if (!allowed.includes(k)) p.push(`_headers rule ${r.path} sets ${k}, which the policy does not set there`);
+    for (const k of r.removes) p.push(`_headers rule ${r.path} removes ${k}`);
+  }
+  for (const [path, exact] of Object.entries(EXACT)) {
+    const these = rules.filter((r) => r.path === path);
+    const want = Object.entries(exact).map(([k, v]) => `${k}: ${v}`).join("; ");
+    const ok = these.length === 1 && these[0].headers.length === Object.keys(exact).length && these[0].headers.every(([k, v]) => exact[k] !== undefined && ws(v) === exact[k]);
+    if (!ok) p.push(`_headers must hold one ${path} rule that sets exactly ${want}`);
+  }
   const all = rules.filter((r) => r.path === "/*");
   if (all.length !== 1) return [...p, `_headers must hold exactly one /* rule (has ${all.length})`];
-  for (const r of rules) {
-    for (const [k] of r.headers) if (r.path !== "/*" && POLICY.includes(k) && !(r.path === WORKER_PATH && own(r))) p.push(`_headers rule ${r.path} sets ${k}: the policy is set on /* only`);
-    for (const k of r.removes) if (POLICY.includes(k)) p.push(`_headers rule ${r.path} removes ${k}`);
-  }
   const seen = {};
   for (const [k, v] of all[0].headers) {
     if (k in seen) p.push(`_headers /* sets ${k} twice (Pages joins the two with a comma)`);

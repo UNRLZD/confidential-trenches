@@ -3,7 +3,7 @@
 // origin (vault.md 2.14 and V2's end state, M304 D-8, wallet.md W:880-882). It reads, against pins written out here and
 // not read from the kit, on SIGN_HOST = https://sign.confidential.unrealized.trade (signpage-skeleton's SIGN):
 //   - each of the six setup files at https://SIGN_HOST/assets/zk/<sha256>.<ext>: 200, its size and sha256 equal to
-//     vault.md 2.6's table (research ffcba5e, V:520-525), and cached for good (Cache-Control immutable, one year);
+//     vault.md 2.6's table (research ffcba5e, V:522-527), and cached for good: Cache-Control exactly ZK_CACHE;
 //   - the worker at https://SIGN_HOST/prover-worker.js: 200, a script, byte for byte the committed
 //     packages/signpage/public/prover-worker.js (the kit's build, which build-app.mjs --check holds), under two
 //     policies at once: the site's (signpage-skeleton's CSP, every directive) and its own, exactly W:880's;
@@ -39,7 +39,9 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export const WORKER_PATH = "/prover-worker.js";
 // wallet.md W:880: the worker script carries its own policy
 export const WORKER_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'";
-// vault.md 2.6, the table's six rows (V:520-525): name, bytes, sha256
+// the setup files' one Cache-Control (vault.md 2.14: immutable); deploy.mjs's gate allows no other on /assets/zk/*
+export const ZK_CACHE = "public, max-age=31536000, immutable";
+// vault.md 2.6, the table's six rows (research ffcba5e, V:522-527): name, bytes, sha256
 export const PINS = [
   ["withdraw.wasm", 2607967, "36cda22791def3d520a55c0fc808369cd5849532a75fab65686e666ed3d55c10"],
   ["withdraw.zkey", 17793015, "2a893b42174c813566e5c40c715a8b90cd49fc4ecf384e3a6024158c3d6de677"],
@@ -117,9 +119,8 @@ export async function judge(rec, want = expected()) {
     }
     say(f.status === 200, `${name} at ${zkPath(pin)}: ${f.status}`);
     say(f.bytes === bytes && f.sha256 === sha, `${name}: ${f.bytes} B sha256 ${f.sha256}${f.bytes === bytes && f.sha256 === sha ? "" : `, pinned ${bytes} B ${sha}`}`);
-    const cc = String(f.headers?.["cache-control"] ?? "");
-    const cached = /(^|,)\s*immutable\s*(,|$)/.test(cc) && /(^|,)\s*max-age=31536000\s*(,|$)/.test(cc);
-    say(cached, `${name}: cache-control ${show(f.headers?.["cache-control"])}${cached ? "" : ", want max-age=31536000 and immutable"}`);
+    const cached = f.headers?.["cache-control"] === ZK_CACHE; // exactly: a joined value may hold a second max-age
+    say(cached, `${name}: cache-control ${show(f.headers?.["cache-control"])}${cached ? "" : `, want ${show(ZK_CACHE)}`}`);
   }
 
   const w = files[WORKER_PATH];

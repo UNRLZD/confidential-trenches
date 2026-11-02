@@ -7,12 +7,13 @@
 //   prover-worker is made only then, once per page (the kit's client.ts; the CSP allows no duplicate).
 // - One worker serves every proof on the page and loads the withdraw setup files once (the kit's prove.ts), each
 //   checked by size and sha256 in the worker before snarkjs sees it.
-// - A worker that died (client.ts then rejects every call with "prover worker: ...") is ended and dropped; the next
-//   proof starts a new one, which loads the files again. Any other refusal keeps the worker.
+// - A worker that died (the kit's isProverDead reads it from the refusal) is ended and dropped; the next proof starts a
+//   new one, which loads the files again. Any other refusal keeps the worker.
+// - Proofs run one at a time, in the order asked: two at once in one worker only raise a phone's peak memory.
 // - Every proof is the kit's vaultProveWithdraw: it refuses an input the vault would refuse before the worker sees it,
 //   and a worker answer that is not that input's.
 // Nothing here logs: the input holds the note's secrets.
-import { startProver, type Prover, type ProverOptions } from "../../kit/src/prover/client.ts";
+import { isProverDead, startProver, type Prover, type ProverOptions } from "../../kit/src/prover/client.ts";
 import { vaultProveWithdraw, type VaultProver, type VaultWithdrawProof } from "../../kit/src/prover/prove.ts";
 import type { VaultWithdrawInputArgs } from "../../kit/src/vault/inputs.ts";
 
@@ -35,25 +36,29 @@ function generation(start: (o: ProverOptions) => Prover): Generation {
   };
 }
 
-const DEAD = "prover worker: "; // client.ts's failAll: failed to load, a reply could not be read, terminated
-
 /** The page's prover; `start` is the kit's startProver but in tests. */
 export function proverHost(start: (o: ProverOptions) => Prover = startProver): ProverHost {
   let gen: Generation | null = null;
+  let queue: Promise<unknown> = Promise.resolve(); // the proof before this one, settled either way
   const drop = (g: Generation) => {
     if (gen !== g) return;
     gen = null;
     g.stop();
   };
   return {
-    async proveWithdraw(args) {
-      const g = (gen ??= generation(start));
-      try {
-        return await vaultProveWithdraw(g, args);
-      } catch (e) {
-        if (e instanceof Error && e.message.startsWith(DEAD)) drop(g);
-        throw e;
-      }
+    proveWithdraw(args) {
+      const run = async () => {
+        const g = (gen ??= generation(start));
+        try {
+          return await vaultProveWithdraw(g, args);
+        } catch (e) {
+          if (isProverDead(e)) drop(g);
+          throw e;
+        }
+      };
+      const p = queue.then(run);
+      queue = p.catch(() => {});
+      return p;
     },
     stop() {
       if (gen) drop(gen);
