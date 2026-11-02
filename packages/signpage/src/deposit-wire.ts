@@ -2,10 +2,10 @@
 // W:416-418; the deposit index rule of §2.3, W:351-361; the deposit quote row of §2.8, W:911). The kind's rule is
 // ./rules/deposit-quote.ts; this file gives it what it needs from public data alone and carries its answer back.
 //
-// - U is named ahead, never here. SIGN_HOST's top-level page, which reads the seed to sign in, names the deposit source's
-//   one index and U_{s,i}'s id in the store's public record meta/"deposit" (the wallet store's depositId: the counter
-//   is written first, then the record, with a compare on the seed record). The API answers from that record and the
-//   status record only: it never opens the seed (state-no-seed-read.test.ts), in the shell and in the frame alike.
+// - U is named ahead, never here. SIGN_HOST's top-level page, which reads the seed to sign in, copies the note store's
+//   one PLANNED deposit note of the vault's scope into the public record meta/"deposit/<scope>" { scope, index, id }
+//   (./deposit-name.ts). The API answers from that record and the status record only: it never opens the seed
+//   (state-no-seed-read.test.ts), in the shell and in the frame alike.
 // - So the deposit index is recorded before any address is shown: no answer carries an address for a U the store has
 //   not recorded, and every quote names that same index until money reaches it (W:355-358).
 // - The answer is a Deferred (./api.ts): the helper's round trip takes up to DEPOSIT_QUOTE_TIMEOUT_MS. Its codes are the
@@ -30,8 +30,8 @@ export interface DepositPublic {
 export interface DepositWireDeps {
   /** The scope of the release's vault on the page's network, or null while none is named. */
   scope(): bigint | null;
-  /** Reads the public records (src/state.ts depositRead); never the seed. */
-  read(): Promise<DepositPublic | null>;
+  /** Reads the public records of `scope` (src/state.ts depositRead); never the seed. */
+  read(scope: bigint): Promise<DepositPublic | null>;
   /** Settles once the top-level page's naming of U in flight is done (src/main.ts); the frame names nothing. */
   named?(): Promise<unknown>;
   priced?: DepositQuoteKindContext["priced"];
@@ -58,7 +58,8 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
     const after = (async () => {
       await deps.named?.().catch(() => {});
       const scope = deps.scope();
-      const before = usable(await deps.read(), scope);
+      if (scope === null) return;
+      const before = usable(await deps.read(scope), scope);
       if (!before) return;
       const got = await depositQuoteKind(params, {
         seed: before.status,
@@ -69,7 +70,7 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       });
       if (!got.ok) return void (out = { error: got.code });
       // the address stands only while the records are the ones it was asked under
-      const now = usable(await deps.read(), deps.scope());
+      const now = usable(await deps.read(scope), deps.scope());
       if (!now || !same(now.deposit, before.deposit)) return;
       out = { result: got.result };
     })();

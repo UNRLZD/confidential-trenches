@@ -5,7 +5,7 @@
 // - The frame never opens the seed record, nor any record that holds a secret. SIGN_HOST and APP_HOST are one site, so
 //   the frame may share APP_HOST's renderer process, and decoded seed JSON in its heap would sit beside APP_HOST's code.
 //   It reads four things: keys("meta"), get("meta", "status"), keys/get on "ops" and, for deposit.quote,
-//   get("meta", "deposit") (U's public record, which SIGN_HOST's top-level page writes; src/deposit-wire.ts). APP_HOST and SIGN_HOST being one
+//   get("meta", "deposit/<scope>") (U's public record, which SIGN_HOST's top-level page writes; src/deposit-name.ts). APP_HOST and SIGN_HOST being one
 //   site is also why the frame opens the same database as SIGN_HOST's top-level tabs.
 // - The frame opens the store read-only (openWalletStoreReader): it makes no database, writes no record (no K_wrap, no
 //   lane, no counter) and takes no lock. No database, or one with no K_wrap yet, reads as signed out.
@@ -35,7 +35,7 @@
 //   sign out or a closed connection drops the reader; the next read opens a new one.
 import type { Operation, SigninWay, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import { depositRecordOf, type WalletEvent, type WalletStoreReader } from "@blindfill/wallet/store";
+import { depositKey, depositRecordOf, type WalletEvent, type WalletStoreReader } from "@blindfill/wallet/store";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { SEED_SOURCES, type SeedSource } from "@blindfill/wallet/signin/words";
 import { API, RELEASE, signedOutState } from "./api.ts";
@@ -135,10 +135,11 @@ export interface FrameState {
   /** Calls `fn` on every change another tab makes to the store, a sign out included. */
   watch(fn: () => void): void;
   /**
-   * The deposit.quote kind's public records (src/deposit-wire.ts): the status and meta/"deposit", which SIGN_HOST's
-   * top-level page writes ahead; null when no seed is stored or the store cannot be read. Never the seed. Never throws.
+   * The deposit.quote kind's public records (src/deposit-wire.ts): the status and meta/"deposit/<scope>", which
+   * SIGN_HOST's top-level page writes ahead (src/deposit-name.ts); null when no seed is stored or the store cannot be
+   * read. Never the seed. Never throws.
    */
-  depositRead(): Promise<DepositPublic | null>;
+  depositRead(scope: bigint): Promise<DepositPublic | null>;
   close(): void;
 }
 
@@ -196,13 +197,13 @@ export function frameState(open: ReaderOpener, listen: ChannelListen): FrameStat
     watch(fn) {
       watchers.add(fn);
     },
-    async depositRead() {
+    async depositRead(scope) {
       let h: Held | null = null;
       try {
         h = await live();
         if (!h || !(await h.store.keys("meta")).includes("seed")) return null;
         const status = statusOf(await h.store.get("meta", "status").catch(() => undefined));
-        const deposit = depositRecordOf(await h.store.get("meta", "deposit").catch(() => undefined));
+        const deposit = depositRecordOf(await h.store.get("meta", depositKey(scope)).catch(() => undefined));
         return { status, deposit };
       } catch {
         if (h) h.dead = true;
