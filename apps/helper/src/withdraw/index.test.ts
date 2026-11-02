@@ -446,3 +446,48 @@ test("claim refuses unless the key's nonce counter is past the record's nonce, w
   assert.equal(store.claim(send(OTHER, { key: other, nonce: "41" })).ok, true, "the counter at n + 1");
   store.close();
 });
+
+test("the settle record: kept on a succeeded row across restarts until done; refused on an open row, for a second open settle, and unless the key's counter is past its nonce; a malformed one reads unreadable", () => {
+  const dir = tmp();
+  let store = open(dir);
+  const c = send(NF);
+  assert.deepEqual(store.claim(c), { ok: true, replaced: null });
+  const tx = { tx_hash: hashOf(7001), nonce: "42", height: "101", block_hash: hashOf(101), signed_tx: "BBBB", key: KEY };
+  assert.throws(() => store.setSettle(NF, { tx, done: false }), /no succeeded send record/, "an open row takes no settle");
+  store.settle(NF, c.tx_hash, { kind: "succeeded" });
+  assert.deepEqual(store.toSettle(), [NF]);
+  assert.throws(() => store.setSettle(NF, { tx: { ...tx, nonce: "1000" }, done: false }), /nonce counter/);
+  store.setSettle(NF, { tx, done: false });
+  assert.throws(() => store.setSettle(NF, { tx: { ...tx, tx_hash: hashOf(7002) }, done: false }), /still open/);
+  store.close();
+  store = open(dir); // a restart: the open settle is read back and still to do
+  assert.deepEqual(store.toSettle(), [NF]);
+  assert.deepEqual((store.get(NF) as WithdrawSend).settle, { tx, done: false });
+  store.setSettle(NF, null); // never landed: cleared, signed again next round
+  store.setSettle(NF, { tx: null, done: true }); // another caller settled it
+  assert.deepEqual(store.toSettle(), []);
+  assert.throws(() => store.setSettle(NF, null), /already settled/);
+  store.close();
+  store = open(dir);
+  assert.deepEqual(store.toSettle(), []);
+  assert.equal(store.get(NF) === "unreadable", false);
+  store.close();
+  // a settle field of any other form makes the row unreadable (held as open), never a settled one
+  const bad = tmp();
+  writeFileSync(join(bad, `w-${nullifierKey(OTHER)}.json`), JSON.stringify({ ...row(send(OTHER)), outcome: "succeeded", settle: { tx: null, done: false } }));
+  store = open(bad);
+  assert.equal(store.get(OTHER), "unreadable");
+  assert.deepEqual(store.open(), [OTHER]);
+  store.close();
+});
+
+test("the spends index keeps each nullifier's row in the vault's list", async () => {
+  const store = open();
+  const d = deps([prov(12), prov(12)], store);
+  assert.equal(d.index.indexOf(NF), null, "nothing read yet");
+  assert.equal(await code(OTHER, d), "ok");
+  assert.equal(d.index.indexOf(NF), 1);
+  assert.equal(d.index.indexOf(VAULT_FIELD_P - 1n), 2);
+  assert.equal(d.index.indexOf(OTHER), null);
+  store.close();
+});
