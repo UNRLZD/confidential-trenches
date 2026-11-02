@@ -14,7 +14,8 @@
 // 2. Static checks on the wasm: every problem list scripts/live-checks/vault-skeleton.mjs wasmProblems returns is empty
 //    (fail-closed: a field it adds later refuses here too; today none of 2.8's banned imports, promise imports inside
 //    the seven, exports inside 2.5.7's list); every function body at most 196,608 B
-//    (`max_function_body_size`); a testnet deploy must be the testnet build (it names Circle's testnet USDC).
+//    (`max_function_body_size`); a testnet deploy must be the testnet build (it names the team's testnet USDC,
+//    scripts/live-checks/vault-testnet-t01.mjs TESTNET_TOKEN, and no other token).
 // 3. The chain: every RPC the run uses answers `status` with the network's chain id (testnet: "testnet" on both;
 //    sandbox: near-sandbox's test-chain-<id>), else nothing is sent; a sandbox --rpc is a loopback URL only.
 //    The recipe: the parent signs one transaction to vault.<parent> with [CreateAccount, Transfer(code storage +
@@ -47,7 +48,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { b58decode, b58encode, functionCallTx, recipeTx } from "./near-tx.mjs";
-import { RPCS as TESTNET_RPCS, TESTNET_USDC, TESTNET_VERSION, networkProblems, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
+import { RPCS as TESTNET_RPCS, TESTNET_VERSION, wasmProblems } from "../../../scripts/live-checks/vault-skeleton.mjs";
+import { TESTNET_TOKEN, networkProblems } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CRATE = path.resolve(HERE, "..");
@@ -61,7 +63,7 @@ export const TOOLCHAIN = "1.96.0";
 // The cargo-near the vault is built with: `cargo +1.96.0 near --version` must print exactly this.
 export const CARGO_NEAR = "cargo-near-near 0.22.0";
 export const BUILD_ARGS = ["near", "build", "non-reproducible-wasm", "--no-embed-abi", "--locked"];
-export const LIVE_CHECK = "scripts/live-checks/vault-skeleton.mjs";
+export const LIVE_CHECK = "scripts/live-checks/vault-testnet-t01.mjs";
 
 // The RUSTFLAGS every build passes to cargo-near (it does not inherit the shell's).
 export function rustflags(cargoHome) {
@@ -440,7 +442,7 @@ async function main() {
   console.log(`sending [CreateAccount, Transfer(${transfer}), DeployContract(${wasm.length} B), FunctionCall(config, ${CONFIG_GAS / TGAS} Tgas, 0)] from ${parent} to ${vault}, no AddKey`);
   const d = await send(url, tx, privateKey, "the recipe");
   const config = JSON.parse(Buffer.from(d.r.status.SuccessValue, "base64").toString("utf8"));
-  if (network === "testnet" && (config.asset !== TESTNET_USDC || !TESTNET_VERSION.test(config.version))) throw new Error(`deployed, but config() names asset ${config.asset}, version ${config.version}: not the testnet build`);
+  if (network === "testnet" && (config.asset !== TESTNET_TOKEN || !TESTNET_VERSION.test(config.version))) throw new Error(`deployed, but config() names asset ${config.asset}, version ${config.version}: not the testnet build`);
   const vaultReceipt = d.r.receipts_outcome.find((x) => x.outcome.executor_id === vault);
   console.log(`deployed: tx ${d.hash}; config() asset ${config.asset}, version ${config.version}; the vault's receipt burnt ${vaultReceipt?.outcome.gas_burnt} gas`);
 

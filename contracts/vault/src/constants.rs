@@ -6,10 +6,11 @@
 /// One vault per token. Mainnet: Circle's native USDC on NEAR (Circle's USDC contract address page).
 #[cfg(not(feature = "testnet"))]
 pub const TOKEN: &str = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
-/// Testnet: Circle's testnet USDC on NEAR (Circle's USDC contract address page, read 2026-11-01; its `ft_metadata`
-/// on NEAR testnet answers symbol USDC at block 275,674,154).
+/// Testnet: the team's testnet USDC, mainnet USDC's own wasm set up with test accounts in its roles
+/// (contracts/vault/deployments/testnet-usdc.json; code hash DVJx7F3d…, equal to mainnet's), the token the wallet's
+/// testnet deposit names.
 #[cfg(feature = "testnet")]
-pub const TOKEN: &str = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
+pub const TOKEN: &str = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
 
 /// The network this build names, written into `config().version`.
 #[cfg(not(feature = "testnet"))]

@@ -1,12 +1,12 @@
 // Records the pages test/deposit-bind.test.ts replays (card wallet-deposit-bind): the release's testnet vault's
 // `deposits` view, first page, on the two testnet providers of two operators, at final. Read-only, no key, no secret.
 //   node test/record-deposit-bind.mjs test/vectors/deposit-bind-pages.json   (from packages/wallet)
-// The vault is NEAR_NETWORKS.testnet.vault (contracts/vault/deployments/testnet-skeleton.json); it holds no deposit
+// The vault is NEAR_NETWORKS.testnet.vault (contracts/vault/deployments/testnet-v1.json); it holds no deposit
 // yet, so its page is empty and the tests put rows of the vault's DepositView shape (contracts/vault/src/lib.rs) into it.
 import { writeFileSync } from "node:fs";
 
 const TESTNET = { a: "https://test.rpc.fastnear.com", b: "https://near-testnet.drpc.org" };
-const VAULT = "vault.bf-vs-20261101t012200.testnet"; // gitleaks:allow (a public account id)
+const VAULT = "vault.bf-vt-20261102t071444.testnet"; // gitleaks:allow (a public account id)
 const params = {
   request_type: "call_function",
   account_id: VAULT,
