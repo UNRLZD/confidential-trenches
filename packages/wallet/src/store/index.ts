@@ -462,6 +462,9 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           if (!same) throw new SeedChanged("the stored seed is not the seed shown");
           const had = depositRecordOf(await unwrap("meta", key, await getRaw("meta", key)).catch(() => undefined));
           if (had && had.scope === rec.scope && had.index === rec.index && had.id === rec.id) return had;
+          // planned indices only grow (planDeposit): a lower one is a naming that planned before money reached its
+          // index, and never replaces the newer one another tab named since (wallet.md W:355-358)
+          if (had && had.scope === rec.scope && had.index > rec.index) return had;
           // the compare is on the seed record read and checked above: a seed written since gets no record
           if (await casPut("meta", "seed", before, undefined, [[key, await wrap("meta", key, rec)]])) {
             notify(["meta"]);

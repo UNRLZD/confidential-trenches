@@ -109,3 +109,87 @@ test("nameDeposit wipes the seed it decrypted to compare, named or refused", asy
   assert.ok(made.length >= 2, `saw ${made.length} decrypted seeds`);
   for (const m of made) assert.ok(m.every((b) => b === 0), "a decrypted seed's entropy was left in memory");
 });
+
+// Review of 395f261 (fold 2): planned indices only grow, so a naming that planned before money reached its index never
+// writes that funded index over the newer one another tab named since (W:355-358).
+test("a lower index never replaces a higher one for the same scope and seed (16, then 8, leaves 16)", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(s);
+  await s.insertSeed(SEED());
+  const entropy = () => new Uint8Array(16).fill(0x7f);
+  await s.nameDeposit({ entropy: entropy() }, { scope: 5n, index: 16, id: id(16) });
+  const kept = await s.nameDeposit({ entropy: entropy() }, { scope: 5n, index: 8, id: id(8) });
+  assert.deepEqual(kept, { v: 1, scope: "5", index: 16, id: id(16) }, "the answer is the record kept");
+  assert.deepEqual(await s.get("meta", "deposit/5"), { v: 1, scope: "5", index: 16, id: id(16) });
+  // a higher index still moves it on
+  await s.nameDeposit({ entropy: entropy() }, { scope: 5n, index: 24, id: id(24) });
+  assert.equal(((await s.get("meta", "deposit/5")) as { index: number }).index, 24);
+});
+
+test("naming the same record again writes nothing and tells no tab", async () => {
+  const idb = new IDBFactory();
+  const name = `deposit-name-equal-${process.pid}`;
+  const s = await openWalletStore({ indexedDB: idb, name });
+  closers.push(s);
+  await s.insertSeed(SEED());
+  const rec = { scope: 5n, index: 8, id: id(8) };
+  await s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, rec);
+  const raw = (): Promise<{ iv: Uint8Array }> =>
+    new Promise((ok, no) => {
+      const o = idb.open(name);
+      o.onerror = () => no(o.error);
+      o.onsuccess = () => {
+        const r = o.result.transaction("meta", "readonly").objectStore("meta").get("deposit/5");
+        r.onsuccess = () => (o.result.close(), ok(r.result));
+        r.onerror = () => no(r.error);
+      };
+    });
+  const heard: unknown[] = [];
+  const ch = new BroadcastChannel(`ct-wallet/${name}`);
+  ch.onmessage = (m) => heard.push(m.data);
+  const before = Buffer.from((await raw()).iv).toString("hex");
+  await s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, rec);
+  await new Promise((ok) => setTimeout(ok, 30));
+  ch.close();
+  assert.equal(Buffer.from((await raw()).iv).toString("hex"), before, "the equal record was written again");
+  assert.deepEqual(heard, [], "a change was told for an equal record");
+});
+
+test("a bad index or id is refused and nothing is stored", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(s);
+  await s.insertSeed(SEED());
+  for (const bad of [
+    { index: -1, id: id(0) },
+    { index: 2 ** 32, id: id(0) },
+    { index: 1.5, id: id(0) },
+    { index: 0, id: "zz" },
+    { index: 0, id: id(0).slice(1) },
+  ]) {
+    await assert.rejects(s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 5n, ...bad }), /a deposit record is/, JSON.stringify(bad));
+    assert.deepEqual((await s.keys("meta")).filter((k) => k.startsWith("deposit")), [], `stored for ${JSON.stringify(bad)}`);
+  }
+});
+
+test("nameDeposit waits for the seed lock (a sign out or a seed write in flight) and writes only after it", async () => {
+  const name = `deposit-name-lock-${process.pid}`;
+  const s = await openWalletStore({ indexedDB: new IDBFactory(), name });
+  closers.push(s);
+  await s.insertSeed(SEED());
+  let release!: () => void;
+  let held!: () => void;
+  const isHeld = new Promise<void>((ok) => (held = ok));
+  const holder = navigator.locks.request(`ct-wallet/seed/${name}`, { mode: "exclusive" }, () => {
+    held();
+    return new Promise<void>((ok) => (release = ok));
+  });
+  await isHeld;
+  let done = false;
+  const naming = s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 5n, index: 0, id: id(0) }).then((r) => ((done = true), r));
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(done, false, "named while the seed lock was held");
+  assert.equal(await s.get("meta", "deposit/5"), undefined, "written while the seed lock was held");
+  release();
+  await holder;
+  assert.deepEqual(await naming, { v: 1, scope: "5", index: 0, id: id(0) });
+});
