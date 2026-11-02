@@ -6,11 +6,13 @@
 //       Live check: none (<reason>)          when the pull request names one card
 //       Live check: <key>: none (<reason>)   for one card of several
 //     for a card with nothing live, such as docs;
-//  3. no SIGN_HOST release list already on main (packages/signpage/releases/release-<N>.json) is changed or removed,
-//     no RELEASED ledger entry already on main (packages/signpage/scripts/release-list.mjs) is changed or removed, and
-//     every list the pull request adds names the tree it was built from (`tree`), the tree of the base or of one of
-//     the pull request's commits, whose SIGN_HOST build inputs (./sign-build-inputs.mjs) are the head's, and a
-//     `commit` that is null (cut on the remote test machine) or has that tree.
+//  3. no SIGN_HOST release list (packages/signpage/releases/release-<N>.json) or RELEASED ledger entry
+//     (packages/signpage/scripts/release-list.mjs) the branch had from main, at its merge base with the base, is changed
+//     or removed; a list or entry main wrote after that point and the branch also holds is the same bytes (else a name
+//     clash), and one the branch never had is not read as removed, since main merges by merge commit only and a merge
+//     keeps it; and every list the pull request adds names the tree it was built from (`tree`), the tree of the base,
+//     of the merge base or of one of the pull request's commits, whose SIGN_HOST build inputs (./sign-build-inputs.mjs)
+//     are the head's, and a `commit` that is null (cut on the remote test machine) or has that tree.
 // A card is proven by its own live check, run after every deploy. A release is never written again.
 // No token and no network: it reads the git history checked out by CI (fetch-depth 0) and the body CI passes in.
 //   PR_BODY="<pull request body>" node scripts/ci/verify-gate.mjs <base sha> <head sha>
@@ -64,22 +66,50 @@ const sameInputs = (cwd, tree, head) => {
 };
 const ledger = (text) => new Map([...text.matchAll(ENTRY)].map((m) => [m[1], m[2]]));
 
-/** Refusals for SIGN_HOST's release lists and ledger: what main holds never changes; a new list names its tree. */
+// every merge base of base and head (more than one after criss-cross merges); with no common history, the base itself
+const mergeBases = (cwd, base, head) => {
+  try {
+    return git(cwd, ["merge-base", "--all", base, head]).split("\n").filter(Boolean);
+  } catch {
+    return [base];
+  }
+};
+
+/**
+ * Refusals for SIGN_HOST's release lists and ledger, judged on the branch's own change: what it had from main never
+ * changes, what main wrote since is either absent (the merge keeps main's) or the same bytes, and a new list names its tree.
+ */
 export function releaseRefusals(cwd, base, head) {
   const r = [];
-  const [was, now] = [lists(cwd, base), lists(cwd, head)];
-  for (const [name, blob] of was) {
-    if (!now.has(name)) r.push(`${RELEASES}/${name} is on main and was removed: a release is never written again`);
-    else if (now.get(name) !== blob) r.push(`${RELEASES}/${name} is on main and was changed: a release is never written again`);
+  const mbs = mergeBases(cwd, base, head);
+  const [main, now] = [lists(cwd, base), lists(cwd, head)];
+  const [mainLed, nowLed] = [ledger(show(cwd, base, LEDGER)), ledger(show(cwd, head, LEDGER))];
+  const had = new Set();
+  const hadLed = new Set();
+  for (const mb of mbs) {
+    for (const [name, blob] of lists(cwd, mb)) {
+      had.add(name);
+      if (!now.has(name)) r.push(`${RELEASES}/${name} is on main and was removed: a release is never written again`);
+      else if (now.get(name) !== blob) r.push(`${RELEASES}/${name} is on main and was changed: a release is never written again`);
+    }
+    for (const [tag, sha] of ledger(show(cwd, mb, LEDGER))) {
+      hadLed.add(tag);
+      if (!nowLed.has(tag)) r.push(`RELEASED ${tag} is on main and was removed`);
+      else if (nowLed.get(tag) !== sha) r.push(`RELEASED ${tag} is on main and was changed`);
+    }
   }
-  const [led, nowLed] = [ledger(show(cwd, base, LEDGER)), ledger(show(cwd, head, LEDGER))];
-  for (const [tag, sha] of led) {
-    if (!nowLed.has(tag)) r.push(`RELEASED ${tag} is on main and was removed`);
-    else if (nowLed.get(tag) !== sha) r.push(`RELEASED ${tag} is on main and was changed`);
-  }
-  const trees = new Set([git(cwd, ["rev-parse", `${base}^{tree}`]), ...git(cwd, ["log", "--format=%T", `${base}..${head}`]).split("\n").filter(Boolean)]);
+  for (const [name, blob] of main)
+    if (!had.has(name) && now.has(name) && now.get(name) !== blob)
+      r.push(`${RELEASES}/${name} is on main as another list: a release name is never used twice`);
+  for (const [tag, sha] of mainLed)
+    if (!hadLed.has(tag) && nowLed.has(tag) && nowLed.get(tag) !== sha) r.push(`RELEASED ${tag} is on main with another hash`);
+  const trees = new Set([
+    git(cwd, ["rev-parse", `${base}^{tree}`]),
+    ...mbs.map((mb) => git(cwd, ["rev-parse", `${mb}^{tree}`])),
+    ...git(cwd, ["log", "--format=%T", `${base}..${head}`]).split("\n").filter(Boolean),
+  ]);
   for (const name of now.keys()) {
-    if (was.has(name)) continue;
+    if (had.has(name) || main.has(name)) continue;
     let list;
     try {
       list = JSON.parse(show(cwd, head, `${RELEASES}/${name}`));
@@ -88,7 +118,7 @@ export function releaseRefusals(cwd, base, head) {
       continue;
     }
     if (typeof list.tree !== "string" || !trees.has(list.tree)) {
-      r.push(`${RELEASES}/${name} names no tree of the base or of this pull request's commits`);
+      r.push(`${RELEASES}/${name} names no tree of the base, of the merge base or of this pull request's commits`);
       continue;
     }
     if (list.commit !== null && !(typeof list.commit === "string" && /^[0-9a-f]{40}$/.test(list.commit) && treeOf(cwd, list.commit) === list.tree))
@@ -96,7 +126,7 @@ export function releaseRefusals(cwd, base, head) {
     if (!sameInputs(cwd, list.tree, head))
       r.push(`${RELEASES}/${name} names a tree whose SIGN_HOST build inputs (${SIGN_BUILD_INPUTS.join(", ")}) are not the pull request's`);
   }
-  return r;
+  return [...new Set(r)]; // a list several merge bases hold is named once
 }
 
 export function verifyGate(cwd, base, head, body = "") {
