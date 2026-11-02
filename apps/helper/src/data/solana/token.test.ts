@@ -259,8 +259,12 @@ test("holders: 20 rows at most, merged per owner, bps of the supply, the burn ad
     m.data.parsed.info.supply = "1000000";
     return { ...rec, result: { ...rec.result, value: [m] } };
   };
-  const t = createSolanaToken(fakeProxy(), fakeRpc({ accounts: supplyAccounts, largest, owners }), { now: () => NOW });
+  const shared = fakeRpc({ accounts: supplyAccounts });
+  const keyed = fakeRpc({ largest, owners });
+  const t = createSolanaToken(fakeProxy(), shared, { now: () => NOW, holdersRpc: keyed });
   const a = await t.holders(PUMP);
+  assert.deepEqual(shared.calls.map((c) => c.method), ["getMultipleAccounts"], "the mint on the shared path");
+  assert.deepEqual(keyed.calls.map((c) => c.method), ["getTokenLargestAccounts", "getMultipleAccounts"], "the holders on their own provider");
   assert.equal(a.status, 200);
   const h = JSON.parse(a.body);
   assert.deepEqual(Object.keys(h), [...HOLDERS_FIELDS]);
@@ -273,8 +277,17 @@ test("holders: 20 rows at most, merged per owner, bps of the supply, the burn ad
   assert.equal(h.src, "chain");
 });
 
-test("holders: the RPC refuses getTokenLargestAccounts: no rows, Jupiter's count and top-10 share, src jupiter", async () => {
-  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW });
+test("holders: no holders provider: the shared RPC path never sees getTokenLargestAccounts (its 429 would pause the device's reads and sends); Jupiter's fallback", async () => {
+  const shared = fakeRpc({ largest, owners });
+  const t = createSolanaToken(fakeProxy(), shared, { now: () => NOW });
+  const a = await t.holders(PUMP);
+  assert.deepEqual(shared.calls.map((c) => c.method), ["getMultipleAccounts"]);
+  assert.equal(a.status, 200);
+  assert.equal(JSON.parse(a.body).src, "jupiter");
+});
+
+test("holders: the holders provider refuses getTokenLargestAccounts: no rows, Jupiter's count and top-10 share, src jupiter", async () => {
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW, holdersRpc: fakeRpc() });
   const a = await t.holders(PUMP);
   assert.equal(a.status, 200);
   assert.deepEqual(JSON.parse(a.body), { holders: [], total: FX.tokens[PUMP].search[0].holderCount, top_bps: 5935, src: "jupiter", as_of_ms: Date.parse(FX.tokens[PUMP].fetched_at) });

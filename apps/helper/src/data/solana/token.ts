@@ -10,7 +10,8 @@
 //     every JUP_GAP_MS (D-S6), at once. The mint account gives decimals, the mint and freeze authorities and the
 //     Token-2022 transfer fee (Risk `tax`); the curve account gives `curve_bps` and `lp: curve` while on its curve.
 //   - holders: `getTokenLargestAccounts`, then one `getMultipleAccounts` (jsonParsed) of those accounts for their
-//     owners, merged per owner (D-S11). When the RPC does not answer it: `holders: []`, `total` and `top_bps` from
+//     owners, merged per owner (D-S11), on the holders provider only (SOLANA_HOLDERS_RPC_URL; the public endpoints
+//     refuse the call). With none set, or when it does not answer: `holders: []`, `total` and `top_bps` from
 //     Jupiter's `holderCount` and `audit.topHoldersPercentage`, `src` naming Jupiter (06b v1.36).
 //   - candles: GeckoTerminal (keyless) `tokens/<mint>` for the token's top pool, then the pool's OHLCV in USD for the
 //     mint (D-S7), every call through one queue of at most GT_PER_MIN a minute (L-05) and each answer shared.
@@ -310,12 +311,15 @@ class Upstream extends Error {}
 const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
 
 /** `listed` is Discover's lists (lists.ts get): a token on them takes its row from there, with no Jupiter call. */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer> } = {}) {
+/** `holdersRpc` is the provider holders' getTokenLargestAccounts goes to (D-S11: a keyed one, the only kind that
+ *  answers it); with none, holders is Jupiter's fallback and the shared RPC path never sees the call, since a provider's
+ *  429 on it would pause that path for the device's own reads and sends. */
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
 
-  async function call(method: string, params: unknown[]): Promise<{ result: Record<string, unknown> }> {
-    const a = await rpc.handle("solana", "application/json", rpcBody(method, params));
+  async function call(method: string, params: unknown[], via: Rpc = rpc): Promise<{ result: Record<string, unknown> }> {
+    const a = await via.handle("solana", "application/json", rpcBody(method, params));
     if (a.status !== 200) throw new Upstream();
     const j = obj(JSON.parse(a.body));
     if (!Object.hasOwn(j, "result")) throw new Upstream();
@@ -440,11 +444,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const m = await mintAt(mint, false);
     if (m.mint === null) return NOT_FOUND;
     try {
-      const largest = (await call("getTokenLargestAccounts", [mint, { commitment: "confirmed" }])).result.value;
+      if (deps.holdersRpc === undefined) throw new Upstream();
+      const largest = (await call("getTokenLargestAccounts", [mint, { commitment: "confirmed" }], deps.holdersRpc)).result.value;
       if (!Array.isArray(largest)) throw new Upstream();
       const accts = largest.slice(0, HOLDERS_MAX).map((r) => address(obj(r).address));
       if (accts.some((a) => a === null)) throw new Upstream();
-      const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }])).result.value;
+      const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }], deps.holdersRpc)).result.value;
       const rows = toHolders(largest.slice(0, HOLDERS_MAX), Array.isArray(owners) ? owners : [], m.mint.supply);
       if (rows === null) throw new Upstream();
       const top = rows.slice(0, 10).reduce((s, h) => s + (h.bps ?? 0), 0);

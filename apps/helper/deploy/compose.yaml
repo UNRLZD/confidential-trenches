@@ -21,6 +21,9 @@ services:
       # src/token-status/, src/withdraw/fee.ts; empty: the public endpoint) and the release's withdrawal relayer per
       # network (src/withdraw/fee.ts; empty: that network is not quoted).
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
+      # the token page's holder rows (src/data/solana/token.ts, D-S11): a keyed provider that answers
+      # getTokenLargestAccounts; empty: holders is Jupiter's count and top-10 share, with no rows
+      SOLANA_HOLDERS_RPC_URL: ${SOLANA_HOLDERS_RPC_URL:-}
       BASE_RPC_URL: ${BASE_RPC_URL:-}
       ROBINHOOD_RPC_URL: ${ROBINHOOD_RPC_URL:-}
       NEAR_RPC_URL: ${NEAR_RPC_URL:-}

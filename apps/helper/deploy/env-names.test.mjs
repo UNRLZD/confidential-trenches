@@ -21,6 +21,7 @@ import { createRpc } from "../src/rpc/rpc.ts";
 import { createTokenWatch } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
+import { solanaTokenFromEnv } from "../src/server.ts";
 
 const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Quoted constants in src/ that are not environment names: NEAR RPC error causes and a Ref pool kind. */
@@ -50,7 +51,17 @@ export const computedEnvReads = (text) => [...text.matchAll(/process\.env\[(?!\s
 /** The functions server.ts hands process.env to, each run here with a recording env. */
 // withdrawSenderFromEnv takes the server's fee quoter (fee.ts opens its store once); its own names are read with a stub quoter
 const noFee = { networkOf: () => null, quote: async () => { throw new Error("no quote"); }, reads: () => ({ feeMin: async () => 0n }) };
-export const ENV_READERS = { createProxy, createRpc, createTokenWatch, feeQuoterFromEnv, withdrawSenderFromEnv: (env) => withdrawSenderFromEnv(env, noFee) };
+// solanaTokenFromEnv takes the server's proxy and lists; its own names are read with stubs
+const noProxy = { handle: async () => ({ status: 503, headers: {}, body: "" }) };
+const noLists = { get: async () => ({ status: 503, body: "" }), warm: () => () => {} };
+export const ENV_READERS = {
+  createProxy,
+  createRpc,
+  createTokenWatch,
+  feeQuoterFromEnv,
+  withdrawSenderFromEnv: (env) => withdrawSenderFromEnv(env, noFee),
+  solanaTokenFromEnv: (env) => solanaTokenFromEnv(env, noProxy, noLists),
+};
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */
 export function recordingEnv(values) {

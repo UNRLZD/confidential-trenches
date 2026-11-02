@@ -3,7 +3,7 @@
  * line it writes holds a client IP, a path or a header.
  *
  *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
- *     [SOLANA_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..]
+ *     [SOLANA_RPC_URL=..] [SOLANA_HOLDERS_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..]
  *     [NEAR_TESTNET_RPC_URL=..] [NEAR_TESTNET_RPC_URL_B=..] [WITHDRAW_RELAYER_MAINNET=.. WITHDRAW_FEE_RECIPIENT_MAINNET=..]
  *     [WITHDRAW_RELAYER_TESTNET=.. WITHDRAW_FEE_RECIPIENT_TESTNET=..] node src/server.ts
  *
@@ -114,7 +114,7 @@ export function handler(
   lists: Lists = createSolanaLists(proxy, rpc),
   fee: Fee = feeQuoterFromEnv(process.env),
   withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status }),
-  token: Token = createSolanaToken(proxy, rpc, { listed: lists.get }),
+  token: Token = solanaTokenFromEnv(process.env, proxy, lists),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
@@ -285,6 +285,18 @@ export function handler(
       else res.destroy();
     }
   };
+}
+
+/**
+ * The token page's reads: their own RPC client on the same Solana provider (a 429 on a data read pauses only data
+ * reads, never the device's /v1/rpc/solana), and holders on SOLANA_HOLDERS_RPC_URL when set (src/data/solana/token.ts).
+ */
+export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists): Token {
+  const holders = env.SOLANA_HOLDERS_RPC_URL;
+  return createSolanaToken(proxy, createRpc(env), {
+    listed: lists.get,
+    holdersRpc: holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }),
+  });
 }
 
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token): Server {
