@@ -11,6 +11,9 @@
 //   is false) it draws the backup first, and Sign out only once the user saved them there (W:913). It deletes the store
 //   and signs nothing.
 // - backup.open: only with a seed stored; the 12 words are drawn on this top-level page alone (W:914).
+// - withdraw.open (card signpage-withdraw-form): only with a seed stored; it draws the withdraw form (src/withdraw/),
+//   where the user types the address and the amount (W:927). A withdraw.open with a one-time id (from_id, W:928) is
+//   refused until the withdraw from an id is built: the form withdraws from the vault's notes only.
 //
 // Every open kind runs top-level only: the framed page answers no kind but state (src/main.ts starts its API with none),
 // so a sign-out asked from inside a frame is refused. Each page draws in the shell's layer, and the layer's opening
@@ -19,13 +22,13 @@
 import { backupFirst } from "@blindfill/wallet/store";
 
 /** The open kinds these pages answer. */
-export type AccountKind = "signin.open" | "signout" | "backup.open";
+export type AccountKind = "signin.open" | "signout" | "backup.open" | "withdraw.open";
 
 /** The page's own states in which no open kind is taken: a step is running, or the store is not read yet. */
 const BUSY = new Set(["loading"]);
 
 /** Whether the page has a seed stored, from the state it shows (its own store's last read). */
-const SIGNED_IN = new Set(["signed-in", "backup", "signout"]);
+const SIGNED_IN = new Set(["signed-in", "backup", "signout", "withdraw"]);
 
 /**
  * Whether `kind` may open now: `state` is the page's data-signin, `busy` whether a step is running. A refused kind is
@@ -38,8 +41,16 @@ export function takes(kind: AccountKind, state: string | undefined, busy: boolea
   return state === "signed-in";
 }
 
+/**
+ * Whether the kind's params name a page this release builds: withdraw.open with a one-time id (from_id) is refused,
+ * since the form withdraws from the vault's notes only; every other kind's params are the kit schema's alone.
+ */
+export function takesParams(kind: AccountKind, params: Record<string, unknown>): boolean {
+  return kind !== "withdraw.open" || !Object.hasOwn(params, "from_id");
+}
+
 /** The page a kind draws, read from the store just before it draws: `seed` is the stored seed's status, or none. */
-export type Page = "passkey" | "unsupported" | "words" | "choose" | "signed-in" | "backup" | "signout" | "signed-out";
+export type Page = "passkey" | "unsupported" | "words" | "choose" | "signed-in" | "backup" | "signout" | "signed-out" | "withdraw";
 
 export function pageFor(
   kind: AccountKind,
@@ -56,6 +67,7 @@ export function pageFor(
   }
   if (!seed) return "signed-out";
   if (kind === "backup.open") return "backup";
+  if (kind === "withdraw.open") return "withdraw";
   // signout: the backup first while the 12 words are the only copy and not saved
   return backupFirst(seed) ? "backup" : "signout";
 }

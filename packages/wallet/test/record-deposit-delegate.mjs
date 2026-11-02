@@ -28,7 +28,7 @@ const vector = {
   signed_delegate: out.signed_delegate,
   expect: {
     sender_id: u.id,
-    receiver_id: net.token,
+    receiver_id: net.usdc,
     vault: net.vault,
     public_key: publicKey,
     nonce: String(read.nonce + 1),

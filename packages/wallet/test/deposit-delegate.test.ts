@@ -72,7 +72,7 @@ async function refused(p: Promise<unknown>, code: DelegateRefusalCode, detail?: 
 
 // The helper's checks, with reads that say U exists with its key at the read nonce, the final height is the read
 // height, U holds the recorded USDC, and P and U are clear in the ledger.
-const CFG: BindConfig = { vault: NET.vault, token: NET.token, marginK: 60n };
+const CFG: BindConfig = { vault: NET.vault, token: NET.usdc, marginK: 60n };
 const reads = (over: Partial<BindReads> = {}): BindReads => ({
   accessKey: async (account, publicKey) => (account === U && publicKey === PUB ? { kind: "key", permission: "FullAccess", nonce: NONCE } : { kind: "no_account" }),
   finalHeight: async () => HEIGHT,
@@ -94,7 +94,7 @@ test("the vector: the device's bytes equal the shared vector, and the helper's d
   assert.equal(d.sender_id, e.sender_id);
   assert.equal(d.sender_id, depositId(SEED, S, I).id);
   assert.equal(d.receiver_id, e.receiver_id);
-  assert.equal(d.receiver_id, NET.token);
+  assert.equal(d.receiver_id, NET.usdc);
   assert.equal(d.actions.length, 1);
   const a = d.actions[0]!;
   assert.equal(a.kind, "FunctionCall");
@@ -122,7 +122,7 @@ test("the vector: the device's bytes equal the shared vector, and the helper's d
   assert.ok(verify(null, createHash("sha256").update(prefix).update(d.delegate).digest(), key, d.signature));
   // The six reads name U or the token only, at final; none carries a key or a second id of the user.
   assert.equal(sent.length, 6);
-  for (const p of sent as Record<string, unknown>[]) assert.ok(p.account_id === U || p.account_id === NET.token, JSON.stringify(p));
+  for (const p of sent as Record<string, unknown>[]) assert.ok(p.account_id === U || p.account_id === NET.usdc, JSON.stringify(p));
 });
 
 test("the vault is the release's: testnet's from its deployment file, none on mainnet, and no argument names one", async () => {

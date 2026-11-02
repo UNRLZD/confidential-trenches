@@ -14,10 +14,13 @@
 import { createHash } from "node:crypto";
 import { constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROVER_WORKER_FILE, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
+import { isSignBuildInput, SIGN_BUILD_INPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
+
+export { SIGN_BUILD_INPUTS };
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const KIT = join(dirname(PKG), "kit");
@@ -39,6 +42,12 @@ export const SERVED = Object.freeze([
   Object.freeze({ from: join(dirname(dirname(PKG)), "LICENSE"), to: "licenses/Apache-2.0.txt" }),
   Object.freeze({ from: join(KIT, "zk", "NOTICE"), to: "licenses/zk-NOTICE.txt" }),
 ]);
+// every file SERVED copies is one of the build's inputs, the paths the verify gate compares a release list's tree on
+const REPO = dirname(dirname(PKG));
+for (const e of SERVED) {
+  const path = relative(REPO, e.from).split(sep).join("/");
+  if (!isSignBuildInput(path)) throw new Error(`SERVED copies ${path}, which is not in SIGN_BUILD_INPUTS (scripts/ci/sign-build-inputs.mjs)`);
+}
 
 /** Problems with one setup file's bytes against its pin (empty = it is the pinned file), named `label`. */
 export function pinProblems(entry, bytes, label = entry.to) {

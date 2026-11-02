@@ -149,7 +149,7 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     if (typeof registerDepositOf !== "function") throw new Error("registerDepositOf: not a function");
     const { network, rpcs, priceRpcs } = a;
     if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new Error(`network: unknown ${String(network)}`);
-    if (token !== NEAR_NETWORKS[network].token) throw new Error("token: not the network's own (fee_max is in its unit)");
+    if (token !== NEAR_NETWORKS[network].usdc) throw new Error("token: not the network's own (fee_max is in its unit)");
     if (amount <= 0n) throw new Error("amount: 0 or less");
     if (relayFee < 0n) throw new Error("relayFee: below 0");
     if (relayFee >= amount) throw new Error("relayFee: at or above the amount"); // the §2.8 arming row, l.907

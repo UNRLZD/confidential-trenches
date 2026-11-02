@@ -210,6 +210,15 @@ export const SKIP = {
   "scripts/ci/near-rpc-operators.test.mjs": "the planted cases",
   "contracts/vault/deployments/testnet-usdc.json": "a run's record: its notes say which host answered 429 and which one was read, no list",
 };
+// Built files whose pairs the scan judges in the sources they are built from: minifying drops comments, so the allow
+// marker a source line carries is gone from the bundle. Every host in them must still be in the map.
+export const BUNDLES = {
+  "packages/signpage/public/app.js": "the signing page's bundle, made by packages/signpage/scripts/build-app.mjs from sources this scan reads (build-app --check holds it equal to them); minifying drops the allow marker",
+};
+export const fileProblems = (text, f) => {
+  const p = lineProblems(text, f);
+  return Object.hasOwn(BUNDLES, f) ? p.filter((x) => !/ are one operator \(/.test(x)) : p;
+};
 export function scanTree(cwd) {
   const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { cwd, encoding: "utf8" }).split("\n").filter(Boolean);
   const problems = [];
@@ -222,7 +231,7 @@ export function scanTree(cwd) {
       continue; // a listed file deleted in the working tree
     }
     if (text.includes("\0")) continue;
-    problems.push(...lineProblems(text, f));
+    problems.push(...fileProblems(text, f));
   }
   return problems;
 }
