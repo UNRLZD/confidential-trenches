@@ -1,17 +1,21 @@
-// The sign-in page's words the owner picked (card words-final-nov2; owner 2 Nov 06:08Z, all approved): Continue and Cancel
-// from the Nov 2 words page, and New account and I already have one, which that page left out as already kept. Each
+// The sign-in page's words the owner picked (card words-final-nov2): Continue and Cancel from the Nov 2 words page, New
+// account and I already have one, which that page left out as already kept (owner 2 Nov 06:08Z, all approved), and
+// Recovery code and Backup, the sign-in words kept on 1 Nov 16:45Z (owner 1 Nov 16:45Z, keep). Each
 // must read its text byte for byte in src/main.ts's WORDS, name its pick on its own line, and no longer be called a
 // draft in the note above the table or in src/pages/open.ts. The page draws no draft mark (no data-draft-copy).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const PICK = "owner 2 Nov 06:08Z, all approved";
+const APPROVED = "owner 2 Nov 06:08Z, all approved";
+const KEEP = "owner 1 Nov 16:45Z, keep";
 const FINAL = [
-  ["next", "Continue"],
-  ["cancel", "Cancel"],
-  ["new-account", "New account"],
-  ["have-one", "I already have one"],
+  ["next", "Continue", APPROVED],
+  ["cancel", "Cancel", APPROVED],
+  ["new-account", "New account", APPROVED],
+  ["have-one", "I already have one", APPROVED],
+  ["recovery", "Recovery code", KEEP],
+  ["backup", "Backup", KEEP],
 ] as const;
 
 const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8").split("\n");
@@ -30,11 +34,11 @@ test("the table and its note are where this test reads them", () => {
 
 test("each picked word: its text unchanged and its pick on its line", () => {
   const bad: string[] = [];
-  for (const [key, text] of FINAL) {
+  for (const [key, text, pick] of FINAL) {
     const re = new RegExp(`^  ("${esc(key)}"|${esc(key)}): ${esc(JSON.stringify(text))},(.*)$`);
     const at = main.slice(start + 1, end).filter((l) => re.test(l));
     if (at.length !== 1) bad.push(`${key}: ${at.length} lines with ${JSON.stringify(text)}`);
-    else if (re.exec(at[0])![2] !== ` // ${PICK}`) bad.push(`${key}: no pick: ${at[0].trim()}`);
+    else if (re.exec(at[0])![2] !== ` // ${pick}`) bad.push(`${key}: no pick: ${at[0].trim()}`);
   }
   assert.deepEqual(bad, [], bad.join("\n"));
 });
