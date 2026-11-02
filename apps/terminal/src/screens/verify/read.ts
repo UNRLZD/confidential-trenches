@@ -55,7 +55,7 @@ function finalHeight(a: unknown): number | null {
 
 /**
  * Reads the seven views on both RPCs at one block: the lower of their final heights, or the one final height read
- * when the other RPC did not answer. Refuses a pair the wallet's one rule refuses (nearPairRule's words, thrown before any
+ * when the other RPC did not answer. Refuses a pair the kit's one rule refuses (nearPairRule's words, thrown before any
  * read: exactly one FastNEAR URL and the network's dRPC, each named by the URL it reads), or no final height from either.
  */
 export async function readVerify(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], pins: VerifyPins, signal?: AbortSignal): Promise<VerifyReads> {
