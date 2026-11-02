@@ -1283,6 +1283,14 @@ test("M19: U's key nonce read as two values on the two RPCs is no read", async (
   assert.equal(await readU(t.u, t.deps.rpcs), null);
 });
 
+test("a stale final: U's nonce read on RPCs more than HEIGHT_SPREAD_MAX blocks apart is no read (heightSpreadOver)", async () => {
+  const t = await setup();
+  t.chain.blocks(31n, "a"); // b starts one block ahead: a is now 30 ahead of b
+  assert.ok((await readU(t.u, t.deps.rpcs)) !== null);
+  t.chain.blocks(1n, "a");
+  assert.equal(await readU(t.u, t.deps.rpcs), null);
+});
+
 test("M20: a refused call is not judged dead while one RPC's final height is still inside its window and margin", async () => {
   const t = await setup(["tx"], (c) => (s) => ((c.a.nonce = c.b.nonce = s.nonce), c.finals.add(s.hash)));
   const ac = new AbortController();

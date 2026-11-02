@@ -44,7 +44,7 @@ import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/k
 import { base58, base64 } from "@scure/base";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
-import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./account.ts";
+import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS, heightSpreadOver } from "./account.ts";
 import { type BindAnswer, depositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
 
 /** The margin past max_block_height, in blocks, before a call counts as dead (W:448; V:741-743 covers both readings). */
@@ -173,7 +173,7 @@ export async function readU(account: string, rpcs: readonly [NearRpc, NearRpc]):
     }),
   );
   const [a, b] = sides;
-  if (!a || !b || a.nonce !== b.nonce) return null;
+  if (!a || !b || a.nonce !== b.nonce || heightSpreadOver([a.height, b.height]) !== null) return null; // a stale "final" is no read
   return { nonce: a.nonce, heights: [a.height, b.height] };
 }
 

@@ -19,7 +19,7 @@
 // Nothing here logs. No request carries a key or the words: each read names A or the token only (§2.9).
 import { base58, base64 } from "@scure/base";
 import { armAccount } from "../derive/index.ts";
-import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../deposit/account.ts";
+import { heightSpreadOver, NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../deposit/account.ts";
 
 /** A's public side: its 64-hex implicit id and its one key. */
 export interface ArmingAccountId {
@@ -121,6 +121,11 @@ export async function readArmingRegistration(
   const [ma, mb] = [minOn(0), minOn(1)];
   if (ra !== rb) throw new ArmingRegistrationRefused("disagree", "the two RPCs disagree on whether A is registered");
   if (ma !== mb) throw new ArmingRegistrationRefused("disagree", "the two RPCs disagree on the token's storage minimum");
+  // every answer at a final block, and the four within HEIGHT_SPREAD_MAX: a provider's stale "final" is refused
+  const heights = settled.flatMap((side) => side.map((s) => (s.status === "fulfilled" && isObj(s.value) && isObj(s.value.result) ? s.value.result.block_height : undefined)));
+  if (!heights.every((h) => typeof h === "number" && Number.isSafeInteger(h) && h > 0)) throw new ArmingRegistrationRefused("rpc", "a read has no block height");
+  const spread = heightSpreadOver(heights as number[]);
+  if (spread !== null) throw new ArmingRegistrationRefused("disagree", spread);
   return { account, registered: ra, min: ma, registerDeposit: ra ? 0n : ma };
 }
 

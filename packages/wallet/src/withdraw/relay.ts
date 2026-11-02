@@ -5,10 +5,10 @@
 //
 // - The fee (askWithdrawFee): GET /v1/withdraw/fee?token=<id> on the release's helper. The answer is hostile input:
 //   exactly the frozen fields, each in its form; relayer_account and fee_recipient equal to the release's, byte for
-//   byte (HELPER_FEE_ANSWER_DISPLAY_ONLY: shown, never copied); relay_fee a canonical u128 at most the device's own
-//   fee_max and below the amount (the §2.8 arming row, wallet.md l.915; LD5, markets.md l.1071-1072). fee_max is the
-//   caller's, computed from its own reads (LD5's formula, never a helper figure), so no helper answer can raise the
-//   bound. What goes into the withdrawal is the release's fee_recipient, never the answer's.
+//   byte (HELPER_FEE_ANSWER_DISPLAY_ONLY: shown, never copied); relay_fee a canonical u128 below the amount. No caller
+//   names fee_max (an argument that tries is refused): the device's own (./feemax.ts, LD5's formula on its own reads)
+//   bounds the fee where it is bound, in withdrawRequest before the proof, and again here before the first send (the
+//   §2.8 arming row, wallet.md l.915). What goes into the withdrawal is the release's fee_recipient, never the answer's.
 // - The send (relayWithdraw): POST /v1/withdraw with the request withdrawRequest made, as one fixed string of bytes,
 //   sent again unchanged and never re-proved (wallet.md l.990: a retry never re-signs). It is sent only while the
 //   note is RESERVED by exactly this attempt (its last context and deadline_ms are the body's: WU-06, nothing leaves
@@ -20,6 +20,8 @@
 //   RELAY_RESEND_MS for the pages before the same bytes go again, so a relayer that says submitted and
 //   drops the call costs time, never the withdrawal (route 1, markets.md l.1511-1517). withdraw_failed ends the
 //   sends and names route 2, self-submit (l.1518-1524: the exit tool, from the 12 words); every other code ends them.
+//   Before the first send the device reads its own fee_max (./feemax.ts) for the body's register_deposit; a body whose
+//   relay_fee is above it is never sent (lastAnswer "fee_max"), and the pages and the deadline settle the note.
 // - Confirm first (wallet.md l.424's rule for deposits, here for the change; §2.3 "own" l.227-230): the change
 //   note is written only once the vault's spends and leaves pages, read on two RPCs at one block and matched byte for
 //   byte (the kit's vaultSync), hold a spend of this note's nullifier hash and, at its new_leaf_index, the change leaf
@@ -44,7 +46,7 @@
 // - The seed is copied and the copy zeroed before the first await. Nothing here logs. The relayer gets the request's
 //   body alone: the withdrawal data, the proof and its public signals, none of which names another note or a key.
 //
-// Not here: fee_max's own reads (gas price and the NEAR price, LD1), the refund note a settle writes, the "own" act on
+// Not here: the refund note a settle writes, the "own" act on
 // A (the arming card), a withdrawal across several notes (WM-06), the busy answer's Retry-After (WU-08), and route 2
 // itself (the exit tool, packages/exit).
 import {
@@ -66,6 +68,7 @@ import {
 import { base58 } from "@scure/base";
 import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, nearRpc, RPC_TIMEOUT_MS } from "../deposit/account.ts";
 import { noteCommitment, noteSecrets } from "../notes/secrets.ts";
+import { FeeMaxRefused, type FeeRpc, readWithdrawFeeMax } from "./feemax.ts";
 import { type NoteRecord, type NoteStore, refKey } from "../notes/store.ts";
 import { blockTimeMsOf, WITHDRAW_SEND_MARGIN_MS, type WithdrawRequest } from "./request.ts";
 
@@ -99,8 +102,6 @@ export type WithdrawFeeArgs = {
   token: string;
   /** The release's relayer, written in the release: never a helper's answer. */
   relayer: HelperReleaseRelayer;
-  /** The device's fee_max in the token's base units, from its own reads (LD5); never a helper figure. */
-  feeMax: bigint;
   /** What the recipient gets, in the token's base units. */
   amount: bigint;
   fetchFn?: typeof fetch;
@@ -115,13 +116,13 @@ const U128 = 1n << 128n;
 const DEC = /^(0|[1-9][0-9]{0,38})$/;
 const PX = /^(0|[1-9][0-9]{0,38})(\.[0-9]{1,39})?$/;
 
-/** Asks the release's relayer for its fee and checks the answer against the release and the device's own fee_max. */
+/** Asks the release's relayer for its fee and checks the answer against the release; the device's fee_max bounds it later. */
 export async function askWithdrawFee(a: WithdrawFeeArgs): Promise<WithdrawFee> {
-  const { token, relayer, feeMax, amount } = a;
+  if (a !== null && typeof a === "object" && Object.hasOwn(a, "feeMax")) throw new WithdrawRelayRefused("input", "feeMax: the device computes its own fee cap");
+  const { token, relayer, amount } = a;
   if (typeof token !== "string" || token.length === 0 || token.length > 64) throw new WithdrawRelayRefused("input", "token: not an account id");
   if (relayer === null || typeof relayer !== "object" || typeof relayer.relayer_account !== "string" || typeof relayer.fee_recipient !== "string")
     throw new WithdrawRelayRefused("input", "relayer: not the release's relayer");
-  if (typeof feeMax !== "bigint" || feeMax < 0n) throw new WithdrawRelayRefused("input", "feeMax: not a bigint at or above 0");
   if (typeof amount !== "bigint" || amount <= 0n) throw new WithdrawRelayRefused("input", "amount: not a bigint above 0");
   const res = await (a.fetchFn ?? fetch)(`${WITHDRAW_FEE_URL}?token=${encodeURIComponent(token)}`, {
     ...HELPER_FETCH_INIT,
@@ -146,7 +147,6 @@ export async function askWithdrawFee(a: WithdrawFeeArgs): Promise<WithdrawFee> {
   if (relayer_account !== relayer.relayer_account || fee_recipient !== relayer.fee_recipient)
     throw new WithdrawRelayRefused("relayer", "the answer names a relayer that is not the release's");
   const relayFee = BigInt(relay_fee);
-  if (relayFee > feeMax) throw new WithdrawRelayRefused("fee", "relay_fee: above the device's fee_max");
   if (relayFee >= amount) throw new WithdrawRelayRefused("fee", "relay_fee: at or above the amount");
   return { relayFee, feeRecipient: relayer.fee_recipient, validUntilBlock: valid_until_block };
 }
@@ -156,8 +156,9 @@ export async function askWithdrawFee(a: WithdrawFeeArgs): Promise<WithdrawFee> {
 /** The relayer's answer to one send, checked: submitted with a tx hash, or one of the frozen codes at its status. */
 export type WithdrawAnswer = { ok: true; txHash: string } | { ok: false; code: HelperWithdrawCode | HelperCommonCode };
 
-/** POSTs the body's bytes to the release's relayer; anything that is not a withdraw answer throws. */
-export async function sendWithdraw(bytes: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<WithdrawAnswer> {
+// POSTs the body's bytes to the release's relayer. Module-private: relayWithdraw is the only sender, so nothing is sent
+// without its note and fee_max checks.
+async function sendWithdraw(bytes: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<WithdrawAnswer> {
   const res = await fetchFn(WITHDRAW_URL, {
     ...HELPER_FETCH_INIT,
     redirect: "error",
@@ -166,6 +167,11 @@ export async function sendWithdraw(bytes: string, fetchFn: typeof fetch = fetch,
     body: bytes,
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(RELAY_TIMEOUT_MS)]) : AbortSignal.timeout(RELAY_TIMEOUT_MS),
   });
+  return withdrawAnswerOf(res);
+}
+
+/** The relayer's answer to a send, read: submitted with a tx hash, or a frozen code at its status; anything else throws. */
+export async function withdrawAnswerOf(res: Response): Promise<WithdrawAnswer> {
   const body = await jsonOf(res);
   if (res.status === 200 && isObj(body) && Object.keys(body).length === 2 && body.state === "submitted" && typeof body.tx_hash === "string") {
     let raw: Uint8Array | undefined;
@@ -187,8 +193,8 @@ const AGAIN = new Set<string>(["rate_limited", "upstream", "index_behind", "rela
 const CARRIED = new Set<string>(["in_flight"]);
 
 /** A NEAR provider for the pages (`query`) and for one block's header (`block`), named by its exact URL. */
-export interface RelayRpc extends VaultSyncRpc {
-  block(params: { block_id: number }, signal?: AbortSignal): Promise<unknown>;
+export interface RelayRpc extends VaultSyncRpc, FeeRpc {
+  block(params: { block_id: number } | { finality: "final" }, signal?: AbortSignal): Promise<unknown>;
 }
 const BLOCK_METHOD = "block";
 if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(BLOCK_METHOD)) throw new Error(`"${BLOCK_METHOD}" is not on the kit's NEAR method list`);
@@ -218,6 +224,8 @@ export type RelayDeps = {
   network: NearNetwork;
   /** The network's release pair (nearPairNetwork), for the vault's pages and the time of the block they are read at. */
   rpcs: readonly [RelayRpc, RelayRpc];
+  /** Mainnet's release pair, for the price pool of the device's fee_max (./feemax.ts); rpcs again on mainnet. */
+  priceRpcs: readonly [RelayRpc, RelayRpc];
   fetchFn?: typeof fetch;
   /** The wait between rounds; tests replace it. */
   sleep?: (ms: number) => Promise<void>;
@@ -252,11 +260,13 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
   } finally {
     seed.fill(0);
   }
-  const { notes, network, rpcs, signal } = deps;
+  const { notes, network, rpcs, priceRpcs, signal } = deps;
   if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new WithdrawRelayRefused("input", `unknown network ${String(network)}`);
   const vault = NEAR_NETWORKS[network].vault;
   if (vault === null) throw new WithdrawRelayRefused("input", `the release names no vault on ${network}`);
   if (nearPairNetwork(rpcs) !== network || !rpcs.every((r) => typeof r.block === "function")) throw new WithdrawRelayRefused("input", nearPairRule(network));
+  if (nearPairNetwork(priceRpcs) !== "mainnet" || !priceRpcs.every((r) => typeof r.block === "function"))
+    throw new WithdrawRelayRefused("input", `priceRpcs: ${nearPairRule("mainnet")}`);
   const fetchFn = deps.fetchFn ?? fetch;
   const pollMs = deps.pollMs ?? RELAY_POLL_MS;
   const resendRounds = Math.max(1, Math.ceil((deps.resendMs ?? RELAY_RESEND_MS) / pollMs));
@@ -268,6 +278,10 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
   const deadline = body.withdrawal?.deadline_ms;
   if (!Number.isSafeInteger(deadline)) throw new WithdrawRelayRefused("input", "req.body: deadline_ms is not a whole number");
   const nullifierHash = BigInt(signals[1]!);
+  const relayFee = body.withdrawal?.relay_fee;
+  const registerDeposit = body.withdrawal?.register_deposit;
+  if (typeof relayFee !== "string" || !DEC_FIELD.test(relayFee) || typeof registerDeposit !== "string" || !DEC_FIELD.test(registerDeposit))
+    throw new WithdrawRelayRefused("input", "req.body: relay_fee or register_deposit is not a decimal");
   const bytes = JSON.stringify(body);
   if (new TextEncoder().encode(bytes).length > WITHDRAW_BODY_MAX!) throw new WithdrawRelayRefused("input", `req.body: over ${WITHDRAW_BODY_MAX} bytes`);
 
@@ -286,6 +300,7 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
   let waitRounds = 0;
   let route: "relayer" | "self_submit" = "relayer";
   let lastAnswer: string | null = null;
+  let feeMax: bigint | undefined; // the device's own, read before the first send
   for (;;) {
     signal?.throwIfAborted();
     // 1. The pages on both RPCs at one block, then that same block's time on both.
@@ -324,7 +339,19 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
     }
 
     // 4. The send: the same bytes, while the relayer's check 9 still takes them.
-    if (sending && timeMs !== null && timeMs + BigInt(WITHDRAW_SEND_MARGIN_MS) < BigInt(deadline) && waitRounds <= 0) {
+    if (sending && feeMax === undefined && timeMs !== null) {
+      try {
+        feeMax = await readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit: BigInt(registerDeposit), ...(signal ? { signal } : {}) });
+      } catch (e) {
+        signal?.throwIfAborted(); // the reads failed or disagreed: nothing is sent this round
+        if (e instanceof FeeMaxRefused && e.code === "input") throw new WithdrawRelayRefused("input", e.message);
+      }
+      if (feeMax !== undefined && BigInt(relayFee) > feeMax) {
+        sending = false; // above the device's own cap: never sent; the pages and the deadline settle the note
+        lastAnswer = "fee_max";
+      }
+    }
+    if (sending && feeMax !== undefined && timeMs !== null && timeMs + BigInt(WITHDRAW_SEND_MARGIN_MS) < BigInt(deadline) && waitRounds <= 0) {
       try {
         const a = await sendWithdraw(bytes, fetchFn, signal);
         lastAnswer = a.ok ? "submitted" : a.code;
