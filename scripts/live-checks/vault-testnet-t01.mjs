@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS, TESTNET_VERSION, recorder, wasmProblems } from "./vault-skeleton.mjs";
+import { RPCS, TESTNET_VERSION, operatorProblems, recorder, wasmProblems } from "./vault-skeleton.mjs";
 
 const KEY = "vault-testnet-t01";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -81,12 +81,13 @@ const view = async (fetchFn, url, account_id, method_name, args) => {
 
 export async function check({ deployment, account = deployment.account_id, fetchFn = fetch, rpcs = RPCS }) {
   const lines = [];
-  let ok = rpcs.length >= 2;
+  let ok = true;
   const say = (good, text) => {
     ok &&= good;
     lines.push(`${good ? "ok " : "BAD"} ${text}`);
   };
-  if (rpcs.length < 2) lines.push(`BAD only ${rpcs.length} RPC(s); want two`);
+  for (const p of operatorProblems(rpcs)) say(false, p);
+  rpcs = rpcs.slice(0, 2);
   const recordHash = /^[0-9a-f]{64}$/.test(deployment.wasm_sha256 ?? "") ? b58(Buffer.from(deployment.wasm_sha256, "hex")) : null;
   say(recordHash !== null && deployment.code_hash === recordHash, `the record's code_hash ${deployment.code_hash} is the base58 of its wasm_sha256 ${deployment.wasm_sha256}`);
   say(deployment.asset === TESTNET_TOKEN, `the record's asset ${deployment.asset} is the testnet token ${TESTNET_TOKEN}`);

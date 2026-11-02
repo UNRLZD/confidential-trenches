@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, wasmProblems, networkProblems, DEPLOYMENT, TESTNET_USDC } from "./vault-skeleton.mjs";
+import { check, wasmProblems, networkProblems, operatorProblems, DEPLOYMENT, RPCS, TESTNET_USDC } from "./vault-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -146,6 +146,27 @@ test("the same answers with a third of the RPCs gone: FAIL (two RPCs are require
   const one = [...new Set(answers.map((a) => a.url))].slice(0, 1);
   const r = await check({ deployment, fetchFn: replay(answers), rpcs: one });
   assert.equal(r.ok, false);
+  assert.match(r.lines[0], /^BAD only 1 RPC\(s\): .*; want two of two operators$/);
+  assert.equal(r.lines.filter((l) => l.startsWith("BAD")).length, 1, r.lines.join("\n"));
+});
+
+// planted: dRPC's answers relabelled as rpc.testnet.near.org, a second door to FastNEAR; every read still answers ok
+test("the same answers from two hosts of one operator (FastNEAR twice): FAIL on the operators only", async () => {
+  const NEAR_ORG = "https://rpc.testnet.near.org";
+  const answers = load("vault-skeleton.answers.json").map((a) => (a.url === "https://near-testnet.drpc.org" ? { ...a, url: NEAR_ORG } : a));
+  const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"]);
+});
+
+test("operatorProblems: two testnet operators pass; one operator, a host the map lacks, a mainnet host or one RPC are refused", () => {
+  assert.deepEqual(operatorProblems(RPCS), []);
+  assert.deepEqual(operatorProblems(["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.testnet.near.org"]), []);
+  assert.match(operatorProblems(["https://test.rpc.fastnear.com", "https://archival-rpc.testnet.near.org"])[0], /^only 1 operator\(s\)/);
+  assert.match(operatorProblems(["https://test.rpc.fastnear.com", "https://rpc.example.org"])[0], /rpc\.example\.org \(not a testnet host\); want two testnet operators$/);
+  assert.match(operatorProblems(["https://test.rpc.fastnear.com", "https://near.drpc.org"])[0], /near\.drpc\.org \(not a testnet host\)/);
+  assert.match(operatorProblems(["https://near-testnet.drpc.org"])[0], /^only 1 RPC\(s\)/);
+  assert.match(operatorProblems([])[0], /^only 0 RPC\(s\): none/);
 });
 
 // a minimal wasm: one import env.<imp> of function type 0, one function export <exp>

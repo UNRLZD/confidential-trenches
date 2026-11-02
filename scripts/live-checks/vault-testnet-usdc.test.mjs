@@ -72,6 +72,22 @@ test("bad answer made from the good one: the deploy tx read as failed: FAIL", as
   assert.ok(r.lines.some((l) => l.startsWith(`BAD tx ${deploy} `) && /failed on /.test(l)), r.lines.join("\n"));
 });
 
+// planted: dRPC's state answers relabelled as archival-rpc.testnet.near.org, a second door to FastNEAR, put second, so
+// the state reads come from one operator; every read still answers ok
+test("state reads from two hosts of one operator (FastNEAR twice): FAIL on the operators only", async () => {
+  const NEAR_ORG = "https://archival-rpc.testnet.near.org";
+  const answers = load("vault-testnet-usdc.answers.json").map((a) => (a.url === "https://near-testnet.drpc.org" && a.method === "query" ? { ...a, url: NEAR_ORG } : a));
+  const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://archival-rpc.testnet.fastnear.com", NEAR_ORG, "https://near-testnet.drpc.org"], sleep });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD only 1 operator(s) in https://archival-rpc.testnet.fastnear.com (fastnear), https://archival-rpc.testnet.near.org (fastnear); want two testnet operators"], r.lines.join("\n"));
+});
+
+test("one RPC: FAIL, said so", async () => {
+  const r = await check({ deployment: { ...deployment, txs: [] }, fetchFn: replay(load("vault-testnet-usdc.answers.json")), rpcs: ["https://archival-rpc.testnet.fastnear.com"], sleep });
+  assert.equal(r.ok, false);
+  assert.match(r.lines[0], /^BAD only 1 RPC\(s\): https:\/\/archival-rpc\.testnet\.fastnear\.com \(fastnear\); want two of two operators$/);
+});
+
 test("the live record parses for the money gate: Money path yes, every tx a near-testnet Tx line, none real money", async () => {
   const live = parseLive(liveRecord(deployment, { ok: true, lines: deployment.txs.map((t) => `ok  tx ${t.hash} (${t.what}) ok on a, ok on b`) }), "vault-testnet-usdc");
   assert.deepEqual(live.problems, []);
