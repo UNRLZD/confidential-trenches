@@ -52,7 +52,8 @@ import {
   type TxOutcome,
   type TxRef,
 } from "./send.ts";
-import { createTokenWatch, pausedFrom, USDC, USDC_CODE_HASH, type TokenStatus } from "../token-status/status.ts";
+import { createTokenWatch, pausedFrom, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
+import { A, B, hashOf, nearPair, PAUSED } from "../../test/token-status/near.ts";
 import { watchDeps } from "./env.ts";
 
 const VAULT = "vault.confidential.unrlzd.near";
@@ -116,6 +117,8 @@ class Chain {
   resolved: string[] = [];
   statuses: TokenStatus[] = [OPEN];
   statusAsks = 0;
+  /** Each hold's H rule as asked (status.ts HoldAt). */
+  holds: HoldAt[] = [];
   /** The watch's answer for a height (status.ts pausedAt). */
   pausedAt: (height: bigint) => boolean | null | Promise<boolean | null> = () => false;
   resolveOpts: { resend: boolean }[] = [];
@@ -219,7 +222,8 @@ class Chain {
       reads: this.reads(),
       store,
       relayer: this.relayer(),
-      tokenStatus: async () => {
+      tokenStatus: async (at) => {
+        this.holds.push(at);
         const s = this.statuses[Math.min(this.statusAsks, this.statuses.length - 1)]!;
         this.statusAsks++;
         return { ...s, block_height: s.block_height === -1 ? Number(this.final + this.ahead) : s.block_height };
@@ -429,6 +433,16 @@ test("R3-3: a second call for U while one is carried: in_flight on the same P, p
 
 // ---- (f) the token's hold ----
 
+test("(f) every hold of a deposit asks at the higher of the two finals (markets.md check 10's H for the ids' calls): before the checks, check 9, the prepay's and the send's turns, a re-send", async () => {
+  const w = world();
+  w.chain.fates = ["paused", "lands"];
+  w.chain.pausedAt = () => null; // the paused send stays pending: the next call re-reads it under the hold
+  ok(await w.carry(next(w)));
+  await w.carry(next(w));
+  assert.ok(w.chain.holds.length >= 5, String(w.chain.holds.length));
+  assert.deepEqual([...new Set(w.chain.holds)], ["higher"]);
+});
+
 test("(f) held before the checks: 503 token_halted, nothing prepaid, sent or counted, no record", async () => {
   const w = world();
   w.chain.statuses = [HALTED];
@@ -621,28 +635,18 @@ test("status.ts pausedFrom: paused at the block before or at the block; null unl
 test("(i) through the network's own watch (env.ts watchDeps, status.ts pausedAt on two providers): a send that failed on USDC's paused error while USDC's views show it paused there is resolved exempt, and U is free again", async () => {
   const w = world();
   w.chain.fates = ["paused", "lands"];
-  const reads: { url: string; method: unknown; block_id: unknown }[] = [];
   // two providers answering as nearcore does: USDC paused from the failure's block on, its code the pin
-  const provider = (async (url: string, init: RequestInit) => {
-    const p = (JSON.parse(String(init.body)) as { params: { request_type: string; method_name?: string; block_id?: number } }).params;
-    reads.push({ url, method: p.method_name ?? p.request_type, block_id: p.block_id });
-    const h = p.block_id!;
-    const result =
-      p.request_type === "view_account"
-        ? { amount: "0", locked: "0", code_hash: USDC_CODE_HASH, storage_usage: 1, block_height: h, block_hash: "x" }
-        : BigInt(h) >= w.chain.final
-          ? { block_height: h, block_hash: "x", logs: [], error: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })' }
-          : { block_height: h, block_hash: "x", logs: [], result: [...Buffer.from('"5"')] };
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
-  }) as typeof fetch;
-  const watch = createTokenWatch("mainnet", { NEAR_RPC_URL: "https://a.example", NEAR_RPC_URL_B: "https://b.example", BIND_VAULT_MAINNET: VAULT }, { fetch: provider });
+  const near = nearPair({ final: () => Number(w.chain.final) + 3, balance: (h) => (BigInt(h) >= w.chain.final ? { error: PAUSED } : '"5"') });
+  const watch = createTokenWatch("mainnet", { NEAR_RPC_URL: A, NEAR_RPC_URL_B: B, BIND_VAULT_MAINNET: VAULT }, { fetch: near.fetch });
   const deps = watchDeps(watch, USDC);
   w.chain.pausedAt = (h) => deps.pausedAt(h);
   ok(await w.carry(next(w)));
   assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state, rec(w).sends[0]!.counted], [0, "exempt", false], "resolved, not counted");
+  const f = Number(w.chain.final);
+  const [before, at] = [hashOf(f - 1), hashOf(f)];
   assert.deepEqual(
-    [...new Set(reads.map((r) => `${new URL(r.url).host} ${String(r.method)} ${String(r.block_id)}`))].sort(),
-    ["a.example", "b.example"].flatMap((host) => [`${host} ft_balance_of ${w.chain.final - 1n}`, `${host} ft_balance_of ${w.chain.final}`, `${host} view_account ${w.chain.final}`]).sort(),
+    [...new Set(near.seen.map((r) => `${r.url === A ? "A" : "B"} ${r.method === "block" ? "block" : String(r.params.method_name ?? r.params.request_type)} ${String(r.params.block_id)}`))].sort(),
+    ["A", "B"].flatMap((p) => [`${p} block ${f}`, `${p} ft_balance_of ${before}`, `${p} ft_balance_of ${at}`, `${p} view_account ${before}`, `${p} view_account ${at}`]).sort(),
   );
   // U is free again: the next deposit from U is carried and lands (no in_flight on its P, no prepay_open for a new one)
   ok(await w.carry(next(w)));

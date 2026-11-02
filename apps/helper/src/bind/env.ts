@@ -6,8 +6,9 @@
 // that does not decode is check 1's bad_shape and a token no carried network holds is token_not_accepted (check 5),
 // both with nothing read; with no network set, every request answers one of the two.
 //
-// The token watch (status.ts) of the delegate's own network holds the carry (H4.3 check 9) and answers R3's paused
-// exception (its pausedAt: USDC's own views at the receipt's height and the one before, on both providers); a network
+// The token watch (status.ts) of the delegate's own network holds the carry (H4.3 check 9, at the higher of the two
+// finals) and answers R3's paused exception (its pausedAt: USDC's own views at the receipt's block and at its parent, on
+// both providers); a network
 // with no watch is held, and its paused-error sends stay pending, never counted (send.ts sendState).
 import { join } from "node:path";
 import { HELPER_CODE_STATUS } from "@blindfill/kit";
@@ -55,9 +56,9 @@ function receiverOf(body: unknown): string | null {
  * network's own watch. With no watch: held (token_halted), as a watch holds while it is not caught up, and the paused
  * exception not known, so a paused-error send stays pending (header).
  */
-export function watchDeps(watch: Pick<TokenWatch, "status" | "pausedAt"> | undefined, token: string): Pick<SendDeps, "tokenStatus" | "pausedAt"> {
+export function watchDeps(watch: Pick<TokenWatch, "statusAt" | "pausedAt"> | undefined, token: string): Pick<SendDeps, "tokenStatus" | "pausedAt"> {
   return {
-    tokenStatus: watch?.status ?? (async () => ({ token, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
+    tokenStatus: watch?.statusAt ?? (async () => ({ token, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
     pausedAt: watch?.pausedAt ?? (async () => null),
   };
 }
@@ -71,7 +72,7 @@ export function watchDeps(watch: Pick<TokenWatch, "status" | "pausedAt"> | undef
  */
 export function bindSenderFromEnv(
   env: Record<string, string | undefined>,
-  watches: Partial<Record<TokenNetwork, Pick<TokenWatch, "status" | "pausedAt">>> = tokenWatchesFromEnv(env),
+  watches: Partial<Record<TokenNetwork, Pick<TokenWatch, "statusAt" | "pausedAt">>> = tokenWatchesFromEnv(env),
   fetchFn: typeof fetch = fetch,
 ): BindSender {
   const release = env[RELEASE_ENV] ?? "";

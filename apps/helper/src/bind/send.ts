@@ -39,7 +39,7 @@ import { createHash, createPrivateKey, createPublicKey, sign as edSign } from "n
 import * as nodeFs from "node:fs";
 import { HELPER_CODE_STATUS } from "@blindfill/kit";
 import { base58, checkBindDeposit, decodeSignedDelegate, type BindCode, type BindConfig, type BindLedger, type BindReads, type KeyRead } from "./checks.ts";
-import { tokenHeld, type TokenStatus } from "../token-status/status.ts";
+import { tokenHeld, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
 import { pagesAt, type Rpc } from "../near/pages.ts";
 
@@ -145,8 +145,11 @@ export type SendDeps = {
   reads: SendReads;
   store: DepositStore;
   relayer: Relayer;
-  /** The token watch (status.ts); anything but a caught-up open token holds. */
-  tokenStatus(): Promise<TokenStatus>;
+  /**
+   * The token watch at the move's H (status.ts statusAt); anything but a caught-up open token holds. A deposit asks at
+   * "higher", the higher of the two finals (markets.md check 10).
+   */
+  tokenStatus(at: HoldAt): Promise<TokenStatus>;
   /**
    * The watch's answer from its pause history (status.ts pausedAt): was USDC paused at block `height`; null while the
    * watch has not read that far.
@@ -384,7 +387,8 @@ export function ledgerOf(store: DepositStore, reads: SendReads): BindLedger {
   };
 }
 
-const held = async (deps: SendDeps) => tokenHeld(await deps.tokenStatus());
+// check 10's H for the ids' deposit calls: the higher of the two finals (markets.md check 10)
+const held = async (deps: SendDeps) => tokenHeld(await deps.tokenStatus("higher"));
 
 /** R4 and (f), run inside the relayer's queue right before a transaction is signed. */
 const guardFor = (deps: SendDeps, maxBlockHeight: bigint) => async (): Promise<BindCode | null> => {

@@ -6,16 +6,22 @@
 // of each, NearBlocks' testnet indexer is stalled and dRPC keeps 100k-200k blocks; scripts/live-checks/
 // helper-usdc-event-watch.mjs proves the sources). USDC has no view of its halt (W D48), but while it is halted its views
 // fail with its own panic "FiatToken: paused" (the real wasm in a sandbox, research RESULT 3.1), so on each of the
-// network's two providers, at one block:
-//   - ft_balance_of(vault) at final: a balance is open, exactly the paused panic is halted, anything else is not known;
-//   - is_blocklisted(vault) at that block: exactly true or false, anything else is not known;
-//   - view_account at that block: the code hash.
+// network's two providers, at the move's own block H (markets.md check 10: the two finals at most HEIGHT_SPREAD_MAX
+// apart; H the lower for a withdrawal, the higher for a deposit, its provider one or a few blocks behind given up to
+// H_WAIT_MS to reach it; H's block at most FINAL_AGE_MAX_MS behind the wall clock, so two frozen providers never answer):
+//   - ft_balance_of(vault): a balance is open, exactly the paused panic is halted, anything else is not known;
+//   - is_blocklisted(vault): exactly true or false, anything else is not known;
+//   - view_account: the code hash;
+// each by block_id = H, and each answer counts only when it names H's height and H's hash.
 // A view at block h includes h's receipts (the one mainnet blocklist: false at 99022746, true at 99022747, its block),
 // so the state read at a final block is the state the paper's replay would reach there. The answer is caught up only when
-// both providers answered all three at final, agree on the code hash and it is the pin: the views mean what they mean
+// both providers answered all three at H, agree on the code hash and it is the pin: the views mean what they mean
 // only for the pinned code (an upgrade could change the panic), so another code hash holds everything. Then halted is
-// either provider's halt and vault_blocked either's block. last_event stays null: no event log is read.
-// pausedAt(h) (R3's exception for bind) reads ft_balance_of at h-1 and at h on both providers: paused at either.
+// either provider's halt and vault_blocked either's block. last_event stays null: no event log is read. A final block's
+// answer never changes, so it is kept by its height and hash; the display (/v1/token-status, at the lower final) is
+// read at most once per CACHE_MS on a monotonic clock. One 429 is waited out (Retry-After, at most BACKOFF_429_MS).
+// pausedAt(h) (R3's exception for bind) reads block h's header on both providers (one hash), then ft_balance_of at its
+// parent (by hash: NEAR skips heights, so h-1 may be no block) and at h, with the pin at both: paused at either.
 // Two named limits: (1) a provider keeps only recent blocks (dRPC at least 100k, about 16 h; FastNEAR's archive is the
 // one keyless archive), so a send older than that reads on one operator only and pausedAt stays null: the send stays
 // pending; (2) a pause and an unpause in one block read as open at both heights, so such a send counts as one of R3's
@@ -58,14 +64,31 @@ export const WATCHED = {
   testnet: { token: TESTNET_TOKEN, rpcs: TESTNET_RPCS },
 } as const satisfies Record<TokenNetwork, { token: string; rpcs: readonly [{ env: string; fallback: string }, { env: string; fallback: string }] }>;
 export const READ_TIMEOUT_MS = 2_000; // check 10's reads answer within 1 s at p99 [design, M4.3]; one slow answer holds
-export const CACHE_MS = 1_000; // about one NEAR block: one pair of reads per block, however many callers ask
+export const CACHE_MS = 1_000; // the display's answer, about one NEAR block, on the monotonic clock
+/** Two providers' finals may stand this many blocks apart at most (withdraw/fee.ts HEIGHT_SPREAD_MAX; status.test.ts: one value). */
+export const HEIGHT_SPREAD_MAX = 30;
+/** H's block may stand this far behind the wall clock at most (withdraw/index.ts MAX_FINAL_AGE_MS; status.test.ts: one value). */
+export const FINAL_AGE_MAX_MS = 30_000;
+/** Check 10's wait for a provider one or a few blocks behind to hold H (markets.md check 10, 2 s [design]). */
+export const H_WAIT_MS = 2_000;
+const H_POLL_MS = 300; // about half a NEAR block between two reads of the lagging provider's final
+/** One 429 is waited out this long at most (markets.md check 6's budget: one 429 backed off 10 s). */
+export const BACKOFF_429_MS = 10_000;
+const BLOCKS_KEPT = 64;
 const ANSWER_MAX = 4_096;
 const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** The kit's HelperTokenStatusAnswer (packages/kit/src/helper/v1.ts). */
 export type TokenStatus = HelperTokenStatusAnswer;
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Deps = { fetch?: Fetch; now?: () => number };
+/** now: the wall clock, for H's age only; clock: a monotonic clock in ms; sleep: a wait (tests pass their own). */
+type Deps = { fetch?: Fetch; now?: () => number; clock?: () => number; sleep?: (ms: number) => Promise<void> };
+/**
+ * Which final is the move's H (markets.md check 10, "H is set by what a missed halt costs the move"): the lower of the
+ * two providers' finals for withdrawals and A's delegates (a halt above it costs them no money), the higher for the
+ * ids' deposit calls (a halt between the move and its resolve can strand USDC in the vault).
+ */
+export type HoldAt = "lower" | "higher";
 
 /**
  * The relayers' hold (H3.4 check 10, H4.3 step 9): true unless the watch is caught up, USDC is not halted, the vault is
@@ -86,7 +109,7 @@ export const VAULT_ENV = {
 /** One view's outcome: a value's text, a panic's message, or neither (any other answer). */
 export type ViewOutcome = { at: number; answer: string } | { at: number; panic: string } | { at?: undefined; other: true };
 /** What one provider read at one block: the halt from ft_balance_of, the block from is_blocklisted, the code hash. */
-export type Read = { block_height: number; halt: ViewOutcome; blocked?: ViewOutcome; code_hash?: string };
+export type Read = { block_height: number; block_hash?: string; halt: ViewOutcome; blocked?: ViewOutcome; code_hash?: string };
 
 /** The halt as one ft_balance_of outcome says it: false for a balance, true for exactly the paused panic, else null. */
 export function haltOf(o: ViewOutcome | undefined): boolean | null {
@@ -101,23 +124,27 @@ export function blockedOf(o: ViewOutcome | undefined): boolean | null {
 }
 
 /**
- * The answer from the two providers' reads of `token`: caught up only when both read the halt, the block and the code
- * hash, agree on the code hash and it is the pin; then halted and vault_blocked are either provider's. The code hash is
- * shown whenever both read it and agree; never more than was read.
+ * The answer from the two providers' reads of `token` at one block: both of one height and one hash. Caught up only
+ * when both read the halt and the block at that block, agree on the code hash and it is the pin; then halted and
+ * vault_blocked are either provider's. The code hash is shown whenever both read it at that block and agree; never more
+ * than was read.
  */
 export function statusFrom(a: Read | undefined, b: Read | undefined, token: string): TokenStatus {
-  const agreed = a?.code_hash !== undefined && a.code_hash === b?.code_hash;
+  const one = a !== undefined && b !== undefined && a.block_height === b.block_height && a.block_hash !== undefined && a.block_hash === b.block_hash;
+  const agreed = one && a.code_hash !== undefined && a.code_hash === b.code_hash;
+  // each view's own block is H: an answer of another block says nothing of H
+  const atH = (r: Read) => r.halt.at === r.block_height && r.blocked?.at === r.block_height;
   const halts = [haltOf(a?.halt), haltOf(b?.halt)];
   const blocks = [blockedOf(a?.blocked), blockedOf(b?.blocked)];
-  const known = agreed && a!.code_hash === USDC_CODE_HASH && !halts.includes(null) && !blocks.includes(null);
+  const known = agreed && atH(a) && atH(b) && a.code_hash === USDC_CODE_HASH && !halts.includes(null) && !blocks.includes(null);
   return {
     token,
     caught_up: known,
     halted: known ? halts.includes(true) : null,
     vault_blocked: known ? blocks.includes(true) : null,
     code_hash_ok: known ? true : null,
-    code_hash: agreed ? a!.code_hash! : "",
-    block_height: agreed ? Math.min(a!.block_height, b!.block_height) : 0,
+    code_hash: agreed ? a.code_hash! : "",
+    block_height: agreed ? a.block_height : 0,
     last_event: null,
   };
 }
@@ -174,108 +201,195 @@ export function viewOutcome(j: unknown): ViewOutcome {
   return m ? { at, panic: m[1]! } : { other: true };
 }
 
+/** A block header as both providers give it: its height, its hash, its parent's hash and its time in ms. */
+type Head = { height: number; hash: string; prev_hash: string; ms: number };
+function headOf(j: unknown): Head | undefined {
+  const h = (j as { result?: { header?: { height?: unknown; hash?: unknown; prev_hash?: unknown; timestamp_nanosec?: unknown } } } | null)?.result?.header;
+  if (h === undefined || h === null) return undefined;
+  const { height, hash, prev_hash, timestamp_nanosec: ns } = h;
+  if (typeof height !== "number" || !Number.isSafeInteger(height) || height <= 0) return undefined;
+  if (typeof hash !== "string" || !HASH.test(hash) || typeof prev_hash !== "string" || !HASH.test(prev_hash)) return undefined;
+  if (typeof ns !== "string" || !/^\d{1,25}$/.test(ns)) return undefined;
+  return { height, hash, prev_hash, ms: Number(BigInt(ns) / 1_000_000n) };
+}
+
+/** A query answer only when it is of block `hash` (and at `height` when given): a provider's answer of any other block is no answer. */
+function ofBlock(j: unknown, hash: string, height?: number): unknown {
+  const res = (j as { result?: { block_hash?: unknown; block_height?: unknown } } | null)?.result;
+  return res?.block_hash === hash && (height === undefined || res?.block_height === height) ? j : undefined;
+}
+
+/** How long one 429 is waited out: its Retry-After in seconds when it gives one, never over BACKOFF_429_MS. */
+export function backoffOf(retryAfter: string | null): number {
+  const s = retryAfter !== null && /^\d{1,5}$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) * 1_000 : BACKOFF_429_MS;
+  return Math.min(s, BACKOFF_429_MS);
+}
+
 /** One network's watch: its own token (WATCHED) and the vault it carries (VAULT_ENV) read on its own pair. */
 export function createTokenWatch(network: TokenNetwork, env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
-  const now = deps.now ?? Date.now;
+  const now = deps.now ?? Date.now; // the wall clock: only for H's age against its block time
+  const clock = deps.clock ?? (() => performance.now()); // monotonic: the display's cache and the wait for H
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const urls = readUrls(env, network);
   const token = WATCHED[network].token;
   const vault = vaultOf(env, network);
-  let cached: { at: number; status: TokenStatus } | undefined;
-  let inflight: Promise<TokenStatus> | undefined;
+  const notCaughtUp = statusFrom(undefined, undefined, token);
+  const byBlock = new Map<string, TokenStatus>(); // a final block's status never changes: kept by its height and hash
   const pausedCache = new Map<bigint, boolean>(); // a known answer for a past height never changes
+  const inflight = new Map<HoldAt, Promise<TokenStatus>>();
+  let shown: { at: number; status: TokenStatus } | undefined;
+  let showing: Promise<TokenStatus> | undefined;
 
-  /** One query on one provider: its JSON answer, or undefined on any failure, any status but 200 or a large answer. */
-  async function query(url: string, params: Record<string, unknown>): Promise<unknown> {
-    try {
-      const r = await doFetch(url, {
-        method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params }),
-        redirect: "error",
-        signal: AbortSignal.timeout(READ_TIMEOUT_MS),
-      });
-      if (r.status !== 200 || !r.body) return undefined;
-      // read up to ANSWER_MAX bytes, never more: a provider is an outside input
-      const chunks: Uint8Array[] = [];
-      let n = 0;
-      for await (const c of r.body) {
-        n += c.byteLength;
-        if (n > ANSWER_MAX) return undefined;
-        chunks.push(c);
+  /**
+   * One JSON-RPC call on one provider: its JSON answer, or undefined on any failure, any status but 200 or a large
+   * answer. One 429 is waited out (its Retry-After, at most BACKOFF_429_MS) and the call made once more.
+   */
+  async function rpc(url: string, method: string, params: Record<string, unknown>): Promise<unknown> {
+    for (let tries = 0; ; tries++) {
+      try {
+        const r = await doFetch(url, {
+          method: "POST",
+          headers: { accept: "application/json", "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          redirect: "error",
+          signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+        });
+        if (r.status === 429 && tries === 0) {
+          await r.body?.cancel();
+          await sleep(backoffOf(r.headers.get("retry-after")));
+          continue;
+        }
+        if (r.status !== 200 || !r.body) return undefined;
+        // read up to ANSWER_MAX bytes, never more: a provider is an outside input
+        const chunks: Uint8Array[] = [];
+        let n = 0;
+        for await (const c of r.body) {
+          n += c.byteLength;
+          if (n > ANSWER_MAX) return undefined;
+          chunks.push(c);
+        }
+        return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        return undefined;
       }
-      return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    } catch {
-      return undefined;
     }
   }
-  const view = (url: string, method: string, account_id: string, at: { finality: "final" } | { block_id: number }) =>
-    query(url, { request_type: "call_function", ...at, account_id: token, method_name: method, args_base64: Buffer.from(JSON.stringify({ account_id })).toString("base64") }).then(viewOutcome);
-  /** The token's code hash at a block (or final), or undefined on any answer of the wrong shape or another block. */
-  async function codeHash(url: string, at: { finality: "final" } | { block_id: number }): Promise<{ code_hash: string; block_height: number } | undefined> {
-    const res = ((await query(url, { request_type: "view_account", ...at, account_id: token })) as { result?: { code_hash?: unknown; block_height?: unknown } } | undefined)?.result;
-    const code_hash = res?.code_hash;
-    const block_height = res?.block_height;
-    if (typeof code_hash !== "string" || !HASH.test(code_hash) || typeof block_height !== "number" || !Number.isSafeInteger(block_height) || block_height <= 0) return undefined;
-    if ("block_id" in at && block_height !== at.block_id) return undefined;
-    return { code_hash, block_height };
+  const head = async (url: string, at: { finality: "final" } | { block_id: number }) => {
+    const h = headOf(await rpc(url, "block", at));
+    return h !== undefined && ("finality" in at || h.height === at.block_id) ? h : undefined;
+  };
+  /** A view of `token` at block `hash` (asked by `block_id`), its answer of that block only. */
+  const view = async (url: string, method: string, account_id: string, block_id: number | string, hash: string, height?: number) =>
+    viewOutcome(ofBlock(await rpc(url, "query", { request_type: "call_function", block_id, account_id: token, method_name: method, args_base64: Buffer.from(JSON.stringify({ account_id })).toString("base64") }), hash, height));
+  /** The token's code hash at block `hash`, or undefined on any answer of the wrong shape or another block. */
+  async function codeHash(url: string, block_id: number | string, hash: string, height?: number): Promise<string | undefined> {
+    const j = ofBlock(await rpc(url, "query", { request_type: "view_account", block_id, account_id: token }), hash, height);
+    const code_hash = (j as { result?: { code_hash?: unknown } } | undefined)?.result?.code_hash;
+    return typeof code_hash === "string" && HASH.test(code_hash) ? code_hash : undefined;
   }
 
-  /** One provider's read: the halt at final, then the vault's block and the code hash at that same block. */
-  async function read(url: string): Promise<Read | undefined> {
+  /** One provider's read at block H: the halt, the vault's block and the code hash, each answered of that block. */
+  async function read(url: string, h: Head): Promise<Read> {
     if (vault === undefined) {
       // no vault carried on this network: the code hash only, never caught up (nothing to carry, nothing to free)
-      const c = await codeHash(url, { finality: "final" });
-      return c && { ...c, halt: { other: true } };
+      return { block_height: h.height, block_hash: h.hash, halt: { other: true }, code_hash: await codeHash(url, h.height, h.hash, h.height) };
     }
-    const halt = await view(url, "ft_balance_of", vault, { finality: "final" });
-    if (halt.at === undefined) return undefined;
-    const [blocked, c] = await Promise.all([view(url, "is_blocklisted", vault, { block_id: halt.at }), codeHash(url, { block_id: halt.at })]);
-    return { block_height: halt.at, halt, blocked, code_hash: c?.code_hash };
+    const [halt, blocked, code_hash] = await Promise.all([view(url, "ft_balance_of", vault, h.height, h.hash, h.height), view(url, "is_blocklisted", vault, h.height, h.hash, h.height), codeHash(url, h.height, h.hash, h.height)]);
+    return { block_height: h.height, block_hash: h.hash, halt, blocked, code_hash };
   }
 
-  /** The status, read at most once per CACHE_MS, one pair of reads at a time. */
-  function status(): Promise<TokenStatus> {
-    if (cached && now() - cached.at < CACHE_MS) return Promise.resolve(cached.status);
-    if (!inflight) {
-      inflight = Promise.all(urls.map(read))
-        .then(([a, b]) => {
-          const s = statusFrom(a, b, token);
-          cached = { at: now(), status: s };
-          return s;
-        })
-        .finally(() => (inflight = undefined));
+  /** Whether `url`'s final reaches `height` within H_WAIT_MS on the monotonic clock (check 10's wait for H). */
+  async function reaches(url: string, height: number): Promise<boolean> {
+    const until = clock() + H_WAIT_MS;
+    while (clock() < until) {
+      await sleep(H_POLL_MS);
+      const f = await head(url, { finality: "final" });
+      if (f !== undefined && f.height >= height) return true;
     }
-    return inflight;
-  }
-
-  /** What a relayer calls before every send that H3.4 check 10 or H4.3 step 9 holds: true means send nothing. */
-  async function held(): Promise<boolean> {
-    return tokenHeld(await status());
+    return false;
   }
 
   /**
-   * R3's exception for bind (bind/send.ts): was USDC paused at block `height`, by pausedFrom on both providers, with the
-   * pinned code at that block on both; null when anything is not known (header: the providers' kept blocks).
+   * The status at the move's own H (markets.md check 10): the two providers' finals, at most HEIGHT_SPREAD_MAX apart,
+   * one block where they meet; H the lower for a withdrawal, the higher for a deposit, its block at most
+   * FINAL_AGE_MAX_MS behind the wall clock; then both providers' views at H, each answer of H's own hash.
+   */
+  async function readAt(at: HoldAt): Promise<TokenStatus> {
+    const [fa, fb] = await Promise.all(urls.map((u) => head(u, { finality: "final" })));
+    if (fa === undefined || fb === undefined) return notCaughtUp;
+    if (Math.abs(fa.height - fb.height) > HEIGHT_SPREAD_MAX) return notCaughtUp;
+    const h = (at === "lower") === fa.height <= fb.height ? fa : fb;
+    if (now() - h.ms > FINAL_AGE_MAX_MS) return notCaughtUp; // two frozen providers never answer for now
+    const key = `${h.height} ${h.hash}`;
+    const kept = byBlock.get(key);
+    if (kept !== undefined) return kept;
+    const behind = [fa, fb].findIndex((f) => f.height < h.height);
+    if (behind !== -1 && !(await reaches(urls[behind]!, h.height))) return notCaughtUp;
+    const [a, b] = await Promise.all(urls.map((u) => read(u, h)));
+    const s = statusFrom(a, b, token);
+    if (s.caught_up) {
+      byBlock.set(key, s);
+      if (byBlock.size > BLOCKS_KEPT) byBlock.delete(byBlock.keys().next().value!);
+    }
+    return s;
+  }
+
+  /** The hold's read (H3.4 check 10, H4.3 step 9) at the move's H; one read per rule at a time. */
+  function statusAt(at: HoldAt): Promise<TokenStatus> {
+    let p = inflight.get(at);
+    if (p === undefined) {
+      p = readAt(at).finally(() => inflight.delete(at));
+      inflight.set(at, p);
+    }
+    return p;
+  }
+
+  /** /v1/token-status (display only): the status at the lower final, read at most once per CACHE_MS of the monotonic clock. */
+  function status(): Promise<TokenStatus> {
+    if (shown && clock() - shown.at < CACHE_MS) return Promise.resolve(shown.status);
+    if (!showing) {
+      showing = statusAt("lower")
+        .then((s) => {
+          shown = { at: clock(), status: s };
+          return s;
+        })
+        .finally(() => (showing = undefined));
+    }
+    return showing;
+  }
+
+  /** What a relayer calls before every send that H3.4 check 10 or H4.3 step 9 holds: true means send nothing. */
+  async function held(at: HoldAt): Promise<boolean> {
+    return tokenHeld(await statusAt(at));
+  }
+
+  /**
+   * R3's exception for bind (bind/send.ts): was USDC paused at block `height`, by pausedFrom on both providers: block
+   * `height`'s header on both (one hash, one parent), ft_balance_of at its parent (the state its receipts ran on; a
+   * skipped height before it is no block) and at the block itself, with the pinned code at both; null when anything is
+   * not known (header: the providers' kept blocks), and null is never kept.
    */
   async function pausedAt(height: bigint): Promise<boolean | null> {
     const known = pausedCache.get(height);
     if (known !== undefined) return known;
     if (vault === undefined || height < 2n || height > BigInt(Number.MAX_SAFE_INTEGER)) return null;
-    const h = Number(height);
     const each = await Promise.all(
       urls.map(async (url) => {
-        const [before, at, c] = await Promise.all([view(url, "ft_balance_of", vault, { block_id: h - 1 }), view(url, "ft_balance_of", vault, { block_id: h }), codeHash(url, { block_id: h })]);
-        return { pair: [before.at === h - 1 ? before : undefined, at.at === h ? at : undefined] as const, pinned: c?.code_hash === USDC_CODE_HASH };
+        const h = await head(url, { block_id: Number(height) });
+        if (h === undefined) return undefined;
+        const [before, after, c0, c1] = await Promise.all([view(url, "ft_balance_of", vault, h.prev_hash, h.prev_hash), view(url, "ft_balance_of", vault, h.hash, h.hash, h.height), codeHash(url, h.prev_hash, h.prev_hash), codeHash(url, h.hash, h.hash, h.height)]);
+        return { h, pair: [before, after] as const, pinned: c0 === USDC_CODE_HASH && c1 === USDC_CODE_HASH };
       }),
     );
-    if (!each.every((e) => e.pinned)) return null;
-    const p = pausedFrom(each[0]!.pair, each[1]!.pair);
+    const [a, b] = each;
+    if (a === undefined || b === undefined || a.h.hash !== b.h.hash || a.h.prev_hash !== b.h.prev_hash || !a.pinned || !b.pinned) return null;
+    const p = pausedFrom(a.pair, b.pair);
     if (p !== null) pausedCache.set(height, p);
     return p;
   }
 
-  return { network, token, vault, status, held, pausedAt };
+  return { network, token, vault, status, statusAt, held, pausedAt };
 }
 
 export type TokenWatch = ReturnType<typeof createTokenWatch>;
@@ -286,8 +400,5 @@ export function tokenWatchesFromEnv(env: Record<string, string | undefined>, dep
   return { mainnet: createTokenWatch("mainnet", env, deps), testnet: createTokenWatch("testnet", env, deps) };
 }
 
-/** What the relayers take: each network's status, and only its own. */
-export const statusesOf = (w: TokenWatches): Record<TokenNetwork, () => Promise<TokenStatus>> => ({ mainnet: w.mainnet.status, testnet: w.testnet.status });
-
-/** What bind takes: each network's pausedAt, and only its own. */
-export const pausedAtsOf = (w: TokenWatches): Record<TokenNetwork, (height: bigint) => Promise<boolean | null>> => ({ mainnet: w.mainnet.pausedAt, testnet: w.testnet.pausedAt });
+/** What the relayers take: each network's hold at the move's H, and only its own. */
+export const statusesOf = (w: TokenWatches): Record<TokenNetwork, (at: HoldAt) => Promise<TokenStatus>> => ({ mainnet: w.mainnet.statusAt, testnet: w.testnet.statusAt });
