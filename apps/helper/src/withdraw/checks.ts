@@ -216,7 +216,7 @@ function pair(x: unknown): x is [unknown, unknown] {
 }
 
 /** One canonical decimal below `bound`: digits only, no sign, no leading zero (0 alone excepted). Else null. */
-function decimal(x: unknown, bound: bigint): bigint | null {
+export function decimal(x: unknown, bound: bigint): bigint | null {
   if (typeof x !== "string" || !/^(0|[1-9][0-9]{0,77})$/.test(x)) return null;
   const v = BigInt(x);
   return v < bound ? v : null;
