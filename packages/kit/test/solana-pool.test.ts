@@ -381,7 +381,7 @@ const vT0 = 289_900_000_000_000n;
 const vQ0 = (30_000_000_000n * 1_073_000_000_000_000n) / vT0;
 const endCurve: SolanaBondingCurve = {
   virtualTokenReserves: vT0, virtualQuoteReserves: vQ0, realTokenReserves: 10_000_000_000_000n, realQuoteReserves: vQ0 - 30_000_000_000n,
-  tokenTotalSupply: BILLION, complete: false, creator: PUMP, isMayhemMode: false, quoteMint: SYSTEM, creatorFeeBps: 0n,
+  tokenTotalSupply: BILLION, complete: false, creator: PUMP, isMayhemMode: false, isCashbackCoin: false, quoteMint: SYSTEM, creatorFeeBps: 0n,
 };
 const END_BALANCE = 216_900_000_000_000n;
 const pumpFees = fc(tier(0n, 95n, 30n));

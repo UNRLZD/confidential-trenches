@@ -215,6 +215,7 @@ export function solanaPoolReleaseAccounts(cfg: SolanaPoolConfig, wallet: string,
 export type SolanaPoolBuyVenue =
   | {
       readonly kind: "pump-curve"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly curve: string; readonly creator: string; readonly feeRecipient: string;
+      readonly cashback: boolean; // the curve's is_cashback_coin (byte 82): a cashback coin's sell also names W's volume accumulator
       readonly buybackFeeRecipients: readonly string[]; readonly buybackFeeRecipient: string;
     }
   | {
@@ -426,12 +427,13 @@ const SELL = [51, 230, 133, 164, 1, 127, 131, 173]; // Anchor "global:sell", pum
 /**
  * The least a sell of `amount` tokens may give, in lamports: E for exactly `amount` from the venue's reserves read on
  * two providers (readSolanaReference, side "sell"), less the user's slippage. Never 1 lamport: a sell that would take
- * anything is the sandwich a min out exists to stop. Throws without a reference for this venue, this amount and a
- * floor above 0.
+ * anything is the sandwich a min out exists to stop. Throws without a reference for this venue and this amount, read
+ * at most SOLANA_POOL_QUOTE_MAX_AGE_SLOTS before the device's own `slot`, and a floor above 0.
  */
-export function solanaPoolSellMinOut(venue: SolanaPoolBuyVenue, amount: bigint, reference: { readonly amount: bigint; readonly ref: SolanaReference | null; readonly slippageBps: number }): bigint {
+export function solanaPoolSellMinOut(venue: SolanaPoolBuyVenue, amount: bigint, reference: { readonly amount: bigint; readonly ref: SolanaReference | null; readonly slippageBps: number }, slot: number): bigint {
   const { ref, slippageBps } = reference;
   if (!isU64(amount) || amount === 0n || reference.amount !== amount) throw new Error("the reference is not for the amount sold");
+  if (quoteAgeProblem(ref, slot)) throw new Error(quoteAgeProblem(ref, slot)!);
   if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) throw new Error("slippage out of range");
   const addr = venue.kind === "pump-curve" ? venue.curve : venue.pool;
   const pool = ref?.pools.find((x) => x.address === addr && x.venue === venue.kind);
@@ -444,13 +446,14 @@ export function solanaPoolSellMinOut(venue: SolanaPoolBuyVenue, amount: bigint, 
 /**
  * W's sell of `amount` tokens for at least `minOut` lamports (from solanaPoolSellMinOut). pump: `sell` with the IDL's
  * 14 accounts, then the remaining ones @pump-fun/pump-sdk 4.3.1 getSellInstructionRaw passes (W's volume accumulator
- * for a cashback coin only, bonding-curve-v2, the buyback recipient writable). PumpSwap: W's wrapped-SOL account made,
+ * for a cashback coin only, as the curve's own is_cashback_coin byte says, bonding-curve-v2, the buyback recipient
+ * writable). PumpSwap: W's wrapped-SOL account made,
  * `sell` (the buy's first 19 accounts, its fee config and fee program; remaining: for a cashback pool the volume
  * accumulator's wSOL account and the accumulator, pool-v2 when the coin has a creator, the buyback recipient and its
  * wSOL account), then the wrapped-SOL account closed so W ends with plain SOL (pump-swap-sdk 2.2.0
  * sellInstructionsNoPool). The same steps contracts/pool-solana/fixtures/venues/dump.mjs ran on mainnet's code.
  */
-export function solanaPoolSellSteps(venue: SolanaPoolBuyVenue, wallet: string, amount: bigint, minOut: bigint, cashbackCurve = false): SolanaApiInstruction[] {
+export function solanaPoolSellSteps(venue: SolanaPoolBuyVenue, wallet: string, amount: bigint, minOut: bigint): SolanaApiInstruction[] {
   if (!isU64(amount) || amount === 0n || !isU64(minOut) || minOut === 0n) throw new Error("amount and minOut must be u64s above 0");
   const data = [...SELL, ...u64le(amount), ...u64le(minOut)];
   const tp = venue.tokenProgram;
@@ -470,7 +473,7 @@ export function solanaPoolSellSteps(venue: SolanaPoolBuyVenue, wallet: string, a
       acc(SOLANA_PUMP_PROGRAM, false, false),
       acc(PUMP_FEE_CONFIG, false, false),
       acc(SOLANA_PUMP_FEES_PROGRAM, false, false),
-      ...(cashbackCurve ? [acc(solanaVolumeAccumulator(wallet, SOLANA_PUMP_PROGRAM), false, true)] : []),
+      ...(venue.cashback ? [acc(solanaVolumeAccumulator(wallet, SOLANA_PUMP_PROGRAM), false, true)] : []),
       acc(solanaProgramAddress([enc("bonding-curve-v2"), base58.decode(venue.mint)], SOLANA_PUMP_PROGRAM), false, false),
       acc(venue.buybackFeeRecipient, false, true),
     ], data)];
@@ -550,6 +553,20 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
   return { chunk, peak, left, problem };
 }
 
+/** M352/M353: the fee payer's cost of one release, from the device's own rent read: the spent mark's rent(0), the
+ * change note's 72-byte page entry and two signatures (5,000 each). 1,026,000 lamports at 5,080 a byte. */
+export const solanaPoolReleaseCost = (rent: SolanaRent): bigint => solanaRentMin(rent, 0) + 72n * rent.lamportsPerByte * rent.factor + 10_000n;
+/**
+ * The priority fee W sets (CU limit x price, in micro-lamports) must fit in what the relay fee leaves after the
+ * release's cost, or the helper refuses the transaction W already signed (apps/helper/src/pool/solana.ts
+ * fee_below_cost: relay_fee >= cost + ceil(limit x price / 1e6)).
+ */
+export function solanaPoolPriorityProblem(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "cuPrice">, rent: SolanaRent): string | null {
+  const room = release.relayFee - solanaPoolReleaseCost(rent);
+  const priority = BigInt(SOLANA_POOL_BUY_CU[venue.kind]) * req.cuPrice;
+  return room < 0n || priority > room * 1_000_000n ? `the priority fee (${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)}` : null;
+}
+
 function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, rent: SolanaRent): void {
   for (const k of [cfg.program, cfg.pool, req.wallet, req.feePayer, req.token]) if (!isKey(k)) throw new Error("program, pool, wallet, fee payer and token must be addresses");
   if (cfg.pool !== solanaPoolAccount(cfg.program)) throw new Error("the pool is not the program's pool account");
@@ -559,6 +576,8 @@ function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: 
   if (!isU64(req.cuPrice) || req.cuPrice > SOLANA_CU_PRICE_MAX) throw new Error("the CU price is over its cap");
   const f = solanaPoolBuyFunds(release, venue, req, rent);
   if (f.problem) throw new Error(f.problem);
+  const fee = solanaPoolPriorityProblem(release, venue, req, rent);
+  if (fee) throw new Error(fee);
 }
 
 /**
@@ -592,7 +611,6 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   if (tipAccount !== null && !SOLANA_JITO_TIP_ACCOUNTS.includes(tipAccount)) throw new Error("the tip account is not a Jito tip account");
   const steps = solanaPoolBuySteps(venue, req.wallet, req.spend, req.minOut);
   const outer: SolanaApiAccount[] = [...solanaPoolReleaseAccounts(cfg, req.wallet, req.feePayer, release, stateSize), ...(tipAccount ? [acc(tipAccount, false, true)] : [])];
-  const head = outer.length;
   const indexOf = (a: SolanaApiAccount): number => {
     let i = outer.findIndex((o) => o.key === a.key);
     if (i < 0) i = outer.push({ ...a }) - 1;
@@ -600,8 +618,11 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
     return i;
   };
   const inner = steps.map((s) => ({ program: indexOf(acc(s.program, false, false)), accounts: s.accounts.map(indexOf), data: s.data }));
-  // the pool refuses an inner account that is one of its own (by key or owner) or a signer other than W: never build one
-  if (outer.slice(head).some((a) => a.key === cfg.pool || a.key === cfg.program || a.key === req.feePayer)) throw new Error("a step names the pool or the fee payer");
+  // the pool refuses an inner account that is one of its own (the pool, its spent mark, the pages; by key or owner) or
+  // a signer other than W, and the fee payer's signature must never reach a venue: never build one. Checked on every
+  // account each step names, so one that lands in tag 3's head (the pool at 0, the fee payer at 2) is caught too.
+  const barred = new Set([cfg.pool, cfg.program, req.feePayer, ...[3, 4, 5, 6].map((i) => outer[i]!.key)]);
+  if (steps.some((x) => barred.has(x.program) || x.accounts.some((a) => barred.has(a.key)))) throw new Error("a step names the pool, its accounts or the fee payer");
   const data = solanaEncodePoolTag3({ ...release, proof: solanaCompressPoolProof(release.proof) }, true, req.tip, inner);
   return [
     ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(SOLANA_POOL_BUY_CU[venue.kind])]),
@@ -698,7 +719,7 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
     if (global.data.length !== SOLANA_PUMP_GLOBAL_SIZE) throw new Error(`pump Global is ${global.data.length} bytes, not ${SOLANA_PUMP_GLOBAL_SIZE}`);
     const feeRecipient = keyAt(global.data, PUMP_GLOBAL_FEE_RECIPIENT);
     if (feeRecipient === DEFAULT_KEY) throw new Error("pump Global has no fee recipient");
-    return { kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
+    return { kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, cashback: c.isCashbackCoin, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
   }
   const p = solanaDecodePumpSwapPool(main);
   if (p.index !== 0 || p.creator !== addr.poolAuthority || p.baseMint !== mint || p.quoteMint !== SOLANA_SOL_MINT) throw new Error("the pool is not the mint's canonical pool");
@@ -738,6 +759,13 @@ export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, Sol
 /** The oldest reference QUOTE takes: 25 slots (about 10 s at 400 ms a slot) behind the device's own slot read. A quote
  * completes in under 1 s and the tap follows it, so an older reference means a stale or held-back read. */
 export const SOLANA_POOL_QUOTE_MAX_AGE_SLOTS = 25;
+/** Null when `ref` was read at most SOLANA_POOL_QUOTE_MAX_AGE_SLOTS before the device's `slot`. A reference newer than
+ * the device's slot read is fresher, not staler (one provider's nodes answer a few slots apart), so it is taken. */
+function quoteAgeProblem(ref: SolanaReference | null, slot: number): string | null {
+  if (!ref || ref.slot === undefined || !Number.isSafeInteger(ref.slot) || !Number.isSafeInteger(slot)) return "the reference has no slot, or the device has no slot read";
+  const age = slot - ref.slot;
+  return age > SOLANA_POOL_QUOTE_MAX_AGE_SLOTS ? `the reference was read ${age} slots before the device's slot, over ${SOLANA_POOL_QUOTE_MAX_AGE_SLOTS}` : null;
+}
 
 export type SolanaPoolBuyReads = {
   /** The blockhash the device read itself (getLatestBlockhash): the message must carry exactly this one. */
@@ -753,7 +781,7 @@ export type SolanaPoolBuyReads = {
   /** The reference E for exactly `amount` lamports in (readSolanaReference over two providers), and the user's slippage. */
   readonly reference: { readonly amount: bigint; readonly ref: SolanaReference | null; readonly slippageBps: number };
 };
-export type SolanaPoolBuyCheckId = "DECODE" | "BLOCKHASH" | "TABLES" | "SIGNERS" | "FRAME" | "RELEASE" | "BUY" | "PRIVILEGES" | "FUNDS" | "QUOTE" | "SIZE";
+export type SolanaPoolBuyCheckId = "DECODE" | "BLOCKHASH" | "TABLES" | "SIGNERS" | "FRAME" | "RELEASE" | "BUY" | "PRIVILEGES" | "FUNDS" | "FEE" | "QUOTE" | "SIZE";
 export type SolanaPoolBuyVerdict = { ok: boolean; results: { id: SolanaPoolBuyCheckId; ok: boolean; detail: string }[] };
 
 // An instruction's program, data and account keys in order. Privileges are the message's, one per key (a key that
@@ -856,6 +884,10 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   const funds = solanaPoolBuyFunds(release, venue, req, reads.rent);
   if (funds.problem) { fail("FUNDS", funds.problem); return done(); }
   pass("FUNDS", `chunk ${funds.chunk}, W pays out ${funds.peak} at most, keeps ${funds.left}`);
+  // FEE: the priority fee fits in what the relay fee leaves after the release's cost (the helper's fee_below_cost)
+  const fee = solanaPoolPriorityProblem(release, venue, req, reads.rent);
+  if (fee) { fail("FEE", fee); return done(); }
+  pass("FEE", `priority ${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} within relay fee ${release.relayFee} less cost ${solanaPoolReleaseCost(reads.rent)}`);
   const got = m.instructions.map((x) => ({ program: keys[x.programIndex]?.key ?? "?", accounts: x.accounts.map((i) => keys[i] ?? { key: "?", signer: false, writable: false }), data: x.data }));
   // the tip account the message names (tag 3's ninth account); the rebuild holds it to the baked Jito accounts
   const tipTo = req.tip > 0n ? got[2]?.accounts[8]?.key ?? null : null;
@@ -896,15 +928,15 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   const { amount, ref, slippageBps } = reads.reference;
   const venueAddr = venue.kind === "pump-curve" ? venue.curve : venue.pool;
   const pool = ref?.pools.find((x) => x.address === venueAddr && x.venue === venue.kind);
-  const age = ref?.slot === undefined || !Number.isSafeInteger(reads.slot) ? null : reads.slot - ref.slot;
+  const stale = quoteAgeProblem(ref, reads.slot);
   if (amount !== req.spend) fail("QUOTE", `the reference is for ${amount} lamports, not the spend ${req.spend}`);
   else if (!pool) fail("QUOTE", `no reference read for ${venueAddr} on two providers`);
-  else if (age === null || age < 0 || age > SOLANA_POOL_QUOTE_MAX_AGE_SLOTS) fail("QUOTE", `the reference was read ${age ?? "?"} slots before the device's slot, over ${SOLANA_POOL_QUOTE_MAX_AGE_SLOTS}`);
-  else if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) fail("QUOTE", "slippage out of range");
+  else if (stale) fail("QUOTE", stale);
+  else if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) fail("QUOTE", "slippage out of range");
   else {
     const floor = (pool.expectedOut * BigInt(10_000 - slippageBps)) / 10_000n;
     if (req.minOut < floor || req.minOut === 0n) fail("QUOTE", `min out ${req.minOut} under ${floor} (E ${pool.expectedOut}, slippage ${slippageBps} bps)`);
-    else pass("QUOTE", `min out ${req.minOut} >= ${floor} (E ${pool.expectedOut}, ${age} slots old)`);
+    else pass("QUOTE", `min out ${req.minOut} >= ${floor} (E ${pool.expectedOut}, read at slot ${ref!.slot})`);
   }
   return done();
 }

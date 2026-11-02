@@ -175,7 +175,7 @@ export function solanaDecodeTokenAccount(acc: SolanaPoolAccount): { mint: string
 
 export type SolanaBondingCurve = {
   virtualTokenReserves: bigint; virtualQuoteReserves: bigint; realTokenReserves: bigint; realQuoteReserves: bigint;
-  tokenTotalSupply: bigint; complete: boolean; creator: string; isMayhemMode: boolean; quoteMint: string; creatorFeeBps: bigint;
+  tokenTotalSupply: bigint; complete: boolean; creator: string; isMayhemMode: boolean; isCashbackCoin: boolean; quoteMint: string; creatorFeeBps: bigint;
 };
 /** pump BondingCurve: reserves u64 at 8, 16, 24, 32, supply 40, complete 48, creator 49, mayhem 81, cashback 82,
  * quote_mint 83, creator_fee_bps 115 (later fields not used). */
@@ -185,7 +185,7 @@ export function solanaDecodeBondingCurve(acc: SolanaPoolAccount): SolanaBondingC
   disc(d, DISC.bondingCurve, "BondingCurve", 49);
   return {
     virtualTokenReserves: u64(d, 8), virtualQuoteReserves: u64(d, 16), realTokenReserves: u64(d, 24), realQuoteReserves: u64(d, 32),
-    tokenTotalSupply: u64(d, 40), complete: bool(d, 48), creator: key(d, 49), isMayhemMode: bool(d, 81),
+    tokenTotalSupply: u64(d, 40), complete: bool(d, 48), creator: key(d, 49), isMayhemMode: bool(d, 81), isCashbackCoin: bool(d, 82),
     quoteMint: key(d, 83), creatorFeeBps: u64(d, 115),
   };
 }

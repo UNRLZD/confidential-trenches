@@ -250,6 +250,10 @@ log(`W ${W.address}: ${amount} of ${mint} (min out ${minOut}, E ${refPool.expect
 const f = kit.solanaPoolBuyFunds(release, venue, req0, rent);
 log(`funds: chunk ${f.chunk}, peak ${f.peak}, W keeps ${f.left} by the rule; W's token account ${sizeOf(ata)} B (rule ${venue.tokenAccountSize}); W's volume account ${volBefore ?? "none"} -> ${sizeOf(vol) ?? "none"} B (rule ${kit.SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venueKind]}); W's wrapped SOL ${sizeOf(kit.solanaAta(W.address, kit.SOLANA_SOL_MINT, kit.SOLANA_TOKEN_PROGRAM)) ?? "closed"}`);
 log(`BYTES tag3 ${venueKind} compressed tip ${TIP}: ${built.size}; CU ${r.computeUnitsConsumed()}`);
+// W's ending balance is exactly what the funds rule says W keeps (W starts with `before`, every account made new)
+const after = svm.getBalance(addr(W.address)) ?? 0n;
+if (after !== before + f.left) { log(`FAIL: W ends with ${after}, the funds rule says ${before + f.left}`); process.exit(1); }
+log(`W's ending balance ${after} = the funds rule's ${f.left} (plus the ${before} W held)`);
 if (amount < minOut || amount === 0n) { log("FAIL: W holds less than min out"); process.exit(1); }
 // the same release again: the spent mark refuses it
 svm.expireBlockhash();
