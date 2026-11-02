@@ -54,6 +54,11 @@ export const MUTANTS = [
   ["pool account: owned by the pool", "src/buy.rs", "a.owner == program_id || [0, 3, 4, 5, 6]", "false || [0, 3, 4, 5, 6]", "an_inner_instruction_naming_a_pool_account_is_refused"],
   ["pool account: the release's own", "src/buy.rs", "[0, 3, 4, 5, 6].iter().any(|&i| accounts[i].key == a.key)", "[0usize; 0].iter().any(|&i| accounts[i].key == a.key)", "an_inner_instruction_naming_a_pool_account_is_refused"],
   ["inner signer only W", "src/buy.rs", "if a.is_signer && a.key != recipient.key {", "if false {", "an_inner_signer_other_than_w_is_refused"],
+  // from the independent review of f1081f7
+  ["inner pool accounts by key, not index", "src/buy.rs", "            if is_pool_account(program_id, accounts, a) {", "            if a.owner == program_id || [0u8, 3, 4, 5, 6].contains(&i) {", "a_pool_account_named_again_at_another_index_is_refused"],
+  ["tip account: anything the pool owns", "src/buy.rs", "        if is_pool_account(program_id, accounts, t) {", "        if [0usize, 3, 4, 5, 6].iter().any(|&i| accounts[i].key == t.key) {", "a_tip_to_an_account_the_pool_owns_is_refused"],
+  ["compressed A decoded or refused", "src/buy.rs", "    let a = alt_bn128_g1_decompress_be(c[0..32].try_into().unwrap()).map_err(bad)?;", "    let a = alt_bn128_g1_decompress_be(c[0..32].try_into().unwrap()).unwrap_or([0u8; 64]);", "a_compressed_point_off_its_curve_is_refused"],
+  ["tip account only when the tip is above 0", "src/buy.rs", "    let tip_to = if tip > 0 {", "    let tip_to = if true {", "release_and_buy_with_no_tip_lands"],
 ];
 
 function test(name, so) {
