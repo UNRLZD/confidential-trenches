@@ -1223,11 +1223,48 @@ function parseTx(b64: string): ParsedTx {
   return { hash, nonce, blockHash, action: 8, delegate: decodeSignedDelegate(new Uint8Array(b.subarray(i, b.length - 65))) };
 }
 const unknownTx = () => new RpcError("tx", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } });
+const unknownBlock = () => new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK", info: {} } });
+type KeyChange = { height: bigint; nonce: bigint | null; cause: Record<string, string> };
 
 /** One ledger behind two regular providers and an archival one. */
 class Node {
   final = 1_000n;
-  keyNonce = 10n;
+  /**
+   * The relayer key's history: each change in the block that made it, as EXPERIMENTAL_changes lists it (a nonce of
+   * null: the key deleted). view_access_key by block_id reads the nonce at that block from it.
+   */
+  keyChanges: KeyChange[] = [];
+  /** heights with no block */
+  skipped = new Set<bigint>();
+  /** providers (by index) that answer every EXPERIMENTAL_changes with an empty list (save_state_changes off, F54) */
+  noChanges = new Set<number>();
+  nonceAt(h: bigint): bigint | null {
+    let n: bigint | null = 10n;
+    for (const c of this.keyChanges) if (c.height <= h) n = c.nonce;
+    return n;
+  }
+  /** The key's nonce at the newest block; set, it changes in a new block by a receipt (AddKey again, say). */
+  get keyNonce(): bigint {
+    return this.nonceAt(this.final) ?? -1n;
+  }
+  set keyNonce(n: bigint) {
+    this.final += 1n;
+    this.keyChanges.push({ height: this.final, nonce: n, cause: { type: "receipt_processing", receipt_hash: "AddKey" } });
+  }
+  /** The key deleted by a receipt in a new block. */
+  deleteKey() {
+    this.final += 1n;
+    this.keyChanges.push({ height: this.final, nonce: null, cause: { type: "receipt_processing", receipt_hash: "DeleteKey" } });
+  }
+  /** The block whose chunk applied a transaction of the key (its nonce change names its hash). */
+  appliedAt(hash: string): bigint | undefined {
+    return this.keyChanges.find((c) => c.cause.tx_hash === hash)?.height;
+  }
+  prevOf(h: bigint): bigint {
+    let p = h - 1n;
+    while (this.skipped.has(p)) p--;
+    return p;
+  }
   /** transaction_validity_period, in blocks (86,400 on mainnet) */
   validity = 100n;
   userNonce = new Map<string, bigint>();
@@ -1266,18 +1303,26 @@ class Node {
       this.log.push({ hash: tx.hash, kind, nonce: tx.nonce, dropped: "Expired" });
       return;
     }
-    if (tx.nonce <= this.keyNonce) {
+    const key = this.nonceAt(this.final);
+    if (key === null) {
+      this.log.push({ hash: tx.hash, kind, nonce: tx.nonce, dropped: "InvalidAccessKey" });
+      return;
+    }
+    if (tx.nonce <= key) {
       this.log.push({ hash: tx.hash, kind, nonce: tx.nonce, dropped: "InvalidNonce" });
       return;
     }
-    this.keyNonce = tx.nonce;
+    // applied in the next block: the key's nonce change names the transaction, its receipts run in the blocks after
+    this.final += 1n;
+    this.keyChanges.push({ height: this.final, nonce: tx.nonce, cause: { type: "transaction_processing", tx_hash: tx.hash } });
+    const transaction_outcome = { block_hash: this.bh(this.final), id: tx.hash, outcome: { executor_id: RELAYER, status: { SuccessReceiptId: "r" } } };
     const r = (executor: string, ok: boolean, failure = "") => {
       this.final += 1n;
       return { block_hash: this.bh(this.final), outcome: { executor_id: executor, status: ok ? { SuccessValue: "" } : { Failure: failure } } };
     };
     if (tx.action === 2) {
       this.prepaid.set(tx.precommitment, (this.prepaid.get(tx.precommitment) ?? 0n) + tx.bytes);
-      this.landed.set(tx.hash, { final_execution_status: "FINAL", receipts_outcome: [r(VAULT, true), r(RELAYER, true)] });
+      this.landed.set(tx.hash, { final_execution_status: "FINAL", transaction_outcome, receipts_outcome: [r(VAULT, true), r(RELAYER, true)] });
       this.log.push({ hash: tx.hash, kind, nonce: tx.nonce });
       return;
     }
@@ -1285,13 +1330,13 @@ class Node {
     const expired = this.final + 1n > d.max_block_height;
     this.log.push({ hash: tx.hash, kind, nonce: tx.nonce, expired });
     if (expired) {
-      this.landed.set(tx.hash, { final_execution_status: "FINAL", receipts_outcome: [r(d.sender_id, false, '{"ActionError":{"kind":{"DelegateActionExpired":null}}}')] });
+      this.landed.set(tx.hash, { final_execution_status: "FINAL", transaction_outcome, receipts_outcome: [r(d.sender_id, false, '{"ActionError":{"kind":{"DelegateActionExpired":null}}}')] });
       return;
     }
     this.userNonce.set(d.sender_id, d.nonce);
     const msg = JSON.parse((JSON.parse(Buffer.from((d.actions[0] as { args: Uint8Array }).args).toString()) as { msg: string }).msg) as { precommitment: string };
     this.usdc.set(d.sender_id, this.usdc.get(d.sender_id)! - AMOUNT);
-    const outcome = { final_execution_status: "FINAL", receipts_outcome: [r(d.sender_id, true), r(VAULT_TOKEN, true), r(VAULT, true)] };
+    const outcome = { final_execution_status: "FINAL", transaction_outcome, receipts_outcome: [r(d.sender_id, true), r(VAULT_TOKEN, true), r(VAULT, true)] };
     this.pages.set(msg.precommitment, { depositor: d.sender_id, value: AMOUNT });
     this.landed.set(tx.hash, outcome);
   }
@@ -1300,17 +1345,51 @@ class Node {
       const tx = method === "send_tx" ? parseTx((params as { signed_tx_base64: string }).signed_tx_base64) : undefined;
       const err = this.fail?.(i, method, tx);
       if (err !== undefined) throw err;
+      const top = this.final - (i < 2 ? this.finalLag[i]! : 0n); // this provider's final
+      /** A height this provider holds a block at, else UNKNOWN_BLOCK. */
+      const at = (id: unknown): bigint => {
+        if (typeof id !== "number") throw new Error(`node: block_id ${String(id)}`);
+        const h = BigInt(id);
+        if (this.skipped.has(h) || h > top) throw unknownBlock();
+        return h;
+      };
+      const header = (h: bigint) => ({ header: { height: Number(h), hash: this.bh(h), prev_height: Number(this.prevOf(h)) } });
       if (method === "query") {
-        const q = params as { request_type: string };
-        if (q.request_type === "view_access_key") return { nonce: Number(this.keyNonce), permission: "FullAccess", block_height: Number(this.final), block_hash: this.bh(this.final) };
+        const q = params as { request_type: string; block_id?: unknown; public_key?: string };
+        if (q.request_type === "view_access_key") {
+          const h = q.block_id === undefined ? top : at(q.block_id);
+          const n = this.nonceAt(h);
+          // nearcore answers an absent key as a result holding `error`, not an RPC error (read live on mainnet)
+          if (n === null) return { block_hash: this.bh(h), block_height: Number(h), error: `access key ${q.public_key} does not exist while viewing`, logs: [] };
+          return { nonce: Number(n), permission: "FullAccess", block_height: Number(h), block_hash: this.bh(h) };
+        }
         if (q.request_type === "view_account") return { amount: (10n ** 24n).toString() };
       }
       if (method === "EXPERIMENTAL_protocol_config") return { transaction_validity_period: Number(this.validity) };
+      if (method === "EXPERIMENTAL_changes") {
+        const q = params as { changes_type: string; keys: { account_id: string; public_key: string }[]; block_id: unknown };
+        assert.equal(q.changes_type, "single_access_key_changes");
+        const h = at(q.block_id);
+        const k = q.keys[0]!;
+        const changes = this.noChanges.has(i)
+          ? []
+          : this.keyChanges
+              .filter((c) => c.height === h)
+              .map((c) =>
+                c.nonce === null
+                  ? { cause: c.cause, type: "access_key_deletion", change: { account_id: k.account_id, public_key: k.public_key } }
+                  : { cause: c.cause, type: "access_key_update", change: { account_id: k.account_id, public_key: k.public_key, access_key: { nonce: Number(c.nonce), permission: "FullAccess" } } },
+              );
+        return { block_hash: this.bh(h), changes };
+      }
       if (method === "block") {
-        const p = params as { block_id?: string };
-        if (p.block_id !== undefined) return { header: { height: Number(this.blocks.get(p.block_id) ?? 0n), hash: p.block_id } };
-        const h = this.final - (i < 2 ? this.finalLag[i]! : 0n);
-        return { header: { height: Number(h), hash: this.bh(h) } };
+        const p = params as { block_id?: unknown };
+        if (typeof p.block_id === "string") {
+          const h = this.blocks.get(p.block_id);
+          if (h === undefined) throw unknownBlock();
+          return header(h);
+        }
+        return header(p.block_id === undefined ? top : at(p.block_id));
       }
       if (method === "send_tx") {
         assert.equal((params as { wait_until: string }).wait_until, "NONE");
@@ -1333,7 +1412,10 @@ class Node {
   }
   rpcs = (): [Rpc, Rpc] => [this.rpc(0), this.rpc(1)];
   archival = (): Rpc => this.rpc(2);
-  relayer = (waitMs = 1_000) => createRelayer(this.rpcs(), this.archival(), RELAYER, relayerSecret(), VAULT, this.validity, waitMs);
+  /** the gas account's one key: every relayer this node makes signs with it, as a restart does */
+  secret = relayerSecret();
+  relayerOn = (rpcs: readonly [Rpc, Rpc], waitMs = 1_000) => createRelayer(rpcs, this.archival(), RELAYER, this.secret, VAULT, this.validity, waitMs);
+  relayer = (waitMs = 1_000) => this.relayerOn(this.rpcs(), waitMs);
   reads(): SendReads {
     return {
       accessKey: async (a): Promise<KeyRead> => (this.userNonce.has(a) ? { kind: "key", permission: "FullAccess", nonce: this.userNonce.get(a)! } : { kind: "no_account" }),
@@ -1378,7 +1460,8 @@ test("the fake answers send_tx NONE as nearcore does: NONE for a stale nonce and
   const tx: TxRef[] = [];
   node.landMs = () => ((node.keyNonce = 9_000n), 1); // the key moves after the relayer read it, before inclusion
   const real = node.rpcs()[0];
-  assert.equal((await r.send(prepayAction(2n), open, keep(tx))).kind, "unknown");
+  // (a2): the key's nonce passed it at a block whose change names another cause, so it can never land
+  assert.equal((await r.send(prepayAction(2n), open, keep(tx))).kind, "dropped");
   const drops = () => node.log.filter((x) => x.dropped !== undefined).map((x) => x.dropped);
   assert.ok(drops().length > 0 && drops().every((x) => x === "InvalidNonce"), String(drops()));
   const before = drops().length;
@@ -1449,7 +1532,7 @@ test("RECHECK R1b: after a key jump, three deposits at once all land with no sil
   store.close();
 });
 
-test("RECHECK R2: a prepay that reached no node and outlived its validity period is judged dropped on two reads a block apart, rolled back, and P is prepaid afresh", async () => {
+test("RECHECK R2: a prepay that reached no node and outlived its validity period is judged dropped by (b), K's nonce below its own at F past b0 + the period, rolled back, and P is prepaid afresh", async () => {
   const node = new Node();
   const u = node.user();
   let down = true;
@@ -1460,9 +1543,7 @@ test("RECHECK R2: a prepay that reached no node and outlived its validity period
   down = false;
   node.final += 150n; // the outage outlasts the validity window (100 blocks here; 86,400 on mainnet)
   answers.push(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)));
-  node.final += 1n;
-  answers.push(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)));
-  assert.deepEqual(answers, ["in_flight", "in_flight", "ok"]);
+  assert.deepEqual(answers, ["in_flight", "ok"]);
   assert.equal(node.prepaid.get(P.toString()), PREPAY_BYTES, "one prepay landed");
   assert.deepEqual([store.get(u.id)!.prepays.length, store.get(u.id)!.failed], [1, 0]);
   store.close();
@@ -1482,7 +1563,7 @@ test("RECHECK R4: the settle never re-sends U's stored delegate once the token w
     }
     return r(m, p);
   };
-  const relayer = createRelayer([wrap(base[0]), wrap(base[1])], node.archival(), RELAYER, relayerSecret(), VAULT, node.validity, 300);
+  const relayer = node.relayerOn([wrap(base[0]), wrap(base[1])], 300);
   const store = newStore();
   const deps = node.deps(store, relayer);
   deps.tokenStatus = async () => (halted ? { ...HALTED, block_height: Number(node.final) } : { ...OPEN, block_height: Number(node.final) });
@@ -1537,7 +1618,7 @@ test("R01: a prepay that reached no node is sent again by the next call's settle
   store.close();
 });
 
-test("PROBE N8: a send that reached no node is not re-sent once its delegate is within K; it settles dropped only past its validity period, uncounted, and the new call lands", async () => {
+test("PROBE N8: a send that reached no node is not re-sent once its delegate is within K; with nothing else of the key landed it settles dropped by (b) past its validity period, uncounted, and the new call lands", async () => {
   const node = new Node();
   const u = node.user();
   let down = true;
@@ -1548,8 +1629,6 @@ test("PROBE N8: a send that reached no node is not re-sent once its delegate is 
   assert.equal(store.get(u.id)!.sends[0]!.state, "pending");
   down = false;
   node.final += 200n; // the device waits out D1's max_block_height (and its validity period) and signs D2 for the same P
-  assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "in_flight", "past its validity once: read again a block later");
-  node.final += 1n;
   assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "ok");
   await sleepMs(20);
   assert.equal(node.log.filter((x) => x.kind === "delegate" && x.expired).length, 0, "D1 never went out past its window");
@@ -1617,7 +1696,7 @@ test("nonces: transactions in flight at once get distinct nonces; each is signed
   assert.equal(again[0]!.nonce, "41");
 });
 
-test("PROBE E: past the validity period, with one regular provider unreadable, never dropped; dropped once all three read it unknown twice a block apart", async () => {
+test("PROBE E: past the validity period, with one regular provider unreadable, never dropped; dropped by (b) once both read K at F", async () => {
   const node = new Node();
   let down = new Set<string>(["0:send_tx", "1:send_tx"]);
   node.fail = (i, m) => (down.has(`${i}:${m}`) ? new Error("fetch failed") : undefined);
@@ -1632,21 +1711,41 @@ test("PROBE E: past the validity period, with one regular provider unreadable, n
   kinds.push((await r.resolve(tx[0]!, noResend)).kind);
   down = new Set(["0:send_tx", "1:send_tx"]);
   kinds.push((await r.resolve(tx[0]!, noResend)).kind);
-  node.final += 1n;
-  kinds.push((await r.resolve(tx[0]!, noResend)).kind);
-  assert.deepEqual(kinds, ["unknown", "unknown", "unknown", "dropped"]);
+  assert.deepEqual(kinds, ["unknown", "unknown", "dropped"]);
 });
 
-test("A: the drop is judged on the newer provider's final: a lagging provider does not hold a dead transaction forever", async () => {
+test("A: the window is judged at F, the lower of the two finals: one provider's final past it alone never drops a transaction", async () => {
   const node = new Node();
   sendDown(node, () => true);
   const r = node.relayer(50);
   const tx: TxRef[] = [];
   assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  const b0 = BigInt(tx[0]!.height);
   node.finalLag = [0n, 80n];
-  node.final += 101n; // past b0 + validity on provider 0 only
+  node.final = b0 + 102n; // past b0 + validity on provider 0 only
   assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown");
   node.final += 1n;
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "provider 1's final is still inside the window");
+  node.final = b0 + 180n; // provider 1 at b0 + 100: at the window's end, a block may still include it
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown");
+  node.final += 1n;
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "dropped");
+});
+
+test("X17: an unreadable final keeps the round: the other provider's final alone never drops a transaction", async () => {
+  const node = new Node();
+  sendDown(node, () => true);
+  let down = true;
+  const [r0, r1] = node.rpcs();
+  const blind: Rpc = async (m, p) => (down && m === "block" && (p as { finality?: string }).finality === "final" ? Promise.reject(new Error("fetch failed")) : r1(m, p));
+  const r = node.relayerOn([r0, blind], 50);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  node.final += 150n;
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown");
+  node.final += 1n;
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown");
+  down = false;
   assert.equal((await r.resolve(tx[0]!, noResend)).kind, "dropped");
 });
 
@@ -1699,21 +1798,295 @@ test("M2/C: a send that reached no provider is unknown; resolve() sends the stor
   assert.equal(node.landed.size, 1);
 });
 
-test("M2/C: dropped only past the validity period with the hash unknown everywhere, on two reads a block apart; a nonce past it never drops it", async () => {
+test("M2/C (b): with K's nonce below the transaction's at F, it is dropped only once F is past b0 + the validity period", async () => {
   const node = new Node();
   sendDown(node, () => true);
   const r = node.relayer(50);
   const tx: TxRef[] = [];
   assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
-  node.keyNonce = 99n;
-  node.final += 100n; // at b0 + validity: a block may still include it
-  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "the nonce passed, still within its validity");
+  node.final = BigInt(tx[0]!.height) + 100n; // at b0 + validity: a block may still include it
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown");
   node.final += 1n;
-  const first = await r.resolve(tx[0]!, noResend);
-  assert.equal(first.kind, "unknown", "past it once");
-  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "the same final: not a block apart");
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "dropped");
+});
+
+// ---- the 57dd5df re-check (RC2): F the lower final with its hash on both, (a2), the durable nonce counter ----
+
+/** The node's two providers, provider i's answers passed through `edit`. */
+function edited(node: Node, i: 0 | 1, edit: (method: string, params: Record<string, unknown>, real: () => Promise<unknown>) => Promise<unknown>): [Rpc, Rpc] {
+  const rs = node.rpcs();
+  const r = rs[i];
+  rs[i] = (m, p) => edit(m, p as Record<string, unknown>, () => r(m, p));
+  return rs;
+}
+/** A block answer with another hash. */
+const otherHash = async (real: () => Promise<unknown>) => {
+  const a = (await real()) as { header: Record<string, unknown> };
+  return { header: { ...a.header, hash: base58(createHash("sha256").update("another fork").digest()) } };
+};
+/** A prepay of ours that reached no node, signed at b0 = 1000. */
+async function unsent(node: Node, r: Relayer): Promise<TxRef> {
+  sendDown(node, () => true);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  node.fail = undefined;
+  return tx[0]!;
+}
+
+test("RC2-1 (a2): U's prepay reached no node, then V's deposit landed with higher nonces: U's prepay is dropped at once, not after the validity period, and U's next call lands", async () => {
+  const node = new Node();
+  const store = newStore();
+  const deps = node.deps(store, node.relayer(300));
+  const u = node.user();
+  let down = true;
+  sendDown(node, () => down);
+  const answers = [code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps))];
+  down = false;
+  ok(await carryDeposit(signed(node.user(), P + 1n, 101n, node.final + 100n), deps)); // the key's nonce passes U's prepay's
+  const pre = store.get(u.id)!.prepays[0]!;
+  assert.ok(node.final < BigInt(pre.height) + node.validity, "well inside its validity period");
+  answers.push(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)));
+  assert.deepEqual(answers, ["in_flight", "ok"]);
+  const r = store.get(u.id)!;
+  assert.deepEqual([r.prepays.length, r.failed, r.landed, node.prepaid.get(P.toString())], [1, 0, true, PREPAY_BYTES]);
+  store.close();
+});
+
+test("PROBE N8 (a2): a delegate that reached no node is dropped, uncounted, once another transaction of the key overtook it; U's next delegate lands with no wait for the window", async () => {
+  const node = new Node();
+  const u = node.user();
+  let down = true;
+  sendDown(node, () => down, 8);
+  const store = newStore();
+  const deps = node.deps(store, node.relayer(300));
+  assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "ok");
+  assert.equal(store.get(u.id)!.sends[0]!.state, "pending");
+  down = false;
+  ok(await carryDeposit(signed(node.user(), P + 1n, 101n, node.final + 100n), deps)); // V's deposit lands above D1's nonce
+  assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 99n), deps)), "ok");
+  const r = store.get(u.id)!;
+  assert.deepEqual([r.sends.map((x) => x.state), r.failed, r.landed], [["dropped", "landed"], 0, true]);
+  store.close();
+});
+
+test("RC2-3: one provider's final far ahead (broken or hostile) never makes a live prepay look dropped: F is the lower final, and P is prepaid once", async () => {
+  const node = new Node();
+  node.landMs = () => 700; // inclusion after the second poll (POLL_MS 500)
+  let ahead = 0;
+  const rs = edited(node, 1, async (m, p, real) => {
+    if (m === "block" && p.finality === "final") {
+      const h = node.final + node.validity + 10n + BigInt(ahead++);
+      return { header: { height: Number(h), hash: node.bh(h), prev_height: Number(h - 1n) } };
+    }
+    return real();
+  });
+  const store = newStore();
+  const u = node.user();
+  const deps = node.deps(store, node.relayerOn(rs, 3_000));
+  ok(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps));
+  await sleepMs(50);
+  const r = store.get(u.id)!;
+  assert.equal(node.log.filter((x) => x.kind === "prepay" && x.dropped === undefined).length, 1);
+  assert.deepEqual([node.prepaid.get(P.toString()), r.failed, r.struck, r.prepaid_bytes], [PREPAY_BYTES, 0, false, Number(PREPAY_BYTES)]);
+  store.close();
+});
+
+test("F's hash differing between the providers keeps the round, past the window as inside it", async () => {
+  const node = new Node();
+  let fork = true;
+  const rs = edited(node, 1, async (m, p, real) => (fork && m === "block" && p.block_id === Number(node.final) ? otherHash(real) : real()));
+  const r = node.relayerOn(rs, 50);
+  const tx = await unsent(node, r);
+  node.final += 150n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
   node.final += 1n;
-  assert.deepEqual(await r.resolve(tx[0]!, noResend), { kind: "dropped", tx_hash: tx[0]!.tx_hash, why: "unknown on every provider past its validity period" });
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  fork = false;
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+
+test("b0's hash answered otherwise by the other provider keeps the round", async () => {
+  const node = new Node();
+  let fork = true;
+  const rs = edited(node, 1, async (m, p, real) => (fork && m === "block" && p.block_id === 1000 ? otherHash(real) : real()));
+  const r = node.relayerOn(rs, 50);
+  const tx = await unsent(node, r);
+  assert.equal(tx.height, "1000");
+  node.final += 150n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  node.final += 1n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  fork = false;
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+
+test("(a2): D's hash differing between the providers keeps the round; once they agree, the change at D names another transaction and it is dropped", async () => {
+  const node = new Node();
+  let fork = true;
+  const rs = edited(node, 1, async (m, p, real) => (fork && m === "block" && p.block_id === 1005 ? otherHash(real) : real()));
+  const r = node.relayerOn(rs, 50);
+  const tx = await unsent(node, r);
+  node.keyChanges.push({ height: 1005n, nonce: 50n, cause: { type: "transaction_processing", tx_hash: "another" } });
+  node.final = 1010n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  fork = false;
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+
+test("(a2) search: a height with no block, shown by the next block's prev_height, is skipped and D is found past it", async () => {
+  const node = new Node();
+  const r = node.relayer(50);
+  const tx = await unsent(node, r);
+  node.skipped.add(1010n);
+  node.keyChanges.push({ height: 1011n, nonce: 50n, cause: { type: "transaction_processing", tx_hash: "another" } });
+  node.final = 1020n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+
+test("(a2) search: UNKNOWN_BLOCK at a height whose block the next block's prev_height names is an error that keeps the round", async () => {
+  const node = new Node();
+  let lag = true;
+  const lagging = (i: 0 | 1, rs: [Rpc, Rpc]) => {
+    const r = rs[i];
+    rs[i] = async (m, p) => (lag && m === "query" && (p as { block_id?: unknown }).block_id === 1010 ? Promise.reject(unknownBlock()) : r(m, p));
+    return rs;
+  };
+  const r = node.relayerOn(lagging(1, lagging(0, node.rpcs())), 50);
+  const tx = await unsent(node, r);
+  node.keyChanges.push({ height: 1011n, nonce: 50n, cause: { type: "transaction_processing", tx_hash: "another" } });
+  node.final = 1020n;
+  assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
+  lag = false;
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+
+test("(a2): K deleted before the transaction was applied: the deletion at D names no transaction of ours, so it is dropped", async () => {
+  const node = new Node();
+  const r = node.relayer(50);
+  const tx = await unsent(node, r);
+  node.deleteKey();
+  await r.resolve(tx, resend);
+  await sleepMs(10);
+  assert.equal(node.log.at(-1)!.dropped, "InvalidAccessKey");
+  assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
+});
+
+test("K deleted after the transaction was applied: D is its block, the change there names it, and it reads final", async () => {
+  const node = new Node();
+  const r = node.relayer(50);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "final");
+  node.deleteKey();
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+});
+
+test("an applied transaction whose lookup names a block other than D keeps the round", async () => {
+  const node = new Node();
+  let other = true;
+  const rs = edited(node, 0, async (m, _p, real) => {
+    const a = await real();
+    return other && m === "tx" ? { ...(a as object), transaction_outcome: { block_hash: node.bh(999n) } } : a;
+  });
+  const r = node.relayerOn(rs, 50);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  other = false;
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+});
+
+test("an empty change list at D, on one provider or on both (save_state_changes off, F54), keeps the round", async () => {
+  const node = new Node();
+  node.noChanges.add(1);
+  const r = node.relayer(50);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  node.noChanges.add(0);
+  node.final += 150n;
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown");
+  node.noChanges.clear();
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+});
+
+test("D is found once: a restart's relayer reads it from the store and needs no search", async () => {
+  const node = new Node();
+  node.landMs = () => 1;
+  const tx: TxRef[] = [];
+  const first = node.relayer(50);
+  sendDown(node, () => true);
+  assert.equal((await first.send(prepayAction(1n), open, keep(tx))).kind, "unknown");
+  node.fail = undefined;
+  node.hideTx.set(tx[0]!.tx_hash, 3); // the lookups lag one round
+  await first.resolve(tx[0]!, resend);
+  await sleepMs(10);
+  node.final += 30n;
+  assert.equal((await first.resolve(tx[0]!, noResend)).kind, "unknown", "applied at D, its lookups behind");
+  let searched = 0;
+  const d = node.appliedAt(tx[0]!.tx_hash)!;
+  const rs = node.rpcs().map((r) => (async (m: string, p: unknown) => {
+    const h = (p as { block_id?: unknown }).block_id;
+    if (m === "query" && typeof h === "number" && BigInt(h) > 1000n && BigInt(h) < node.final) searched++;
+    return r(m, p);
+  }) as Rpc) as [Rpc, Rpc];
+  const restarted = node.relayerOn(rs, 50);
+  assert.equal((await restarted.resolve(tx[0]!, noResend)).kind, "final");
+  assert.equal(searched, 0, `D (${d}) read from the store`);
+});
+
+test("the nonce counter: a restart while a transaction is in flight signs the next nonce, never the same one", async () => {
+  const node = new Node();
+  node.landMs = () => 200;
+  const a: TxRef[] = [];
+  const outA = node.relayer(50).send(prepayAction(1n), open, keep(a)); // in flight when the process restarts
+  await sleepMs(20);
+  const b: TxRef[] = [];
+  await node.relayer(50).send(prepayAction(2n), open, keep(b)); // the restart: a new relayer on the same store
+  await outA;
+  await sleepMs(250);
+  assert.deepEqual([a[0]!.nonce, b[0]!.nonce], ["11", "12"]);
+  assert.equal(node.log.filter((x) => x.dropped !== undefined).length, 0, "both land");
+});
+
+test("the nonce counter: two signers on one key at once never both take n; the one that loses the compare-and-set takes the next", async () => {
+  const node = new Node();
+  node.landMs = () => 30;
+  const tx: TxRef[] = [];
+  const outs = await Promise.all([node.relayer(500).send(prepayAction(1n), open, keep(tx)), node.relayer(500).send(prepayAction(2n), open, keep(tx))]);
+  assert.deepEqual(outs.map((o) => o.kind), ["final", "final"]);
+  assert.deepEqual(tx.map((x) => x.nonce).sort(), ["11", "12"]);
+});
+
+test("F58: the relayer refuses to sign a nonce at or above b0 x 10^6; nothing is written or sent", async () => {
+  const node = new Node();
+  const r = node.relayer(50);
+  node.keyNonce = 2_000_000_000n; // above (b0 = 1001) x 10^6
+  const wrote: TxRef[] = [];
+  await assert.rejects(r.send(prepayAction(1n), open, keep(wrote)), /10\^6/);
+  assert.deepEqual([wrote.length, node.sent.length], [0, 0]);
+});
+
+test("the store's nonce counter: a compare-and-set on the value read, durable across a reopen; a set from a stale value writes nothing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-counter-"));
+  const s = createFileStore(dir);
+  const k = "bind.test.near/ed25519:11111111111111111111111111111111";
+  assert.equal(s.nonceNext(k), null);
+  assert.equal(s.nonceCas(k, null, 12n), true);
+  assert.equal(s.nonceCas(k, null, 13n), false);
+  assert.equal(s.nonceCas(k, 11n, 13n), false);
+  assert.equal(s.nonceNext(k), 12n);
+  assert.equal(s.nonceCas(k, 12n, 13n), true);
+  s.close();
+  const t = createFileStore(dir);
+  assert.equal(t.nonceNext(k), 13n);
+  t.close();
+});
+
+test("U's key read: nearcore answers an absent key with a result holding `error`; it reads as no key, and any other error is refused", async () => {
+  const at = (answer: unknown): Rpc => async (m) => (m === "block" ? { header: { height: 5 } } : answer);
+  const absent = { block_hash: "h", block_height: 5, error: "access key ed25519:x does not exist while viewing", logs: [] };
+  const reads = (a: unknown, b: unknown) => createSendReads([at(a), at(b)], { vault: VAULT, token: VAULT_TOKEN });
+  assert.deepEqual(await reads(absent, absent).accessKey("ab".repeat(32), "ed25519:x"), { kind: "no_key" });
+  await assert.rejects(reads({ ...absent, error: "something else" }, { ...absent, error: "something else" }).accessKey("ab".repeat(32), "ed25519:x"));
+  await assert.rejects(reads(absent, { nonce: 5, permission: "FullAccess", block_height: 5, block_hash: "h" }).accessKey("ab".repeat(32), "ed25519:x"), /disagree/);
 });
 
 test("createRelayer refuses a key whose public half is not its seed's", () => {
@@ -1749,12 +2122,19 @@ test("the relayer's transaction: borsh Transaction V0 with the ed25519 key tag a
 test("a receipt that ran with SuccessReceiptId is ok, a Failure is not; each receipt's height is its block's", async () => {
   const node = new Node();
   const outcomes = [
-    { block_hash: "x", outcome: { executor_id: "u", status: { SuccessReceiptId: "r" } } },
+    { block_hash: node.bh(1_500n), outcome: { executor_id: "u", status: { SuccessReceiptId: "r" } } },
     { block_hash: "y", outcome: { executor_id: VAULT, status: { Failure: { ActionError: {} } } } },
   ];
   const [r0, r1] = node.rpcs();
-  const over: Rpc = async (m, p) => (m === "tx" ? { final_execution_status: "FINAL", receipts_outcome: outcomes } : m === "block" && (p as { block_id?: string }).block_id === "y" ? { header: { height: 7777 } } : r0(m, p));
-  const r = createRelayer([over, r1], node.archival(), RELAYER, relayerSecret(), VAULT, node.validity, 1_000);
+  const over: Rpc = async (m, p) => {
+    if (m === "tx") {
+      const at = node.appliedAt((p as { tx_hash: string }).tx_hash);
+      if (at === undefined) throw unknownTx();
+      return { final_execution_status: "FINAL", transaction_outcome: { block_hash: node.bh(at) }, receipts_outcome: outcomes };
+    }
+    return m === "block" && (p as { block_id?: string }).block_id === "y" ? { header: { height: 7777 } } : r0(m, p);
+  };
+  const r = node.relayerOn([over, r1]);
   const out = await r.send(prepayAction(1n), open, () => undefined);
   assert.equal(out.kind, "final");
   const rs = (out as { receipts: Receipt[] }).receipts;
