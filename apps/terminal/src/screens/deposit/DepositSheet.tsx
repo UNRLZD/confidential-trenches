@@ -32,7 +32,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   const { pathname } = useLocation();
   const state = src.snapshot.state;
   const asset = src.assets?.[0] ?? null;
-  const [amount, setAmount] = useState(() => src.restored?.sheet === SHEET_ID ? (src.restored.fields.amount ?? "") : "");
+  const [amount, setAmount] = useState(() => src.start?.amount ?? "");
   const [dry, setDry] = useState<Answer<DryQuote>>(src.assets?.length === 0 ? { kind: "refused", code: "not_available" } : { kind: "idle" });
   const [checked, setChecked] = useState<Answer<SignpageResults["deposit.quote"]>>({ kind: "idle" });
   const [reqId, setReqId] = useState<string | null>(null);

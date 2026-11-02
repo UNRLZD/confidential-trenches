@@ -18,7 +18,7 @@ export const BRANCH = "main"; // the project's production branch: a deploy on it
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 
 // every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs)
-export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-signpage-client", "app-hop-refused", "app-discover-live"];
+export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live"];
 
 export function deploy(argv, env = process.env, run = spawnSync) {
   const dryRun = argv.includes("--dry-run");

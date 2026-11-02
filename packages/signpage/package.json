@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-app.mjs",
-    "test": "node --test scripts/deploy.test.mjs scripts/build-app.test.mjs test/guard.test.ts test/api.test.ts test/state.test.ts test/state-no-seed-read.test.ts",
+    "test": "node --test scripts/deploy.test.mjs scripts/build-app.test.mjs test/guard.test.ts test/api.test.ts test/shell.test.ts test/state.test.ts test/state-no-seed-read.test.ts",
     "test:e2e": "node scripts/frame.e2e.mjs",
-    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --lib es2023,dom,dom.iterable --types node src/main.ts src/guard.ts src/state.ts test/guard.test.ts test/api.test.ts test/state.test.ts test/state-no-seed-read.test.ts"
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --lib es2023,dom,dom.iterable --types node src/main.ts src/guard.ts src/state.ts src/shell.ts test/guard.test.ts test/api.test.ts test/shell.test.ts test/state.test.ts test/state-no-seed-read.test.ts"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
