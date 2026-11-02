@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Writes tests/fixtures/withdraw-spends.json: real withdraw proofs for the vault's spend tests (VT-S05, VT-S06 and the
-// unit tests of withdraw.rs rows 4-12). Test notes only (secrets are keccak256("withdraw-spends/<tag>") mod p), never
+// Writes tests/fixtures/withdraw-spends.json: real withdraw proofs for the vault's spend tests (VT-S05, VT-S06, the
+// unit tests of withdraw.rs rows 4-14, and the payouts' VT-S04 in tests/payouts.rs). Test notes only (secrets are keccak256("withdraw-spends/<tag>") mod p), never
 // money.
 //
 // Six test deposits on vault.test.near (the sandbox harness's vault) with the mainnet build's TOKEN, the asset; the
@@ -58,12 +58,12 @@ const zk = (f) => join(kit, "zk", f);
 const vkey = JSON.parse(readFileSync(zk("withdraw.vkey"), "utf8"));
 
 /** A proof spending note `n` (0-based) for `withdrawn`, against the trees of the first `size` deposits. */
-async function spend(name, n, withdrawn, tag, size = notes.length, relayFee = "0") {
+async function spend(name, n, withdrawn, tag, size = notes.length, relayFee = "0", to = {}) {
   const state = notes.slice(0, size).map((x) => x.commitment);
   const labels = notes.slice(0, size).map((x) => x.label);
   const withdrawal = {
-    recipient: "alice.test.near",
-    register_deposit: "0",
+    recipient: to.recipient ?? "alice.test.near",
+    register_deposit: to.registerDeposit ?? "0",
     fee_recipient: "relayer.test.near",
     relay_fee: relayFee,
     refund_precommitment: String(testField(`${name}/refund`)),
@@ -100,6 +100,16 @@ const spends = [
   await spend("one_block_b", 2, 6_000_000n, "one_block_b"),
   // against the roots of the first 4 deposits, while the vault has had 6
   await spend("old_root", 3, 3_000_000n, "old_root", 4),
+  // relayed to an account the token has never seen, with its registration (VT-S04): USDC's 0.00125 NEAR
+  await spend("new_account", 4, 7_000_000n, "new_account", notes.length, "100000", {
+    recipient: "newcomer.test.near",
+    registerDeposit: "1250000000000000000000",
+  }),
+  // a registration of 1 yocto, below the token's minimum: part 0 [storage_deposit, ft_transfer] fails whole
+  await spend("short_registration", 5, 4_000_000n, "short_registration", notes.length, "0", {
+    recipient: "fresh.test.near",
+    registerDeposit: "1",
+  }),
 ];
 for (const s of spends.slice(1)) if (s.public_signals[1] === spends[0].public_signals[1]) throw new Error("note 1's nullifier repeats");
 if (spends[1].public_signals[1] !== spends[2].public_signals[1]) throw new Error("same_nullifier: two nullifier hashes");
@@ -109,7 +119,7 @@ const out = {
   notes: [
     "Real withdraw proofs for the vault's spend tests (VT-S05, VT-S06, withdraw.rs rows 4-12). Test notes only, never money.",
     "Made by contracts/vault/tests/fixtures/make-withdraw-spends.mjs: the kit's vaultWithdrawInput, then snarkjs 0.7.5 groth16.fullProve with packages/kit/zk/withdraw.wasm and withdraw.zkey; snarkjs groth16.verify passes each.",
-    "leaves and labels: six deposits on vault.test.near with the mainnet TOKEN, in order; deposited is their sum. other_vault: the newest roots of the same six notes on other-vault.test.near.",
+    "leaves and labels: six deposits on vault.test.near with the mainnet TOKEN, in order (precommitments: what each deposit's message names); deposited is their sum. other_vault: the newest roots of the same six notes on other-vault.test.near.",
     "proof: snarkjs's pi_a, pi_b, pi_c without the projective last element. public_signals in snarkjs order: [newCommitmentHash, existingNullifierHash, withdrawnValue, stateRoot, stateTreeDepth, ASPRoot, ASPTreeDepth, context].",
   ],
   vault: VAULT,
@@ -117,6 +127,9 @@ const out = {
   scope: String(scope),
   leaves: notes.map((x) => String(x.commitment)),
   labels: notes.map((x) => String(x.label)),
+  // Poseidon(nullifier, secret) of each note: the precommitment its deposit message names (tests/payouts.rs deposits
+  // the six through ft_on_transfer, which makes the same leaves and labels)
+  precommitments: notes.map((x) => String(poseidon2([x.nullifier, x.secret]))),
   values: VALUES.map(String),
   deposited: String(VALUES.reduce((a, b) => a + b, 0n)),
   other_vault: {
