@@ -1,0 +1,20 @@
+/* The withdraw progress's own styles, over the deposit sheet's box (deposit.css). Every value is R5's
+   (design/proto/assets/private.css:129-133 at design-lock-r5: .wdone, .wamt, .wamt.hero, .wsub, .wto). */
+.wdone { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 0 10px; }
+.wamt { font: 500 34px/1 var(--font-num); letter-spacing: -0.03em; color: var(--text-1); min-height: 34px; }
+.wst { font: 400 13px var(--font-ui); color: var(--text-2); display: flex; align-items: center; gap: 4px; min-height: 18px; }
+.wst.blue { color: var(--blue); }
+.wst.warn { color: var(--warn); }
+.wcnt { font-family: var(--font-num); display: inline-block; width: 5ch; height: 18px; line-height: 18px; contain: strict; font-variant-numeric: tabular-nums; font-kerning: none; } /* the counter ticks in place, as deposit.css .dstat .cnt (BAR-11): a fixed box and its text padded to one length */
+.wst[data-counter]::before { content: ""; width: 2ch; font-family: var(--font-num); } /* the line centred for a counter of 3 (a withdrawal takes 21-25 s, J6 step 5), since the box holds 5 */
+.wto { display: flex; align-items: center; gap: 10px; font: 400 13px var(--font-ui); color: var(--text-2); }
+.wto .t3 { color: var(--text-3); }
+.wtx { color: var(--text-3); text-decoration: none; display: inline-flex; align-items: center; min-height: 28px; }
+.wtx:hover { color: var(--text-2); }
+
+@media (max-width: 767.98px) {
+  .wamt { font-size: 44px; min-height: 44px; }
+  .wst, .wto { font-size: 15px; }
+  .wcnt { height: 22px; line-height: 22px; }
+  .wtx { min-height: 44px; padding: 0 4px; }
+}
