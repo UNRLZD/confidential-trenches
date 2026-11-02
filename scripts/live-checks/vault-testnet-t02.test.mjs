@@ -9,12 +9,14 @@
 // More are made here from the good answer, each changing one read so only that check can fail: a key on the vault;
 // the change leaf written twice; W holding one unit less; a spend row not yet settled. And one that must still pass:
 // W holding one unit more (anyone may send W test USDC; nobody can take it out).
+// A provider's rate limit is never a verdict: one limit then the answer passes (waited out 2 s); four in a row exit 2,
+// not 1 (FAIL would undo a deploy); every request is asked once per provider when no limit comes.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, RUN } from "./vault-testnet-t02.mjs";
+import { check, main, RUN } from "./vault-testnet-t02.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -98,4 +100,66 @@ test("two hosts of one operator are refused", async () => {
   const r = await check({ run, fetchFn: replay(good()), rpcs: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"] }); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
   assert.equal(r.ok, false);
   assert.match(bads(r)[0], /only 1 operator/);
+});
+
+// dRPC's free endpoint's rate limit, in the shape it answers (a real dRPC answer, HTTP 429, error code 15)
+const DRPC_LIMIT = { id: 187, jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } };
+const LIMITS = [
+  ["dRPC's code 15, HTTP 429", () => ({ ok: false, status: 429, json: async () => DRPC_LIMIT })],
+  ["dRPC's code 15, HTTP 200", () => ({ ok: true, status: 200, json: async () => DRPC_LIMIT })],
+  ["a bare HTTP 429", () => ({ ok: false, status: 429, json: async () => { throw new Error("not JSON"); } })],
+  ["a JSON-RPC code -429", () => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "x", error: { code: -429, message: "Too Many Requests" } }) })],
+];
+// the replay, with the first `n` asks of one request (dRPC's leaves page) answered by `limit`
+function limited(n, limit) {
+  const inner = replay(good());
+  let left = n;
+  return async (url, init) => {
+    const { params } = JSON.parse(init.body);
+    if (url === "https://near-testnet.drpc.org" && params.method_name === "leaves" && left > 0) {
+      left--;
+      return limit();
+    }
+    return inner(url, init);
+  };
+}
+
+for (const [name, limit] of LIMITS) {
+  test(`one rate limit (${name}) then the answer passes, waited out 2 s`, async () => {
+    const waits = [];
+    const r = await check({ run, fetchFn: limited(1, limit), sleep: async (ms) => void waits.push(ms) });
+    assert.deepEqual(bads(r), []);
+    assert.equal(r.ok, true);
+    assert.deepEqual(waits, [2000]);
+  });
+}
+
+test("three rate limits then the answer passes, waited out 2, 4, 8 s", async () => {
+  const waits = [];
+  const r = await check({ run, fetchFn: limited(3, LIMITS[0][1]), sleep: async (ms) => void waits.push(ms) });
+  assert.equal(r.ok, true);
+  assert.deepEqual(waits, [2000, 4000, 8000]);
+});
+
+test("four rate limits in a row exit 2, not 1, with no FAIL line", async () => {
+  const waits = [];
+  const out = [];
+  const code = await main([], { fetchFn: limited(4, LIMITS[0][1]), sleep: async (ms) => void waits.push(ms), log: (l) => out.push(l), err: (l) => out.push(l) });
+  assert.equal(code, 2);
+  assert.deepEqual(waits, [2000, 4000, 8000]);
+  assert.ok(out.some((l) => /ERROR: .*rate limited 4 times in a row/.test(l)), out.join("\n"));
+  assert.ok(!out.some((l) => /FAIL|BAD/.test(l)), out.join("\n"));
+});
+
+test("with no limit, every request (each page included) is asked once per provider", async () => {
+  const asked = new Map();
+  const inner = replay(good());
+  const r = await check({ run, fetchFn: async (url, init) => {
+    const k = `${url} ${init.body}`;
+    asked.set(k, (asked.get(k) ?? 0) + 1);
+    return inner(url, init);
+  } });
+  assert.equal(r.ok, true);
+  assert.ok([...asked.values()].every((n) => n === 1), JSON.stringify([...asked.entries()].filter(([, n]) => n > 1)));
+  assert.ok([...asked.keys()].filter((k) => k.includes('"method_name":"leaves"')).length === 2);
 });
