@@ -370,3 +370,60 @@ test("a sell's min out comes from the two-provider quote less the user's slippag
     assert.throws(() => solanaPoolSellSteps(venue, W, amount, 0n), /above 0/);
   }
 });
+
+test("the build refuses a pool that is not the program's, W as the fee payer and a CU price over its cap", async () => {
+  const { venue, req, chain } = await setup("pump");
+  assert.throws(() => buildSolanaPoolBuy({ ...cfg, pool: base58.encode(new Uint8Array(32).fill(6)) }, release, venue, req, chain), /not the program's pool account/);
+  assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, feePayer: W }, chain), /must differ/);
+  assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, cuPrice: 10n ** 12n }, chain), /CU price/);
+});
+
+test("the venue read refuses a Mayhem curve, a complete curve, an unset buyback recipient and a PumpSwap pool that is not the mint's", async () => {
+  const flip = (v: "pump" | "pumpswap", i: number, at: number, byte: number) => (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
+    const d = Buffer.from(ans.value[i].data[0], "base64");
+    if (byte < 0) d.fill(0, at, at + 32);
+    else d[at] = byte;
+    ans.value[i].data[0] = d.toString("base64");
+    return ans;
+  });
+  const read = (v: "pump" | "pumpswap", f: (p: 0 | 1) => SolanaRpc) => readSolanaPoolBuyVenue([f(0), f(1)], v === "pump" ? "pump-curve" : "pumpswap", fx[v].mint, () => 0);
+  await assert.rejects(read("pump", flip("pump", 1, 81, 1)), /Mayhem/);
+  await assert.rejects(read("pump", flip("pump", 1, 48, 1)), /complete/);
+  await assert.rejects(read("pump", flip("pump", 2, 741 + 32 * 5, -1)), /buyback recipient is unset/);
+  await assert.rejects(read("pumpswap", flip("pumpswap", 1, 9, 1)), /canonical pool/);
+});
+
+test("the check refuses a deactivated table or one not owned by the table program, and a wire without two signature slots", async () => {
+  const { venue, req, chain, reads, tableData, tableAddr } = await setup("pump");
+  const built = buildSolanaPoolBuy(cfg, release, venue, req, chain);
+  const off = tableData.slice();
+  new DataView(off.buffer).setBigUint64(4, 5n, true); // deactivated at slot 5
+  const ids = (t: { owner: string; data: Uint8Array }) => failed(checkSolanaPoolBuy(built.wire, cfg, release, venue, req, { ...reads, tables: { [tableAddr]: [t, t] } }));
+  assert.deepEqual(ids({ owner: ALT, data: off }), ["TABLES"]);
+  assert.deepEqual(ids({ owner: "11111111111111111111111111111111", data: tableData }), ["TABLES"]);
+  const three = built.wire.slice();
+  three[0] = 3;
+  assert.deepEqual(failed(checkSolanaPoolBuy(three, cfg, release, venue, req, reads)), ["DECODE"]);
+});
+
+test("QUOTE refuses a min out of 0 even when the floor is 0, and a slippage over 10,000 bps", async () => {
+  const { venue, req, chain, reads, ref } = await setup("pump");
+  const zero = { ...ref, pools: ref.pools.map((p) => ({ ...p, expectedOut: 0n })) };
+  const q0 = { ...req, minOut: 0n };
+  assert.deepEqual(failed(checkSolanaPoolBuy(buildSolanaPoolBuy(cfg, release, venue, q0, chain).wire, cfg, release, venue, q0, { ...reads, reference: { ...reads.reference, ref: zero } })), ["QUOTE"]);
+  const wire = buildSolanaPoolBuy(cfg, release, venue, req, chain).wire;
+  assert.deepEqual(failed(checkSolanaPoolBuy(wire, cfg, release, venue, req, { ...reads, reference: { ...reads.reference, slippageBps: 10_001 } })), ["QUOTE"]);
+  // a sell whose reference gives 0 has no floor: refused
+  assert.throws(() => solanaPoolSellMinOut(venue, SPEND, { amount: SPEND, ref: zero, slippageBps: 300 }), /floor is 0/);
+});
+
+test("the compressed point's bit 7 is y's sign: set for y above q - y, clear below", () => {
+  const p = new Uint8Array(256);
+  const put = (at: number, x: bigint) => p.set(Uint8Array.from(Buffer.from(x.toString(16).padStart(64, "0"), "hex")), at);
+  put(0, 1n); put(32, Q - 2n); // A = (1, -2): the larger root
+  put(64, 1n); put(96, 1n); put(128, 1n); put(160, 1n); // B, any nonzero point
+  put(192, 1n); put(224, 2n); // C = (1, 2): the smaller root
+  const c = solanaCompressPoolProof(p);
+  assert.equal(c[0], 0x80);
+  assert.equal(c[96], 0);
+});

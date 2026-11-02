@@ -1,7 +1,7 @@
 /// <reference types="node" />
 // The device's on-chain reference E (markets paper S12, §2.0 LD1): replays real mainnet answers recorded by
 // test/fixtures/solana-pool-capture.mjs. One live pump.fun bonding-curve token and one graduated token in its PumpSwap
-// canonical pool, each venue's accounts read with one getMultipleAccounts at `processed` on two public RPCs, and a real
+// canonical pool, each venue's accounts read with one getMultipleAccounts at `confirmed` on two public RPCs, and a real
 // Jupiter route on that venue alone simulated on both for the same exact input, kept only when the venue's accounts
 // read the same before and after. Good: E equal to the simulated out on every venue and side, and on a buy that
 // crosses the curve's end; a reserve inside the band agrees and the larger-output read sets E; each leg's E comes from
@@ -80,7 +80,7 @@ function provider(url: string, answers: Record<Venue, unknown[]>, lists: Record<
   const fn = async (method: string, params: readonly unknown[]): Promise<unknown> => {
     assert.equal(method, "getMultipleAccounts");
     const v: Venue = JSON.stringify(params[0]) === JSON.stringify(lists.curve) ? "curve" : "pool";
-    assert.deepEqual(params, [lists[v], { encoding: "base64", commitment: "processed" }]);
+    assert.deepEqual(params, [lists[v], { encoding: "base64", commitment: "confirmed" }]);
     f.calls++;
     const list = answers[v];
     return clone(list[Math.min(f.by[v]++, list.length - 1)]);
