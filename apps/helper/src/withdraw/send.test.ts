@@ -68,8 +68,8 @@ type Chain = {
   /** The nullifier the spends row at spendIndex names (NF unless a test plants another). */
   spendNf?: bigint;
   /** Check 5's views: is_known_state_root, is_known_label_root, totals (deposited, spent, returned). */
-  stateKnown: boolean;
-  labelKnown: boolean;
+  stateKnown: unknown;
+  labelKnown: unknown;
   totals: [bigint, bigint, bigint];
   /** The recipient A, per provider: absent, or its NEAR and its key list. */
   account: ("absent" | { amount: bigint; keys: { public_key: string; permission: unknown }[] })[];
@@ -272,12 +272,17 @@ test("check 5 on what was read: stateRoot 0 is unknown_root; withdrawnValue abov
   assert.equal(check5(w, t(99n, 0n, 0n)), "bad_proof");
 });
 
-test("check 5, row 9 at the chain: a pool that holds less than withdrawnValue is bad_proof; totals that do not read are 503 upstream", async () => {
+test("check 5, row 9 at the chain: a pool that holds less than withdrawnValue is bad_proof; totals or root views that do not read are 503 upstream", async () => {
   const withdrawn = BigInt(fixture.request.public_signals[2]!); // snarkjs order: newCommitmentHash, existingNullifierHash, withdrawnValue, stateRoot, ...
   const thin = setup(chain({ totals: [withdrawn - 1n, 0n, 0n] }));
   assert.equal(code(await carryWithdraw(req(), thin.deps)), "bad_proof");
   const exact = setup(chain({ totals: [withdrawn, 0n, 0n] }));
   assert.equal(code(await carryWithdraw(req(), exact.deps)), "ok");
+  for (const over of [{ stateKnown: "true" }, { labelKnown: 1 }, { stateKnown: null }]) {
+    const x = setup(chain(over)); // a root view that answers anything but a boolean
+    const b = await carryWithdraw(req(), x.deps);
+    assert.deepEqual([b.status, code(b), x.relayer.sent.length], [503, "upstream", 0], JSON.stringify(over));
+  }
   const off = setup(chain({ totals: [1n << 128n, 0n, 0n] })); // not a u128
   const a = await carryWithdraw(req(), off.deps);
   assert.deepEqual([a.status, code(a)], [503, "upstream"]);

@@ -1,18 +1,16 @@
 // The review's junk repro, held (card relayer-withdraw-send, F1): three proofs, each over a one-leaf tree of the
-// sender's own that the vault never had, proved for the fixture's vault and scope with the kit's own inputs and zk files.
-// Each passes checks 1-4 (a real Groth16 proof) and is a fresh nullifier, so before check 5's root views every one was
-// signed and sent and burnt the relayer's gas at the vault's row 5 without bound. Check 5 answers unknown_root now,
-// with nothing signed.
+// sender's own that the vault never had, proved for the fixture's vault and scope with the kit's own inputs and zk files
+// and recorded in fixtures/withdraw-junk.json. Each passes checks 1-4 (a real Groth16 proof) and is a fresh nullifier,
+// so before check 5's root views every one was signed and sent and burnt the relayer's gas at the vault's row 5 without
+// bound. Check 5 answers unknown_root now, with nothing signed.
 //   node --test apps/helper/src/withdraw/send-junk.test.ts
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { after, test } from "node:test";
-import { VAULT_CONSTANTS, VAULT_FIELD_P, vaultProof } from "@blindfill/kit";
+import { test } from "node:test";
+import { VAULT_CONSTANTS } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import type { Relayer, RelayerAction, Rpc, TxOutcome, TxRef } from "../bind/send.ts";
 import { USDC_CODE_HASH, type TokenStatus } from "../token-status/status.ts";
@@ -20,24 +18,10 @@ import type { WithdrawConfig } from "./checks.ts";
 import { createWithdrawSendStore, type LeavesIndex, type SpendsIndex } from "./index.ts";
 import { carryWithdraw, type WithdrawSendDeps } from "./send.ts";
 
-const KIT = join(import.meta.dirname, "../../../../packages/kit");
-const ZK = join(KIT, "zk");
-const req = createRequire(join(KIT, "package.json"));
-const snarkjs = await import(pathToFileURL(req.resolve("snarkjs")).href);
-const { poseidon1 } = await import(pathToFileURL(req.resolve("poseidon-lite/poseidon1")).href);
-const { poseidon2 } = await import(pathToFileURL(req.resolve("poseidon-lite/poseidon2")).href);
-const { poseidon3 } = await import(pathToFileURL(req.resolve("poseidon-lite/poseidon3")).href);
-const { VaultTree, vaultWithdrawInput } = await import(pathToFileURL(join(KIT, "src/vault/inputs.ts")).href);
-
-// snarkjs keeps its curve's worker threads alive after the last proof
-after(async () => {
-  await (globalThis as { curve_bn128?: { terminate(): Promise<void> } }).curve_bn128?.terminate();
-});
-
 const fixture = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/withdraw-request.json"), "utf8"));
+const JUNK = (JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/withdraw-junk.json"), "utf8")) as { requests: Record<string, unknown>[] }).requests;
 const CFG: WithdrawConfig = { vault: fixture.vault, token: VAULT_CONSTANTS.TOKEN, scope: BigInt(fixture.scope), feeRecipient: fixture.fee_recipient };
 const DEADLINE = BigInt(fixture.request.withdrawal.deadline_ms);
-const rnd = () => BigInt(`0x${randomBytes(31).toString("hex")}`) % VAULT_FIELD_P;
 const hashOf = (h: number) => base58(createHash("sha256").update(`block ${h}`).digest());
 
 const asked: string[] = [];
@@ -61,33 +45,6 @@ function provider(ms: bigint): Rpc {
     }
     throw new Error(`no method ${method} ${String(p.request_type)}`);
   };
-}
-
-/** A note the vault never had, in a one-leaf tree of the sender's own, proved for the fixture's vault and scope. */
-async function junk() {
-  const value = 1_000_000n;
-  const label = rnd();
-  const nullifier = rnd();
-  const secret = rnd();
-  const commitment = poseidon3([value, label, poseidon2([nullifier, secret])]);
-  const stateTree = new VaultTree([commitment]);
-  const labelTree = new VaultTree([label]);
-  const withdrawal = {
-    recipient: "attacker.near",
-    register_deposit: "0",
-    fee_recipient: CFG.feeRecipient,
-    relay_fee: fixture.request.withdrawal.relay_fee,
-    refund_precommitment: rnd().toString(),
-    deadline_ms: Number(DEADLINE),
-    salt: randomBytes(16).toString("hex"),
-  };
-  const input = vaultWithdrawInput({
-    stateTree, labelTree, newestStateRoot: stateTree.root, newestLabelRoot: labelTree.root,
-    note: { value, label, nullifier, secret }, newNullifier: rnd(), newSecret: rnd(), withdrawn: value,
-    withdrawal, vaultId: CFG.vault, scope: CFG.scope, nowMs: Number(DEADLINE) - 120_000,
-  });
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, join(ZK, "withdraw.wasm"), join(ZK, "withdraw.zkey"));
-  return { body: { withdrawal, proof: vaultProof(proof), public_signals: publicSignals, fund_recipient: false, token: VAULT_CONSTANTS.TOKEN }, nfh: poseidon1([nullifier]) };
 }
 
 test("junk: three proofs over trees the vault never had answer unknown_root, nothing signed, the root views asked", async () => {
@@ -122,9 +79,9 @@ test("junk: three proofs over trees the vault never had answer unknown_root, not
     tokenStatus: async () => open,
     now: () => Number(ms),
   };
-  for (let i = 0; i < 3; i++) {
-    const j = await junk();
-    const a = await carryWithdraw(j.body, deps);
+  assert.equal(JUNK.length, 3);
+  for (const [i, j] of JUNK.entries()) {
+    const a = await carryWithdraw({ ...j, token: VAULT_CONSTANTS.TOKEN }, deps);
     assert.deepEqual([a.status, a.body], [400, { error: { code: "unknown_root" } }], `junk ${i}`);
   }
   assert.equal(sent.length, 0, "nothing signed");
