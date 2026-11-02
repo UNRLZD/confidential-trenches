@@ -27,7 +27,7 @@
 // 5. Registration: the parent calls the token config() names, `storage_deposit(vault, registration_only)` with the
 //    token's own `storage_balance_bounds().min`, signed only when min = max and min <= MAX_REGISTRATION (0.01 N), then
 //    reads `storage_balance_of(vault)` back.
-// It writes the record (--out) and prints the live check to run next.
+// It writes the record (--out) and prints the live check to run next (nextLine: testnet's; a sandbox deploy has none).
 //
 // The signer's key comes from --key-file, a path given at run time: the near CLI's keychain file
 // (~/.near-credentials/<network>/<parent>.json) or any file holding {account_id, public_key, private_key}. A path inside
@@ -64,6 +64,15 @@ export const TOOLCHAIN = "1.96.0";
 export const CARGO_NEAR = "cargo-near-near 0.22.0";
 export const BUILD_ARGS = ["near", "build", "non-reproducible-wasm", "--no-embed-abi", "--locked"];
 export const LIVE_CHECK = "scripts/live-checks/vault-testnet-t01.mjs";
+
+// The line a deploy on `network` ends with: the live check to run next. Testnet's vault has LIVE_CHECK, which reads two
+// public testnet RPCs and refuses any build but the testnet one. A sandbox deploy lives on this machine only, so no
+// live check can read it (tests/s20.rs checks its end state). Mainnet is refused before any build or send.
+export function nextLine(network, record) {
+  if (network === "testnet") return `next: node ${LIVE_CHECK} --deployment ${record}`;
+  if (network === "sandbox") return "next: no live check (a sandbox deploy lives on this machine only; tests/s20.rs checks its end state)";
+  throw new Error(`no network ${network}`);
+}
 
 // The RUSTFLAGS every build passes to cargo-near (it does not inherit the shell's).
 export function rustflags(cargoHome) {
@@ -507,7 +516,7 @@ async function main() {
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
   writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
   console.log(`wrote ${out}`);
-  console.log(`next: node ${LIVE_CHECK} --deployment ${path.relative(path.resolve(CRATE, "../.."), path.resolve(out))}`);
+  console.log(nextLine(network, path.relative(path.resolve(CRATE, "../.."), path.resolve(out))));
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
