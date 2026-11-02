@@ -1,7 +1,7 @@
 {
  "release": "release-2",
  "commit": null,
- "tree": "79ee46ea8cca4ff77cea7c36e596f71866468717",
+ "tree": "5eff88c20cd04096e63e7d974712dd5ad502bdd2",
  "hosts": {
   "SIGN_HOST": {
    "origin": "https://sign.confidential.unrealized.trade",

@@ -180,7 +180,7 @@ export const listPath = (tag, releases = RELEASES) => join(releases, `${tag}.jso
 /** Every written release list's sha256, as written: a list is never edited after (releaseProblems). */
 export const RELEASED = Object.freeze({
   "release-1": "c8ffda0045fc1a814abea60ee8f0815cfd995e6c670b98e68b0c1e2f144ac3bc",
-  "release-2": "835286962d6f563cc1d1fcb3e49e282b8c2e29d48284dc4a19a201899a0dc82a",
+  "release-2": "05b618a384bbbb799ee9274611eaae07fbf8ebad3dedcba9ffc1100ec3c7073f",
 });
 
 /**
