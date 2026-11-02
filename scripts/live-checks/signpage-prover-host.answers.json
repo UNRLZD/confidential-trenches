@@ -1,7 +1,7 @@
 {
  "good": {
   "source": "harness, SIGN_HOST from a fresh deploy.mjs --dry-run build",
-  "at": "2026-11-02T21:37:56.879Z",
+  "at": "2026-11-02T23:55:42.492Z",
   "browser": "chromium 153.0.8010.12 (Playwright)",
   "files": {
    "/assets/zk/36cda22791def3d520a55c0fc808369cd5849532a75fab65686e666ed3d55c10.wasm": {
@@ -78,8 +78,8 @@
    },
    "/prover-worker.js": {
     "status": 200,
-    "bytes": 718838,
-    "sha256": "aa9c7d098228c5137d0ffeba038ebafe30c420312069c7af381adfe286166901",
+    "bytes": 718988,
+    "sha256": "f3ce25c397023e9a2602e350c2e4ed737a63d374d752b7f6184859e76a8e5309",
     "headers": {
      "content-type": "text/javascript; charset=utf-8",
      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'",
@@ -172,22 +172,22 @@
    "workerURLIsTrusted": true,
    "secondPolicySameName": "TypeError: Failed to execute 'createPolicy' on 'TrustedTypePolicyFactory': Policy with name \"prover-worker\" already exists.",
    "otherPolicy": "TypeError: Failed to execute 'createPolicy' on 'TrustedTypePolicyFactory': Policy \"other\" disallowed.",
-   "loadMs": 103,
+   "loadMs": 87,
    "result": {
     "proof": {
      "pi_a": [
-      "17447775153707046452690649885963650571928855692841409875973013379205810877563",
-      "13380278462720676384911804700505648683048689567768729977664104891649715691360",
+      "12521299517947549478236737312967469546843277696297628194688252946732058392802",
+      "17577274239429555437048559553014779118635484017397205048767786732713811309422",
       "1"
      ],
      "pi_b": [
       [
-       "2107854703174995344988407193466939422691119236733198183748013955625853758658",
-       "9090485286765214619181077283512996979906744911600322155171903061265528085469"
+       "12619556654980278779904713075635123356851361953172971285976295147955564902270",
+       "6756072670233638350873550183545916148533415690241305939409773727304645401755"
       ],
       [
-       "8925208328067498129379029300819015254928148718518044403897171182424367473553",
-       "7111017415298044159525234430177503663859753462545181086236669320365353899996"
+       "829071675647485981743005883204164366831576131934654044258603830173206016503",
+       "4699906609662986842257810346024901162607630114234951743925234051702860954911"
       ],
       [
        "1",
@@ -195,8 +195,8 @@
       ]
      ],
      "pi_c": [
-      "5335783507994927569172751644700299331156272875887708093366442538233712441825",
-      "14820909617120532649932827524299021849748800900182420454183383084277722681817",
+      "10007997463575793257393585444652284353718539545114637364786712427065674602230",
+      "17731283809594587605721700980530612938788185650346856150805884703353415006760",
       "1"
      ],
      "protocol": "groth16",
@@ -212,7 +212,7 @@
      "3",
      "802377141111801993956095990454547848147819793756653330486998369192452016786"
     ],
-    "proveMs": 1760,
+    "proveMs": 1739,
     "threads": 4
    }
   }
