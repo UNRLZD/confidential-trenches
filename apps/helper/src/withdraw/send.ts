@@ -47,7 +47,7 @@ import { join } from "node:path";
 import { vaultWithdrawYocto, type HelperWithdrawCode } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, RpcError, startRelayer, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
-import { readUrls, statusesOf, tokenHeld, tokenWatchesFromEnv, USDC, type TokenStatus } from "../token-status/status.ts";
+import { readUrls, statusesOf, tokenHeld, tokenWatchesFromEnv, USDC, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, decimal, isAccountId, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
 import { agreedBlock, FeeReadRefused, HEIGHT_SPREAD_MAX, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type Block, type FeeNetwork, type FeeQuoter } from "./fee.ts";
 import { checkNullifier, createLeavesIndex, createSpendsIndex, createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
@@ -96,8 +96,11 @@ export type WithdrawSendDeps = {
   store: WithdrawSendStore;
   /** One per relayer key (nonce lanes); each send takes the next in turn. */
   relayers: readonly Relayer[];
-  /** The token watch (status.ts); anything but a caught-up open token holds. */
-  tokenStatus(): Promise<TokenStatus>;
+  /**
+   * The token watch at the move's H (status.ts statusAt); anything but a caught-up open token holds. A withdrawal asks
+   * at "lower", the newest block final on both providers (markets.md check 10).
+   */
+  tokenStatus(at: HoldAt): Promise<TokenStatus>;
   /** The helper's clock, only for the age bound on two frozen finals (fee.ts agreedBlock), never for the deadline. */
   now?: () => number;
 };
@@ -105,7 +108,7 @@ export type WithdrawSendDeps = {
 const no = (code: HelperWithdrawCode | "upstream", status = 400): WithdrawAnswer => ({ status, body: { error: { code } } });
 const held = async (deps: WithdrawSendDeps) => {
   try {
-    return tokenHeld(await deps.tokenStatus());
+    return tokenHeld(await deps.tokenStatus("lower")); // check 10's H for a withdrawal: the lower of the two finals
   } catch {
     return true;
   }
@@ -302,7 +305,16 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   try {
     const out = await relayer.send<HelperWithdrawCode>(
       action,
-      async () => ((await held(deps)) ? "token_halted" : (await relayer.balance()) < withdrawFloor(deposit) ? "relayer_low" : null),
+      // the hold first, check 9's margin last: a hold that waits (check 10's wait for H, a 429 waited out) never spends
+      // the margin it was checked against at the reads above
+      async () =>
+        (await held(deps))
+          ? "token_halted"
+          : (await relayer.balance()) < withdrawFloor(deposit)
+            ? "relayer_low"
+            : BigInt(w.deadline_ms) < (await newestFinalMs(deps.rpcs)) + SEND_MARGIN_MS
+              ? "deadline_too_close"
+              : null,
       (tx) => {
         const claim = deps.store.claim({ ...tx, nullifier: nullifierKey(nf), key: relayer.key, deadline_ms: w.deadline_ms });
         if (!claim.ok) throw new ClaimLost(claim.code);
@@ -454,7 +466,7 @@ export type WithdrawSender = {
 export function withdrawSenderFromEnv(
   env: Record<string, string | undefined>,
   fee: FeeQuoter,
-  status: Partial<Record<FeeNetwork, () => Promise<TokenStatus>>> = statusesOf(tokenWatchesFromEnv(env)),
+  status: Partial<Record<FeeNetwork, (at: HoldAt) => Promise<TokenStatus>>> = statusesOf(tokenWatchesFromEnv(env)),
   fetchFn: typeof fetch = fetch,
 ): WithdrawSender {
   const release = env[RELEASE_ENV] ?? "";

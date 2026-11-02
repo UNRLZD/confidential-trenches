@@ -23,7 +23,10 @@
 // Every transaction is read back by the money gate's own readTx on the testnet RPCs and must read ok on two of them.
 // The ids, the tx hashes and the code hash go to contracts/vault/deployments/testnet-usdc.json; then run
 // scripts/live-checks/vault-testnet-usdc.mjs. Testnet only; no dependency.
-//   node contracts/vault/scripts/testnet-usdc.mjs --keychain-service <name> [--token <name>.testnet] [--out <file>]
+// --pausers 2 makes a second pauser (pauser2.<token>) at init: USDC's Pause and Unpause each want two pausers'
+// approvals (InsufficientApprovals { current: 1, required: 2 } on the one-pauser token, 2026-11-02), so only such a
+// token can be halted and opened again on testnet, for the token watch's halted-then-open run. Mainnet's token has four.
+//   node contracts/vault/scripts/testnet-usdc.mjs --keychain-service <name> [--token <name>.testnet] [--out <file>] [--pausers 1|2]
 import "../../../scripts/net-window.mjs";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -42,6 +45,16 @@ export const TESTNET_RPCS = GATE_RPCS["near-testnet"];
 const SEND_RPC = "https://test.rpc.fastnear.com";
 const FAUCET = "https://helper.nearprotocol.com/account"; // near-cli-rs's testnet faucet (`create-account sponsor-by-faucet-service`)
 export const ROLES = ["admin", "owner", "pauser", "blocklister", "mm1", "mm2", "minter", "ctl1", "ctl2", "holder"];
+/** The role accounts for `pausers` pausers (1 or 2): a second pauser is pauser2. */
+export const rolesFor = (pausers = 1) => (pausers === 2 ? [...ROLES.slice(0, 3), "pauser2", ...ROLES.slice(3)] : ROLES);
+/** --pausers: 1 (the default) or 2; anything else refused. */
+export function pausersOf(argv) {
+  const i = argv.indexOf("--pausers");
+  if (i < 0) return 1;
+  const v = argv[i + 1];
+  if (v !== "1" && v !== "2") throw new Error(`--pausers ${JSON.stringify(v)}: want 1 or 2`);
+  return Number(v);
+}
 export const INIT_NAMES = ["admin_ids", "master_minter_ids", "owner_ids", "pauser_ids", "blocklister_id", "metadata"];
 export const ALLOWANCE = "1000000000000000"; // 1,000,000,000 USDC of allowance for the minter
 export const MINTED = "1000000000000"; // 1,000,000 USDC to the holder
@@ -65,13 +78,13 @@ export function wasmProblems(buf, reportedHash) {
 }
 
 // init's arguments: the six names the deployed code reads, each role a test account
-export function initArgs(token, metadata) {
+export function initArgs(token, metadata, pausers = 1) {
   const r = (x) => `${x}.${token}`;
   return {
     admin_ids: [r("admin")],
     master_minter_ids: [r("mm1"), r("mm2")],
     owner_ids: [r("owner")],
-    pauser_ids: [r("pauser")],
+    pauser_ids: pausers === 2 ? [r("pauser"), r("pauser2")] : [r("pauser")],
     blocklister_id: r("blocklister"),
     metadata,
   };
@@ -164,6 +177,8 @@ async function main() {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   const service = keychainService(a);
+  const pausers = pausersOf(a);
+  const roles = rolesFor(pausers);
   const out = opt("--out", path.join(HERE, "../deployments/testnet-usdc.json"));
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "t").toLowerCase();
   const token = opt("--token", `bf-usdc-${stamp}.testnet`);
@@ -233,10 +248,10 @@ async function main() {
 
   // 2. the role accounts, each with the team key
   const id = (role) => `${role}.${token}`;
-  for (const role of ROLES) await send(token, id(role), [act.create(), act.transfer(ROLE_FUND), act.fullKey(pub)], `create ${id(role)}`);
+  for (const role of roles) await send(token, id(role), [act.create(), act.transfer(ROLE_FUND), act.fullKey(pub)], `create ${id(role)}`);
 
   // 3. deploy + init, signed by the token to itself
-  const init = initArgs(token, metadata);
+  const init = initArgs(token, metadata, pausers);
   await send(token, token, [act.deploy(wasm), act.call("init", init, 300n * TGAS)], "deploy the USDC wasm + init");
   const acct = await rpc(SEND_RPC, "query", { request_type: "view_account", account_id: token, finality: "final" });
   if (acct.code_hash !== PIN.codeHash) throw new Error(`deployed, but ${token}'s code hash is ${acct.code_hash}`);
@@ -266,8 +281,8 @@ async function main() {
     wasm_sha256: PIN.sha256,
     wasm_bytes: wasm.length,
     wasm_from: `view_code of mainnet ${MAINNET_USDC} on ${MAINNET_RPCS.join(" and ")}, equal bytes`,
-    key: { public_key: pubText, holders: [token, ...ROLES.map(id)] },
-    roles: Object.fromEntries(ROLES.map((r) => [r, id(r)])),
+    key: { public_key: pubText, holders: [token, ...roles.map(id)] },
+    roles: Object.fromEntries(roles.map((r) => [r, id(r)])),
     init: { ...init, metadata: { ...metadata, icon: metadata.icon ? `<mainnet's icon, ${metadata.icon.length} chars>` : null } },
     minter_allowance: ALLOWANCE,
     holder: id("holder"),

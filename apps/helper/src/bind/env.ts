@@ -6,14 +6,15 @@
 // that does not decode is check 1's bad_shape and a token no carried network holds is token_not_accepted (check 5),
 // both with nothing read; with no network set, every request answers one of the two.
 //
-// The token watch (status.ts) of the delegate's own network holds the carry (H4.3 check 9); a network with no watch is
-// held. The watch has no pause history yet, so R3's paused exception reads "not known" (pausedAt null) and such a send
-// stays pending, never counted, until the watch can tell (send.ts sendState).
+// The token watch (status.ts) of the delegate's own network holds the carry (H4.3 check 9, at the higher of the two
+// finals) and answers R3's paused exception (its pausedAt: USDC's own views at the receipt's block and at its parent, on
+// both providers); a network
+// with no watch is held, and its paused-error sends stay pending, never counted (send.ts sendState).
 import { join } from "node:path";
 import { HELPER_CODE_STATUS } from "@blindfill/kit";
 import { decodeSignedDelegate } from "./checks.ts";
 import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RPC_TIMEOUT_MS, startLockRounds, startRelayer, type Answer, type Rpc, type SendDeps } from "./send.ts";
-import { readUrls, statusesOf, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenStatus } from "../token-status/status.ts";
+import { readUrls, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
 import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
 import { OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
@@ -51,6 +52,18 @@ function receiverOf(body: unknown): string | null {
 }
 
 /**
+ * A network's watch as the carry takes it: the hold (tokenStatus) and R3's paused exception (pausedAt), both from the
+ * network's own watch. With no watch: held (token_halted), as a watch holds while it is not caught up, and the paused
+ * exception not known, so a paused-error send stays pending (header).
+ */
+export function watchDeps(watch: Pick<TokenWatch, "statusAt" | "pausedAt"> | undefined, token: string): Pick<SendDeps, "tokenStatus" | "pausedAt"> {
+  return {
+    tokenStatus: watch?.statusAt ?? (async () => ({ token, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
+    pausedAt: watch?.pausedAt ?? (async () => null),
+  };
+}
+
+/**
  * The route's sender. A network is carried only when its vault, gas account and key, the release number, the store
  * folder and the margin K are all set; one set in part stops the helper at start, as does a key that does not parse or
  * a vault that is not the one WITHDRAW_VAULT_<NETWORK> names. Every name is read, set or not, so the deploy gate sees
@@ -59,7 +72,7 @@ function receiverOf(body: unknown): string | null {
  */
 export function bindSenderFromEnv(
   env: Record<string, string | undefined>,
-  status: Partial<Record<TokenNetwork, () => Promise<TokenStatus>>> = statusesOf(tokenWatchesFromEnv(env)),
+  watches: Partial<Record<TokenNetwork, Pick<TokenWatch, "statusAt" | "pausedAt">>> = tokenWatchesFromEnv(env),
   fetchFn: typeof fetch = fetch,
 ): BindSender {
   const release = env[RELEASE_ENV] ?? "";
@@ -111,16 +124,14 @@ export function bindSenderFromEnv(
     // a start that fails after the store opens closes it, so the next try can take its lock again
     try {
       const relayer = await startRelayer(rpcs, rpcs[0], net.account, net.key, net.vault, store);
-      const watch = status[net.network];
+      const watch = watches[net.network];
       const deps: SendDeps = {
         cfg: { vault: net.vault, token, marginK: BigInt(k) },
         reads: createSendReads(rpcs, { vault: net.vault, token }),
         store,
         relayer,
         // no watch for this network's token: held (token_halted), as the watch holds while it is not caught up
-        tokenStatus: watch ?? (async () => ({ token, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
-        // the watch has no pause history yet: not known, so a paused-error send stays pending (header)
-        pausedAt: async () => null,
+        ...watchDeps(watch, token),
       };
       stops.push(startLockRounds(deps));
       return deps;

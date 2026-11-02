@@ -52,7 +52,9 @@ import {
   type TxOutcome,
   type TxRef,
 } from "./send.ts";
-import { USDC_CODE_HASH, pausedAt, type TokenStatus } from "../token-status/status.ts";
+import { createTokenWatch, pausedFrom, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
+import { A, B, hashOf, nearPair, PAUSED } from "../../test/token-status/near.ts";
+import { watchDeps } from "./env.ts";
 
 const VAULT = "vault.confidential.unrlzd.near";
 const RELAYER = "bind.test.near";
@@ -115,8 +117,10 @@ class Chain {
   resolved: string[] = [];
   statuses: TokenStatus[] = [OPEN];
   statusAsks = 0;
-  /** The watch's pause history's answer for a height (status.ts pausedAt). */
-  pausedAt: (height: bigint) => boolean | null = () => false;
+  /** Each hold's H rule as asked (status.ts HoldAt). */
+  holds: HoldAt[] = [];
+  /** The watch's answer for a height (status.ts pausedAt). */
+  pausedAt: (height: bigint) => boolean | null | Promise<boolean | null> = () => false;
   resolveOpts: { resend: boolean }[] = [];
   /** Runs inside a relayer send, after its durable write (a race). */
   during?: () => Promise<void>;
@@ -218,7 +222,8 @@ class Chain {
       reads: this.reads(),
       store,
       relayer: this.relayer(),
-      tokenStatus: async () => {
+      tokenStatus: async (at) => {
+        this.holds.push(at);
         const s = this.statuses[Math.min(this.statusAsks, this.statuses.length - 1)]!;
         this.statusAsks++;
         return { ...s, block_height: s.block_height === -1 ? Number(this.final + this.ahead) : s.block_height };
@@ -328,6 +333,34 @@ test("H1: R4 runs at the send's turn in the queue: the final passing the margin 
   assert.deepEqual([w.chain.sends().length, rec(w).sends.length, rec(w).failed], [0, 0, 0]);
 });
 
+test("R4 after (f): a hold that waits at the send's turn while the final passes the margin answers resign_needed, nothing sent; and a re-send the same way", async () => {
+  const w = world();
+  const real = w.deps.relayer.send;
+  const hold = w.deps.tokenStatus;
+  let queued = false;
+  w.deps.relayer.send = async (action, guard, before) => {
+    queued = action.kind === "delegate";
+    return real(action, guard, before);
+  };
+  w.deps.tokenStatus = async (at) => {
+    if (queued) w.chain.final += 200n; // the hold waited (a lagging provider, a 429) while the chain moved on
+    return hold(at);
+  };
+  assert.equal(code(await w.carry(next(w))), "resign_needed");
+  assert.deepEqual([w.chain.sends().length, rec(w).sends.length, rec(w).failed], [0, 0, 0]);
+  // the settle's re-send: K ahead before the hold, under K after it: read, never re-sent
+  const v = world();
+  v.chain.fates = ["unknown", "lands"];
+  ok(await v.carry(next(v)));
+  const mbh = BigInt(rec(v).sends[0]!.max_block_height);
+  v.chain.final = mbh - 20n; // K ahead
+  const vh = v.deps.tokenStatus;
+  v.deps.tokenStatus = async (at) => ((v.chain.final += 1n), vh(at)); // the hold waits a block
+  v.chain.resolveOpts = [];
+  await lockRound(v.deps); // the background round: the settle's own hold, then its margin
+  assert.deepEqual(v.chain.resolveOpts, [{ resend: false }]);
+});
+
 // ---- the idempotent answer and U's in-flight slot ----
 
 test("a re-send of carried bytes answers 200 with that tx_hash, before check 3 (U's nonce moved), and sends nothing; after a restart too", async () => {
@@ -427,6 +460,16 @@ test("R3-3: a second call for U while one is carried: in_flight on the same P, p
 });
 
 // ---- (f) the token's hold ----
+
+test("(f) every hold of a deposit asks at the higher of the two finals (markets.md check 10's H for the ids' calls): before the checks, check 9, the prepay's and the send's turns, a re-send", async () => {
+  const w = world();
+  w.chain.fates = ["paused", "lands"];
+  w.chain.pausedAt = () => null; // the paused send stays pending: the next call re-reads it under the hold
+  ok(await w.carry(next(w)));
+  await w.carry(next(w));
+  assert.ok(w.chain.holds.length >= 5, String(w.chain.holds.length));
+  assert.deepEqual([...new Set(w.chain.holds)], ["higher"]);
+});
 
 test("(f) held before the checks: 503 token_halted, nothing prepaid, sent or counted, no record", async () => {
   const w = world();
@@ -587,25 +630,55 @@ test("(i) R3's exception: USDC's own receipt failed with its paused error and th
   assert.equal(rec(w).landed, true);
 });
 
-test("PROBE N6: paused at the failure, unpaused, then a blocklist and another pause: the history still says paused there, not counted", async () => {
+test("PROBE N6, by views: paused at the failure, unpaused two blocks later, then another pause: the views at the failure's block and the one before still say paused there, not counted", async () => {
   const w = world();
   w.chain.fates = ["paused"];
   let failAt = 0n;
   w.chain.pausedAt = (h) => {
     failAt = h;
-    const at = Number(h);
-    return pausedAt({ from: 0, pausedAtFrom: false, caughtUpTo: at + 50, events: [{ name: "paused", block_height: at - 3 }, { name: "unpaused", block_height: at + 2 }, { name: "paused", block_height: at + 9 }] }, at);
+    // the halt switches at h-3 (paused), h+2 (unpaused), h+9 (paused): only h-1 and h are read
+    const open = (x: bigint) => !(x >= h - 3n && x < h + 2n) && x < h + 9n;
+    const o = (x: bigint) => (open(x) ? { at: Number(x), answer: '"5"' } : { at: Number(x), panic: "FiatToken: paused" });
+    return pausedFrom([o(h - 1n), o(h)], [o(h - 1n), o(h)]);
   };
   ok(await w.carry(next(w)));
   assert.ok(failAt > 0n);
   assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state], [0, "exempt"]);
 });
 
-test("status.ts pausedAt: the state at a height from the history; a pause or unpause in that block is paused; null outside what was read", () => {
-  const h = { from: 100, pausedAtFrom: false, caughtUpTo: 200, events: [{ name: "unpaused" as const, block_height: 150 }, { name: "paused" as const, block_height: 120 }] };
-  assert.deepEqual([110, 119, 120, 121, 149, 150, 151, 200].map((x) => pausedAt(h, x)), [false, false, true, true, true, true, false, false]);
-  assert.deepEqual([pausedAt(h, 99), pausedAt(h, 201)], [null, null]);
-  assert.equal(pausedAt({ ...h, pausedAtFrom: true, events: [] }, 150), true);
+test("status.ts pausedFrom: paused at the block before or at the block; null unless all four reads are known and the providers agree", () => {
+  const open = (at: number) => ({ at, answer: '"20000"' });
+  const paused = (at: number) => ({ at, panic: "FiatToken: paused" });
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), open(10)]), false);
+  assert.equal(pausedFrom([paused(9), open(10)], [paused(9), open(10)]), true, "paused before the block, unpaused in it: the receipt may have run before the unpause");
+  assert.equal(pausedFrom([open(9), paused(10)], [open(9), paused(10)]), true, "paused in the block");
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), paused(10)]), null, "the providers disagree");
+  assert.equal(pausedFrom([open(9), undefined], [open(9), open(10)]), null, "a read missing");
+  assert.equal(pausedFrom([open(9), { at: 10, panic: "FiatToken: paused!" }], [open(9), open(10)]), null, "a panic that is not exactly USDC's");
+  assert.equal(pausedFrom([open(9), { at: 10, answer: "null" }], [open(9), { at: 10, answer: "null" }]), null, "an answer that is not a balance");
+  // named limit: a pause and an unpause inside one block read as open at both heights
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), open(10)]), false);
+});
+
+test("(i) through the network's own watch (env.ts watchDeps, status.ts pausedAt on two providers): a send that failed on USDC's paused error while USDC's views show it paused there is resolved exempt, and U is free again", async () => {
+  const w = world();
+  w.chain.fates = ["paused", "lands"];
+  // two providers answering as nearcore does: USDC paused from the failure's block on, its code the pin
+  const near = nearPair({ final: () => Number(w.chain.final) + 3, balance: (h) => (BigInt(h) >= w.chain.final ? { error: PAUSED } : '"5"') });
+  const watch = createTokenWatch("mainnet", { NEAR_RPC_URL: A, NEAR_RPC_URL_B: B, BIND_VAULT_MAINNET: VAULT }, { fetch: near.fetch });
+  const deps = watchDeps(watch, USDC);
+  w.chain.pausedAt = (h) => deps.pausedAt(h);
+  ok(await w.carry(next(w)));
+  assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state, rec(w).sends[0]!.counted], [0, "exempt", false], "resolved, not counted");
+  const f = Number(w.chain.final);
+  const [before, at] = [hashOf(f - 1), hashOf(f)];
+  assert.deepEqual(
+    [...new Set(near.seen.map((r) => `${r.url === A ? "A" : "B"} ${r.method === "block" ? "block" : String(r.params.method_name ?? r.params.request_type)} ${String(r.params.block_id)}`))].sort(),
+    ["A", "B"].flatMap((p) => [`${p} block ${f}`, `${p} ft_balance_of ${before}`, `${p} ft_balance_of ${at}`, `${p} view_account ${before}`, `${p} view_account ${at}`]).sort(),
+  );
+  // U is free again: the next deposit from U is carried and lands (no in_flight on its P, no prepay_open for a new one)
+  ok(await w.carry(next(w)));
+  assert.equal(rec(w).landed, true);
 });
 
 test("(i) R3's exception waits for the watch: no answer at the failure's height leaves the send pending; a later call settles it", async () => {
@@ -1676,10 +1749,13 @@ test("RECHECK R4: the settle never re-sends U's stored delegate once the token w
   assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 100n), deps)), "ok"); // answered as sent; the delegate reached no node
   assert.equal(store.get(u.id)!.sends[0]!.state, "pending");
   cut = false;
-  // the watch turns halted after check 9 read it open, while the settle runs
-  const reads = deps.reads;
-  deps.reads = { ...reads, newestFinalHeight: async () => ((halted = true), reads.newestFinalHeight()) };
+  // the watch turns halted after check 9 read it open, while the settle runs: the call's first two holds (before the
+  // checks, check 9) read open, the settle's own hold reads halted (the hold comes before R4's margin, guardFor)
+  let asks = 0;
+  const watch = deps.tokenStatus;
+  deps.tokenStatus = async (at) => ((halted ||= ++asks > 2), watch(at));
   assert.equal(code(await carryDeposit(signed(u, P, 101n, node.final + 90n), deps)), "in_flight");
+  assert.equal(asks, 3);
   assert.equal(sentWhileHalted, 0);
   store.close();
 });

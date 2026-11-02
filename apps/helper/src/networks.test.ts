@@ -5,7 +5,9 @@
 //   carried when testnet's watch is open, whatever mainnet's says, and held (503 token_halted) when testnet's holds;
 // - a deposit delegate (POST /v1/bind) on testnet is held by testnet's watch only, the same way;
 // - a mainnet withdrawal (the same proof, its token USDC) is carried or held by mainnet's watch only;
-// - every read of a carry goes to its own network's pair, never the other's.
+// - every read of a carry goes to its own network's pair, never the other's;
+// - with both networks' deposits carried, a send on each that failed on USDC's paused error asks only its own
+//   network's watch whether USDC was paused there (R3's exception, bind/env.ts watchDeps).
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -15,8 +17,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
 import { base58, NEP366_PREFIX } from "./bind/checks.ts";
+import { createFileStore, type DepositRecord } from "./bind/send.ts";
 import { start } from "./server.ts";
-import { TESTNET_TOKEN, USDC, USDC_CODE_HASH, type TokenStatus, type TokenWatches } from "./token-status/status.ts";
+import { TESTNET_TOKEN, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus, type TokenWatches } from "./token-status/status.ts";
 import type { FeeQuoter } from "./withdraw/fee.ts";
 import { A_STORE_YOCTO, idKeyOf } from "./withdraw/send.ts";
 
@@ -60,6 +63,7 @@ function fakeNear() {
     is_known_state_root: true,
     is_known_label_root: true,
     totals: { deposited: "1000000000000", spent: "0", returned: "0" },
+    deposits: [],
   };
   const fetchFn = (async (url: string, init: { body: string }) => {
     const { method, params } = JSON.parse(init.body) as { method: string; params: Record<string, unknown> };
@@ -73,6 +77,16 @@ function fakeNear() {
       result = { result: [...Buffer.from(JSON.stringify({ scope: fixture.scope, asset }))], logs: [], ...at(h) };
     }
     else if (method === "EXPERIMENTAL_protocol_config") result = { transaction_validity_period: 86_400 };
+    else if (method === "EXPERIMENTAL_changes" && params.changes_type === "single_access_key_changes") {
+      // the relayer key's change at D, caused by its stored send (PAUSED_SENDS)
+      const key = (params.keys as { account_id: string; public_key: string }[])[0]!;
+      result = { block_hash: hashOf(h), changes: [{ type: "access_key_update", cause: { type: "transaction_processing", tx_hash: PAUSED_SENDS[key.account_id] }, change: { ...key, access_key: { nonce: 5, permission: "FullAccess" } } }] };
+    } else if (method === "tx") {
+      // the stored send's outcome, FINAL: applied at D, the token's receipt failed on USDC's paused panic at H
+      const token = new URL(String(url)).host.startsWith("m-") ? USDC : TESTNET_TOKEN;
+      const status = { Failure: { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: FiatToken: paused" } } } } };
+      result = { final_execution_status: "FINAL", transaction_outcome: { block_hash: hashOf(PAUSED_B0 + 1) }, receipts_outcome: [{ block_hash: hashOf(H), outcome: { executor_id: token, status } }] };
+    }
     else if (method === "send_tx") result = { final_execution_status: "NONE" };
     else if (method === "query" && params.request_type === "call_function" && String(params.method_name) in views) {
       result = { result: [...Buffer.from(JSON.stringify(views[String(params.method_name)]))], logs: [], ...at(h) };
@@ -95,7 +109,7 @@ const HELD = { ...OPEN, halted: true } as const;
 function watches(m: "open" | "held", t: "open" | "held"): TokenWatches {
   const w = (network: "mainnet" | "testnet", token: string, s: "open" | "held") => {
     const status = async (): Promise<TokenStatus> => ({ token, ...(s === "open" ? OPEN : HELD) });
-    return { network, token, status, held: async () => s === "held" };
+    return { network, token, status, statusAt: status, held: async () => s === "held", pausedAt: async () => null };
   };
   return { mainnet: w("mainnet", USDC, m), testnet: w("testnet", TESTNET_TOKEN, t) } as unknown as TokenWatches;
 }
@@ -278,4 +292,43 @@ test("POST /v1/bind with both networks set at once: each delegate is held by its
       }
     });
   }
+});
+
+// ---- R3's exception per network (review round 1: a carry given the other network's pausedAt failed no test) ----
+const PAUSED_B0 = H - 5;
+/** Each network's bind relayer and the hash of its stored send that failed on USDC's paused panic. */
+const PAUSED_SENDS: Record<string, string> = { [BIND_RELAYER]: hashOf(900_001), [BIND_RELAYER_MAINNET]: hashOf(900_002) };
+
+test("POST /v1/bind with both networks set at once: a send on each that failed on USDC's paused error asks only its own network's watch (pausedAt), and each hold asks at the deposit's H", async () => {
+  const env = { ...BIND_ENV_TESTNET(), ...BIND_ENV_MAINNET() };
+  // one open record per network, its send stored pending: the lock round at start reads its outcome
+  for (const [net, relayer, u] of [["testnet", BIND_RELAYER, "ab"], ["mainnet", BIND_RELAYER_MAINNET, "cd"]] as const) {
+    const store = createFileStore(join(env.HELPER_STORE_DIR, `bind-${net}`));
+    const send = { tx_hash: PAUSED_SENDS[relayer]!, nonce: "5", height: String(PAUSED_B0), block_hash: hashOf(PAUSED_B0), signed_tx: Buffer.from("stored").toString("base64"), sha256: "0".repeat(64), amount: "25000000", max_block_height: String(H), state: "pending" as const, counted: true };
+    const rec: DepositRecord = { u: u.repeat(32), p: "12345", prepaid_bytes: 756, failed: 0, struck: false, landed: false, p_closed: false, prepays: [], sends: [send], carried: [] };
+    store.create(rec);
+    store.close();
+  }
+  const asked: Record<string, { at: bigint[]; holds: HoldAt[] }> = { mainnet: { at: [], holds: [] }, testnet: { at: [], holds: [] } };
+  const w = watches("open", "open");
+  for (const net of ["mainnet", "testnet"] as const) {
+    const status = w[net].status;
+    Object.assign(w[net], {
+      statusAt: (at: HoldAt) => (asked[net]!.holds.push(at), status()),
+      pausedAt: async (h: bigint) => (asked[net]!.at.push(h), true),
+    });
+  }
+  await withHelper(env, w, async (port) => {
+    for (const token of [USDC, TESTNET_TOKEN]) {
+      const a = await call(port, "POST", "/v1/bind", JSON.stringify({ signed_delegate: badlySigned(token) }));
+      assert.deepEqual([a.status, codeOf(a.body)], [400, "bad_signature"], `${token}: ${a.body}`);
+    }
+    // the lock rounds run at each network's start; wait for both to read their send
+    for (let i = 0; i < 5_000 && (asked.mainnet!.at.length === 0 || asked.testnet!.at.length === 0); i++) await new Promise((ok) => setImmediate(ok));
+  });
+  assert.deepEqual(asked.mainnet!.at, [BigInt(H)], "mainnet's send asked mainnet's watch, once");
+  assert.deepEqual(asked.testnet!.at, [BigInt(H)], "testnet's send asked testnet's watch, once");
+  // each network's hold asked at the deposit's H rule
+  assert.ok(asked.mainnet!.holds.length > 0 && asked.mainnet!.holds.every((x) => x === "higher"), JSON.stringify(asked.mainnet!.holds));
+  assert.ok(asked.testnet!.holds.length > 0 && asked.testnet!.holds.every((x) => x === "higher"), JSON.stringify(asked.testnet!.holds));
 });
