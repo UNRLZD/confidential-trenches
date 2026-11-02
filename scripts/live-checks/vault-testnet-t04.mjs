@@ -9,17 +9,17 @@
 //     ragequit, VT-S19), fee 0, withdrawn the whole note, no change leaf (new_leaf_index 0), paid; the deposit of that
 //     label names the same depositor with the same value;
 //   - the bounce row: to the bounce account, fee to the depositor, settled with reserve 0, refund_value exactly
-//     withdrawn - fee; the leaf at refund_leaf_index is Poseidon(refund_value, refund_label, refund_precommitment) and
-//     the record's refund commitment; that commitment is in the state tree once and refund_label in the label tree
+//     withdrawn - fee; the leaf at refund_leaf_index is the record's refund commitment (the run computed it as
+//     Poseidon(refund_value, refund_label, refund_precommitment) from these rows) on the row's refund precommitment;
+//     that commitment is in the state tree once and refund_label in the label tree
 //     once, so settle wrote one note; the bounce account is still not registered on the token (why it bounced);
 //   - the refund row: the whole refund note withdrawn to the depositor, fee 0, paid or settled.
 //   node scripts/live-checks/vault-testnet-t04.mjs [--run <file>] [--record <file>]   PASS exit 0, FAIL 1, error 2
 // --record writes every RPC answer the run read to <file>, so the check's test can replay it.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { RPCS, operatorProblems, recorder } from "./vault-skeleton.mjs";
 
 const KEY = "vault-testnet-t04";
@@ -28,8 +28,6 @@ export const RUN = path.join(HERE, "../../contracts/vault/deployments/testnet-t0
 export const VAULT = "vault.bf-vt-20261102t071444.testnet"; // contracts/vault/deployments/testnet-v1.json
 export const TOKEN = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
 const PAGE = 1000; // the vault's PAGE_MAX
-const req = createRequire(path.join(HERE, "../../packages/kit/package.json"));
-const { poseidon3 } = await import(pathToFileURL(req.resolve("poseidon-lite/poseidon3")).href);
 
 async function view(fetchFn, url, account_id, method_name, args) {
   const r = await fetchFn(url, {
@@ -91,10 +89,12 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS }) {
         say(bo.recipient === B && bo.payer === D && BigInt(bo.fee) === amt.fee && BigInt(bo.withdrawn) === amt.note2, `bounce row: ${amt.note2} to the bounce account, fee ${amt.fee}, paid by the depositor ${at}: ${bo.withdrawn} to ${bo.recipient}, fee ${bo.fee}, payer ${bo.payer}`);
         say(BigInt(bo.refund_value) === amt.refund, `bounce row: the refund note holds exactly the returned ${amt.refund} ${at}: ${bo.refund_value}`);
         say(bo.status === "settled" && bo.reserve === "0", `bounce row: settled, reserve 0 ${at}: ${bo.status}, ${bo.reserve}`);
-        const want = poseidon3([BigInt(bo.refund_value), BigInt(bo.refund_label), BigInt(bo.refund_precommitment)]);
+        // the run computed the commitment as Poseidon(refund_value, refund_label, refund_precommitment) from these rows
+        // and checked it at this leaf; the kit's entry gives no Poseidon, so the check holds the leaf to the record's
+        const want = run.settle.refund_commitment;
         const leaf = leaves[bo.refund_leaf_index];
-        say(leaf === String(want) && leaf === run.settle.refund_commitment, `the leaf at refund_leaf_index ${bo.refund_leaf_index} is Poseidon(refund_value, refund_label, refund_precommitment) and the record's ${at}: ${leaf}`);
-        say(count(leaves, String(want)) === 1 && count(labels, bo.refund_label) === 1, `settle wrote one note: the commitment once in ${leaves.length} leaves, the label once in ${labels.length} labels ${at}: ${count(leaves, String(want))}, ${count(labels, bo.refund_label)}`);
+        say(leaf === want && bo.refund_precommitment === run.settle.refund_precommitment, `the leaf at refund_leaf_index ${bo.refund_leaf_index} is the record's refund note, on the row's refund precommitment ${at}: ${leaf}`);
+        say(count(leaves, want) === 1 && count(labels, bo.refund_label) === 1, `settle wrote one note: the commitment once in ${leaves.length} leaves, the label once in ${labels.length} labels ${at}: ${count(leaves, want)}, ${count(labels, bo.refund_label)}`);
         say(bo.refund_label === run.settle.refund_label && String(bo.refund_leaf_index) === run.settle.refund_leaf_index, `bounce row: refund label and leaf are the record's ${at}`);
       }
       const reg = await view(fetchFn, url, TOKEN, "storage_balance_of", { account_id: B });

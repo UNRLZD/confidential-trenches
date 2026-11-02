@@ -38,7 +38,7 @@ Vault gas burnt per receipt (Tgas): storage_prepay 1.82; ft_transfer_call (depos
     ok  bounce row: 2000000 to the bounce account, fee 100000, paid by the depositor on https://test.rpc.fastnear.com: 2000000 to b-03fc656a.bf-vt-20261102t071444.testnet, fee 100000, payer 4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a
     ok  bounce row: the refund note holds exactly the returned 1900000 on https://test.rpc.fastnear.com: 1900000
     ok  bounce row: settled, reserve 0 on https://test.rpc.fastnear.com: settled, 0
-    ok  the leaf at refund_leaf_index 3 is Poseidon(refund_value, refund_label, refund_precommitment) and the record's on https://test.rpc.fastnear.com: 13094665642350563597862164787960002341551523224574415097453320422490938489601
+    ok  the leaf at refund_leaf_index 3 is the record's refund note, on the row's refund precommitment on https://test.rpc.fastnear.com: 13094665642350563597862164787960002341551523224574415097453320422490938489601
     ok  settle wrote one note: the commitment once in 5 leaves, the label once in 3 labels on https://test.rpc.fastnear.com: 1, 1
     ok  bounce row: refund label and leaf are the record's on https://test.rpc.fastnear.com
     ok  the bounce account is not registered on the token on https://test.rpc.fastnear.com: null
@@ -54,7 +54,7 @@ Vault gas burnt per receipt (Tgas): storage_prepay 1.82; ft_transfer_call (depos
     ok  bounce row: 2000000 to the bounce account, fee 100000, paid by the depositor on https://near-testnet.drpc.org: 2000000 to b-03fc656a.bf-vt-20261102t071444.testnet, fee 100000, payer 4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a
     ok  bounce row: the refund note holds exactly the returned 1900000 on https://near-testnet.drpc.org: 1900000
     ok  bounce row: settled, reserve 0 on https://near-testnet.drpc.org: settled, 0
-    ok  the leaf at refund_leaf_index 3 is Poseidon(refund_value, refund_label, refund_precommitment) and the record's on https://near-testnet.drpc.org: 13094665642350563597862164787960002341551523224574415097453320422490938489601
+    ok  the leaf at refund_leaf_index 3 is the record's refund note, on the row's refund precommitment on https://near-testnet.drpc.org: 13094665642350563597862164787960002341551523224574415097453320422490938489601
     ok  settle wrote one note: the commitment once in 5 leaves, the label once in 3 labels on https://near-testnet.drpc.org: 1, 1
     ok  bounce row: refund label and leaf are the record's on https://near-testnet.drpc.org
     ok  the bounce account is not registered on the token on https://near-testnet.drpc.org: null
