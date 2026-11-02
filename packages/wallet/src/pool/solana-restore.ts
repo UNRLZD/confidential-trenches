@@ -1,15 +1,15 @@
 // Restore of the Solana pool's notes from the 12 words (card notes-per-pool-sol; ../notes/restore.ts is the NEAR
 // vault's, whose walk and follow rules this keeps).
 //
-// - No request names a note or a wallet of the user's. The spent marks ["spent", nullifierHash] and the precommitment
-//   marks ["pre", precommitment] are the program's only empty accounts (src/state.rs), so one getProgramAccounts read
-//   with a dataSize 0 filter on each of two RPCs returns every mark of every user; the two sets must be equal. The
-//   device derives its own marks' addresses and looks them up here. A read per mark (getAccountInfo of a note's own
-//   address) would tell the RPC which notes are one user's, so none is made.
-// - Deposit rows (precommitment, value, label, leaf index) are an input: the program keeps no account that holds a
-//   deposit's value or nonce, only the transaction that made it. Every row is checked against the two RPCs' trees and
-//   marks before it is used: its commitment must be the state tree's leaf at its index, its label in the label tree,
-//   and its precommitment mark present. So a row source can hide a note but never invent or move one.
+// - No request names a note or a wallet of the user's. The program's marks are its only accounts of 0 and 16 bytes
+//   (src/state.rs, M353): a spent mark ["spent", nullifierHash] is empty, and a precommitment mark ["pre",
+//   precommitment] holds its deposit, value u64 LE then the nonce u64 LE its label hashes. Two getProgramAccounts reads
+//   (dataSize 0 and dataSize 16) on each of two RPCs return every mark of every user; the two RPCs must give the same
+//   marks, byte for byte. Then the pages, read after the marks, on the same two RPCs (./solana.ts solanaTreeSync), so
+//   every deposit a mark records has its leaves in them. The device derives its own marks' addresses and looks them up
+//   here; a read per mark (a note's own address) would tell the RPC which notes are one user's, so none is made.
+// - A deposit from its mark: label = keccak256(scope ‖ nonce) mod p, which must be the label tree's leaf nonce - 1, and
+//   commitment = Poseidon(value, label, precommitment), which must be a leaf of the state tree; else the restore stops.
 // - The walk: deposit indices lane by lane until RESTORE_GAP misses in a row (../notes/restore.ts walkLane), each
 //   deposit note's second arrivals; for each note found, spent when its spent mark is in the set. A spent note's
 //   release withdrew its chunk (chunkOf: the queue releases exactly one rung, ./queue.ts), so its change note is
@@ -17,14 +17,15 @@
 //   move, return and second-arrival notes the release's W brought back, as on the NEAR vault. No refund note: a Solana
 //   release pays W in its own transaction.
 // - Each spent note's W is W_{sol, l, j}: its address is returned, the key stays derivable from the words alone.
-import { base58 } from "@scure/base";
-import type { SolanaRpc } from "@blindfill/kit";
+import { base58, base64 } from "@scure/base";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf } from "../notes/store.ts";
 import { chunkOf, type Ladder } from "./ladder.ts";
-import { solanaPda } from "./solana.ts";
+import { solanaPda, solanaPoolOf, solanaTreeSync, SOL_LADDER } from "./solana.ts";
 
 const U32 = 0xffffffff;
 const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
@@ -40,30 +41,44 @@ export function solanaMarkOf(program: string, seed: "spent" | "pre", key: bigint
   return base58.encode(solanaPda([enc.encode(seed), be32(key)], base58.decode(program)).address);
 }
 
-/** Every mark of the pool, read whole on two RPCs that must give the same set. */
-export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal): Promise<Set<string>> {
-  const cfg = { commitment: "finalized", encoding: "base64", dataSlice: { offset: 0, length: 0 }, filters: [{ dataSize: 0 }] };
-  signal?.throwIfAborted();
-  const sets = await Promise.all(
-    rpcs.map(async (rpc, k) => {
-      const a = await rpc("getProgramAccounts", [program, cfg]);
-      if (!Array.isArray(a)) throw new Error(`rpc ${k}: getProgramAccounts: not a list`);
-      const s = new Set<string>();
-      for (const x of a as { pubkey?: unknown; account?: { owner?: unknown } }[]) {
-        if (typeof x?.pubkey !== "string" || x.account?.owner !== program) throw new Error(`rpc ${k}: getProgramAccounts: not the program's account`);
-        s.add(x.pubkey);
-      }
-      return s;
-    }),
-  );
-  signal?.throwIfAborted();
-  const [x, y] = sets as [Set<string>, Set<string>];
-  if (x.size !== y.size || [...x].some((m) => !y.has(m))) throw new Error("the two RPCs' marks differ");
-  return x;
-}
+/** A deposit as its precommitment mark records it. */
+export type SolanaDepositMark = { value: bigint; nonce: bigint };
+/** Every mark of the pool: the spent marks' addresses, and each precommitment mark's address with its record. */
+export type SolanaMarks = { spent: ReadonlySet<string>; pre: ReadonlyMap<string, SolanaDepositMark> };
 
-/** One deposit into the pool, from a row source; checked against the trees and the marks before use. */
-export type SolanaDepositRow = { precommitment: bigint; value: bigint; label: bigint; leafIndex: bigint };
+const PRE_MARK_LEN = 16;
+
+/** Every mark of the pool, read whole on two RPCs that must give the same marks, byte for byte. */
+export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal): Promise<SolanaMarks> {
+  const read = async (rpc: SolanaRpc, k: number, size: number): Promise<Map<string, string>> => {
+    const cfg = { commitment: "finalized", encoding: "base64", ...(size === 0 ? { dataSlice: { offset: 0, length: 0 } } : {}), filters: [{ dataSize: size }] };
+    const a = await rpc("getProgramAccounts", [program, cfg]);
+    if (!Array.isArray(a)) throw new Error(`rpc ${k}: getProgramAccounts: not a list`);
+    const m = new Map<string, string>();
+    for (const x of a as { pubkey?: unknown; account?: { owner?: unknown; data?: unknown } }[]) {
+      const d = x?.account?.data;
+      if (typeof x?.pubkey !== "string" || x.account?.owner !== program || !Array.isArray(d) || d[1] !== "base64" || typeof d[0] !== "string") throw new Error(`rpc ${k}: getProgramAccounts: not the program's account`);
+      if (m.has(x.pubkey)) throw new Error(`rpc ${k}: getProgramAccounts: an account twice`);
+      m.set(x.pubkey, d[0]);
+    }
+    return m;
+  };
+  signal?.throwIfAborted();
+  const [x, y] = await Promise.all(rpcs.map(async (rpc, k) => [await read(rpc, k, 0), await read(rpc, k, PRE_MARK_LEN)] as const));
+  signal?.throwIfAborted();
+  for (const i of [0, 1]) {
+    const [p, q] = [x![i]!, y![i]!];
+    if (p.size !== q.size || [...p].some(([key, d]) => q.get(key) !== d)) throw new Error("the two RPCs' marks differ");
+  }
+  const pre = new Map<string, SolanaDepositMark>();
+  for (const [key, d64] of x![1]!) {
+    const d = base64.decode(d64);
+    if (d.length !== PRE_MARK_LEN) throw new Error(`mark ${key}: not ${PRE_MARK_LEN} bytes`);
+    const v = new DataView(d.buffer, d.byteOffset, 16);
+    pre.set(key, { value: v.getBigUint64(0, true), nonce: v.getBigUint64(8, true) });
+  }
+  return { spent: new Set(x![0]!.keys()), pre };
+}
 
 export type SolanaRestoredNote = { ref: NoteRef; scope: bigint; precommitment: bigint; leaf: Leaf; state: "UNSPENT" | "SPENT"; parent?: string };
 /** A spent note of ours: its release (l, j), the W it paid and the chunk. */
@@ -74,12 +89,10 @@ export type SolanaRestoreArgs = {
   program: string;
   scope: bigint;
   ladder: Ladder;
-  /** The whole state tree's leaves and the label tree's, from the two-RPC page read (./solana.ts). */
+  /** The whole state tree's leaves and the label tree's, read after the marks (./solana.ts solanaTreeSync leaves). */
   stateLeaves: readonly bigint[];
   labelLeaves: readonly bigint[];
-  /** solanaMarks' set. */
-  marks: ReadonlySet<string>;
-  deposits: readonly SolanaDepositRow[];
+  marks: SolanaMarks;
   /** tests only: RESTORE_GAP unless given */
   gap?: number;
 };
@@ -91,9 +104,7 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
     if (leafAt.has(c)) throw new Error(`state leaf ${k} repeats`);
     leafAt.set(c, k);
   });
-  const labels = new Set(a.labelLeaves);
-  const byP = new Map<bigint, SolanaDepositRow>();
-  for (const r of a.deposits) if (!byP.has(r.precommitment)) byP.set(r.precommitment, r);
+  const markOf = (P: bigint): SolanaDepositMark | undefined => marks.pre.get(solanaMarkOf(program, "pre", P));
 
   const notes: SolanaRestoredNote[] = [];
   const spends: SolanaRestoredSpend[] = [];
@@ -104,16 +115,18 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
     seen.add(key);
     notes.push({ ref, scope, precommitment, leaf, state: "UNSPENT", ...(parent === undefined ? {} : { parent }) });
   };
-  // a note the pool holds as a deposit: its row, checked against the trees and the marks
+  // a note the pool holds as a deposit: its precommitment mark's record, checked against both trees
   const asDeposit = (ref: NoteRef): boolean => {
     const P = noteSecrets(seed64, ref).precommitment;
-    const r = byP.get(P);
-    if (r === undefined) return false;
-    const commitment = noteCommitment(r.value, r.label, P);
-    if (leafAt.get(commitment) !== Number(r.leafIndex)) throw new Error(`deposit of ${refKey(ref)}: its commitment is not the state tree's leaf ${r.leafIndex}`);
-    if (!labels.has(r.label)) throw new Error(`deposit of ${refKey(ref)}: its label is not in the label tree`);
-    if (!marks.has(solanaMarkOf(program, "pre", P))) throw new Error(`deposit of ${refKey(ref)}: no precommitment mark`);
-    put(ref, P, { value: r.value, label: r.label, commitment, leafIndex: r.leafIndex });
+    const m = markOf(P);
+    if (m === undefined) return false;
+    if (m.value === 0n || m.nonce === 0n || m.nonce > BigInt(a.labelLeaves.length)) throw new Error(`deposit of ${refKey(ref)}: its mark's nonce ${m.nonce} is not a label tree leaf`);
+    const label = vaultLabelOf(keccak_256, scope, m.nonce);
+    if (a.labelLeaves[Number(m.nonce - 1n)] !== label) throw new Error(`deposit of ${refKey(ref)}: its label is not the label tree's leaf ${m.nonce - 1n}`);
+    const commitment = noteCommitment(m.value, label, P);
+    const at = leafAt.get(commitment);
+    if (at === undefined) throw new Error(`deposit of ${refKey(ref)}: its commitment is not in the state tree`);
+    put(ref, P, { value: m.value, label, commitment, leafIndex: BigInt(at) });
     return true;
   };
   const seconds = (id: SecondId): void => {
@@ -121,13 +134,13 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++)
-    for (const i of walkLane(seed64, scope, lane, (P) => byP.has(P), a.gap ?? RESTORE_GAP).found) asDeposit({ kind: "deposit", s: scope, i });
+    for (const i of walkLane(seed64, scope, lane, (P) => markOf(P) !== undefined, a.gap ?? RESTORE_GAP).found) asDeposit({ kind: "deposit", s: scope, i });
 
   for (let k = 0; k < notes.length; k++) {
     const note = notes[k]!;
     const ref = note.ref;
     if (ref.kind === "deposit") seconds({ id: "U", s: ref.s, i: ref.i });
-    if (!marks.has(solanaMarkOf(program, "spent", noteSecrets(seed64, ref).nullifierHash))) continue;
+    if (!marks.spent.has(solanaMarkOf(program, "spent", noteSecrets(seed64, ref).nullifierHash))) continue;
     note.state = "SPENT";
     const l = note.leaf.label;
     const j = ref.kind === "change" ? ref.j + 1 : 0;
@@ -152,4 +165,11 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
     }
   }
   return { notes, spends };
+}
+
+/** Restore of the Solana pool from the 12 words: the marks, then the pages, on two RPCs; then solanaRestore. */
+export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number }) {
+  const marks = await solanaMarks(a.rpcs, a.program, a.signal);
+  const leaves = await solanaTreeSync(a.rpcs, a.program).leaves(a.signal);
+  return solanaRestore({ seed64: a.seed64, program: a.program, scope: solanaPoolOf(a.program).scope, ladder: SOL_LADDER, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) });
 }

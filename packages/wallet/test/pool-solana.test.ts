@@ -11,11 +11,11 @@ import { base58, base64 } from "@scure/base";
 import { VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { solanaMarkOf, solanaMarks, solanaRestore, type SolanaDepositRow } from "../src/pool/solana-restore.ts";
+import { solanaMarkOf, solanaRestoreNotes } from "../src/pool/solana-restore.ts";
 import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import {
-  SOL_LADDER, SOL_LIFE_MS, SOL_TIP_CAP, solanaContextOf, solanaFeeBound, solanaPageOf, solanaPool, solanaPoolOf, type SolanaFeeAnswer,
+  SOL_LIFE_MS, SOL_TIP_CAP, solanaContextOf, solanaFeeBound, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
 } from "../src/pool/solana.ts";
 
 type Spend = { name: string; note: number; new_commitment: string; withdrawn: string; state_root_index: number; label_root_index: number; salt: string; public_signals: string[] };
@@ -62,7 +62,7 @@ function pages(tree: 0 | 1, es: readonly Entry[], edit: (b: Uint8Array, i: numbe
   return out;
 }
 
-type Chain = { accounts: Map<string, Uint8Array>; slot: number; time: (slot: number) => bigint };
+type Chain = { accounts: Map<string, Uint8Array>; slot: number; time: (slot: number) => bigint; marks?: Map<string, Uint8Array> };
 type Over = { rent0?: number; rent72?: number; fee?: number; url?: string };
 /** One RPC answering the reads solana.ts makes, from a chain's accounts at its finalized slot. */
 function rpc(c: Chain, o: Over = {}, log: string[] = []): SolanaRpc {
@@ -80,6 +80,12 @@ function rpc(c: Chain, o: Over = {}, log: string[] = []): SolanaRpc {
       }
       case "getLatestBlockhash": return { context: ctx, value: { blockhash: base58.encode(new Uint8Array(32).fill(7)), lastValidBlockHeight: 1 } };
       case "getFeeForMessage": return { context: ctx, value: o.fee ?? 10_000 };
+      case "getProgramAccounts": {
+        assert.equal(params[0], PROGRAM);
+        const size = (params[1] as { filters: { dataSize: number }[] }).filters[0]!.dataSize;
+        assert.deepEqual((params[1] as { filters: unknown }).filters, [{ dataSize: size }]); // the whole set, never a note's address
+        return [...(c.marks ?? new Map())].filter(([, d]) => d.length === size).map(([pubkey, d]) => ({ pubkey, account: { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(d), "base64"] } }));
+      }
       default: throw new Error(`unexpected ${method}`);
     }
   };
@@ -228,56 +234,164 @@ test("bind refuses a chunk the program would refuse at the fee: the backstop, an
   await assert.rejects(poolWith(pair(nowChain(), nowChain())).bind({ ...args(), chunk: 2_700_000n }), /under rent\(0\)/);
 });
 
-// Restore from the words alone: the all-zero test seed's notes in the fixture pool (test values, never money).
+test("trees refuses a page that is not the program's: another owner, another page's header", async () => {
+  const before = T(5) * 1000n + 1n;
+  const base = relChain();
+  const page0 = solanaPageOf(PROGRAM, 0, 0);
+  const owner: Chain = { ...base };
+  const o = rpc(owner, MAINNET);
+  const foreign: SolanaRpc = async (m, p) => {
+    const r = (await o(m, p)) as { value?: { owner: string }[] };
+    if (m === "getMultipleAccounts") r.value = r.value!.map((x) => (x === null ? x : { ...x, owner: W }));
+    return r;
+  };
+  await assert.rejects(poolWith([rpc(base, MAINNET), foreign]).trees(before), /not the program's account/);
+  const header = new Map(base.accounts);
+  const d = header.get(page0)!.slice();
+  d[9] = 1; // page_no 1 in page 0's account
+  header.set(page0, d);
+  await assert.rejects(poolWith(pair(base, { ...base, accounts: header })).trees(before), /not page 0 of tree 0/);
+});
 
-test("restore from the words alone: every note, each spent note's W, from whole-set reads only", async () => {
-  const seed = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
-  const P = (ref: Parameters<typeof noteSecrets>[1]) => noteSecrets(seed, ref).precommitment;
-  const leaves: bigint[] = [];
-  const labels: bigint[] = [];
-  const rows: SolanaDepositRow[] = [];
-  const marks = new Set<string>();
-  // another user's deposit first, then ours: deposit notes 0 and 9 (lanes 0 and 1), U_{s,0}'s second arrival 0
+// the boundary pool: both trees past one full page (1,024 entries) into page 1
+function boundary() {
+  const labels = B.deposits.map((_, i) => vaultLabelOf(keccak_256, SCOPE, BigInt(i + 1)));
+  const commit = (i: number) => noteCommitment(BigInt(B.deposits[i]!.value), labels[i]!, big(B.deposits[i]!.precommitment));
+  const state = entries([
+    ...B.deposits.slice(0, 1024).map((_, i) => ({ leaf: commit(i), t: 1_800_000_000n + BigInt(i) })),
+    { leaf: big(B.spends[0]!.new_commitment), t: 1_800_002_000n },
+    { leaf: commit(1024), t: 1_800_002_001n },
+  ]);
+  const label = entries(labels.map((leaf, i) => ({ leaf, t: i < 1024 ? 1_800_000_000n + BigInt(i) : 1_800_002_001n })));
+  return { state, label };
+}
+
+test("incremental sync: a full page is read once; a later call reads only the newest page and any after it", async () => {
+  const { state, label } = boundary();
+  // first: the pool before deposit 1,024 (state 1,025 entries, label 1,024: label page 0 full, no label page 1)
+  const at = (n: number, m: number): Chain => ({ accounts: new Map([...pages(0, state.slice(0, n)), ...pages(1, label.slice(0, m))]), slot: 900, time: () => 1_800_003_000n });
+  const chain = { c: at(1025, 1024) };
+  const logs: string[][] = [[], []];
+  const asked: string[][] = [[], []];
+  const spy = (k: number): SolanaRpc => async (m, p) => {
+    if (m === "getMultipleAccounts") asked[k]!.push(...(p[0] as string[]));
+    return rpc(chain.c, MAINNET, logs[k])(m, p);
+  };
+  const sync = solanaTreeSync([spy(0), spy(1)], PROGRAM);
+  const one = await sync.trees(1_800_002_001_000n);
+  assert.equal(one.stateRoot, big(B.state_roots["1024"]!));
+  for (const k of [0, 1]) for (const t of [0, 1] as const) assert.ok(asked[k]!.includes(solanaPageOf(PROGRAM, t, 0)), "the first call reads page 0");
+  // then deposit 1,024 lands: the second call reads page 1 of each tree and on, never page 0
+  chain.c = at(1026, 1025);
+  asked[0] = [];
+  asked[1] = [];
+  const two = await sync.trees(1_800_002_002_000n);
+  assert.equal(two.stateRoot, big(B.state_roots["1025"]!));
+  assert.equal(two.labelRoot, big(B.label_roots["1024"]!));
+  for (const k of [0, 1]) {
+    for (const t of [0, 1] as const) assert.ok(!asked[k]!.includes(solanaPageOf(PROGRAM, t, 0)), `rpc ${k} tree ${t}: page 0 is not read again`);
+    assert.ok(asked[k]!.includes(solanaPageOf(PROGRAM, 0, 1)) && asked[k]!.includes(solanaPageOf(PROGRAM, 1, 1)), `rpc ${k}: the newest pages are read`);
+  }
+});
+
+test("incremental sync: a page read before that has changed in a later read is refused", async () => {
+  const { state, label } = boundary();
+  const chain = { c: { accounts: new Map([...pages(0, state.slice(0, 1000)), ...pages(1, label.slice(0, 1000))]), slot: 900, time: () => 1_800_003_000n } as Chain };
+  const sync = solanaTreeSync([async (m, p) => rpc(chain.c, MAINNET)(m, p), async (m, p) => rpc(chain.c, MAINNET)(m, p)], PROGRAM);
+  await sync.trees(1_800_001_000_000n);
+  // page 0 fills up, with entry 10 changed on both RPCs since it was read
+  chain.c = { ...chain.c, accounts: new Map([...pages(0, state.slice(0, 1025), (e, i) => { if (i === 10) e[0] ^= 1; }), ...pages(1, label.slice(0, 1024))]) };
+  await assert.rejects(sync.trees(1_800_002_001_000n), /tree 0: page 0 changed since it was read/);
+});
+
+test("the fixtures' precommitment marks decode to each deposit's value and the nonce its label hashes", () => {
+  const rows = R.deposits as unknown as { value: string; label: string; mark: string }[];
+  for (const [i, d] of rows.entries()) {
+    const m = unhex(d.mark);
+    const v = new DataView(m.buffer);
+    assert.equal(m.length, 16);
+    assert.equal(v.getBigUint64(0, true), BigInt(d.value), `deposit ${i}: value`);
+    assert.equal(vaultLabelOf(keccak_256, SCOPE, v.getBigUint64(8, true)), big(d.label), `deposit ${i}: the nonce's label`);
+  }
+});
+
+// Restore from the words alone: the all-zero test seed's notes in the fixture pool (test values, never money).
+const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
+const markData = (value: bigint, nonce: bigint): Uint8Array => {
+  const b = new Uint8Array(16);
+  new DataView(b.buffer).setBigUint64(0, value, true);
+  new DataView(b.buffer).setBigUint64(8, nonce, true);
+  return b;
+};
+function restorePool() {
+  const P = (ref: Parameters<typeof noteSecrets>[1]) => noteSecrets(SEED, ref).precommitment;
+  const state: { leaf: bigint; t: bigint }[] = [];
+  const labels: { leaf: bigint; t: bigint }[] = [];
+  const marks = new Map<string, Uint8Array>();
+  let t = 1_800_000_000n;
+  // a deposit as deposit.rs makes it: its mark (value, nonce), its commitment and its label, one second apart
   const deposit = (precommitment: bigint, value: bigint): bigint => {
-    const label = vaultLabelOf(keccak_256, SCOPE, BigInt(labels.length + 1));
-    labels.push(label);
-    rows.push({ precommitment, value, label, leafIndex: BigInt(leaves.length) });
-    leaves.push(noteCommitment(value, label, precommitment));
-    marks.add(solanaMarkOf(PROGRAM, "pre", precommitment));
+    const nonce = BigInt(labels.length + 1);
+    const label = vaultLabelOf(keccak_256, SCOPE, nonce);
+    labels.push({ leaf: label, t });
+    state.push({ leaf: noteCommitment(value, label, precommitment), t });
+    marks.set(solanaMarkOf(PROGRAM, "pre", precommitment), markData(value, nonce));
+    t += 1n;
     return label;
   };
+  // another user's deposit first, then ours: deposit notes 0 and 9 (lanes 0 and 1), U_{s,0}'s second arrival 0
   deposit(big(R.deposits[0]!.precommitment), 20_000_000n);
   const l0 = deposit(P({ kind: "deposit", s: SCOPE, i: 0 }), 50_000_000n);
   deposit(P({ kind: "deposit", s: SCOPE, i: 9 }), 10_000_000n);
   deposit(P({ kind: "second", id: { id: "U", s: SCOPE, i: 0 }, n: 0 }), 20_000_000n);
   // deposit 0 is released whole: its spent mark, its change note of 0 into the state tree
-  marks.add(solanaMarkOf(PROGRAM, "spent", noteSecrets(seed, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash));
-  leaves.push(noteCommitment(0n, l0, P({ kind: "change", l: l0, j: 0 })));
+  marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), new Uint8Array(0));
+  state.push({ leaf: noteCommitment(0n, l0, P({ kind: "change", l: l0, j: 0 })), t: (t += 1n) });
   // the sell's proceeds came back to the pool as W_{sol, l0, 0}'s return note
   deposit(P({ kind: "return", c: "sol", l: l0, j: 0 }), 5_000_000n);
   // someone else's spent mark
-  marks.add(solanaMarkOf(PROGRAM, "spent", 12345n));
+  marks.set(solanaMarkOf(PROGRAM, "spent", 12345n), new Uint8Array(0));
+  const chain: Chain = { accounts: new Map([...pages(0, entries(state)), ...pages(1, entries(labels))]), slot: 700, time: () => t + 5n, marks };
+  return { chain, l0, P };
+}
 
-  const gpa = (set: Set<string>): SolanaRpc => async (m, p) => {
-    assert.equal(m, "getProgramAccounts");
-    assert.deepEqual((p[1] as { filters: unknown }).filters, [{ dataSize: 0 }]); // the whole set, never one note's address
-    return [...set].map((pubkey) => ({ pubkey, account: { owner: PROGRAM, lamports: 890_880, data: ["", "base64"], executable: false } }));
-  };
-  const got = await solanaMarks([gpa(marks), gpa(marks)], PROGRAM);
-  const r = solanaRestore({ seed64: seed, program: PROGRAM, scope: SCOPE, ladder: SOL_LADDER, stateLeaves: leaves, labelLeaves: labels, marks: got, deposits: rows, gap: 4 });
-  const keys = r.notes.map((n) => `${refKey(n.ref)}:${n.state}`).sort();
-  assert.equal(keys.length, 5);
+test("restore from the words alone: every note and each spent note's W, from the marks and pages on two RPCs", async () => {
+  const { chain, l0 } = restorePool();
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 });
+  assert.equal(r.notes.length, 5);
   assert.deepEqual(r.notes.filter((n) => n.state === "SPENT").map((n) => n.ref.kind), ["deposit"]);
-  assert.ok(r.notes.some((n) => n.ref.kind === "return" && n.leaf.value === 5_000_000n));
+  assert.ok(r.notes.some((n) => n.ref.kind === "deposit" && n.ref.i === 0 && n.leaf.value === 50_000_000n && n.leaf.leafIndex === 1n));
+  assert.ok(r.notes.some((n) => n.ref.kind === "deposit" && n.ref.i === 9 && n.leaf.leafIndex === 2n));
+  assert.ok(r.notes.some((n) => n.ref.kind === "second" && n.leaf.value === 20_000_000n));
   assert.ok(r.notes.some((n) => n.ref.kind === "change" && n.leaf.value === 0n && n.leaf.leafIndex === 4n));
-  assert.ok(r.notes.some((n) => n.ref.kind === "deposit" && n.ref.i === 9));
-  assert.ok(r.notes.some((n) => n.ref.kind === "second"));
-  assert.deepEqual(r.spends.map((s) => [s.l, s.j, s.withdrawn, s.w]), [[l0, 0, 50_000_000n, d.freshWallet(seed, "sol", l0, 0).address]]);
+  assert.ok(r.notes.some((n) => n.ref.kind === "return" && n.leaf.value === 5_000_000n && n.leaf.leafIndex === 5n));
+  assert.deepEqual(r.spends.map((s) => [s.l, s.j, s.withdrawn, s.w]), [[l0, 0, 50_000_000n, d.freshWallet(SEED, "sol", l0, 0).address]]);
+});
 
-  // hostile inputs: two RPCs whose mark sets differ; a row moved off its leaf; a row with no precommitment mark
-  await assert.rejects(solanaMarks([gpa(marks), gpa(new Set([...marks].slice(1)))], PROGRAM), /marks differ/);
-  const moved = rows.map((x, i) => (i === 2 ? { ...x, leafIndex: 0n } : x));
-  assert.throws(() => solanaRestore({ seed64: seed, program: PROGRAM, scope: SCOPE, ladder: SOL_LADDER, stateLeaves: leaves, labelLeaves: labels, marks: got, deposits: moved, gap: 4 }), /not the state tree's leaf/);
-  const noMark = new Set([...got].filter((m) => m !== solanaMarkOf(PROGRAM, "pre", rows[2]!.precommitment)));
-  assert.throws(() => solanaRestore({ seed64: seed, program: PROGRAM, scope: SCOPE, ladder: SOL_LADDER, stateLeaves: leaves, labelLeaves: labels, marks: noMark, deposits: rows, gap: 4 }), /no precommitment mark/);
+test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its label, and a mark not in the state tree", async () => {
+  const { chain, P } = restorePool();
+  const key = solanaMarkOf(PROGRAM, "pre", P({ kind: "deposit", s: SCOPE, i: 9 }));
+  const edit = (f: (m: Map<string, Uint8Array>) => void): Chain => {
+    const m = new Map(chain.marks!);
+    f(m);
+    return { ...chain, marks: m };
+  };
+  // one RPC lacks a spent mark; one RPC's record differs
+  const noSpent = edit((m) => m.delete(solanaMarkOf(PROGRAM, "spent", 12345n)));
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, noSpent), gap: 4 }), /marks differ/);
+  const other = edit((m) => m.set(key, markData(10_000_000n, 4n)));
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, other), gap: 4 }), /marks differ/);
+  // both RPCs: the nonce of another deposit (its label is not this note's), another value (not in the state tree)
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(other, other), gap: 4 }), /commitment is not in the state tree/);
+  const far = edit((m) => m.set(key, markData(10_000_000n, 99n)));
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(far, far), gap: 4 }), /is not a label tree leaf/);
+  // both RPCs serve another label at deposit 9's place in the label tree
+  const label = { ...chain, accounts: new Map(chain.accounts) };
+  const lp = solanaPageOf(PROGRAM, 1, 0);
+  const lb = label.accounts.get(lp)!.slice();
+  lb[16 + 72 * 2 + 31] ^= 1;
+  label.accounts.set(lp, lb);
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(label, label), gap: 4 }), /its label is not the label tree's leaf 2/);
+  const value = edit((m) => m.set(key, markData(20_000_000n, 3n)));
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(value, value), gap: 4 }), /commitment is not in the state tree/);
 });

@@ -7,8 +7,9 @@
 // - now: the newest finalized block's time on each of two RPCs (getSlot finalized, then getBlockTime), the lower one, in
 //   ms. The program's own time is the Clock's unix_timestamp, whole seconds, and a release is refused once
 //   unix_timestamp * 1000 is past deadline_ms (src/release.rs row 2).
-// - trees(beforeMs), duty 2 of pool.ts: the pages ["page", tree, page_no u32 LE] of both trees, read whole on two RPCs
-//   at finalized commitment. Each entry is (leaf, root, unix_timestamp i64 LE) in insert order (src/state.rs); the cut
+// - trees(beforeMs), duty 2 of pool.ts: the pages ["page", tree, page_no u32 LE] of both trees, read on two RPCs at
+//   finalized commitment and kept once both agree (finalized entries never change): a full page is read once, and each
+//   call reads the newest page held and any after it, refusing one whose entries held before have changed. Each entry is (leaf, root, unix_timestamp i64 LE) in insert order (src/state.rs); the cut
 //   keeps the entries with unix_timestamp * 1000 below beforeMs. It refuses when either RPC's read is at a block whose
 //   time is below beforeMs (a later insert could still land under the cut), when the two cuts differ in any byte, when
 //   times go back, and when the root the device builds from the cut's leaves is not the root the page holds at the
@@ -234,17 +235,17 @@ function decodePage(raw: unknown, program: string, tree: number, pageNo: number,
 }
 
 /**
- * One RPC's cut of both trees: every entry whose time is below beforeMs, in insert order, and the lowest slot it read
- * at. Pages are read in order until one is missing, short, or holds an entry at or past beforeMs.
+ * One RPC's read of both trees from page `from[tree]` on: every entry of each page, in insert order, until a page is
+ * missing or short, and the lowest slot it read at. The pages before `from` are the sync's, read and agreed before.
  */
-async function readCut(rpc: SolanaRpc, program: string, beforeMs: bigint, signal?: AbortSignal): Promise<{ cut: [Entry[], Entry[]]; slot: number }> {
-  const cut: [Entry[], Entry[]] = [[], []];
+async function readPages(rpc: SolanaRpc, program: string, from: readonly [number, number], signal?: AbortSignal): Promise<{ pages: [Entry[], Entry[]]; slot: number }> {
+  const pages: [Entry[], Entry[]] = [[], []];
   const open = [true, true];
   let slot = Number.MAX_SAFE_INTEGER;
-  for (let from = 0; open[0] || open[1]; from += BATCH / 2) {
+  for (let step = 0; open[0] || open[1]; step += BATCH / 2) {
     signal?.throwIfAborted();
     const want: { tree: 0 | 1; pageNo: number }[] = [];
-    for (const tree of [TREE_STATE, TREE_LABEL] as const) if (open[tree]) for (let k = from; k < from + BATCH / 2; k++) want.push({ tree, pageNo: k });
+    for (const tree of [TREE_STATE, TREE_LABEL] as const) if (open[tree]) for (let k = 0; k < BATCH / 2; k++) want.push({ tree, pageNo: from[tree] + step + k });
     const a = (await rpc("getMultipleAccounts", [want.map((w) => solanaPageOf(program, w.tree, w.pageNo)), { ...FINAL, encoding: "base64" }])) as { context?: { slot?: unknown }; value?: unknown };
     slot = Math.min(slot, int(a?.context?.slot, "getMultipleAccounts context slot"));
     const got = a?.value;
@@ -253,41 +254,91 @@ async function readCut(rpc: SolanaRpc, program: string, beforeMs: bigint, signal
       if (!open[w.tree]) return;
       const page = decodePage(got[i], program, w.tree, w.pageNo, `page ${w.pageNo} of tree ${w.tree}`);
       if (page === null) return void (open[w.tree] = false);
-      const into = cut[w.tree];
-      if (into.length !== w.pageNo * SOL_PAGE_ENTRIES) throw new Error(`page ${w.pageNo} of tree ${w.tree}: the page before it is not full`);
-      for (const e of page) {
-        if (into.length > 0 && e.t < into[into.length - 1]!.t) throw new Error(`tree ${w.tree}: a time goes back at leaf ${into.length}`);
-        if (e.t >= beforeMs) return void (open[w.tree] = false);
-        into.push(e);
-      }
+      // pages are read in order and a short page closes its tree, so this page follows full ones only
+      pages[w.tree].push(...page);
       if (page.length < SOL_PAGE_ENTRIES) open[w.tree] = false;
     });
   }
-  return { cut, slot };
+  return { pages, slot };
 }
 
-/** The pool's two trees cut at beforeMs, read on two RPCs that agree on every entry, each read at or past beforeMs. */
-export async function solanaPoolTrees(rpcs: Rpcs, program: string, beforeMs: bigint, signal?: AbortSignal): Promise<PoolTrees> {
-  if (typeof beforeMs !== "bigint" || beforeMs <= 0n) throw new Error("beforeMs: a bigint above 0");
-  const reads = await both(rpcs, async (rpc, k) => {
-    const r = await readCut(rpc, program, beforeMs, signal);
-    // every leaf under the cut is final only once the block read at is at or past beforeMs: a later block's time is too
-    const { ms } = await finalTime(rpc, r.slot);
-    if (ms < beforeMs) throw new Error(`rpc ${k}: its read at slot ${r.slot} (${ms} ms) has not reached ${beforeMs}`);
-    return r.cut;
-  }, signal);
-  const trees: VaultTree[] = [];
-  const roots: bigint[] = [];
-  for (const tree of [TREE_STATE, TREE_LABEL]) {
-    const [x, y] = [reads[0][tree]!, reads[1][tree]!];
-    if (x.length !== y.length || !x.every((e, i) => same(e.bytes, y[i]!.bytes))) throw new Error(`tree ${tree}: the two RPCs differ`);
-    if (x.length === 0) throw new Error(`tree ${tree}: no leaf before ${beforeMs}`);
-    const t = new VaultTree(x.map((e) => e.leaf));
-    if (t.root !== x[x.length - 1]!.root) throw new Error(`tree ${tree}: the root built from the leaves is not the page's root at leaf ${x.length - 1}`);
-    trees.push(t);
-    roots.push(t.root);
+/**
+ * The pool's tree sync on two RPCs. Every entry read at finalized commitment on both RPCs, and the same on both, is
+ * kept: it can never change. A full page is read once; each call reads the newest page the sync holds (it may have
+ * grown) and any page after it, on both RPCs, and refuses a read whose entries already held differ.
+ */
+export type SolanaTreeSync = {
+  trees(beforeMs: bigint, signal?: AbortSignal): Promise<PoolTrees>;
+  /** Every leaf of both trees both RPCs agree on, read after anything the caller read before (a restore's marks). */
+  leaves(signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[] }>;
+};
+
+export function solanaTreeSync(rpcs: Rpcs, program: string): SolanaTreeSync {
+  const held: [Entry[], Entry[]] = [[], []];
+  // beforeMs null: no cut, no root check, every agreed entry
+  async function run(beforeMs: bigint | null, signal?: AbortSignal): Promise<Entry[][]> {
+      const base = [held[0], held[1]] as const;
+      const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
+      const reads = await both(rpcs, async (rpc, k) => {
+        const r = await readPages(rpc, program, from, signal);
+        // every leaf under the cut is in only once the block read at is at or past beforeMs: a later block's time is too
+        const { ms } = await finalTime(rpc, r.slot);
+        if (beforeMs !== null && ms < beforeMs) throw new Error(`rpc ${k}: its read at slot ${r.slot} (${ms} ms) has not reached ${beforeMs}`);
+        return r.pages;
+      }, signal);
+      const next: Entry[][] = [];
+      const cuts: Entry[][] = [];
+      for (const tree of [TREE_STATE, TREE_LABEL]) {
+        const kept = base[tree]!;
+        const start = from[tree]! * SOL_PAGE_ENTRIES;
+        const lists = reads.map((r) => {
+          const fresh = r[tree]!;
+          // the entries held past the last full page were read before: a later read must hold them, unchanged
+          for (let i = start; i < kept.length; i++)
+            if (fresh[i - start] === undefined || !same(fresh[i - start]!.bytes, kept[i]!.bytes)) throw new Error(`tree ${tree}: page ${Math.floor(i / SOL_PAGE_ENTRIES)} changed since it was read`);
+          return [...kept.slice(0, start), ...fresh];
+        });
+        const [x, y] = lists as [Entry[], Entry[]];
+        const common = Math.min(x.length, y.length);
+        for (let i = start; i < common; i++) if (!same(x[i]!.bytes, y[i]!.bytes)) throw new Error(`tree ${tree}: the two RPCs differ at leaf ${i}`);
+        for (const l of lists) for (let i = Math.max(1, start); i < l.length; i++) if (l[i]!.t < l[i - 1]!.t) throw new Error(`tree ${tree}: a time goes back at leaf ${i}`);
+        const agreed = x.slice(0, common);
+        if (beforeMs === null) {
+          next.push(agreed);
+          continue;
+        }
+        // the cut: every entry below beforeMs, which both RPCs must hold, since both read past beforeMs
+        let n = 0;
+        while (n < agreed.length && agreed[n]!.t < beforeMs) n++;
+        if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw new Error(`tree ${tree}: the two RPCs differ below the cut`);
+        if (n === 0) throw new Error(`tree ${tree}: no leaf before ${beforeMs}`);
+        next.push(agreed);
+        cuts.push(agreed.slice(0, n));
+      }
+      // a slower call that read less never shrinks what a faster one kept
+      for (const tree of [TREE_STATE, TREE_LABEL]) if (next[tree]!.length > held[tree]!.length) held[tree] = next[tree]!;
+      return beforeMs === null ? next : cuts;
   }
-  return { stateTree: trees[0]!, labelTree: trees[1]!, stateRoot: roots[0]!, labelRoot: roots[1]! };
+  return {
+    async trees(beforeMs, signal) {
+      if (typeof beforeMs !== "bigint" || beforeMs <= 0n) throw new Error("beforeMs: a bigint above 0");
+      const out = (await run(beforeMs, signal)).map((cut, tree) => {
+        const t = new VaultTree(cut.map((e) => e.leaf));
+        if (t.root !== cut[cut.length - 1]!.root) throw new Error(`tree ${tree}: the root built from the leaves is not the page's root at leaf ${cut.length - 1}`);
+        return { tree: t, root: t.root };
+      });
+      return { stateTree: out[0]!.tree, labelTree: out[1]!.tree, stateRoot: out[0]!.root, labelRoot: out[1]!.root };
+    },
+    async leaves(signal) {
+      const [state, label] = await run(null, signal);
+      return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf) };
+    },
+  };
+}
+
+/** One read of the pool's two trees cut at beforeMs (a sync with nothing held). */
+export function solanaPoolTrees(rpcs: Rpcs, program: string, beforeMs: bigint, signal?: AbortSignal): Promise<PoolTrees> {
+  return solanaTreeSync(rpcs, program).trees(beforeMs, signal);
 }
 
 /** The pool's time: the lower of two RPCs' finalized block times, ms. */
@@ -327,6 +378,7 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
   const { program, feePayer } = a;
   const { pool, scope } = solanaPoolOf(program);
   if (feePayer === pool) throw new Error("feePayer: the pool");
+  const sync = solanaTreeSync(a.rpcs, program);
   return {
     id: `sol:${program}`,
     chain: "sol",
@@ -336,7 +388,7 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
     lifeMs: SOL_LIFE_MS,
     sendMarginMs: SOL_SEND_MARGIN_MS,
     now: (signal) => solanaNow(a.rpcs, signal),
-    trees: (beforeMs, signal) => solanaPoolTrees(a.rpcs, program, beforeMs, signal),
+    trees: (beforeMs, signal) => sync.trees(beforeMs, signal),
     async bind({ chunk, wallet, epochStartMs, deadlineMs }, signal) {
       if (!(wallet.publicKey instanceof Uint8Array) || wallet.publicKey.length !== 32 || wallet.address !== base58.encode(wallet.publicKey))
         throw new Error("wallet: a Solana W is base58 of its ed25519 public key");
