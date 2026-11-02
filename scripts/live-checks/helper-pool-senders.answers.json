@@ -1,0 +1,130 @@
+{
+ "good": {
+  "note": "apps/helper at card/helper-pool-senders 8ee9ec6 plus the fee_payer field (working tree), node src/server.ts on the Mac, POOL_SOLANA_*_DEVNET set: the program id of the pool-sol-buy-sell LiteSVM fixture (Grmxuo8j...), a throwaway fee payer key made for this run and never stored, fee 2000000, devnet RPCs api.devnet.solana.com and solana-devnet.drpc.org (never called: both planted transactions are refused before any read); read 2026-11-02T21:47:55.561Z (api.confidential.unrealized.trade does not serve the route yet)",
+  "pool": "6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1",
+  "reads": [
+   {
+    "asked": "fee",
+    "origin": true,
+    "readAt": "2026-11-02T21:47:55.561Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "287",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+    },
+    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"Grmxuo8jHWMnnGxG6Dy2GhJ1ej3tb9SUNxmR5jCxaq54\",\"pool\":\"6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1\",\"fee_payer\":\"2brexuRHMq9zex96AzmeEZYgw4GaJyyMGDjfTF9i2pBW\",\"epoch_ms\":60000,\"epoch_start_ms\":1793656020000,\"fee\":\"2000000\",\"step\":\"100000\"}"
+   },
+   {
+    "asked": "fee",
+    "origin": false,
+    "readAt": "2026-11-02T21:47:55.564Z",
+    "status": 200,
+    "headers": {
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "287",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+    },
+    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"Grmxuo8jHWMnnGxG6Dy2GhJ1ej3tb9SUNxmR5jCxaq54\",\"pool\":\"6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1\",\"fee_payer\":\"2brexuRHMq9zex96AzmeEZYgw4GaJyyMGDjfTF9i2pBW\",\"epoch_ms\":60000,\"epoch_start_ms\":1793656020000,\"fee\":\"2000000\",\"step\":\"100000\"}"
+   },
+   {
+    "asked": "changed",
+    "origin": true,
+    "readAt": "2026-11-02T21:47:55.576Z",
+    "status": 422,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "34",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+    },
+    "body": "{\"error\":{\"code\":\"bad_signature\"}}"
+   },
+   {
+    "asked": "fee_off",
+    "origin": true,
+    "readAt": "2026-11-02T21:47:55.579Z",
+    "status": 422,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "76",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+    },
+    "body": "{\"error\":{\"code\":\"fee_off\",\"detail\":\"relay_fee 2100000, published 2000000\"}}"
+   }
+  ]
+ },
+ "bad_unconfigured": {
+  "note": "the same helper with no POOL_SOLANA_* set, as the deployed helper is before this card: the fee answers 404, so nothing is planted",
+  "pool": "6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1",
+  "reads": [
+   {
+    "asked": "fee",
+    "origin": true,
+    "readAt": "2026-11-02T21:48:03.077Z",
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "30",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 21:48:03 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "asked": "fee",
+    "origin": false,
+    "readAt": "2026-11-02T21:48:03.079Z",
+    "status": 404,
+    "headers": {
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "30",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 21:48:03 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  ]
+ }
+}

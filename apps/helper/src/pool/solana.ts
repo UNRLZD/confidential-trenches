@@ -241,6 +241,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       cluster: cfg.cluster,
       program: cfg.program,
       pool,
+      fee_payer: feePayer,
       epoch_ms: POOL_EPOCH_MS,
       epoch_start_ms: epochStartOf(atMs),
       fee: fee.toString(),

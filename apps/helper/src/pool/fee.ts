@@ -39,6 +39,8 @@ export type PoolFeeAnswer = {
   cluster: string;
   program: string;
   pool: string;
+  /** The fee payer: the payer and the pool's account 2, which the proof's context binds. */
+  fee_payer: string;
   epoch_ms: number;
   epoch_start_ms: number;
   fee: string;

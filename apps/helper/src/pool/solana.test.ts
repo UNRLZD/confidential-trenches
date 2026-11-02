@@ -236,7 +236,7 @@ test("every refusal of the checks reaches the route before any read", async () =
 test("the published fee: on its step, the same for every caller in every epoch, never under the worst release cost", () => {
   const s = sender();
   const a = s.fee(1_800_000_012_345);
-  assert.deepEqual(a, { chain: "solana", cluster: "devnet", program: PROGRAM, pool: POOL, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: 1_800_000_000_000, fee: "2000000", step: "100000" });
+  assert.deepEqual(a, { chain: "solana", cluster: "devnet", program: PROGRAM, pool: POOL, fee_payer: FP.address, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: 1_800_000_000_000, fee: "2000000", step: "100000" });
   assert.equal(s.fee(1_800_000_060_000).fee, a.fee);
   assert.equal(solanaPoolFee("1900001", "x"), 2_000_000n);
   assert.equal(SOLANA_RELEASE_COST_MAX, 1_757_520n, "release.rs row 8's figure");
