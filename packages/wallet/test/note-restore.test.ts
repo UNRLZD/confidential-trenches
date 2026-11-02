@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
-import { VAULT_CONSTANTS, VaultSyncStopped, vaultLabelOf, vaultScopeOf, type VaultSyncRpc } from "@blindfill/kit";
+import { VAULT_CONSTANTS, VAULT_SYNC_LAG_MAX, VaultSyncStopped, vaultLabelOf, vaultScopeOf, type VaultSyncRpc } from "@blindfill/kit";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import * as d from "../src/derive/index.ts";
@@ -423,13 +423,17 @@ test("the gap rule counts within one lane: a lane's note after gap - 1 misses is
   const lane = 3;
   const at = (pos: number) => sec({ kind: "deposit", s: SCOPE, i: lane + 8 * pos }).precommitment;
   const near = new Set([at(0), at(1 + RESTORE_GAP - 1)]); // RESTORE_GAP - 1 misses between: found
-  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => near.has(p)), [lane, lane + 8 * RESTORE_GAP]);
+  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => near.has(p)).found, [lane, lane + 8 * RESTORE_GAP]);
   const far = new Set([at(0), at(1 + RESTORE_GAP)]); // RESTORE_GAP misses between: the walk has stopped
-  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => far.has(p)), [lane]);
+  const stop = walkLane(SEED, SCOPE, lane, (p) => far.has(p));
+  assert.deepEqual(stop.found, [lane]);
+  // it read exactly RESTORE_GAP indices of the lane past its last note, and names the last one's precommitment
+  assert.equal(stop.last, lane + 8 * RESTORE_GAP);
+  assert.equal(stop.lastPrecommitment, at(RESTORE_GAP));
   // another lane's notes never reset this lane's count, and this lane never reads another's indices
   const mixed = new Set([at(0), sec({ kind: "deposit", s: SCOPE, i: 4 + 8 * 5 }).precommitment, at(9)]);
-  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => mixed.has(p), 9), [lane, lane + 8 * 9]); // 8 misses, then the note
-  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => mixed.has(p), 8), [lane]);
+  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => mixed.has(p), 9).found, [lane, lane + 8 * 9]); // 8 misses, then the note
+  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => mixed.has(p), 8).found, [lane]);
 });
 
 test("an empty vault: no note, every lane empty", async () => {
@@ -602,16 +606,45 @@ test("the walk handed in from outside (the proof pool's workers) gives the same 
   const lanesAsked: number[] = [];
   const outside = await restoreNotes({
     seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP,
-    walk: async (lane, ps) => (lanesAsked.push(lane), walkLane(SEED, SCOPE, lane, (p) => ps.has(p), TEST_GAP)),
+    walk: async (lane, scope, gap, ps) => (lanesAsked.push(lane), assert.equal(scope, SCOPE), assert.equal(gap, TEST_GAP), walkLane(SEED, scope, lane, (p) => ps.has(p), gap)),
   });
   assert.deepEqual(lanesAsked.sort(), [0, 1, 2, 3, 4, 5, 6, 7]);
   assert.deepEqual(outside, inline);
   const pages = pagesOf(w.v);
-  const lanes = Array.from({ length: 8 }, (_, lane) => walkLane(SEED, SCOPE, lane, (p) => pages.deposits.some((r) => r.precommitment === p), TEST_GAP));
-  const wrong = lanes.map((x) => [...x]);
-  wrong[0]!.push(1); // lane 1's index in lane 0's walk
-  assert.throws(() => restorePages(SEED, SCOPE, pages, { lanes: wrong }), /not this lane's/);
-  assert.throws(() => restorePages(SEED, SCOPE, pages, { lanes: lanes.slice(1) }), /one walk per lane/);
+  const has = (p: bigint) => pages.deposits.some((r) => r.precommitment === p);
+  const lanes = Array.from({ length: 8 }, (_, lane) => walkLane(SEED, SCOPE, lane, has, TEST_GAP));
+  const copy = () => lanes.map((x) => ({ ...x, found: [...x.found] }));
+  const wrong = copy();
+  wrong[0]!.found.push(1); // lane 1's index in lane 0's walk
+  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: wrong }), /not this lane's/);
+  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: lanes.slice(1) }), /one walk per lane/);
+  assert.equal(restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes }).notes.length, inline.notes.length);
+});
+
+test("a walk handed in that stopped early, or walked another scope or seed, stops the restore (never fewer notes quietly)", async () => {
+  const w = verifierOrder(rng(7));
+  const v = w.v.views();
+  const pages = pagesOf(w.v);
+  const used = w.laneHigh.keys().next().value!;
+  // a lane handed in empty (D1b): it ends at the lane's first index, not gap past its notes
+  const honest = Array.from({ length: 8 }, (_, lane) => walkLane(SEED, SCOPE, lane, (p) => pages.deposits.some((r) => r.precommitment === p), TEST_GAP));
+  const emptied = honest.map((x, lane) => (lane === used ? { found: [], last: lane, lastPrecommitment: sec({ kind: "deposit", s: SCOPE, i: lane }).precommitment } : x));
+  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: emptied }), /the walk ended at/);
+  // a walk with a smaller gap than the restore's stops before gap misses past its last note
+  await assert.rejects(
+    restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, scope, _gap, ps) => walkLane(SEED, scope, lane, (p) => ps.has(p), TEST_GAP - 1) }),
+    /the walk ended at/,
+  );
+  // a walk wired to another token's scope (D1c), or to another seed: no note, a whole walk, the wrong last precommitment
+  const otherScope = vaultScopeOf(keccak_256, VAULT, "usdc.other.testnet");
+  await assert.rejects(
+    restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, _scope, gap, ps) => walkLane(SEED, otherScope, lane, (p) => ps.has(p), gap) }),
+    /last precommitment is not this seed's and scope's/,
+  );
+  await assert.rejects(
+    restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, scope, gap, ps) => walkLane(OTHER, scope, lane, (p) => ps.has(p), gap) }),
+    /last precommitment is not this seed's and scope's/,
+  );
 });
 
 test("the vault's config on both RPCs: a wrong token or scope is refused, the two final heights come back", async () => {
@@ -625,6 +658,17 @@ test("the vault's config on both RPCs: a wrong token or scope is refused, the tw
   const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { finals: [H + 3, H] }), gap: TEST_GAP });
   assert.equal(got.height, H);
   assert.deepEqual(got.finalHeights, [H + 3, H]);
+  // final heights further apart than VAULT_SYNC_LAG_MAX (D3): one RPC is stuck or lying; refused, as vaultSync's probe
+  const far = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { finals: [H + VAULT_SYNC_LAG_MAX, H] }), gap: TEST_GAP });
+  assert.deepEqual(far.finalHeights, [H + VAULT_SYNC_LAG_MAX, H]);
+  // config read after the pages: rpc-b's config final far ahead of its page reads
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { configFinalB: H + VAULT_SYNC_LAG_MAX + 1 }), gap: TEST_GAP }), /over 120 blocks apart/);
+  // an abort while config is read ends the restore at once, even with an RPC that never answers
+  const ctl = new AbortController();
+  const hang = rpcs(v);
+  const b0 = hang[1];
+  hang[1] = { name: b0.name, query: (p, sig) => (p.method_name === "config" ? (setTimeout(() => ctl.abort(new Error("stopped by the user")), 10), new Promise(() => {})) : b0.query(p, sig)) };
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: hang, gap: TEST_GAP, signal: ctl.signal }), /stopped by the user/);
   // an RPC whose final block, read after the pages, is below the block the pages were read at: refused
   await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { configFinalB: H - 1 }), gap: TEST_GAP }), /rpc-b: config: its final height .* is below the pages'/);
 });
@@ -674,7 +718,7 @@ test("R3b: a store note on the same ref with another precommitment stops writeRe
   }
 });
 
-test("R3c and R3d: a TAKEN index the vault holds a note on, and an INCOMING note the vault shows spent, come back in leftAlone with the notes below them", async () => {
+test("R3c, R3d and D5: a TAKEN index and an INCOMING note the vault holds come back in leftAlone; notes below TAKEN are written, notes below INCOMING wait", async () => {
   const v = new Vault();
   const { ns, close } = await liveStore();
   try {
@@ -687,19 +731,26 @@ test("R3c and R3d: a TAKEN index the vault holds a note on, and an INCOMING note
     const n = await ns.planDeposit(SCOPE, (ref) => sec(ref).precommitment);
     await ns.move(n.id, "PLANNED", "INCOMING");
     const nl = v.deposit(n.precommitment, 8_000_000n, hex64("U"))!;
-    v.withdraw(sec(n.ref).nullifierHash, nl.value, null, sec({ kind: "refund", l: nl.label, j: 0 }).precommitment, 0n); // spent elsewhere
+    // spent elsewhere, with a change note below the INCOMING record
+    const nref: NoteRef = { kind: "change", l: nl.label, j: 0 };
+    v.withdraw(sec(n.ref).nullifierHash, 3_000_000n, { P: sec(nref).precommitment, value: 5_000_000n, label: nl.label }, sec({ kind: "refund", l: nl.label, j: 0 }).precommitment, 8n);
     const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP });
     const out = await writeRestored(ns, got);
     const left = out.leftAlone.map((x) => [x.key, x.stored, x.vault, x.why]).sort();
     assert.deepEqual(left, [
       [refKey(t.ref), "TAKEN", "SPENT", "taken"],
-      [refKey(cref), null, "UNSPENT", "parent"],
       [refKey(n.ref), "INCOMING", "SPENT", "incoming"],
+      [refKey(nref), null, "UNSPENT", "parent"],
     ].sort());
     const states = new Map(out.notes.map((x) => [x.id, x.state]));
     assert.equal(states.get(t.id), "TAKEN");
     assert.equal(states.get(n.id), "INCOMING");
-    assert.equal(out.notes.length, 2, "nothing written below a note left alone");
+    // TAKEN is terminal: the other device's 30 USDC change is written, spendable, with no parent (D5)
+    const ch = out.notes.find((x) => refKey(x.ref) === refKey(cref));
+    assert.ok(ch && ch.state === "UNSPENT" && ch.parent === undefined && ch.leaf?.value === 30_000_000n, "the change below TAKEN is written UNSPENT");
+    // INCOMING still lands by the deposit's own confirm: nothing below it is written yet
+    assert.equal(out.notes.find((x) => refKey(x.ref) === refKey(nref)), undefined);
+    assert.equal(out.notes.length, 3);
   } finally {
     close();
   }

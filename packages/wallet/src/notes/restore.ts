@@ -11,8 +11,11 @@
 // - Step 3, the deposit index walk: in each of the 8 lanes, deposit indices i = lane, lane + 8, ... are derived and
 //   matched against the deposits' precommitments, with no request, until RESTORE_GAP indices of that lane in a row
 //   have no note (the lane rule, l.252: every "in a row" counts within one lane). A note found resets only its own
-//   lane's count. The lanes are independent: a caller may run walkLane in the proof pool's workers and hand the found
-//   indices in (restoreNotes `walk`, restorePages `lanes`); each index handed in must be its lane's and is matched again.
+//   lane's count. The lanes are independent: a caller may run walkLane in the proof pool's workers and hand each lane's
+//   walk in (restoreNotes `walk`, which is given the lane, scope and gap the restore checks; restorePages `lanes`). A
+//   walk handed in must name its lane's own indices, ascending, each one matched again here, and the last index it read
+//   with that index's precommitment, recomputed here: so a walk on another scope or seed, or one that stopped before
+//   `gap` misses past its last note, stops the restore instead of returning fewer notes.
 // - Every note found is followed: its nullifier hash into the spends; for a withdrawal (l, j) of ours (l its label, j 0
 //   for the first note of a label, k + 1 for change note k): change note j, which must be the leaf the spend names
 //   unless the spend is a ragequit (context 0, which inserts no change); the refund note once settle has written it (a
@@ -29,6 +32,7 @@
 // - Keys stay here: seed64 is the caller's and is never copied; the masters and note secrets are bigints, which JS
 //   cannot zero, as in ../derive. Nothing here logs or sends a secret: the only requests are vaultSync's page reads.
 import {
+  VAULT_SYNC_LAG_MAX,
   vaultScopeOf,
   vaultSync,
   vaultSyncStart,
@@ -94,10 +98,10 @@ export type RestoreArgs = {
   /** tests only: RESTORE_GAP unless given */
   gap?: number;
   /**
-   * The deposit index walk of one lane, run where the caller likes (the proof pool's workers): walkLane's found indices
-   * for that lane, given the vault's precommitments. walkLane on this thread unless given.
+   * The deposit index walk of one lane, run where the caller likes (the proof pool's workers): walkLane(seed64, scope,
+   * lane, p => precommitments.has(p), gap) for exactly the lane, scope and gap given. walkLane on this thread unless given.
    */
-  walk?: (lane: number, precommitments: ReadonlySet<bigint>) => Promise<readonly number[]>;
+  walk?: (lane: number, scope: bigint, gap: number, precommitments: ReadonlySet<bigint>) => Promise<LaneWalk>;
 };
 
 /** Steps 2 and 3: the vault's pages on two RPCs, then every note of this seed found in them. */
@@ -108,11 +112,10 @@ export async function restoreNotes(a: RestoreArgs): Promise<NoteRestore> {
   // the vault's own scope and token, read on both RPCs: a wrong token string would give an empty restore that looks valid
   const finalHeights = await readConfig(a.rpcs, a.vault, a.token, scope, s.height, a.signal);
   const gap = a.gap ?? RESTORE_GAP;
-  let lanes: (readonly number[])[] | undefined;
+  let lanes: LaneWalk[] | undefined;
   if (a.walk) {
     const ps: ReadonlySet<bigint> = new Set(s.deposits.map((r) => r.precommitment));
-    lanes = await Promise.all(Array.from({ length: RESTORE_LANES }, (_, lane) => a.walk!(lane, ps)));
-    a.signal?.throwIfAborted();
+    lanes = await untilAbort(Promise.all(Array.from({ length: RESTORE_LANES }, (_, lane) => a.walk!(lane, scope, gap, ps))), a.signal);
   }
   return { height: s.height, finalHeights, blockHash: s.blockHash, cursor: s.cursor, ...restorePages(a.seed64, scope, s, { gap, ...(lanes ? { lanes } : {}) }) };
 }
@@ -130,7 +133,11 @@ async function readConfig(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], vault: st
     if ((r!.block_height as number) < height) throw new Error(`${rpc.name}: config: its final height ${String(r!.block_height)} is below the pages' ${height}`);
     return { bytes: new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes as number[])), height: r!.block_height as number };
   };
-  const [x, y] = await Promise.all([one(rpcs[0]), one(rpcs[1])]);
+  signal?.throwIfAborted();
+  const [x, y] = await untilAbort(Promise.all([one(rpcs[0]), one(rpcs[1])]), signal);
+  // as vaultSync's probe: final heights further apart than the device's window mean one RPC is stuck or lying, and step
+  // 7's wait counted from the higher would never end on the honest one
+  if (Math.abs(x.height - y.height) > VAULT_SYNC_LAG_MAX) throw new Error(`config: the RPCs' final heights ${x.height} and ${y.height} are over ${VAULT_SYNC_LAG_MAX} blocks apart`);
   if (x.bytes !== y.bytes) throw new Error("config: the RPCs' answers differ");
   const c = JSON.parse(x.bytes) as { scope?: unknown; asset?: unknown };
   if (c?.scope !== scope.toString()) throw new Error(`config: the vault's scope ${String(c?.scope)} is not the one computed from ${vault} and ${token}`);
@@ -138,26 +145,53 @@ async function readConfig(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], vault: st
   return [x.height, y.height];
 }
 
+/** p, or the signal's reason once it aborts, whichever comes first. */
+function untilAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p;
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(signal.reason);
+    if (signal.aborted) return stop();
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
+/** One lane's walk: the indices with a note, ascending, and the last index read with its precommitment. */
+export type LaneWalk = { found: number[]; last: number; lastPrecommitment: bigint };
+
 /**
  * The deposit index walk of one lane: every index of the lane with a note, in order, until `gap` indices of the lane
  * in a row have none. `has` tells whether the vault holds a precommitment (a lookup in pages already read).
  */
-export function walkLane(seed64: Uint8Array, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP): number[] {
+export function walkLane(seed64: Uint8Array, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP): LaneWalk {
   if (!Number.isInteger(lane) || lane < 0 || lane >= RESTORE_LANES) throw new Error("a lane is 0-7");
   if (!Number.isSafeInteger(gap) || gap < 1) throw new Error("gap is a count above 0");
   // depositNote's derivation (../derive/notes.ts) with its masters read once for the whole walk; every hit is checked
   // against noteSecrets below, so a drift between the two stops the restore instead of losing a note
   const m = masters(seed64, "deposit");
   const found: number[] = [];
+  let last = lane;
+  let lastPrecommitment = 0n;
   for (let i = lane, misses = 0; misses < gap && i <= U32; i += RESTORE_LANES) {
     const n = poseidon3([m.nullifier, scope, BigInt(i)]);
     const sc = poseidon3([m.secret, scope, BigInt(i)]);
-    if (has(poseidon2([n, sc]))) {
+    last = i;
+    lastPrecommitment = poseidon2([n, sc]);
+    if (has(lastPrecommitment)) {
       found.push(i);
       misses = 0;
     } else misses++;
   }
-  return found;
+  return { found, last, lastPrecommitment };
+}
+
+// The last index a whole walk of the lane reads: `gap` indices of the lane past its last note (the lane's first
+// gap indices when it has none), or the lane's last index below 2^32
+function walkEnd(lane: number, found: readonly number[], gap: number): number {
+  const from = found.length === 0 ? lane - RESTORE_LANES : found[found.length - 1]!;
+  const end = from + RESTORE_LANES * gap;
+  const top = lane + RESTORE_LANES * Math.floor((U32 - lane) / RESTORE_LANES);
+  return Math.min(end, top);
 }
 
 /** Step 3 on pages both RPCs gave: the deposits, the spends and the whole state tree's leaves. */
@@ -165,7 +199,7 @@ export function restorePages(
   seed64: Uint8Array,
   scope: bigint,
   pages: { deposits: readonly VaultDepositRow[]; spends: readonly VaultSpendRow[]; leaves: readonly bigint[] },
-  opts: { gap?: number; lanes?: readonly (readonly number[])[] } = {},
+  opts: { gap?: number; lanes?: readonly LaneWalk[] } = {},
 ): Omit<NoteRestore, "height" | "finalHeights" | "blockHash" | "cursor"> {
   const gap = opts.gap ?? RESTORE_GAP;
   if (opts.lanes !== undefined && (!Array.isArray(opts.lanes) || opts.lanes.length !== RESTORE_LANES)) throw new Error("lanes: one walk per lane");
@@ -215,10 +249,15 @@ export function restorePages(
   // the deposit index walk, lane by lane
   const laneHighest: (number | null)[] = [];
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
-    // a walk run elsewhere: the lane's own indices, ascending, each one the vault holds (checked by asDeposit below)
-    const found = opts.lanes ? [...opts.lanes[lane]!] : walkLane(seed64, scope, lane, (P) => byP.has(P), gap);
-    if (!found.every((i, k) => Number.isInteger(i) && i >= 0 && i <= U32 && i % RESTORE_LANES === lane && (k === 0 || i > found[k - 1]!)))
+    const w = opts.lanes ? opts.lanes[lane]! : walkLane(seed64, scope, lane, (P) => byP.has(P), gap);
+    const found = Array.isArray(w?.found) ? [...w.found] : null;
+    // a walk run elsewhere: the lane's own indices, ascending, each one the vault holds (checked by asDeposit below) ...
+    if (found === null || !found.every((i, k) => Number.isInteger(i) && i >= 0 && i <= U32 && i % RESTORE_LANES === lane && (k === 0 || i > found[k - 1]!)))
       throw new Error(`lane ${lane}: the walk's indices are not this lane's, ascending`);
+    // ... read to gap misses past its last note, on this seed and scope: its last index's precommitment is recomputed
+    if (w.last !== walkEnd(lane, found, gap)) throw new Error(`lane ${lane}: the walk ended at ${String(w.last)}, not ${walkEnd(lane, found, gap)} (gap ${gap} past its last note)`);
+    if (w.lastPrecommitment !== noteSecrets(seed64, { kind: "deposit", s: scope, i: w.last }).precommitment)
+      throw new Error(`lane ${lane}: the walk's last precommitment is not this seed's and scope's`);
     for (const i of found) {
       const ref: NoteRef = { kind: "deposit", s: scope, i };
       if (!asDeposit(ref)) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
@@ -291,7 +330,8 @@ export type LeftAlone = {
   /**
    * taken: an index this store marked TAKEN that the vault holds a note on (another device's deposit on this seed);
    * incoming or planned: a note in flight in this store that the vault shows landed (the deposit's own confirm moves
-   * it; INCOMING has no edge to SPENT, so a spent one is reported here); parent: its parent was left alone
+   * it; INCOMING has no edge to SPENT, so a spent one is reported here); parent: its parent is PLANNED or INCOMING and
+   * it waits for that note to land
    */
   why: "taken" | "incoming" | "planned" | "parent";
 };
@@ -301,13 +341,17 @@ export type RestoreWrite = { notes: NoteRecord[]; leftAlone: LeftAlone[] };
  * Writes what a restore found into the note store, parents first, so each change and refund note names its parent and
  * the parent goes to SPENT with it (store.add); a spent note with no child found (a ragequit) is moved to SPENT. A note
  * the store already holds as landed is kept, unless the vault shows it spent; one it holds PLANNED, INCOMING or TAKEN
- * is left as it is and returned in leftAlone, with every note below it. Returns the store's notes and those left alone.
+ * is left as it is and returned in leftAlone. The notes below a PLANNED or INCOMING one are held back with it (returned
+ * as "parent"); those below a TAKEN one are written. Returns the store's notes and those left alone.
  */
 export async function writeRestored(store: NoteStore, r: NoteRestore): Promise<RestoreWrite> {
   const have = new Map((await store.list()).map((n) => [refKey(n.ref), n]));
   const leftAlone: LeftAlone[] = [];
   const blocked = new Set<string>();
   const WHY: Partial<Record<NoteState, LeftAlone["why"]>> = { TAKEN: "taken", INCOMING: "incoming", PLANNED: "planned" };
+  // the notes below a PLANNED or INCOMING note wait for it to land (store.add needs a landed parent); TAKEN is terminal,
+  // so the notes below it are written with no parent, else the other device's change would stay out of reach for good
+  const HOLDS: readonly NoteState[] = ["PLANNED", "INCOMING"];
   for (const n of r.notes) {
     const key = refKey(n.ref);
     const cur = have.get(key);
@@ -316,7 +360,7 @@ export async function writeRestored(store: NoteStore, r: NoteRestore): Promise<R
       const why = WHY[cur.state];
       if (why !== undefined) {
         leftAlone.push({ key, ref: n.ref, stored: cur.state, vault: n.state, why });
-        blocked.add(key);
+        if (HOLDS.includes(cur.state)) blocked.add(key);
       }
       continue;
     }
