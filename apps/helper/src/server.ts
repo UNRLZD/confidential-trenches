@@ -278,8 +278,13 @@ if (import.meta.main) {
     const proxy = createProxy(process.env);
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);
-    server = start(commit, port, proxy, rpc, undefined, lists);
+    const watch = createTokenWatch(process.env);
+    const fee = feeQuoterFromEnv(process.env);
+    // the withdrawal relayer starts with the helper: a restart resends its open sends before any request (send.ts)
+    const withdraw = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status });
+    server = start(commit, port, proxy, rpc, watch, lists, fee, withdraw);
     lists.warm();
+    withdraw.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);

@@ -308,6 +308,11 @@ export const KEYS_MAX = 8;
 export type WithdrawSender = {
   /** POST /v1/withdraw for a parsed body: the network from its token; a token this relayer does not carry is bad_shape. */
   carry(body: unknown): Promise<WithdrawAnswer>;
+  /**
+   * At the helper's start: every carried network started now, so a restart resends its open sends and settles within
+   * one round whether or not a request comes; a start that fails is tried again every OUTCOME_ROUND_MS.
+   */
+  warm(): void;
   stop(): void;
 };
 
@@ -372,17 +377,26 @@ export function withdrawSenderFromEnv(
     stops.push(await startOutcomeRounds(deps));
     return deps;
   };
+  const started = (net: Net): Promise<WithdrawSendDeps> => {
+    let p = ready.get(net.network);
+    if (p === undefined) {
+      p = init(net);
+      ready.set(net.network, p);
+      p.catch(() => ready.delete(net.network)); // the next request, or the next warm try, starts it again
+    }
+    return p;
+  };
+  let stopped = false;
+  const warmNet = (net: Net) =>
+    started(net).catch(() => {
+      if (!stopped) setTimeout(() => warmNet(net), OUTCOME_ROUND_MS).unref();
+    });
   return {
     async carry(body) {
       const token = isObj(body) ? body.token : undefined;
       const net = typeof token === "string" ? nets.get(token) : undefined;
       if (net === undefined) return no("bad_shape");
-      let p = ready.get(net.network);
-      if (p === undefined) {
-        p = init(net);
-        ready.set(net.network, p);
-        p.catch(() => ready.delete(net.network)); // the next request tries again
-      }
+      const p = started(net);
       let deps: WithdrawSendDeps;
       try {
         deps = await p;
@@ -391,6 +405,10 @@ export function withdrawSenderFromEnv(
       }
       return carryWithdraw(body, deps);
     },
-    stop: () => stops.forEach((s) => s()),
+    warm: () => nets.forEach((net) => void warmNet(net)),
+    stop: () => {
+      stopped = true;
+      stops.forEach((s) => s());
+    },
   };
 }

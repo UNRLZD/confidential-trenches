@@ -220,6 +220,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
       if (t === "carried.near") return { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" } };
       return { status: 400, body: { error: { code: "bad_shape" } } };
     },
+    warm: () => undefined,
     stop: () => undefined,
   };
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw);
