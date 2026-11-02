@@ -32,6 +32,8 @@ import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
+import { POOL_EPOCH_MS } from "./pool/fee.ts";
+import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
@@ -41,9 +43,9 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES] = MOUNTED.proxy;
-const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -136,6 +138,7 @@ export function handler(
   token: Token = solanaTokenFromEnv(process.env, proxy, lists),
   bind: BindSender = bindSenderFromEnv(process.env, watches),
   release: number | null = releaseOf(process.env),
+  pools: ReadonlyMap<string, SolanaPoolSender> = solanaPoolSendersFromEnv(process.env),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // GET /v1/token-status serves each network's token from that network's own watch
@@ -196,6 +199,40 @@ export function handler(
           .quote(tokens[0]!)
           .then((a) => send(200, a, cors(req)))
           .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? send(503, { error: { code: "upstream" } }, cors(req)) : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path === POOL_FEE) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // the relayer's one fee per pool per epoch (pool/fee.ts): exactly one pool this helper carries, and at most one
+        // epoch start on the 60 s grid (default: the epoch now); the same answer for every caller
+        const q = new URL(req.url ?? "/", "http://helper.invalid").searchParams;
+        const pool = q.getAll("pool").length === 1 ? pools.get(q.get("pool")!) : undefined;
+        const epochs = q.getAll("epoch");
+        if (pool === undefined || epochs.length > 1) return send(404, { error: { code: "not_found" } }, cors(req));
+        if (epochs.length === 1 && (!/^[1-9][0-9]{0,15}$/.test(epochs[0]!) || Number(epochs[0]) % POOL_EPOCH_MS !== 0)) return send(404, { error: { code: "not_found" } }, cors(req));
+        return send(200, pool.fee(epochs.length === 1 ? Number(epochs[0]) : Date.now()), cors(req));
+      }
+      if (path === POOL_SOLANA_SEND) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // pool/solana.ts: { pool, tx }, the pool one this helper carries (else 404 not_found)
+        void readBody(req, POOL_SOLANA_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            // the pool the body names, one this helper carries (pool/solana.ts checks the transaction is that pool's)
+            const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
+            const pool = typeof name === "string" ? pools.get(name) : undefined;
+            if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+            const a = await pool.carry(body);
+            return { status: a.status, body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
       if (path === WITHDRAW) {

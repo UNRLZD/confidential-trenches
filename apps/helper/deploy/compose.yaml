@@ -52,6 +52,17 @@ services:
       BIND_RELAYER_TESTNET: ${BIND_RELAYER_TESTNET:-}
       BIND_RELAYER_KEY_TESTNET: ${BIND_RELAYER_KEY_TESTNET:-}
       BIND_MARGIN_K: ${BIND_MARGIN_K:-}
+      # GET /v1/pool/fee and POST /v1/pool/solana/send per cluster (src/pool/solana.ts; empty: that cluster's pool is
+      # not carried): the pool program, the fee payer's key (base58 of 64 bytes, gas SOL only), the fee in lamports
+      # (rounded up to 100,000, at least a release's worst cost) and two RPC URLs, comma-separated
+      POOL_SOLANA_PROGRAM_MAINNET: ${POOL_SOLANA_PROGRAM_MAINNET:-}
+      POOL_SOLANA_FEE_PAYER_KEY_MAINNET: ${POOL_SOLANA_FEE_PAYER_KEY_MAINNET:-}
+      POOL_SOLANA_FEE_MAINNET: ${POOL_SOLANA_FEE_MAINNET:-}
+      POOL_SOLANA_RPCS_MAINNET: ${POOL_SOLANA_RPCS_MAINNET:-}
+      POOL_SOLANA_PROGRAM_DEVNET: ${POOL_SOLANA_PROGRAM_DEVNET:-}
+      POOL_SOLANA_FEE_PAYER_KEY_DEVNET: ${POOL_SOLANA_FEE_PAYER_KEY_DEVNET:-}
+      POOL_SOLANA_FEE_DEVNET: ${POOL_SOLANA_FEE_DEVNET:-}
+      POOL_SOLANA_RPCS_DEVNET: ${POOL_SOLANA_RPCS_DEVNET:-}
       HELPER_RELEASE: ${HELPER_RELEASE:-}
       # the relayers' durable store (src/store/durable.ts): the one writable path in a read-only container
       HELPER_STORE_DIR: /app/data
