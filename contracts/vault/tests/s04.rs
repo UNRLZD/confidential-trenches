@@ -17,7 +17,8 @@
 //! root and size, `totals`, the vault's storage use and every raw state byte, the token balances of the vault, the
 //! recipient, the fee recipient and the sender, the recipient's token registration, the NEAR of the recipient and the
 //! fee recipient (when not the sender), the sender's NEAR less exactly the transaction's burnt tokens, and the vault's
-//! NEAR at most the withdraw receipt's burnt tokens higher (its share of the gas, never the attachment).
+//! NEAR at most the withdraw receipt's burnt tokens higher (its share of the gas, never the attachment: the attachment,
+//! row 14's requirement, is several times what the refused receipt burns).
 //!
 //! At G the call lands whole (every receipt succeeds): the recipient gets withdrawn - fee, the fee recipient the fee,
 //! the vault gives withdrawn, all to the base unit; the spend reads `paid` with its withdrawn, fee and recipient;
@@ -112,6 +113,7 @@ fn same<T: Debug>(name: &str, got: &T, want: &T) {
 }
 
 struct World {
+    kind: TokenKind,
     h: Harness,
     relayer: Account,
     alice: Account,
@@ -162,7 +164,7 @@ async fn world(kind: TokenKind) -> R<World> {
         let _ = h.storage_deposit(&h.root, a.id()).await?;
     }
     assert!(h.view(&h.token, "storage_balance_of", json!({"account_id": newcomer.id()})).await?.is_null(), "newcomer is registered");
-    Ok(World { h, relayer, alice, _newcomer: newcomer })
+    Ok(World { kind, h, relayer, alice, _newcomer: newcomer })
 }
 
 /// The fixture's spend is the case: recipient, fee recipient, fee, registration and withdrawn value.
@@ -310,8 +312,10 @@ async fn unchanged(w: &World, c: &Case, step: &str, before: &Snap, o: &Outcome) 
     let (all, vault_burnt) = burnt(&w.h, o, &sender).await?;
     num(&k("near_sender_paid"), before.near_sender - after.near_sender, all);
     let gain = after.near_vault.checked_sub(before.near_vault).ok_or_else(|| format!("{}: the vault's NEAR fell", k("near_vault")))?;
-    println!("check {}: the vault's NEAR +{gain} yocto, its receipts burnt {vault_burnt}", k("near_vault"));
-    assert!(gain <= vault_burnt, "{}: the vault kept {gain} yocto, more than its receipt burnt ({vault_burnt})", k("near_vault"));
+    // its gas share only: a planted check allows one yocto less than it gained
+    let bound = if planted(&k("near_vault")) { gain.saturating_sub(1) } else { vault_burnt };
+    println!("check {}: the vault's NEAR +{gain} yocto, at most {bound} (its receipts burnt {vault_burnt})", k("near_vault"));
+    assert!(gain <= bound, "{}: the vault kept {gain} yocto, more than its receipt burnt ({vault_burnt})", k("near_vault"));
     Ok(())
 }
 
@@ -321,7 +325,7 @@ async fn scout(w: &World, c: &Case) -> R<u64> {
     while t <= MAX_TGAS {
         let (o, _) = send(w, c, t).await?;
         if landed(w, c, &o)? {
-            println!("{}: scout: lands at {t} Tgas, refused at {} Tgas", c.key, t - COARSE_TGAS);
+            println!("{:?} {}: scout: lands at {t} Tgas, refused at {} Tgas", w.kind, c.key, t - COARSE_TGAS);
             return Ok(t);
         }
         t += COARSE_TGAS;
@@ -346,7 +350,7 @@ async fn measured(w: &World, c: &Case, coarse: u64) -> R<u64> {
             break (t, before, o);
         }
         let f = o.calls_exactly(&h.vault, "withdraw", 1)?[0].failure().unwrap_or_default().to_string();
-        println!("{}: refused at {t} Tgas: {}", c.key, f.chars().take(160).collect::<String>());
+        println!("{:?} {}: refused at {t} Tgas: {}", w.kind, c.key, f.chars().take(160).collect::<String>());
         unchanged(w, c, &format!("short{t}"), &before, &o).await?;
         refused_below = Some(t);
         t += 1;
@@ -356,9 +360,9 @@ async fn measured(w: &World, c: &Case, coarse: u64) -> R<u64> {
     num(&format!("{}.gas", c.key), g as u128, refused_below.unwrap() as u128 + 1);
     let wr = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
     let cb = o.calls_exactly(&h.vault, "on_payout", 1)?[0];
-    println!("{}: measured: refused at {} Tgas, lands at exactly {g} Tgas; withdraw burnt {:.3} Tgas, on_payout {:.3} Tgas", c.key, g - 1, wr.gas_burnt as f64 / 1e12, cb.gas_burnt as f64 / 1e12);
+    println!("{:?} {}: measured: refused at {} Tgas, lands at exactly {g} Tgas; withdraw burnt {:.3} Tgas, on_payout {:.3} Tgas", w.kind, c.key, g - 1, wr.gas_burnt as f64 / 1e12, cb.gas_burnt as f64 / 1e12);
     for r in &o.receipts {
-        println!("{}: {}", c.key, r.line());
+        println!("{:?} {}: {}", w.kind, c.key, r.line());
     }
 
     // exact amounts, to the base unit
@@ -383,7 +387,8 @@ async fn measured(w: &World, c: &Case, coarse: u64) -> R<u64> {
     num(&k("totals_spent"), spent(&after), spent(&before) + c.withdrawn);
     num(&k("state_size"), after.state_tree["size"].as_u64().unwrap() as u128, before.state_tree["size"].as_u64().unwrap() as u128 + 1);
     println!(
-        "{}: amounts: vault {} -> {}, recipient {} {} -> {}, fee recipient {FEE_RECIPIENT} {} -> {}, sender {sender} {} -> {}, registration {} -> {}",
+        "{:?} {}: amounts: vault {} -> {}, recipient {} {} -> {}, fee recipient {FEE_RECIPIENT} {} -> {}, sender {sender} {} -> {}, registration {} -> {}",
+        w.kind,
         c.key, before.vault, after.vault, c.recipient, before.recipient, after.recipient, before.fee_recipient, after.fee_recipient, before.sender, after.sender, before.registration, after.registration
     );
 
