@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { busy, outcome, progress, READY, tap } from "../trade/model.ts";
 import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
+import type { PartCount } from "../trade/States.tsx";
 
 // What the sell side reads and does. The sell is the kit's own `buy` request with `side: "sell"` (messages.ts
 // SignpageParams.buy) through the trade box's source (src/screens/trade/source.tsx: the same TradeKit stub, `request`
@@ -46,6 +47,8 @@ export interface Sell {
   bps: number | null;
   /** The kit can take a sell now. */
   ready: boolean;
+  /** A part-filled sell's count of slices, when the kit gives it (TradeKit.part, not in the kit yet). */
+  part: PartCount | null;
   now(): number;
   /** Sells `amount` (token units) as `bps` of the position; nothing while a sell runs or with no amount. */
   sell(amount: string | null, bps: number): void;
@@ -62,12 +65,16 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
 
   useEffect(() => {
     if (!kit.onProgress) return;
-    return kit.onProgress((id, stage) => setPhase((p) => progress(p, id, stage, src.now())));
+    // the time is read when the stage arrives, not when React renders it: a late render must not stretch Filled's time
+    return kit.onProgress((id, stage) => {
+      const at = src.now();
+      setPhase((p) => progress(p, id, stage, at));
+    });
   }, [kit.onProgress, src.now]);
 
-  // Landing's counter: a tick every 100 ms while it draws, none otherwise
+  // Landing's counter and Slow: a tick every 100 ms while a sell runs, none otherwise
   useEffect(() => {
-    if (phase.k !== "landing") return;
+    if (!busy(phase)) return;
     const t = setInterval(() => tick((n) => n + 1), 100);
     return () => clearInterval(t);
   }, [phase.k]);
@@ -77,6 +84,7 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
     phase,
     bps,
     ready,
+    part: phase.k === "ended" ? (kit.part?.(phase.id) ?? null) : null,
     now: src.now,
     sell(amount, b) {
       if (!ready || amount === null || busy(ref.current)) return;
@@ -85,7 +93,10 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
       ref.current = next;
       setPhase(next);
       setBps(b);
-      void h.outcome.then((o) => setPhase((p) => outcome(p, h.id, o, src.now())));
+      void h.outcome.then((o) => {
+        const at = src.now();
+        setPhase((p) => outcome(p, h.id, o, at));
+      });
     },
   };
 }
