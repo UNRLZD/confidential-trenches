@@ -267,8 +267,10 @@ test("S14.3 after a restore: the kit's restore op done", () => {
   assert.equal(restored([{ id: "rs", kind: "restore", stage: "reading", txs: [] }]), false);
 });
 
-test("words: every word has a source; the drafts are the ones not signed", () => {
+test("words: every word has a source; the one draft left is the overflow button's accessible name", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text && w.source, k);
   for (const k of ["total", "token", "holding", "value", "pnl", "realized", "tpsl", "search", "hideSmall", "minSize", "feesPaid", "receipt", "keyExported", "viewKey"] as const) assert.equal(WORDS[k].draft, false, k);
-  for (const k of ["cash", "noPositions", "noActivity", "open", "closed", "offline", "noRoute", "reverted", "held", "today", "yesterday", "notRestorable"] as const) assert.ok(DRAFTS.includes(k), k);
+  // owner 2 Nov 06:08Z, all approved
+  for (const k of ["cash", "noPositions", "noActivity", "open", "closed", "offline", "noRoute", "reverted", "held", "today", "yesterday", "notRestorable"] as const) assert.equal(WORDS[k].draft, false, k);
+  assert.deepEqual([...DRAFTS], ["more"]);
 });

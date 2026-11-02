@@ -5,7 +5,7 @@
 // The owner's lists: the signed CN rows of docs/spec/09-design-brief.md (CN-06, CN-07, CN-42; owner round 16,
 // words-r12), the locked R5 prototype's own labels (design/proto/assets/app.js P.deposit at design-lock-r5; a label R5
 // draws through P.dc is R5's draft copy and stays a draft here), and the owner's picks in docs/owner-decisions.md
-// (owner-words-pass, 1 Nov 03:32Z; the new draft words, 1 Nov 16:45Z).
+// (owner-words-pass, 1 Nov 03:32Z; the new draft words, 1 Nov 16:45Z; the Nov 2 words page, 2 Nov 06:08Z, all approved).
 
 export interface Word {
   text: string;
@@ -14,7 +14,6 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
-const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   deposit: ok("Deposit", "R5 app.js:626 (dseg); src/screens/signin/words.ts"),
@@ -37,19 +36,19 @@ export const WORDS = {
   notAvailable: ok("Not available", "owner 1 Nov 16:45Z (Keep the drafts)"),
   backup: ok("Backup", "owner 1 Nov 16:45Z (Keep the drafts)"),
   retry: ok("Retry", "owner-words-pass (app-signpage-client)"),
-  max: draft("Max", "R5 app.js:632, drawn as draft copy (P.dc)"),
-  youGet: draft("You get, about", "R5 app.js:635-636, drawn as draft copy (P.dc)"),
-  minimum: draft("Minimum", "R5 app.js:635-636, drawn as draft copy (P.dc)"),
-  fees: draft("Fees", "R5 app.js:635-636, drawn as draft copy (P.dc)"),
-  arrives: draft("Arrives", "R5 app.js:635-636, drawn as draft copy (P.dc)"),
-  done: draft("Done", "R5 app.js:662, drawn as draft copy (P.dc)"),
-  busy: draft("Busy", "09-design-brief S4.7 [draft copy: Busy · Retry]"),
-  quoteRefused: draft("Quote refused", "app.md FR-P8: the quote failed the signing page's check, no address (NEW state)"),
-  short: draft("Short deposit", "09-design-brief S4.18 (CN-08 still open)"),
-  refunded: draft("Refunded", "09-design-brief S4.17 [draft copy: Refunded · $X]"),
-  refundedLine: draft("Refunded to this account, not to the wallet it came from.", "app.md FR-D1 (S4.17's facts, CH-032)"),
-  held: draft("Held", "app.md FR-D3 and CH-119 (NEW state)"),
-  heldLine: draft("This deposit couldn't reach your balance, so withdraw it to an address you choose.", "app.md FR-D3 and CH-119"),
+  max: ok("Max", "owner 2 Nov 06:08Z, all approved; drafted from R5 app.js:632, drawn as draft copy (P.dc)"),
+  youGet: ok("You get, about", "owner 2 Nov 06:08Z, all approved; drafted from R5 app.js:635-636, drawn as draft copy (P.dc)"),
+  minimum: ok("Minimum", "owner 2 Nov 06:08Z, all approved; drafted from R5 app.js:635-636, drawn as draft copy (P.dc)"),
+  fees: ok("Fees", "owner 2 Nov 06:08Z, all approved; drafted from R5 app.js:635-636, drawn as draft copy (P.dc)"),
+  arrives: ok("Arrives", "owner 2 Nov 06:08Z, all approved; drafted from R5 app.js:635-636, drawn as draft copy (P.dc)"),
+  done: ok("Done", "owner 2 Nov 06:08Z, all approved; drafted from R5 app.js:662, drawn as draft copy (P.dc)"),
+  busy: ok("Busy", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S4.7 [draft copy: Busy · Retry]"),
+  quoteRefused: ok("Quote refused", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-P8: the quote failed the signing page's check, no address (NEW state)"),
+  short: ok("Short deposit", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S4.18 (CN-08 still open)"),
+  refunded: ok("Refunded", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S4.17 [draft copy: Refunded · $X]"),
+  refundedLine: ok("Refunded to this account, not to the wallet it came from.", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-D1 (S4.17's facts, CH-032)"),
+  held: ok("Held", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-D3 and CH-119 (NEW state)"),
+  heldLine: ok("This deposit couldn't reach your balance, so withdraw it to an address you choose.", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-D3 and CH-119"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

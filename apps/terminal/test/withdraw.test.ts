@@ -115,11 +115,11 @@ test("the tx link: the last tx, on its chain's explorer (scripts/perf-table.mjs:
   assert.equal(txLink([{ chain: "near", hash: "a/b?c" }]), "https://nearblocks.io/txns/a%2Fb%3Fc", "a hash is one path segment");
 });
 
-test("words: each with its source; the drafts are the words no owner list holds yet", () => {
+test("words: each with its source; no draft is left (owner 2 Nov 06:08Z, all approved)", () => {
   for (const [id, w] of Object.entries(WORDS)) {
     assert.ok(w.text.length > 0 && w.source.length > 0, id);
     assert.ok(!/[.!?]$/.test(w.text), `${id}: a label, not a sentence`);
   }
-  assert.deepEqual([...DRAFTS].sort(), ["done", "notSent", "refunded", "sending", "sent", "transaction"]);
+  assert.deepEqual([...DRAFTS], []);
   for (const k of ["withdraw", "deposit", "close", "processing"] as const) assert.equal(WORDS[k].draft, false, k);
 });

@@ -5,7 +5,7 @@
 // - signin.open: only while no seed is stored here (a seed is never replaced: sign out first, W:912). The passkey way
 //   draws the passkey page, the words way the typed 12 words. The wallet way reads the store first and, with no seed,
 //   draws the two choices before the wallet is asked anything or any seed is made (owner pick Ask first, OD:349):
-//   [draft copy: New account] and [draft copy: I already have one]; I already have one draws Use passkey (Face ID) and
+//   New account and I already have one (owner 2 Nov 06:08Z, all approved); I already have one draws Use passkey (Face ID) and
 //   the typed 12 words, then restore (W:50).
 // - signout: only with a seed stored. While the 12 words are the only copy and not saved (a no-PRF seed whose code_saved
 //   is false) it draws the backup first, and Sign out only once the user saved them there (W:913). It deletes the store
