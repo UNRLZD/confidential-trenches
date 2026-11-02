@@ -168,6 +168,8 @@ export const HELPER_RPC_METHODS = {
     "getTransaction",
     "getBlockHeight",
     "getMinimumBalanceForRentExemption",
+    // the set send's dead check (trade/solana/send.ts): is the tx's blockhash still valid at processed
+    "isBlockhashValid",
   ],
   base: [
     "eth_call",
