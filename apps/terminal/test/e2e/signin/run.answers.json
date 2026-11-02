@@ -1,0 +1,2114 @@
+{
+ "note": "Recorded on the box (unrlzd-pc-ct) 2026-11-02T09:36Z by run.mjs --record: good is the three launches, bad each planted prf launch. States, counts, times and boxes only.",
+ "good": [
+  {
+   "run": "prf",
+   "plant": null,
+   "browser": "153.0.8010.12",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-390.png",
+      "fr-P1-S2.1-390.png",
+      "fr-P2-hop-390.png",
+      "fr-P3-S2.2-390.png",
+      "fr-P4-hop-390.png",
+      "fr-P5-S1.3-390.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 92,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 82,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 52
+      },
+      {
+       "step": "passkey",
+       "t": 549
+      },
+      {
+       "step": "create",
+       "t": 981
+      },
+      {
+       "step": "end",
+       "t": 1964
+      }
+     ],
+     "blank": {
+      "frames": 16,
+      "white": 0,
+      "longestMs": 73,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 46,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 99,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 183,
+        "blankMs": 73
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "8v5n62",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "wa9u2y",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "y955kw",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "ssbeti",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-1440.png",
+      "fr-P1-S2.1-1440.png",
+      "fr-P2-hop-1440.png",
+      "fr-P3-S2.2-1440.png",
+      "fr-P4-hop-1440.png",
+      "fr-P5-S1.3-1440.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 70,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 87,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 32
+      },
+      {
+       "step": "passkey",
+       "t": 501
+      },
+      {
+       "step": "create",
+       "t": 904
+      },
+      {
+       "step": "end",
+       "t": 1841
+      }
+     ],
+     "blank": {
+      "frames": 15,
+      "white": 0,
+      "longestMs": 69,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 40,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 84,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 137,
+        "blankMs": 69
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "4768mb",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "v2dqnh",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "j8ulop",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "hsa3cx",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 6353
+  },
+  {
+   "run": "no-prf",
+   "plant": null,
+   "browser": "153.0.8010.12",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "N4-S3.1",
+      "N5-hop",
+      "N6-S1.3"
+     ],
+     "shots": [
+      "fr-N4-S3.1-390.png",
+      "fr-N5-hop-390.png",
+      "fr-N6-S1.3-390.png",
+      "fr-P0-S5.6-390.png",
+      "fr-P1-S2.1-390.png",
+      "fr-P2-hop-390.png",
+      "fr-P3-S2.2-390.png"
+     ],
+     "taps": 4,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 63,
+     "words": 12,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 157,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": false
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "backup",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 61
+      },
+      {
+       "step": "passkey",
+       "t": 540
+      },
+      {
+       "step": "create",
+       "t": 969
+      },
+      {
+       "step": "saved",
+       "t": 1720
+      },
+      {
+       "step": "end",
+       "t": 2696
+      }
+     ],
+     "blank": {
+      "frames": 20,
+      "white": 0,
+      "longestMs": 14,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 32,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 99,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 95,
+        "blankMs": 0
+       },
+       {
+        "step": "saved",
+        "ms": 175,
+        "blankMs": 14
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "tgs4dv",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "94e93a",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0.006042092495676198
+       },
+       {
+        "doc": "ocppah",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "yzifcc",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       },
+       {
+        "step": "saved",
+        "sum": 0
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "N4-S3.1",
+      "N5-hop",
+      "N6-S1.3"
+     ],
+     "shots": [
+      "fr-N4-S3.1-1440.png",
+      "fr-N5-hop-1440.png",
+      "fr-N6-S1.3-1440.png",
+      "fr-P0-S5.6-1440.png",
+      "fr-P1-S2.1-1440.png",
+      "fr-P2-hop-1440.png",
+      "fr-P3-S2.2-1440.png"
+     ],
+     "taps": 4,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 92,
+     "words": 12,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 150,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": false
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "backup",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 39
+      },
+      {
+       "step": "passkey",
+       "t": 508
+      },
+      {
+       "step": "create",
+       "t": 903
+      },
+      {
+       "step": "saved",
+       "t": 1596
+      },
+      {
+       "step": "end",
+       "t": 2564
+      }
+     ],
+     "blank": {
+      "frames": 22,
+      "white": 0,
+      "longestMs": 61,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 33,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 72,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 55,
+        "blankMs": 0
+       },
+       {
+        "step": "saved",
+        "ms": 167,
+        "blankMs": 61
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "i659l8",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "lk47t9",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0.0033209876543209877
+       },
+       {
+        "doc": "w1gogi",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "2qsohv",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       },
+       {
+        "step": "saved",
+        "sum": 0
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 7768
+  },
+  {
+   "run": "wallet",
+   "plant": null,
+   "browser": "153.0.8010.12",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "W1-S2.1",
+      "W2-choose",
+      "W2-existing",
+      "W2-words",
+      "W6-hop",
+      "W7-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-390.png",
+      "fr-W1-S2.1-390.png",
+      "fr-W2-choose-390.png",
+      "fr-W2-existing-390.png",
+      "fr-W2-words-390.png",
+      "fr-W6-hop-390.png",
+      "fr-W7-S1.3-390.png"
+     ],
+     "taps": 5,
+     "doubleTap": false,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 80,
+     "newAccount": "wallet-signature",
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 181,
+     "pages": 1,
+     "creates": [],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "choose",
+      "existing",
+      "words",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 54
+      },
+      {
+       "step": "wallet",
+       "t": 523
+      },
+      {
+       "step": "have-one",
+       "t": 913
+      },
+      {
+       "step": "recovery",
+       "t": 1010
+      },
+      {
+       "step": "continue",
+       "t": 1112
+      },
+      {
+       "step": "end",
+       "t": 2110
+      }
+     ],
+     "blank": {
+      "frames": 21,
+      "white": 0,
+      "longestMs": 71,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 30,
+        "blankMs": 0
+       },
+       {
+        "step": "wallet",
+        "ms": 46,
+        "blankMs": 0
+       },
+       {
+        "step": "have-one",
+        "ms": 52,
+        "blankMs": 0
+       },
+       {
+        "step": "recovery",
+        "ms": 55,
+        "blankMs": 0
+       },
+       {
+        "step": "continue",
+        "ms": 198,
+        "blankMs": 71
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "gxa98j",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "6i5bno",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "w4kkk7",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "v1e064",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "wallet",
+        "sum": 0
+       },
+       {
+        "step": "have-one",
+        "sum": 0
+       },
+       {
+        "step": "recovery",
+        "sum": 0
+       },
+       {
+        "step": "continue",
+        "sum": 0
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "W1-S2.1",
+      "W2-choose",
+      "W2-existing",
+      "W2-words",
+      "W6-hop",
+      "W7-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-1440.png",
+      "fr-W1-S2.1-1440.png",
+      "fr-W2-choose-1440.png",
+      "fr-W2-existing-1440.png",
+      "fr-W2-words-1440.png",
+      "fr-W6-hop-1440.png",
+      "fr-W7-S1.3-1440.png"
+     ],
+     "taps": 5,
+     "doubleTap": false,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 64,
+     "newAccount": "wallet-signature",
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 139,
+     "pages": 1,
+     "creates": [],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "choose",
+      "existing",
+      "words",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 33
+      },
+      {
+       "step": "wallet",
+       "t": 481
+      },
+      {
+       "step": "have-one",
+       "t": 826
+      },
+      {
+       "step": "recovery",
+       "t": 869
+      },
+      {
+       "step": "continue",
+       "t": 920
+      },
+      {
+       "step": "end",
+       "t": 1888
+      }
+     ],
+     "blank": {
+      "frames": 16,
+      "white": 0,
+      "longestMs": 70,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 27,
+        "blankMs": 0
+       },
+       {
+        "step": "wallet",
+        "ms": 19,
+        "blankMs": 0
+       },
+       {
+        "step": "have-one",
+        "ms": 18,
+        "blankMs": 18
+       },
+       {
+        "step": "recovery",
+        "ms": 25,
+        "blankMs": 25
+       },
+       {
+        "step": "continue",
+        "ms": 168,
+        "blankMs": 70
+       }
+      ],
+      "resting": [
+       {
+        "ms": 365,
+        "at": 512,
+        "oneColour": 0.995,
+        "screen": "W2-words"
+       }
+      ]
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "8eamvf",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "4oel73",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "5sxafa",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "m5k283",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "wallet",
+        "sum": 0
+       },
+       {
+        "step": "have-one",
+        "sum": 0
+       },
+       {
+        "step": "recovery",
+        "sum": 0
+       },
+       {
+        "step": "continue",
+        "sum": 0
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 6528
+  }
+ ],
+ "bad": {
+  "jump": {
+   "run": "prf",
+   "plant": "jump",
+   "browser": "153.0.8010.12",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-390.png",
+      "fr-P1-S2.1-390.png",
+      "fr-P2-hop-390.png",
+      "fr-P3-S2.2-390.png",
+      "fr-P4-hop-390.png",
+      "fr-P5-S1.3-390.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 64,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 87,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 64
+      },
+      {
+       "step": "passkey",
+       "t": 552
+      },
+      {
+       "step": "create",
+       "t": 986
+      },
+      {
+       "step": "end",
+       "t": 1966
+      }
+     ],
+     "blank": {
+      "frames": 19,
+      "white": 0,
+      "longestMs": 72,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 42,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 103,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 180,
+        "blankMs": 72
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "az2z24",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "73zm57",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "7hmy87",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0.04851643044855237
+       },
+       {
+        "doc": "lt15mm",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0.04851643044855237
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-1440.png",
+      "fr-P1-S2.1-1440.png",
+      "fr-P2-hop-1440.png",
+      "fr-P3-S2.2-1440.png",
+      "fr-P4-hop-1440.png",
+      "fr-P5-S1.3-1440.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 64,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 87,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 36
+      },
+      {
+       "step": "passkey",
+       "t": 514
+      },
+      {
+       "step": "create",
+       "t": 911
+      },
+      {
+       "step": "end",
+       "t": 1837
+      }
+     ],
+     "blank": {
+      "frames": 17,
+      "white": 0,
+      "longestMs": 58,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 44,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 74,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 126,
+        "blankMs": 58
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "cq6205",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "4fujm4",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "eonjf8",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0.025
+       },
+       {
+        "doc": "twnhly",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0.025
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 6355
+  },
+  "missing-frame": {
+   "run": "prf",
+   "plant": "missing-frame",
+   "browser": "153.0.8010.12",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-390.png",
+      "fr-P2-hop-390.png",
+      "fr-P3-S2.2-390.png",
+      "fr-P4-hop-390.png",
+      "fr-P5-S1.3-390.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 79,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 74,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 57
+      },
+      {
+       "step": "passkey",
+       "t": 504
+      },
+      {
+       "step": "create",
+       "t": 938
+      },
+      {
+       "step": "end",
+       "t": 1907
+      }
+     ],
+     "blank": {
+      "frames": 17,
+      "white": 0,
+      "longestMs": 62,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 38,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 102,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 168,
+        "blankMs": 62
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "pzemdn",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "qow9nd",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "drid7i",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "1f5231",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-1440.png",
+      "fr-P2-hop-1440.png",
+      "fr-P3-S2.2-1440.png",
+      "fr-P4-hop-1440.png",
+      "fr-P5-S1.3-1440.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 91,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 85,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open",
+      "state",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 34
+      },
+      {
+       "step": "passkey",
+       "t": 484
+      },
+      {
+       "step": "create",
+       "t": 871
+      },
+      {
+       "step": "end",
+       "t": 1799
+      }
+     ],
+     "blank": {
+      "frames": 16,
+      "white": 0,
+      "longestMs": 58,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 41,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 67,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 127,
+        "blankMs": 58
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "yr28tp",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "rha0u4",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "poknyx",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       },
+       {
+        "doc": "p02e5p",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       },
+       {
+        "step": "create",
+        "sum": 0
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 6259
+  },
+  "prf-off": {
+   "run": "prf",
+   "plant": "prf-off",
+   "browser": "153.0.8010.12",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2"
+     ],
+     "shots": [
+      "error-390.png",
+      "fr-P0-S5.6-390.png",
+      "fr-P1-S2.1-390.png",
+      "fr-P2-hop-390.png",
+      "fr-P3-S2.2-390.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 63,
+     "error": "the PRF launch drew the no-PRF backup after the create",
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": false
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "backup"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 59
+      },
+      {
+       "step": "passkey",
+       "t": 537
+      },
+      {
+       "step": "create",
+       "t": 953
+      }
+     ],
+     "blank": {
+      "frames": 13,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 33,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 85,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 239,
+        "blankMs": 0
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "cyzcie",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "p03c37",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0.006042092495676198
+       },
+       {
+        "doc": "ouotp7",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2"
+     ],
+     "shots": [
+      "error-1440.png",
+      "fr-P0-S5.6-1440.png",
+      "fr-P1-S2.1-1440.png",
+      "fr-P2-hop-1440.png",
+      "fr-P3-S2.2-1440.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 82,
+     "error": "the PRF launch drew the no-PRF backup after the create",
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "sign.confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": false
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "backup"
+     ],
+     "messages": [
+      "state",
+      "state",
+      "nav",
+      "signin.open"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 39
+      },
+      {
+       "step": "passkey",
+       "t": 513
+      },
+      {
+       "step": "create",
+       "t": 897
+      }
+     ],
+     "blank": {
+      "frames": 12,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 43,
+        "blankMs": 0
+       },
+       {
+        "step": "passkey",
+        "ms": 63,
+        "blankMs": 0
+       },
+       {
+        "step": "create",
+        "ms": 177,
+        "blankMs": 0
+       }
+      ],
+      "resting": []
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "wog7ty",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0
+       },
+       {
+        "doc": "epvhzg",
+        "host": "sign.confidential.unrealized.trade",
+        "top": true,
+        "sum": 0.0033209876543209877
+       },
+       {
+        "doc": "rk6wri",
+        "host": "confidential.unrealized.trade",
+        "top": false,
+        "sum": 0
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0
+       },
+       {
+        "step": "passkey",
+        "sum": 0
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 4449
+  }
+ }
+}
