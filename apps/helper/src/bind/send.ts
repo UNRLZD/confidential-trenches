@@ -41,8 +41,9 @@ import { HELPER_CODE_STATUS } from "@blindfill/kit";
 import { base58, checkBindDeposit, decodeSignedDelegate, type BindCode, type BindConfig, type BindLedger, type BindReads, type KeyRead } from "./checks.ts";
 import { tokenHeld, type TokenStatus } from "../token-status/status.ts";
 import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
+import { pagesAt, type Rpc } from "../near/pages.ts";
 
-export type { StoreFs };
+export type { Rpc, StoreFs };
 
 // ---- The papers' values ----
 
@@ -601,7 +602,6 @@ async function carryChecked(deps: SendDeps, d: Checked, sha: string): Promise<An
 
 // ---- The NEAR side: two RPCs, the relayer's key ----
 
-export type Rpc = (method: string, params: unknown) => Promise<unknown>;
 export const RPC_TIMEOUT_MS = 10_000;
 const RPC_ANSWER_MAX = 4 * 1024 * 1024;
 
@@ -706,10 +706,10 @@ export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string;
   const catchUp = async (at?: bigint) => {
     for (;;) {
       const from = next;
-      const page = await both(async (r, h) => view(r, h, cfg.vault, "deposits", { from, limit: PAGE }), at);
-      if (!Array.isArray(page) || page.length > PAGE) throw new Error("deposits: not a page");
+      // the shared page rule (near/pages.ts): both providers at the block asked, one block hash, the same bytes, each row at its index
+      const page = await pagesAt(rpcs, cfg.vault, "deposits", at ?? (await finalHeight()), from, PAGE);
       for (const x of page) {
-        if (!isObj(x) || typeof x.precommitment !== "string" || typeof x.depositor !== "string") throw new Error("deposits: not a deposit");
+        if (typeof x.precommitment !== "string" || typeof x.depositor !== "string") throw new Error("deposits: not a deposit");
         pages.set(x.precommitment, { depositor: x.depositor, value: u128(x.value, "deposits.value") });
       }
       next = from + page.length;

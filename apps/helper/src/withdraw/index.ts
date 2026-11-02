@@ -7,7 +7,9 @@
 // same block hash and the same bytes; anything else (an error, a disagreement, a malformed row) counts nothing and
 // decides nothing. It is caught up at H once it has read the whole list at a block at or above H. At each request H
 // is the newest block final on both providers (the lower of their two finals), and the index waits up to
-// INDEX_WAIT_MS for H; past that the request is `index_behind` (503), and the kit resends.
+// INDEX_WAIT_MS for H; past that the request is `index_behind` (503), and the kit resends. A final that has stopped
+// moving would freeze H, so H is refused (index_behind) when the two finals are more than MAX_FINAL_GAP blocks apart or
+// H's block time is more than MAX_FINAL_AGE_MS behind the helper's clock.
 //
 // The send records: one row per nullifier value (its 32-byte big-endian hex, never the string as received), written
 // once by an atomic create-if-absent before any broadcast, kept across restarts in the relayers' durable store
@@ -15,7 +17,10 @@
 // an index that lags the chain can never cause a second send: the row, not the index, keys check 6. A row that reads
 // succeeded marks the nullifier spent at once, before the pages show it. A failure other than the deadline's is kept
 // with its error and the signer's release number: `withdraw_failed` while the running release's number is not above
-// it, and a release with a higher number may carry the note once more by replacing that row. A deadline failure, or
+// it, and a release with a higher number may carry the note once more by replacing that row. The release number is the
+// store's own, given once when the running helper opens it, and every claim is stamped with it. A claim also refuses
+// unless the signing key's nonce counter is already past the record's nonce, so a record never holds a nonce another
+// signer of that key could still take. A deadline failure, or
 // a send never applied, deletes the row and frees the note. An unreadable row is treated as open: never replaced,
 // never sent past.
 //
@@ -23,7 +28,8 @@
 // (withdraw/send.ts); this file holds the rules they write through.
 import * as nodeFs from "node:fs";
 import { VAULT_FIELD_P } from "@blindfill/kit";
-import type { Rpc, TxRef } from "../bind/send.ts";
+import type { RelayerStore, TxRef } from "../bind/send.ts";
+import { pagesAt, type Rpc } from "../near/pages.ts";
 import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
 import { decimal } from "./checks.ts";
 
@@ -33,6 +39,17 @@ import { decimal } from "./checks.ts";
 export const INDEX_WAIT_MS = 2_000;
 /** Rows per `spends` page read (the vault caps a page at PAGE_MAX, 1,000; 100 keeps an answer well under the RPC bound). */
 export const SPENDS_PAGE = 100;
+/**
+ * The most blocks the two providers' finals may stand apart before H is refused. F69 (markets paper, H3.4 check 5,
+ * M:1124-1126; check 9's margin, M:1380-1381) reads a provider's final answer about 5 blocks behind the other's; twice
+ * that is a provider that has stopped, not one that lags [design].
+ */
+export const MAX_FINAL_GAP = 10n;
+/**
+ * The most H's block time may trail the helper's clock: check 9's 30 s margin (M:1376), so a frozen final can hold a
+ * spend past check 5 for no longer than one deadline margin [design].
+ */
+export const MAX_FINAL_AGE_MS = 30_000n;
 const POLL_MS = 100;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -49,8 +66,9 @@ export function nullifierKey(nf: bigint): string {
 
 /**
  * One withdrawal send: the signed bytes and their hash, the key's nonce n and the block b0 it was signed on (TxRef),
- * the key, the request's deadline_ms and the release number of the helper that signed. `outcome` is "open" until the
- * send's outcome is read from blocks; `error` holds the on-chain error of a failure.
+ * the key's counter id (`<account>/<public key>`, as the relayer's nonce counter names it), the request's deadline_ms
+ * and the release number of the helper that signed. `outcome` is "open" until the send's outcome is read from blocks;
+ * `error` holds the on-chain error of a failure.
  */
 export type WithdrawSend = TxRef & {
   nullifier: string;
@@ -64,17 +82,23 @@ export type WithdrawSend = TxRef & {
 /** A send's outcome as read from blocks. A deadline failure and a send never applied delete the row. */
 export type SendOutcome = { kind: "succeeded" } | { kind: "failed"; error: string } | { kind: "deadline" } | { kind: "never_applied" };
 
+/** What a signer hands claim(): the store stamps the release, the open outcome and no error. */
+export type SendClaim = Omit<WithdrawSend, "release" | "outcome" | "error">;
+
 export type Claim = { ok: true; replaced: WithdrawSend | null } | { ok: false; code: Exclude<NullifierCode, "index_behind"> };
 
 export type WithdrawSendStore = {
+  /** The running helper's release number (HELPER_RELEASE), stamped on every claim. */
+  readonly release: number;
   /** The nullifier's send record, "unreadable" for a row that does not parse as one, or null. */
   get(nf: bigint): WithdrawSend | "unreadable" | null;
   /**
    * The write before a broadcast: creates the row when none exists, or replaces a row holding a failure (not the
-   * deadline's; those rows are deleted) recorded under a lower release number than `rec.release`; durable before it
-   * returns. Fails on any other row, writing nothing: its bytes are then dropped, never sent.
+   * deadline's; those rows are deleted) recorded under a lower release number than the store's; durable before it
+   * returns. Fails on any other row, writing nothing: its bytes are then dropped, never sent. Throws, writing nothing,
+   * unless the key's nonce counter is already past `rec.nonce`.
    */
-  claim(rec: WithdrawSend): Claim;
+  claim(rec: SendClaim): Claim;
   /** Records an open send's outcome. Throws unless the row is open and holds `tx_hash` (a stale outcome changes nothing). */
   settle(nf: bigint, tx_hash: string, outcome: SendOutcome): void;
   /** The nullifiers whose row is open or unreadable: the restart's rebroadcast and the outcome rounds' work. */
@@ -111,12 +135,20 @@ function parseSend(text: string, key: string): WithdrawSend | null {
   return ok ? (x as WithdrawSend) : null;
 }
 
+export type SendStoreOptions = {
+  /** The running helper's release number: a whole number, 1 or more, that only goes up. */
+  release: number;
+  /** The relayer's nonce counters (bind/send.ts RelayerStore): the one store every signer of a key takes n from. */
+  keys: Pick<RelayerStore, "nonceNext">;
+};
+
 /** The withdrawal send records in `dir`, owned by this process (the store's lock). */
-export function createWithdrawSendStore(dir: string, fs: StoreFs = nodeFs): WithdrawSendStore {
-  return openDurableDir(dir, fs, (d) => sendStoreOn(d));
+export function createWithdrawSendStore(dir: string, opts: SendStoreOptions, fs: StoreFs = nodeFs): WithdrawSendStore {
+  if (!Number.isSafeInteger(opts.release) || opts.release < 1) throw new Error("release: not a whole number, 1 or more");
+  return openDurableDir(dir, fs, (d) => sendStoreOn(d, opts));
 }
 
-function sendStoreOn(d: DurableDir): WithdrawSendStore {
+function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): WithdrawSendStore {
   const read = (nf: bigint): WithdrawSend | "unreadable" | null => {
     const text = d.text(name(nf));
     if (text === null) return null;
@@ -131,11 +163,15 @@ function sendStoreOn(d: DurableDir): WithdrawSendStore {
     if (rec === null || rec.outcome === "open") openRows.add(m[1]!);
   }
   return {
+    release,
     get: read,
-    claim(rec) {
+    claim(input) {
       d.held();
+      const rec: WithdrawSend = { ...input, release, outcome: "open", error: null };
       const nf = BigInt(`0x${rec.nullifier}`);
-      if (rec.outcome !== "open" || rec.error !== null || parseSend(JSON.stringify(rec), nullifierKey(nf)) === null) throw new Error("claim: not an open send record");
+      if (parseSend(JSON.stringify(rec), nullifierKey(nf)) === null) throw new Error("claim: not an open send record");
+      const counter = keys.nonceNext(rec.key);
+      if (counter === null || counter <= BigInt(rec.nonce)) throw new Error("claim: the key's nonce counter is not past this nonce");
       const v = JSON.stringify(rec);
       // one process holds the store and nothing here awaits: the read and the write are one step
       if (d.createOnce(name(nf), v)) {
@@ -146,7 +182,7 @@ function sendStoreOn(d: DurableDir): WithdrawSendStore {
       if (held === null) throw new Error("claim: the row went between its link and its read"); // nothing runs between them: no await
       if (held === "unreadable" || held.outcome === "open") return { ok: false, code: "in_flight" };
       if (held.outcome === "succeeded") return { ok: false, code: "spent" };
-      if (held.release >= rec.release) return { ok: false, code: "withdraw_failed" };
+      if (held.release >= release) return { ok: false, code: "withdraw_failed" };
       d.replace(name(nf), v);
       openRows.add(rec.nullifier);
       return { ok: true, replaced: held };
@@ -169,7 +205,7 @@ function sendStoreOn(d: DurableDir): WithdrawSendStore {
 // ---- The spends index ----
 
 export type SpendsIndex = {
-  /** H: the newest block final on both providers, the lower of their two finals. */
+  /** H: the newest block final on both providers, the lower of their two finals; throws on finals too far apart or too old. */
   finalHeight(): Promise<bigint>;
   /** Reads the pages at H until the index is caught up at H; false when INDEX_WAIT_MS passes first. */
   reach(h: bigint): Promise<boolean>;
@@ -181,36 +217,20 @@ export type SpendsIndex = {
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
-/** One provider's newest final block height. */
-async function finalOf(r: Rpc): Promise<bigint> {
+/** One provider's newest final block: its height and its time in ms (header.timestamp_nanosec, a decimal string). */
+async function finalOf(r: Rpc): Promise<{ height: bigint; ms: bigint }> {
   const b = await r("block", { finality: "final" });
-  const h = isObj(b) && isObj(b.header) ? b.header.height : undefined;
+  const head = isObj(b) && isObj(b.header) ? b.header : {};
+  const h = head.height;
+  const ns = head.timestamp_nanosec;
   if (typeof h !== "number" || !Number.isSafeInteger(h) || h < 0) throw new Error("block: no final height");
-  return BigInt(h);
+  if (typeof ns !== "string" || !/^(0|[1-9][0-9]{0,19})$/.test(ns)) throw new Error("block: no timestamp_nanosec");
+  return { height: BigInt(h), ms: BigInt(ns) / 1_000_000n };
 }
 
-/** One provider's `spends` page at block `h`: the answer's bytes and the block hash it names, which must be at `h`. */
-async function pageOf(r: Rpc, vault: string, h: bigint, from: number): Promise<{ bytes: Buffer; hash: string }> {
-  const a = await r("query", {
-    request_type: "call_function",
-    block_id: Number(h),
-    account_id: vault,
-    method_name: "spends",
-    args_base64: Buffer.from(JSON.stringify({ from, limit: SPENDS_PAGE })).toString("base64"),
-  });
-  if (!isObj(a) || !Array.isArray(a.result)) throw new Error("spends: no result bytes");
-  if (a.block_height !== Number(h)) throw new Error("spends: not answered at the block asked");
-  if (typeof a.block_hash !== "string" || !B58.test(a.block_hash)) throw new Error("spends: no block hash");
-  if (!a.result.every((x) => Number.isInteger(x) && x >= 0 && x <= 255)) throw new Error("spends: result not bytes");
-  return { bytes: Buffer.from(a.result as number[]), hash: a.block_hash };
-}
-
-/** The page's nullifiers, refused unless every row is the vault's SpendView at its own index with a canonical nullifier. */
-function nullifiersOf(bytes: Buffer, from: number): bigint[] {
-  const page = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)) as unknown;
-  if (!Array.isArray(page) || page.length > SPENDS_PAGE) throw new Error("spends: not a page");
-  return page.map((x, i) => {
-    if (!isObj(x) || x.index !== from + i) throw new Error("spends: a row not at its index");
+/** The page's nullifiers, refused unless each is one canonical decimal below p (pagesAt holds the rest of the page rule). */
+function nullifiersOf(page: Record<string, unknown>[]): bigint[] {
+  return page.map((x) => {
     const nf = decimal(x.nullifier_hash, VAULT_FIELD_P);
     if (nf === null) throw new Error("spends: a nullifier_hash not one canonical decimal below p");
     return nf;
@@ -221,7 +241,7 @@ function nullifiersOf(bytes: Buffer, from: number): bigint[] {
  * The index of the vault's spends pages on two providers of two operators (`rpcs`). Reads run one at a time, each at a
  * final height at or above the last, so the cursor never skips a row.
  */
-export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, waitMs = INDEX_WAIT_MS): SpendsIndex {
+export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, waitMs = INDEX_WAIT_MS, now: () => number = Date.now): SpendsIndex {
   const spent = new Set<string>();
   let next = 0;
   let caughtAt: bigint | null = null;
@@ -230,10 +250,7 @@ export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, wait
   const readAt = async (h: bigint) => {
     for (;;) {
       const from = next;
-      const [a, b] = await Promise.all(rpcs.map((r) => pageOf(r, vault, h, from)));
-      if (a!.hash !== b!.hash) throw new Error("spends: the two providers name different blocks");
-      if (!a!.bytes.equals(b!.bytes)) throw new Error("spends: the two providers disagree on a page");
-      const nfs = nullifiersOf(a!.bytes, from);
+      const nfs = nullifiersOf(await pagesAt(rpcs, vault, "spends", h, from, SPENDS_PAGE));
       for (const nf of nfs) spent.add(nullifierKey(nf));
       next = from + nfs.length;
       if (nfs.length < SPENDS_PAGE) return;
@@ -267,7 +284,12 @@ export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, wait
   return {
     async finalHeight() {
       const [a, b] = await Promise.all(rpcs.map(finalOf));
-      return a! < b! ? a! : b!;
+      const gap = a!.height > b!.height ? a!.height - b!.height : b!.height - a!.height;
+      if (gap > MAX_FINAL_GAP) throw new Error(`the two finals stand ${gap} blocks apart`);
+      const low = a!.height < b!.height ? a! : b!;
+      const age = BigInt(Math.floor(now())) - low.ms;
+      if (age > MAX_FINAL_AGE_MS) throw new Error(`H's block is ${age} ms old`);
+      return low.height;
     },
     reach,
     holds: (nf) => spent.has(nullifierKey(nf)),
@@ -279,9 +301,8 @@ export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, wait
 
 export type NullifierDeps = {
   index: SpendsIndex;
+  /** The send records, opened with the running helper's release number. */
   store: WithdrawSendStore;
-  /** The running helper's release number (HELPER_RELEASE): a whole number that only goes up. */
-  release: number;
 };
 
 export type NullifierVerdict = { ok: true } | { ok: false; code: NullifierCode; why: string };
@@ -292,7 +313,6 @@ export type NullifierVerdict = { ok: true } | { ok: false; code: NullifierCode; 
  * release number at or above the running one). An ok here is advice: only claim() decides who sends.
  */
 export async function checkNullifier(nf: bigint, deps: NullifierDeps): Promise<NullifierVerdict> {
-  if (!Number.isSafeInteger(deps.release) || deps.release < 1) throw new Error("release: not a whole number, 1 or more");
   const no = (code: NullifierCode, why: string): NullifierVerdict => ({ ok: false, code, why });
   const first = deps.store.get(nf);
   if (first !== null && first !== "unreadable" && first.outcome === "succeeded") return no("spent", "its send record reads succeeded");
@@ -311,6 +331,6 @@ export async function checkNullifier(nf: bigint, deps: NullifierDeps): Promise<N
   if (rec === "unreadable") return no("in_flight", "its send record does not read; held as open");
   if (rec.outcome === "succeeded") return no("spent", "its send record reads succeeded");
   if (rec.outcome === "open") return no("in_flight", "its send's outcome is not final");
-  if (rec.release >= deps.release) return no("withdraw_failed", `its send failed on chain under release ${rec.release}`);
+  if (rec.release >= deps.store.release) return no("withdraw_failed", `its send failed on chain under release ${rec.release}`);
   return { ok: true };
 }

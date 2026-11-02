@@ -712,8 +712,9 @@ test("M1: createSendReads.depositSettled answers unknown until both finals pass 
   let lowFinal = 1007;
   const mk = (high: boolean): Rpc => async (method, params) => {
     if (method === "block") return { header: { height: high ? 1011 : lowFinal } };
-    const q = params as { block_id: number };
-    return { result: [...Buffer.from(JSON.stringify(q.block_id >= 1009 ? [row] : []))] };
+    const q = params as { block_id: number; args_base64: string };
+    const { from } = JSON.parse(Buffer.from(q.args_base64, "base64").toString()) as { from: number };
+    return { result: [...Buffer.from(JSON.stringify((q.block_id >= 1009 ? [row] : []).slice(from)))], block_height: q.block_id, block_hash: blockHashAt(q.block_id) };
   };
   const reads = createSendReads([mk(true), mk(false)], { vault: VAULT, token: VAULT_TOKEN }, 50);
   assert.deepEqual(await reads.depositSettled(77n, 1009n), { state: "unknown" });
@@ -727,7 +728,10 @@ test("PROBE N5: depositSettled reads the pages at the height that passed, though
   let lowAsks = 0;
   const mk = (high: boolean): Rpc => async (method, params) => {
     if (method === "block") return { header: { height: high ? 1011 : lowAsks++ === 0 ? 1011 : 1007 } }; // a load balancer
-    return { result: [...Buffer.from(JSON.stringify((params as { block_id: number }).block_id >= 1009 ? [row] : []))] };
+    const q = params as { block_id: number; args_base64: string };
+    const h = q.block_id;
+    const { from } = JSON.parse(Buffer.from(q.args_base64, "base64").toString()) as { from: number };
+    return { result: [...Buffer.from(JSON.stringify((h >= 1009 ? [row] : []).slice(from)))], block_height: h, block_hash: blockHashAt(h) };
   };
   const reads = createSendReads([mk(true), mk(false)], { vault: VAULT, token: VAULT_TOKEN }, 50);
   assert.deepEqual(await reads.depositSettled(77n, 1009n), { state: "held", depositor: row.depositor, value: 5n });
@@ -750,16 +754,30 @@ test("createSendReads: the deposits index read twice at once skips no row (sandb
   const rows = [1n, 2n, 3n].map((p, i) => ({ index: i, precommitment: p.toString(), label: "0", value: "5", leaf_index: i, depositor: "a.near" }));
   const rpc: Rpc = async (method, params) => {
     if (method === "block") return { header: { height: 50 } };
-    const q = params as { method_name: string; args_base64: string };
+    const q = params as { method_name: string; args_base64: string; block_id: number };
     assert.equal(q.method_name, "deposits");
     const { from, limit } = JSON.parse(Buffer.from(q.args_base64, "base64").toString()) as { from: number; limit: number };
     await new Promise((r) => setTimeout(r, 5));
-    return { result: [...Buffer.from(JSON.stringify(rows.slice(from, from + limit)))] };
+    return { result: [...Buffer.from(JSON.stringify(rows.slice(from, from + limit)))], block_height: q.block_id, block_hash: blockHashAt(q.block_id) };
   };
   const reads = createSendReads([rpc, rpc], { vault: VAULT, token: VAULT_TOKEN });
   assert.deepEqual(await Promise.all([reads.pUsed(9n), reads.pUsed(9n)]), [false, false]);
   rows.push({ index: 3, precommitment: "9", label: "0", value: "5", leaf_index: 3, depositor: "u.near" });
   assert.deepEqual(await reads.deposit(9n), { depositor: "u.near", value: 5n });
+});
+
+test("createSendReads: a deposits page counts only at the block asked, with one block hash on both providers and each row at its index (near/pages.ts, the spends index's rule)", async () => {
+  const rows = [{ index: 0, precommitment: "9", label: "0", value: "5", leaf_index: 0, depositor: "u.near" }];
+  const mk = (o: { hash?: (h: number) => string; height?: (h: number) => number; rows?: unknown[] } = {}): Rpc => async (method, params) => {
+    if (method === "block") return { header: { height: 50 } };
+    const h = (params as { block_id: number }).block_id;
+    return { result: [...Buffer.from(JSON.stringify(o.rows ?? rows))], block_height: (o.height ?? ((x) => x))(h), block_hash: (o.hash ?? blockHashAt)(h) };
+  };
+  const pUsed = (a: Rpc, b: Rpc) => createSendReads([a, b], { vault: VAULT, token: VAULT_TOKEN }).pUsed(9n);
+  assert.equal(await pUsed(mk(), mk()), true);
+  await assert.rejects(pUsed(mk(), mk({ hash: (h) => blockHashAt(h + 1_000_000) })), /different blocks/, "another hash at the same height");
+  await assert.rejects(pUsed(mk({ height: (h) => h - 1 }), mk({ height: (h) => h - 1 })), /not answered at the block asked/, "both at the block before");
+  await assert.rejects(pUsed(mk({ rows: [{ ...rows[0], index: 1 }] }), mk({ rows: [{ ...rows[0], index: 1 }] })), /not at its index/);
 });
 
 // ---- M2: every transaction with no read outcome is settled from its stored bytes ----
@@ -1024,6 +1042,8 @@ test("a request that is not canonical base64 is refused at check 1 and never mat
 
 // ---- M3, M4: the store ----
 
+/** A base58 block hash for height `h` (32 bytes), as nearcore names a block. */
+const blockHashAt = (h: number) => base58(createHash("sha256").update(`block ${h}`).digest());
 const emptyRecord = (u: string) => ({ u, p: "1", prepaid_bytes: 0, failed: 0, struck: false, landed: false, p_closed: false, prepays: [], sends: [], carried: [] });
 /** How long a lock probe's child holds the store at most while it waits for the other children's results. */
 const PROBE_HOLD_CAP_MS = 10_000;
