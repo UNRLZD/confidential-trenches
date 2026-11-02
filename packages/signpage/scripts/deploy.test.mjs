@@ -99,6 +99,7 @@ test("other policy breaks are refused", () => {
     "/assets/zk/* no-store": swap(ZK_RULE, ZK_RULE.replace("public, max-age=31536000, immutable", "no-store")),
     "/assets/zk/* a second max-age": swap(ZK_RULE, ZK_RULE.replace("immutable", "immutable, max-age=0")),
     "/assets/zk/* twice": `${REAL}${ZK_RULE}`,
+    "/assets/zk/* sets its Cache-Control twice": swap(ZK_RULE, `${ZK_RULE}  Cache-Control: public, max-age=31536000, immutable\n`),
     "/assets/zk/* removes a header": swap(ZK_RULE, `${ZK_RULE}  ! X-Content-Type-Options\n`),
   };
   for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);

@@ -33,12 +33,11 @@ const REPO = dirname(dirname(PKG));
 // headers and removing none; any other rule, header or removal is refused. /* holds the site's policy (judged below by
 // signpage-skeleton's check); the worker's rule its own CSP (W:880), which Pages joins to /*'s; the setup files' rule
 // their one Cache-Control (vault.md 2.14).
+const EXACT = { [WORKER_PATH]: { "content-security-policy": WORKER_CSP }, "/assets/zk/*": { "cache-control": ZK_CACHE } };
 export const RULES = {
   "/*": ["content-security-policy", ...Object.keys(HEADERS)],
-  [WORKER_PATH]: ["content-security-policy"],
-  "/assets/zk/*": ["cache-control"],
+  ...Object.fromEntries(Object.entries(EXACT).map(([path, exact]) => [path, Object.keys(exact)])),
 };
-const EXACT = { [WORKER_PATH]: { "content-security-policy": WORKER_CSP }, "/assets/zk/*": { "cache-control": ZK_CACHE } };
 
 /** Copies index.html, public/ and the prover's setup files and licences (SERVED) into a fresh temp folder and returns its path. */
 export function build(pkg = PKG) {
@@ -80,7 +79,12 @@ export function checkHeadersFile(text) {
   for (const [path, exact] of Object.entries(EXACT)) {
     const these = rules.filter((r) => r.path === path);
     const want = Object.entries(exact).map(([k, v]) => `${k}: ${v}`).join("; ");
-    const ok = these.length === 1 && these[0].headers.length === Object.keys(exact).length && these[0].headers.every(([k, v]) => exact[k] !== undefined && ws(v) === exact[k]);
+    // each of its headers once, with its value (any other header is refused above)
+    const once = (k, v) => {
+      const hs = these[0].headers.filter(([h]) => h === k);
+      return hs.length === 1 && ws(hs[0][1]) === v;
+    };
+    const ok = these.length === 1 && Object.entries(exact).every(([k, v]) => once(k, v));
     if (!ok) p.push(`_headers must hold one ${path} rule that sets exactly ${want}`);
   }
   const all = rules.filter((r) => r.path === "/*");
