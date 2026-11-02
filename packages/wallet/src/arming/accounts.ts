@@ -127,7 +127,14 @@ export async function readArmingRegistration(
   return { account, registered: ra, min: ma, registerDeposit: ra ? 0n : ma };
 }
 
-/** withdrawRequest's registerDepositOf (withdraw/request.ts): A's register_deposit, read as readArmingRegistration. */
-export function armingRegisterDepositOf(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): (account: string) => Promise<bigint> {
-  return async (account) => (await readArmingRegistration(account, network, rpcs)).registerDeposit;
+/**
+ * withdrawRequest's registerDepositOf (withdraw/request.ts): A's register_deposit, read as readArmingRegistration. The
+ * withdrawal's token must be the network's token, the one the read is made on; any other is refused before any read.
+ */
+export function armingRegisterDepositOf(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): (account: string, token: string) => Promise<bigint> {
+  return async (account, token) => {
+    if (typeof network === "string" && Object.hasOwn(NEAR_NETWORKS, network) && token !== NEAR_NETWORKS[network].token)
+      throw new ArmingRegistrationRefused("input", `the withdrawal's token ${String(token)} is not the ${network} token the read is made on`);
+    return (await readArmingRegistration(account, network, rpcs)).registerDeposit;
+  };
 }

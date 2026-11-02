@@ -179,6 +179,15 @@ test("not registered on both: register_deposit = storage_balance_bounds().min, m
   }
 });
 
+test("register_deposit is storage_balance_bounds().min, never max: max 2 × min and max null on both sides", async () => {
+  for (const max of [String(2n * MIN), null]) {
+    const edit = (r: Read, j: any) => r === "bounds" && setBytes(j, { min: String(MIN), max }); // edited: max, both sides
+    const r = await readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", { edit }));
+    assert.equal(r.registerDeposit, MIN, `max ${max}`);
+    assert.equal(r.min, MIN, `max ${max}`);
+  }
+});
+
 test("the two RPCs disagree: refused, nothing decided", async () => {
   // registered on one, null on the other, either way round
   const set = { reg: "reg_set" } as Opts;
@@ -207,11 +216,17 @@ test("an error answer or a malformed value is refused, never read as unregistere
   // edited: a JSON-RPC error, a value that is neither null nor a storage balance, bytes that are not JSON, no min
   const edits: [string, (r: Read, j: any) => void, RegExp][] = [
     ["rpc error", (r, j) => r === "reg" && ((j.error = { name: "HANDLER_ERROR" }), delete j.result), /failed/],
+    ["a top-level error next to a null result", (r, j) => r === "reg" && (j.error = { name: "HANDLER_ERROR" }), /failed/],
     ["0", (r, j) => r === "reg" && setBytes(j, 0), /neither null/],
+    ["available not U128", (r, j) => r === "reg" && setBytes(j, { total: String(MIN), available: "-1" }), /neither null/],
+    ["no available", (r, j) => r === "reg" && setBytes(j, { total: String(MIN) }), /neither null/],
     ["total not U128", (r, j) => r === "reg" && setBytes(j, { total: "1.5", available: "0" }), /neither null/],
     ["total above 2^128", (r, j) => r === "reg" && setBytes(j, { total: String(1n << 128n), available: "0" }), /neither null/],
     ["not JSON", (r, j) => r === "reg" && (j.result.result = [0x7b]), /not JSON/],
     ["no bytes", (r, j) => r === "reg" && delete j.result.result, /no bytes/],
+    ["a byte above 255 that wraps to \"null\"", (r, j) => r === "reg" && (j.result.result = [0x16e, 0x75, 0x6c, 0x6c]), /no bytes/],
+    ["total with a leading zero", (r, j) => r === "reg" && setBytes(j, { total: "0" + String(MIN), available: "0" }), /neither null/],
+    ["min with a leading zero", (r, j) => r === "bounds" && setBytes(j, { min: "0" + String(MIN), max: null }), /no min/],
     ["min a number", (r, j) => r === "bounds" && setBytes(j, { min: 1250000000000000000000, max: null }), /no min/],
     ["min above 2^128", (r, j) => r === "bounds" && setBytes(j, { min: String(1n << 128n), max: null }), /no min/],
   ];
@@ -238,7 +253,8 @@ test("the RPC pair must be one FastNEAR URL and the network's dRPC URL, exactly"
 test("A must be a lowercase 64-hex implicit id, and the network one of the kit's", async () => {
   for (const a of [rec.test_a.toUpperCase(), "alice.near", rec.test_a.slice(1), `${rec.test_a}0`, 7 as unknown as string])
     await refused(readArmingRegistration(a, "mainnet", pair("mainnet")), "input", /64-hex/);
-  await refused(readArmingRegistration(rec.test_a, "devnet" as NearNetwork, pair("mainnet")), "input", /network/);
+  for (const n of ["devnet", "toString", "__proto__", "constructor"])
+    await refused(readArmingRegistration(rec.test_a, n as NearNetwork, pair("mainnet")), "input", /network/);
 });
 
 test("each request names only A or the token, at final", async () => {
@@ -254,7 +270,12 @@ test("each request names only A or the token, at final", async () => {
 
 test("armingRegisterDepositOf is withdrawRequest's registerDepositOf", async () => {
   const f: WithdrawRequestArgs["registerDepositOf"] = armingRegisterDepositOf("mainnet", pair("mainnet"));
-  assert.equal(await f(rec.test_a), MIN);
-  assert.equal(await armingRegisterDepositOf("mainnet", pair("mainnet", { reg: "reg_set" }))(rec.good), 0n);
-  await refused(armingRegisterDepositOf("mainnet", pair("mainnet", {}, { down: true }))(rec.test_a), "rpc");
+  assert.equal(await f(rec.test_a, VAULT_CONSTANTS.TOKEN), MIN);
+  assert.equal(await armingRegisterDepositOf("mainnet", pair("mainnet", { reg: "reg_set" }))(rec.good, VAULT_CONSTANTS.TOKEN), 0n);
+  await refused(armingRegisterDepositOf("mainnet", pair("mainnet", {}, { down: true }))(rec.test_a, VAULT_CONSTANTS.TOKEN), "rpc");
+  // the withdrawal's token must be the token the read is made on, and nothing is read otherwise
+  const seen: unknown[] = [];
+  for (const [net, token] of [["mainnet", NEAR_NETWORKS.testnet.token], ["testnet", NEAR_NETWORKS.mainnet.token], ["mainnet", undefined]] as const)
+    await refused(armingRegisterDepositOf(net, pair(net, { seen }))(rec.test_a, token as unknown as string), "input", /token/);
+  assert.equal(seen.length, 0);
 });
