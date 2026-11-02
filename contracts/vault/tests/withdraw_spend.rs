@@ -19,11 +19,12 @@
 //!    changed; a proof against an older root (4 of the 6 deposits) lands.
 //! 3. `rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes`: rows 4, 7, 8, 9 and 10 refuse with no state byte,
 //!    no storage use and no log changed; three landed calls each write 2.3's bytes for their account ids (+74 B when
-//!    the state tree grows a level) and log exactly `leaf_inserted` then `withdrawn`.
+//!    the state tree grows a level) and log exactly `leaf_inserted`, `withdrawn` then `withdrawal_relayed`.
 //!
-//! Until card vault-withdraw-payouts, a withdrawal that lands pays nothing: these tests read the spend's record, the
-//! change leaf, `totals` and the raw state. Each prints its gas table: `vault::withdraw` is the vault's own work
-//! through the proof check, against vault.md 2.11's 40.333 Tgas at depth 3.
+//! No token is deployed at TOKEN here, so both payout parts of a landed withdrawal fail and `on_payout` turns them
+//! into a refund-pending amount (the payouts themselves are tests/payouts.rs'). Each call attaches 1 NEAR, over row
+//! 14's charge. Each test prints its gas table: `vault::withdraw` is the vault's own work through the payouts' promises,
+//! against vault.md 2.11's 41.202-41.828 Tgas at depth 3.
 #![cfg(feature = "sandbox")]
 
 mod harness;
@@ -40,8 +41,8 @@ use near_workspaces::Account;
 
 const SPENDS: &str = include_str!("fixtures/withdraw-spends.json");
 const GAS: Gas = Gas::from_tgas(300);
-/// Any deposit: this cut charges no storage (row 14 is card vault-withdraw-payouts').
-const ATTACHED: NearToken = NearToken::from_yoctonear(0);
+/// Over row 14's charge: (at most 784 B + REFUND_RESERVE_BYTES) x 1e19 + 2 yocto; the rest stays in the reserve.
+const ATTACHED: NearToken = NearToken::from_near(1);
 /// NEAR's 40 extra bytes per record (`storage_num_extra_bytes_record`).
 const RECORD_EXTRA: u64 = 40;
 
@@ -88,7 +89,7 @@ async fn vault_with_deposits() -> R<Harness> {
         .patch(&h.vault)
         .account_from_current(move |a| {
             let su = a.storage_usage;
-            // 1 N more for the spends' records: this cut charges the caller nothing (row 14 is the payouts card's)
+            // 1 N more, as the deposits' prepays would have brought
             let bal = a.balance.saturating_add(NearToken::from_near(1));
             AccountDetailsPatch::from(a).storage_usage(su + bytes).balance(bal)
         })
@@ -194,7 +195,8 @@ async fn vt_s05_one_nullifier_spends_once() -> R<()> {
     let r = spend_row(&h, &signal("same_call", 1)).await?;
     assert_eq!(r["withdrawn"], "2000000");
     assert_eq!(r["new_leaf_index"], 6);
-    assert_eq!(r["status"], "in_flight");
+    // no token at TOKEN: both parts failed and came back (2.5.4)
+    assert_eq!((r["status"].as_str(), r["refund_value"].as_str()), (Some("refund_pending"), Some("2000000")));
     assert_eq!(r["payer"], relayer.id().as_str());
     assert_eq!((&r["recipient"], &r["fee"], &r["refund_precommitment"]), (&w["recipient"], &w["relay_fee"], &w["refund_precommitment"]));
     assert_eq!(r["context"], signal("same_call", 7));
@@ -297,7 +299,7 @@ async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes() -> R<()>
         let gas = landed(&h, &o)?.map_err(|f| format!("{name}: {f}"))?;
         let r = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
         let events: Vec<&str> = r.logs.iter().map(|l| l.split(r#""event":""#).nth(1).and_then(|e| e.split('"').next()).unwrap_or("")).collect();
-        assert_eq!(events, ["leaf_inserted", "withdrawn"], "{name}: {:?}", r.logs);
+        assert_eq!(events, ["leaf_inserted", "withdrawn", "withdrawal_relayed"], "{name}: {:?}", r.logs);
         assert!(r.logs[0].contains(r#""tree":"state""#) && r.logs[0].contains(&signal(name, 0)), "{}", r.logs[0]);
         h.wait_final(&h.vault).await?;
         let now = h.account_view(&h.vault, "final").await?["storage_usage"].as_u64().ok_or("storage_usage")?;

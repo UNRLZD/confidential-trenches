@@ -6,7 +6,9 @@
 //!
 //! The vault here has no deposit, so a request that passes rows 1-3 is refused at row 5 with `UnknownStateRoot` (its
 //! state root signal is 4, a root no tree has had): "accepted" here reads as that panic and "refused" as the named
-//! check's; tests/withdraw_spend.rs runs rows 4-12 with real proofs. No proof is
+//! check's. VT-S18's probe attaches 10 Tgas to each withdraw, under the gas pre-check's bound (src/payout.rs), which
+//! comes right after row 3: there "accepted" reads as `InsufficientGas`. tests/withdraw_spend.rs runs rows 4-12 with
+//! real proofs. No proof is
 //! verified: the proof only has to parse (row 1), and each case's context is made by the vault's own src/context.rs,
 //! whose bytes equal the kit's on VT-U02's vectors (src/context.rs and src/withdraw.rs unit tests).
 //!
@@ -244,7 +246,8 @@ async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<
         let offsets: Vec<u64> = (mid.saturating_sub(7)..=mid + 7).collect();
         let (sent, got) = probe_round(&h, &probe, &w, &sc, &offsets).await?;
         for (deadline, landed, f) in &got {
-            let want = if landed <= deadline { "UnknownStateRoot" } else { "DeadlineExpired" };
+            // the probe's 10 Tgas: a request past rows 1-3 stops at the gas pre-check
+            let want = if landed <= deadline { "InsufficientGas" } else { "DeadlineExpired" };
             assert!(f.contains(want), "deadline {deadline} ms, landed {landed} ms: want {want}, got {f}");
             if landed == deadline {
                 at = Some((*deadline, f.clone()));
@@ -261,8 +264,8 @@ async fn vt_s18_one_block_after_the_deadline_is_refused_and_at_it_passes() -> R<
         }
     }
     let (d, f) = at.ok_or("no call landed in a block whose time equals its deadline in 12 rounds")?;
-    assert!(f.contains("UnknownStateRoot"), "at the deadline: {f}");
-    println!("at the deadline: deadline {d} ms = the landing block's ms: passed rows 1-3 (UnknownStateRoot)");
+    assert!(f.contains("InsufficientGas"), "at the deadline: {f}");
+    println!("at the deadline: deadline {d} ms = the landing block's ms: passed rows 1-3 (InsufficientGas, the probe's 10 Tgas)");
     if let Some((d, f)) = one_ms_late {
         assert!(f.contains("DeadlineExpired"), "1 ms after: {f}");
         println!("1 ms after the deadline: deadline {d} ms, landed {} ms: refused (DeadlineExpired)", d + 1);
