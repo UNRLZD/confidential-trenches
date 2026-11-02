@@ -2,7 +2,7 @@
 // helper yet, so the panel sends them through the kit's VaultSyncRpc, the same `query` shape vaultSync reads, at the
 // lower of the two final heights (vaultSync's rule). Every answer is kept whole, a failed one as { error }; the model
 // (model.ts) judges them. Nothing here throws on an RPC's answer.
-import type { VaultSyncRpc } from "@blindfill/kit";
+import { nearPairNetwork, nearPairRule, type VaultSyncRpc } from "@blindfill/kit";
 
 export const VERIFY_READS = ["keys", "account", "config", "totals", "balance", "registration", "token"] as const;
 export type VerifyReadId = (typeof VERIFY_READS)[number];
@@ -55,10 +55,11 @@ function finalHeight(a: unknown): number | null {
 
 /**
  * Reads the seven views on both RPCs at one block: the lower of their final heights, or the one final height read
- * when the other RPC did not answer. Refuses only one provider given twice, or no final height from either.
+ * when the other RPC did not answer. Refuses a pair the wallet's one rule refuses (nearPairRule's words, thrown before any
+ * read: exactly one FastNEAR URL and the network's dRPC, each named by the URL it reads), or no final height from either.
  */
 export async function readVerify(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], pins: VerifyPins, signal?: AbortSignal): Promise<VerifyReads> {
-  if (rpcs.length !== 2 || rpcs[0] === rpcs[1] || rpcs[0].name === rpcs[1].name) throw new Error("Verify reads two RPCs of different operators");
+  if (nearPairNetwork(rpcs) === null) throw new Error(nearPairRule());
   const probe = verifyQuery("keys", pins, { finality: "final" });
   const finals = await Promise.all(rpcs.map((r) => r.query(probe, signal).then(finalHeight, () => null)));
   const known = finals.filter((h): h is number => h !== null);

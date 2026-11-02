@@ -99,7 +99,7 @@ try {
       check(external.length === 0, `${tag}: external requests ${external.join(" ")}`);
       const body = await page.locator(".vfy").innerText();
       check(!CLAIM.test(body), `${tag}: a claim word on screen: ${body.match(CLAIM)?.[0]}`);
-      if (state !== "loading") check(body.includes("275,831,776") && body.includes("fastnear, drpc"), `${tag}: the block and the RPCs read`);
+      if (state !== "loading") check(body.includes("275,831,776") && body.includes("https://test.rpc.fastnear.com, https://near-testnet.drpc.org"), `${tag}: the block and the RPCs read`);
       for (const d of await page.$$eval("[data-draft-copy]", (els) => els.filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-draft-copy")))) {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(sid);

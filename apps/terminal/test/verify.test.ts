@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import type { VaultSyncRpc } from "@blindfill/kit";
+import { nearPairRule, type VaultSyncRpc } from "@blindfill/kit";
 import { readVerify, VERIFY_READS, verifyQuery } from "../src/screens/verify/read.ts";
 import type { VerifyPins, VerifyReads } from "../src/screens/verify/read.ts";
 import { verifyView } from "../src/screens/verify/model.ts";
@@ -22,6 +22,7 @@ const PINS: VerifyPins = {
   assetDecimals: 6,
 };
 const H = REC.height;
+const URL_OF = ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"] as const; // the testnet pair, each RPC named by the URL it reads
 const clone = (): VerifyReads => JSON.parse(JSON.stringify(REC));
 const bytes = (v: unknown) => [...Buffer.from(JSON.stringify(v))];
 /** Sets one call_function answer's value on the RPCs named (both unless given). */
@@ -43,7 +44,7 @@ const value = (c: VerifyCheck, k: string) => c.values.find((x) => x.k === k)?.v;
 
 test("the recording: both RPCs at one block, every read answered", () => {
   assert.equal(REC.rpcs.length, 2);
-  assert.deepEqual(REC.rpcs.map((r) => r.name), ["fastnear", "drpc"]);
+  assert.deepEqual(REC.rpcs.map((r) => r.name), [...URL_OF]);
   for (const r of REC.rpcs) for (const id of VERIFY_READS) assert.equal((r.answers[id] as any).result.block_height, H, `${r.name} ${id}`);
 });
 
@@ -66,7 +67,7 @@ test("CH-090 S18.2: the recorded skeleton reads ok on every check, and shows wha
   assert.equal(value(check(v, "balance"), "surplus"), "0 USDC");
   assert.equal(v.height, "275,831,776");
   assert.equal(v.blockHash, "FCjusy…bWxZNM");
-  assert.deepEqual(v.rpcs, ["fastnear", "drpc"]);
+  assert.deepEqual(v.rpcs, [...URL_OF]);
 });
 
 test("S18.1: no reads yet is loading", () => {
@@ -140,7 +141,7 @@ test("CH-095 S18.4: the RPCs giving different answers at one block is RPCs disag
   assert.equal(v.state, "disagree");
   assert.equal(check(v, "keys").status, "warn");
   assert.equal(check(v, "keys").word, "disagree");
-  assert.deepEqual(check(v, "keys").values.filter((x) => x.k === "keys").map((x) => [x.rpc, x.v]), [["fastnear", "0"], ["drpc", "1"]]);
+  assert.deepEqual(check(v, "keys").values.filter((x) => x.k === "keys").map((x) => [x.rpc, x.v]), [[URL_OF[0], "0"], [URL_OF[1], "1"]]);
   assert.equal(v.code.status, "warn");
   assert.equal(v.funds.status, "warn", "both rows amber");
   const b = clone();
@@ -192,9 +193,9 @@ test("S18.3: an unread answer is Unverified on its check only, its row amber", (
 test("readVerify: the seven reads on both RPCs at the lower final height, failures kept, never thrown", async () => {
   const sent: [string, Record<string, unknown>][] = [];
   const rpc = (i: number, lead = 0, fail?: string): VaultSyncRpc => ({
-    name: REC.rpcs[i].name,
+    name: URL_OF[i],
     async query(p) {
-      sent.push([REC.rpcs[i].name, p]);
+      sent.push([URL_OF[i], p]);
       const id = VERIFY_READS.find((k) => JSON.stringify({ ...verifyQuery(k, PINS, { block_id: H }), block_id: undefined }) === JSON.stringify({ ...p, block_id: undefined, finality: undefined }));
       if (!id) throw new Error(`unexpected query ${JSON.stringify(p)}`);
       if (fail === id && p.block_id !== undefined) throw new Error("fetch failed");
@@ -208,11 +209,28 @@ test("readVerify: the seven reads on both RPCs at the lower final height, failur
   const reads = sent.filter(([, p]) => p.block_id !== undefined);
   assert.equal(reads.length, 14);
   for (const [, p] of reads) assert.equal(p.block_id, H);
-  for (const n of ["fastnear", "drpc"]) assert.deepEqual(reads.filter(([x]) => x === n).map(([, p]) => p).sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1), VERIFY_READS.map((k) => verifyQuery(k, PINS, { block_id: H })).sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+  for (const n of URL_OF) assert.deepEqual(reads.filter(([x]) => x === n).map(([, p]) => p).sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1), VERIFY_READS.map((k) => verifyQuery(k, PINS, { block_id: H })).sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
   assert.deepEqual(r.rpcs[1].answers.totals, { error: "fetch failed" });
   assert.equal(check(verifyView(r, PINS), "balance").word, "unverified");
   assert.equal(check(verifyView(r, PINS), "keys").status, "ok");
-  await assert.rejects(readVerify([rpc(0), rpc(0)], PINS), /two RPCs/, "one provider twice is not two RPCs");
+  await assert.rejects(readVerify([rpc(0), rpc(0)], PINS), new Error(nearPairRule()), "one provider twice is not the rule's pair");
+});
+
+test("readVerify refuses the pairs every money path refuses: two hosts of one operator, an unknown host, a pair across networks", async () => {
+  const URLS = { fast: "https://test.rpc.fastnear.com", fastAlt: "https://rpc.testnet.near.org", drpc: "https://near-testnet.drpc.org", mainDrpc: "https://near.drpc.org", other: "https://rpc.example.org" };
+  let sent = 0;
+  const rpc = (name: string): VaultSyncRpc => ({ name, async query() { sent++; throw new Error("a refused pair is never queried"); } });
+  for (const [why, a, b] of [
+    ["two hosts of one operator", URLS.fast, URLS.fastAlt],
+    ["a host the rule does not name", URLS.fast, URLS.other],
+    ["a pair across networks", URLS.fast, URLS.mainDrpc],
+    ["dRPC alone, twice", URLS.drpc, URLS.drpc],
+  ] as const) {
+    await assert.rejects(readVerify([rpc(a), rpc(b)], PINS), new Error(nearPairRule()), why); // the rule's own words, nothing new
+  }
+  assert.equal(sent, 0, "a refused pair is refused before any read");
+  const good = (name: string): VaultSyncRpc => ({ name, query: async (p) => { const id = VERIFY_READS.find((k) => JSON.stringify({ ...verifyQuery(k, PINS, { block_id: H }), block_id: undefined }) === JSON.stringify({ ...p, block_id: undefined, finality: undefined })); return REC.rpcs[0].answers[id!]; } });
+  for (const pair of [[URLS.fast, URLS.drpc], [URLS.drpc, URLS.fastAlt]] as const) assert.equal((await readVerify([good(pair[0]), good(pair[1])], PINS)).height, H, pair.join(" + "));
 });
 
 test("verifyQuery: the view calls of app.md A7, at the block given", () => {
