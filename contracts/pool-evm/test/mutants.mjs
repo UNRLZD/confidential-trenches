@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Removes each of the pool's checks, one at a time, in a copy of contracts/pool-evm, and runs the test named for it:
 // each named test passes on the pool as it is and fails on every mutant. Exits 1 when a named test passes on its
-// mutant, fails on the pool as it is, or a mutant's text is not found exactly once. Needs forge (Foundry).
+// mutant, fails on the pool as it is, or a mutant's text is not found exactly once. Needs forge and cast (Foundry).
 //   node contracts/pool-evm/test/mutants.mjs
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -13,6 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PP = "src/PrivacyPool.sol";
 const ST = "src/State.sol";
 const SIMPLE = "src/PrivacyPoolSimple.sol";
+const VERIFIER = "src/verifiers/WithdrawalVerifier.sol";
 // lib/forge-std's submodule commit (v1.9.7), fetched into the copy when the checkout has no submodule files
 const FORGE_STD = "77041d2ce690e692d6e03cc812b57d1ddaa4d505";
 
@@ -51,7 +52,7 @@ export const MUTANTS = [
   [ST, "if (_entered) revert Reentrancy();", "", "test_aPayeeCannotReenterWithdraw"],
   [SIMPLE, "if (msg.value != _amount) revert InsufficientValue();", "", "test_depositRefusesAValueOtherThanSent"],
   [SIMPLE, "if (!_success) revert FailedToSendNativeAsset();", "", "test_aPayeeThatRefusesEtherRevertsTheWithdrawal"],
-  ["src/verifiers/WithdrawalVerifier.sol", "checkField(calldataload(add(_pubSignals, 32)))", "", "test_aSignalAtOrAbovePIsRefused"],
+  [VERIFIER, "checkField(calldataload(add(_pubSignals, 32)))", "", "test_aSignalAtOrAbovePIsRefused"],
   [PP, "if (_precommitmentHash >= Constants.SNARK_SCALAR_FIELD) revert InvalidPrecommitment();", "", "test_aPrecommitmentAtOrAbovePIsRefused"],
   [ST, "if (PoseidonT3.DEPLOYED.codehash != PoseidonT3.CODEHASH) revert UnexpectedCode(PoseidonT3.DEPLOYED);", "", "test_aChainWithoutPoseidonT3IsRefused"],
   [ST, "if (PoseidonT4.DEPLOYED.codehash != PoseidonT4.CODEHASH) revert UnexpectedCode(PoseidonT4.DEPLOYED);", "", "test_aChainWithoutPoseidonT4IsRefused"],
@@ -65,13 +66,19 @@ export const MUTANTS = [
   [ST, "    _;\n    _entered = false;", "    _;", "test_twoCallsInOneTransactionBothLand"],
   [ST, "if (_merkleTree.depth > MAX_TREE_DEPTH)", "if (_merkleTree.depth >= MAX_TREE_DEPTH)", "test_anInsertThatTakesTheStateTreeTo32Lands"],
   [ST, "if (_labelTree.depth > MAX_TREE_DEPTH)", "if (_labelTree.depth >= MAX_TREE_DEPTH)", "test_anInsertThatTakesTheLabelTreeTo32Lands"],
-  ["src/verifiers/WithdrawalVerifier.sol", "checkField(calldataload(add(_pubSignals, 0)))", "", "test_aSignalAtOrAbovePIsRefused"],
+  [VERIFIER, "checkField(calldataload(add(_pubSignals, 0)))", "", "test_aSignalAtOrAbovePIsRefused"],
   // an added admin path: a selector, a DELEGATECALL, a storage slot
   [PP, "  /// @inheritdoc IPrivacyPool\n  function deposit(", "  function owner() external pure returns (address) {\n    return address(0);\n  }\n\n  /// @inheritdoc IPrivacyPool\n  function deposit(", "test_theDispatcherHasExactlyTheListedSelectors"],
   [PP, "  /// @inheritdoc IPrivacyPool\n  function deposit(", "  function depositors(uint256) external pure returns (address) {\n    return address(0);\n  }\n\n  /// @inheritdoc IPrivacyPool\n  function deposit(", "test_ragequitIsAbsent"],
   ["src/poseidon/PoseidonT3.sol", "function hash(uint256[2] memory _inputs) internal pure returns (uint256) {", "function hash(uint256[2] memory _inputs) public pure returns (uint256) {", "test_noDelegatecallCallcodeSelfdestructOrCreate"],
   [ST, "  /// @inheritdoc IState\n  uint256 public nonce;", "  /// @inheritdoc IState\n  uint256 public nonce;\n  address internal admin;", "layout"],
 ];
+
+// keccak256 of the withdrawal verifier's deployed code as `dir` builds it
+function verifierHash(dir) {
+  const code = execFileSync("forge", ["inspect", "WithdrawalVerifier", "deployedBytecode"], { cwd: dir, encoding: "utf8", stdio: "pipe" });
+  return execFileSync("cast", ["keccak", code.trim()], { encoding: "utf8", stdio: "pipe" }).trim();
+}
 
 // "pass" or "fail" of one named test; throws unless forge ran exactly that one test (forge matches --mt against
 // `name()`, and a pattern that matches nothing exits 0)
@@ -125,8 +132,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         return;
       }
       writeFileSync(f, src.replace(find, repl));
+      // the pool refuses any verifier but the one it was built with: a verifier mutant is deployed with its own hash
+      const st = path.join(dir, ST);
+      const stSrc = readFileSync(st, "utf8");
+      if (file === VERIFIER) writeFileSync(st, stSrc.replace(/(WITHDRAWAL_VERIFIER_CODEHASH = )0x[0-9a-f]{64}/, `$1${verifierHash(dir)}`));
       const r = run(dir, t);
       writeFileSync(f, src);
+      writeFileSync(st, stSrc);
       console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1} ${file}: ${find.trim().split("\n")[0].slice(0, 70)} -> ${t} ${r === "fail" ? "fails" : "PASSES"}`);
       if (r !== "fail") bad++;
     });
