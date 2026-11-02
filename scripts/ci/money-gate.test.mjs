@@ -528,6 +528,21 @@ test('"Money path: no" on a money-path change is refused, and so is a live FAIL'
   }
 });
 
+test("the pool programs are money code: a change under each, with \"Money path: no\" or no card, is refused", async () => {
+  for (const f of ["contracts/pool-solana/src/release.rs", "contracts/pool-evm/src/PrivacyPool.sol"]) {
+    const r = moneyRepo();
+    try {
+      const no = r.commit("Card arm: code", { [f]: "// code\n", "scripts/live-checks/arm.md": liveRec("arm", "Money path: no\n") });
+      const esc = f.replace(/[.\/]/g, "\\$&");
+      assert.match((await gate(r, r.base, no)).refusals.join("\n"), new RegExp(`"Money path: no", but card arm changes money code \\(${esc}\\)`), f);
+      const nameless = r.commit("tweak the pool", { [f]: "// two\n" });
+      assert.match((await gate(r, no, nameless)).refusals.join("\n"), new RegExp(`changes money code \\(${esc}\\) and names no card`), f);
+    } finally {
+      r.done();
+    }
+  }
+});
+
 test("a docs-only change passes with no record, and screen code is not money code", async () => {
   const r = moneyRepo();
   try {
