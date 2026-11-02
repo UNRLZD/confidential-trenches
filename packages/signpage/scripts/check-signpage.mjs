@@ -12,12 +12,14 @@
 //   - and in every page it reads, each script, worker preload, module preload and stylesheet must be a listed file of
 //     that host; one that is not is a script the release does not name.
 // It prints one line per read and MATCH only when every line is ok.
-//   node packages/signpage/scripts/check-signpage.mjs [--release release-<N>] [--list <file>] [--record <file>]
-//   node packages/signpage/scripts/check-signpage.mjs [--release ... | --list ...] --answer <file>
-//     MATCH exit 0, no match exit 1, error exit 2. The newest release by default. --record writes what the run read
-//     (sizes, hashes and the listed headers per path and mode, no bodies); --answer judges such a record instead of
-//     reading the hosts, against the release it names unless --list or --release is given.
+//   node packages/signpage/scripts/check-signpage.mjs [--release release-<N> | --list <file> | --head] [--host sign|app]
+//       [--record <file> | --answer <file>]
+//     MATCH exit 0, no match exit 1, error exit 2. The newest committed release by default, both hosts unless --host
+//     names one. --head checks against this checkout's own build instead (release-list.mjs --print, which needs the
+//     workspace installed): what a deploy from this commit serves. --record writes what the run read (sizes, hashes
+//     and the listed headers per path and mode, no bodies); --answer judges such a record instead of reading the hosts.
 import "../../../scripts/net-window.mjs";
+import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -36,6 +38,26 @@ export function readList(tag = null) {
   }
   if (!TAG.test(tag)) throw new Error(`${tag}: a release is named release-<N>, N from 1`);
   return JSON.parse(readFileSync(join(RELEASES, `${tag}.json`), "utf8"));
+}
+
+/** The --host names: sign is SIGN_HOST, app is APP_HOST. */
+export const HOST_ARGS = Object.freeze({ sign: "SIGN_HOST", app: "APP_HOST" });
+
+/** `list` with only the host `arg` names (sign or app), or `list` itself for none; throws when the list does not hold it. */
+export function onlyHost(list, arg) {
+  if (arg === null || arg === undefined) return list;
+  const name = HOST_ARGS[arg];
+  if (!name) throw new Error(`--host ${arg}: sign or app`);
+  if (!list.hosts?.[name]) throw new Error(`${list.release} holds no ${name}`);
+  return { ...list, hosts: { [name]: list.hosts[name] } };
+}
+
+/** This checkout's own build's list for the host `arg` names, or both (release-list.mjs --print). */
+export function headList(arg) {
+  const gen = join(dirname(fileURLToPath(import.meta.url)), "release-list.mjs");
+  const r = spawnSync(process.execPath, [gen, "--print", ...(arg ? ["--host", arg] : [])], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(`release-list --print: ${r.stderr.trim() || r.signal}`);
+  return JSON.parse(r.stdout);
 }
 
 /** The two ways a file is asked for: as a navigation, and as a plain fetch() from a page (mode cors, destination empty). */
@@ -162,7 +184,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : null);
   try {
     const recorded = opt("--answer") ? JSON.parse(readFileSync(opt("--answer"), "utf8")) : null;
-    const list = opt("--list") ? JSON.parse(readFileSync(opt("--list"), "utf8")) : readList(opt("--release") ?? recorded?.release);
+    const from = opt("--list") ? JSON.parse(readFileSync(opt("--list"), "utf8")) : a.includes("--head") ? headList(opt("--host")) : readList(opt("--release") ?? recorded?.release);
+    const list = onlyHost(from, opt("--host"));
     const answer = recorded ?? { ...(await read(list)), read_at: new Date().toISOString() };
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(answer, null, 1)}\n`);
     const { ok, lines } = judge(list, answer);

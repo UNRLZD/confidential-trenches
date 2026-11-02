@@ -3,13 +3,14 @@
 // every response under the matching _headers rules joined as Pages joins them.
 //   node --test packages/signpage/scripts/release.test.mjs
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, namesOf, read, readList, WEBAUTHN } from "./check-signpage.mjs";
+import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
 import { diffLists, headersFor, HOSTS, listDir, makeList, matches, parseRules, publishedPath } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
@@ -87,7 +88,7 @@ const changed = (f) => {
 const check = async (fetchFn) => judge(LIST, await read(LIST, fetchFn, "/release-check-probe"));
 const noMatch = (r, line) => {
   assert.equal(r.ok, false);
-  assert.match(r.lines.at(-1), /^NO MATCH release-1: \d+ line\(s\) differ$/);
+  assert.match(r.lines.at(-1), /^NO MATCH \S+: \d+ line\(s\) differ$/);
   assert.ok(r.lines.some((l) => l.startsWith(`BAD ${line}`)), `no "BAD ${line}" in:\n${r.lines.join("\n")}`);
 };
 
@@ -218,4 +219,75 @@ test("a redirect, or a host that answers a navigation and a plain fetch differen
 
 test("namesOf reads script srcs, inline scripts and preload, modulepreload and stylesheet hrefs, any case and quoting", () => {
   assert.deepEqual(namesOf(`<SCRIPT src='/a.js'></SCRIPT><script>x</script><link rel="modulepreload" href=/b.js><link rel="icon" href="/i.png"><link rel="Stylesheet" href="/s.css"><link rel="preload" as="worker" href="/w.js">`), ["/a.js", "(inline)", "/b.js", "/s.css", "/w.js"]);
+});
+
+// ---------- one host against its own build ----------
+
+test("one host against its own build: MATCH on a matching host, NO MATCH on one changed byte, the other host never read", async () => {
+  const sign = makeList("build-0123456789ab", { SIGN_HOST: site(SITES.SIGN_HOST) }, "0".repeat(40));
+  assert.deepEqual(Object.keys(sign.hosts), ["SIGN_HOST"]);
+  const one = async (list, sites) => judge(list, await read(list, pages(sites), "/release-check-probe"));
+  // APP_HOST lags (it serves other files): a check of SIGN_HOST alone still matches, and never asks APP_HOST
+  const lagging = changed((s) => (s.APP_HOST["assets/index-a.js"] = "an older build"));
+  const r = await one(sign, lagging);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(r.lines.at(-1), "MATCH build-0123456789ab");
+  assert.ok(!r.lines.some((l) => l.includes("APP_HOST")));
+  const seen = [];
+  const spy = pages(lagging);
+  await read(sign, (u, o) => (seen.push(new URL(u).origin), spy(u, o)), "/p");
+  assert.deepEqual([...new Set(seen)], [HOSTS.SIGN_HOST]);
+  noMatch(await one(sign, changed((s) => (s.SIGN_HOST["app.js"] = s.SIGN_HOST["app.js"].replace("s", "S")))), "SIGN_HOST /app.js (navigate): ");
+  // the same through onlyHost on a list of both: APP_HOST alone, SIGN_HOST lagging
+  const app = onlyHost(LIST, "app");
+  assert.deepEqual(Object.keys(app.hosts), ["APP_HOST"]);
+  assert.equal((await one(app, changed((s) => (s.SIGN_HOST["app.js"] += "x")))).ok, true);
+  noMatch(await one(app, changed((s) => (s.APP_HOST["assets/style.css"] = "body{color:red}"))), "APP_HOST /assets/style.css (fetch): ");
+  assert.throws(() => onlyHost(LIST, "helper"), /sign or app/);
+  assert.throws(() => onlyHost(sign, "app"), /holds no APP_HOST/);
+  assert.throws(() => makeList("build-xyz", { SIGN_HOST: site(SITES.SIGN_HOST) }, "x"), /release-<N>/);
+});
+
+// ---------- the command line on this checkout's real builds ----------
+
+const GEN = join(PKG, "scripts", "release-list.mjs");
+/**
+ * release-list.mjs with `args` under a fresh TMPDIR: { status, stdout, stderr, left } where left is what stayed in it,
+ * but node-compile-cache (Vite turns on Node's module compile cache, which keeps its cache there by design).
+ */
+function gen(args) {
+  const t = mkdtempSync(join(tmp, "tmpdir-"));
+  const r = spawnSync(process.execPath, [GEN, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...process.env, TMPDIR: t, TMP: t, TEMP: t } });
+  return { ...r, left: readdirSync(t).filter((f) => f !== "node-compile-cache") };
+}
+
+test("--print and --check build both hosts, and leave no build folder behind on success or on failure", () => {
+  const p = gen(["--print"]);
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(p.left, []);
+  const head = JSON.parse(p.stdout);
+  assert.match(head.release, /^build-[0-9a-f]{12}(-dirty)?$/);
+  assert.deepEqual(Object.keys(head.hosts), ["SIGN_HOST", "APP_HOST"]);
+  assert.ok(head.hosts.SIGN_HOST.files.some((f) => f.path === "/prover-worker.js"));
+  const listFile = join(tmp, "head.json");
+  writeFileSync(listFile, p.stdout);
+  const ok = gen(["--check", "--list", listFile]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /equals build-/);
+  assert.deepEqual(ok.left, [], "a passing --check left a build behind");
+  const planted = structuredClone(head);
+  planted.hosts.SIGN_HOST.files.find((f) => f.path === "/app.js").sha256 = "0".repeat(64);
+  writeFileSync(listFile, JSON.stringify(planted));
+  const bad = gen(["--check", "--list", listFile]);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /SIGN_HOST \/app\.js: the build's [0-9a-f]{64} is not the list's 0{64}/);
+  assert.deepEqual(bad.left, [], "a failing --check left a build behind");
+});
+
+test("--print --host builds and lists only the host asked; a bad argument is a usage error", () => {
+  const p = gen(["--print", "--host", "app"]);
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(Object.keys(JSON.parse(p.stdout).hosts), ["APP_HOST"]);
+  assert.deepEqual(p.left, []);
+  for (const args of [["--print", "--host", "helper"], ["--check"], ["v1"], ["--print", "x"]]) assert.equal(gen(args).status, 2, args.join(" "));
 });

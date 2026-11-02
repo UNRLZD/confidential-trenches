@@ -168,6 +168,8 @@ test("a deploy names every live check that reads SIGN_HOST in its success line",
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
   assert.deepEqual([...LIVE_CHECKS].sort(), ["signpage-postmessage", "signpage-prover-host", "signpage-release", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "wallet-passkey-prf"]);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
+  // the release check reads SIGN_HOST alone, against this commit's build
+  assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host sign"), `the success line does not run signpage-release on SIGN_HOST alone: ${out}`);
 });
 
 const zkPath = (name) => `assets/zk/${ZK_SETUP_FILES[name].sha256}.${name.split(".").pop()}`;

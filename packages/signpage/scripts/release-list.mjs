@@ -6,8 +6,12 @@
 // `vite build` into an empty folder (its SRI plugin, card app-release-sri); each build must pass its own deploy gate
 // first. So anyone with the release tag can run this at the tag and get the same list, byte for byte.
 // check-signpage.mjs reads both hosts over HTTPS against the list.
-//   node packages/signpage/scripts/release-list.mjs <release-N>           writes packages/signpage/releases/<release-N>.json
-//   node packages/signpage/scripts/release-list.mjs --check <release-N>   exit 1 when a fresh build differs from the list
+//   node packages/signpage/scripts/release-list.mjs <release-N>        writes packages/signpage/releases/<release-N>.json
+//   node packages/signpage/scripts/release-list.mjs --check (release-<N> | --list <file>)
+//     exit 1 when a fresh build of the hosts the list holds differs from it
+//   node packages/signpage/scripts/release-list.mjs --print [--host sign|app]
+//     this checkout's own build's list (named build-<sha>), for both hosts or the one asked, to stdout: what a deploy
+//     from this commit serves, which the live check after a deploy reads that host against
 // Writing refuses a tree with uncommitted changes outside releases/, since the list names the commit it was built from.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -16,7 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDir as checkApp } from "../../../apps/terminal/scripts/check-deploy.ts";
-import { readList, RELEASES, TAG } from "./check-signpage.mjs";
+import { HOST_ARGS, readList, RELEASES, TAG } from "./check-signpage.mjs";
 import { build as buildSign, checkDir as checkSign } from "./deploy.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -91,16 +95,34 @@ export function listDir(dir) {
   return { headers_file: digests(headersText), files };
 }
 
-/** Builds both hosts with their own build steps, each passed by its own deploy gate: { SIGN_HOST: dir, APP_HOST: dir }. */
-export function buildHosts(repo = REPO) {
-  const sign = buildSign();
+/** APP_HOST's build: the terminal's own `vite build` into an empty folder. */
+function buildApp(repo) {
   const app = mkdtempSync(join(tmpdir(), "ct-release-app-"));
   const term = join(repo, "apps", "terminal");
   const vite = join(term, "node_modules", "vite", "bin", "vite.js");
   const r = spawnSync(process.execPath, [vite, "build", "--outDir", app, "--emptyOutDir", "--logLevel", "warn"], { cwd: term, encoding: "utf8" });
-  const dirs = { SIGN_HOST: sign, APP_HOST: app };
-  const p = r.status !== 0 ? [`APP_HOST: vite build failed (exit ${r.status ?? r.signal}): ${r.stderr}`] : [];
-  p.push(...checkSign(sign).map((x) => `SIGN_HOST: ${x}`), ...(r.status === 0 ? checkApp(app).map((x) => `APP_HOST: ${x}`) : []));
+  return { dir: app, problems: r.status !== 0 ? [`vite build failed (exit ${r.status ?? r.signal}): ${r.stderr}`] : checkApp(app) };
+}
+
+/** Builds the hosts named (both by default) with their own build steps, each passed by its own deploy gate: { [name]: dir }. */
+export function buildHosts(names = Object.keys(HOSTS), repo = REPO) {
+  const dirs = {};
+  const p = [];
+  try {
+    for (const name of Object.keys(HOSTS).filter((n) => names.includes(n))) {
+      if (name === "SIGN_HOST") {
+        dirs.SIGN_HOST = buildSign();
+        p.push(...checkSign(dirs.SIGN_HOST).map((x) => `SIGN_HOST: ${x}`));
+      } else {
+        const b = buildApp(repo);
+        dirs.APP_HOST = b.dir;
+        p.push(...b.problems.map((x) => `APP_HOST: ${x}`));
+      }
+    }
+  } catch (e) {
+    removeBuilds(dirs);
+    throw e;
+  }
   if (p.length) {
     removeBuilds(dirs);
     throw new Error(`a build its deploy gate refuses:\n${p.join("\n")}`);
@@ -110,18 +132,22 @@ export function buildHosts(repo = REPO) {
 
 export const removeBuilds = (dirs) => Object.values(dirs).forEach((d) => rmSync(d, { recursive: true, force: true }));
 
-/** The list for `tag` from the two build folders. */
-export function makeList(tag, dirs, commit) {
-  if (!TAG.test(tag)) throw new Error(`${tag}: a release is named release-<N>, N from 1`);
+/** A list's name: release-<N> for a tagged release, build-<sha> for a checkout's own build (-dirty with uncommitted changes). */
+export const NAME = /^(release-[1-9][0-9]*|build-[0-9a-f]{12}(-dirty)?)$/;
+
+/** The list named `name` from the build folders in `dirs` (the hosts it holds, in HOSTS' order). */
+export function makeList(name, dirs, commit) {
+  if (!NAME.test(name)) throw new Error(`${name}: a release is named release-<N>, N from 1`);
   const hosts = {};
-  for (const [name, origin] of Object.entries(HOSTS)) hosts[name] = { origin, ...listDir(dirs[name]) };
-  return { release: tag, commit, hosts };
+  for (const [host, origin] of Object.entries(HOSTS)) if (dirs[host]) hosts[host] = { origin, ...listDir(dirs[host]) };
+  if (!Object.keys(hosts).length) throw new Error("no host built");
+  return { release: name, commit, hosts };
 }
 
-/** Lines where `fresh` and `listed` differ, the commit left out (empty = the same files and headers). */
+/** Lines where `fresh` and `listed` differ for the hosts `fresh` holds, the commit left out (empty = the same files and headers). */
 export function diffLists(fresh, listed) {
   const p = [];
-  for (const name of Object.keys(HOSTS)) {
+  for (const name of Object.keys(fresh.hosts)) {
     const a = fresh.hosts[name];
     const b = listed.hosts?.[name];
     if (!b) {
@@ -143,34 +169,58 @@ export function diffLists(fresh, listed) {
 
 export const listPath = (tag) => join(RELEASES, `${tag}.json`);
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const a = process.argv.slice(2);
-  const checking = a[0] === "--check";
-  const tag = checking ? a[1] : a[0];
-  if (!tag || !TAG.test(tag) || a.length !== (checking ? 2 : 1)) {
-    console.error("usage: node packages/signpage/scripts/release-list.mjs [--check] release-<N>");
-    process.exit(2);
-  }
-  const git = (...args) => spawnSync("git", ["-C", REPO, ...args], { encoding: "utf8" }).stdout.trim();
-  const dirty = git("status", "--porcelain", "--", ".", ":!packages/signpage/releases");
-  if (!checking && dirty) {
-    console.error(`release-list: uncommitted changes, so the list could not name its commit:\n${dirty}`);
-    process.exit(1);
-  }
-  const dirs = buildHosts();
+const git = (...args) => spawnSync("git", ["-C", REPO, ...args], { encoding: "utf8" }).stdout.trim();
+const uncommitted = () => git("status", "--porcelain", "--", ".", ":!packages/signpage/releases");
+
+/** The list of this checkout's own build, in memory, for the hosts named: what a deploy from this commit serves. */
+export function headList(names = Object.keys(HOSTS)) {
+  const commit = git("rev-parse", "HEAD");
+  const dirs = buildHosts(names);
   try {
-    const fresh = makeList(tag, dirs, git("rev-parse", "HEAD"));
-    if (checking) {
-      if (!existsSync(listPath(tag))) throw new Error(`no list ${listPath(tag)}`);
-      const p = diffLists(fresh, readList(tag));
-      for (const l of p) console.error(`release-list: ${l}`);
-      if (!p.length) console.log(`release-list: a fresh build of ${fresh.commit.slice(0, 7)} equals ${tag}'s list`);
-      process.exitCode = p.length ? 1 : 0; // not process.exit: the finally below removes the two builds (24 MB of setup files)
-    } else {
-      writeFileSync(listPath(tag), `${JSON.stringify(fresh, null, 1)}\n`);
-      for (const [name, h] of Object.entries(fresh.hosts)) console.log(`release-list: ${tag} ${name} ${h.files.length} files, _headers ${h.headers_file.sha256}`);
-    }
+    return makeList(`build-${commit.slice(0, 12)}${uncommitted() ? "-dirty" : ""}`, dirs, commit);
   } finally {
     removeBuilds(dirs);
   }
+}
+
+const USAGE = [
+  "usage: node packages/signpage/scripts/release-list.mjs release-<N>                     write the list",
+  "       node packages/signpage/scripts/release-list.mjs --check (release-<N> | --list <file>)",
+  "       node packages/signpage/scripts/release-list.mjs --print [--host sign|app]       this checkout's build's list, to stdout",
+].join("\n");
+
+/** The command line: { code, out, err } (no process.exit inside, so every build is removed before the process ends). */
+export function main(a) {
+  const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
+  const usage = { code: 2, err: [USAGE] };
+  if (a[0] === "--print") {
+    const host = opt("--host");
+    if (a.length !== (host === undefined ? 1 : 3) || (host !== undefined && !HOST_ARGS[host])) return usage;
+    return { code: 0, out: [JSON.stringify(headList(host ? [HOST_ARGS[host]] : undefined), null, 1)] };
+  }
+  if (a[0] === "--check") {
+    const file = opt("--list");
+    const tag = file === undefined ? a[1] : undefined;
+    if (a.length !== (file === undefined ? 2 : 3) || (tag !== undefined && !TAG.test(tag))) return usage;
+    if (file === undefined && !existsSync(listPath(tag))) return { code: 2, err: [`no list ${listPath(tag)}`] };
+    const listed = file === undefined ? readList(tag) : JSON.parse(readFileSync(file, "utf8"));
+    const fresh = headList(Object.keys(listed.hosts ?? {}));
+    const p = diffLists(fresh, listed);
+    return p.length ? { code: 1, err: p } : { code: 0, out: [`a fresh build of ${fresh.commit.slice(0, 7)} equals ${listed.release}'s list`] };
+  }
+  if (a.length !== 1 || !TAG.test(a[0])) return usage;
+  const dirty = uncommitted();
+  if (dirty) return { code: 1, err: [`uncommitted changes, so the list could not name its commit:\n${dirty}`] };
+  const list = headList();
+  list.release = a[0];
+  writeFileSync(listPath(a[0]), `${JSON.stringify(list, null, 1)}\n`);
+  return { code: 0, out: Object.entries(list.hosts).map(([name, h]) => `${a[0]} ${name} ${h.files.length} files, _headers ${h.headers_file.sha256}`) };
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const r = main(process.argv.slice(2));
+  const print = process.argv[2] === "--print";
+  for (const l of r.out ?? []) console.log(print ? l : `release-list: ${l}`);
+  for (const l of r.err ?? []) console.error(`release-list: ${l}`);
+  process.exitCode = r.code;
 }
