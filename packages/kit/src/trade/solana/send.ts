@@ -622,8 +622,9 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const eligible = (i: number): boolean => !decided[i] && !past(i);
 
   /** One call on provider p, in the provider's shared queue (rpcSlot), timed out, with its 429 back-off. Rejects on
-   * any failure, and without calling once the set is over: a turn whose time comes after the end is given back
-   * (end() gives back the turns pending then; this one was asked after it, by a loop that had not seen the end). */
+   * any failure, and without calling once the set is over: a turn whose time comes after the end is given back.
+   * end() gives back the turns pending then; every caller reads `over` before it asks, and this gives back a turn
+   * asked after the end by a caller that did not (the dead check's loop once did, and its turn stayed booked). */
   function call(p: 0 | 1, method: string, params: readonly unknown[]): Promise<unknown> {
     const { run, wait, drop } = rpcSlot(opts.providers[p], limits[p], method);
     pending.add(drop);
