@@ -7,10 +7,11 @@
 // response). It needs CLOUDFLARE_API_TOKEN (a Pages-only token) and CLOUDFLARE_ACCOUNT_ID in the environment; neither
 // is printed.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TESTNET_RPCS } from "../build/network.mjs";
 import { checkDir } from "./check-deploy.ts";
 
 export const PROJECT = "confidential-trenches-app";
@@ -20,9 +21,11 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 // every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs
 // and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
 // fail this deploy)
-export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "signpage-release"];
-export const LIVE_ARGS = { "signpage-release": "--host app" };
-export const liveRun = (k) => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}`;
+export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-harness-signin-e2e", "app-verify-mount", "signpage-release"];
+export const LIVE_ARGS = { "app-harness-signin-e2e": "--host app", "signpage-release": "--host app" };
+// app-verify-mount reads the network the build names: a testnet build's _headers carries the testnet pair (build/network.mjs)
+export const networkOfBuild = (dir) => (readFileSync(join(dir, "_headers"), "utf8").includes(TESTNET_RPCS) ? "testnet" : "mainnet");
+export const liveRun = (k, network = "mainnet") => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}${k === "app-verify-mount" ? ` --network ${network}` : ""}`;
 
 export function deploy(argv, env = process.env, run = spawnSync) {
   const dryRun = argv.includes("--dry-run");
@@ -45,7 +48,7 @@ export function deploy(argv, env = process.env, run = spawnSync) {
     stdio: "inherit",
   });
   if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map(liveRun).join(", ")} next`] };
+  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map((k) => liveRun(k, networkOfBuild(dir))).join(", ")} next`] };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

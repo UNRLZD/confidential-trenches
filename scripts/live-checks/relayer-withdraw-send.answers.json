@@ -1,0 +1,236 @@
+{
+ "good": {
+  "note": "apps/helper at card/relayer-withdraw-send 048509b run with node src/server.ts on a Mac, the testnet network carried (the testnet vault, a throwaway relayer key no account holds, release 1): the route read the vault config() on test.rpc.fastnear.com and near-testnet.drpc.org, ran its first outcome round, and answered the real proof for another vault bad_proof (check 2); mainnet not carried: bad_shape",
+  "base": "http://127.0.0.1:18132",
+  "reads": [
+   {
+    "asked": "GET",
+    "readAt": "2026-11-02T11:07:24.424Z",
+    "status": 405,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": "POST, OPTIONS",
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "asked": "not JSON",
+    "readAt": "2026-11-02T11:07:24.428Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "over 8 KB",
+    "readAt": "2026-11-02T11:07:24.430Z",
+    "status": 413,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"too_large\"}}"
+   },
+   {
+    "asked": "a field the vault does not take",
+    "readAt": "2026-11-02T11:07:24.430Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "a real proof for another vault, mainnet USDC",
+    "readAt": "2026-11-02T11:07:24.432Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "a real proof for another vault, the testnet token",
+    "readAt": "2026-11-02T11:07:25.862Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_proof\"}}"
+   }
+  ]
+ },
+ "good_uncarried": {
+  "note": "the same commit with no network carried (the deployed helper until the release sets its relayer): every proof bad_shape",
+  "base": "http://127.0.0.1:18131",
+  "reads": [
+   {
+    "asked": "GET",
+    "readAt": "2026-11-02T11:07:03.711Z",
+    "status": 405,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": "POST, OPTIONS",
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "asked": "not JSON",
+    "readAt": "2026-11-02T11:07:03.715Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "over 8 KB",
+    "readAt": "2026-11-02T11:07:03.718Z",
+    "status": 413,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"too_large\"}}"
+   },
+   {
+    "asked": "a field the vault does not take",
+    "readAt": "2026-11-02T11:07:03.719Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "a real proof for another vault, mainnet USDC",
+    "readAt": "2026-11-02T11:07:03.720Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "a real proof for another vault, the testnet token",
+    "readAt": "2026-11-02T11:07:03.720Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "048509bab9830674e3db2ac075bba3b7ec20c6f9",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   }
+  ]
+ },
+ "bad_unmounted": {
+  "note": "apps/helper at main e92762a, before this card: /v1/withdraw is not served, every ask 404 not_found",
+  "base": "http://127.0.0.1:18133",
+  "reads": [
+   {
+    "asked": "GET",
+    "readAt": "2026-11-02T11:07:42.302Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "asked": "not JSON",
+    "readAt": "2026-11-02T11:07:42.308Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "asked": "over 8 KB",
+    "readAt": "2026-11-02T11:07:42.309Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "asked": "a field the vault does not take",
+    "readAt": "2026-11-02T11:07:42.310Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "asked": "a real proof for another vault, mainnet USDC",
+    "readAt": "2026-11-02T11:07:42.311Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "asked": "a real proof for another vault, the testnet token",
+    "readAt": "2026-11-02T11:07:42.312Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "e92762a5a38434f63e634c35f8ee8effe72d6602",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "allow": null,
+     "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   }
+  ]
+ }
+}

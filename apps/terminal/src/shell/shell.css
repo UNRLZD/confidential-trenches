@@ -49,6 +49,7 @@ svg { display: block; flex: none; }
 /* desktop footer (proto.css:124, :132) */
 .ft { height: 32px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 0 16px; border-top: 1px solid #151515; font: 12px var(--font-num); color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .ft .links { flex: none; display: flex; gap: 14px; font-family: var(--font-ui); color: var(--text-3); }
+.ft .pill { flex: none; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 11px; font: 600 11px var(--font-ui); background: var(--bg-raised); color: var(--text-2); }
 
 /* phone header and tab bar (proto.css:232-247, :368) */
 .phh, .tabbar { display: none; }
@@ -62,4 +63,23 @@ svg { display: block; flex: none; }
   .tabbar .tb4 .pl { width: 54px; height: 30px; border-radius: 15px; display: flex; align-items: center; justify-content: center; }
   .tabbar .tb4.on { color: var(--text-1); font-weight: 600; }
   .tabbar .tb4.on .pl { background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); }
+}
+
+/* the boot frame (index.html #boot): drawn before the script runs, hidden once the app draws into #root, so nothing on
+   screen moves between the two (BAR-03, BAR-04). Its sizes are the shell's at --fit-zoom, written as lengths because
+   fit.ts sets the zoom only once the script runs: from 1024 css px the zoom is viewport / 1920 clamped to [0.72, 1]. The
+   screen's frame is one panel where a screen's panels sit (Discover's grid: discover.css .dsc, .dsc-grid). */
+#boot { --z-tb: 60px; --z-ft: 32px; --z-top: 54px; --z-pad: 8px; --z-x: 18px; min-height: 100dvh; display: flex; flex-direction: column; }
+@media (min-width: 1024px) {
+  #boot { --z-tb: clamp(43.2px, 3.125vw, 60px); --z-ft: clamp(23.04px, 1.6667vw, 32px); --z-top: clamp(38.88px, 2.8125vw, 54px); --z-pad: clamp(5.76px, 0.41667vw, 8px); --z-x: clamp(12.96px, 0.9375vw, 18px); }
+}
+#root:not(:empty) ~ #boot { display: none; }
+#boot .ctlogo { zoom: 0.525; }
+#boot .ctlogo.ph { zoom: 1; }
+.boot-tb { height: var(--z-tb); flex: none; display: flex; align-items: center; padding: 0 var(--z-x); }
+.boot-screen { flex: 1; display: flex; padding: var(--z-top) var(--z-pad) var(--z-pad); }
+.boot-panel { flex: 1; background: #0f0f0f; border: 1px solid #1f1f1f; border-radius: calc(var(--z-pad) * 1.25); }
+.boot-ft { height: var(--z-ft); flex: none; border-top: 1px solid #151515; }
+@media (max-width: 767.98px) {
+  .boot-tb, .boot-screen, .boot-ft { display: none; }
 }

@@ -1,0 +1,81 @@
+{
+ "note": "Every record is a real run of this check. good: the card's build (packages/signpage index.html and public/app.js at card/signpage-withdraw-form 1a0c8ef, 168,416 B, the build release-2 lists) served at / and /app.js on 127.0.0.1, before its deploy. bad: the live SIGN_HOST, https://sign.confidential.unrealized.trade, 2026-11-02, serving main's page without the form. badIntegrity: the card's app.js served under the base page's index.html (7f496cb), whose integrity names the old script.",
+ "good": {
+  "key": "signpage-withdraw-form",
+  "url": "http://127.0.0.1:60971",
+  "at": "2026-11-02T10:45:53.074Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-K1hB+bV42bfopJhCz4Klx9XH0wE+E1Gh+ilXKf+j+erUfxQD7lIAiwaAGA3k/DCT",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 168416,
+   "sha384": "sha384-K1hB+bV42bfopJhCz4Klx9XH0wE+E1Gh+ilXKf+j+erUfxQD7lIAiwaAGA3k/DCT",
+   "markers": {
+    "not-account": 1,
+    "no-account": 1,
+    "UNKNOWN_ACCOUNT": 1,
+    "withdraw-relay": 1,
+    "dataset.withdraw=`form`": 1,
+    "Invalid address": 1,
+    "Busy · Retry": 1
+   }
+  }
+ },
+ "bad": {
+  "key": "signpage-withdraw-form",
+  "url": "https://sign.confidential.unrealized.trade",
+  "at": "2026-11-02T08:57:12.559Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-3Kzd9qIGb5BQM4lkXNhBsS77hPD7zU1O4g644tGcuVKC9kpVKNg9r57qz3izlASS",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 156338,
+   "sha384": "sha384-3Kzd9qIGb5BQM4lkXNhBsS77hPD7zU1O4g644tGcuVKC9kpVKNg9r57qz3izlASS",
+   "markers": {
+    "not-account": 0,
+    "no-account": 0,
+    "UNKNOWN_ACCOUNT": 0,
+    "withdraw-relay": 0,
+    "dataset.withdraw=`form`": 0,
+    "Invalid address": 0,
+    "Busy · Retry": 0
+   }
+  }
+ },
+ "badIntegrity": {
+  "key": "signpage-withdraw-form",
+  "url": "http://127.0.0.1:60975",
+  "at": "2026-11-02T10:45:53.149Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-3Kzd9qIGb5BQM4lkXNhBsS77hPD7zU1O4g644tGcuVKC9kpVKNg9r57qz3izlASS",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 168416,
+   "sha384": "sha384-K1hB+bV42bfopJhCz4Klx9XH0wE+E1Gh+ilXKf+j+erUfxQD7lIAiwaAGA3k/DCT",
+   "markers": {
+    "not-account": 1,
+    "no-account": 1,
+    "UNKNOWN_ACCOUNT": 1,
+    "withdraw-relay": 1,
+    "dataset.withdraw=`form`": 1,
+    "Invalid address": 1,
+    "Busy · Retry": 1
+   }
+  }
+ }
+}

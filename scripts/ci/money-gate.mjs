@@ -75,8 +75,10 @@ const NEAR = new Set(["near", "near-testnet"]);
 export const FLOOR = Date.parse("2026-11-01T00:00:00Z");
 // The folders that hold money code, from the kit layout (README.md "Layout": contracts/vault/ the vault, packages/kit/
 // the kit, packages/wallet/ the wallets) and the terminal's trade code (docs/plan1/app.md:128 and :141 cite the UNRLZD
-// terminal's apps/terminal/src/trading/, which the terminal is rebuilt from). Screens and docs are not money code.
-export const MONEY = ["contracts/vault/", "packages/kit/", "packages/wallet/", "apps/terminal/src/trading/"];
+// terminal's apps/terminal/src/trading/, which the terminal is rebuilt from), and the pool programs on Solana and EVM
+// (contracts/pool-solana/, contracts/pool-evm/), which hold deposits as the vault does. Screens and docs are not
+// money code.
+export const MONEY = ["contracts/vault/", "contracts/pool-solana/", "contracts/pool-evm/", "packages/kit/", "packages/wallet/", "apps/terminal/src/trading/"];
 export const LIVE = "scripts/live-checks/";
 const CHAIN_ID = { base: "0x2105", robinhood: "0x1237" }; // 8453, 4663
 const B58 = "[1-9A-HJ-NP-Za-km-z]";

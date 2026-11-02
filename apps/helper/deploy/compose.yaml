@@ -1,5 +1,6 @@
 # The helper and Caddy on one host. Only Caddy is published (80, 443 and 443/udp for HTTP/3).
 #   HELPER_COMMIT=<40 hex> docker compose up -d --build
+# On the server, deploy/redeploy.sh <40 hex> runs it, with HELPER_COMMIT and HELPER_RELEASE written to deploy/.env.
 name: ct-helper
 services:
   helper:
@@ -17,6 +18,45 @@ services:
       RELAY_API_KEY: ${RELAY_API_KEY:-}
       LIFI_API_KEY: ${LIFI_API_KEY:-}
       ONECLICK_JWT: ${ONECLICK_JWT:-}
+      # Every other name src/ reads (deploy/env-names.test.mjs holds the list to src): the RPC providers (src/rpc/rpc.ts,
+      # src/token-status/, src/withdraw/fee.ts; empty: the public endpoint) and the release's withdrawal relayer per
+      # network (src/withdraw/fee.ts; empty: that network is not quoted).
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
+      # the token page's holder rows (src/data/solana/token.ts, D-S11): a keyed provider that answers
+      # getTokenLargestAccounts; empty: holders is Jupiter's count and top-10 share, with no rows
+      SOLANA_HOLDERS_RPC_URL: ${SOLANA_HOLDERS_RPC_URL:-}
+      BASE_RPC_URL: ${BASE_RPC_URL:-}
+      ROBINHOOD_RPC_URL: ${ROBINHOOD_RPC_URL:-}
+      NEAR_RPC_URL: ${NEAR_RPC_URL:-}
+      NEAR_RPC_URL_B: ${NEAR_RPC_URL_B:-}
+      NEAR_TESTNET_RPC_URL: ${NEAR_TESTNET_RPC_URL:-}
+      NEAR_TESTNET_RPC_URL_B: ${NEAR_TESTNET_RPC_URL_B:-}
+      WITHDRAW_RELAYER_MAINNET: ${WITHDRAW_RELAYER_MAINNET:-}
+      WITHDRAW_FEE_RECIPIENT_MAINNET: ${WITHDRAW_FEE_RECIPIENT_MAINNET:-}
+      WITHDRAW_RELAYER_TESTNET: ${WITHDRAW_RELAYER_TESTNET:-}
+      WITHDRAW_FEE_RECIPIENT_TESTNET: ${WITHDRAW_FEE_RECIPIENT_TESTNET:-}
+      # POST /v1/withdraw per network (src/withdraw/send.ts; empty: that network's withdrawals are not carried): the
+      # release's vault, the relayer account's full-access keys (gas NEAR only, comma-separated, one nonce lane each),
+      # and the release number (one above the last release's; a rollback ships with the next number)
+      WITHDRAW_VAULT_MAINNET: ${WITHDRAW_VAULT_MAINNET:-}
+      WITHDRAW_RELAYER_KEYS_MAINNET: ${WITHDRAW_RELAYER_KEYS_MAINNET:-}
+      WITHDRAW_VAULT_TESTNET: ${WITHDRAW_VAULT_TESTNET:-}
+      WITHDRAW_RELAYER_KEYS_TESTNET: ${WITHDRAW_RELAYER_KEYS_TESTNET:-}
+      # POST /v1/bind per network (src/bind/env.ts; empty: that network's deposits are not carried): the release's vault
+      # (the same as WITHDRAW_VAULT_<NET> when both are set), the gas account that sends deposits and its one
+      # full-access key (gas and storage prepays only), and R4's margin K in blocks (the release's pin, 1 to 600)
+      BIND_VAULT_MAINNET: ${BIND_VAULT_MAINNET:-}
+      BIND_RELAYER_MAINNET: ${BIND_RELAYER_MAINNET:-}
+      BIND_RELAYER_KEY_MAINNET: ${BIND_RELAYER_KEY_MAINNET:-}
+      BIND_VAULT_TESTNET: ${BIND_VAULT_TESTNET:-}
+      BIND_RELAYER_TESTNET: ${BIND_RELAYER_TESTNET:-}
+      BIND_RELAYER_KEY_TESTNET: ${BIND_RELAYER_KEY_TESTNET:-}
+      BIND_MARGIN_K: ${BIND_MARGIN_K:-}
+      HELPER_RELEASE: ${HELPER_RELEASE:-}
+      # the relayers' durable store (src/store/durable.ts): the one writable path in a read-only container
+      HELPER_STORE_DIR: /app/data
+    volumes:
+      - helper_data:/app/data
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -46,3 +86,4 @@ services:
 volumes:
   caddy_data: {}
   caddy_config: {}
+  helper_data: {}

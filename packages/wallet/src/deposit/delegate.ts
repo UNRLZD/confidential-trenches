@@ -24,7 +24,7 @@
 //
 // Not here (card wallet-deposit-bind, W2.3): the re-sign at the same nonce once a call lapsed ("Nothing landed"), the
 // answers' waits and retries, the storage_balance_of(vault) read and the deposits-pages read of P.
-import { HELPER_BIND_DEPOSIT_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindCode, vaultDepositCall } from "@blindfill/kit";
+import { HELPER_BIND_ANSWER_MS, HELPER_BIND_DEPOSIT_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindCode, vaultDepositCall } from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
@@ -43,7 +43,12 @@ export const NONCE_RANGE_MULTIPLIER = 1_000_000n;
 export const RELEASE_BIND_URL = "https://api.confidential.unrealized.trade/v1/bind";
 /** POST /v1/bind's body limit (HELPER_V1_PATHS), which also caps the decoded SignedDelegateAction. */
 export const BIND_MAX_BYTES = 4_096;
-export const SEND_TIMEOUT_MS = 10_000;
+/**
+ * How long the send waits for the relayer's answer: the kit's HELPER_BIND_ANSWER_MS, within which the helper answers
+ * (a carry still running then answers in_flight), and 5 s for the request's way there and back. Every answer the
+ * carry gives in time is heard; past this the send has no answer, which the bind reads as unsure (it reads the pages).
+ */
+export const SEND_TIMEOUT_MS = HELPER_BIND_ANSWER_MS + 5_000;
 /** The relayer's answer is {tx_hash} or {error: {code}}: anything longer is not one. */
 export const BIND_ANSWER_MAX_BYTES = 1_024;
 
@@ -148,7 +153,7 @@ function signDepositDelegate(seed64: Uint8Array, s: bigint, i: number, args: Dep
   const window = args.window ?? DEPOSIT_WINDOW;
   if (!Number.isSafeInteger(window) || window < 1 || window > DEPOSIT_WINDOW_MAX)
     throw new DepositDelegateRefused("window", `the window must be a whole number of blocks in 1..${DEPOSIT_WINDOW_MAX}`);
-  const { token, vault } = NEAR_NETWORKS[args.network];
+  const { usdc: token, vault } = NEAR_NETWORKS[args.network];
   if (vault === null) throw new DepositDelegateRefused("no_vault", `the release names no vault on ${args.network}`);
   const n = BigInt(read.nonce) + 1n;
   if (n >= BigInt(read.height) * NONCE_RANGE_MULTIPLIER) throw new DepositDelegateRefused("nonce", "nonce + 1 is at or above the read height x 1,000,000");
@@ -215,16 +220,17 @@ export type BindAnswer = { ok: true; tx_hash: string } | { ok: false; code: Help
  * Hands the signed call to the release's relayer only: POST RELEASE_BIND_URL with {signed_delegate} and nothing else.
  * The answer is hostile input: only a tx hash of 32 bytes in base58 on 200, or a code from HELPER_BIND_DEPOSIT_CODES
  * with its own HTTP status, is taken;
- * the deposit itself is confirmed from the vault's deposits pages, never from this answer (W:418).
+ * the deposit itself is confirmed from the vault's deposits pages, never from this answer (W:418). It waits
+ * SEND_TIMEOUT_MS, or until `signal` (the bind's stop) aborts.
  */
-export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch): Promise<BindAnswer> {
+export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<BindAnswer> {
   const res = await fetchFn(RELEASE_BIND_URL, {
     ...HELPER_FETCH_INIT,
     redirect: "error",
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ signed_delegate: signed.signed_delegate }),
-    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(SEND_TIMEOUT_MS)]) : AbortSignal.timeout(SEND_TIMEOUT_MS),
   });
   let body: unknown;
   try {

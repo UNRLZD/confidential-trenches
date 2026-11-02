@@ -3,7 +3,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { afterSaved, pageFor, takes } from "../src/pages/open.ts";
+import { afterSaved, pageFor, takes, takesParams } from "../src/pages/open.ts";
 
 const PRF = { source: "prf", code_saved: false }; // a passkey with PRF: the words are not the only copy
 const SAVED = { source: "random", code_saved: true };
@@ -57,4 +57,21 @@ test("no kind is taken while a step runs or before the store is read", () => {
     assert.equal(takes(k, "loading", false), false);
     assert.equal(takes(k, undefined, false), false);
   }
+});
+
+test("withdraw.open: only with a seed, and it draws the withdraw form; signin.open is refused while it shows", () => {
+  assert.equal(takes("withdraw.open", "signed-in", false), true);
+  for (const st of ["signed-out", "unsupported", "words", "choose", "existing", "backup", "signout", "withdraw", "loading"])
+    assert.equal(takes("withdraw.open", st, false), false, st);
+  assert.equal(takes("withdraw.open", "signed-in", true), false);
+  for (const s of [PRF, SAVED, UNSAVED, TYPED]) assert.equal(pageFor("withdraw.open", undefined, s, true), "withdraw");
+  assert.equal(pageFor("withdraw.open", undefined, undefined, true), "signed-out");
+  assert.equal(takes("signin.open", "withdraw", false), false);
+});
+
+test("withdraw.open with a one-time id is refused until that way out is built; without one it is taken", () => {
+  assert.equal(takesParams("withdraw.open", { return_key: "k" }), true);
+  assert.equal(takesParams("withdraw.open", { return_key: "k", from_id: "ab".repeat(32) }), false);
+  assert.equal(takesParams("withdraw.open", { return_key: "k", from_id: undefined }), false);
+  for (const k of ["signin.open", "signout", "backup.open"] as const) assert.equal(takesParams(k, { return_key: "k" }), true);
 });

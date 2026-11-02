@@ -265,9 +265,9 @@ test("heights spread over HEIGHT_SPREAD_MAX blocks stop it; the lowest height is
 // Review round 2, P2 3: one token per network (adversary.mjs case 7).
 test("the caller names the network, never the token: each network reads its one token", async () => {
   const dep = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/testnet-usdc.json", import.meta.url), "utf8"));
-  assert.equal(NEAR_NETWORKS.testnet.token, dep.account_id);
+  assert.equal(NEAR_NETWORKS.testnet.usdc, dep.account_id);
   assert.equal(dep.code_hash, VAULT_TOKEN_CODE_HASH);
-  assert.equal(NEAR_NETWORKS.mainnet.token, USDC);
+  assert.equal(NEAR_NETWORKS.mainnet.usdc, USDC);
   // Testnet, on the testnet pair: the code read is the testnet token's real answer (its heights set to the mainnet
   // reads', since two networks' heights never meet); every token read names the testnet token.
   const seen: Record<string, unknown>[] = [];
@@ -284,8 +284,8 @@ test("the caller names the network, never the token: each network reads its one 
   });
   const r = await checkDepositAccount(rec.good, ONE, "testnet", [tn("a", T.fastnear[1]), tn("b", T.drpc)]);
   assert.equal(r.codeHash, VAULT_TOKEN_CODE_HASH);
-  assert.equal(A.code_testnet.for, T.token);
-  for (const p of seen) assert.ok(p.account_id === rec.good || p.account_id === T.token, JSON.stringify(p));
+  assert.equal(A.code_testnet.for, T.usdc);
+  for (const p of seen) assert.ok(p.account_id === rec.good || p.account_id === T.usdc, JSON.stringify(p));
   // No token parameter exists: a fifth argument changes nothing.
   const spy: Record<string, unknown>[] = [];
   const s = (side: "a" | "b"): NearRpc => ({ name: URL_OF[side], query: (p) => (spy.push(p), replay(side).query(p)) });

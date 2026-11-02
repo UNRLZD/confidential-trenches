@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+# The Blindfill pool program: a Solana port of the Blindfill vault (contracts/vault, itself a port of Privacy Pools
+# v1.3.0 core, 0xbow, Apache-2.0). No admin account, no setter, no pause; deployed with no upgrade authority.
+[package]
+name = "blindfill-pool-solana"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+# The program's entrypoint, on by default; svm-tests links the crate for its pure functions without it.
+default = ["entrypoint"]
+entrypoint = []
+
+[dependencies]
+# The Groth16 check runs on these crates' alt_bn128 `_be` calls and the trees on sol_poseidon (circomlib's vectors);
+# built with cargo-build-sbf 4.4.0.
+solana-program = "=3.0.0"
+solana-poseidon = "=3.1.6"
+solana-bn254 = "=3.2.1"
+
+# solana-program's entrypoint! macro reads these two cfg names.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("custom-heap", "custom-panic"))', 'cfg(target_os, values("solana"))'] }
+
+[dev-dependencies]
+serde_json = "=1.0.145"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+# Host tests: the field and curve arithmetic at full optimisation (the host builds of sol_poseidon and the alt_bn128
+# calls are light-poseidon and arkworks); overflow checks and debug assertions stay on.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Its own workspace: the program builds alone. svm-tests/ is a workspace of its own (litesvm 0.8.2's agave 3.0 pins
+# solana-poseidon 3.0.0, which cannot share a lockfile with this crate's 3.1.6).
+[workspace]
+exclude = ["svm-tests"]

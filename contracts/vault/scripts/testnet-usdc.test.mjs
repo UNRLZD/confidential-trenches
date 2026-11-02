@@ -9,7 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { wasmProblems, initArgs, INIT_NAMES, encodeTx, act, PIN, keychainService } from "./testnet-usdc.mjs";
+import { wasmProblems, initArgs, INIT_NAMES, encodeTx, act, PIN, keychainService, pausersOf, rolesFor, ROLES } from "./testnet-usdc.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const deployment = JSON.parse(readFileSync(path.join(HERE, "../deployments/testnet-usdc.json"), "utf8"));
@@ -45,4 +45,15 @@ test("run without --keychain-service, the script refuses before any network read
   const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, path.join(HERE, "testnet-usdc.mjs"), "--token", "a.testnet"], { encoding: "utf8", timeout: 30_000 });
   assert.equal(r.status, 1, r.stderr);
   assert.equal(r.stderr.trim(), "testnet-usdc: ERROR: --keychain-service <name> is required: the Keychain service the key is written to");
+});
+
+test("--pausers 2 makes a second pauser at init and as a role account; 1 is the default and unchanged; anything else is refused", () => {
+  assert.equal(pausersOf([]), 1);
+  assert.equal(pausersOf(["--pausers", "2"]), 2);
+  for (const v of [["--pausers"], ["--pausers", "3"], ["--pausers", "0"], ["--pausers", "two"]]) assert.throws(() => pausersOf(v), /want 1 or 2/, v.join(" "));
+  assert.deepEqual(initArgs("t.testnet", {}).pauser_ids, ["pauser.t.testnet"]);
+  assert.deepEqual(initArgs("t.testnet", {}, 2).pauser_ids, ["pauser.t.testnet", "pauser2.t.testnet"]);
+  assert.deepEqual(Object.keys(initArgs("t.testnet", {}, 2)), INIT_NAMES);
+  assert.deepEqual(rolesFor(1), ROLES);
+  assert.deepEqual(rolesFor(2), ["admin", "owner", "pauser", "pauser2", "blocklister", "mm1", "mm2", "minter", "ctl1", "ctl2", "holder"]);
 });

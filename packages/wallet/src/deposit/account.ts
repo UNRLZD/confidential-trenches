@@ -38,33 +38,11 @@
 import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { base58, base64 } from "@scure/base";
 import { depositId } from "../derive/keys.ts";
+import { NEAR_NETWORKS, NEAR_RPC_METHOD, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../../../kit/src/near/networks.ts";
 
-/** RPC_A, RPC_B, RPC_C (M306 (5)): mainnet. */
-export const NEAR_RPC_URLS = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org", "https://near.drpc.org"] as const;
-/**
- * One token and two operators per network. The token's code must be VAULT_TOKEN_CODE_HASH on both: the testnet token
- * (contracts/vault/deployments/testnet-usdc.json, account_id) was deployed from mainnet USDC's own wasm (its wasm_from:
- * view_code of mainnet USDC on two RPCs, equal bytes), and its code_hash is DVJx7F3d… (the file; read on
- * test.rpc.fastnear.com and near-testnet.drpc.org 2026-11-01T08:02Z).
- */
-export const NEAR_NETWORKS = {
-  // vault: the release's vault on this network, the only receiver a deposit call names (wallet.md:898, "the vault id
-  // written into the release"); null until the release writes one, and the device signs no deposit call there.
-  // Mainnet: none yet (the vault is deployed at the freeze). Testnet: contracts/vault/deployments/testnet-v1.json,
-  // account_id: a keyless vault whose config() names this token as its asset, registered on it (its registration_tx;
-  // scripts/live-checks/vault-testnet-t01.mjs reads both).
-  mainnet: { token: VAULT_CONSTANTS.TOKEN, vault: null, fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
-  testnet: {
-    token: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (a public account id)
-    vault: "vault.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
-    fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], // near-rpc-operators: one operator (alternatives; the pair is one of these and drpc)
-    drpc: "https://near-testnet.drpc.org",
-  },
-} as const;
-// Frozen, so no code on the page can point a network at another token, vault or RPC after load.
-for (const net of Object.values(NEAR_NETWORKS)) Object.freeze(Object.freeze(net).fastnear);
-Object.freeze(NEAR_NETWORKS);
-export type NearNetwork = keyof typeof NEAR_NETWORKS;
+// The networks, the pair rule and nearRpc live in the kit (packages/kit/src/near/networks.ts); every caller still imports them here.
+export { NEAR_NETWORKS, NEAR_RPC_METHOD, NEAR_RPC_URLS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "../../../kit/src/near/networks.ts";
+
 /** The six reads' heights may spread by this many blocks at most (live spread measured by the review: 5-6). */
 export const HEIGHT_SPREAD_MAX = 30;
 /**
@@ -78,57 +56,11 @@ export function heightSpreadOver(heights: readonly (number | bigint)[]): string 
   const low = hs.reduce((a, b) => (a < b ? a : b));
   return top - low > BigInt(HEIGHT_SPREAD_MAX) ? `the reads' heights spread ${top - low} blocks, over ${HEIGHT_SPREAD_MAX}` : null;
 }
-const METHOD = "query";
-if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(METHOD)) throw new Error(`"${METHOD}" is not on the kit's NEAR method list`);
-export const RPC_TIMEOUT_MS = 10_000;
+if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(NEAR_RPC_METHOD)) throw new Error(`"${NEAR_RPC_METHOD}" is not on the kit's NEAR method list`);
 const HALT = "FiatToken: paused";
 
 /** What no deposit's answer can say yet (the header): a pending Pause request on USDC is not readable on chain. */
 export const PENDING_PAUSE = "unread" as const;
-
-/** One NEAR provider: runs a `query` with these params and gives back the JSON-RPC answer object. */
-export interface NearRpc {
-  name: string;
-  query(params: Record<string, unknown>): Promise<unknown>;
-}
-
-/**
- * The network whose release pair `rpcs` is, or null: exactly one of its FastNEAR URLs and its dRPC URL, in either
- * order, each provider named by the exact URL it reads (nearRpc's name). The one rule for every path that reads NEAR
- * on two RPCs: two hosts of one operator are one read, so two of them, or any other name, give null.
- */
-export function nearPairNetwork(rpcs: unknown): NearNetwork | null {
-  if (!Array.isArray(rpcs) || rpcs.length !== 2) return null;
-  const names = rpcs.map((r: unknown) => (typeof r === "object" && r !== null && typeof (r as NearRpc).query === "function" ? (r as NearRpc).name : undefined));
-  for (const network of Object.keys(NEAR_NETWORKS) as NearNetwork[]) {
-    const net = NEAR_NETWORKS[network];
-    const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n);
-    if ((fast(names[0]) && names[1] === net.drpc) || (names[0] === net.drpc && fast(names[1]))) return network;
-  }
-  return null;
-}
-/** The refusal's words for a pair that is not the network's (or, with none named, not any network's). */
-export function nearPairRule(network?: NearNetwork): string {
-  const nets = network === undefined ? (Object.keys(NEAR_NETWORKS) as NearNetwork[]) : [network];
-  return `the RPCs must be one of ${nets.map((n) => `${NEAR_NETWORKS[n].fastnear.join(", ")} and ${NEAR_NETWORKS[n].drpc}`).join("; or ")}, exactly`;
-}
-
-/** A provider by URL. A status other than 200, a body that is not JSON or no answer in time throws. */
-export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): NearRpc {
-  return {
-    name: url,
-    async query(params) {
-      const res = await fetchFn(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: METHOD, params }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    },
-  };
-}
 
 export type RefusalCode = "input" | "rpc" | "disagree" | "height" | "not_created" | "keys" | "nonce" | "halted" | "balance" | "code_hash";
 export class DepositAccountRefused extends Error {
@@ -185,7 +117,7 @@ export async function checkDepositAccount(
   if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new DepositAccountRefused("input", `unknown network ${String(network)}`);
   const net = NEAR_NETWORKS[network];
   if (nearPairNetwork(rpcs) !== network) throw new DepositAccountRefused("input", nearPairRule(network));
-  const token = net.token;
+  const token = net.usdc;
   const publicKey = `ed25519:${base58.encode(Uint8Array.from(account.match(/../g)!, (h) => parseInt(h, 16)))}`;
   const args = base64.encode(new TextEncoder().encode(JSON.stringify({ account_id: account })));
   const reads = {

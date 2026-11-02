@@ -195,6 +195,13 @@ test("deploy.mjs names every live check that reads APP_HOST in its success line"
   // and signpage-release, which reads APP_HOST alone against this commit's own build
   assert.match(readFileSync(join(dir, "signpage-release.mjs"), "utf8"), /"https:\/\/confidential\.unrealized\.trade"/);
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host app"), `the success line does not run signpage-release on APP_HOST alone: ${out}`);
+  // app-verify-mount runs on the network the build names: this build's _headers names the mainnet RPCs
+  assert.ok(out.includes("scripts/live-checks/app-verify-mount.mjs --network mainnet"), out);
+  const { networkOfBuild } = await import("./deploy.mjs");
+  const { headersFor } = await import("../build/network.mjs");
+  const t = mkdtempSync(join(tmpdir(), "check-deploy-testnet-"));
+  writeFileSync(join(t, "_headers"), headersFor("testnet", readFileSync(join(BUILD, "_headers"), "utf8")));
+  assert.deepEqual([networkOfBuild(BUILD), networkOfBuild(t)], ["mainnet", "testnet"]);
   const { LIVE_CHECKS } = await import("./deploy.mjs");
   assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release"], "LIVE_CHECKS holds only app-* checks and signpage-release");
 });

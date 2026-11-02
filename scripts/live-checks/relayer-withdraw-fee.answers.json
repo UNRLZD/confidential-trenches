@@ -1,0 +1,200 @@
+{
+ "good": {
+  "note": "apps/helper at card/relayer-withdraw-fee (f4c83b0 with its two-round-trip read; the test machine's snapshot 211cb29 is its X-Helper-Commit) run with node src/server.ts on a Linux test machine, no NEAR URL set, so it read rpc.mainnet.fastnear.com + near.drpc.org and test.rpc.fastnear.com + near-testnet.drpc.org; WITHDRAW_RELAYER_* and WITHDRAW_FEE_RECIPIENT_* relayer.confidential.unrlzd.near on both networks (the wallet vectors' relayer; the release names none yet); the check's own device reads on the same pairs; read 2026-11-02T09:30:16.489Z (api.confidential.unrealized.trade does not serve the route yet)",
+  "base": "http://127.0.0.1:18111",
+  "reads": [
+   {
+    "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "readAt": "2026-11-02T09:30:16.489Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "218",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 09:30:17 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "211cb2961fed0b34fc17661bf3cffa30a2b88376"
+    },
+    "body": "{\"relayer_account\":\"relayer.confidential.unrlzd.near\",\"fee_recipient\":\"relayer.confidential.unrlzd.near\",\"relay_fee\":\"207609\",\"gp\":\"100000000\",\"px\":\"4.135781763845\",\"g_w\":\"92505000000000\",\"valid_until_block\":222700748}"
+   },
+   {
+    "asked": "bf-usdc-20261101t022248.testnet",
+    "readAt": "2026-11-02T09:30:17.025Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "218",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 09:30:17 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "211cb2961fed0b34fc17661bf3cffa30a2b88376"
+    },
+    "body": "{\"relayer_account\":\"relayer.confidential.unrlzd.near\",\"fee_recipient\":\"relayer.confidential.unrlzd.near\",\"relay_fee\":\"207609\",\"gp\":\"100000000\",\"px\":\"4.135781763845\",\"g_w\":\"92505000000000\",\"valid_until_block\":275880316}"
+   },
+   {
+    "asked": "usdt.tether-token.near",
+    "readAt": "2026-11-02T09:30:17.630Z",
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "30",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 09:30:17 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "211cb2961fed0b34fc17661bf3cffa30a2b88376"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  ],
+  "device": {
+   "mainnet": {
+    "height": "222700650",
+    "gasPrice": "100000000",
+    "poolToken": "1023068829135",
+    "poolNear": "247370119496778966130420997292",
+    "registerDeposit": "1250000000000000000000"
+   },
+   "testnet": {
+    "height": "275880219",
+    "gasPrice": "100000000",
+    "poolToken": "1023068829135",
+    "poolNear": "247370119496778966130420997292",
+    "registerDeposit": "1250000000000000000000"
+   }
+  },
+  "relayer": {
+   "mainnet": {
+    "relayer_account": "relayer.confidential.unrlzd.near",
+    "fee_recipient": "relayer.confidential.unrlzd.near"
+   },
+   "testnet": {
+    "relayer_account": "relayer.confidential.unrlzd.near",
+    "fee_recipient": "relayer.confidential.unrlzd.near"
+   }
+  },
+  "pairs": {
+   "mainnet": [
+    "https://rpc.mainnet.fastnear.com",
+    "https://near.drpc.org"
+   ],
+   "testnet": [
+    "https://test.rpc.fastnear.com",
+    "https://near-testnet.drpc.org"
+   ]
+  }
+ },
+ "bad_rate": {
+  "note": "made from the good run: the mainnet answer with relay_fee \"0.0005\", a fee given as a rate (what a percentage relayer answers)",
+  "base": "http://127.0.0.1:18111",
+  "reads": [
+   {
+    "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "readAt": "2026-11-02T09:30:16.489Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "218",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 09:30:17 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "211cb2961fed0b34fc17661bf3cffa30a2b88376"
+    },
+    "body": "{\"relayer_account\":\"relayer.confidential.unrlzd.near\",\"fee_recipient\":\"relayer.confidential.unrlzd.near\",\"relay_fee\":\"0.0005\",\"gp\":\"100000000\",\"px\":\"4.135781763845\",\"g_w\":\"92505000000000\",\"valid_until_block\":222700748}"
+   },
+   {
+    "asked": "bf-usdc-20261101t022248.testnet",
+    "readAt": "2026-11-02T09:30:17.025Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "218",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 09:30:17 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "211cb2961fed0b34fc17661bf3cffa30a2b88376"
+    },
+    "body": "{\"relayer_account\":\"relayer.confidential.unrlzd.near\",\"fee_recipient\":\"relayer.confidential.unrlzd.near\",\"relay_fee\":\"207609\",\"gp\":\"100000000\",\"px\":\"4.135781763845\",\"g_w\":\"92505000000000\",\"valid_until_block\":275880316}"
+   },
+   {
+    "asked": "usdt.tether-token.near",
+    "readAt": "2026-11-02T09:30:17.630Z",
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "30",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 09:30:17 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "211cb2961fed0b34fc17661bf3cffa30a2b88376"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  ],
+  "device": {
+   "mainnet": {
+    "height": "222700650",
+    "gasPrice": "100000000",
+    "poolToken": "1023068829135",
+    "poolNear": "247370119496778966130420997292",
+    "registerDeposit": "1250000000000000000000"
+   },
+   "testnet": {
+    "height": "275880219",
+    "gasPrice": "100000000",
+    "poolToken": "1023068829135",
+    "poolNear": "247370119496778966130420997292",
+    "registerDeposit": "1250000000000000000000"
+   }
+  },
+  "relayer": {
+   "mainnet": {
+    "relayer_account": "relayer.confidential.unrlzd.near",
+    "fee_recipient": "relayer.confidential.unrlzd.near"
+   },
+   "testnet": {
+    "relayer_account": "relayer.confidential.unrlzd.near",
+    "fee_recipient": "relayer.confidential.unrlzd.near"
+   }
+  },
+  "pairs": {
+   "mainnet": [
+    "https://rpc.mainnet.fastnear.com",
+    "https://near.drpc.org"
+   ],
+   "testnet": [
+    "https://test.rpc.fastnear.com",
+    "https://near-testnet.drpc.org"
+   ]
+  }
+ }
+}

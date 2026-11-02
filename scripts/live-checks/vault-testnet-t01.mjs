@@ -27,7 +27,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEPLOYMENT = path.join(HERE, "../../contracts/vault/deployments/testnet-v1.json");
 // The team's testnet USDC: mainnet USDC's own wasm with test accounts in its roles (card vault-testnet-usdc,
 // contracts/vault/deployments/testnet-usdc.json), the token the wallet's testnet deposit names
-// (packages/wallet/src/deposit/account.ts NEAR_NETWORKS.testnet.token). The testnet build's TOKEN
+// (packages/wallet/src/deposit/account.ts NEAR_NETWORKS.testnet.usdc). The testnet build's TOKEN
 // (contracts/vault/src/constants.rs).
 export const TESTNET_TOKEN = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
 // The two token ids a testnet build must not hold: mainnet USDC and Circle's testnet USDC (the 1 Nov skeleton's asset).

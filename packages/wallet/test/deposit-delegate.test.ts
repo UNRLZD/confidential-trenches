@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
-import { HELPER_BIND_DEPOSIT_CAP, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/kit";
+import { HELPER_BIND_ANSWER_MS, HELPER_BIND_DEPOSIT_CAP, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58 } from "@scure/base";
@@ -42,6 +42,7 @@ import {
 } from "../src/deposit/delegate.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { type ReadKind, replayDepositReads } from "./replay-deposit-reads.ts";
+import { withSendClock } from "./send-clock.ts";
 
 const V = JSON.parse(readFileSync(new URL("./vectors/deposit-delegate.json", import.meta.url), "utf8"));
 const SEED = new Uint8Array(64).fill(0x42); // the public test seed of deposit-account.json's test_u: U_{1,0}
@@ -72,7 +73,7 @@ async function refused(p: Promise<unknown>, code: DelegateRefusalCode, detail?: 
 
 // The helper's checks, with reads that say U exists with its key at the read nonce, the final height is the read
 // height, U holds the recorded USDC, and P and U are clear in the ledger.
-const CFG: BindConfig = { vault: NET.vault, token: NET.token, marginK: 60n };
+const CFG: BindConfig = { vault: NET.vault, token: NET.usdc, marginK: 60n };
 const reads = (over: Partial<BindReads> = {}): BindReads => ({
   accessKey: async (account, publicKey) => (account === U && publicKey === PUB ? { kind: "key", permission: "FullAccess", nonce: NONCE } : { kind: "no_account" }),
   finalHeight: async () => HEIGHT,
@@ -94,7 +95,7 @@ test("the vector: the device's bytes equal the shared vector, and the helper's d
   assert.equal(d.sender_id, e.sender_id);
   assert.equal(d.sender_id, depositId(SEED, S, I).id);
   assert.equal(d.receiver_id, e.receiver_id);
-  assert.equal(d.receiver_id, NET.token);
+  assert.equal(d.receiver_id, NET.usdc);
   assert.equal(d.actions.length, 1);
   const a = d.actions[0]!;
   assert.equal(a.kind, "FunctionCall");
@@ -122,7 +123,7 @@ test("the vector: the device's bytes equal the shared vector, and the helper's d
   assert.ok(verify(null, createHash("sha256").update(prefix).update(d.delegate).digest(), key, d.signature));
   // The six reads name U or the token only, at final; none carries a key or a second id of the user.
   assert.equal(sent.length, 6);
-  for (const p of sent as Record<string, unknown>[]) assert.ok(p.account_id === U || p.account_id === NET.token, JSON.stringify(p));
+  for (const p of sent as Record<string, unknown>[]) assert.ok(p.account_id === U || p.account_id === NET.usdc, JSON.stringify(p));
 });
 
 test("the vault is the release's: testnet's from its deployment file, none on mainnet, and no argument names one", async () => {
@@ -430,6 +431,57 @@ test("send: the relayer's codes come back only with their own status", async () 
   assert.deepEqual(await sendDepositDelegate(OUT, answer(403, { error: { code: "sender_struck" } })), { ok: false, code: "sender_struck" });
   for (const [status, code] of [[400, "prepay_open"], [302, "expired"], [500, "sender_struck"], [200, "prepay_open"]] as [number, string][])
     await assert.rejects(sendDepositDelegate(OUT, answer(status, { error: { code } })), /relayer/, `${status} ${code}`);
+});
+
+// The carry answers once the prepay and the delegate are read at final: a testnet deposit took 19.4 s from the signed
+// call to the pages, and the device must still be waiting then.
+test("send: a carry that answers at 19.5 s is heard, on the real fetch and a local helper", async () => {
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => setTimeout(() => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ tx_hash: HASH })), 19_500));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  try {
+    const viaLocal = ((_: unknown, init?: RequestInit) => fetch(`http://127.0.0.1:${port}/v1/bind`, init)) as typeof fetch;
+    const t0 = performance.now();
+    assert.deepEqual(await sendDepositDelegate(OUT, viaLocal), { ok: true, tx_hash: HASH });
+    assert.ok(performance.now() - t0 >= 19_400, `answered after ${performance.now() - t0} ms`);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test("send: the wait is the kit's HELPER_BIND_ANSWER_MS and the way back; past it there is no answer, and the caller reads the pages", async () => {
+  await withSendClock(async (clock) => {
+    // the helper answers within its bound: an answer at the bound itself is heard
+    assert.deepEqual(await sendDepositDelegate(OUT, clock.late([HELPER_BIND_ANSWER_MS], answer(200, { tx_hash: HASH }))), { ok: true, tx_hash: HASH });
+    assert.deepEqual(await sendDepositDelegate(OUT, clock.late([HELPER_BIND_ANSWER_MS], answer(409, { error: { code: "prepay_open" } }))), { ok: false, code: "prepay_open" });
+    // the device's own wait is the bound and a few seconds for the request's way there and back, no more
+    const waits = clock.timeouts.splice(0);
+    assert.equal(new Set(waits).size, 1);
+    assert.ok(waits[0]! > HELPER_BIND_ANSWER_MS && waits[0]! <= HELPER_BIND_ANSWER_MS + 10_000, `waits ${waits[0]} ms`);
+    // an answer later than that is never taken: the send fails as a timeout, which bindDeposit reads as unsure
+    await assert.rejects(sendDepositDelegate(OUT, clock.late([waits[0]! + 1], answer(200, { tx_hash: HASH }))), (e: unknown) => e instanceof DOMException && e.name === "TimeoutError");
+  });
+});
+
+test("send: the caller's stop ends the wait at once, with the carry still out", async () => {
+  await withSendClock(async () => {
+    const stop = new AbortController();
+    let asked = 0;
+    // a helper that never answers: only an abort of the request's own signal ends it
+    const silent = (async (_: unknown, init?: RequestInit) => {
+      asked++;
+      return new Promise<Response>((_ok, fail) => init?.signal?.addEventListener("abort", () => fail(init.signal!.reason)));
+    }) as typeof fetch;
+    const sent = sendDepositDelegate(OUT, silent, stop.signal);
+    stop.abort();
+    const ended = await Promise.race([sent.then(() => "answered", (e: unknown) => (e as Error).name), new Promise<string>((ok) => setTimeout(() => ok("still waiting"), 2_000))]);
+    assert.equal(ended, "AbortError");
+    assert.equal(asked, 1);
+  });
 });
 
 test("send: the answer is hostile: capped at BIND_ANSWER_MAX_BYTES, and anything but a bind answer is refused", async () => {

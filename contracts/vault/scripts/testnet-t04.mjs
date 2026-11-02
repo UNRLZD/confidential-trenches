@@ -217,7 +217,7 @@ export const view = async (url, account_id, method, args) => {
 };
 
 /** The same view on both operators, which must answer the same. */
-async function view2(account, method, args) {
+export async function view2(account, method, args) {
   const [a, b] = await Promise.all(RPCS.map((u) => view(u, account, method, args)));
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     await new Promise((ok) => setTimeout(ok, 3000));
@@ -228,7 +228,7 @@ async function view2(account, method, args) {
   return a;
 }
 
-async function nearOf(account) {
+export async function nearOf(account) {
   try {
     return BigInt((await rpc(RPCS[0], "query", { request_type: "view_account", account_id: account, finality: "final" })).amount);
   } catch (e) {
@@ -238,7 +238,7 @@ async function nearOf(account) {
 }
 
 /** Signs and sends one tx from `signer` with `key`; waits for FINAL; returns { hash, r } whatever the outcome. */
-async function send(signer, key, receiver, actions) {
+export async function send(signer, key, receiver, actions) {
   const pk = `ed25519:${b58encode(key.pub)}`;
   const ak = await rpc(RPCS[0], "query", { request_type: "view_access_key", account_id: signer, public_key: pk, finality: "final" });
   const block = await rpc(RPCS[0], "block", { finality: "final" });
@@ -258,7 +258,7 @@ async function send(signer, key, receiver, actions) {
 }
 
 /** EXPERIMENTAL_tx_status of `hash` on RPCS[i], waiting for FINAL; null when unknown after `tries`. */
-async function readBack(hash, signer, i, tries = 20) {
+export async function readBack(hash, signer, i, tries = 20) {
   for (let n = 0; n < tries; n++) {
     try {
       const r = await rpc(RPCS[i], "EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: signer, wait_until: "FINAL" });
@@ -273,7 +273,7 @@ async function readBack(hash, signer, i, tries = 20) {
 
 // ---- the run ----
 
-function loadState(file, roots) {
+export function loadState(file, roots) {
   const real = path.resolve(file);
   for (const r of roots) if (real === r || real.startsWith(r + path.sep)) throw new Error(`--state is inside the repository (${r}): the run's seed never lives in the repo`);
   if (!existsSync(real)) {
@@ -286,7 +286,7 @@ function loadState(file, roots) {
   } };
 }
 
-async function kitModules() {
+export async function kitModules() {
   const req = createRequire(path.join(KIT, "package.json"));
   const imp = (m) => import(pathToFileURL(req.resolve(m)).href);
   const kit = (f) => import(pathToFileURL(path.join(KIT, "src/vault", f)).href);
@@ -298,13 +298,13 @@ async function kitModules() {
 }
 
 /** A note's secrets and precommitment from the seed. */
-function noteSecrets(k, seed, tag) {
+export function noteSecrets(k, seed, tag) {
   const nullifier = fieldOf(seed, `${tag}/nullifier`, k.VAULT_FIELD_P);
   const secret = fieldOf(seed, `${tag}/secret`, k.VAULT_FIELD_P);
   return { nullifier, secret, precommitment: k.poseidon2([nullifier, secret]), nullifierHash: k.poseidon1([nullifier]) };
 }
 
-async function prove(k, circuit, input) {
+export async function prove(k, circuit, input) {
   const zk = (f) => path.join(KIT, "zk", f);
   const t = Date.now();
   const { proof, publicSignals } = await k.snarkjs.groth16.fullProve(input, zk(`${circuit}.wasm`), zk(`${circuit}.zkey`));
@@ -314,7 +314,7 @@ async function prove(k, circuit, input) {
 }
 
 /** The vault read by the kit's vaultSync on both operators, at one block. */
-async function synced(k, vault) {
+export async function synced(k, vault) {
   const rpcs = RPCS.map((u) => ({ name: u, query: (params) => fetch(u, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "vt-t04", method: "query", params }), signal: AbortSignal.timeout(60_000), redirect: "error" }).then((r) => r.json()) }));
   for (let i = 1; ; i++) {
     try {

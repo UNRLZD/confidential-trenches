@@ -1,0 +1,428 @@
+// node --test apps/helper/src/data/solana/token.test.ts: the token page's Solana reads (token.ts) on answers recorded
+// 2 Nov 13:52Z through the helper's proxy and RPC paths and from GeckoTerminal (fixtures/token-page.json): the page,
+// holders and candles in 06b's field lists, every hostile value refused, and the three routes on a real server.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { request } from "node:http";
+import type { AddressInfo } from "node:net";
+import { after, before, test } from "node:test";
+import { start } from "../../server.ts";
+import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
+import {
+  CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
+} from "./token.ts";
+
+const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
+const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"; // Token-2022, graduated long ago, no launchpad curve
+const CURVE = "Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump"; // pump.fun, on its curve
+const NOW = Date.parse("2026-11-02T13:53:00Z");
+const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+const APP = "https://confidential.unrealized.trade";
+const clone = <T>(v: T): T => structuredClone(v);
+
+type RpcCall = { method: string; params: unknown[] };
+/** A fake RPC path answering from the recording; `largest` and `owners` answer getTokenLargestAccounts. */
+function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown; owners?: unknown; down?: boolean } = {}) {
+  const calls: RpcCall[] = [];
+  return {
+    calls,
+    async handle(_chain: string, _ct: string | undefined, body: string) {
+      const r = JSON.parse(body) as RpcCall;
+      calls.push(r);
+      if (opts.down) return { status: 503, body: '{"error":{"code":"upstream"}}' };
+      if (r.method === "getTokenLargestAccounts") return opts.largest === undefined ? { status: 503, body: '{"error":{"code":"upstream"}}' } : { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.largest }) };
+      const keys = r.params[0] as string[];
+      if (keys.length === 2 && keys[1] === pumpCurveAddress(keys[0]!)) {
+        const rec = FX.tokens[keys[0]!]?.accounts ?? { jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value: [null, null] } };
+        return { status: 200, body: JSON.stringify(opts.accounts ? opts.accounts(keys[0]!) : rec) };
+      }
+      if (keys.length === 1) {
+        const rec = FX.tokens[keys[0]!]?.accounts;
+        const v = rec ? { ...rec, result: { ...rec.result, value: [rec.result.value[0]] } } : { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [null] } };
+        return { status: 200, body: JSON.stringify(opts.accounts ? opts.accounts(keys[0]!) : v) };
+      }
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.owners }) };
+    },
+  };
+}
+function fakeProxy(opts: { down?: boolean; search?: (mint: string) => unknown } = {}) {
+  const calls: string[] = [];
+  return {
+    calls,
+    async handle(vendor: string, path: string, q: string): Promise<{ status: number; headers: Record<string, string>; body: string }> {
+      calls.push(`${vendor}${path}?${q}`);
+      if (opts.down) return { status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' };
+      // Jupiter's search takes mints joined by commas and answers a row for each it knows
+      const mints = new URLSearchParams(q).get("query")!.split(",");
+      const body = mints.flatMap((m) => (opts.search ? opts.search(m) : (FX.tokens[m]?.search ?? [])) as unknown[]);
+      return { status: 200, headers: { "X-Fetched-At": FX.tokens[mints[0]!]?.fetched_at ?? "2026-11-02T13:52:51.287Z" }, body: JSON.stringify(body) };
+    },
+  };
+}
+function fakeGecko(opts: { status?: number; headers?: Record<string, string> } = {}) {
+  const urls: string[] = [];
+  const fetch = async (url: string) => {
+    urls.push(url);
+    if (opts.status !== undefined) return new Response("{}", { status: opts.status, headers: opts.headers });
+    const body = url.includes("/ohlcv/") ? FX.gt_ohlcv : FX.gt_token;
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { urls, fetch };
+}
+
+// ---- the page ------------------------------------------------------------------------------------------------
+
+test("page: a Token-2022 mint off any curve, in 06b's TokenPage fields, the chain's authorities and fee, Jupiter's row", async () => {
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW });
+  const a = await t.page(PUMP);
+  assert.equal(a.status, 200);
+  const p = JSON.parse(a.body);
+  assert.deepEqual(Object.keys(p), [...PAGE_FIELDS]);
+  assert.deepEqual(Object.keys(p.row), [...ROW_FIELDS]);
+  assert.deepEqual(Object.keys(p.risk), [...RISK_FIELDS]);
+  for (const k of RISK_FIELDS) assert.deepEqual(Object.keys(p.risk[k]), ["v", "src", "as_of_ms"], k);
+  assert.equal(p.row.token, PUMP);
+  assert.equal(p.row.symbol, "PUMP");
+  assert.equal(p.decimals, 6);
+  assert.equal(p.route, "unknown");
+  assert.equal(p.pool, "GLZRp9CSaLeVUf9y3BKfv8b4QnivkL7sY7jTfQk8waQS"); // Jupiter's first pool, not the mint
+  assert.deepEqual(p.risk.mint_auth, { v: false, src: "chain", as_of_ms: NOW });
+  assert.deepEqual(p.risk.freeze_auth, { v: false, src: "chain", as_of_ms: NOW });
+  assert.deepEqual(p.risk.tax.v, { buy_bps: 0, sell_bps: 0 }); // a transfer hook, no TransferFeeConfig
+  assert.equal(p.risk.lp.v, null);
+  assert.equal(p.risk.holders.v, FX.tokens[PUMP].search[0].holderCount);
+  assert.equal(p.risk.holders.src, "jupiter");
+  assert.equal(p.risk.top10_bps.v, 5935);
+  assert.equal(p.risk.snipers_bps.v, null);
+  assert.equal(p.risk.snipers_bps.src, "none");
+  assert.equal(p.risk.honeypot.v, null);
+  assert.equal(a.asOfMs, Math.min(NOW, Date.parse(FX.tokens[PUMP].fetched_at)));
+});
+
+test("page: a pump.fun token on its curve: curve_bps from the curve account, lp curve, the curve as its pool", async () => {
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW });
+  const p = JSON.parse((await t.page(CURVE)).body);
+  assert.equal(p.row.launchpad, "pump.fun");
+  assert.ok(Number.isInteger(p.row.curve_bps) && p.row.curve_bps > 0 && p.row.curve_bps < 10_000, String(p.row.curve_bps));
+  assert.deepEqual(p.risk.lp.v, { class: "curve", bps: null });
+  assert.equal(p.pool, pumpCurveAddress(CURVE));
+  assert.equal(p.decimals, 6);
+});
+
+test("page: not a mint (no account, a system account, a token account, a third program) and not on Jupiter answer 404", async () => {
+  const noAcct = createSolanaToken(fakeProxy(), fakeRpc({ accounts: () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [null, null] } }) }), { now: () => NOW });
+  assert.equal((await noAcct.page(PUMP)).status, 404);
+  const rec = FX.tokens[PUMP].accounts;
+  for (const bad of [
+    { ...rec.result.value[0], owner: "11111111111111111111111111111111" },
+    { ...rec.result.value[0], data: { ...rec.result.value[0].data, parsed: { ...rec.result.value[0].data.parsed, type: "account" } } },
+    { ...rec.result.value[0], owner: "BPFLoaderUpgradeab1e11111111111111111111111" },
+  ]) {
+    const t = createSolanaToken(fakeProxy(), fakeRpc({ accounts: () => ({ ...rec, result: { ...rec.result, value: [bad, null] } }) }), { now: () => NOW });
+    assert.equal((await t.page(PUMP)).status, 404);
+  }
+  const notListed = createSolanaToken(fakeProxy({ search: () => [] }), fakeRpc(), { now: () => NOW });
+  assert.equal((await notListed.page(PUMP)).status, 404);
+  // Jupiter answering a different token for the query is not this token
+  const other = createSolanaToken(fakeProxy({ search: () => FX.tokens[CURVE].search }), fakeRpc(), { now: () => NOW });
+  assert.equal((await other.page(PUMP)).status, 404);
+  // not an address at all: refused before any read
+  const proxy = fakeProxy();
+  const t = createSolanaToken(proxy, fakeRpc(), { now: () => NOW });
+  for (const m of ["", "x", `${PUMP}1`, "0OIl" + PUMP.slice(4), "../../etc"]) assert.equal((await t.page(m)).status, 404, m);
+  assert.equal(proxy.calls.length, 0);
+});
+
+test("page: an upstream down answers 503; the last good page serves up to 60 s, then 503; reads are cached 5 s", async () => {
+  let now = NOW;
+  let down = false;
+  const proxy = fakeProxy();
+  const rpc = fakeRpc();
+  const t = createSolanaToken({ handle: (v, p, q, b) => (down ? fakeProxy({ down: true }).handle(v, p, q) : proxy.handle(v, p, q)) }, rpc, { now: () => now });
+  assert.equal((await t.page(PUMP)).status, 200);
+  assert.equal((await t.page(PUMP)).status, 200);
+  assert.equal(proxy.calls.length, 1, "one read within 5 s");
+  down = true;
+  now += 10_000;
+  assert.equal((await t.page(PUMP)).status, 200, "stale but under 60 s");
+  now += 60_000;
+  assert.equal((await t.page(PUMP)).status, 503);
+  const cold = createSolanaToken(fakeProxy({ down: true }), fakeRpc(), { now: () => NOW });
+  assert.equal((await cold.page(PUMP)).status, 503);
+  const rpcDown = createSolanaToken(fakeProxy(), fakeRpc({ down: true }), { now: () => NOW });
+  assert.equal((await rpcDown.page(PUMP)).status, 503);
+});
+
+test("page: Jupiter's search is batched: mints asked together share one call; one asked within JUP_GAP_MS of the last waits it out; a row is kept 12 s", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let now = NOW;
+  const proxy = fakeProxy();
+  const tok = createSolanaToken(proxy, fakeRpc(), { now: () => now });
+  const flush = () => new Promise((ok) => setImmediate(ok));
+  // the reads reach the search a few promise steps after they are asked: let them, then move the clock
+  const advance = async (ms: number) => {
+    await flush();
+    t.mock.timers.tick(ms);
+    await flush();
+  };
+  const first = Promise.all([tok.page(PUMP), tok.page(CURVE), tok.holders(PUMP)]);
+  await advance(0);
+  assert.deepEqual((await first).map((a) => a.status), [200, 200, 200]);
+  assert.deepEqual(proxy.calls, [`jupiter/tokens/v2/search?query=${PUMP},${CURVE}`]);
+  // 13 s on (past the 12 s row and the page's 5 s cache), PUMP is asked: sent at once, the gap is long past
+  now += 13_000;
+  const p2 = tok.page(PUMP);
+  await advance(0);
+  assert.equal((await p2).status, 200);
+  assert.equal(proxy.calls.length, 2);
+  // 1 s after that search, CURVE (read 14 s ago) is due: it waits until JUP_GAP_MS after the last search
+  now += 1_000;
+  const p3 = tok.page(CURVE);
+  await advance(JUP_GAP_MS - 1_000 - 1);
+  assert.equal(proxy.calls.length, 2, "held inside the gap");
+  await advance(1);
+  assert.equal((await p3).status, 200);
+  assert.equal(proxy.calls.length, 3);
+  assert.equal(proxy.calls[2], `jupiter/tokens/v2/search?query=${CURVE}`);
+});
+
+test("page and holders: a token on Discover's lists takes its row from there, with no Jupiter call", async () => {
+  const proxy = fakeProxy();
+  const row = toRow(FX.tokens[CURVE].search[0], Date.parse(FX.tokens[CURVE].fetched_at))!;
+  const snapshot = { chain: "solana", lists: { new: [row], trending: [], trending_5m: [], trending_1h: [], graduating: [] }, as_of_ms: 1793627000000 };
+  const listed = async () => ({ status: 200, body: JSON.stringify(snapshot), asOfMs: snapshot.as_of_ms });
+  const tok = createSolanaToken(proxy, fakeRpc(), { now: () => NOW, listed });
+  const p = JSON.parse((await tok.page(CURVE)).body);
+  assert.deepEqual(Object.keys(p.row), [...ROW_FIELDS]);
+  assert.equal(p.row.symbol, row.symbol);
+  assert.equal(p.row.as_of_ms, row.as_of_ms);
+  assert.equal(p.pool, pumpCurveAddress(CURVE), "on its curve: the curve account");
+  assert.equal(p.risk.holders.as_of_ms, snapshot.as_of_ms);
+  const h = JSON.parse((await tok.holders(CURVE)).body);
+  assert.equal(h.src, "jupiter");
+  assert.equal(h.total, row.holders);
+  assert.equal(proxy.calls.length, 0);
+  // a token off the lists still goes to Jupiter
+  assert.equal((await tok.page(PUMP)).status, 200);
+  assert.deepEqual(proxy.calls, [`jupiter/tokens/v2/search?query=${PUMP}`]);
+});
+
+test("page: one search failing fails every mint in it with 503, and the next search is a new call", async () => {
+  let down = true;
+  const ok = fakeProxy();
+  const proxy = { calls: ok.calls, handle: (v: string, p: string, q: string) => (down ? fakeProxy({ down: true }).handle(v, p, q) : ok.handle(v, p, q)) };
+  let now = NOW;
+  const tok = createSolanaToken(proxy, fakeRpc(), { now: () => now });
+  assert.deepEqual((await Promise.all([tok.page(PUMP), tok.page(CURVE)])).map((a) => a.status), [503, 503]);
+  down = false;
+  now += 5_000;
+  assert.equal((await tok.page(PUMP)).status, 200);
+});
+
+test("toMint: decimals, supply, authorities and the Token-2022 fee in force at the slot's epoch; malformed is null", () => {
+  const base = { owner: TOKEN_2022_PROGRAM, data: { parsed: { type: "mint", info: { decimals: 9, supply: "1000", mintAuthority: null, freezeAuthority: PUMP } } } };
+  const fee = (older: number, newer: number, epoch: number) => ({
+    ...base,
+    data: { parsed: { type: "mint", info: { ...base.data.parsed.info, extensions: [{ extension: "transferFeeConfig", state: { olderTransferFee: { epoch: 0, transferFeeBasisPoints: older, maximumFee: 1 }, newerTransferFee: { epoch, transferFeeBasisPoints: newer, maximumFee: 1 } } }] } } },
+  });
+  assert.deepEqual(toMint(base, 1), { decimals: 9, supply: 1000n, mintAuth: false, freezeAuth: true, feeBps: 0 });
+  assert.equal(toMint(fee(100, 250, 1075), 1075 * 432_000)!.feeBps, 250, "the newer fee from its epoch");
+  assert.equal(toMint(fee(100, 250, 1076), 1075 * 432_000)!.feeBps, 100, "the older fee before it");
+  assert.equal(toMint({ ...base, owner: TOKEN_PROGRAM }, 1)!.feeBps, 0);
+  for (const bad of [
+    fee(100, 10_001, 0),
+    fee(-1, 0, 0),
+    { ...base, data: { parsed: { type: "mint", info: { ...base.data.parsed.info, decimals: 256 } } } },
+    { ...base, data: { parsed: { type: "mint", info: { ...base.data.parsed.info, supply: "18446744073709551616" } } } },
+    { ...base, data: { parsed: { type: "mint", info: { ...base.data.parsed.info, supply: 1000 } } } },
+    { ...base, data: { parsed: { type: "mint", info: { ...base.data.parsed.info, mintAuthority: "not an address" } } } },
+    { ...base, data: { parsed: { type: "mint", info: { ...base.data.parsed.info, extensions: "x" } } } },
+    { ...base, data: ["AAAA", "base64"] },
+    null,
+  ]) assert.equal(toMint(bad, 1), null, JSON.stringify(bad));
+});
+
+// ---- holders -------------------------------------------------------------------------------------------------
+
+// getTokenLargestAccounts is answered only by a keyed provider (D-S11; the public endpoints refused it 2 Nov 13:52Z:
+// api.mainnet-beta 429, publicnode 403), so these rows are written in its documented shape, not recorded.
+const ACCT = ["8hT1Yhd8x3xKMtV9Ue4BoGpvdsxVrz5V6V8Brp7NbB7B", "6t8nGMxjKCFbBf4KQ6YsgpAvWdzfPUSSa8UpKQfr5Ft5", "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM"];
+const OWNER = ["7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", "1nc1nerator11111111111111111111111111111111"];
+const largest = { context: { slot: 1 }, value: [{ address: ACCT[0], amount: "500000" }, { address: ACCT[1], amount: "300000" }, { address: ACCT[2], amount: "100000" }] };
+const tokenAcct = (owner: string) => ({ owner: TOKEN_2022_PROGRAM, data: { parsed: { type: "account", info: { owner } } } });
+const owners = { context: { slot: 1 }, value: [tokenAcct(OWNER[1]!), tokenAcct(OWNER[0]!), tokenAcct(OWNER[1]!)] };
+
+test("holders: 20 rows at most, merged per owner, bps of the supply, the burn address marked, Jupiter's count as total", async () => {
+  const supplyAccounts = (mint: string) => {
+    const rec = FX.tokens[mint].accounts;
+    const m = structuredClone(rec.result.value[0]);
+    m.data.parsed.info.supply = "1000000";
+    return { ...rec, result: { ...rec.result, value: [m] } };
+  };
+  const shared = fakeRpc({ accounts: supplyAccounts });
+  const keyed = fakeRpc({ largest, owners });
+  const t = createSolanaToken(fakeProxy(), shared, { now: () => NOW, holdersRpc: keyed });
+  const a = await t.holders(PUMP);
+  assert.deepEqual(shared.calls.map((c) => c.method), ["getMultipleAccounts"], "the mint on the shared path");
+  assert.deepEqual(keyed.calls.map((c) => c.method), ["getTokenLargestAccounts", "getMultipleAccounts"], "the holders on their own provider");
+  assert.equal(a.status, 200);
+  const h = JSON.parse(a.body);
+  assert.deepEqual(Object.keys(h), [...HOLDERS_FIELDS]);
+  assert.deepEqual(h.holders, [
+    { addr: OWNER[1], amt: "600000", bps: 6000, kind: "burn" },
+    { addr: OWNER[0], amt: "300000", bps: 3000 },
+  ]);
+  assert.equal(h.top_bps, 9000);
+  assert.equal(h.total, FX.tokens[PUMP].search[0].holderCount);
+  assert.equal(h.src, "chain");
+});
+
+test("holders: no holders provider: the shared RPC path never sees getTokenLargestAccounts (its 429 would pause the device's reads and sends); Jupiter's fallback", async () => {
+  const shared = fakeRpc({ largest, owners });
+  const t = createSolanaToken(fakeProxy(), shared, { now: () => NOW });
+  const a = await t.holders(PUMP);
+  assert.deepEqual(shared.calls.map((c) => c.method), ["getMultipleAccounts"]);
+  assert.equal(a.status, 200);
+  assert.equal(JSON.parse(a.body).src, "jupiter");
+});
+
+test("holders: the holders provider refuses getTokenLargestAccounts: no rows, Jupiter's count and top-10 share, src jupiter", async () => {
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW, holdersRpc: fakeRpc() });
+  const a = await t.holders(PUMP);
+  assert.equal(a.status, 200);
+  assert.deepEqual(JSON.parse(a.body), { holders: [], total: FX.tokens[PUMP].search[0].holderCount, top_bps: 5935, src: "jupiter", as_of_ms: Date.parse(FX.tokens[PUMP].fetched_at) });
+  assert.equal(a.src, "jupiter");
+});
+
+test("toHolders: a row with a bad amount, a bad owner, an account no token program owns, or a count mismatch is refused", () => {
+  assert.equal(toHolders(largest.value, owners.value.slice(0, 2), 1000n), null);
+  assert.equal(toHolders([{ ...largest.value[0], amount: "-1" }], [owners.value[0]], 1000n), null);
+  assert.equal(toHolders([{ ...largest.value[0], amount: 5 }], [owners.value[0]], 1000n), null);
+  assert.equal(toHolders([largest.value[0]], [tokenAcct("x")], 1000n), null);
+  assert.equal(toHolders([largest.value[0]], [{ ...tokenAcct(OWNER[0]!), owner: "11111111111111111111111111111111" }], 1000n), null);
+  assert.equal(toHolders(Array(21).fill(largest.value[0]), Array(21).fill(owners.value[0]), 1000n), null);
+  assert.deepEqual(toHolders([largest.value[0]], [owners.value[1]], 0n), [{ addr: OWNER[0], amt: "500000", bps: null }]);
+});
+
+// ---- candles -------------------------------------------------------------------------------------------------
+
+test("candles: the token's top pool on GeckoTerminal, bars oldest first in USD decimal strings, cut to the limit", async () => {
+  const g = fakeGecko();
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW, fetch: g.fetch });
+  const a = await t.candles(CURVE, "1m", null, 10);
+  assert.equal(a.status, 200);
+  const c = JSON.parse(a.body);
+  assert.deepEqual(Object.keys(c), [...CANDLES_FIELDS]);
+  assert.equal(c.tf, "1m");
+  assert.equal(c.src, "geckoterminal");
+  assert.equal(c.candles.length, 10);
+  for (const bar of c.candles) {
+    assert.equal(bar.length, 6);
+    assert.ok(Number.isSafeInteger(bar[0]) && bar[0] % 60 === 0);
+    for (const v of bar.slice(1)) assert.match(v, /^\d+(\.\d+)?$/);
+  }
+  assert.ok(c.candles.every((b: number[], i: number) => i === 0 || b[0]! > c.candles[i - 1][0]));
+  const newest = FX.gt_ohlcv.data.attributes.ohlcv_list[0];
+  assert.equal(c.candles.at(-1)[0], newest[0]);
+  assert.equal(g.urls[0], `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${CURVE}`);
+  assert.equal(g.urls[1], `https://api.geckoterminal.com/api/v2/networks/solana/pools/${topPool(FX.gt_token)}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${CURVE}`);
+  // the pool and the bars are shared: another read within 60 s calls nobody
+  await t.candles(CURVE, "1m", null, 500);
+  assert.equal(g.urls.length, 2);
+  await t.candles(CURVE, "4h", 1793620800, 500);
+  assert.equal(g.urls[2], `https://api.geckoterminal.com/api/v2/networks/solana/pools/${topPool(FX.gt_token)}/ohlcv/hour?aggregate=4&limit=1000&currency=usd&token=${CURVE}&before_timestamp=1793620800`);
+});
+
+test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal; at most GT_PER_MIN calls a minute", async () => {
+  const g = fakeGecko();
+  let now = NOW;
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: g.fetch });
+  for (const tf of ["1s", "2m", "", "__proto__", "constructor"]) assert.equal((await t.candles(CURVE, tf, null, 10)).status, 404, tf);
+  assert.equal(g.urls.length, 0);
+  const tfs = ["1m", "5m", "15m", "1h", "4h", "1d"];
+  let ok = 0;
+  for (let i = 0; i < 20; i++) if ((await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10)).status === 200) ok++;
+  assert.equal(g.urls.length, GT_PER_MIN);
+  assert.equal(ok, GT_PER_MIN - 1, "one token read, then bars until the minute's calls are spent");
+  now += 61_000;
+  const limited = fakeGecko({ status: 429, headers: { "retry-after": "30" } });
+  const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: limited.fetch });
+  assert.equal((await t2.candles(CURVE, "1m", null, 10)).status, 503);
+  assert.equal((await t2.candles(CURVE, "5m", null, 10)).status, 503);
+  assert.equal(limited.urls.length, 1, "paused after the 429");
+});
+
+test("toCandles: bars off the grid, from the future, with a zero, negative or non-finite price, or low above high are dropped", () => {
+  const T = 1793627520;
+  const good = [T, 1, 2, 0.5, 1.5, 10];
+  const ans = (list: unknown[]) => ({ data: { attributes: { ohlcv_list: list } } });
+  assert.deepEqual(toCandles(ans([good]), "1m", 10, NOW), [[T, "1", "2", "0.5", "1.5", "10"]]);
+  for (const bad of [[T + 1, 1, 2, 0.5, 1.5, 10], [T + 3_600, 1, 2, 0.5, 1.5, 10], [T, 0, 2, 0.5, 1.5, 10], [T, -1, 2, 0.5, 1.5, 10], [T, 1, 2, 3, 1.5, 10], [T, 1, 2, 0.5, 3, 10], [T, 1, 2, 0.5, 1.5, -1], [T, 1, Infinity, 0.5, 1.5, 10], [T, "1", 2, 0.5, 1.5, 10], [T, 1, 2, 0.5]])
+    assert.deepEqual(toCandles(ans([bad]), "1m", 10, NOW), [], JSON.stringify(bad));
+  assert.deepEqual(toCandles(ans([good, good]), "1m", 10, NOW)!.length, 1, "one bar per open time");
+  assert.equal(toCandles({ data: {} }, "1m", 10, NOW), null);
+  assert.equal(topPool({ data: { relationships: { top_pools: { data: [{ id: "base_0xabc" }] } } } }), null);
+  assert.equal(topPool({ data: { relationships: { top_pools: { data: [] } } } }), null);
+});
+
+// ---- the routes ----------------------------------------------------------------------------------------------
+
+const good = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW, fetch: fakeGecko().fetch });
+const servers = [start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, good)];
+const ports: number[] = [];
+before(() => Promise.all(servers.map((s, i) => new Promise<void>((ok) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), ok()))))));
+after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
+
+function call(method: string, path: string, headers: Record<string, string> = {}) {
+  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
+    const r = request({ host: "127.0.0.1", port: ports[0], method, path, headers }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    r.on("error", fail).end();
+  });
+}
+
+test("GET /v1/market/token, /holders and /candles with chain=solana: 200 in the field lists, commit, source, read time, CORS", async () => {
+  for (const [path, fields, src] of [
+    [`/v1/market/token?chain=solana&token=${PUMP}`, PAGE_FIELDS, "jupiter"],
+    [`/v1/market/holders?chain=solana&token=${PUMP}`, HOLDERS_FIELDS, "jupiter"],
+    [`/v1/market/candles?chain=solana&token=${CURVE}&tf=1m&limit=5`, CANDLES_FIELDS, "geckoterminal"],
+  ] as const) {
+    const r = await call("GET", path, { origin: APP });
+    assert.equal(r.status, 200, path);
+    assert.deepEqual(Object.keys(JSON.parse(r.body)), [...fields], path);
+    assert.equal(r.headers["x-helper-commit"], COMMIT);
+    assert.equal(r.headers["x-helper-source"], src);
+    assert.ok(Number.isFinite(Date.parse(String(r.headers["x-fetched-at"]))));
+    assert.equal(r.headers["access-control-allow-origin"], APP);
+    assert.equal(r.headers["content-type"], "application/json; charset=utf-8");
+    const h = await call("HEAD", path);
+    assert.equal(h.status, 200);
+    assert.equal(h.body, "");
+  }
+});
+
+test("the routes refuse: another method 405; no, two or another chain, no or two tokens, a bad tf, to or limit 404", async () => {
+  for (const m of ["POST", "PUT", "DELETE"]) assert.equal((await call(m, `/v1/market/token?chain=solana&token=${PUMP}`)).status, 405, m);
+  for (const q of [
+    `/v1/market/token?token=${PUMP}`,
+    `/v1/market/token?chain=base&token=${PUMP}`,
+    `/v1/market/token?chain=solana&chain=solana&token=${PUMP}`,
+    `/v1/market/token?chain=solana`,
+    `/v1/market/token?chain=solana&token=${PUMP}&token=${PUMP}`,
+    `/v1/market/token?chain=solana&token=nope`,
+    `/v1/market/holders?chain=near&token=${PUMP}`,
+    `/v1/market/candles?chain=solana&token=${CURVE}`,
+    `/v1/market/candles?chain=solana&token=${CURVE}&tf=1s`,
+    `/v1/market/candles?chain=solana&token=${CURVE}&tf=1m&to=-1`,
+    `/v1/market/candles?chain=solana&token=${CURVE}&tf=1m&to=1e9`,
+    `/v1/market/candles?chain=solana&token=${CURVE}&tf=1m&limit=0`,
+    `/v1/market/candles?chain=solana&token=${CURVE}&tf=1m&limit=501`,
+    `/v1/market/candles?chain=solana&token=${CURVE}&tf=1m&limit=5&limit=5`,
+    `/v1/market/token/x?chain=solana&token=${PUMP}`,
+  ]) {
+    const r = await call("GET", q);
+    assert.equal(r.status, 404, q);
+  }
+});

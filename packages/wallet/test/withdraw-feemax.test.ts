@@ -38,7 +38,7 @@ test("the formula's figures: LD5's constants, and fee_max at the recorded gas pr
   assert.equal(FEE_A_FUND, 8_820_000_000_000_000_000_000n); // 182 B × 1e19 + 0.007 N
   assert.equal(FEE_A_FUND + FEE_G_ARM_CAP * GP, 18_820_000_000_000_000_000_000n); // A_cap ≈ 0.0188 N at 1e8 (markets l.1688)
   assert.equal(FEE_POOL_ID, 4512);
-  assert.deepEqual([...FEE_POOL_TOKENS], [NEAR_NETWORKS.mainnet.token, "wrap.near"]);
+  assert.deepEqual([...FEE_POOL_TOKENS], [NEAR_NETWORKS.mainnet.usdc, "wrap.near"]);
   assert.deepEqual(POOL.token_account_ids, [...FEE_POOL_TOKENS]);
   // the recorded reads: gas price 1e8 on both networks' blocks, and the pool's two amounts
   for (const net of ["mainnet", "testnet"] as const)
@@ -101,7 +101,7 @@ test("two providers disagreeing are refused: the gas price, the block's hash, th
 test("the pool must be the pinned SIMPLE_POOL of USDC and wNEAR, with two amounts above 0", async () => {
   const both = (f: (p: Record<string, unknown>) => void): FeeEdit => (r, _s, j) => (r === "pool" ? poolBytes(j, f) : j);
   await refused(withEdit("mainnet", both((p) => (p.pool_kind = "STABLE_SWAP"))), "pool", /SIMPLE_POOL/);
-  await refused(withEdit("mainnet", both((p) => (p.token_account_ids = ["wrap.near", NEAR_NETWORKS.mainnet.token]))), "pool", /USDC/);
+  await refused(withEdit("mainnet", both((p) => (p.token_account_ids = ["wrap.near", NEAR_NETWORKS.mainnet.usdc]))), "pool", /USDC/);
   await refused(withEdit("mainnet", both((p) => (p.token_account_ids = ["usdt.tether-token.near", "wrap.near"]))), "pool", /USDC/);
   await refused(withEdit("mainnet", both((p) => (p.amounts = ["0", "1"]))), "pool", /amounts/);
   await refused(withEdit("mainnet", both((p) => (p.amounts = [1, "1"]))), "pool", /amounts/);
@@ -210,7 +210,7 @@ test("each read's own checks: the header's height and gas price, the pool's bloc
 
 test("the pool's shape: exactly [USDC, wNEAR] and two amounts; its USDC side at or above the 250,000 USDC floor", async () => {
   const both = (f: (p: Record<string, unknown>) => void): FeeEdit => (r, _s, j) => (r === "pool" ? poolBytes(j, f) : j);
-  const usdc = NEAR_NETWORKS.mainnet.token;
+  const usdc = NEAR_NETWORKS.mainnet.usdc;
   await refused(withEdit("mainnet", both((p) => (p.token_account_ids = [usdc, "usdt.tether-token.near"]))), "pool", /USDC/);
   await refused(withEdit("mainnet", both((p) => (p.token_account_ids = [usdc, "wrap.near", "usdt.tether-token.near"]))), "pool", /USDC/);
   await refused(withEdit("mainnet", both((p) => (p.amounts = [...(p.amounts as string[]), "1"]))), "pool", /amounts/);
