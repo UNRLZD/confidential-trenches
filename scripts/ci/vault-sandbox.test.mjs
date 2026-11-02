@@ -2,11 +2,27 @@
 // scripts/ci/vault-sandbox.mjs: the rule that decides when CI runs the vault's sandbox suite, and its shards. Each
 // failure the rule must refuse is planted here.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { PATHS, SHARDS, closure, decide, matches, namedPaths, shardArgs, shardProblems, suiteReads, targets, uncovered } from "./vault-sandbox.mjs";
+import { PATHS, ROOT, SHARDS, closure, decide, matches, namedPaths, shardArgs, shardProblems, suiteReads, targets, uncovered } from "./vault-sandbox.mjs";
+
+// What is wrong with ci.yml's vault-sandbox-plan decide step: on a pull request it must run main's copy of the rule
+// (extracted from the base into $RUNNER_TEMP/base), never the head's, which the pull request could edit to skip.
+function planStepProblems(ci) {
+  const job = ci.split(/\n  vault-sandbox-plan:\n/)[1]?.split(/\n  [a-z-]+:\n/)[0];
+  if (!job) return ["ci.yml has no vault-sandbox-plan job"];
+  const pr = job.match(/\n\s*pull_request\)\n([\s\S]*?);;/)?.[1];
+  if (!pr) return ["the decide step has no pull_request arm"];
+  const p = [];
+  if (!pr.includes('git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"')) p.push("the pull_request arm does not extract the base's scripts");
+  if (!pr.includes('node "$RUNNER_TEMP/base/scripts/ci/vault-sandbox.mjs" decide "$EVENT" "$BASE" "$HEAD"')) p.push("the pull_request arm does not run the base's rule");
+  if (/node\s+(\.\/)?scripts\/ci\/vault-sandbox\.mjs/.test(pr)) p.push("the pull_request arm runs the head's rule");
+  if (/run=false/.test(pr)) p.push("the pull_request arm can skip on its own");
+  return p;
+}
 
 test("every file the sandbox suite reads is one the rule runs the suite for", () => {
   const reads = suiteReads();
@@ -68,6 +84,39 @@ test("the decision: a pull request or push runs the suite only when it touches w
   assert.equal(decide("workflow_dispatch", [])[0], true);
   assert.equal(matches("packages/kit/src/index.ts"), true);
   assert.equal(matches("packages/wallet/src/index.ts"), false);
+});
+
+test("on a pull request the plan step runs main's rule, never the head's", () => {
+  const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  assert.deepEqual(planStepProblems(ci), []);
+});
+
+test("planted: a plan step that runs the head's rule on a pull request fails", () => {
+  const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  // each plant changes the plan job only (verify-gate and money-gate hold the same lines)
+  const at = ci.indexOf("\n  vault-sandbox-plan:\n");
+  const plant = (a, b) => ci.slice(0, at) + ci.slice(at).replace(a, b);
+  const head = plant('node "$RUNNER_TEMP/base/scripts/ci/vault-sandbox.mjs" decide', "node scripts/ci/vault-sandbox.mjs decide");
+  assert.notEqual(head, ci);
+  assert.deepEqual(planStepProblems(head), ["the pull_request arm does not run the base's rule", "the pull_request arm runs the head's rule"]);
+  const noBase = plant('git archive "$BASE" scripts', 'git archive "$HEAD" scripts');
+  assert.ok(planStepProblems(noBase).includes("the pull_request arm does not extract the base's scripts"));
+  const skips = plant('echo "run=true" >> "$GITHUB_OUTPUT"', 'echo "run=false" >> "$GITHUB_OUTPUT"');
+  assert.ok(planStepProblems(skips).includes("the pull_request arm can skip on its own"));
+});
+
+test("a copy of the rule outside the checkout reads the change in its working directory", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "vault-sandbox-base-"));
+  try {
+    copyFileSync(path.join(ROOT, "scripts/ci/vault-sandbox.mjs"), path.join(dir, "vault-sandbox.mjs"));
+    const sha = (r) => execFileSync("git", ["rev-parse", r], { cwd: ROOT, encoding: "utf8" }).trim();
+    const file = execFileSync("git", ["log", "-1", "--format=", "--name-only", "--", "contracts/vault"], { cwd: ROOT, encoding: "utf8" }).split("\n")[0];
+    const commit = execFileSync("git", ["log", "-1", "--format=%H", "--", file], { cwd: ROOT, encoding: "utf8" }).trim();
+    const out = execFileSync("node", [path.join(dir, "vault-sandbox.mjs"), "decide", "pull_request", sha(`${commit}~1`), commit], { cwd: ROOT, encoding: "utf8", env: { ...process.env, GITHUB_OUTPUT: "" } });
+    assert.match(out, /^run=true: \d+ changed file\(s\) the suite reads/, out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("every test target is in exactly one shard", () => {

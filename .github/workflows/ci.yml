@@ -229,13 +229,28 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+      # On a pull request the rule runs as main has it (see verify-gate), so a pull request cannot edit the rule to skip
+      # its own suite; it reads the head checkout, its working directory. While main has no rule yet, the suite runs.
+      # scripts/ci/vault-sandbox.test.mjs fails when this step runs the head's copy on a pull request.
       - name: does this change touch what the suite reads
         id: decide
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/ci/vault-sandbox.mjs decide "$EVENT" "$BASE" "$HEAD"
+        run: |
+          case "$EVENT" in
+            pull_request)
+              mkdir -p "$RUNNER_TEMP/base"
+              git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
+              if [ -f "$RUNNER_TEMP/base/scripts/ci/vault-sandbox.mjs" ]; then
+                node "$RUNNER_TEMP/base/scripts/ci/vault-sandbox.mjs" decide "$EVENT" "$BASE" "$HEAD"
+              else
+                echo "run=true: main has no scripts/ci/vault-sandbox.mjs yet, so the suite runs"
+                echo "run=true" >> "$GITHUB_OUTPUT"
+              fi ;;
+            *) node scripts/ci/vault-sandbox.mjs decide "$EVENT" "$BASE" "$HEAD" ;;
+          esac
 
   vault-sandbox-shard:
     needs: vault-sandbox-plan

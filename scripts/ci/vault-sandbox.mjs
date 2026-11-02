@@ -12,10 +12,11 @@
 // one shard; vault-sandbox.test.mjs fails on a target in no shard or in two.
 //
 //   node scripts/ci/vault-sandbox.mjs decide <event> [<base> <head>]   prints run=true|false and why; with
-//                                                                     GITHUB_OUTPUT set, writes run=... there too
+//                                                                     GITHUB_OUTPUT set, writes run=... there too;
+//                                                                     reads the change in the working directory
 //   node scripts/ci/vault-sandbox.mjs shard <n>                        prints shard n's cargo test target args
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -178,17 +179,19 @@ export function decide(event, changed) {
   return [false, `none of the ${changed.length} changed file(s) is one the vault's sandbox suite reads`];
 }
 
+// The files the change touches, read in the working directory: on a pull request CI runs main's copy of this file
+// from outside the checkout, against the head checkout.
 function changedFiles(base, head) {
   if (!base || /^0+$/.test(base) || !head) return null;
   try {
-    execFileSync("git", ["cat-file", "-e", `${base}^{commit}`], { cwd: ROOT });
-    return execFileSync("git", ["diff", "--name-only", `${base}...${head}`], { cwd: ROOT, encoding: "utf8" }).split("\n").filter(Boolean);
+    execFileSync("git", ["cat-file", "-e", `${base}^{commit}`]);
+    return execFileSync("git", ["diff", "--name-only", `${base}...${head}`], { encoding: "utf8" }).split("\n").filter(Boolean);
   } catch {
     return null;
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const [cmd, ...a] = process.argv.slice(2);
   if (cmd === "decide") {
     const [run, why] = decide(a[0], a[0] === "pull_request" || a[0] === "push" ? changedFiles(a[1], a[2]) : []);
