@@ -462,9 +462,11 @@ export const HELPER_BIND_DEPOSIT_CAP = 1_000_000_000n;
  * request's way there and back, so it hears every answer given in time (a tx_hash, written with the call, and every
  * refusal, acted on at once); a send with no answer by then is unsure, and the device reads the deposits pages again.
  * A deposit's carry is two transactions read at final, the prepay and the delegate: a testnet deposit took 19.4 s from
- * the signed call to the pages. 60 s is three times that, and inside the call's own window of 120 blocks.
+ * the signed call to the pages. 45 s is 2.3 times that, and well inside the call's own window of 120 blocks. With the
+ * device's 5 s for the way there and back, its whole wait is 50 s, under the 60 s at which browsers and proxies often
+ * cut a long request, so the device hears the helper's own in_flight rather than a broken connection.
  */
-export const HELPER_BIND_ANSWER_MS = 60_000;
+export const HELPER_BIND_ANSWER_MS = 45_000;
 
 /**
  * A deposit delegate's codes, in H4.3's order. Not failures: prepay_open (the device waits until the deposits pages
