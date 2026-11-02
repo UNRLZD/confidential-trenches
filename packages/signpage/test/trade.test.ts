@@ -126,13 +126,13 @@ const BLOCKHASH = base58.encode(new Uint8Array(32).fill(9));
 const message = (text: string) => Uint8Array.from([1, 0, 0, 0, ...base58.decode(BLOCKHASH), ...new TextEncoder().encode(text)]);
 const noRpc: SolanaRpc = async () => { throw new Error("no read expected"); };
 const shaOf = (params: Record<string, unknown>) => createHash("sha256").update(JSON.stringify(params)).digest("hex");
-function page(s: ReturnType<typeof store>, script: Script, providers: readonly [SolanaRpc, SolanaRpc] = [noRpc, noRpc], storeMs?: number) {
+function page(s: ReturnType<typeof store>, script: Script, providers: readonly [SolanaRpc, SolanaRpc] = [noRpc, noRpc], storeMs?: number, seed64: () => Promise<Uint8Array> = async () => seed()) {
   const calls: SolanaTradeRequest[] = [];
   let opened = 0;
   const tab = tabLocks();
   const handler = tradeKind({
     store: async () => s,
-    seed64: async () => (opened++, seed()),
+    seed64: () => (opened++, seed64()),
     deps: { helper: "https://api.confidential.unrealized.trade", providers, reference: async () => 1n, paths: [] },
     run: standIn(script, calls) as never,
     now: () => 1_700_000_000_000,
@@ -484,6 +484,30 @@ test("a pick resolves every dead tab's mark at once, not one after another under
   await q.ask(buy("10"));
   assert.ok(most >= 4, `${most} reads at once: the two marks' reads on both providers ran together`);
   assert.equal(q.calls.length, 1, "the third wallet bought");
+});
+
+test("a dead tab's trade on two wallets: one pick frees both and the op reads filled with both legs' ends", async () => {
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 1_000n) });
+  const before = page(s, { hold: new Promise<void>(() => {}) });
+  const first = await before.ask(buy("20"));
+  assert.equal(before.calls[0]!.legs.length, 2, "two legs");
+  assert.ok(mark(s, 0) && mark(s, 1));
+  before.die();
+  const q = page(s, { final: "filled" }, [sigStatus("ok"), sigStatus("ok")]);
+  assert.deepEqual((await q.ask(buy("10"))).answer, { error: "no_ready_set" });
+  assert.deepEqual([0, 1].map((j) => [(s.m.wallets!.get(armKey("sol", L, j)) as ArmRecord).state, mark(s, j)]), [["IN_POSITION", undefined], ["IN_POSITION", undefined]], "both wallets of the one op freed in one pick");
+  const op = s.m.ops!.get(first.id) as { stage: string; txs: { hash: string; state?: string }[] };
+  assert.deepEqual([op.stage, op.txs.map((t) => t.state)], ["filled", ["filled", "filled"]], "neither leg's end lost");
+});
+
+test("a seed that answers after its bound refuses the trade, and is zeroed when it lands", async () => {
+  let late = null as Uint8Array | null; // set in the seed's timer, so typed wide
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
+  const p = page(s, { final: "filled" }, [noRpc, noRpc], 50, () => new Promise((r) => setTimeout(() => r((late = seed())), 150)));
+  assert.deepEqual((await p.ask(buy("10"))).answer, { error: "failed" }, "the seed's open is bounded");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(late, "the seed landed");
+  assert.ok(late!.every((b) => b === 0), "the late seed is zeroed");
 });
 
 test("a sell skips a wallet a live trade has marked, as a buy does: it sells from the others, never fails at the claim", async () => {

@@ -818,7 +818,7 @@ test("Low: a pacer leaves the map once its last set is done and its interval has
 
 // a provider for a tx signed in an earlier session: its finalized bank (slot, height), the blockhash's verdict at
 // processed and its bank's slot, and the status read with its bank's slot; `landsAfter` lands the tx once that method was asked
-function endProvider(o: { slot: number; height: number; valid: boolean; validSlot?: number; status: "ok" | "err" | null; statusSlot?: number; landsAfter?: string }): SolanaRpc & { asked: string[] } {
+function endProvider(o: { slot: number; height: number; valid: boolean; validSlot?: number; status: "ok" | "err" | "pending" | null; statusSlot?: number; landsAfter?: string }): SolanaRpc & { asked: string[] } {
   const asked: string[] = [];
   const rpc = async (method: string, params: readonly unknown[]) => {
     asked.push(method);
@@ -834,7 +834,7 @@ function endProvider(o: { slot: number; height: number; valid: boolean; validSlo
     assert.deepEqual(params[1], { searchTransactionHistory: true });
     const landed = o.landsAfter ? asked.includes(o.landsAfter) : o.status !== null;
     const st = landed ? (o.status ?? "ok") : null;
-    return { context: { slot: o.statusSlot ?? o.slot + 3 }, value: [st === null ? null : { confirmationStatus: "finalized", err: st === "ok" ? null : { InstructionError: [0, "x"] }, slot: o.slot - 5 }] };
+    return { context: { slot: o.statusSlot ?? o.slot + 3 }, value: [st === null ? null : { confirmationStatus: st === "pending" ? "processed" : "finalized", err: st === "err" ? { InstructionError: [0, "x"] } : null, slot: o.slot - 5 }] };
   };
   return Object.assign(rpc, { asked });
 }
@@ -865,6 +865,13 @@ test("readSolanaTxEnd: expired only when A4 holds on both providers", async () =
   assert.equal(await readSolanaTxEnd([late(), late()], TX_END), "filled", "landed after the first look: the status read after the height finds it");
   const err = () => endProvider({ slot: 50, height: 1_001, valid: false, status: "err" });
   assert.equal(await readSolanaTxEnd([err(), err()], TX_END), "failed");
+  assert.equal(await readSolanaTxEnd([err(), dead()], TX_END), "unknown", "one provider's err alone frees nothing");
+  assert.equal(await readSolanaTxEnd([endProvider({ slot: 50, height: 1_001, valid: false, status: "ok" }), dead()], TX_END), "unknown", "one provider's ok alone fills nothing");
+  const pending = () => endProvider({ slot: 50, height: 1_001, valid: false, status: "pending" });
+  assert.equal(await readSolanaTxEnd([pending(), pending()], TX_END), "unknown", "a processed-only status is a status, not none");
+  const behind = () => endProvider({ slot: 1_000, height: 5_000, valid: false, validSlot: 900, status: null, statusSlot: 1_001 });
+  assert.equal(await readSolanaTxEnd([behind(), behind()], { ...TX_END, lastValidBlockHeight: 10 }), "unknown", "an invalid read from a bank behind the provider's finalized anchor counts for nothing");
+  assert.equal(await readSolanaTxEnd([dead(), endProvider({ slot: 50, height: 1_001, valid: false, validSlot: 49, status: null })], TX_END), "unknown", "one provider's invalid read one slot behind its anchor");
   const down: SolanaRpc = async () => { throw new Error("HTTP 503"); };
   assert.equal(await readSolanaTxEnd([dead(), down], TX_END), "unknown");
 });

@@ -422,8 +422,10 @@ export function solanaDeadOn(r: SolanaDeadReads, lastValidBlockHeight: number): 
  * searchTransactionHistory: true. filled or failed when both read it landed so; expired when solanaDeadOn holds on
  * both; unknown otherwise (one provider's word, an error or a lagging node decides nothing). The send loop also wants
  * a valid read of the blockhash before an invalid one counts, against a hash too fresh for a bank to hold; here the
- * height past lastValidBlockHeight on that same bank stands for it, and a lowered lastValidBlockHeight still needs
- * the blockhash itself read no longer valid on both providers.
+ * invalid read counts only from a bank at or past that provider's finalized anchor, whose height is past the hash's
+ * lastValidBlockHeight, so that bank comes after the hash and its no is the hash's age, not a bank that never held
+ * it; and the signer records the higher lastValidBlockHeight of the two providers' reads (readSolanaBlockhashBoth),
+ * so one provider cannot lower it.
  */
 export async function readSolanaTxEnd(
   providers: readonly [SolanaRpc, SolanaRpc],
@@ -441,7 +443,9 @@ export async function readSolanaTxEnd(
       const reads: SolanaDeadReads = {
         landed: read.kind === "ok" || read.kind === "err",
         anchor,
-        invalidAt: v && !v.valid ? v.slot : undefined,
+        // an invalid read counts only from a bank at or past this provider's finalized anchor: a bank behind it may
+        // predate the blockhash, and with a lowered lastValidBlockHeight the height says nothing
+        invalidAt: v && !v.valid && anchor !== null && v.slot >= anchor.slot ? v.slot : undefined,
         histNone: read.kind === "none" ? st.slot : undefined,
       };
       return { read, dead: solanaDeadOn(reads, tx.lastValidBlockHeight) };

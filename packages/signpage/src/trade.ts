@@ -287,17 +287,23 @@ export function tradeKind(host: TradeHost): TradeKind {
      * each one is marked as this trade's before the lock is let go.
      */
     async function pick(store: TradeStore, locks: Locks): Promise<{ legs: SolanaTradeLeg[]; keys: string[]; all: string[] } | ErrorCode> {
-      // every dead tab's mark at once (one Promise.all), so the pick lock is held for one round of reads, not one per mark
+      // every dead tab's marks at once (one Promise.all), so the pick lock is held for one round of reads, not one per
+      // mark; the marks grouped by op, each op's lock probed once (two probes of one op at once would each read the
+      // other as a live trade)
+      const byOp = new Map<string, { key: string; m: NonNullable<ArmRecord["inflight"]> }[]>();
+      for (const { key, rec } of await armRecords(store, "sol")) if (rec.inflight) byOp.set(rec.inflight.op, [...(byOp.get(rec.inflight.op) ?? []), { key, m: rec.inflight }]);
       await Promise.all(
-        (await armRecords(store, "sol")).map(async ({ key, rec }) => {
-          const m = rec.inflight;
-          if (!m) return;
-          const live = await locks.request(tradeLock(m.op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
+        [...byOp].map(async ([op, marks]) => {
+          const live = await locks.request(tradeLock(op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
           if (live) return;
-          const states = await Promise.all(m.txs.map((t) => txEnd(host.deps.providers, t)));
-          if (states.includes("unknown")) return;
-          await settleArm(store, key, m.op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
-          if (m.txs[0]) await noteLeg(store, m.op, m.txs[0].sig, states[0] as LegEnd).catch(() => {});
+          await Promise.all(
+            marks.map(async ({ key, m }) => {
+              const states = await Promise.all(m.txs.map((t) => txEnd(host.deps.providers, t)));
+              if (states.includes("unknown")) return;
+              await settleArm(store, key, op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
+              if (m.txs[0]) await noteLeg(store, op, m.txs[0].sig, states[0] as LegEnd).catch(() => {});
+            }),
+          );
         }),
       );
       const records = await armRecords(store, "sol");
@@ -335,7 +341,14 @@ export function tradeKind(host: TradeHost): TradeKind {
       refuse: (code: ErrorCode) => Promise<void>,
     ): Promise<void> {
       const { legs, keys } = set;
-      const signer = solanaArmedSigner(store, () => within(host.seed64(), host.storeMs ?? TRADE_STORE_MS, "the seed's open"), ctx.id);
+      const signer = solanaArmedSigner(store, () => {
+        // a seed that answers after the bound is zeroed when it lands: no copy stays in memory unused
+        const p = host.seed64();
+        return within(p, host.storeMs ?? TRADE_STORE_MS, "the seed's open").catch((e: unknown) => {
+          void p.then((seed) => seed.fill(0), () => {});
+          throw e;
+        });
+      }, ctx.id);
       const signed: TxRef[] = [];
       let last: SolanaTradeStage | null = null;
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
@@ -408,10 +421,17 @@ export async function txEnd(providers: readonly [SolanaRpc, SolanaRpc], t: { sig
   return end === "expired" ? "not_landed" : end;
 }
 
-/** Records how a dead tab's leg ended on its op: the tx's state, and the op's stage once every tx of it has one. */
+/** Records how a dead tab's leg ended on its op: the tx's state, and the op's stage once every tx of it has one. One
+ * store.update (a compare-and-set), so legs of one op noted at once all land. */
 async function noteLeg(store: TradeStore, op: string, sig: string, end: LegEnd): Promise<void> {
-  const rec = (await store.get("ops", op)) as { stage?: unknown; txs?: unknown } | undefined;
-  if (!rec || typeof rec !== "object") return;
+  await store.update("ops", op, (v) => {
+    const rec = v as { stage?: unknown; txs?: unknown } | undefined;
+    if (!rec || typeof rec !== "object") return undefined;
+    return noted(rec, sig, end);
+  });
+}
+
+function noted(rec: { stage?: unknown; txs?: unknown }, sig: string, end: LegEnd): object {
   const txs = (Array.isArray(rec.txs) ? rec.txs : []).filter((t): t is { hash: string; state?: string } => !!t && typeof t === "object" && typeof (t as { hash?: unknown }).hash === "string");
   const i = txs.findIndex((t) => t.hash === sig);
   if (i >= 0) txs[i] = { ...txs[i]!, state: end };
@@ -421,7 +441,7 @@ async function noteLeg(store: TradeStore, op: string, sig: string, end: LegEnd):
   if (!["filled", "part_filled", "not_landed", "refused"].includes(String(stage)) && ends.every((e) => e !== undefined)) {
     stage = ends.every((e) => e === "filled") ? "filled" : ends.some((e) => e === "filled") ? "part_filled" : "not_landed";
   }
-  await store.put("ops", op, { ...rec, txs, stage });
+  return { ...rec, txs, stage };
 }
 
 /** A repeated id's answer from its ops record: its trade stage and txs, its code; id_reused while it is pending or when the request differs. */

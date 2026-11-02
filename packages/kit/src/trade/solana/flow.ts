@@ -184,10 +184,11 @@ function mintHasTransferFee(mint: Acc): boolean {
   return false;
 }
 
-/** The older of two finalized reads, which both providers hold. */
+/** The older of two finalized reads, which both providers hold, with the higher of the two lastValidBlockHeights:
+ * one provider's lowered answer can then never make the tx read past its window before it is. */
 export async function readSolanaBlockhashBoth(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaBlockhash> {
   const [a, b] = await both(readSolanaBlockhash, providers);
-  return a.slot <= b.slot ? a : b;
+  return { ...(a.slot <= b.slot ? a : b), lastValidBlockHeight: Math.max(a.lastValidBlockHeight, b.lastValidBlockHeight) };
 }
 
 /** A signature read again on both providers with searchTransactionHistory: filled or failed only when both agree. */
