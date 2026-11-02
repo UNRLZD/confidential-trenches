@@ -159,7 +159,8 @@ const out = {
     "Deposits and real withdraw proofs that carry both trees of the Solana pool across a page boundary, for svm-tests/tests/release.rs. Test notes only, never money.",
     "Made by contracts/pool-solana/fixtures/make-boundary-spends.mjs (snarkjs 0.7.5 with packages/kit/zk/withdraw.wasm and withdraw.zkey; snarkjs groth16.verify passes each). Same program, keys and context fields as release-spends.json.",
   ],
-  deposits: notes.map((x) => ({ value: String(x.value), precommitment: hex(be32(x.precommitment)) })),
+  // mark: the precommitment mark's 16 bytes after the deposit (M353), value u64 LE ‖ nonce u64 LE
+  deposits: notes.map((x, i) => ({ value: String(x.value), precommitment: hex(be32(x.precommitment)), mark: hex(cat(le(x.value, 8), le(BigInt(i + 1), 8))) })),
   // the root at each index around the boundary, from the off-chain trees
   state_roots: { 1023: rootOf(state0), 1024: rootOf(state0.concat(one.change)), 1025: rootOf(state1) },
   label_roots: { 1023: rootOf(labels0), 1024: rootOf(labels1) },

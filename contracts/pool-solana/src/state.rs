@@ -6,7 +6,7 @@
 //! | pool | `["pool"]` | the lamports every note holds, plus its own rent; `nonce`, `deposited`, `spent`; each tree's size, depth and 33 side nodes (`POOL_LEN` bytes) |
 //! | page | `["page", tree, page_no u32 LE]` | up to `PAGE_ENTRIES` entries (leaf, root, time) of one tree, in insert order: entry `i` is leaf `page_no * PAGE_ENTRIES + i`, the tree's root right after it, and the cluster Clock's `unix_timestamp` (i64 LE) at that insert |
 //! | spent mark | `["spent", nullifierHash]` | nothing: it exists once the note is spent |
-//! | precommitment mark | `["pre", precommitment]` | nothing: it exists once a deposit used it |
+//! | precommitment mark | `["pre", precommitment]` | the deposit that used it (`PRE_MARK_LEN` bytes): value u64 LE, then its nonce u64 LE, the one its label hashes |
 //!
 //! A page grows by one entry (72 bytes) per insert, its rent paid by the inserting transaction's payer; the insert
 //! at a page's first entry creates it. Nothing is ever removed or closed: a closed spent mark would reopen the spend.
@@ -32,6 +32,8 @@ use solana_program::{
 pub const SYSTEM_PROGRAM: Pubkey = solana_program::pubkey!("11111111111111111111111111111111");
 
 pub const POOL_SEED: &[u8] = b"pool";
+/// A precommitment mark's data: the deposit's value u64 LE ‖ its nonce u64 LE.
+pub const PRE_MARK_LEN: usize = 16;
 pub const PAGE_SEED: &[u8] = b"page";
 pub const SPENT_SEED: &[u8] = b"spent";
 pub const PRE_SEED: &[u8] = b"pre";
@@ -200,8 +202,8 @@ pub fn create_pda<'a>(
     }
 }
 
-/// A mark (spent nullifier or used precommitment): the program-owned, empty account at `[seed, key]`. Refuses an
-/// account that is not that address (`WrongAccount`) and a mark that exists (`exists`).
+/// A spent mark: the program-owned, empty account at `[seed, key]`. Refuses an account that is not that address
+/// (`WrongAccount`) and a mark that exists (`exists`).
 pub fn put_mark<'a>(
     program_id: &Pubkey,
     payer: &AccountInfo<'a>,
@@ -211,12 +213,28 @@ pub fn put_mark<'a>(
     key: &[u8; 32],
     exists: PoolError,
 ) -> Result<(), ProgramError> {
+    put_mark_of(program_id, payer, mark, system, seed, key, 0, exists)
+}
+
+/// A mark of `space` bytes, zeroed, for its maker to fill (the precommitment mark's record, `PRE_MARK_LEN`); as
+/// `put_mark` otherwise.
+#[allow(clippy::too_many_arguments)]
+pub fn put_mark_of<'a>(
+    program_id: &Pubkey,
+    payer: &AccountInfo<'a>,
+    mark: &AccountInfo<'a>,
+    system: &AccountInfo<'a>,
+    seed: &[u8],
+    key: &[u8; 32],
+    space: usize,
+    exists: PoolError,
+) -> Result<(), ProgramError> {
     // the canonical bump only: another bump would give the same key a second address
     let (addr, bump) = Pubkey::find_program_address(&[seed, key], program_id);
     if addr != *mark.key {
         return Err(PoolError::WrongAccount.into());
     }
-    create_pda(program_id, payer, mark, system, &[seed, key, &[bump]], 0, exists)
+    create_pda(program_id, payer, mark, system, &[seed, key, &[bump]], space, exists)
 }
 
 /// Reads the page header: this program's, a page of `tree` numbered `page_no`. Returns its entry count.
