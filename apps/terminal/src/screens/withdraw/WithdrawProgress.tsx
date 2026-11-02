@@ -19,7 +19,7 @@ import "./withdraw.css";
 // withdrawal the app follows (model.ts) is in the signing page's state, so it shows when SIGN_HOST's layer closes and
 // after a reload mid-way. It has no address field and no amount field: both are typed on SIGN_HOST's form (W:924-925).
 // The end screen is R5's: the dot ring, the amount, Sent with what the address got, the short destination and the tx
-// link, opened only when tapped; Done drops it. A stopped withdrawal moved nothing, so its one action opens the form
+// link, opened only when tapped; Done, the close and Deposit drop it (Deposit then asks the mount for the deposit sheet). A stopped withdrawal moved nothing, so its one action opens the form
 // again. No dialog and no timer: every change is a kit stage.
 
 export const SHEET_ID = "withdraw";
@@ -105,7 +105,7 @@ export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
         </div>
         <div className="dbody">
           <div className="dseg">
-            <button type="button" data-control="withdraw-deposit" onClick={onDeposit}><W id="deposit" /></button>
+            <button type="button" data-control="withdraw-deposit" onClick={() => (done(), onDeposit())}><W id="deposit" /></button>
             <button type="button" className="on" id="wdr-seg-on"><W id="withdraw" /></button>
           </div>
           <div className="wdone">

@@ -4,11 +4,11 @@
 // 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1), the page clock paused by Playwright at NOW. Per state: its own state id and no
 // other, app-shell's BAR-10 rules (MEASURE: no text under 11 px, no phone tap box under 44 px, no horizontal scroll), no
 // external request (the tx link opens only when tapped), and no field the app could take an address or amount in
-// (W:924-925). An old finished withdrawal draws nothing. Then: BAR-05, the sheet's box in every state and the action's in
-// the end states equal within 1 px and within 2 px of R5's (as test/deposit-sheet/run.mjs); BAR-11, S12.12's counter
-// ticks in place over 120 s of page clock with no layout shift; and the taps: Done and the close drop the withdrawal,
-// Deposit asks for the deposit sheet, and a stopped withdrawal's Withdraw sends withdraw.open with no param (the address
-// is typed on SIGN_HOST's form), off while the signing page is not READY.
+// (W:924-925). An old finished withdrawal draws nothing. Then: BAR-05 and AS-03, the sheet's box in every state and the
+// action's in the end states within 2 px of R5's (the deposit sheet's, test/deposit-sheet/run.mjs); BAR-11, S12.12's
+// counter ticks in place over 120 s of page clock with no layout shift; and the taps: Done and the close drop the
+// withdrawal, Deposit drops it and asks for the deposit sheet, and a stopped withdrawal's Withdraw sends withdraw.open
+// with no param (the address is typed on SIGN_HOST's form), off while the signing page is not READY.
 //   node apps/terminal/test/withdraw/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -176,7 +176,7 @@ try {
       const { ctx, page } = await open(browser, w, "sent");
       await page.locator('[data-control="withdraw-deposit"]').click();
       const calls = await page.evaluate(() => window.__calls);
-      check(calls.some((c) => c.kind === "deposit"), `@${w.name}: Deposit ${JSON.stringify(calls)}`);
+      check(calls.some((c) => c.kind === "deposit") && (await page.locator(".wdr").count()) === 0, `@${w.name}: Deposit ${JSON.stringify(calls)}`);
       await ctx.close();
     }
     {
