@@ -5,7 +5,7 @@
 // The owner's lists: the column names of owner round 15 (research repo docs/owner-decisions.md:174, dr2-discover:
 // "the columns are New, Trending, Hot and Graduating"), CN-09 (`Price` `MC` `Vol`, signed; 09-design-brief S5 Row),
 // owner-words-pass (owner-decisions.md:351) and the locked R5 prototype's own labels (design/proto/assets/app.js and
-// discover-ui.js at design-lock-r5).
+// discover-ui.js at design-lock-r5), and the new draft words (owner 1 Nov 16:45Z, keep).
 
 export interface Word {
   text: string;
@@ -16,7 +16,6 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
-const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   discover: ok("Discover", "R5 app.js nav (S1 top bar) and discover-1440.html title"),
@@ -35,9 +34,9 @@ export const WORDS = {
   notChecked: ok("not checked", "R5 discover-ui.js metric pill hover (`<label>: not checked`)"),
   holders: ok("Holders", "R5 discover-ui.js phone row hover"),
   retry: ok("Retry", "owner-words-pass (app-signpage-client)"),
-  noTokens: draft("No tokens", "09-design-brief S5.3 Empty [draft copy: No tokens]"),
-  offline: draft("Offline", "09-design-brief S5.5 Offline [draft copy: Offline]"),
-  loading: draft("Loading", "S5.1 skeleton rows: the list's accessible name only (never drawn)"),
+  noTokens: ok("No tokens", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.3 Empty [draft copy: No tokens]"),
+  offline: ok("Offline", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.5 Offline [draft copy: Offline]"),
+  loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from S5.1 skeleton rows: the list's accessible name only (never drawn)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

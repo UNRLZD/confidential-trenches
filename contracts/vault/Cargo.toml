@@ -60,6 +60,11 @@ name = "smoke"
 path = "tests/smoke.rs"
 required-features = ["sandbox"]
 
+[[test]]
+name = "relayer_send"
+path = "tests/relayer_send.rs"
+required-features = ["sandbox"]
+
 # Tests only (`cargo test` builds the dev profile): Poseidon's field arithmetic at full optimisation, so VT-P01
 # (tests/tree_prop.rs, 125,774 inserts) takes 16 s instead of 140 s on the box (card vault-leanimt). light-poseidon's
 # `Poseidon<Fr>` and ark-ff's Montgomery ops are generic, so their code is made in the crate that names `Fr`, this one:

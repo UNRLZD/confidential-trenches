@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 // The token page's shots and checks (card app-token-page; AS-02, app.md:1356), taken from the built app at its route,
-// not a test page: apps/terminal built with its own vite config and served on 127.0.0.1 with the app's history
-// fallback, each fixture state opened at `/?fx=<name>` (src/screens/token/source.ts) at 390 x 844 (dpr 2, touch) and
-// 1440 x 900 (dpr 1). Per shot: the token route drew the page in its state, no horizontal scroll, no text under 11 px
-// in the page, the curve bar only on the curve token and the dash in the field elsewhere, and on the phone the bottom
-// bar sits above the tab bar and the last tile scrolls clear of it and the curve tile is on screen without a sideways scroll. Requests off the page's host (the shell's hidden
-// SIGN_HOST frame) are refused and listed. Draft words drawn are listed.
+// not a test page: apps/terminal built with its own vite config, each fixture state opened at `/?fx=<name>`
+// (src/screens/token/source.ts) at 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1). The terminal runs only inside
+// SIGN_HOST's shell (a top-level visit moves there, src/shell/in-shell.ts), so the run answers the hosts' real names from
+// local files as app-in-shell.mjs --harness and the BAR-10 run do: APP_HOST the build under its _headers, SIGN_HOST the
+// stand-in shell, signed in; every read is of the terminal's frame inside the shell, and each shot is the whole window.
+// Per shot: the token route drew the page in its state, no horizontal scroll, no text under 11 px in the page, the
+// curve bar only on the curve token and the dash in the field elsewhere, and on the phone the bottom bar sits above the
+// tab bar and the last tile scrolls clear of it and the curve tile is on screen without a sideways scroll. Requests to
+// any other host are refused and listed. Draft words drawn are listed.
 //   node apps/terminal/test/token-page/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
@@ -42,22 +45,6 @@ async function build() {
   return out;
 }
 
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
-function serve(dir) {
-  const server = createServer((req, res) => {
-    const p = new URL(req.url, "http://x").pathname;
-    // the app's history fallback: a path with no file extension is the app
-    const file = path.join(dir, path.extname(p) ? p : "index.html");
-    if (!file.startsWith(dir)) return res.writeHead(403).end();
-    try {
-      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(readFileSync(file));
-    } catch {
-      res.writeHead(404).end();
-    }
-  });
-  return new Promise((r) => server.listen(0, "127.0.0.1", () => r(server)));
-}
-
 const fails = [];
 const drafts = new Map();
 const refused = new Set();
@@ -65,24 +52,30 @@ const check = (ok, what) => {
   if (!ok) fails.push(what);
 };
 
-let BASE = "";
-async function openAt(browser, w, fx) {
+// `page` is the top window (SIGN_HOST's shell, for the shot); `f` is the terminal's frame inside it, where every read is.
+async function openAt(browser, route, w, fx) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
-  await ctx.route((u) => !u.href.startsWith(BASE) && !u.href.startsWith("data:"), (r) => {
-    refused.add(new URL(r.request().url()).origin);
-    return r.abort();
+  await ctx.route("**/*", (r) => {
+    const origin = new URL(r.request().url()).origin;
+    if (origin !== APP_HOST && origin !== SIGN_HOST) refused.add(origin);
+    return route(r);
   });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto(`${BASE}/${fx ? `?fx=${fx}` : ""}`);
-  await page.waitForSelector('main[data-route="token"] [data-token-page]', { timeout: 10_000 }).catch(() => {});
-  return { ctx, page, errors };
+  await page.goto(`${APP_HOST}/${fx ? `?fx=${fx}` : ""}`, { waitUntil: "load" });
+  let f = null;
+  for (const until = Date.now() + 8_000; !f && Date.now() < until; ) {
+    f = page.frames().find((x) => x !== page.mainFrame() && x.url().startsWith(`${APP_HOST}/`)) ?? null;
+    if (!f) await page.waitForTimeout(100);
+  }
+  if (!f) throw new Error(`${w.name} ?fx=${fx}: no APP_HOST frame inside the shell (top at ${page.url()})`);
+  await f.waitForSelector('main[data-route="token"] [data-token-page]', { timeout: 10_000 }).catch(() => {});
+  return { ctx, page, f, errors };
 }
 
 const dir = await build();
-const server = await serve(dir);
-BASE = `http://127.0.0.1:${server.address().port}`;
+const route = await harnessRoute(dir, "signed");
 const { chromium } = await import("playwright");
 const browser = await chromium.launch();
 let n = 0;
@@ -92,23 +85,23 @@ try {
     for (const s of STATES) {
       n++;
       const tag = `${s.id} @${w.name}`;
-      const { ctx, page, errors } = await openAt(browser, w, s.fx);
+      const { ctx, page, f, errors } = await openAt(browser, route, w, s.fx);
       const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
-      const drawn = await page.locator(sel).first().isVisible().catch(() => false);
+      const drawn = await f.locator(sel).first().isVisible().catch(() => false);
       check(drawn, `${tag}: ${sel} not drawn at the route`);
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
-      const scroll = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      const scroll = await f.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       check(scroll <= 0, `${tag}: horizontal scroll ${scroll}px`);
-      const small = await page.$$eval(".tkp *", (els) => els.filter((e) => e.getClientRects().length && [...e.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())).map((e) => [e.textContent.trim().slice(0, 20), parseFloat(getComputedStyle(e).fontSize)]).filter(([, px]) => px < 10.95));
+      const small = await f.$$eval(".tkp *", (els) => els.filter((e) => e.getClientRects().length && [...e.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())).map((e) => [e.textContent.trim().slice(0, 20), parseFloat(getComputedStyle(e).fontSize)]).filter(([, px]) => px < 10.95));
       check(small.length === 0, `${tag}: text under 11 px: ${JSON.stringify(small)}`);
       if (drawn && s.state === "ready") {
         const box = phone ? ".tkp-phone" : ".tkp-desk";
-        const bars = await page.locator(`${box} [data-testid="curve-bar"]`).count();
+        const bars = await f.locator(`${box} [data-testid="curve-bar"]`).count();
         check(bars === (s.curve ? 1 : 0), `${tag}: ${bars} curve bars`);
-        const field = (await page.locator(`${box} [data-k="curve"] .tkp-val`).textContent())?.trim();
+        const field = (await f.locator(`${box} [data-k="curve"] .tkp-val`).textContent())?.trim();
         check(s.curve ? /^\d+%$/.test(field ?? "") : field === "—", `${tag}: the curve field reads ${field}`);
         if (phone) {
-          const g = await page.evaluate(() => {
+          const g = await f.evaluate(() => {
             window.scrollTo(0, document.documentElement.scrollHeight);
             const r = (q) => document.querySelector(q)?.getBoundingClientRect();
             const tiles = [...document.querySelectorAll(".tkp-mtile")].map((e) => e.getBoundingClientRect().bottom);
@@ -117,20 +110,20 @@ try {
           check(g.bar && g.tab && g.bar.bottom <= g.tab.top + 0.5, `${tag}: the bottom bar overlaps the tab bar`);
           check(g.curveRight <= g.vw, `${tag}: the curve tile is off screen (right ${g.curveRight} > ${g.vw})`);
           check(g.bar && g.lastTile <= g.bar.top, `${tag}: the last tile ends under the bottom bar (${g.lastTile} > ${g.bar?.top})`);
-          await page.evaluate(() => window.scrollTo(0, 0));
+          await f.evaluate(() => window.scrollTo(0, 0));
         }
       } else {
-        check((await page.locator(".tkp-bottom").count()) === 0, `${tag}: the bottom bar shows with no token`);
+        check((await f.locator(".tkp-bottom").count()) === 0, `${tag}: the bottom bar shows with no token`);
       }
       if (drawn && s.state === "error") {
-        await page.locator(".tkp-retry").click();
-        check(await page.locator(sel).isVisible(), `${tag}: Retry lost the page`);
+        await f.locator(".tkp-retry").click();
+        check(await f.locator(sel).isVisible(), `${tag}: Retry lost the page`);
       }
-      for (const d of await page.$$eval("[data-draft-copy]", (els) => els.map((e) => e.getAttribute("data-draft-copy")))) {
+      for (const d of await f.$$eval("[data-draft-copy]", (els) => els.map((e) => e.getAttribute("data-draft-copy")))) {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(s.id);
       }
-      const label = await page.$eval("[data-token-page]", (e) => e.getAttribute("aria-label")).catch(() => null);
+      const label = await f.$eval("[data-token-page]", (e) => e.getAttribute("aria-label")).catch(() => null);
       if (label) {
         if (!drafts.has(label)) drafts.set(label, new Set());
         drafts.get(label).add(`${s.id} (accessible name)`);
@@ -141,7 +134,6 @@ try {
   }
 } finally {
   await browser.close();
-  server.close();
   rmSync(dir, { recursive: true, force: true });
 }
 
@@ -152,4 +144,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} states`);
   process.exit(1);
 }
-console.log(`PASS ${n} states (${STATES.length} at 390 and 1440) from the built app at the token route${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+console.log(`PASS ${n} states (${STATES.length} at 390 and 1440) from the built app at the token route inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""}`);
