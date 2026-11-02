@@ -67,8 +67,10 @@ export interface WalletStore {
   // that both read "no seed" never write one over the other. Resolves to the record that is stored afterwards: this
   // one when inserted, the other tab's when it lost.
   insertSeed(seed: unknown): Promise<{ inserted: boolean; seed: unknown }>;
-  // Sets the stored seed's code_saved to true (the backup's "Saved", 06b ses.5) and nothing else.
-  setCodeSaved(): Promise<void>;
+  // Sets the stored seed's code_saved to true (the backup's "Saved", 06b ses.5) and nothing else, only while the stored
+  // seed is the one whose 12 words were shown (`shown.entropy`, compared under the seed lock): a seed another tab stored
+  // since is refused with SeedChanged and left as it is, so a Saved never marks words the user never saw.
+  setCodeSaved(shown: { entropy: Uint8Array }): Promise<void>;
   // Writes meta/"status" from the stored seed when it is missing or behind (a database from before the status record);
   // insertSeed and setCodeSaved write it themselves, in the seed's own transaction.
   syncStatus(): Promise<void>;
@@ -176,6 +178,17 @@ function checkCallerKey(store: WalletStoreName, key: string): void {
 }
 // A seed whose 12 words are its only copy and not saved yet: no source but the passkey's PRF gives them back
 // (wallet.md:922, 06b:776-781). Sign out refuses it until the backup has set code_saved.
+/** setCodeSaved's refusal: the stored seed is not the one whose 12 words were shown (another tab signed out and in). */
+export class SeedChanged extends Error {}
+
+// Equal bytes, read in full whatever the first difference (two 16-byte entropies on the device).
+function sameBytes(a: unknown, b: Uint8Array): boolean {
+  if (!(a instanceof Uint8Array) || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < b.length; i++) d |= (a[i] as number) ^ (b[i] as number);
+  return d === 0;
+}
+
 export function backupFirst(seed: unknown): boolean {
   if (seed === undefined) return false;
   const s = seed as { source?: unknown; code_saved?: unknown };
@@ -362,13 +375,16 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         return { inserted, seed: await unwrap("meta", "seed", await getRaw("meta", "seed")) };
       });
     },
-    setCodeSaved() {
+    setCodeSaved(shown) {
+      if (!(shown?.entropy instanceof Uint8Array) || shown.entropy.length !== 16) return Promise.reject(new Error("setCodeSaved needs the seed shown"));
+      const want = shown.entropy.slice();
       return seedLocked(async () => {
       for (;;) {
         const before = await getRaw("meta", "seed");
-        if (before === undefined) throw new Error("no seed is stored");
+        if (before === undefined) throw new SeedChanged("no seed is stored");
         const seed = (await unwrap("meta", "seed", before)) as Record<string, unknown>;
         try {
+          if (!sameBytes(seed.entropy, want)) throw new SeedChanged("the stored seed is not the seed shown");
           if (seed.code_saved === true) return;
           const status: [string, unknown][] = [[STATUS, await wrap("meta", STATUS, { ...statusOf(seed), code_saved: true })]];
           if (await casPut("meta", "seed", before, await wrap("meta", "seed", { ...seed, code_saved: true }), status)) {
@@ -379,7 +395,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           wipe(seed);
         }
       }
-      });
+      }).finally(() => want.fill(0));
     },
     async syncStatus() {
       for (;;) {

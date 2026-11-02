@@ -7,26 +7,33 @@
 //     closes, back to the app with a frame again. backup.open draws the 12 words in the layer (counted, never read) and
 //     Cancel goes back to the app, still signed in. signout opens the sign-out page in the top window (the frame out of
 //     the document, no Sign out in any frame); Sign out deletes the store and goes back to the app, signed out. A
-//     signout sent signed out, and a backup.open sent signed out, are refused (not_allowed). Signed in, the APP_HOST frame
-//     puts SIGN_HOST in a frame of its own and sends it signout: the framed page loads no sign-out (SIGN_HOST's
-//     frame-ancestors 'none', and its framed branch answers no open kind), so no answer is pending and no frame of the
-//     page holds a Sign out. The browser's report of that refused frame is kept apart from the page errors.
+//     signout sent signed out, and a backup.open sent signed out, are refused (not_allowed). Signed in, a signin.open is
+//     refused (a seed is never replaced), and a press on Sign out within 500 ms of the sign-out page opening does
+//     nothing. Signed in, a blank page of the check's own (APP_HOST frames nothing: its frame-src 'none') puts SIGN_HOST
+//     in a frame and sends it signout: the browser refuses the frame (SIGN_HOST's frame-ancestors 'none', its report
+//     read), so no answer comes and no frame of either page holds a Sign out. That report is kept apart from the page
+//     errors.
 //   no-prf run (hasPrf false): signin.open {way: passkey} then Create stores a random seed and opens the backup in the
 //     same visit. After a reload (signed in, the words not saved) signout draws the backup first, with no Sign out;
 //     Saved goes on to the sign-out page, whose Sign out deletes the store.
 //   wallet run (no passkey): a wallet stub counts every request a page makes of it (window.ethereum, window.solana).
 //     signin.open {way: wallet} on an empty store draws the two choices, New account and I already have one, with no
 //     wallet request made and no seed stored; I already have one draws Use passkey and Recovery code, still with no
-//     wallet request and no seed.
+//     wallet request and no seed; Use passkey with a passkey that has no PRF there makes nothing and offers the 12 words
+//     and the passkey again, never Create passkey (W:932: before any seed is made).
+//   two tabs: tab A loaded signed out, tab B signs in; A takes backup.open and draws the account's 12 words, as A's app
+//     (which reads the same store) shows it signed in.
 //   Every press waits out the page's 500 ms activation guard first, which each layer opening restarts.
 //   node scripts/live-checks/signpage-signin-kinds.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-signin-kinds.mjs --harness [--site <dir>] ...   the same steps on the app's
 //     browser harness (apps/terminal/test/harness) with SIGN_HOST's and APP_HOST's real names mapped to it, serving
-//     SIGN_HOST's build (or <dir>) under its own _headers and a stand-in terminal at APP_HOST
+//     SIGN_HOST's build (or <dir>) under its own _headers and a stand-in terminal at APP_HOST under the terminal's own
+//     _headers (apps/terminal/public/_headers), as the live APP_HOST serves it
 //   PASS exit 0, FAIL exit 1, error exit 2
 // Records hold public values only: states, counts and the public account ids. Never the words, a key or a PRF output.
 import "../net-window.mjs";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -72,12 +79,16 @@ export function judge(rec) {
     `prf: backup.open draws the 12 words of the account in the top window (${p.backup?.page?.state}, ${p.backup?.page?.words ?? 0} words)`);
   say(inLayer(p.backup?.page, "backup") && backToApp(p.backupCancel, "signed-in") && p.backupCancel?.account === A && p.backupCancel?.words === 0,
     `prf: Cancel on the backup goes back to the app signed in, the words gone (${p.backupCancel?.state}, layer ${p.backupCancel?.layer})`);
+  say(refusedNA(p.again?.answer) && p.again?.page?.layer === "hidden" && p.again?.page?.account === A && p.again?.page?.seed === true,
+    `prf: signin.open sent signed in is refused, the seed kept (${p.again?.answer?.error?.code ?? (p.again?.answer ? "answered" : "no step")})`);
   const so = p.signout ?? {};
   say(pending(so.answer) && inLayer(so.page, "signout") && so.page?.signoutButtons === 1 && so.page?.framesWithSignout === 0,
     `prf: signout opens the sign-out page top-level only (${so.page?.state}, top ${so.page?.top}, ${so.page?.signoutButtons ?? 0} Sign out, ${so.page?.framesWithSignout ?? "?"} in a frame)`);
   const fr = p.framed;
-  say(!!fr && !pending(fr.answer) && fr.loaded === false && fr.signoutButtons === 0,
-    `prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out (${fr ? (fr.loaded ? "loaded" : "not loaded") : "no step"}, ${fr?.answer?.ok === true ? "answered ok" : fr?.answer?.timeout ? "no answer" : fr?.answer?.error?.code ?? "?"}, ${fr?.signoutButtons ?? "?"} Sign out)`);
+  say(!!fr && !pending(fr.answer) && fr.loaded === false && fr.signoutButtons === 0 && fr.refusals >= 1,
+    `prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out (${fr ? (fr.loaded ? "loaded" : "not loaded") : "no step"}, ${fr?.answer?.ok === true ? "answered ok" : fr?.answer?.timeout ? "no answer" : fr?.answer?.error?.code ?? "?"}, ${fr?.signoutButtons ?? "?"} Sign out, ${fr?.refusals ?? "?"} frame-ancestors refusal(s))`);
+  say(inLayer(so.early, "signout") && so.early?.db === true && so.early?.account === A,
+    `prf: a press on Sign out within 500 ms of the page opening does nothing (${so.early?.state ?? "no step"}, store ${so.early?.db ? "kept" : "gone"})`);
   say(backToApp(so.after, "signed-out") && so.after?.db === false && !so.after?.account,
     `prf: Sign out deletes the store and goes back to the app signed out (${so.after?.state}, store ${so.after?.db ? "kept" : "gone"})`);
   say(refusedNA(p.refused?.signout) && refusedNA(p.refused?.backup) && p.refused?.layer === "hidden",
@@ -101,7 +112,14 @@ export function judge(rec) {
     `wallet: no wallet request and no seed before the choice (${w.choose?.walletAsks ?? "?"} request(s), seed ${w.choose?.seed ? "made" : "none"})`);
   say(inLayer(w.existing, "existing") && w.existing?.use === 1 && w.existing?.recovery === 1 && w.existing?.walletAsks === 0 && w.existing?.seed === false,
     `wallet: I already have one draws Use passkey and Recovery code, no wallet request, no seed (${w.existing?.state}, ${w.existing?.walletAsks ?? "?"} request(s))`);
-  say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})`);
+  const ex = w.existingUse;
+  say(inLayer(ex, "no-prf") && ex?.create === 0 && ex?.use === 1 && ex?.recovery === 1 && ex?.seed === false,
+    `wallet: Use passkey there with no PRF makes nothing and offers the passkey and the 12 words, never Create passkey (${ex?.state ?? "no step"}, ${ex?.create ?? "?"} Create passkey)`);
+  const t = rec.twoTabs ?? {};
+  say(t.aLoaded?.state === "signed-out" && HEX64.test(t.bCreate?.account ?? "") && pending(t.backup?.answer) && inLayer(t.backup?.page, "backup")
+    && t.backup?.page?.words === 12 && t.backup?.page?.account === t.bCreate?.account,
+    `two tabs: tab A loaded signed out takes backup.open once tab B signed in (${t.backup?.answer?.ok === true ? "pending" : t.backup?.answer?.error?.code ?? "no step"}, ${t.backup?.page?.state ?? "?"})`);
+  say(Array.isArray(rec.errors) && rec.errors.length === 0, `no page error or CSP violation (${Array.isArray(rec.errors) ? rec.errors.length : "no record"})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -117,6 +135,7 @@ async function launch({ harness, site }) {
   const root = site ?? buildSignpage();
   const app = mkdtempSync(path.join(tmpdir(), "ct-signin-kinds-app-"));
   writeFileSync(path.join(app, "index.html"), APP_STAND_IN);
+  writeFileSync(path.join(app, "_headers"), readFileSync(path.join(REPO, "apps/terminal/public/_headers"), "utf8"));
   const cert = makeCert([SIGN_HOST, APP_HOST]);
   const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root }, [APP_HOST]: { root: app, spa: true } } });
   const map = [SIGN_HOST, APP_HOST].map((h) => `MAP ${h} 127.0.0.1:${server.port}`).join(", ");
@@ -141,14 +160,31 @@ async function authenticator(page, hasPrf) {
   });
 }
 
-function watch(page, errors, refusals = []) {
-  page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
-  page.on("console", (m) => {
-    if (m.type() !== "error") return;
-    // the check's own framed SIGN_HOST (prf.framed), refused by SIGN_HOST's frame-ancestors 'none'
-    if (/frame-ancestors/.test(m.text()) && m.text().includes(SIGN_HOST)) refusals.push(m.text().slice(0, 200));
-    else errors.push(`console: ${m.text()}`);
+// A virtual authenticator without PRF holding one passkey for SIGN_HOST (a fresh P-256 key, made here, never stored):
+// Use passkey then gets an assertion with no PRF output.
+async function passkeyNoPrf(page) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: { protocol: "ctap2", ctap2Version: "ctap2_1", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, hasPrf: false, automaticPresenceSimulation: true },
   });
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  await cdp.send("WebAuthn.addCredential", {
+    authenticatorId,
+    credential: {
+      credentialId: randomBytes(16).toString("base64"),
+      isResidentCredential: true,
+      rpId: SIGN_HOST,
+      privateKey: privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+      userHandle: randomBytes(16).toString("base64"),
+      signCount: 0,
+    },
+  });
+}
+
+function watch(page, errors) {
+  page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+  page.on("console", (m) => m.type() === "error" && errors.push(`console: ${m.text()}`));
 }
 
 // Sign out buttons in every frame of the page, each read in its own frame (cross-origin ones too).
@@ -159,26 +195,37 @@ async function framedSignouts(page) {
   return n;
 }
 
-// From inside the APP_HOST frame, SIGN_HOST in a frame of its own, sent signout as the terminal sends it.
-async function framedTry(page, refusals) {
-  const f = await appFrame(page);
-  const answer = await f.evaluate(({ src, origin }) => new Promise((done) => {
-    const fr = document.createElement("iframe");
-    fr.src = src;
-    document.body.append(fr);
-    const id = crypto.randomUUID();
+// A blank page of the check's own in the same browser context (the signed-in store), with SIGN_HOST in a frame, sent
+// signout as the terminal sends it. The browser's frame-ancestors report on that page is counted, never a page error.
+async function framedTry(page) {
+  const ctx = page.context();
+  const host = await ctx.newPage();
+  const refusals = [];
+  const errors = [];
+  host.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+  host.on("console", (m) => {
+    if (m.type() !== "error") return;
+    if (/frame-ancestors/.test(m.text()) && m.text().includes(SIGN_HOST)) refusals.push(m.text().slice(0, 200));
+    else errors.push(`console: ${m.text()}`);
+  });
+  await host.setContent(`<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`);
+  const answer = await host.evaluate((origin) => new Promise((done) => {
+    const fr = document.querySelector("iframe");
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, "0")).join(""); // about:blank has no randomUUID
     const t = setTimeout(() => done({ timeout: true }), 4_000);
     addEventListener("message", (e) => {
       if (e.origin !== origin || e.data?.id !== id) return;
       clearTimeout(t);
       done(e.data);
     });
-    fr.addEventListener("load", () => setTimeout(() => fr.contentWindow?.postMessage({ v: 1, id, type: "signout", return_key: "settings" }, origin), 500));
-  }), { src: `https://${SIGN_HOST}/`, origin: `https://${SIGN_HOST}` });
-  const loaded = page.frames().some((x) => x.parentFrame() === f && x.url().startsWith(`https://${SIGN_HOST}/`));
-  const signoutButtons = await framedSignouts(page);
-  await f.evaluate(() => document.querySelectorAll("iframe").forEach((x) => x.remove()));
-  return { answer, loaded, signoutButtons, refusals: refusals.length };
+    const post = () => fr.contentWindow?.postMessage({ v: 1, id, type: "signout", return_key: "settings" }, origin);
+    setTimeout(post, 1_000);
+    fr.addEventListener("load", () => setTimeout(post, 500));
+  }), `https://${SIGN_HOST}`);
+  const loaded = host.frames().some((x) => x !== host.mainFrame() && x.url().startsWith(`https://${SIGN_HOST}/`));
+  const signoutButtons = (await framedSignouts(host)) + (await framedSignouts(page));
+  await host.close();
+  return { answer, loaded, signoutButtons, refusals: refusals.length, errors };
 }
 
 // The APP_HOST frame the shell holds now (a new one comes each time the layer closes).
@@ -265,15 +312,14 @@ async function press(page, action, not) {
 
 export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, site } = {}) {
   const errors = [];
-  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, noPrf: {}, wallet: {}, errors };
+  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, noPrf: {}, wallet: {}, twoTabs: {}, errors };
   const h = await launch({ harness, site });
   try {
     // prf run
     {
       const ctx = await h.browser.newContext();
       const page = await ctx.newPage();
-      const refusals = [];
-      watch(page, errors, refusals);
+      watch(page, errors);
       await authenticator(page, true);
       await page.goto(url);
       await read(page);
@@ -281,13 +327,20 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const answer = await send(page, "signin.open", { way: "passkey", return_key: "settings" });
       p.signin = { answer, page: await read(page) };
       p.create = await press(page, "create", ["signed-out"]);
-      p.framed = await framedTry(page, refusals);
+      p.framed = await framedTry(page);
+      errors.push(...p.framed.errors);
+      delete p.framed.errors;
+      p.again = { answer: await send(page, "signin.open", { way: "passkey", return_key: "settings" }), page: await read(page) };
       const backup = await send(page, "backup.open", { return_key: "settings" });
       p.backup = { answer: backup, page: await read(page, ["signed-in"]) };
       p.backupCancel = await press(page, "cancel", ["backup"]);
       const signout = await send(page, "signout", { return_key: "settings" });
+      // a press as soon as the page is drawn, inside the 500 ms the opening restarts
+      await page.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signout", null, { timeout: WAIT_MS }).catch(() => {});
+      await page.click('[data-action="signout"]', { timeout: 1_000 }).catch(() => {});
+      const early = await read(page);
       const soPage = await read(page, ["signed-in"]);
-      p.signout = { answer: signout, page: soPage, after: await press(page, "signout", ["signout"]) };
+      p.signout = { answer: signout, page: soPage, early, after: await press(page, "signout", ["signout"]) };
       p.refused = { signout: await send(page, "signout", { return_key: "settings" }), backup: await send(page, "backup.open", { return_key: "settings" }) };
       p.refused.layer = (await read(page)).layer;
       await ctx.close();
@@ -318,12 +371,35 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await ctx.addInitScript(WALLET_STUB);
       const page = await ctx.newPage();
       watch(page, errors);
+      await passkeyNoPrf(page);
       await page.goto(url);
       await read(page);
       const w = record.wallet;
       w.answer = await send(page, "signin.open", { way: "wallet", return_key: "settings" });
       w.choose = await read(page, ["signed-out", "unsupported"]);
       w.existing = await press(page, "have-one", ["choose"]);
+      w.existingUse = await press(page, "use", ["existing"]);
+      await ctx.close();
+    }
+    // two tabs
+    {
+      const ctx = await h.browser.newContext();
+      const a = await ctx.newPage();
+      const b = await ctx.newPage();
+      watch(a, errors);
+      watch(b, errors);
+      await authenticator(b, true);
+      await a.goto(url);
+      const t = record.twoTabs;
+      t.aLoaded = await read(a);
+      await b.goto(url);
+      await read(b);
+      await send(b, "signin.open", { way: "passkey", return_key: "settings" });
+      await read(b);
+      t.bCreate = await press(b, "create", ["signed-out"]);
+      await a.waitForTimeout(1_000);
+      t.backup = { answer: await send(a, "backup.open", { return_key: "settings" }) };
+      t.backup.page = await read(a, ["signed-out", "signed-in"]);
       await ctx.close();
     }
   } finally {

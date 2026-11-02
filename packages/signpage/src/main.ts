@@ -54,7 +54,7 @@
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { backupFirst, openWalletStore, openWalletStoreReader, WALLET_CHANNEL, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
@@ -96,8 +96,8 @@ const root = document.createElement("main");
 root.id = "signin";
 if (framed) root.dataset.framed = "true";
 // top-level: the shell, with these screens in its layer over the APP_HOST frame; the layer opens only when the app
-// asks (signin.open here; backup.open, export.open, signout and withdraw.open are refused until card
-// signpage-signin-kinds builds them) and closes on signed in or Cancel
+// asks (signin.open, signout and backup.open here; export.open and withdraw.open are refused until their cards build
+// them) and closes on signed in, signed out by the signout kind, or Cancel
 let shell: Shell | null = null;
 if (framed) document.body.append(root);
 else {
@@ -107,12 +107,15 @@ else {
     (onEvent) => openWalletStoreReader({ onEvent }),
     (fn) => channel.addEventListener("message", (m) => fn(m.data)),
   );
+  // another tab's seed write or sign out: the page's own state follows, so the open kinds it takes match what the app
+  // shows (it reads the same store); the page's store handle hears nothing once a sign out has closed it
+  channel.addEventListener("message", (m) => storeMoved(m.data as WalletEvent));
   shell = mountShell(document, {
     state: fs.state,
     watch: fs.watch,
     kinds: {
-      // the sign-in screens for one way in, while no seed is stored (wallet.md:919: sign out first); the wallet way has
-      // no screen yet. The answer goes first, then the layer opens (and the frame leaves).
+      // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
+      // layer opens (and the frame leaves).
       "signin.open": (p) => openKind("signin.open", p.way),
       signout: () => openKind("signout"),
       "backup.open": () => openKind("backup.open"),
@@ -125,15 +128,19 @@ else {
 // then the page reads its own store, draws the kind's page and opens the layer. Nothing is asked of a wallet and no seed
 // is made before that read and the page it draws.
 let openedBy: AccountKind | null = null;
+// I already have one (W:932): Face ID or the typed 12 words and restore, before any seed is made; while it holds, no
+// screen offers Create passkey (a passkey without PRF, a cancelled sheet or an error included)
+let restoreOnly = false;
 function openKind(kind: AccountKind, way?: unknown): { result: { pending: true }; then: () => void } | null {
   if (!takes(kind, root.dataset.signin, busy)) return null;
   return {
     result: { pending: true },
     then: () =>
       void run(async () => {
-        const seed = await readSeed();
+        const seed = await readSeedSettled();
         const page = pageFor(kind, way, seed, typeof PublicKeyCredential !== "undefined");
         openedBy = kind;
+        restoreOnly = false;
         if (page === "signed-in") return landed({ screen: "signed-in", seed: seed! });
         if (page === "signed-out") return show("signed-out");
         if (page === "backup") showBackup(seed!);
@@ -151,6 +158,7 @@ function openLayer(): void {
 // Back to the app: the layer closes on the page's signed-in or signed-out state.
 function closeLayer(): void {
   openedBy = null;
+  restoreOnly = false;
   shell?.close();
 }
 
@@ -200,6 +208,10 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
 
 function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }, words?: string): void {
   root.dataset.signin = state;
+  if (state !== "backup" && drawn) {
+    drawn.fill(0);
+    drawn = null;
+  }
   if (state === "signed-in") closeLayer();
   if (seed) {
     root.dataset.account = seed.account;
@@ -232,7 +244,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     fresh.disabled = true;
     fresh.dataset.pending = "wallet-signature";
     parts.push(fresh);
-    parts.push(button("have-one", WORDS["have-one"], () => show("existing")));
+    parts.push(button("have-one", WORDS["have-one"], () => ((restoreOnly = true), show("existing"))));
   } else if (!framed && state === "existing") {
     // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
     if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
@@ -267,7 +279,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     }));
   } else if (!framed && state !== "loading") {
     if (state !== "unsupported") {
-      parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey, true))));
+      if (!restoreOnly) parts.push(button("create", WORDS.create, () => void run(() => signIn(createPasskey, true))));
       parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
     }
     parts.push(button("recovery", WORDS.recovery, () => show("words")));
@@ -305,15 +317,45 @@ const open = async (): Promise<WalletStore> =>
   (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
+      moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
       if (e.kind === "closed") store = null;
       if (e.kind !== "signout") return;
       store = null;
+      openedBy = null;
       show("signed-out");
     },
   }));
 
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
+// The store moved (another tab signed in, saved or signed out) since `moved` was last read: a read that spans a move
+// may hold a seed that is no longer stored, so it is read again; a store that keeps moving reads as no seed.
+let moved = 0;
+async function readSeedSettled(): Promise<Seed | undefined> {
+  for (let i = 0; i < 3; i++) {
+    const at = moved;
+    const s = await readSeed();
+    if (at === moved && store !== null) return s;
+    s?.entropy.fill(0);
+  }
+  return undefined;
+}
+// Another tab's write to the seed or its sign out, heard on the shell's channel: while the layer is hidden and no step
+// runs, the page reads its store again and shows signed in or signed out, as the app does.
+function storeMoved(e: WalletEvent): void {
+  if (e?.kind === "signout" || (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta"))) moved += 1;
+  else return;
+  void resync();
+}
+async function resync(): Promise<void> {
+  if (busy || !shell?.layer.hidden) return;
+  await run(async () => {
+    const s = await readSeedSettled();
+    if (!shell?.layer.hidden) return void s?.entropy.fill(0);
+    if (s) return landed({ screen: "signed-in", seed: s });
+    show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
+  }, false);
+}
 
 const topLevelOnly = (): void => {
   if (framed) throw new Error("sign-in and sign-out run top-level only, never in a frame");
@@ -356,11 +398,15 @@ async function signInWords(typed: string): Promise<void> {
 }
 
 // The backup screen (S3.1): the stored seed's 12 words, top-level only; the entropy is zeroed once they are made.
+// `drawn` keeps the entropy of the words on screen until the page leaves the backup, so Saved marks that seed alone.
+let drawn: Uint8Array | null = null;
 function showBackup(s: Seed): void {
   topLevelOnly();
   const seen = shown({ ...s, entropy: s.entropy.slice() });
   try {
     show("backup", seen, backupWords(s));
+    drawn?.fill(0);
+    drawn = s.entropy.slice();
   } finally {
     s.entropy.fill(0);
   }
@@ -374,16 +420,26 @@ async function openBackup(): Promise<void> {
 // the sign-out page (W:913), else back to the app signed in.
 async function saved(): Promise<void> {
   topLevelOnly();
-  await saveWords(await open());
+  if (!drawn) throw new Error("no 12 words are on screen");
+  try {
+    await saveWords(await open(), { entropy: drawn });
+  } catch (e) {
+    // another tab signed out and in since the words were drawn: nothing is marked, and the page shows the store as it is
+    if (!(e instanceof SeedChanged)) throw e;
+    const now = await readSeed();
+    return now ? show("signed-in", shown(now)) : (show("signed-out"), closeLayer());
+  }
   const s = await readSeed();
   if (!s) return show("signed-out");
   if (afterSaved(openedBy) === "signout") return show("signout", shown(s));
   show("signed-in", shown(s));
 }
-// Cancel: back to the app as the store stands (signed in with a seed, signed out with none)
+// Cancel: back to the app as the store stands (signed in with a seed, signed out with none), from any page, an error's
+// included, so the state the open kinds read is the store's
 async function cancel(): Promise<void> {
-  const s = shell && (root.dataset.signin === "backup" || root.dataset.signin === "signout") ? await readSeed() : undefined;
+  const s = shell ? await readSeed() : undefined;
   if (s) return show("signed-in", shown(s));
+  if (root.dataset.signin === "error") show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
   closeLayer();
 }
 
@@ -399,7 +455,7 @@ async function signOut(): Promise<void> {
 }
 
 let busy = false;
-async function run(step: () => Promise<void>): Promise<void> {
+async function run(step: () => Promise<void>, again = true): Promise<void> {
   if (busy) return;
   busy = true;
   try {
@@ -409,6 +465,8 @@ async function run(step: () => Promise<void>): Promise<void> {
   } finally {
     busy = false;
   }
+  // a step that failed with the layer hidden (an open kind's read) leaves no page on screen: read the store again
+  if (again && root.dataset.signin === "error" && shell?.layer.hidden) void resync();
 }
 
 show("loading");
