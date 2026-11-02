@@ -210,21 +210,21 @@ test("HELD writes the attempt's context on the note before the proof starts", as
   assert.deepEqual((await v.ns.get(r.noteId))?.contexts, want);
 });
 
-test("a second attempt after a free keeps both contexts, through RESERVED and back to UNSPENT", async () => {
+test("a freed attempt, never sent, leaves no context; a sent attempt's stays through RESERVED and back to UNSPENT", async () => {
   const v = await vaultWith();
   const broken: VaultProver = { load: async () => {}, prove: async () => Promise.reject(new Error("the prover died")) };
   await assert.rejects(withdrawRequest(argsFor(v, broken)), /the prover died/);
   const first = (await v.ns.get(v.notes[1]!.id))!;
   assert.equal(first.state, "UNSPENT");
-  assert.equal(first.contexts?.length, 1, "a freed note keeps its attempt's context");
+  assert.equal(first.contexts, undefined, "a freed attempt was never sent: its context goes");
   const r = await withdrawRequest(argsFor(v, signalsProver()));
   assert.equal(r.noteId, v.notes[1]!.id);
   const n = (await v.ns.get(r.noteId))!;
-  assert.deepEqual(n.contexts?.map((c) => c.context), [first.contexts![0]!.context, r.body.public_signals[7]]);
+  assert.deepEqual(n.contexts?.map((c) => c.context), [r.body.public_signals[7]]);
   const back = await v.ns.move(r.noteId, "RESERVED", "UNSPENT", { blockTimeMs: BigInt(r.body.withdrawal.deadline_ms) + 1n });
-  assert.equal(back.contexts?.length, 2);
+  assert.equal(back.contexts?.length, 1, "a sent attempt's context stays: it can land until its deadline");
   const spent = await v.ns.move(r.noteId, "UNSPENT", "SPENT");
-  assert.equal(spent.contexts?.length, 2, "nothing removes an entry");
+  assert.equal(spent.contexts?.length, 1, "no move but a free of HELD removes an entry");
 });
 
 test("a move to HELD without a context, or with a bad or repeated one, is refused with nothing written", async () => {
@@ -238,7 +238,9 @@ test("a move to HELD without a context, or with a bad or repeated one, is refuse
   assert.equal((await v.ns.get(id))?.contexts, undefined);
   const h = await v.ns.move(id, "UNSPENT", "HELD", { deadlineMs, context: "42" });
   await assert.rejects(v.ns.move(id, "HELD", "RESERVED", { attempt: h.attempt, context: "43" } as never), /context/);
-  await v.ns.move(id, "HELD", "UNSPENT", { attempt: h.attempt });
+  // a sent attempt's context stays, so it is never written again (a freed, unsent one leaves none, store.ts)
+  await v.ns.move(id, "HELD", "RESERVED", { attempt: h.attempt });
+  await v.ns.move(id, "RESERVED", "UNSPENT", { blockTimeMs: deadlineMs + 1n });
   await assert.rejects(v.ns.move(id, "UNSPENT", "HELD", { deadlineMs, context: "42" }), /written twice/);
 });
 
@@ -303,7 +305,7 @@ test("deposit -> change 0 -> change 1 -> change 2, a crash and retry in the midd
     v.stateTree.append([commitment]);
     const child = await v.ns.add({ ref: r.change, scope: SCOPE, precommitment: pc, state: "UNSPENT", leaf: { value: r.changeValue, label: r.change.l, commitment, leafIndex: BigInt(v.stateTree.size - 1) } });
     assert.equal((await v.ns.get(spends))?.state, "SPENT", `spend ${k}: the parent is SPENT once its change lands`);
-    if (k === 1) assert.equal((await v.ns.get(spends))?.contexts?.length, 2, "the dead attempt's context is kept");
+    if (k === 1) assert.equal((await v.ns.get(spends))?.contexts?.length, 1, "the dead tab's attempt was never sent: its context goes");
     spends = child.id;
   }
 });
