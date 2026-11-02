@@ -61,6 +61,8 @@ import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLE
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
+import { depositQuoteHost } from "./deposit-wire.ts";
+import { depositNamer } from "./deposit-name.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
@@ -116,6 +118,7 @@ else {
   // another tab's seed write or sign out: the page's own state follows, so the open kinds it takes match what the app
   // shows (it reads the same store); the page's store handle hears nothing once a sign out has closed it
   channel.addEventListener("message", (m) => storeMoved(m.data as WalletEvent));
+  channel.addEventListener("message", (m) => notesMoved(m.data as WalletEvent));
   // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
   document.body.append(drawBackdrop(document));
   shell = mountShell(document, {
@@ -129,6 +132,8 @@ else {
       "backup.open": () => openKind("backup.open"),
       // the form withdraws from the vault's notes; a one-time id's way out (from_id) is not built yet
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
+      // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
     },
   });
   shell.layer.append(root);
@@ -323,7 +328,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
 // RPCs only. With no vault named there yet, no note can be in it: the note value is 0. Once a vault is named, the note
 // value (withdrawable over the note store), the fee bound (the device's own fee_max, LD5: card wallet-withdraw-feemax)
 // and the hand-off come with the wallet's withdraw path (VT-T02's integration); until then they stay unread and no
-// amount is ready. The note store is not imported here until then: it brings the kit's whole entry into this page.
+// amount is ready. The note store is on the page for deposit naming (src/deposit-name.ts; the bundle keeps only what it
+// uses of the kit's entry, app.js 218 KB to 237 KB), not read by the withdraw form until then.
 const PAGE_NETWORK: NearNetwork = "mainnet";
 function withdrawDeps(): WithdrawFormDeps {
   const net = NEAR_NETWORKS[PAGE_NETWORK];
@@ -412,9 +418,38 @@ const topLevelOnly = (): void => {
   if (framed) throw new Error("sign-in and sign-out run top-level only, never in a frame");
 };
 
+// deposit.quote's U (card signpage-deposit-quote-wire; src/deposit-name.ts): this top-level page, which reads the seed
+// to sign in, copies the note store's one PLANNED deposit note of the vault's scope into the public record
+// meta/"deposit/<scope>", so the API answers from public data and never opens the seed. Named on every landing and
+// again on every change to the notes (a note that left PLANNED: the next index is planned and named); while no vault
+// is named on the page's network, nothing is.
+// a function declaration: the shell's kinds, made at the top, hold it before this line runs
+function pageScope(): bigint | null {
+  return vaultScope(PAGE_NETWORK);
+}
+const namer = depositNamer({
+  top: !framed,
+  scope: pageScope,
+  open,
+  startup: () => startup,
+  resyncing: () => resyncing,
+});
+// a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
+function notesMoved(e: WalletEvent): void {
+  if (!shell || pageScope() === null || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
+  void readSeed()
+    .then((s) => {
+      if (!s) return;
+      namer.name(s.entropy);
+      s.entropy.fill(0);
+    })
+    .catch(() => {});
+}
+
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
+  namer.name(l.seed.entropy);
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }
@@ -524,8 +559,9 @@ async function run(step: () => Promise<void>, again = true): Promise<void> {
 show("loading");
 // top-level only: the frame never opens the seed record (src/state.ts reads the status instead); it draws nothing
 if (framed) root.dataset.signin = "framed";
-else
-  void run(async () => {
+const startup: Promise<void> = framed
+  ? Promise.resolve()
+  : run(async () => {
     // one backfill: a database from before the status record gets it from the seed (the store writes it itself since);
     // a failed one leaves the frame reading the seed's key alone (signed in, the Backup dot) until the next load
     await open()
@@ -543,5 +579,12 @@ if (framed) {
     (onEvent) => openWalletStoreReader({ onEvent }),
     (fn) => channel.addEventListener("message", (m) => fn(m.data)),
   );
-  startApi({ parent: window.parent, listen: (fn) => window.addEventListener("message", fn), state: fs.state, watch: fs.watch });
+  // deposit.quote reads U's public record, which a top-level SIGN_HOST page names; the frame names nothing
+  startApi({
+    parent: window.parent,
+    listen: (fn) => window.addEventListener("message", fn),
+    state: fs.state,
+    watch: fs.watch,
+    kinds: { "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead }) },
+  });
 }

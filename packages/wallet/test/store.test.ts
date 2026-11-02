@@ -546,10 +546,11 @@ test("openWalletStoreReader: makes no database, writes nothing, reads records an
     assert.deepEqual(await r.get("meta", "status"), { v: 1, source: "random", code_saved: true });
     assert.deepEqual(await r.get("ops", "op1"), { kind: "deposit", stage: "waiting", txs: [] });
     await assert.rejects(r.get("meta", "k_wrap"));
-    // the frame's reader opens meta/status and ops only: never the seed, nor a note or a wallet
-    await assert.rejects(r.get("meta", "seed"), /meta\/status and ops only/);
-    await assert.rejects(r.get("meta", "settings"), /meta\/status and ops only/);
-    await assert.rejects(r.get("notes", "n1"), /meta\/status and ops only/);
+    // the frame's reader opens meta/status, meta/deposit/<scope> and ops only: never the seed, nor a note or a wallet
+    assert.equal(await r.get("meta", "deposit/7"), undefined);
+    for (const [st, k] of [["meta", "seed"], ["meta", "settings"], ["meta", "deposit"], ["meta", "deposit/07"], ["meta", "deposit/x"], ["notes", "n1"]] as const) {
+      await assert.rejects(r.get(st, k), /meta\/status, meta\/deposit\/<scope> and ops only/, `${st}/${k}`);
+    }
   } finally {
     for (const m of Object.keys(saved)) proto[m] = saved[m]!;
   }
@@ -642,4 +643,70 @@ test("wrap's encoded plaintext and unwrap's decrypted buffer are zeroed after us
     subtle.encrypt = realEncrypt;
     subtle.decrypt = realDecrypt;
   }
+});
+
+// card signpage-deposit-quote-wire: the public copy of the deposit source's one unfunded index, meta/"deposit/<scope>"
+// { v, scope, index, id }, written on SIGN_HOST's top-level page so the API never opens the seed. The index is the note
+// store's PLANNED deposit note's (planDeposit); nameDeposit reserves nothing (wallet.md §2.3 the deposit index rule).
+const HEXID = (i: number) => i.toString(16).padStart(64, "0");
+test("nameDeposit: writes the scope's record for the seed shown, reserves nothing, refuses another seed", async () => {
+  const idb = new IDBFactory();
+  const s = await openWalletStore({ indexedDB: idb });
+  const shown = () => ({ entropy: new Uint8Array(16).fill(0x7f) });
+  await assert.rejects(s.nameDeposit(shown(), { scope: SCOPE, index: 3, id: HEXID(3) }), /no seed is stored/);
+  await s.insertSeed(SEED(true));
+  const first = await s.nameDeposit(shown(), { scope: SCOPE, index: s.lane, id: HEXID(1) });
+  assert.deepEqual(first, { v: 1, scope: SCOPE.toString(), index: s.lane, id: HEXID(1) });
+  // nothing reserved: the counter still hands out the lane's first index
+  assert.equal(await s.reserveDepositIndex(SCOPE), s.lane);
+  // one record per scope
+  const other = await s.nameDeposit(shown(), { scope: SCOPE2, index: 9, id: HEXID(9) });
+  assert.deepEqual(await s.get("meta", `deposit/${SCOPE}`), first);
+  assert.deepEqual(await s.get("meta", "deposit/7"), other);
+  // the reader reads them, never the seed
+  const r = await openWalletStoreReader({ indexedDB: idb });
+  assert.ok(r);
+  assert.deepEqual(await r.get("meta", `deposit/${SCOPE}`), first);
+  r.close();
+  // the index moved on (the note left PLANNED): the record follows
+  const moved = await s.nameDeposit(shown(), { scope: SCOPE, index: s.lane + WALLET_LANES, id: HEXID(2) });
+  assert.equal(moved.index, s.lane + WALLET_LANES);
+  // another seed than the one stored: refused, the record left as it is
+  await assert.rejects(s.nameDeposit({ entropy: new Uint8Array(16).fill(1) }, { scope: SCOPE, index: 0, id: HEXID(0) }), /not the seed shown/);
+  assert.deepEqual(await s.get("meta", `deposit/${SCOPE}`), moved);
+  // the record is the store's own: no caller puts or deletes it
+  await assert.rejects(s.put("meta", `deposit/${SCOPE}` as never, first), /store's own/);
+  await assert.rejects(s.delete("meta", `deposit/${SCOPE}` as never), /store's own/);
+  // bad input writes nothing
+  for (const bad of [{ scope: SCOPE, index: 0, id: "U" }, { scope: SCOPE, index: -1, id: HEXID(0) }, { scope: SCOPE, index: 2 ** 32, id: HEXID(0) }, { scope: -1n, index: 0, id: HEXID(0) }]) {
+    await assert.rejects(s.nameDeposit(shown(), bad));
+  }
+  await assert.rejects(s.nameDeposit({ entropy: new Uint8Array(15) }, { scope: SCOPE, index: 0, id: HEXID(0) }), /the seed shown/);
+  assert.deepEqual(await s.get("meta", `deposit/${SCOPE}`), moved);
+});
+
+test("nameDeposit: the record is written only by a compare on the seed record: a seed changed before it is read again", async () => {
+  const idb = new IDBFactory();
+  const s = await openWalletStore({ indexedDB: idb });
+  await s.insertSeed(SEED(true));
+  // the first compare finds another seed record (a stale tab's write) and aborts, leaving the seed as it was; the next
+  // pass reads and checks the seed again before it writes
+  const proto = IDBObjectStore.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+  const orig = proto.get!;
+  let fired = 0;
+  proto.get = function (this: { transaction: IDBTransaction; name: string; put: (v: unknown, k: string) => unknown }, ...a: unknown[]) {
+    if (fired === 0 && this.name === "meta" && a[0] === "seed" && this.transaction.mode === "readwrite") {
+      fired++;
+      this.put({ iv: new Uint8Array(12).fill(9), ct: new ArrayBuffer(16) }, "seed");
+    }
+    return orig.apply(this, a);
+  };
+  try {
+    const rec = await s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: SCOPE, index: s.lane, id: HEXID(5) });
+    assert.equal(fired, 1);
+    assert.equal(rec.id, HEXID(5));
+  } finally {
+    proto.get = orig;
+  }
+  assert.deepEqual(await s.get("meta", "seed"), SEED(true), "the aborted compare left the seed as it was");
 });
