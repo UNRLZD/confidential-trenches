@@ -1,8 +1,10 @@
 // node --test apps/helper/src/server.test.ts: the helper answers /v1/health with the six parts and its commit, and
 // allows cross-origin reads for exactly the two origins (markets paper H7), on a real server on a free port.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { PARTS } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
@@ -220,10 +222,16 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
       if (t === "carried.near") return { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" } };
       return { status: 400, body: { error: { code: "bad_shape" } } };
     },
-    warm: () => undefined,
+    warm: () => void warmed++,
     stop: () => undefined,
   };
+  let warmed = 0;
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw);
+  assert.equal(warmed, 1, "start warms the withdrawal relayer: a restart resends its open sends before any request");
+  // and the helper's main starts the server with the relayer it built
+  const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
+  assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, \{ mainnet: watch\.status \}\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watch, lists, fee, withdraw\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   try {

@@ -263,6 +263,8 @@ export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, wa
     handler(commit, proxy, rpc, watch, lists, fee, withdraw),
   );
   server.listen(port);
+  // the withdrawal relayer starts with the helper: a restart resends its open sends and settles before any request
+  withdraw?.warm();
   return server;
 }
 
@@ -280,11 +282,9 @@ if (import.meta.main) {
     const lists = createSolanaLists(proxy, rpc);
     const watch = createTokenWatch(process.env);
     const fee = feeQuoterFromEnv(process.env);
-    // the withdrawal relayer starts with the helper: a restart resends its open sends before any request (send.ts)
     const withdraw = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status });
-    server = start(commit, port, proxy, rpc, watch, lists, fee, withdraw);
+    server = start(commit, port, proxy, rpc, watch, lists, fee, withdraw); // warms the withdrawal relayer
     lists.warm();
-    withdraw.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);

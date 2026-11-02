@@ -17,7 +17,9 @@ import {
   MAX_FINAL_AGE_MS,
   MAX_FINAL_GAP,
   SPENDS_PAGE,
+  LEAVES_PAGE,
   checkNullifier,
+  createLeavesIndex,
   createSpendsIndex,
   createWithdrawSendStore,
   nullifierKey,
@@ -490,4 +492,66 @@ test("the spends index keeps each nullifier's row in the vault's list", async ()
   assert.equal(d.index.indexOf(VAULT_FIELD_P - 1n), 2);
   assert.equal(d.index.indexOf(OTHER), null);
   store.close();
+});
+
+test("a settle's failure on chain: kept under the running release only, naming the open settle; that release settles it no more, after a restart too; a higher release takes it again; a malformed failure reads unreadable", () => {
+  const dir = tmp();
+  let store = open(dir, 4);
+  const c = send(NF);
+  store.claim(c);
+  store.settle(NF, c.tx_hash, { kind: "succeeded" });
+  const tx = { tx_hash: hashOf(7101), nonce: "42", height: "101", block_hash: hashOf(101), signed_tx: "BBBB", key: KEY };
+  counters.set(KEY, 43n);
+  store.setSettle(NF, { tx, done: false });
+  assert.throws(() => store.setSettle(NF, { tx, done: false, failed: { release: 3, error: "x" } }), /running release/);
+  assert.throws(() => store.setSettle(NF, { tx: { ...tx, tx_hash: hashOf(7102) }, done: false, failed: { release: 4, error: "x" } }), /another settle/);
+  store.setSettle(NF, { tx, done: false, failed: { release: 4, error: "Smart contract panicked" } });
+  assert.deepEqual(store.toSettle(), []);
+  store.close();
+  store = open(dir, 4);
+  assert.deepEqual(store.toSettle(), [], "the same release after a restart");
+  assert.deepEqual((store.get(NF) as WithdrawSend).settle, { tx, done: false, failed: { release: 4, error: "Smart contract panicked" } });
+  store.close();
+  store = open(dir, 5);
+  assert.deepEqual(store.toSettle(), [NF], "a higher release");
+  store.close();
+  for (const failed of [{ release: 0, error: "x" }, { release: 4 }, { release: 4, error: 1 }, { release: 4, error: "x", more: 1 }, null]) {
+    const bad = tmp();
+    writeFileSync(join(bad, `w-${nullifierKey(OTHER)}.json`), JSON.stringify({ ...row(send(OTHER)), outcome: "succeeded", settle: { tx, done: false, failed } }));
+    const s2 = open(bad);
+    assert.equal(s2.get(OTHER), "unreadable", JSON.stringify(failed));
+    s2.close();
+  }
+  const done = tmp();
+  writeFileSync(join(done, `w-${nullifierKey(OTHER)}.json`), JSON.stringify({ ...row(send(OTHER)), outcome: "succeeded", settle: { tx, done: true, failed: { release: 4, error: "x" } } }));
+  const s3 = open(done);
+  assert.equal(s3.get(OTHER), "unreadable", "a failure on a done settle");
+  s3.close();
+});
+
+/** Two providers holding the vault's leaves (`leaves[i]` on provider i) at final height h. */
+function leavesProvider(leaves: string[], h = 500): Rpc {
+  return async (method, params) => {
+    const q = params as { method_name: string; block_id: number; args_base64: string };
+    assert.equal(method, "query");
+    assert.equal(q.method_name, "leaves");
+    const { from, limit } = JSON.parse(Buffer.from(q.args_base64, "base64").toString()) as { from: number; limit: number };
+    return { result: [...Buffer.from(JSON.stringify(leaves.slice(from, from + limit)))], block_height: q.block_id, block_hash: hashOf(q.block_id), logs: [] };
+  };
+}
+
+test("the leaves index (check 5, row 12): read on both providers page by page; a leaf held, its count; a disagreement or an entry off form is never caught up", async () => {
+  const many = Array.from({ length: LEAVES_PAGE + 3 }, (_, i) => String(1000 + i));
+  const ix = createLeavesIndex([leavesProvider(many), leavesProvider(many)], VAULT, 200);
+  assert.equal(await ix.reach(500n), true);
+  assert.equal(ix.count(), BigInt(many.length));
+  assert.equal(ix.has(1000n + BigInt(LEAVES_PAGE) + 2n), true);
+  assert.equal(ix.has(999n), false);
+  const split = createLeavesIndex([leavesProvider(["1", "2"]), leavesProvider(["1", "3"])], VAULT, 200);
+  assert.equal(await split.reach(500n), false);
+  assert.equal(split.has(3n), false);
+  for (const bad of [["01"], ["-1"], [VAULT_FIELD_P.toString()], [1]]) {
+    const x = createLeavesIndex([leavesProvider(bad as string[]), leavesProvider(bad as string[])], VAULT, 200);
+    assert.equal(await x.reach(500n), false, JSON.stringify(bad));
+  }
 });

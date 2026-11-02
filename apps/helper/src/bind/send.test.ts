@@ -1327,6 +1327,8 @@ class Node {
   vaultChanges: { height: bigint; cause: Record<string, string> }[] = [];
   /** providers (by index) that answer every EXPERIMENTAL_changes with an empty list (save_state_changes off, F54) */
   noChanges = new Set<number>();
+  /** ms added to every block's time on a provider (by index): two providers that disagree on a block's time */
+  msSkew = [0n, 0n, 0n];
   nonceAt(h: bigint): bigint | null {
     let n: bigint | null = 10n;
     for (const c of this.keyChanges) if (c.height <= h) n = c.nonce;
@@ -1446,7 +1448,7 @@ class Node {
         return h;
       };
       // timestamp_nanosec as nearcore writes it (a decimal string): 600 ms a block from 1.7e12 ms; timestamp (a JSON number past 2^53) is never read
-      const header = (h: bigint) => ({ header: { height: Number(h), hash: this.bh(h), prev_height: Number(this.prevOf(h)), timestamp_nanosec: ((1_700_000_000_000n + h * 600n) * 1_000_000n + 999_999n).toString(), timestamp: 9_007_199_254_740_993_000 } });
+      const header = (h: bigint) => ({ header: { height: Number(h), hash: this.bh(h), prev_height: Number(this.prevOf(h)), timestamp_nanosec: ((1_700_000_000_000n + h * 600n + (this.msSkew[i] ?? 0n)) * 1_000_000n + 999_999n).toString(), timestamp: 9_007_199_254_740_993_000 } });
       if (method === "query") {
         const q = params as { request_type: string; block_id?: unknown; public_key?: string };
         if (q.request_type === "view_access_key") {
@@ -2753,6 +2755,31 @@ test("a vault call read from blocks only (the withdrawal relayer's fromBlocks): 
   const again = await r.resolve(tx[0]!, { resend: false, fromBlocks: true });
   assert.equal(again.kind, "final");
   assert.equal(node.lookups, 0);
+});
+
+test("from blocks, the two providers' block times must agree: a block whose time differs on them gives no final outcome", async () => {
+  const node = new Node();
+  const r = node.relayer(2_000);
+  const tx: TxRef[] = [];
+  assert.equal((await r.send(prepayAction(1n), open, keep(tx), { fromBlocks: true })).kind, "final");
+  node.msSkew[1] = 1n;
+  const out = await r.resolve(tx[0]!, { resend: false, fromBlocks: true }).catch((e: Error) => ({ kind: "threw", why: e.message }));
+  assert.notEqual(out.kind, "final", JSON.stringify(out));
+  node.msSkew[1] = 0n;
+  assert.equal((await r.resolve(tx[0]!, { resend: false, fromBlocks: true })).kind, "final");
+});
+
+test("from blocks reads only a transaction to the vault: one to any other receiver is refused", async () => {
+  const node = new Node();
+  const r = node.relayer(2_000);
+  const tx: TxRef[] = [];
+  const call = (receiver: string) => r.send({ kind: "call", receiver, method: "m", args: "{}", gas: 30_000_000_000_000n, deposit: 0n }, open, keep(tx), { fromBlocks: true }).catch((e: Error) => ({ kind: "threw", why: e.message }));
+  // the same call to the vault reads final from its receipt in the vault's changes; to another receiver, the vault's
+  // changes are never read for it, however they read
+  assert.equal((await call(VAULT)).kind, "final");
+  const out = await call("other.test.near");
+  assert.notEqual(out.kind, "final", JSON.stringify(out));
+  assert.notEqual((await r.resolve(tx[1]!, { resend: false, fromBlocks: true })).kind, "final");
 });
 
 test("a FunctionCall encodes as nearcore's Action::FunctionCall: tag 2, method, args, gas u64, deposit u128; gas past 300 Tgas or a deposit past u128 refused", () => {
