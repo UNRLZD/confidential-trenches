@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/helper-usdc-event-watch.test.mjs: the live check replays recorded runs
-// (helper-usdc-event-watch.answers.json). good: the helper at dd4ee99 run locally with testnet carried, and mainnet USDC
-// and the testnet token on FastNEAR and dRPC, the indexer and the archival provider, on 2026-11-02: PASS.
+// (helper-usdc-event-watch.answers.json). good: the helper at 66e1cbb run locally with testnet carried, and mainnet USDC
+// and the testnet token on FastNEAR and dRPC, the indexer and the archival provider, on 2026-11-03: PASS.
 // bad_deployed_before: the deployed helper at 350a7db, whose watch never answered caught up: FAIL on that line alone.
 // bad_provider_mismatch: dRPC's is_blocklisted answers
 // true where FastNEAR's answers false: FAIL on that line alone. bad_history_mismatch: the archival view at the blocklist's
