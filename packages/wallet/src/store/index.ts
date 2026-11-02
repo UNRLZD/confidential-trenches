@@ -74,13 +74,14 @@ export interface WalletStore {
   // Writes meta/"status" from the stored seed when it is missing or behind (a database from before the status record);
   // insertSeed and setCodeSaved write it themselves, in the seed's own transaction.
   syncStatus(): Promise<void>;
-  // The deposit source's one named index (wallet.md §2.3 "The deposit index rule"): meta/"deposit" { v, scope, index,
-  // id } for `scope`, public data the frame and the API read in place of the seed. When it already names `scope`, it is
-  // returned as it is: every deposit quote names that same index until money reaches it. Else the next index of the
-  // scope is reserved (the counter is written first, so it is never handed out again), `derive(index)` gives U's id
-  // (64 hex), and the record is written in one transaction with a compare on the seed record, under the seed lock, only
-  // while the stored seed is the one `shown` (else SeedChanged). So no U is named for a seed that is not stored.
-  depositId(shown: { entropy: Uint8Array }, scope: bigint, derive: (index: number) => string): Promise<DepositRecord>;
+  // The public copy of the deposit source's one unfunded index (wallet.md §2.3 "The deposit index rule"):
+  // meta/"deposit/<scope>" { v, scope, index, id }, which the frame and the API read in place of the seed. The index is
+  // the note store's PLANNED deposit note's (../notes/store.ts planDeposit, the one place an index is picked); this
+  // reserves nothing. `id` is U_{scope,index}'s, derived by the caller from the seed `shown`. Written under the seed
+  // lock in one transaction with a compare on the seed record this call read and checked, only while the stored seed
+  // is the one `shown` (else SeedChanged), so no U is named for a seed that is not stored; a record already equal is
+  // left as it is (nothing written). The store's copy of the entropy and the seed it decrypts are zeroed.
+  nameDeposit(shown: { entropy: Uint8Array }, rec: { scope: bigint; index: number; id: string }): Promise<DepositRecord>;
   // Deletes the database. Refuses while the stored seed's 12 words are its only copy and not saved (backupFirst).
   signOut(): Promise<void>;
   close(): void;
@@ -212,14 +213,15 @@ function statusOf(seed: unknown): { v: 1; source: string | null; code_saved: boo
   return { v: 1, source: typeof s?.source === "string" ? s.source : null, code_saved: s?.code_saved === true };
 }
 
-/** meta/"deposit": the deposit source's one named index of `scope` (a decimal field element) and U_{scope,index}'s id. */
+/** meta/"deposit/<scope>": the deposit source's one unfunded index of `scope` (a decimal field element) and U's id. */
 export interface DepositRecord {
   v: 1;
   scope: string;
   index: number;
   id: string;
 }
-const DEPOSIT = "deposit";
+/** The meta key of `scope`'s deposit record. */
+export const depositKey = (scope: bigint | string): string => `deposit/${scope.toString()}`;
 const SCOPE = /^(0|[1-9][0-9]{0,77})$/;
 const IMPLICIT = /^[0-9a-f]{64}$/;
 /** The deposit record read back, or undefined when there is none or it is not one. */
@@ -443,9 +445,12 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         }
       }
     },
-    depositId(shown, scope, derive) {
-      if (!(shown?.entropy instanceof Uint8Array) || shown.entropy.length !== 16) return Promise.reject(new Error("depositId needs the seed shown"));
-      if (typeof scope !== "bigint" || scope < 0n) return Promise.reject(new Error("a scope is a field element"));
+    nameDeposit(shown, r) {
+      if (!(shown?.entropy instanceof Uint8Array) || shown.entropy.length !== 16) return Promise.reject(new Error("nameDeposit needs the seed shown"));
+      if (typeof r?.scope !== "bigint" || r.scope < 0n) return Promise.reject(new Error("a scope is a field element"));
+      const rec = depositRecordOf({ v: 1, scope: r.scope.toString(), index: r.index, id: r.id });
+      if (!rec) return Promise.reject(new Error("a deposit record is an index in [0, 2^32) and a 64-hex id"));
+      const key = depositKey(r.scope);
       const want = shown.entropy.slice();
       return seedLocked(async () => {
         for (;;) {
@@ -455,16 +460,10 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           const same = sameBytes((seed as { entropy?: unknown } | undefined)?.entropy, want);
           wipe(seed);
           if (!same) throw new SeedChanged("the stored seed is not the seed shown");
-          const had = depositRecordOf(await unwrap("meta", DEPOSIT, await getRaw("meta", DEPOSIT)).catch(() => undefined));
-          if (had?.scope === scope.toString()) return had;
-          // written before U is named: an index once reserved is never handed out again (wallet.md:344-345)
-          const index = await moveCounter(scope, (n) => {
-            if (n > MAX_INDEX) throw new Error(`deposit index for scope ${scope} is past 2^32`);
-            return n + WALLET_LANES;
-          });
-          const rec = depositRecordOf({ v: 1, scope: scope.toString(), index, id: derive(index) });
-          if (!rec) throw new Error("derive gave no 64-hex id");
-          if (await casPut("meta", "seed", before, undefined, [[DEPOSIT, await wrap("meta", DEPOSIT, rec)]])) {
+          const had = depositRecordOf(await unwrap("meta", key, await getRaw("meta", key)).catch(() => undefined));
+          if (had && had.scope === rec.scope && had.index === rec.index && had.id === rec.id) return had;
+          // the compare is on the seed record read and checked above: a seed written since gets no record
+          if (await casPut("meta", "seed", before, undefined, [[key, await wrap("meta", key, rec)]])) {
             notify(["meta"]);
             return rec;
           }
@@ -531,7 +530,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
 }
 
 /**
- * What SIGN_HOST's frame reads: meta/status, meta/deposit and the ops records, opened under K_wrap, and keys. It opens no other record
+ * What SIGN_HOST's frame reads: meta/status, meta/deposit/<scope> and the ops records, opened under K_wrap, and keys. It opens no other record
  * (never the seed, K_wrap, a note or a wallet) and writes nothing.
  */
 export interface WalletStoreReader {
@@ -585,8 +584,8 @@ export async function openWalletStoreReader(
     async get(store, key) {
       checkKey(store, key);
       // the frame's two reads; every other record (the seed, K_wrap, a note) is refused before it is read
-      if (store !== "ops" && !(store === "meta" && (key === STATUS || key === DEPOSIT))) {
-        throw new Error(`the reader opens meta/status, meta/deposit and ops only, not ${store}/${key}`);
+      if (store !== "ops" && !(store === "meta" && (key === STATUS || /^deposit\/(0|[1-9][0-9]{0,77})$/.test(key)))) {
+        throw new Error(`the reader opens meta/status, meta/deposit/<scope> and ops only, not ${store}/${key}`);
       }
       return unwrapWith(k, store, key, await getRaw(store, key));
     },
