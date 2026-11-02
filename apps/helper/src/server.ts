@@ -3,11 +3,14 @@
  * line it writes holds a client IP, a path or a header.
  *
  *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
- *     [SOLANA_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..] node src/server.ts
+ *     [SOLANA_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..]
+ *     [NEAR_TESTNET_RPC_URL=..] [NEAR_TESTNET_RPC_URL_B=..] [WITHDRAW_RELAYER_MAINNET=.. WITHDRAW_FEE_RECIPIENT_MAINNET=..]
+ *     [WITHDRAW_RELAYER_TESTNET=.. WITHDRAW_FEE_RECIPIENT_TESTNET=..] node src/server.ts
  *
  * The vendor keys come from the host's environment only (src/proxy/vendors.ts); a vendor with no key is called
  * without one. So do the RPC providers' URLs (src/rpc/rpc.ts), where a keyed provider holds its key; a chain with none
  * set uses its public endpoint, and the second NEAR provider USDC's watch reads (NEAR_RPC_URL_B; src/token-status/).
+ * GET /v1/withdraw/fee quotes a network only when the release's relayer accounts for it are set (src/withdraw/fee.ts).
  *
  * Every answer carries X-Helper-Commit and Vary: Origin. Cross-origin reads are allowed for exactly APP_HOST and
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
@@ -20,17 +23,19 @@ import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { createTokenWatch, USDC } from "./token-status/status.ts";
+import { feeQuoterFromEnv, FeeReadRefused } from "./withdraw/fee.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
 type Watch = ReturnType<typeof createTokenWatch>;
 type Lists = ReturnType<typeof createSolanaLists>;
+type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists"], relay: ["/v1/token-status"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists"], relay: ["/v1/token-status", "/v1/withdraw/fee"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS] = MOUNTED.proxy;
-const [TOKEN_STATUS] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE] = MOUNTED.relay;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
@@ -102,6 +107,7 @@ export function handler(
   rpc: Rpc = createRpc(process.env),
   watch: Watch = createTokenWatch(process.env),
   lists: Lists = createSolanaLists(proxy, rpc),
+  fee: Fee = feeQuoterFromEnv(process.env),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   return (req: IncomingMessage, res: ServerResponse): void => {
@@ -147,6 +153,18 @@ export function handler(
           .status()
           .then((s) => send(200, s, cors(req)))
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path === WITHDRAW_FEE) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // the relayer's quote (withdraw/fee.ts): exactly one token, one this relayer carries; reads that fail or
+        // disagree answer upstream (503) and quote nothing
+        const tokens = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("token");
+        if (tokens.length !== 1 || fee.networkOf(tokens[0]!) === null) return send(404, { error: { code: "not_found" } }, cors(req));
+        void fee
+          .quote(tokens[0]!)
+          .then((a) => send(200, a, cors(req)))
+          .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? send(503, { error: { code: "upstream" } }, cors(req)) : send(500, { error: "internal" }, cors(req))));
         return;
       }
       if (path === MARKET_LISTS) {
@@ -214,12 +232,12 @@ export function handler(
   };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists, fee?: Fee): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watch, lists),
+    handler(commit, proxy, rpc, watch, lists, fee),
   );
   server.listen(port);
   return server;
