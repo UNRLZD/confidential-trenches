@@ -80,7 +80,7 @@ export const EXPORTS_ALLOWED = new Set([
 
 // What keeps `rpcs` from being two independent reads of NEAR testnet: [] when its first two are testnet hosts of two
 // different operators (scripts/ci/near-rpc-operators.mjs). Two hosts of one operator are one read
-// (test.rpc.fastnear.com and rpc.testnet.near.org are both FastNEAR), and a host the map does not hold is no read.
+// (FastNEAR runs near.org's testnet hosts too), and a host the map does not hold is no read.
 export function operatorProblems(rpcs) {
   const two = rpcs.slice(0, 2);
   const named = two.map((u) => `${u} (${networkOf(u) === "testnet" ? (operatorOf(u) ?? "unknown") : "not a testnet host"})`);

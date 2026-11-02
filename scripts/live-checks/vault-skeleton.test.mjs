@@ -156,13 +156,13 @@ test("the same answers from two hosts of one operator (FastNEAR twice): FAIL on 
   const answers = load("vault-skeleton.answers.json").map((a) => (a.url === "https://near-testnet.drpc.org" ? { ...a, url: NEAR_ORG } : a));
   const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
   assert.equal(r.ok, false);
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"]); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
 });
 
 test("operatorProblems: two testnet operators pass; one operator, a host the map lacks, a mainnet host or one RPC are refused", () => {
   assert.deepEqual(operatorProblems(RPCS), []);
   assert.deepEqual(operatorProblems(["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.testnet.near.org"]), []);
-  assert.match(operatorProblems(["https://test.rpc.fastnear.com", "https://archival-rpc.testnet.near.org"])[0], /^only 1 operator\(s\)/);
+  assert.match(operatorProblems(["https://test.rpc.fastnear.com", "https://archival-rpc.testnet.near.org"])[0], /^only 1 operator\(s\)/); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
   assert.match(operatorProblems(["https://test.rpc.fastnear.com", "https://rpc.example.org"])[0], /rpc\.example\.org \(not a testnet host\); want two testnet operators$/);
   assert.match(operatorProblems(["https://test.rpc.fastnear.com", "https://near.drpc.org"])[0], /near\.drpc\.org \(not a testnet host\)/);
   assert.match(operatorProblems(["https://near-testnet.drpc.org"])[0], /^only 1 RPC\(s\)/);

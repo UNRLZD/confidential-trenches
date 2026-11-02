@@ -138,7 +138,7 @@ test("the same answers from two hosts of one operator (FastNEAR twice): FAIL on 
   const answers = good().map((a) => (a.url === "https://near-testnet.drpc.org" ? { ...a, url: NEAR_ORG } : a));
   const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
   assert.equal(r.ok, false);
-  assert.deepEqual(bads(r), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"], r.lines.join("\n"));
+  assert.deepEqual(bads(r), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"], r.lines.join("\n")); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
   assert.equal(r.lines.filter((l) => l.startsWith("ok ")).length, 22);
 });
 

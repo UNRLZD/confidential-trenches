@@ -79,7 +79,7 @@ test("state reads from two hosts of one operator (FastNEAR twice): FAIL on the o
   const answers = load("vault-testnet-usdc.answers.json").map((a) => (a.url === "https://near-testnet.drpc.org" && a.method === "query" ? { ...a, url: NEAR_ORG } : a));
   const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://archival-rpc.testnet.fastnear.com", NEAR_ORG, "https://near-testnet.drpc.org"], sleep });
   assert.equal(r.ok, false);
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD only 1 operator(s) in https://archival-rpc.testnet.fastnear.com (fastnear), https://archival-rpc.testnet.near.org (fastnear); want two testnet operators"], r.lines.join("\n"));
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), ["BAD only 1 operator(s) in https://archival-rpc.testnet.fastnear.com (fastnear), https://archival-rpc.testnet.near.org (fastnear); want two testnet operators"], r.lines.join("\n")); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
 });
 
 test("one RPC: FAIL, said so", async () => {
