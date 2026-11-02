@@ -290,9 +290,16 @@ function compact(n: number): number[] {
  * with its signer and writable flags merged; a key that signs or is a program id stays static; any other key found in
  * a table is loaded from the first table that holds it (that table's writable then readonly indexes, in first-use
  * order); static keys are writable signers (the payer first), readonly signers, writable non-signers, readonly
- * non-signers; loaded keys follow, every table's writable entries, then every table's readonly.
+ * non-signers; loaded keys follow, every table's writable entries, then every table's readonly. Only `signers` may
+ * sign (the wallet alone for a swap; the fee payer and W for a pool release, src/trade/solana/pool-buy.ts).
  */
-function compileV0(payer: string, ixs: readonly SolanaApiInstruction[], blockhash: string, tables: readonly { address: string; table: SolanaLookupTable }[]): { message: Uint8Array; tablesUsed: string[] } {
+export function solanaCompileV0(
+  payer: string,
+  ixs: readonly SolanaApiInstruction[],
+  blockhash: string,
+  tables: readonly { address: string; table: SolanaLookupTable }[],
+  signers: readonly string[] = [payer],
+): { message: Uint8Array; tablesUsed: string[] } {
   type Meta = { signer: boolean; writable: boolean; invoked: boolean };
   const meta = new Map<string, Meta>([[payer, { signer: true, writable: true, invoked: false }]]);
   const touch = (k: string, m: Partial<Meta>) => {
@@ -303,7 +310,7 @@ function compileV0(payer: string, ixs: readonly SolanaApiInstruction[], blockhas
     touch(ix.program, { invoked: true });
     for (const a of ix.accounts) touch(a.key, { signer: a.signer, writable: a.writable });
   }
-  for (const [k, m] of meta) if (m.signer && k !== payer) bad(`an instruction asks ${k} to sign (only the wallet signs)`);
+  for (const [k, m] of meta) if (m.signer && !signers.includes(k)) bad(`an instruction asks ${k} to sign (only ${signers.join(" and ")} sign)`);
   const lookups: { address: string; writable: number[]; readonly: number[]; wKeys: string[]; rKeys: string[] }[] = [];
   for (const { address, table } of tables) {
     const l = { address, writable: [] as number[], readonly: [] as number[], wKeys: [] as string[], rKeys: [] as string[] };
@@ -408,7 +415,7 @@ export function assembleSolanaSwap(req: SolanaBuildRequest, build: SolanaJupiter
     const t = Object.hasOwn(chain.tables, address) ? chain.tables[address] : undefined;
     return t && solanaTableIsActive(t) ? [{ address, table: t }] : [];
   });
-  const { message, tablesUsed } = compileV0(w, ixs, chain.blockhash, tables);
+  const { message, tablesUsed } = solanaCompileV0(w, ixs, chain.blockhash, tables);
   const wire = new Uint8Array(1 + 64 + message.length);
   wire[0] = 1;
   wire.set(message, 65);
@@ -436,7 +443,7 @@ export function buildSolanaTeardown(wallet: string, plan: SolanaTeardownPlan, ch
   const frame = (body: SolanaApiInstruction[], cu: number): SolanaAssembled => {
     const cuLimit = 2 * SOLANA_TEARDOWN_CU.budget + cu;
     const head = [ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(cuLimit)]), ...(cuPrice > 0n ? [ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [3, ...u64le(cuPrice)])] : [])];
-    const { message, tablesUsed } = compileV0(wallet, [...head, ...body], chain.blockhash, []);
+    const { message, tablesUsed } = solanaCompileV0(wallet, [...head, ...body], chain.blockhash, []);
     const wire = new Uint8Array(1 + 64 + message.length);
     wire[0] = 1;
     wire.set(message, 65);
