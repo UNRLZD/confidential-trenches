@@ -18,7 +18,7 @@ import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
 import { askWithdrawFee, type RelayDeps, type RelayRpc, relayWithdraw, sendWithdraw, WITHDRAW_FEE_URL, WITHDRAW_URL, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
 import { type WithdrawRequest, WITHDRAW_SEND_MARGIN_MS, withdrawRequest } from "../src/withdraw/request.ts";
-import { argsFor, BLOCK_MS, closeVaults, RELAY_FEE, SEED, signalsProver, TOKEN, type Vault, vaultWith } from "./withdraw-fixture.ts";
+import { argsFor, BLOCK_MS, closeVaults, FEE_MAX, type FeeEdit, feeReplay, RELAY_FEE, SEED, signalsProver, TOKEN, type Vault, vaultWith } from "./withdraw-fixture.ts";
 
 after(closeVaults);
 
@@ -46,7 +46,6 @@ function helper(answer: (n: number) => Answer, sent: Sent[] = [], clock: { timeM
 const feeArgs = (fetchFn: typeof fetch, over: Partial<Parameters<typeof askWithdrawFee>[0]> = {}) => ({
   token: TOKEN,
   relayer: A.relayer,
-  feeMax: 60_000n,
   amount: 3_000_000n,
   fetchFn,
   ...over,
@@ -64,14 +63,19 @@ test("the fee: the recorded answer gives relay_fee and the release's fee recipie
   assert.equal(sent[0]!.init.body, undefined);
 });
 
-test("the fee: every recorded bad answer is refused, and fee_max and the amount bound a good one", async () => {
+test("the fee: every recorded bad answer is refused, and the amount bounds a good one (fee_max is the device's own: withdraw-feemax.test.ts)", async () => {
+  const OVER = "a fee one above the device fee_max";
   for (const [name, bad] of Object.entries(A.fee.bad)) {
-    await assert.rejects(askWithdrawFee(feeArgs(helper(() => bad))), WithdrawRelayRefused, name);
+    if (name !== OVER) await assert.rejects(askWithdrawFee(feeArgs(helper(() => bad))), WithdrawRelayRefused, name);
   }
+  // a fee above the device's own fee_max reads as a fee; withdrawRequest, which binds it, refuses it (no proof, no send)
+  const over = await askWithdrawFee(feeArgs(helper(() => A.fee.bad[OVER]!)));
+  assert.equal(over.relayFee, FEE_MAX + 1n);
+  const v = await vaultWith();
+  await assert.rejects(withdrawRequest(argsFor(v, signalsProver(), { relayFee: over.relayFee })), /fee_max/);
   await assert.rejects(askWithdrawFee(feeArgs(helper(() => A.fee.busy))), (e: WithdrawRelayRefused) => e.code === "helper" && /upstream/.test(e.message));
-  // the device's own fee_max, exactly at and one below the answer's fee
-  assert.equal((await askWithdrawFee(feeArgs(helper(() => A.fee.good), { feeMax: RELAY_FEE }))).relayFee, RELAY_FEE);
-  await assert.rejects(askWithdrawFee(feeArgs(helper(() => A.fee.good), { feeMax: RELAY_FEE - 1n })), (e: WithdrawRelayRefused) => e.code === "fee");
+  // the amount, exactly at the fee, is refused; one above it takes the fee
+  assert.equal((await askWithdrawFee(feeArgs(helper(() => A.fee.good), { amount: RELAY_FEE + 1n }))).relayFee, RELAY_FEE);
   await assert.rejects(askWithdrawFee(feeArgs(helper(() => A.fee.good), { amount: RELAY_FEE })), (e: WithdrawRelayRefused) => e.code === "fee");
   // an answer over the size limit is refused unread
   const big = { status: 200, body: { ...GOOD_FEE, px: `1.${"0".repeat(1_100)}` } };
@@ -146,15 +150,20 @@ class Chain {
         if (Array.isArray(view)) view = view.slice(Math.min(args.from!, view.length), Math.min(args.from! + args.limit!, view.length));
         return { jsonrpc: "2.0", id: "x", result: { block_hash: `hash-${at}`, block_height: at, logs: [], result: [...new TextEncoder().encode(JSON.stringify(view))] } };
       },
-      block: async ({ block_id }) => {
+      block: async (p) => {
         if (b && this.bDown) throw new Error("down");
+        const block_id = "block_id" in p ? p.block_id : this.height - (b ? this.lagB : 0);
         const t = this.times.get(block_id)! + (b ? this.timeLieB : 0n);
-        return { jsonrpc: "2.0", id: "x", result: { header: { height: block_id, hash: b && this.hashLieB ? `fork-${block_id}` : `hash-${block_id}`, timestamp: 0, timestamp_nanosec: (t * 1_000_000n).toString() } } };
+        const header = { height: block_id, hash: b && this.hashLieB ? `fork-${block_id}` : `hash-${block_id}`, timestamp: 0, timestamp_nanosec: (t * 1_000_000n).toString(), gas_price: "100000000" };
+        return { jsonrpc: "2.0", id: "x", result: { header } };
       },
     });
     return [one(names[0], false), one(names[1], true)];
   }
 }
+
+/** Mainnet's recorded release pair (test/vectors/withdraw-feemax.json) as RelayRpc, for fee_max's price pool. */
+const priceRpcs = (edit?: FeeEdit): [RelayRpc, RelayRpc] => feeReplay("mainnet", edit) as [RelayRpc, RelayRpc];
 
 const sig = (r: WithdrawRequest, k: number): bigint => BigInt(r.body.public_signals[k]);
 /** This attempt's own spend, as the vault writes it: its nullifier hash, withdrawn value, change leaf and context. */
@@ -172,6 +181,7 @@ function depsOf(v: Vault, c: Chain, fetchFn: typeof fetch, script: (round: numbe
     notes: v.ns,
     network: "testnet",
     rpcs: c.rpcs(),
+    priceRpcs: priceRpcs(),
     fetchFn,
     pollMs: 1_000,
     resendMs: 5_000,
@@ -344,6 +354,38 @@ test("a stop by the caller ends the wait with nothing written; a later call find
   landOwn(c, req);
   const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.codes.in_flight!)));
   assert.equal(out.kind, "landed");
+});
+
+test("a body whose relay_fee is above the device's own fee_max is never sent; the deadline frees the note", async () => {
+  for (const [fee, sends] of [[FEE_MAX, true], [FEE_MAX + 1n, false]] as const) {
+    const { v, req } = await reserved();
+    const over = { ...req, body: { ...req.body, withdrawal: { ...req.body.withdrawal, relay_fee: String(fee) } } };
+    const sent: Sent[] = [];
+    const out = await relayWithdraw(SEED, over, depsOf(v, new Chain(), helper(() => A.withdraw.codes.fee_too_low!, sent), undefined, 30_000n));
+    assert.equal(out.kind, "expired");
+    assert.equal(sent.length > 0, sends, `relay_fee ${fee}`);
+    if (!sends) assert.equal(out.kind === "expired" && out.lastAnswer, "fee_max");
+  }
+  // price reads that disagree (dRPC's gas price at the pool's block) send nothing until they agree
+  {
+    const { v, req } = await reserved();
+    const c = new Chain();
+    const sent: Sent[] = [];
+    let lie = true;
+    let firstAt = -1;
+    const price = priceRpcs((r, s, j) => (lie && r === "at" && s === "b" ? { ...j, result: { header: { ...(j.result as { header: object }).header, gas_price: "1" } } } : j));
+    const script = (round: number) => {
+      if (sent.length > 0 && firstAt < 0) firstAt = round;
+      if (round === 4) lie = false;
+      if (round === 8) landOwn(c, req);
+    };
+    const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.submitted, sent), script, 1_000n, { priceRpcs: price }));
+    assert.equal(out.kind, "landed");
+    assert.equal(firstAt, 5, "the first send is in the round after the reads agree");
+  }
+  // the price pair must be mainnet's release pair
+  const { v, req } = await reserved();
+  await assert.rejects(relayWithdraw(SEED, req, depsOf(v, new Chain(), helper(() => A.withdraw.submitted), undefined, 1_000n, { priceRpcs: new Chain().rpcs() })), (e: WithdrawRelayRefused) => e.code === "input" && /priceRpcs/.test(e.message));
 });
 
 // ---------- the review's cases (one operator, a cursor, the block's time, the change another tab wrote) ----------
