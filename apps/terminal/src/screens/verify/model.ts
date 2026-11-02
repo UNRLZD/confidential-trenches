@@ -29,7 +29,7 @@ function viewJson(r: Record<string, unknown>): unknown {
   const b = r.result;
   if (!Array.isArray(b) || !b.every((x) => Number.isInteger(x) && x >= 0 && x <= 255)) return undefined;
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(b as number[])));
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(b as number[])));
   } catch {
     return undefined;
   }

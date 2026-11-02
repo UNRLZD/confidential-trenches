@@ -179,6 +179,12 @@ test("S18.3: an unread answer is Unverified on its check only, its row amber", (
     assert.equal(check(w, "keys").word, "unverified");
     assert.equal(w.code.status, "warn");
   }
+  // a view's bytes with a leading UTF-8 BOM are not its JSON: kept and refused, as every decode of checked bytes here is
+  const bom = clone();
+  for (const x of bom.rpcs) (x.answers.config as any).result.result.unshift(0xef, 0xbb, 0xbf);
+  const b = ready(verifyView(bom, PINS));
+  assert.equal(check(b, "asset").word, "unverified", "a BOM before config()'s JSON");
+  assert.equal(b.funds.status, "warn");
   const z = plantCall(clone(), "balance", "1.5");
   assert.equal(check(verifyView(z, PINS), "balance").word, "unverified", "a balance that is not a whole number is not read");
 });
