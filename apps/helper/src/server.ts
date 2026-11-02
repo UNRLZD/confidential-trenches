@@ -134,7 +134,7 @@ export function handler(
   fee: Fee = feeQuoterFromEnv(process.env),
   withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, statusesOf(watches)),
   token: Token = solanaTokenFromEnv(process.env, proxy, lists),
-  bind: BindSender = bindSenderFromEnv(process.env, statusesOf(watches)),
+  bind: BindSender = bindSenderFromEnv(process.env, watches),
   release: number | null = releaseOf(process.env),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
@@ -373,7 +373,7 @@ if (import.meta.main) {
     const fee = feeQuoterFromEnv(process.env);
     // each network's carry is held by its own watch only
     const withdraw = withdrawSenderFromEnv(process.env, fee, statusesOf(watches));
-    const bind = bindSenderFromEnv(process.env, statusesOf(watches));
+    const bind = bindSenderFromEnv(process.env, watches);
     server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind); // warms both relayers
     lists.warm();
   } catch (e) {

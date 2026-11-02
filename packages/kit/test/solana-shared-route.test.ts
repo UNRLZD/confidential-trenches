@@ -64,7 +64,7 @@ function check(c: Case, change: (swap: Swap, data: Buffer) => Buffer | void = ()
     if (a) tables[t] = solanaDecodeLookupTable(a.data);
   }
   const tx = assembleSolanaSwap(req, build, { blockhash: c.run.blockhash.blockhash, lastValidBlockHeight: c.run.blockhash.lastValidBlockHeight, tables, tokenProgram: c.tp });
-  return checkSolanaQuote(tx.wire, { ...req, spendable: req.amount, minOut }, {
+  return checkSolanaQuote(tx.wire, { ...req, spendable: req.amount, minOut, otherWallets: [] }, {
     tables: Object.fromEntries(build.tables.map((t) => [t, pair(c.run, t)])),
     mint: pair(c.run, c.run.mint),
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },

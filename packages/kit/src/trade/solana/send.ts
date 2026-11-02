@@ -3,8 +3,9 @@
 // byte. Signed bytes cannot be altered by whoever carries them and the first copy to land wins, so every path gets
 // the same bytes and no single path can hold a trade back (LD2).
 //
-// - Send: in the first tick, before sendSolanaSet returns, every tx goes to every path without a rate limit (a public
-//   RPC, and the helper's `/v1/rpc/solana` `sendTransaction`, keyed on the helper's side, when the app has a helper),
+// - Send: in the first tick, before sendSolanaSet returns, every tx goes to every RPC path that its URL's queue lets
+//   start now (a public RPC, and the helper's `/v1/rpc/solana` `sendTransaction` when the app has a helper; see the
+//   provider queue below: 40 a method in any 10 s keyless, so a set of 40 all goes at once),
 //   and one tx to each 1-request-a-second path whose URL has had no request in the last second (keyless Helius Sender
 //   `/fast?swqos_only=true` gets the set's first tx, the Jito block engine `/api/v1/transactions` its second; both
 //   limits count refused requests too). A path that is down, refusing or slow is recorded and holds nothing back.
@@ -69,8 +70,164 @@ export const SOLANA_ANSWER_MAX_BYTES = 1024 * 1024;
 const MAX_PROCESSING_AGE = 150;
 /** A provider answering 429 waits 1 s, then twice as long each time, up to this. */
 const BACKOFF_MAX_MS = 8_000;
-/** getSignatureStatuses takes at most 256 signatures a call (Solana RPC docs); a larger set is read in chunks. */
-const STATUS_CHUNK = 256;
+/** A provider's limit: at most `total` calls, and at most `perMethod` calls of one method, starting in any `windowMs`. */
+export type SolanaRpcLimit = { readonly windowMs: number; readonly total: number; readonly perMethod: number };
+/** A keyless provider's limit: Solana's public RPC allows 100 requests per 10 s per IP, and 40 per 10 s for one method
+ * (solana.com/docs/references/clusters.md, read 2026-10-25); PublicNode publishes no number and is held to the same. */
+export const SOLANA_KEYLESS_RPC_LIMIT: SolanaRpcLimit = { windowMs: 10_000, total: 100, perMethod: 40 };
+/** A keyed provider named by its requests a second: that many in any second, of all methods. */
+export const solanaRpsLimit = (rps: number): SolanaRpcLimit => ({ windowMs: 1_000, total: rps, perMethod: rps });
+
+// One queue per provider, shared by every call the kit makes on it: a trade's reads, simulations, re-reads, fill reads,
+// settle reads and every teardown's, the sends on an RPC path, and any other set or trade in flight on the same
+// provider. Keyed on the provider's URL (the limit is the provider's, per caller IP), or on its own function when it has
+// none, so a provider wrapped by solanaPacedRpc and the same provider passed bare share one queue. Every limit named for
+// the provider is kept and each call fits all of them, so the strictest holds whoever names it. Calls of one method start
+// in the order they asked (first in, first out, so no caller starves another), each at the first time the limits allow:
+// a method whose budget is spent waits alone, and the others go on, the total still counted over all methods.
+// Each call is a slot: reserved at the first time the limits allow after the slot of its method before it, then checked
+// again when its time comes against the calls that really started, and started then or later (a busy page starts a
+// timer late, and the limits hold on the times the calls went out).
+type RpcSlot = { t: number; method: string; started: boolean };
+// fillSteady: when each steady fill read (past its set's burst, fillPool) went out on the provider, by every set on it.
+type RpcQueue = { lastOf: Map<string, number>; slots: RpcSlot[]; limits: Map<string, SolanaRpcLimit>; fillSteady: number[] };
+const queueOfUrl = new Map<string, RpcQueue>();
+const queueOfFn = new WeakMap<SolanaRpc, RpcQueue>();
+const bareOf = new WeakMap<SolanaRpc, SolanaRpc>();
+const WINDOW_MAX_MS = 60_000;
+// The queue's clock: monotonic, so a step of the wall clock (an NTP fix, a user changing the time) can never make the
+// calls in a window look older than they are and let one more through.
+const queueNow = (): number => performance.now();
+// A URL as one key whatever its spelling (a trailing slash, the case of the host), so one provider is one queue.
+const urlKeys = new Map<string, string>();
+function urlKey(u: string): string {
+  let k = urlKeys.get(u);
+  if (k === undefined) {
+    try { k = new URL(u).href; } catch { k = u; }
+    if (urlKeys.size < 10_000) urlKeys.set(u, k);
+  }
+  return k;
+}
+/** The first time at or after `from` that a call of `method` fits every limit beside `slots`. Times are whole ms, so a
+ * window is held 1 ms longer: a call at 0.9 ms and one at 1000.0 ms are in one second on a finer clock. */
+function fitsAt(slots: readonly RpcSlot[], limits: Iterable<SolanaRpcLimit>, method: string, from: number): number {
+  let t = from;
+  const all = slots.map((x) => x.t).sort((x, y) => x - y);
+  const same = slots.filter((x) => x.method === method).map((x) => x.t).sort((x, y) => x - y);
+  for (const limit of limits) {
+    if (all.length >= limit.total) t = Math.max(t, all[all.length - limit.total]! + limit.windowMs + 1);
+    if (same.length >= limit.perMethod) t = Math.max(t, same[same.length - limit.perMethod]! + limit.windowMs + 1);
+  }
+  return t;
+}
+/** The provider's queue, with this limit named in it: named as soon as a caller holds the provider under it (a paced
+ * wrapper made, a set or trade started), so the strictest limit binds every caller's calls from then, before its own. */
+function queueWith(rpc: SolanaRpc, limit: SolanaRpcLimit): RpcQueue {
+  if (![limit?.windowMs, limit?.total, limit?.perMethod].every((x) => typeof x === "number" && Number.isSafeInteger(x) && x > 0) || limit.windowMs > WINDOW_MAX_MS) throw new Error("a provider's limit must be whole numbers above 0, its window at most 60 s");
+  const bare = bareOf.get(rpc) ?? rpc;
+  let q = bare.url === undefined ? queueOfFn.get(bare) : queueOfUrl.get(urlKey(bare.url));
+  if (!q) {
+    q = { lastOf: new Map(), slots: [], limits: new Map(), fillSteady: [] };
+    if (bare.url === undefined) queueOfFn.set(bare, q);
+    else queueOfUrl.set(urlKey(bare.url), q);
+  }
+  q.limits.set(`${limit.windowMs}/${limit.total}/${limit.perMethod}`, { windowMs: limit.windowMs, total: limit.total, perMethod: limit.perMethod });
+  return q;
+}
+function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: (params: readonly unknown[]) => Promise<unknown>; wait: Promise<void> | null; drop: () => void } {
+  const queue = queueWith(rpc, limit);
+  const bare = bareOf.get(rpc) ?? rpc;
+  const now = queueNow();
+  queue.slots = queue.slots.filter((x) => !x.started || x.t > now - WINDOW_MAX_MS);
+  const slot: RpcSlot = { t: fitsAt(queue.slots, queue.limits.values(), method, Math.max(now, queue.lastOf.get(method) ?? 0)), method, started: false };
+  queue.lastOf.set(method, slot.t);
+  queue.slots.push(slot);
+  // How long until the calls that really went out leave room for this one (0: now).
+  const room = (): number => {
+    const at = queueNow();
+    return fitsAt(queue.slots.filter((x) => x.started), queue.limits.values(), method, at) - at;
+  };
+  // The call itself: checked against the calls that went out, then marked started and sent in the same tick, so no
+  // other call is let through on a start time this one has not kept (a caller that runs it late waits again).
+  const run = (params: readonly unknown[]): Promise<unknown> => {
+    const ms = room();
+    if (ms > 0) return new Promise<void>((r) => setTimeout(r, ms)).then(() => run(params));
+    slot.t = queueNow();
+    slot.started = true;
+    // Stamped again once the call has been handed over: a pause in between (a GC, a slow tick) then makes the call look
+    // later, never earlier, than when it left this queue, so the window this queue counts never starts too soon.
+    try {
+      return bare(method, params);
+    } finally {
+      slot.t = queueNow();
+    }
+  };
+  // A turn its caller gives up on before the call starts (the set is over; never a started one): taken out of the
+  // queue, so it holds back no later call and the queue keeps no slot for it.
+  const drop = (): void => {
+    queue.slots = queue.slots.filter((x) => x !== slot);
+    const last = queue.slots.filter((x) => x.method === method).reduce((m, x) => Math.max(m, x.t), -Infinity);
+    if (last === -Infinity) queue.lastOf.delete(method);
+    else queue.lastOf.set(method, last);
+  };
+  if (slot.t <= now && room() <= 0) return { run, wait: null, drop };
+  return {
+    run,
+    drop,
+    wait: new Promise<void>((resolve) => {
+      const go = () => { const ms = room(); if (ms <= 0) resolve(); else setTimeout(go, ms); };
+      setTimeout(go, Math.max(0, slot.t - now));
+    }),
+  };
+}
+/** How long a call of `method` on the provider would wait if asked now (0: it starts at once, behind no call of the
+ * method that waits there); it asks nothing and books nothing. */
+function methodWaitMs(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): number {
+  const queue = queueWith(rpc, limit);
+  const now = queueNow();
+  return Math.max(0, fitsAt(queue.slots, queue.limits.values(), method, Math.max(now, queue.lastOf.get(method) ?? 0)) - now);
+}
+// The fill poll's share of a provider's budget for getSignatureStatuses, B calls in any window W (keyless: 40 in 10 s;
+// one signature a read, so no request links two of the user's wallets: n txs cost n reads a round). Counted, not timed,
+// so a fast round trip spends no more:
+// - each set's first C = B/5 reads are its burst (keyless 8), spaced by pollMs over its open txs and spread over at
+//   least FILL_BURST_MS (most txs land within it): a 3-tx sell landing 0.8 s in is read filled about 0.6 s after;
+// - after it, the set reads no faster than the steady pool, B - 2C in any W (keyless 24, one read every 417 ms), and
+//   every set's steady reads on the provider share that one pool (RpcQueue.fillSteady);
+// - so a set's own reads in any window are at most C + (B - 2C) = B - C, and with every steady read held to B - 2C
+//   at least C stay free for a set that starts later: its whole burst goes at once, whatever ran before (two at once
+//   once the older set's burst has left the window).
+// A lone open tx of an n-tx set is read again at least every n x max(pollMs / n, W / (B - 2C)) plus the round trip
+// (keyless, 9 txs: 3.75 s; 3 txs: 1.25 s; 1 tx: 0.42 s).
+const FILL_BURST_MS = 1_600;
+const fillBurst = (l: SolanaRpcLimit): number => Math.max(1, Math.floor(l.perMethod / 5));
+const fillPool = (l: SolanaRpcLimit): number => Math.max(1, l.perMethod - 2 * fillBurst(l));
+/** Provider A's and B's requests a second when keyed; undefined in a place holds that provider to the keyless limit. */
+export type SolanaProviderRps = readonly [number | undefined, number | undefined];
+/** Each provider's limit: its requests a second when the caller names them (a keyed provider), else the keyless one. */
+export function solanaProviderLimits(providerRps?: SolanaProviderRps): readonly [SolanaRpcLimit, SolanaRpcLimit] {
+  if (providerRps === undefined) return [SOLANA_KEYLESS_RPC_LIMIT, SOLANA_KEYLESS_RPC_LIMIT];
+  if (!Array.isArray(providerRps) || providerRps.length !== 2 || !providerRps.every((r) => r === undefined || (Number.isSafeInteger(r) && r > 0))) throw new Error("providerRps must be two whole numbers above 0, or undefined for a keyless provider");
+  const one = (r: number | undefined) => (r === undefined ? SOLANA_KEYLESS_RPC_LIMIT : solanaRpsLimit(r));
+  return [one(providerRps[0]), one(providerRps[1])];
+}
+/** Whether two providers are the same one: the same function under any wrapping, or the same URL. */
+export function solanaSameProvider(a: SolanaRpc, b: SolanaRpc): boolean {
+  return (bareOf.get(a) ?? a) === (bareOf.get(b) ?? b) || (a.url !== undefined && b.url !== undefined && urlKey(a.url) === urlKey(b.url));
+}
+/** The provider with every call in its shared queue (SOLANA_KEYLESS_RPC_LIMIT when no limit is named). */
+export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KEYLESS_RPC_LIMIT): SolanaRpc {
+  const bare = bareOf.get(rpc) ?? rpc;
+  queueWith(bare, limit);
+  const paced = (method: string, params: readonly unknown[]): Promise<unknown> => {
+    const s = rpcSlot(bare, limit, method);
+    // a call its limit allows now starts in this tick, as the bare provider's would
+    return s.wait ? s.wait.then(() => s.run(params)) : s.run(params);
+  };
+  const out: SolanaRpc = bare.url === undefined ? paced : Object.assign(paced, { url: bare.url });
+  bareOf.set(out, bare);
+  return out;
+}
 
 export type SolanaFetch = (url: string, init: RequestInit) => Promise<Response>;
 /** One JSON-RPC call on one Solana provider: resolves the call's `result`, rejects on any other answer. `url`, when
@@ -116,6 +273,9 @@ export type SolanaSetOptions = {
   readonly pollMs?: number;
   readonly deadlineMs?: number;
   readonly callTimeoutMs?: number;
+  /** A keyed provider's requests a second, every call on it counted, this set's and every other caller's; a provider
+   * not named here (absent, or undefined in its place) is held to SOLANA_KEYLESS_RPC_LIMIT. */
+  readonly providerRps?: SolanaProviderRps;
 };
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e).slice(0, 200);
@@ -205,7 +365,7 @@ function rpcPath(name: string, rpc: SolanaRpc, config: Record<string, unknown>, 
   return {
     name,
     ...(minIntervalMs === undefined ? {} : { minIntervalMs, ...(rpc.url ? { paceKey: rpc.url } : {}) }),
-    send: (b64) => rpc("sendTransaction", [b64, config]).then((sig) => {
+    send: (b64) => solanaPacedRpc(rpc)("sendTransaction", [b64, config]).then((sig) => {
       if (typeof sig !== "string") throw new Error("the path answered no signature");
       return sig;
     }),
@@ -247,6 +407,15 @@ const pacers = new Map<unknown, Pacer>();
 /** How many 1-rps pacers this page holds: a diagnostic read (the kit's tests check that a finished set's pacer goes). */
 export function solanaSendPacerCount(): number {
   return pacers.size;
+}
+/** How many turns the provider's queue holds, booked (not yet started) and started (in the last minute), of one method
+ * when named: a diagnostic read (the kit's tests check that a turn given up on leaves none behind, and that the fill
+ * poll books none while it reads). */
+export function solanaRpcQueueSize(rpc: SolanaRpc, method?: string): { booked: number; started: number } {
+  const bare = bareOf.get(rpc) ?? rpc;
+  const q = bare.url === undefined ? queueOfFn.get(bare) : queueOfUrl.get(urlKey(bare.url));
+  const slots = (q?.slots ?? []).filter((x) => method === undefined || x.method === method);
+  return { booked: slots.filter((x) => !x.started).length, started: slots.filter((x) => x.started).length };
 }
 
 function paceFire(p: Pacer): boolean {
@@ -320,12 +489,16 @@ function paceJoin(key: unknown, interval: number, client: PaceClient): () => voi
 type Prepared = { signature: string; b64: string; lvbh: number; blockhash: string };
 
 /** The set's own checks before anything is sent: signed bytes the kit can decode, each once, a usable height. */
-function prepare(set: readonly SolanaSignedTx[], opts: Pick<SolanaSetOptions, "paths" | "providers">): Prepared[] {
+function prepare(set: readonly SolanaSignedTx[], opts: Pick<SolanaSetOptions, "paths" | "providers" | "providerRps">): Prepared[] {
   if (!Array.isArray(set) || set.length === 0) throw new Error("the set is empty");
   if (!Array.isArray(opts.paths) || opts.paths.length === 0) throw new Error("no send path");
   if (!Array.isArray(opts.providers) || opts.providers.length !== 2 || typeof opts.providers[0] !== "function" || typeof opts.providers[1] !== "function") throw new Error("two providers are needed");
   const [pa, pb] = opts.providers;
-  if (pa === pb || (pa.url !== undefined && pa.url === pb.url)) throw new Error("the two providers are the same provider: a fill must never rest on one provider's word");
+  if (solanaSameProvider(pa, pb)) throw new Error("the two providers are the same provider: a fill must never rest on one provider's word");
+  // Each provider's limit named in its queue before the set's first call (its sends on an RPC path to the same URL too).
+  const limits = solanaProviderLimits(opts.providerRps);
+  queueWith(pa, limits[0]);
+  queueWith(pb, limits[1]);
   for (const p of opts.paths) {
     if (p.minIntervalMs !== undefined && !(Number.isSafeInteger(p.minIntervalMs) && p.minIntervalMs > 0)) throw new Error(`path ${p.name}: minIntervalMs ${String(p.minIntervalMs)}`);
   }
@@ -402,9 +575,11 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const txs = prepare(set, opts);
   const rebroadcastMs = opts.rebroadcastMs ?? SOLANA_REBROADCAST_MS;
   const pollMs = opts.pollMs ?? SOLANA_STATUS_POLL_MS;
+  if (!(typeof pollMs === "number" && Number.isFinite(pollMs) && pollMs > 0)) throw new Error("pollMs must be a number of ms above 0");
   const deadlineMs = opts.deadlineMs ?? SOLANA_SET_DEADLINE_MS;
   const callTimeoutMs = opts.callTimeoutMs ?? SOLANA_CALL_TIMEOUT_MS;
-  const t0 = Date.now();
+  const limits = solanaProviderLimits(opts.providerRps);
+  const t0 = queueNow();
   const outcomes: SolanaTxOutcome[] = txs.map((t) => ({ signature: t.signature, state: "unknown", sends: [] }));
   const decided = txs.map(() => false);
   // Per provider:
@@ -417,14 +592,20 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   //   answer.
   // - histNone: per signature, the slot of the bank of the latest searchTransactionHistory: true read that had none.
   const landed = [new Map<string, StatusRead>(), new Map<string, StatusRead>()] as const;
+  const chased = [new Set<string>(), new Set<string>()] as const; // txs read on p first because the other read them landed
+  const burstLeft = [fillBurst(limits[0]), fillBurst(limits[1])]; // each provider's burst reads (fillBurst) not yet made
+  const lastFast = [t0, t0]; // when a fill read last went out (or was booked) on each provider
   const anchor: [{ slot: number; height: number } | null, { slot: number; height: number } | null] = [null, null];
   const validMin = [new Map<string, number>(), new Map<string, number>()] as const;
   const invalidAt = [new Map<string, number>(), new Map<string, number>()] as const;
   const histNone = [new Map<string, number>(), new Map<string, number>()] as const;
   const fastInFlight = [false, false];
+  // Per provider: the fill poll's round-robin position over the undecided txs.
+  const fastCursor = [-1, -1];
   const deadInFlight = [false, false];
   const backoffMs = [0, 0];
   const backoffUntil = [0, 0];
+  const pending = new Set<() => void>(); // the turns this set's calls wait for, given back when the set ends
   let attempt = 0;
   let over = false;
   let finish!: (r: SolanaSetResult) => void;
@@ -440,21 +621,29 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const past = (i: number): boolean => pastOn(0, i) && pastOn(1, i);
   const eligible = (i: number): boolean => !decided[i] && !past(i);
 
-  /** One call on provider p, timed out, with its 429 back-off. Rejects on any failure. */
+  /** One call on provider p, in the provider's shared queue (rpcSlot), timed out, with its 429 back-off. Rejects on
+   * any failure, and without calling once the set is over: a turn whose time comes after the end is given back.
+   * end() gives back the turns pending then; every caller reads `over` before it asks, and this gives back a turn
+   * asked after the end by a caller that did not (the dead check's loop once did, and its turn stayed booked). */
   function call(p: 0 | 1, method: string, params: readonly unknown[]): Promise<unknown> {
-    const rpc = opts.providers[p];
-    return withTimeout(Promise.resolve().then(() => rpc(method, params)), callTimeoutMs).then(
+    const { run, wait, drop } = rpcSlot(opts.providers[p], limits[p], method);
+    pending.add(drop);
+    return (wait ?? Promise.resolve()).then(() => {
+      pending.delete(drop);
+      if (over) { drop(); throw new Error("the set is over"); }
+      return withTimeout(Promise.resolve().then(() => run(params)), callTimeoutMs);
+    }).then(
       (v) => { backoffMs[p] = 0; return v; },
       (e) => {
         if (/\b429\b/.test(errText(e))) {
           backoffMs[p] = Math.min(Math.max(backoffMs[p]! * 2, 1_000), BACKOFF_MAX_MS);
-          backoffUntil[p] = Date.now() + backoffMs[p]!;
+          backoffUntil[p] = queueNow() + backoffMs[p]!;
         }
         throw e;
       },
     );
   }
-  const backedOff = (p: 0 | 1): boolean => Date.now() < backoffUntil[p]!;
+  const backedOff = (p: 0 | 1): boolean => queueNow() < backoffUntil[p]!;
 
   function sendOne(i: number, p: SolanaSendPath, n: number): void {
     const t = txs[i]!;
@@ -526,38 +715,55 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       } else if (deadOn(0, i) && deadOn(1, i)) {
         o.state = "expired";
       } else continue;
-      o.ms = Date.now() - t0;
+      o.ms = Math.round(queueNow() - t0);
       decided[i] = true;
     }
     if (decided.every(Boolean)) end();
   }
 
-  /** getSignatureStatuses for these txs on p, chunked; null when any chunk is not an answer. */
-  async function statuses(p: 0 | 1, idx: number[], history: boolean): Promise<{ i: number; r: StatusRead; slot: number }[] | null> {
-    const out: { i: number; r: StatusRead; slot: number }[] = [];
-    for (let c = 0; c < idx.length; c += STATUS_CHUNK) {
-      const part = idx.slice(c, c + STATUS_CHUNK);
-      const ans = readStatuses(await call(p, "getSignatureStatuses", [part.map((i) => txs[i]!.signature), { searchTransactionHistory: history }]), part.length);
-      if (!ans) return null;
-      part.forEach((i, k) => out.push({ i, r: ans.reads[k]!, slot: ans.slot }));
-    }
-    return out;
+  /** getSignatureStatuses for one tx on p: one signature a request, never a batch, since each signature names its fee
+   * payer, one of the user's wallets, and no request may carry two of them. Null when it is not an answer. */
+  async function status(p: 0 | 1, i: number, history: boolean): Promise<{ r: StatusRead; slot: number } | null> {
+    const ans = readStatuses(await call(p, "getSignatureStatuses", [[txs[i]!.signature], { searchTransactionHistory: history }]), 1);
+    return ans ? { r: ans.reads[0]!, slot: ans.slot } : null;
   }
 
-  // The fill poll: the status cache only (searchTransactionHistory: false), every undecided tx.
-  function readFast(p: 0 | 1): void {
-    if (fastInFlight[p] || over || backedOff(p)) return;
-    const idx = txs.map((_, i) => i).filter((i) => !decided[i]);
-    if (idx.length === 0) return;
+  // The fill poll: the status cache only (searchTransactionHistory: false), one undecided tx a call, in turn, the calls
+  // spaced by fastPeriod. Whether a read went out.
+  function readFast(p: 0 | 1): boolean {
+    if (fastInFlight[p] || over || backedOff(p)) return false;
+    // A tx p has read landed is not read again on p (its first read is the one kept); one the other provider has read
+    // landed goes first, once, so the second read a fill needs follows the first at once; the rest in turn, so a tx
+    // one provider never sees land never holds the others back.
+    const open = (k: number): boolean => !decided[k] && !landed[p].has(txs[k]!.signature);
+    let i = txs.findIndex((t, k) => open(k) && landed[p === 0 ? 1 : 0].has(t.signature) && !chased[p].has(t.signature));
+    if (i >= 0) chased[p].add(txs[i]!.signature);
+    else {
+      for (let step = 1; step <= txs.length; step++) {
+        const k = (fastCursor[p]! + step) % txs.length;
+        if (open(k)) { i = k; break; }
+      }
+      if (i < 0) return false;
+      fastCursor[p] = i;
+    }
     fastInFlight[p] = true;
-    statuses(p, idx, false)
+    status(p, i, false)
       .then((got) => {
         if (over || !got) return; // a broken answer is no answer
-        for (const g of got) record(p, txs[g.i]!.signature, g.r);
+        record(p, txs[i]!.signature, got.r);
         decide();
       }, () => {})
       .finally(() => { fastInFlight[p] = false; });
+    return true;
   }
+  /** The fill poll's spacing on p: pollMs over the txs p still reads, and no closer than the steady pool allows
+   * (W / (B - 2C)); a burst read, spread over FILL_BURST_MS, never further apart than a steady one. */
+  const fastPeriod = (p: 0 | 1): number => {
+    const n = Math.max(1, txs.filter((t, k) => !decided[k] && !landed[p].has(t.signature)).length); // the txs p still reads
+    const l = limits[p];
+    const steady = Math.max(pollMs / n, l.windowMs / fillPool(l));
+    return burstLeft[p]! > 0 ? Math.min(steady, Math.max(pollMs / n, FILL_BURST_MS / fillBurst(l))) : steady;
+  };
 
   // The dead check on p, every rebroadcast: the finalized bank's height and slot; every undecided tx's blockhash at
   // processed; for each tx past its lastValidBlockHeight there, a status read with searchTransactionHistory: true. Each step's answer carries its bank's slot, which deadOn compares.
@@ -571,6 +777,7 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       // Every undecided tx's blockhash, from the first cycle on, so a fresh hash is read valid before it can read expired.
       const open = txs.map((_, i) => i).filter((i) => !decided[i]);
       for (const bh of new Set(open.map((i) => txs[i]!.blockhash))) {
+        if (over) return;
         let answer: unknown;
         try {
           answer = await call(p, "isBlockhashValid", [bh, { commitment: "processed" }]);
@@ -594,12 +801,14 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       // cache has dropped (a fill) whatever the blockhash reads; it counts toward dead only through deadOn's gates.
       const check = open.filter((i) => !decided[i] && cur.height > txs[i]!.lvbh);
       if (over || check.length === 0) return;
-      const got = await statuses(p, check, true);
-      if (over || !got) return;
-      for (const g of got) {
-        const sig = txs[g.i]!.signature;
-        record(p, sig, g.r);
-        if (g.r.kind === "none") histNone[p].set(sig, g.slot);
+      for (const i of check) {
+        if (over || decided[i]) continue;
+        const got = await status(p, i, true);
+        if (over) return;
+        if (!got) continue;
+        const sig = txs[i]!.signature;
+        record(p, sig, got.r);
+        if (got.r.kind === "none") histNone[p].set(sig, got.slot);
         else histNone[p].delete(sig);
       }
       decide();
@@ -610,16 +819,43 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
 
   broadcast(); // the first send, in this tick, before anything is awaited
   const leaves = limited.map((p, k) => paceJoin(p.paceKey ?? p, p.minIntervalMs!, () => nextFor(k)));
-  const timers = [
-    setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs),
-    setInterval(() => { readFast(0); readFast(1); }, pollMs),
-  ];
+  const timers = [setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs)];
+  const fastTimers: (ReturnType<typeof setTimeout> | undefined)[] = [undefined, undefined];
+  // Past its burst, a fill read goes only while the steady reads of every set on the provider are under the pool
+  // (fillPool) in the window, else at the time the oldest of them leaves it.
+  const fastTick = (p: 0 | 1): void => {
+    if (over) return;
+    // A fill read that would wait is not asked, so the calls waiting on p go first; but once no fill read has gone on p
+    // for a whole window (a slow keyed provider whose budget the dead check's reads fill), the next one books its turn
+    // behind them, so the poll reads at every limit.
+    const waitMs = methodWaitMs(opts.providers[p], limits[p], "getSignatureStatuses");
+    if (waitMs > 0 && queueNow() - lastFast[p]! < limits[p].windowMs) { fastTimers[p] = setTimeout(() => fastTick(p), waitMs); return; }
+    if (burstLeft[p]! > 0) {
+      if (readFast(p)) { burstLeft[p]!--; lastFast[p] = queueNow(); }
+    } else {
+      const l = limits[p];
+      const q = queueWith(opts.providers[p], l);
+      const now = queueNow();
+      q.fillSteady = q.fillSteady.filter((x) => x > now - l.windowMs);
+      if (q.fillSteady.length >= fillPool(l)) {
+        fastTimers[p] = setTimeout(() => fastTick(p), q.fillSteady[0]! + l.windowMs - now + 1);
+        return;
+      }
+      if (readFast(p)) { q.fillSteady.push(now); lastFast[p] = now; }
+    }
+    fastTimers[p] = setTimeout(() => fastTick(p), fastPeriod(p));
+  };
+  fastTimers[0] = setTimeout(() => fastTick(0), fastPeriod(0));
+  fastTimers[1] = setTimeout(() => fastTick(1), fastPeriod(1));
   const deadline = setTimeout(end, deadlineMs);
 
   function end(): void {
     if (over) return;
     over = true;
+    for (const drop of pending) drop();
+    pending.clear();
     for (const t of timers) clearInterval(t);
+    for (const t of fastTimers) clearTimeout(t);
     for (const leave of leaves) leave();
     clearTimeout(deadline);
     finish({ txs: outcomes });
@@ -644,8 +880,10 @@ export async function dryRunSolanaSet(set: readonly SolanaSignedTx[], opts: Sola
   const txs = prepare(set, opts);
   const timeoutMs = opts.callTimeoutMs ?? SOLANA_CALL_TIMEOUT_MS;
   const config = { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed" };
-  const one = (rpc: SolanaRpc, b64: string) =>
-    withTimeout(Promise.resolve().then(() => rpc("simulateTransaction", [b64, config])), timeoutMs).then(
+  const limits = solanaProviderLimits(opts.providerRps);
+  const one = (p: 0 | 1, b64: string) => {
+    const { run, wait } = rpcSlot(opts.providers[p], limits[p], "simulateTransaction");
+    return (wait ?? Promise.resolve()).then(() => withTimeout(Promise.resolve().then(() => run([b64, config])), timeoutMs)).then(
       (ans) => {
         const v = (ans as { value?: { err?: unknown; unitsConsumed?: unknown } } | null)?.value;
         if (typeof v !== "object" || v === null || !("err" in v)) return { error: "not a simulation answer" };
@@ -653,9 +891,10 @@ export async function dryRunSolanaSet(set: readonly SolanaSignedTx[], opts: Sola
       },
       (e) => ({ error: errText(e) }),
     );
+  };
   const out = await Promise.all(
     txs.map(async (t): Promise<SolanaDryTx> => {
-      const sims = (await Promise.all([one(opts.providers[0], t.b64), one(opts.providers[1], t.b64)])) as SolanaDryTx["simulations"];
+      const sims = (await Promise.all([one(0, t.b64), one(1, t.b64)])) as SolanaDryTx["simulations"];
       const clean = sims.every((s) => "err" in s && s.err === null);
       return { signature: t.signature, state: clean ? "simulated" : "sim-failed", simulations: sims };
     }),

@@ -49,6 +49,7 @@ svg { display: block; flex: none; }
 /* desktop footer (proto.css:124, :132) */
 .ft { height: 32px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 0 16px; border-top: 1px solid #151515; font: 12px var(--font-num); color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .ft .links { flex: none; display: flex; gap: 14px; font-family: var(--font-ui); color: var(--text-3); }
+.ft .pill { flex: none; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 11px; font: 600 11px var(--font-ui); background: var(--bg-raised); color: var(--text-2); }
 
 /* phone header and tab bar (proto.css:232-247, :368) */
 .phh, .tabbar { display: none; }

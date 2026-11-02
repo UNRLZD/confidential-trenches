@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { VAULT_CONSTANTS, vaultWithdrawYocto } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
-import { USDC_CODE_HASH, type TokenStatus } from "../token-status/status.ts";
+import { USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import type { CheckedWithdraw, WithdrawConfig } from "./checks.ts";
 import { TESTNET_TOKEN } from "./fee.ts";
 import { createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex } from "./index.ts";
@@ -237,6 +237,31 @@ test("a request that passes checks 1-10 is sent once: one withdraw call on the v
   assert.equal(rec.key, relayer.key);
   assert.equal(rec.deadline_ms, W.deadline_ms);
   assert.equal((a.body as { tx_hash: string }).tx_hash, tx.tx_hash);
+});
+
+test("check 10's H for a withdrawal: every hold asks at the lower of the two finals (markets.md check 10), before the send and at the relayer's turn", async () => {
+  const { deps } = setup();
+  const holds: HoldAt[] = [];
+  const open = deps.tokenStatus;
+  deps.tokenStatus = (at) => (holds.push(at), open(at));
+  assert.equal((await carryWithdraw(req(), deps)).status, 200);
+  assert.ok(holds.length >= 2, String(holds.length));
+  assert.deepEqual([...new Set(holds)], ["lower"]);
+});
+
+test("check 9 after check 10 at the relayer's turn: a hold that waits while the chain passes the deadline's margin answers deadline_too_close, nothing sent or claimed", async () => {
+  const { c, deps, relayer, store } = setup();
+  const open = deps.tokenStatus;
+  let asks = 0;
+  deps.tokenStatus = async (at) => {
+    if (++asks === 2) c.ms += 60_001n; // the relayer's turn: the hold waited (a lagging provider, a 429) past the margin
+    return open(at);
+  };
+  const a = await carryWithdraw(req(), deps);
+  assert.equal(asks, 2);
+  assert.deepEqual([a.status, code(a)], [400, "deadline_too_close"]);
+  assert.equal(relayer.sent.length, 0);
+  assert.equal(store.get(NF), null);
 });
 
 test("check 6 after a send: the same note again answers in_flight and nothing more is signed; two at once send once", async () => {
