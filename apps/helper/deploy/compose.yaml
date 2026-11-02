@@ -31,6 +31,14 @@ services:
       WITHDRAW_FEE_RECIPIENT_MAINNET: ${WITHDRAW_FEE_RECIPIENT_MAINNET:-}
       WITHDRAW_RELAYER_TESTNET: ${WITHDRAW_RELAYER_TESTNET:-}
       WITHDRAW_FEE_RECIPIENT_TESTNET: ${WITHDRAW_FEE_RECIPIENT_TESTNET:-}
+      # POST /v1/withdraw per network (src/withdraw/send.ts; empty: that network's withdrawals are not carried): the
+      # release's vault, the relayer account's full-access keys (gas NEAR only, comma-separated, one nonce lane each),
+      # and the release number (one above the last release's; a rollback ships with the next number)
+      WITHDRAW_VAULT_MAINNET: ${WITHDRAW_VAULT_MAINNET:-}
+      WITHDRAW_RELAYER_KEYS_MAINNET: ${WITHDRAW_RELAYER_KEYS_MAINNET:-}
+      WITHDRAW_VAULT_TESTNET: ${WITHDRAW_VAULT_TESTNET:-}
+      WITHDRAW_RELAYER_KEYS_TESTNET: ${WITHDRAW_RELAYER_KEYS_TESTNET:-}
+      HELPER_RELEASE: ${HELPER_RELEASE:-}
       # the relayers' durable store (src/store/durable.ts): the one writable path in a read-only container
       HELPER_STORE_DIR: /app/data
     volumes:

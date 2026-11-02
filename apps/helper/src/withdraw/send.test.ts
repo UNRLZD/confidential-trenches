@@ -4,7 +4,7 @@
 // guard, takes n from the counter, calls `before` and records what it would broadcast. Each test names its rule.
 //   node --test apps/helper/src/withdraw/send.test.ts
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +26,7 @@ import {
   newestFinalMs,
   outcomeOf,
   outcomeRound,
+  withdrawSenderFromEnv,
   type WithdrawSendDeps,
 } from "./send.ts";
 
@@ -419,4 +420,28 @@ test("a send never applied deletes its row; a row whose key is no longer served 
   await outcomeRound(deps);
   assert.equal(store.get(NF), null);
   assert.equal(nullifierKey(NF).length, 64);
+});
+
+test("the host's configuration: nothing set carries nothing (bad_shape); a network half set, a key that does not parse, no release or no store stops the helper at start", async () => {
+  const quoter = { networkOf: () => null, quote: async () => { throw new Error("no"); }, reads: () => ({ feeMin: async () => 0n }) };
+  const none = withdrawSenderFromEnv({}, quoter, {});
+  const a = await none.carry(req());
+  assert.equal(a.status, 400);
+  assert.equal(code(a), "bad_shape");
+  const base = { WITHDRAW_RELAYER_TESTNET: "relay.test.testnet", WITHDRAW_FEE_RECIPIENT_TESTNET: "relay.test.testnet", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "wenv-")) };
+  assert.throws(() => withdrawSenderFromEnv({ ...base, WITHDRAW_VAULT_TESTNET: "vault.test.testnet" }, quoter, {}), /ed25519 keys/);
+  assert.throws(() => withdrawSenderFromEnv({ ...base, WITHDRAW_VAULT_TESTNET: "vault.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: `ed25519:${"1".repeat(88)}` }, quoter, {}), /relayer key/);
+  const key = (() => {
+    const seed = Buffer.alloc(32, 7);
+    const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+    const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+    return `ed25519:${base58(Buffer.concat([seed, pub]))}`;
+  })();
+  const good = { ...base, WITHDRAW_VAULT_TESTNET: "vault.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: key };
+  assert.doesNotThrow(() => withdrawSenderFromEnv(good, quoter, {}));
+  assert.throws(() => withdrawSenderFromEnv({ ...good, HELPER_RELEASE: "" }, quoter, {}), /HELPER_RELEASE/);
+  assert.throws(() => withdrawSenderFromEnv({ ...good, HELPER_STORE_DIR: "" }, quoter, {}), /HELPER_STORE_DIR/);
+  assert.throws(() => withdrawSenderFromEnv({ ...good, WITHDRAW_RELAYER_TESTNET: "" }, quoter, {}), /WITHDRAW_RELAYER_TESTNET/);
+  // a token of another network, or none, is check 1's bad_shape, with nothing read
+  assert.equal(code(await withdrawSenderFromEnv(good, quoter, {}).carry({ ...req(), token: VAULT_CONSTANTS.TOKEN })), "bad_shape");
 });

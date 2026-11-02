@@ -31,12 +31,13 @@
 //
 // Not here: H3.7's funding of A and its relayed call (fund_recipient_wrong, recipient_refused), H3.5's relayer_low,
 // check 5's unknown_root.
+import { join } from "node:path";
 import { vaultWithdrawYocto, type HelperWithdrawCode } from "@blindfill/kit";
-import type { Relayer, Rpc, TxOutcome, TxRef } from "../bind/send.ts";
-import { tokenHeld, type TokenStatus } from "../token-status/status.ts";
-import { checkWithdraw, decimal, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
-import { agreedBlock, FeeReadRefused, HEIGHT_SPREAD_MAX, viewAt } from "./fee.ts";
-import { checkNullifier, nullifierKey, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
+import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, startRelayer, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
+import { createTokenWatch, readUrls, tokenHeld, USDC, type TokenStatus } from "../token-status/status.ts";
+import { checkWithdraw, decimal, isAccountId, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
+import { agreedBlock, FeeReadRefused, HEIGHT_SPREAD_MAX, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type FeeNetwork, type FeeQuoter } from "./fee.ts";
+import { checkNullifier, createSpendsIndex, createWithdrawSendStore, nullifierKey, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
 import { pagesAt } from "../near/pages.ts";
 
 // ---- Values ----
@@ -57,6 +58,7 @@ export const SETTLE_REFUND_ATTACH = 148n * 10n ** 19n;
 export const OUTCOME_ROUND_MS = 10_000;
 
 const U128 = 1n << 128n;
+const TOKENS: Record<FeeNetwork, string> = { mainnet: USDC, testnet: TESTNET_TOKEN };
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
 export type WithdrawAnswer = { status: number; body: { tx_hash: string; state: "submitted" } | { error: { code: HelperWithdrawCode | "upstream" } } };
@@ -288,5 +290,107 @@ export async function startOutcomeRounds(deps: WithdrawSendDeps, everyMs = OUTCO
   return () => {
     stopped = true;
     clearTimeout(timer);
+  };
+}
+
+// ---- The host's configuration ----
+
+/** The release number (index.ts: a whole number that only goes up, one per release), from the image or the host. */
+export const RELEASE_ENV = "HELPER_RELEASE";
+/** Per network: the release's vault account and the relayer account's full-access keys (comma-separated "ed25519:..."), the nonce lanes. */
+export const SEND_ENV = {
+  mainnet: ["WITHDRAW_VAULT_MAINNET", "WITHDRAW_RELAYER_KEYS_MAINNET"],
+  testnet: ["WITHDRAW_VAULT_TESTNET", "WITHDRAW_RELAYER_KEYS_TESTNET"],
+} as const;
+/** A network's relayer keys: at most this many lanes (four full-access keys on the server, M:1044-1047). */
+export const KEYS_MAX = 8;
+
+export type WithdrawSender = {
+  /** POST /v1/withdraw for a parsed body: the network from its token; a token this relayer does not carry is bad_shape. */
+  carry(body: unknown): Promise<WithdrawAnswer>;
+  stop(): void;
+};
+
+/**
+ * The route's sender from the host's environment. A network is carried only when its fee quoter is set (fee.ts), and
+ * its vault, its relayer keys, the release number and the store folder are all set; else its requests answer
+ * bad_shape (check 1: not the vault's token). Every name is read, set or not, so the deploy gate sees them all. On
+ * the first request (and again after a failure) it reads the vault's config() on both providers (its scope, and its
+ * asset equal to the token), opens the network's stores under HELPER_STORE_DIR, starts its relayers and runs the
+ * first outcome round (the restart's rebroadcast) before it takes the request; then a round every OUTCOME_ROUND_MS.
+ */
+export function withdrawSenderFromEnv(
+  env: Record<string, string | undefined>,
+  fee: FeeQuoter,
+  status: Partial<Record<FeeNetwork, () => Promise<TokenStatus>>> = { mainnet: createTokenWatch(env).status },
+): WithdrawSender {
+  const release = env[RELEASE_ENV] ?? "";
+  const storeDir = env[STORE_ENV] ?? "";
+  const set = Object.fromEntries((Object.keys(SEND_ENV) as FeeNetwork[]).map((n) => [n, SEND_ENV[n].map((k) => env[k] ?? "")])) as Record<FeeNetwork, string[]>;
+  const relayerOf = Object.fromEntries((Object.keys(RELAYER_ENV) as FeeNetwork[]).map((n) => [n, env[RELAYER_ENV[n][0]] ?? ""])) as Record<FeeNetwork, string>;
+  const feeTo = Object.fromEntries((Object.keys(RELAYER_ENV) as FeeNetwork[]).map((n) => [n, env[RELAYER_ENV[n][1]] ?? ""])) as Record<FeeNetwork, string>;
+  const mainnet = readUrls(env);
+  const testnet = TESTNET_RPCS.map(({ env: k, fallback }) => env[k] || fallback);
+  const urls: Record<FeeNetwork, readonly string[]> = { mainnet, testnet };
+
+  type Net = { network: FeeNetwork; vault: string; keys: string[] };
+  const nets = new Map<string, Net>();
+  for (const n of Object.keys(SEND_ENV) as FeeNetwork[]) {
+    const [vault, keyList] = set[n];
+    if (vault === "" && keyList === "") continue;
+    const keys = keyList!.split(",").filter((k) => k !== "");
+    if (!isAccountId(vault) || keys.length === 0 || keys.length > KEYS_MAX || !keys.every((k) => /^ed25519:[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(k))) throw new Error(`${SEND_ENV[n].join(" and ")} must be a NEAR account id and 1 to ${KEYS_MAX} ed25519 keys`);
+    if (!/^[1-9][0-9]{0,8}$/.test(release)) throw new Error(`${RELEASE_ENV} must be a whole number, 1 or more, to carry withdrawals`);
+    if (storeDir === "") throw new Error(`${STORE_ENV} must be set to carry withdrawals`);
+    if (!isAccountId(relayerOf[n]) || !isAccountId(feeTo[n])) throw new Error(`${RELAYER_ENV[n].join(" and ")} must be set to carry withdrawals`);
+    for (const k of keys) relayerKey(k); // a key that does not parse stops the helper at start, never at a request
+    nets.set(TOKENS[n], { network: n, vault: vault!, keys });
+  }
+
+  const ready = new Map<FeeNetwork, Promise<WithdrawSendDeps>>();
+  const stops: (() => void)[] = [];
+  const init = async (net: Net): Promise<WithdrawSendDeps> => {
+    const rpcs = urls[net.network].map((u) => nearRpc(u, fetch, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
+    const block = await agreedBlock(rpcs, Date.now);
+    const c = await viewAt(rpcs, block, net.vault, "config", {});
+    const scope = isObj(c) ? decimal(c.scope, 1n << 256n) : null;
+    if (!isObj(c) || scope === null || c.asset !== TOKENS[net.network]) throw new Error("the vault's config() names another token or no scope");
+    const nonces = createFileStore(join(storeDir, `withdraw-keys-${net.network}`));
+    const store = createWithdrawSendStore(join(storeDir, `withdraw-send-${net.network}`), { release: Number(release), keys: nonces });
+    const relayers = await Promise.all(net.keys.map((k) => startRelayer(rpcs, rpcs[0], relayerOf[net.network], k, net.vault, nonces)));
+    const watch = status[net.network];
+    const deps: WithdrawSendDeps = {
+      cfg: { vault: net.vault, token: TOKENS[net.network], scope, feeRecipient: feeTo[net.network] },
+      rpcs,
+      reads: fee.reads(net.network),
+      index: createSpendsIndex(rpcs, net.vault),
+      store,
+      relayers,
+      // no watch for this network's token: held (token_halted), as the watch holds while it is not caught up
+      tokenStatus: watch ?? (async () => ({ token: TOKENS[net.network], caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
+    };
+    stops.push(await startOutcomeRounds(deps));
+    return deps;
+  };
+  return {
+    async carry(body) {
+      const token = isObj(body) ? body.token : undefined;
+      const net = typeof token === "string" ? nets.get(token) : undefined;
+      if (net === undefined) return no("bad_shape");
+      let p = ready.get(net.network);
+      if (p === undefined) {
+        p = init(net);
+        ready.set(net.network, p);
+        p.catch(() => ready.delete(net.network)); // the next request tries again
+      }
+      let deps: WithdrawSendDeps;
+      try {
+        deps = await p;
+      } catch {
+        return no("upstream", 503);
+      }
+      return carryWithdraw(body, deps);
+    },
+    stop: () => stops.forEach((s) => s()),
   };
 }
