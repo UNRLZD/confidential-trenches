@@ -4,26 +4,30 @@
 // card signpage-shell (frame-ancestors APP_HOST): FAIL, APP_HOST frames it and its ready arrives. planted: an earlier
 // build with the page's origin check taken out and its answers posted to "*": FAIL on every stranger with
 // frame-ancestors lifted. The rest are the good run with one thing changed each.
-// The deposit.quote round trip (card signpage-deposit-quote-wire): good and live (SIGN_HOST as deployed, before a
-// vault is named on its network) answer a fresh browser not_allowed with no request sent: PASS. plantedDeposit: this
-// card's build with an address answered while no seed is stored and nothing was asked: FAIL. The runs before this
-// card have no deposit run: FAIL on that line alone.
+// The deposit.quote round trip (card signpage-deposit-quote-wire): good (this card's build, its release's /app.js) answers
+// a fresh browser not_allowed with no request sent: PASS. liveRelease3: SIGN_HOST as deployed before this card's
+// release, refused the same way but serving release-3's /app.js: FAIL on the pin alone. plantedDeposit: this card's
+// build with an address answered while no seed is stored and nothing was asked: FAIL. The runs before this card have
+// no deposit run: FAIL on that line alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, headersOf, judge } from "./signpage-postmessage.mjs";
+import { APP_HOST, headersOf, judge as judgeAt, releasePin } from "./signpage-postmessage.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-postmessage.answers.json"), "utf8"));
 const GOOD = ANSWERS.good;
+// every recording is judged against the newest release list, but the good run against the list it was recorded with
+// (its /app.js is that release's; a later release must not turn it red)
+const judge = (rec) => judgeAt(rec, releasePin());
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const run = (rec, parent, headers) => rec.runs.find((r) => r.parent === parent && r.headers === headers);
 const STRANGERS = ["https://example.com", "https://evil.ct.test", "https://app.other.test"];
 
 test("recorded good run (local build): PASS, APP_HOST blocked by frame-ancestors", () => {
-  const r = judge(GOOD);
+  const r = judgeAt(GOOD, releasePin(GOOD.pin.release));
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes("ok  from APP_HOST: the frame is blocked by frame-ancestors"), r.lines.join("\n"));
   assert.ok(r.lines.includes("ok  from APP_HOST: 0 message(s) reached the parent, want none"), r.lines.join("\n"));
@@ -35,21 +39,28 @@ test("recorded good run (local build): PASS, APP_HOST blocked by frame-ancestors
   assert.ok(r.lines.includes("ok  deposit.quote refused not_allowed: 0 request(s) to the helper, want none"), r.lines.join("\n"));
 });
 
-test("recorded live run (SIGN_HOST as deployed, against the real helper host): PASS, refused not_allowed, nothing sent", () => {
-  const r = judge(ANSWERS.live);
-  assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(ANSWERS.live.source, "live");
-  assert.deepEqual(ANSWERS.live.deposit.helper, []);
+test("recorded live run on release-3 (SIGN_HOST before this card's deploy): FAIL on the /app.js pin alone", () => {
+  const rec = ANSWERS.liveRelease3;
+  assert.equal(rec.source, "live");
+  assert.equal(rec.deposit.appJs.sha256, releasePin("release-3").sha256, "the recording is release-3's /app.js");
+  const r = judge(rec);
+  assert.equal(r.ok, false);
+  const b = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(b.length, 1, r.lines.join("\n"));
+  assert.match(b[0], /^BAD deposit\.quote: SIGN_HOST served \/app\.js sha256 5b8d5780/);
+  // against release-3's own pin it passes: the refusal itself was right
+  assert.equal(judgeAt(rec, releasePin("release-3")).ok, true);
 });
 
 test("recorded bad run: an address answered with no seed stored and no request sent: FAIL", () => {
   const r = judge(ANSWERS.plantedDeposit);
   assert.equal(r.ok, false);
   const b = r.lines.filter((l) => l.startsWith("BAD"));
-  assert.deepEqual(b, [
-    "BAD deposit.quote answered ok with no seed stored: an address for a U the store has not recorded",
-    "BAD deposit.quote: 0 request(s) to the helper, want 1 naming one id as recipient and refundTo",
-  ]);
+  assert.ok(b.includes("BAD deposit.quote answered ok with no seed stored: an address for a U the store has not recorded"), r.lines.join("\n"));
+  assert.ok(b.includes("BAD deposit.quote: 0 request(s) to the helper, want 1 naming one id as recipient and refundTo"), r.lines.join("\n"));
+  // judged against its own build's /app.js, those two lines alone
+  const own = judgeAt(ANSWERS.plantedDeposit, { release: "planted", sha256: ANSWERS.plantedDeposit.deposit.appJs?.sha256 ?? "" });
+  assert.equal(own.lines.filter((l) => l.startsWith("BAD")).length, ANSWERS.plantedDeposit.deposit.appJs ? 2 : 3);
 });
 
 test("deposit.quote: the good run with one change each: FAIL; a signed-in address after one request to U: PASS", () => {
@@ -61,10 +72,11 @@ test("deposit.quote: the good run with one change each: FAIL; a signed-in addres
     stateAnswer(rec).data.result.signed_in = true;
     quoteAnswer(rec).data = { v: 1, id: rec.deposit.ids.quote, ok: true, result: { deposit_address: "addr", origin_asset: rec.deposit.asked.origin_asset, amount_in: "25", min_amount_out: "24.7", deadline: "2026-11-05T00:00:00.000Z", time_estimate_s: 20 } };
   };
+  const pin = releasePin(GOOD.pin.release);
   const ok = clone(GOOD);
   signedInOk(ok);
   ok.deposit.helper.push(asked(ok));
-  assert.equal(judge(ok).ok, true, judge(ok).lines.join("\n"));
+  assert.equal(judgeAt(ok, pin).ok, true, judgeAt(ok, pin).lines.join("\n"));
   const cases = {
     "no deposit run": (rec) => delete rec.deposit,
     "no ready": (rec) => (rec.deposit.ready = false),
@@ -79,11 +91,13 @@ test("deposit.quote: the good run with one change each: FAIL; a signed-in addres
     "signed in, an address after two requests": (rec) => (signedInOk(rec), rec.deposit.helper.push(asked(rec), asked(rec))),
     "signed in, the refund to another id": (rec) => (signedInOk(rec), rec.deposit.helper.push(asked(rec, { refundTo: "ab".repeat(32) }))),
     "signed in, another asset answered": (rec) => (signedInOk(rec), rec.deposit.helper.push(asked(rec)), (quoteAnswer(rec).data.result.origin_asset = "nep141:other")),
+    "another /app.js served": (rec) => (rec.deposit.appJs.sha256 = "0".repeat(64)),
+    "no /app.js read": (rec) => delete rec.deposit.appJs,
   };
   for (const [name, change] of Object.entries(cases)) {
     const rec = clone(GOOD);
     change(rec);
-    assert.equal(judge(rec).ok, false, name);
+    assert.equal(judgeAt(rec, pin).ok, false, name);
   }
 });
 

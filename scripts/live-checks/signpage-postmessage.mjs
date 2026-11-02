@@ -20,6 +20,9 @@
 // only after exactly one request, which names one id as recipient and refundTo. --local answers the helper with 503
 // itself (no network); live, a request goes to the helper as the page sends it. The live quote with an address is the
 // mainnet test vault's run (until a vault is named on the page's network, the page asks no quote at all).
+// The run records the sha256 of the /app.js SIGN_HOST served, and the deposit run passes only when it is the newest
+// release list's pin for SIGN_HOST's /app.js (packages/signpage/releases): so a host still serving an older release,
+// whose deposit.quote is refused just the same, fails here.
 //   node scripts/live-checks/signpage-postmessage.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/signpage-postmessage.mjs --local [<dir>] [--record <file>]
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers
@@ -27,10 +30,12 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
 import "../net-window.mjs";
 import { copyFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readList } from "../../packages/signpage/scripts/check-signpage.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -50,7 +55,16 @@ export const QUOTE_CODES = ["not_allowed", "above_max", "busy", "down", "quote_c
 /** Each parent and the headers it is judged under: APP_HOST as served, every stranger as served and lifted. */
 const CASES = [[APP_HOST, ["served"]], ...STRANGERS.map((p) => [p, ["served", "lifted"]])];
 
-export function judge(rec) {
+/** SIGN_HOST's /app.js pin in the release list `tag` (the newest by default): { release, sha256 }. */
+export function releasePin(tag = null) {
+  const list = readList(tag);
+  const f = list.hosts?.SIGN_HOST?.files?.find((x) => x.path === "/app.js");
+  if (!f || !/^[0-9a-f]{64}$/.test(f.sha256 ?? "")) throw new Error(`${list.release}: no /app.js pin for SIGN_HOST`);
+  return { release: list.release, sha256: f.sha256 };
+}
+
+/** `pin`: the release whose /app.js the deposit run must have been served (the newest list's when not given). */
+export function judge(rec, pin = releasePin()) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const runs = rec.runs ?? [];
@@ -68,13 +82,15 @@ export function judge(rec) {
       say(n === 0, `${label}: ${n} message(s) reached the parent${n ? ` (${JSON.stringify(s.messages.map((m) => m.data))})` : ""}, want none`);
     }
   }
-  judgeDeposit(rec.deposit, say);
+  judgeDeposit(rec.deposit, say, pin);
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
 /** The deposit.quote round trip: one answer; a refusal with a code; an address only after one request to U. */
-function judgeDeposit(d, say) {
+function judgeDeposit(d, say, pin) {
   if (!d) return say(false, "deposit.quote: no run");
+  const got = d.appJs?.sha256 ?? null;
+  say(got === pin.sha256, `deposit.quote: SIGN_HOST served /app.js sha256 ${got ?? "(not read)"}, want ${pin.release}'s ${pin.sha256}`);
   say(d.ready === true, `deposit.quote: the shell's ready ${d.ready ? "arrived" : "did not arrive"} in the APP_HOST frame`);
   const answers = (d.log ?? []).filter((m) => m.fromParent && m.origin === new URL(d.signUrl).origin && m.data?.id === d.ids?.quote);
   say(answers.length === 1, `deposit.quote: ${answers.length} answer(s) to its id, want 1`);
@@ -247,6 +263,14 @@ async function depositRun(browser, { signUrl, dir }) {
     await ctx.route((u) => u.origin === new URL(HELPER_QUOTE).origin, (r) => r.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
   }
   const helper = [];
+  // the /app.js SIGN_HOST served this page: its sha256 against the release list's pin
+  let appJs = null;
+  ctx.on("response", async (res) => {
+    if (res.url() !== new URL("/app.js", signUrl).href || res.request().resourceType() !== "script") return;
+    try {
+      appJs = { status: res.status(), sha256: createHash("sha256").update(await res.body()).digest("hex") };
+    } catch {}
+  });
   ctx.on("request", (req) => {
     if (!req.url().startsWith(HELPER_QUOTE)) return;
     let body = null;
@@ -272,7 +296,7 @@ async function depositRun(browser, { signUrl, dir }) {
   const f = app();
   if (f) out = await f.evaluate(() => ({ log: window.__log, ids: window.__ids ?? null, asked: window.__asked ?? null })).catch(() => out);
   await ctx.close();
-  return { signUrl, ready: out.log.some((m) => m.fromParent && m.data?.type === "ready"), ...out, helper, errors };
+  return { signUrl, ready: out.log.some((m) => m.fromParent && m.data?.type === "ready"), ...out, helper, appJs, errors };
 }
 
 export async function collect({ browser, signUrl = SIGN_URL, dir, source }) {
@@ -305,8 +329,10 @@ async function main() {
     await browser.close();
     if (local && !given) rmSync(dir, { recursive: true, force: true });
   }
+  const pin = releasePin();
+  rec.pin = pin;
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 1)}\n`);
-  const r = judge(rec);
+  const r = judge(rec, pin);
   for (const l of r.lines) console.log(l);
   console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chromium ${rec.browser}, ${rec.at})`);
   process.exit(r.ok ? 0 : 1);
