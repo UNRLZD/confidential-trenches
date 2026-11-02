@@ -29,6 +29,8 @@ COPY apps/helper/src/ apps/helper/src/
 ARG HELPER_COMMIT
 RUN echo "$HELPER_COMMIT" | grep -Eqx '[0-9a-f]{40}' || { echo "HELPER_COMMIT must be a full 40-hex commit" >&2; exit 1; }
 ENV HELPER_COMMIT=$HELPER_COMMIT
+# the relayers' durable store (HELPER_STORE_DIR in deploy/compose.yaml): a volume over a folder the node user owns
+RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 WORKDIR /app/apps/helper
 EXPOSE 8080

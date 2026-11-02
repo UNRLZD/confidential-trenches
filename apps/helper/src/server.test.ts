@@ -7,6 +7,7 @@ import { after, before, test } from "node:test";
 import { PARTS } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { handler, start } from "./server.ts";
+import { FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://confidential.unrealized.trade";
@@ -167,5 +168,43 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
     helper.closeAllConnections();
     stub.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => stub.close(() => ok())));
+  }
+});
+
+test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async () => {
+  const ANSWER = { relayer_account: "relayer.confidential.unrlzd.near", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "207609", gp: "100000000", px: "4.135781763845", g_w: "92505000000000", valid_until_block: 222699586 };
+  let failing = false;
+  const fee: FeeQuoter = {
+    networkOf: (t) => (t === "carried.near" ? "mainnet" : null),
+    quote: async () => {
+      if (failing) throw new FeeReadRefused("the providers' gas prices differ");
+      return ANSWER;
+    },
+    reads: () => ({ feeMin: async () => 0n }),
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, fee);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  try {
+    const r = await call("GET", "/v1/withdraw/fee?token=carried.near", { origin: APP }, undefined, to);
+    assert.equal(r.status, 200);
+    assert.deepEqual(JSON.parse(r.body), ANSWER);
+    assert.equal(r.headers["x-helper-commit"], COMMIT);
+    assert.equal(r.headers["access-control-allow-origin"], APP);
+    for (const q of ["?token=other.near", "?token=carried.near&token=carried.near", ""]) {
+      const n = await call("GET", `/v1/withdraw/fee${q}`, { origin: APP }, undefined, to);
+      assert.equal(n.status, 404, q);
+      assert.deepEqual(JSON.parse(n.body), { error: { code: "not_found" } }, q);
+    }
+    failing = true;
+    const u = await call("GET", "/v1/withdraw/fee?token=carried.near", { origin: APP }, undefined, to);
+    assert.equal(u.status, 503);
+    assert.deepEqual(JSON.parse(u.body), { error: { code: "upstream" } });
+    const p = await call("POST", "/v1/withdraw/fee?token=carried.near", JSON_H, "{}", to);
+    assert.equal(p.status, 405);
+    assert.equal(p.headers["allow"], "GET, HEAD, OPTIONS");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
   }
 });

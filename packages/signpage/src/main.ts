@@ -50,7 +50,10 @@
 //   app signed out), backup.open (the 12 words, then Saved or Cancel back to the app) and signin.open's wallet way (the
 //   store read first, then the two choices before the wallet is asked anything; I already have one draws Use passkey
 //   and Recovery code). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
-//   export.open and withdraw.open stay refused until their cards build them.
+//   Card signpage-withdraw-form adds withdraw.open: with a seed stored it draws the withdraw form (src/withdraw/), where
+//   the user types the address and the amount, refused before any proof when bad; a withdraw.open with a one-time id
+//   is refused until that way out is built. Withdraw is guarded like Sign out, and drawn not offered until the
+//   wallet's withdraw path, the note value and the device's fee bound are wired here (withdrawDeps, below). export.open stays refused until its card.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
@@ -61,11 +64,14 @@ import { startApi } from "./api.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
-import { afterSaved, pageFor, takes, type AccountKind } from "./pages/open.ts";
+import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
+import { vaultScope } from "./withdraw/checks.ts";
+import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
+import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../wallet/src/near/networks.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
-  | "choose" | "existing" | "signout";
+  | "choose" | "existing" | "signout" | "withdraw";
 
 // DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801),
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335) and the six the owner picked, each with its pick on its line.
@@ -96,8 +102,8 @@ const root = document.createElement("main");
 root.id = "signin";
 if (framed) root.dataset.framed = "true";
 // top-level: the shell, with these screens in its layer over the APP_HOST frame; the layer opens only when the app
-// asks (signin.open, signout and backup.open here; export.open and withdraw.open are refused until their cards build
-// them) and closes on signed in, signed out by the signout kind, or Cancel
+// asks (signin.open, signout, backup.open and withdraw.open here; export.open is refused until its card builds it) and
+// closes on signed in, signed out by the signout kind, or Cancel
 let shell: Shell | null = null;
 if (framed) document.body.append(root);
 else {
@@ -121,6 +127,8 @@ else {
       "signin.open": (p) => openKind("signin.open", p.way),
       signout: () => openKind("signout"),
       "backup.open": () => openKind("backup.open"),
+      // the form withdraws from the vault's notes; a one-time id's way out (from_id) is not built yet
+      "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
     },
   });
   shell.layer.append(root);
@@ -157,7 +165,11 @@ function decide(kind: AccountKind, way: unknown): OpenAnswer {
         if (page === "signed-out") return show("signed-out");
         if (page === "backup") showBackup(seed!);
         else if (page === "signout") show("signout", shown(seed!));
-        else show(page === "passkey" ? "signed-out" : page);
+        else if (page === "withdraw") {
+          // the form needs no seed: its entropy is zeroed at once
+          seed!.entropy.fill(0);
+          show("withdraw");
+        } else show(page === "passkey" ? "signed-out" : page);
         openLayer();
       }),
   };
@@ -188,7 +200,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy"]);
+const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -234,7 +246,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   }
   const parts: HTMLElement[] = [];
   if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
-    && state !== "choose" && state !== "existing" && state !== "signout") {
+    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw") {
     const p = document.createElement("p");
     p.textContent = WORDS[state];
     parts.push(p);
@@ -257,6 +269,10 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     fresh.dataset.pending = "wallet-signature";
     parts.push(fresh);
     parts.push(button("have-one", WORDS["have-one"], () => ((restoreOnly = true), show("existing"))));
+  } else if (!framed && state === "withdraw") {
+    // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount are typed here, never
+    // passed in by the app (W:927)
+    parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
   } else if (!framed && state === "existing") {
     // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
     if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
@@ -301,6 +317,22 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   const cancellable = state !== "loading" && state !== "signed-in" && (state !== "backup" || openedBy === "backup.open" || openedBy === "signout");
   if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
   root.replaceChildren(...parts);
+}
+
+// The withdraw form's reads. The page's network is mainnet: the release's hosts and SIGN_HOST's CSP name the mainnet
+// RPCs only. With no vault named there yet, no note can be in it: the note value is 0. Once a vault is named, the note
+// value (withdrawable over the note store), the fee bound (the device's own fee_max, LD5: card wallet-withdraw-feemax)
+// and the hand-off come with the wallet's withdraw path (VT-T02's integration); until then they stay unread and no
+// amount is ready. The note store is not imported here until then: it brings the kit's whole entry into this page.
+const PAGE_NETWORK: NearNetwork = "mainnet";
+function withdrawDeps(): WithdrawFormDeps {
+  const net = NEAR_NETWORKS[PAGE_NETWORK];
+  return {
+    network: PAGE_NETWORK,
+    rpcs: [nearRpc(net.fastnear[0]), nearRpc(net.drpc)],
+    available: () => (vaultScope(PAGE_NETWORK) === null ? Promise.resolve(0n) : Promise.reject(new Error("notes: read with the withdraw path"))),
+    fee: () => Promise.reject(new Error("fee_max: read with the withdraw path (card wallet-withdraw-feemax)")),
+  };
 }
 
 // The account's public id from its entropy: entropy -> 12 words -> seed64 -> T_0 (wallet.md:47, :54, :68). seed64 is
