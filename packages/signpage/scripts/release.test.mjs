@@ -149,7 +149,10 @@ test("the committed release-1 names both hosts' pages and scripts, the worker an
     assert.deepEqual([f.bytes, f.sha256, f.headers["cache-control"]], [pin.bytes, pin.sha256, "public, max-age=31536000, immutable"]);
   }
   assert.equal(sign["/prover-worker.js"].headers["content-security-policy"].split(", default-src").length, 2, "the worker's two policies");
-  assert.equal(sign["/"].sha256, createHash("sha256").update(readFileSync(join(PKG, "index.html"))).digest("hex"));
+  // the list's page is this tree's index.html with the release's own /app.js pinned in it: a page change after the
+  // release (a new app.js, so a new integrity) is the next release's, while any other change to the page fails here
+  const page = readFileSync(join(PKG, "index.html"), "utf8").replace(/(src="\/app\.js" integrity=")[^"]+(")/, `$1${sign["/app.js"].sha384}$2`);
+  assert.equal(sign["/"].sha256, createHash("sha256").update(page).digest("hex"));
   const app = list.hosts.APP_HOST.files;
   assert.ok(app.some((f) => f.path === "/") && app.some((f) => /^\/assets\/index-[\w-]+\.js$/.test(f.path)));
   for (const h of Object.values(list.hosts)) {
