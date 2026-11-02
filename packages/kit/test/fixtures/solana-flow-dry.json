@@ -1,0 +1,412 @@
+{
+ "dry": true,
+ "at": "2026-11-02T09:05:13.172Z",
+ "token": "7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump",
+ "helper": "https://api.confidential.unrealized.trade",
+ "providers": [
+  "https://solana-rpc.publicnode.com",
+  "https://api.confidential.unrealized.trade/v1/rpc/solana"
+ ],
+ "slippageBps": 500,
+ "buy": {
+  "waits": [],
+  "ms": 2921,
+  "reference": "160043931507",
+  "blockhash": {
+   "blockhash": "4BYiaqZoKXqpqBXLm4BMzRtvQmXiyGcd2GNTUT1KMRxj",
+   "lastValidBlockHeight": 442459673,
+   "slot": 464438352
+  },
+  "legs": [
+   {
+    "wallet": "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS",
+    "amount": "10000000",
+    "expectedOut": "53347977169",
+    "minOut": "50680578310",
+    "quoteMs": 1611,
+    "buildMs": 1045,
+    "buildCalls": 1,
+    "size": 803,
+    "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+    "dry": {
+     "signature": "5oueFsbUMKxdhiAQirTUifCmYdFeawmj7yEFhfHYfQftMVUNrngVEZCVCjjnFQJ66qtgqouy7hRymUwfxnC5qS8k",
+     "state": "simulated",
+     "simulations": [
+      {
+       "err": null,
+       "units": 93349
+      },
+      {
+       "err": null,
+       "units": 93349
+      }
+     ]
+    }
+   },
+   {
+    "wallet": "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",
+    "amount": "10000000",
+    "expectedOut": "53347977169",
+    "minOut": "50680578310",
+    "quoteMs": 1649,
+    "buildMs": 1044,
+    "buildCalls": 1,
+    "size": 803,
+    "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+    "dry": {
+     "signature": "2kNUiLShhvsXmxWvj2Y4S2gxzjpL24NhbRJHVDB4PVYyCs7HmZqANvDfZmBnLfUxWZsyE2u1Bc8X7MRDsPw5J1xV",
+     "state": "simulated",
+     "simulations": [
+      {
+       "err": null,
+       "units": 94849
+      },
+      {
+       "err": null,
+       "units": 94849
+      }
+     ]
+    }
+   },
+   {
+    "wallet": "78omi7BpCLQG6KoRhfxuPetreK835hp9BYCqxFoPm8bb",
+    "amount": "10000000",
+    "expectedOut": "53347977169",
+    "minOut": "50680578310",
+    "quoteMs": 1654,
+    "buildMs": 1047,
+    "buildCalls": 1,
+    "size": 803,
+    "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+    "dry": {
+     "signature": "5tnR2Dvi7ZENW61sZD2b1rDiiAR1gztiqjYDx35jZbAqme21p2guW6o5nnBKGEDvUXvgg4L4BtAthtFEFbwZ6DEK",
+     "state": "simulated",
+     "simulations": [
+      {
+       "err": null,
+       "units": 95114
+      },
+      {
+       "err": null,
+       "units": 95114
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "sell": {
+  "waits": [
+   {
+    "at": "B",
+    "method": "getMinimumBalanceForRentExemption",
+    "ms": 300
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 300
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 300
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 300
+   },
+   {
+    "at": "B",
+    "method": "getMinimumBalanceForRentExemption",
+    "ms": 600
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 600
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 600
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 600
+   },
+   {
+    "at": "B",
+    "method": "getMinimumBalanceForRentExemption",
+    "ms": 1200
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 1200
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 1200
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 1200
+   },
+   {
+    "at": "B",
+    "method": "getMinimumBalanceForRentExemption",
+    "ms": 2400
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 2400
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 2400
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 2400
+   },
+   {
+    "at": "B",
+    "method": "getMinimumBalanceForRentExemption",
+    "ms": 4800
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 4800
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 4800
+   },
+   {
+    "at": "B",
+    "method": "getMultipleAccounts",
+    "ms": 4800
+   }
+  ],
+  "ms": 14885,
+  "reference": "14043619727",
+  "blockhash": {
+   "blockhash": "CuDWqhDAfoaLD1R6TUP3z55Mk3vnNE7s476R1DppkFgH",
+   "lastValidBlockHeight": 442459690,
+   "slot": 464438369
+  },
+  "legs": [
+   {
+    "wallet": "5gjgcgdZ49QcYatiCTDNFVCSHTtcxcAcTKihUfSxQMg1",
+    "amount": "32529539051367",
+    "expectedOut": "4849414136",
+    "minOut": "4606943429",
+    "quoteMs": 12368,
+    "buildMs": 249,
+    "buildCalls": 1,
+    "size": 770,
+    "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+    "dry": {
+     "signature": "2ozy7NntYgQq9wVVt7Amsbq7hHsb5u9GFphiZ5fMrY7SRwgUXoKB5xMPJwFnXdpdbrSkAt9EQxtzgro7qmSibKrr",
+     "state": "simulated",
+     "simulations": [
+      {
+       "err": null,
+       "units": 77163
+      },
+      {
+       "err": null,
+       "units": 77163
+      }
+     ]
+    },
+    "teardown": {
+     "frames": 1,
+     "ok": true,
+     "plan": {
+      "close": [
+       {
+        "kind": "volume",
+        "address": "7fn9vxei3cegWePU9Co6TU6WavqWf6h9hAhN6yBJzfwt",
+        "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "lamports": "1346200"
+       },
+       {
+        "kind": "volume",
+        "address": "9zm1w6FcCqRJVJPsrSLZTnPbEnCCg5cyuXLRnDqmRiQq",
+        "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+        "lamports": "1346200"
+       }
+      ],
+      "keep": [
+       {
+        "address": "3haXZytJYzYu8qmJAB9D3FJcfZQn1Zs3WSFpttFxpkzL",
+        "why": "holds 32529539051367 of 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump"
+       }
+      ]
+     },
+     "dry": [
+      {
+       "signature": "5DRUtHxBenXoPY4E4VXHHwYTMs5jVT4AcBUr7JwdJRWnBLjanDPYf9M3S7XHQ7ataZ6jdSFBzzuG2bzJD5J8x7QS",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 23791
+        },
+        {
+         "err": null,
+         "units": 23791
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "wallet": "7puGGEKSmELgzTq3GXBxLkGbnZhDPUPjg8xfRcKyRFRi",
+    "amount": "31623276442068",
+    "expectedOut": "4714311001",
+    "minOut": "4478595450",
+    "quoteMs": 12161,
+    "buildMs": 254,
+    "buildCalls": 1,
+    "size": 770,
+    "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+    "dry": {
+     "signature": "2DNYZC819Uzt6Hu4AxvDKEEDX7EahwRbvFEuSWPWQ9xP2567opiCHVtrRnx8RARoacpEWa7DQkSeSiAdm1MSxfri",
+     "state": "simulated",
+     "simulations": [
+      {
+       "err": null,
+       "units": 90701
+      },
+      {
+       "err": null,
+       "units": 90701
+      }
+     ]
+    },
+    "teardown": {
+     "frames": 1,
+     "ok": true,
+     "plan": {
+      "close": [
+       {
+        "kind": "volume",
+        "address": "3eNGEtyot5R95guYtxACS5nPwkVEusfQAaRgvs2sYMEf",
+        "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "lamports": "1346200"
+       },
+       {
+        "kind": "volume",
+        "address": "8DG669kFJYHQygNWzsLJXZrPS6b1PD1P8fTUxc9icXHG",
+        "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+        "lamports": "1346200"
+       }
+      ],
+      "keep": [
+       {
+        "address": "BEbwq7cgXST618i1tA5KZvxwbTnmatEe51MDtkHkb6K1",
+        "why": "holds 31623276442068 of 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump"
+       }
+      ]
+     },
+     "dry": [
+      {
+       "signature": "3CeqgMiQT67Fm4qBcgi238kHdNPGtDd7Ym21CPGhpSZyV32DLcq4evN6V3SRBxWrdgVSxqQGyS2EeGEQTfXqv3YL",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 22291
+        },
+        {
+         "err": null,
+         "units": 22291
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "wallet": "23Emex2TAi2B8dyAdpUY3UR6DVuipvxtGozNqtksBhGp",
+    "amount": "30050827139983",
+    "expectedOut": "4479894588",
+    "minOut": "4255899858",
+    "quoteMs": 12286,
+    "buildMs": 255,
+    "buildCalls": 1,
+    "size": 770,
+    "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+    "dry": {
+     "signature": "35QFfF9iSErkJuTUU73zdTSeEkCJF9ewyCaCVSF8smNwHU2Sz1r2MBQJxJz4D8iSCwr9wbg52RoVct4d37vwqMbH",
+     "state": "simulated",
+     "simulations": [
+      {
+       "err": null,
+       "units": 78682
+      },
+      {
+       "err": null,
+       "units": 78682
+      }
+     ]
+    },
+    "teardown": {
+     "frames": 1,
+     "ok": true,
+     "plan": {
+      "close": [
+       {
+        "kind": "volume",
+        "address": "875KUSHUuTZKhwdjrphVi7MkTBD3xCLds1EEmv37P716",
+        "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "lamports": "1346200"
+       },
+       {
+        "kind": "volume",
+        "address": "hP55mygU5NFx2Z4hYfUCBEWUyXieJmLaoBmS1SjxBod",
+        "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+        "lamports": "1346200"
+       }
+      ],
+      "keep": [
+       {
+        "address": "CzDaHrkzcvkWLaepte5NjgMDUxNJB7ZdSVZjxny3yqVq",
+        "why": "holds 30050827139983 of 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump"
+       }
+      ]
+     },
+     "dry": [
+      {
+       "signature": "zVjWf2N59tpCkJjg3X3niHbBrj6TAqwFwMFrsKj9UH6QK2iV7bB7gSB3EVjW24uMksYt8S2iswGxLAwPZ4zuPYG",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 20791
+        },
+        {
+         "err": null,
+         "units": 20791
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ }
+}
