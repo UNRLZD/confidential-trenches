@@ -801,6 +801,7 @@ test("a pool whose fixed fields are not what the queue relies on is refused when
     ["no epoch", { epochMs: 0n }, /epochMs is a bigint above 0/],
     ["no send margin", { sendMarginMs: 0n }, /sendMarginMs is a bigint above 0/],
     ["a life too short to send in the next epoch", { lifeMs: 2n * E + MARGIN - 1n }, /lifeMs is below 2 epochs/],
+    ["an epoch no longer than the take slack", { epochMs: 15_000n }, /epochMs is at most the take slack/],
     ["no context function", { bind: undefined }, /bind is not a function/],
     ["no tree source", { trees: undefined }, /trees is not a function/],
     ["no time", { now: undefined }, /now is not a function/],
@@ -808,6 +809,19 @@ test("a pool whose fixed fields are not what the queue relies on is refused when
   ];
   for (const [what, over, err] of cases) assert.throws(() => queue(v, { ...good, ...over } as Fake), err, what);
   assert.throws(() => queue(v, good, []), /provers: at least one/);
+});
+
+test("a pool at checkPool's floor (L = 2E + margin) always lets take() hand a proof out: an epoch of 5 s is refused, 15.001 s works", async () => {
+  const v = await vaultWith([usd(5)]);
+  const short = { ...fakePool(v), epochMs: 5_000n, lifeMs: 2n * 5_000n + MARGIN }; // every take would be refused
+  assert.throws(() => queue(v, short), /epochMs is at most the take slack/);
+  const e = TAKE_SLACK_MS + 1n;
+  const floor = { ...fakePool(v), epochMs: e, lifeMs: 2n * e + MARGIN };
+  floor.t.now = START + 1n; // START is a multiple of 60 s, not of e: the queue's epoch is START - START % e
+  const q = queue(v, floor);
+  await q.refresh();
+  const [r] = q.ready();
+  assert.equal((await q.take(r!.noteId)).noteId, r!.noteId);
 });
 
 test("another pool's notes are not this pool's: the queue proves only notes of its scope", async () => {

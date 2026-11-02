@@ -126,6 +126,9 @@ export function checkPool(p: Pool): void {
   for (const f of ["epochMs", "lifeMs", "sendMarginMs"] as const) if (typeof p[f] !== "bigint" || p[f] <= 0n) throw new Error(`pool ${p.id}: ${f} is a bigint above 0`);
   // a proof of epoch e is handed out until e + 1 ends: by then deadline - now is lifeMs - 2 epochMs, above the margin
   if (p.lifeMs < 2n * p.epochMs + p.sendMarginMs) throw new Error(`pool ${p.id}: lifeMs is below 2 epochs plus the send margin`);
+  // at that floor a proof made at its epoch's start keeps take()'s slack for 2 epochMs - TAKE_SLACK_MS: an epoch at or
+  // below the slack would leave no time in which take() hands a proof out
+  if (p.epochMs <= TAKE_SLACK_MS) throw new Error(`pool ${p.id}: epochMs is at most the take slack (${TAKE_SLACK_MS} ms)`);
   for (const f of ["now", "trees", "bind"] as const) if (typeof p[f] !== "function") throw new Error(`pool ${p.id}: ${f} is not a function`);
 }
 
