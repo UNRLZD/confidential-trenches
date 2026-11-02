@@ -5,7 +5,7 @@
 //   node fixtures/venues/dump.mjs [--pump <mint>] [--pumpswap <mint>]   writes pump.json, pumpswap.json, programs/*.so
 //   node fixtures/venues/dump.mjs --programs-only                        re-fetches the ELFs; fails unless each sha256
 //                                                                        equals the JSON's
-// KIT_DIR: the kit's package folder (default the markets lead's sol-pool-buy-tx worktree); its readSolanaPoolBuyVenue,
+// KIT_DIR: the kit's package folder (default this repo's packages/kit, after `pnpm install`); its readSolanaPoolBuyVenue,
 // solanaPoolBuySteps and readSolanaReference build the buy and the expected out.
 //
 // - Every account is read on two public RPCs at `confirmed`; provider A's copy is written, and the accounts whose two
@@ -18,7 +18,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const KIT_DIR = process.env.KIT_DIR ?? "/Users/mackubucku/Downloads/confidential-trenches-public/.claude/worktrees/sol-pool-buy-tx/packages/kit";
+const KIT_DIR = process.env.KIT_DIR ?? join(HERE, "..", "..", "..", "..", "packages", "kit");
+// What to run when mainnet's code no longer hashes as the JSON says: a fresh dump of both venues, from the repo root.
+const REFRESH = "pnpm install --frozen-lockfile && node contracts/pool-solana/fixtures/venues/dump.mjs";
 const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 const SPEND = 5_000_000n;
 const SLIPPAGE_BPS = 300n;
@@ -77,7 +79,11 @@ if (process.argv.includes("--programs-only")) {
       if (g.sha256 !== p.sha256) { bad++; console.log(`MISMATCH ${name} ${p.address}: json ${p.sha256}, chain ${g.sha256}`); }
     }
   }
-  if (bad) { console.log(`FAIL: ${bad} program(s) changed on mainnet since the dump`); process.exit(1); }
+  if (bad) {
+    console.log(`FAIL: ${bad} program(s) changed on mainnet since the dump. Refresh the fixtures from the repo root with: ${REFRESH}`);
+    console.log("then run the pool's LiteSVM tests on the new code and commit contracts/pool-solana/fixtures/venues/*.json");
+    process.exit(1);
+  }
   console.log("PASS: every program's sha256 equals the JSON's");
   process.exit(0);
 }
