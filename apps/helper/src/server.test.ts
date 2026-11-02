@@ -1,13 +1,16 @@
 // node --test apps/helper/src/server.test.ts: the helper answers /v1/health with the six parts and its commit, and
 // allows cross-origin reads for exactly the two origins (markets paper H7), on a real server on a free port.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { PARTS } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
-import { handler, start } from "./server.ts";
+import { handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
 import { FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
+import type { WithdrawSender } from "./withdraw/send.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://confidential.unrealized.trade";
@@ -203,6 +206,54 @@ test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another t
     const p = await call("POST", "/v1/withdraw/fee?token=carried.near", JSON_H, "{}", to);
     assert.equal(p.status, 405);
     assert.equal(p.headers["allow"], "GET, HEAD, OPTIONS");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/withdraw: the body parsed and handed to the sender, its status and code answered; not JSON 400 bad_shape; over 8 KB 413 too_large; GET 405", async () => {
+  const seen: unknown[] = [];
+  const withdraw: WithdrawSender = {
+    carry: async (body) => {
+      seen.push(body);
+      const t = (body as { token?: unknown }).token;
+      if (t === "halted.near") return { status: 503, body: { error: { code: "token_halted" } } };
+      if (t === "carried.near") return { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" } };
+      return { status: 400, body: { error: { code: "bad_shape" } } };
+    },
+    warm: () => void warmed++,
+    stop: () => undefined,
+  };
+  let warmed = 0;
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw);
+  assert.equal(warmed, 1, "start warms the withdrawal relayer: a restart resends its open sends before any request");
+  // and the helper's main starts the server with the relayer it built
+  const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
+  assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, \{ mainnet: watch\.status \}\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watch, lists, fee, withdraw\);/);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  try {
+    const ok = await call("POST", "/v1/withdraw", { ...JSON_H, origin: APP }, JSON.stringify({ token: "carried.near" }), to);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(JSON.parse(ok.body), { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" });
+    assert.equal(ok.headers["x-helper-commit"], COMMIT);
+    assert.equal(ok.headers["access-control-allow-origin"], APP);
+    const h = await call("POST", "/v1/withdraw", JSON_H, JSON.stringify({ token: "halted.near" }), to);
+    assert.equal(h.status, 503);
+    assert.deepEqual(JSON.parse(h.body), { error: { code: "token_halted" } });
+    const n = await call("POST", "/v1/withdraw", JSON_H, "{not json", to);
+    assert.equal(n.status, 400);
+    assert.deepEqual(JSON.parse(n.body), { error: { code: "bad_shape" } });
+    assert.equal(seen.length, 2, "a body that does not parse never reaches the sender");
+    const big = await call("POST", "/v1/withdraw", JSON_H, JSON.stringify({ pad: "x".repeat(WITHDRAW_BODY_MAX) }), to);
+    assert.equal(big.status, 413);
+    assert.deepEqual(JSON.parse(big.body), { error: { code: "too_large" } });
+    assert.equal(seen.length, 2);
+    const g = await call("GET", "/v1/withdraw", {}, undefined, to);
+    assert.equal(g.status, 405);
+    assert.equal(g.headers["allow"], "POST, OPTIONS");
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
