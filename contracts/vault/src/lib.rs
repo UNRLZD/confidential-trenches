@@ -20,6 +20,7 @@ pub mod payout;
 pub mod poseidon;
 pub mod prepay;
 pub mod promise;
+pub mod ragequit;
 pub mod settle;
 pub mod tree;
 pub mod verifier;

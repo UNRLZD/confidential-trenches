@@ -12,9 +12,8 @@
 //!   refused with `ActorNoPermission` (NC `actions.rs` l.776-813), and afterwards the keys are still `[]`, the code
 //!   hash and the balance unchanged;
 //! - the wasm's imports hold none of 2.8's banned actions; its promise imports equal 2.8's seven less NOT_YET_PROMISES
-//!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (withdraw's payouts, on_payout and settle, with
-//!   its plain NEAR Transfer, have landed; ragequit has not, and the card that lands it empties NOT_YET_EXPORTS, and
-//!   this equality fails until it does); its outgoing method names `storage_deposit`,
+//!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (every method of 2.5.7 has landed, so both sets
+//!   are empty, and a build that gains or loses a name fails this equality); its outgoing method names `storage_deposit`,
 //!   `ft_transfer` and `on_payout` are in its bytes while none of the token's other mutating methods is.
 #![cfg(feature = "sandbox")]
 
@@ -72,11 +71,11 @@ const EXPORTS: [&str; 17] = [
     "totals",
     "contract_source_metadata",
 ];
-/// What the build does not hold yet, by name: ragequit (2.5.3) has not landed. settle (2.5.5) has, and with it the
-/// plain NEAR Transfer (src/promise.rs `transfer_near`), so the build holds all seven promise imports. Each set is
-/// compared for equality, so a build that gains or loses any one name fails here until the set is edited with it.
+/// What the build does not hold yet, by name: nothing. ragequit (2.5.3) and settle (2.5.5) have landed, and with settle
+/// the plain NEAR Transfer (src/promise.rs `transfer_near`), so the build holds all seven promise imports and every
+/// export of 2.5.7. Each set is compared for equality, so a build that gains or loses any one name fails here.
 const NOT_YET_PROMISES: [&str; 0] = [];
-const NOT_YET_EXPORTS: [&str; 1] = ["ragequit"];
+const NOT_YET_EXPORTS: [&str; 0] = [];
 /// The vault's outgoing calls (2.5): to the token and to itself. A presence check only (other strings could meet it);
 /// src/promise.rs's and withdraw.rs's unit tests read the exact calls a payout makes.
 const OUTGOING: [&str; 3] = ["storage_deposit", "ft_transfer", "on_payout"];
