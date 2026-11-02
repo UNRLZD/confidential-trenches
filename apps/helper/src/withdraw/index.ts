@@ -77,7 +77,18 @@ export type WithdrawSend = TxRef & {
   release: number;
   outcome: "open" | "succeeded" | "failed";
   error: string | null;
+  /**
+   * The settle after a send that succeeded (markets.md H3.1: "settle(nullifier_hash) once the callback has run"): its
+   * transaction, and done once it read succeeded or the vault's spends row reads settled. Absent until one is signed.
+   */
+  settle?: SettleRecord | null;
 };
+
+/**
+ * The relayer's settle transaction (null when none is signed: another caller settled the spend first, which anyone
+ * may) and whether the spend reads settled.
+ */
+export type SettleRecord = { tx: (TxRef & { key: string }) | null; done: boolean };
 
 /** A send's outcome as read from blocks. A deadline failure and a send never applied delete the row. */
 export type SendOutcome = { kind: "succeeded" } | { kind: "failed"; error: string } | { kind: "deadline" } | { kind: "never_applied" };
@@ -103,6 +114,14 @@ export type WithdrawSendStore = {
   settle(nf: bigint, tx_hash: string, outcome: SendOutcome): void;
   /** The nullifiers whose row is open or unreadable: the restart's rebroadcast and the outcome rounds' work. */
   open(): bigint[];
+  /**
+   * Writes a succeeded send's settle (its transaction, durable before it is broadcast, or done), or clears one that
+   * never landed or failed while the spend is not settled, so the next round signs again. Throws unless the row reads
+   * succeeded and, for a new settle transaction, holds none still open; and unless the key's counter is past its nonce.
+   */
+  setSettle(nf: bigint, settle: SettleRecord | null): void;
+  /** The nullifiers whose send succeeded and whose spend is not settled yet: the settle rounds' work. */
+  toSettle(): bigint[];
   close(): void;
 };
 
@@ -110,6 +129,23 @@ const NAME = /^w-([0-9a-f]{64})\.json$/;
 const name = (nf: bigint) => `w-${nullifierKey(nf)}.json`;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const DEC = /^(0|[1-9][0-9]{0,19})$/;
+
+function settleOk(s: unknown): boolean {
+  if (typeof s !== "object" || s === null || Array.isArray(s)) return false;
+  const r = s as Record<string, unknown>;
+  if (Object.keys(r).length !== 2 || typeof r.done !== "boolean") return false;
+  if (r.tx === null) return r.done; // no transaction of ours: only "settled by another"
+  if (typeof r.tx !== "object" || Array.isArray(r.tx)) return false;
+  const x = r.tx as Record<string, unknown>;
+  return (
+    typeof x.tx_hash === "string" && B58.test(x.tx_hash) &&
+    typeof x.signed_tx === "string" && x.signed_tx.length > 0 &&
+    typeof x.nonce === "string" && DEC.test(x.nonce) &&
+    typeof x.height === "string" && DEC.test(x.height) &&
+    typeof x.block_hash === "string" && B58.test(x.block_hash) &&
+    typeof x.key === "string" && x.key.length > 0
+  );
+}
 
 /** The row as written, or null for anything else (a torn or foreign file reads as unreadable, never as absent). */
 function parseSend(text: string, key: string): WithdrawSend | null {
@@ -131,7 +167,8 @@ function parseSend(text: string, key: string): WithdrawSend | null {
     typeof x.key === "string" && x.key.length > 0 &&
     typeof x.deadline_ms === "number" && Number.isSafeInteger(x.deadline_ms) && x.deadline_ms >= 0 &&
     typeof x.release === "number" && Number.isSafeInteger(x.release) && x.release >= 1 &&
-    ((x.outcome === "failed" && typeof x.error === "string") || ((x.outcome === "open" || x.outcome === "succeeded") && x.error === null));
+    ((x.outcome === "failed" && typeof x.error === "string") || ((x.outcome === "open" || x.outcome === "succeeded") && x.error === null)) &&
+    (x.settle === undefined || x.settle === null || (x.outcome === "succeeded" && settleOk(x.settle)));
   return ok ? (x as WithdrawSend) : null;
 }
 
@@ -156,11 +193,13 @@ function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): Withdr
   };
   // open rows: read once as the lock is taken (a restart), then kept by every write (one process holds the store)
   const openRows = new Set<string>();
+  const settleRows = new Set<string>();
   for (const f of d.names()) {
     const m = NAME.exec(f);
     if (m === null) continue;
     const rec = parseSend(d.text(f) ?? "", m[1]!);
     if (rec === null || rec.outcome === "open") openRows.add(m[1]!);
+    else if (rec.outcome === "succeeded" && rec.settle?.done !== true) settleRows.add(m[1]!);
   }
   return {
     release,
@@ -192,12 +231,34 @@ function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): Withdr
       const held = read(nf);
       if (held === null || held === "unreadable" || held.outcome !== "open" || held.tx_hash !== tx_hash) throw new Error("settle: no open send record with that hash");
       if (outcome.kind === "deadline" || outcome.kind === "never_applied") d.remove(name(nf));
-      else if (outcome.kind === "succeeded") d.replace(name(nf), JSON.stringify({ ...held, outcome: "succeeded", error: null }));
+      else if (outcome.kind === "succeeded") {
+        d.replace(name(nf), JSON.stringify({ ...held, outcome: "succeeded", error: null }));
+        settleRows.add(held.nullifier);
+      }
       else if (outcome.kind === "failed" && typeof outcome.error === "string") d.replace(name(nf), JSON.stringify({ ...held, outcome: "failed", error: outcome.error }));
       else throw new Error("settle: not an outcome");
       openRows.delete(held.nullifier);
     },
     open: () => [...openRows].map((k) => BigInt(`0x${k}`)),
+    setSettle(nf, settle) {
+      d.held();
+      const held = read(nf);
+      if (held === null || held === "unreadable" || held.outcome !== "succeeded") throw new Error("setSettle: no succeeded send record");
+      if (held.settle?.done === true) throw new Error("setSettle: already settled");
+      const was = held.settle?.tx ?? null;
+      if (settle !== null && !settle.done) {
+        if (settle.tx === null) throw new Error("setSettle: an open settle names no transaction");
+        if (was !== null && was.tx_hash !== settle.tx.tx_hash) throw new Error("setSettle: a settle transaction is still open");
+        const counter = keys.nonceNext(settle.tx.key);
+        if (counter === null || counter <= BigInt(settle.tx.nonce)) throw new Error("setSettle: the key's nonce counter is not past this nonce");
+      }
+      if (settle !== null && settle.done && settle.tx !== null && was !== null && was.tx_hash !== settle.tx.tx_hash) throw new Error("setSettle: done names another settle transaction");
+      const v = JSON.stringify({ ...held, settle });
+      if (parseSend(v, held.nullifier) === null) throw new Error("setSettle: not a settle record");
+      d.replace(name(nf), v);
+      if (settle?.done === true) settleRows.delete(held.nullifier);
+    },
+    toSettle: () => [...settleRows].map((k) => BigInt(`0x${k}`)),
     close: d.close,
   };
 }
@@ -213,6 +274,8 @@ export type SpendsIndex = {
   holds(nf: bigint): boolean;
   /** The height the index is caught up at, or null before its first whole read. */
   at(): bigint | null;
+  /** The nullifier's row in the vault's spends list, as the pages read so far hold it, or null. */
+  indexOf(nf: bigint): number | null;
 };
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
@@ -242,7 +305,7 @@ function nullifiersOf(page: Record<string, unknown>[]): bigint[] {
  * final height at or above the last, so the cursor never skips a row.
  */
 export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, waitMs = INDEX_WAIT_MS, now: () => number = Date.now): SpendsIndex {
-  const spent = new Set<string>();
+  const spent = new Map<string, number>();
   let next = 0;
   let caughtAt: bigint | null = null;
 
@@ -251,7 +314,7 @@ export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, wait
     for (;;) {
       const from = next;
       const nfs = nullifiersOf(await pagesAt(rpcs, vault, "spends", h, from, SPENDS_PAGE));
-      for (const nf of nfs) spent.add(nullifierKey(nf));
+      nfs.forEach((nf, i) => spent.set(nullifierKey(nf), from + i));
       next = from + nfs.length;
       if (nfs.length < SPENDS_PAGE) return;
     }
@@ -294,6 +357,7 @@ export function createSpendsIndex(rpcs: readonly [Rpc, Rpc], vault: string, wait
     reach,
     holds: (nf) => spent.has(nullifierKey(nf)),
     at: () => caughtAt,
+    indexOf: (nf) => spent.get(nullifierKey(nf)) ?? null,
   };
 }
 

@@ -126,7 +126,7 @@ export function pxOf(poolToken: bigint, poolNear: bigint): string {
 
 // ---- The reads ----
 
-type Block = { height: bigint; hash: string; gasPrice: bigint; ms: bigint };
+export type Block = { height: bigint; hash: string; gasPrice: bigint; ms: bigint };
 
 function headerOf(a: unknown, who: string): Block {
   const h = isObj(a) && isObj(a.header) ? a.header : undefined;
@@ -171,7 +171,7 @@ export async function agreedBlock(rpcs: readonly [Rpc, Rpc], now: () => number):
 }
 
 /** One view at block `b` on both providers, its bytes equal on both, parsed as JSON. */
-async function viewAt(rpcs: readonly [Rpc, Rpc], b: Block, account: string, method: string, args: unknown): Promise<unknown> {
+export async function viewAt(rpcs: readonly [Rpc, Rpc], b: Block, account: string, method: string, args: unknown): Promise<unknown> {
   const params = { request_type: "call_function", block_id: Number(b.height), account_id: account, method_name: method, args_base64: Buffer.from(JSON.stringify(args)).toString("base64") };
   const bytes = await Promise.all(
     rpcs.map(async (r, i) => {
