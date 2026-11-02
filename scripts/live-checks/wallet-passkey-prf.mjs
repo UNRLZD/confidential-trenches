@@ -66,6 +66,8 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export const SIGN_HOST = "sign.confidential.unrealized.trade";
 export const APP_HOST = "confidential.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
 const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
+/** The harness's APP_HOST page inside the shell: the terminal's first controls, a link and a button. */
+export const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
 export const PRF_INPUT = "confidential-trenches/v1/seed";
 export const WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt";
 export const WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"; // BIP-39's own pin
@@ -77,13 +79,23 @@ export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector defau
 // and every press's time and repeat flag (__ctPresses), so a step shows its gap to the press before.
 // SIGN_HOST top-level is the shell (card signpage-shell): its screens draw in a layer over the APP_HOST frame, hidden once
 // signed in. The signout and backup.open kinds will open it (card signpage-signin-kinds); here it is held open in every
-// SIGN_HOST top-level page, so this check reads and presses the same screens as before. In a frame (none: the CSP's
-// frame-ancestors 'none') there is no layer.
+// SIGN_HOST top-level page, so this check reads and presses the same screens as before. It is held as the shell's own
+// open() shows it (packages/signpage/src/shell.ts): the layer shown and the APP_HOST frame inert, so the frame is out of
+// the tab order and the pointer's reach and a keyboard's first Tab lands in the layer. A layer shown over a live frame
+// is a state the shell never has: the frame comes first in the document, so Tab went into the terminal and Tab then
+// Enter never reached Sign out. In a frame (none: the CSP's frame-ancestors 'none') there is no layer.
 const HOLD_LAYER = () => {
   if (location.hostname !== "sign.confidential.unrealized.trade" || window.top !== window) return;
+  const inert = () => {
+    const f = document.getElementById("app");
+    if (f && !f.inert) f.inert = true;
+  };
   const hold = (l) => {
     if (l.hidden) l.hidden = false;
     new MutationObserver(() => l.hidden && (l.hidden = false)).observe(l, { attributes: true, attributeFilter: ["hidden"] });
+    // the shell's close() (on signed in) makes the frame live again, or puts a new one in: each is made inert again
+    inert();
+    new MutationObserver(inert).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["inert"] });
   };
   new MutationObserver((_, o) => {
     const l = document.getElementById("screen");
@@ -260,10 +272,12 @@ async function launch({ harness, site }) {
   const root = site ?? buildSignpage();
   // APP_HOST's address serves the framing parent here too: Chromium's local network access checks refuse a public
   // parent framing a host that resolves to this machine, so on the harness both are local.
-  // the framing parent at its own path; every other APP_HOST path is a blank page, the stand-in for the terminal that
-  // SIGN_HOST's shell frames (card signpage-shell)
+  // the framing parent at its own path; every other APP_HOST path is the stand-in for the terminal that SIGN_HOST's shell
+  // frames (card signpage-shell): a link and a button, as the terminal's header draws, so the frame holds focusable
+  // content and the shell's tab order is the live one (a blank frame is skipped by Tab, and hid a layer shown over a
+  // live frame)
   const app = mkdtempSync(path.join(tmpdir(), "ct-passkey-app-"));
-  writeFileSync(path.join(app, "index.html"), "<!doctype html><title>APP_HOST</title>");
+  writeFileSync(path.join(app, "index.html"), APP_STAND_IN);
   writeFileSync(path.join(app, "__wallet-passkey-prf-frame.html"), FRAME_PARENT);
   const cert = makeCert([SIGN_HOST, APP_HOST]);
   const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root }, [APP_HOST]: { root: app, spa: true } } });
@@ -380,10 +394,10 @@ async function early(page, press) {
     const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
     if (!b) return { pressed: false, after: await settled(page) };
     const box = await b.boundingBox();
-    await press({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    const read = await press({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
     const { withinMs, pressOn } = await page.evaluate(() => ({ withinMs: performance.now() - globalThis.__ctDrawn, pressOn: globalThis.__ctPressOn ?? null }));
     await page.waitForTimeout(1_000);
-    t = { pressed: true, withinMs, pressOn, after: await settled(page) };
+    t = { pressed: true, withinMs, pressOn, ...read, after: await settled(page) };
     if (t.after.state === "signed-out") await click(page, "use");
     if (withinMs < 400) break;
   }
@@ -508,7 +522,13 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         }),
         enter: await early(page, async () => {
           await page.keyboard.press("Tab");
+          // where the first Tab put the focus, read before Enter (a few ms, inside the window)
+          const tabTo = await page.evaluate(() => {
+            const a = document.activeElement;
+            return a?.dataset?.action ?? (a ? `${a.nodeName}${a.id ? `#${a.id}` : ""}` : null);
+          });
           await page.keyboard.press("Enter");
+          return { tabTo };
         }),
       };
       // the guard's other triggers, with Sign out drawn well before each
