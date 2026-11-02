@@ -1,7 +1,8 @@
 // What Verify checks on each NEAR network, as the release names it: the pair of RPCs it reads (one FastNEAR URL and the
 // network's dRPC URL, the kit's nearPairRule) and the pins it judges against (read.ts VerifyPins). The build names its
-// network (VITE_NEAR_NETWORK at build time, build/network.mjs; mainnet when unset). test/verify-mount.test.ts holds the
-// testnet pins to contracts/vault/deployments/testnet-v1.json and testnet-usdc.json, and each pair to the kit's rule.
+// network (VITE_NEAR_NETWORK at build time, build/network.mjs; mainnet when unset). The testnet pins are
+// contracts/vault/deployments/testnet-v1.json's (account_id, asset, code_hash); test/verify-mount.test.ts holds them to
+// the vault's own reads and each pair to the kit's rule.
 import { VAULT_TOKEN_CODE_HASH, type NearNetwork } from "@blindfill/kit";
 import type { VerifyPins } from "./read.ts";
 

@@ -52,19 +52,15 @@ function assertUnverified(v: VerifyView, rpcs: readonly string[]) {
   assert.deepEqual([v.height, v.blockHash, v.rpcs], ["—", null, [...rpcs]]);
 }
 
-test("the testnet pins are the deployed vault's records; mainnet names no vault until the freeze", () => {
-  const vault = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/testnet-v1.json", import.meta.url), "utf8"));
-  const usdc = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/testnet-usdc.json", import.meta.url), "utf8"));
-  assert.deepEqual(TESTNET.pins, {
-    vault: vault.account_id,
-    asset: vault.asset,
-    release: vault.code_hash,
-    assetRelease: usdc.code_hash,
-    assetSymbol: "USDC",
-    assetDecimals: 6,
-  });
-  assert.equal(usdc.account_id, vault.asset);
-  assert.equal(usdc.code_hash, VAULT_TOKEN_CODE_HASH);
+test("the testnet pins are what the vault's own reads answered; mainnet names no vault until the freeze", () => {
+  // the recording read the vault's code hash, config().asset and the token's code hash on both RPCs at one block, and
+  // the view judged each equal to its pin (contracts/vault/deployments/testnet-v1.json and testnet-usdc.json hold the same)
+  assert.equal(REC.view.state, "read");
+  if (REC.view.state === "loading") return;
+  for (const c of [...REC.view.code.checks, ...REC.view.funds.checks]) assert.deepEqual([c.status, c.word], ["ok", null], c.id);
+  const k = REC.answers.find((a) => (a.params as { request_type?: string; account_id?: string }).request_type === "view_account" && (a.params as { account_id?: string }).account_id === TESTNET.pins!.vault);
+  assert.equal((k?.answer as { result?: { code_hash?: string } }).result?.code_hash, TESTNET.pins!.release);
+  assert.equal(TESTNET.pins!.assetRelease, VAULT_TOKEN_CODE_HASH);
   assert.equal(VERIFY_RELEASES.mainnet.pins, null);
   assert.ok(Object.isFrozen(VERIFY_RELEASES));
 });

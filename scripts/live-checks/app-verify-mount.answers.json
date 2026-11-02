@@ -1,0 +1,676 @@
+{
+ "good": {
+  "check": "app-verify-mount",
+  "at": "2026-11-02T16:49:39.078Z",
+  "source": "harness, terminal build dist/build-testnet, live testnet RPCs",
+  "network": "testnet",
+  "browser": "153.0.8010.12",
+  "runs": [
+   {
+    "width": "phone",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "panel": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "checks": {
+      "keys": "ok",
+      "code": "ok",
+      "asset": "ok",
+      "registration": "ok",
+      "tokenCode": "ok",
+      "balance": "ok"
+     },
+     "rpcs": [
+      "https://test.rpc.fastnear.com",
+      "https://near-testnet.drpc.org"
+     ],
+     "block": "275,925,892",
+     "words": [
+      "Verify",
+      "Code",
+      "Vault keys",
+      "Code hash",
+      "Funds",
+      "Asset",
+      "Registration",
+      "Token code",
+      "Balance",
+      "Block",
+      "RPCs"
+     ]
+    },
+    "requests": [
+     {
+      "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/index-C2K1fTS7.js",
+      "method": "GET",
+      "type": "script",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+      "method": "GET",
+      "type": "stylesheet",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     }
+    ],
+    "violations": [],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "panel": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "checks": {
+      "keys": "ok",
+      "code": "ok",
+      "asset": "ok",
+      "registration": "ok",
+      "tokenCode": "ok",
+      "balance": "ok"
+     },
+     "rpcs": [
+      "https://test.rpc.fastnear.com",
+      "https://near-testnet.drpc.org"
+     ],
+     "block": "275,925,896",
+     "words": [
+      "Verify",
+      "Code",
+      "Vault keys",
+      "Code hash",
+      "Funds",
+      "Asset",
+      "Registration",
+      "Token code",
+      "Balance",
+      "Block",
+      "RPCs"
+     ]
+    },
+    "requests": [
+     {
+      "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/index-C2K1fTS7.js",
+      "method": "GET",
+      "type": "script",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+      "method": "GET",
+      "type": "stylesheet",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://test.rpc.fastnear.com/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     },
+     {
+      "url": "https://near-testnet.drpc.org/",
+      "method": "POST",
+      "type": "fetch",
+      "status": 200
+     }
+    ],
+    "violations": [],
+    "errors": [],
+    "footer": {
+     "opened": true,
+     "closedTo": "/"
+    }
+   }
+  ]
+ },
+ "mainnetNoVault": {
+  "check": "app-verify-mount",
+  "at": "2026-11-02T16:49:40.370Z",
+  "source": "harness, terminal build dist/build-mainnet, live mainnet RPCs",
+  "network": "mainnet",
+  "browser": "153.0.8010.12",
+  "runs": [
+   {
+    "width": "phone",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "panel": {
+     "state": "unverified",
+     "code": "warn",
+     "funds": "warn",
+     "checks": {
+      "keys": "warn",
+      "code": "warn",
+      "asset": "warn",
+      "registration": "warn",
+      "tokenCode": "warn",
+      "balance": "warn"
+     },
+     "rpcs": [
+      "https://rpc.mainnet.fastnear.com",
+      "https://near.drpc.org"
+     ],
+     "block": "—",
+     "words": [
+      "Verify",
+      "Code",
+      "Vault keys",
+      "Unverified",
+      "Code hash",
+      "Unverified",
+      "Funds",
+      "Asset",
+      "Unverified",
+      "Registration",
+      "Unverified",
+      "Token code",
+      "Unverified",
+      "Balance",
+      "Unverified",
+      "Block",
+      "RPCs"
+     ]
+    },
+    "requests": [
+     {
+      "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/index-cMi5Qa8m.js",
+      "method": "GET",
+      "type": "script",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+      "method": "GET",
+      "type": "stylesheet",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     }
+    ],
+    "violations": [],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "panel": {
+     "state": "unverified",
+     "code": "warn",
+     "funds": "warn",
+     "checks": {
+      "keys": "warn",
+      "code": "warn",
+      "asset": "warn",
+      "registration": "warn",
+      "tokenCode": "warn",
+      "balance": "warn"
+     },
+     "rpcs": [
+      "https://rpc.mainnet.fastnear.com",
+      "https://near.drpc.org"
+     ],
+     "block": "—",
+     "words": [
+      "Verify",
+      "Code",
+      "Vault keys",
+      "Unverified",
+      "Code hash",
+      "Unverified",
+      "Funds",
+      "Asset",
+      "Unverified",
+      "Registration",
+      "Unverified",
+      "Token code",
+      "Unverified",
+      "Balance",
+      "Unverified",
+      "Block",
+      "RPCs"
+     ]
+    },
+    "requests": [
+     {
+      "url": "https://confidential.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "method": "GET",
+      "type": "font",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/index-cMi5Qa8m.js",
+      "method": "GET",
+      "type": "script",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/style-BchPB2yX.css",
+      "method": "GET",
+      "type": "stylesheet",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     },
+     {
+      "url": "https://confidential.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "method": "GET",
+      "type": "image",
+      "status": 200
+     }
+    ],
+    "violations": [],
+    "errors": [],
+    "footer": {
+     "opened": true,
+     "closedTo": "/"
+    }
+   }
+  ]
+ }
+}
