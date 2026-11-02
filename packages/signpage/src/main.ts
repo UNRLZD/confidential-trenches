@@ -131,7 +131,17 @@ let openedBy: AccountKind | null = null;
 // I already have one (W:932): Face ID or the typed 12 words and restore, before any seed is made; while it holds, no
 // screen offers Create passkey (a passkey without PRF, a cancelled sheet or an error included)
 let restoreOnly = false;
-function openKind(kind: AccountKind, way?: unknown): { result: { pending: true }; then: () => void } | null {
+// A kind that comes while a resync reads the store waits for it and is decided on what it read: refused only by the
+// store's own state, never for coming at that moment (the app takes not_allowed as a refusal no retry changes).
+function openKind(kind: AccountKind, way?: unknown): OpenAnswer | { after: Promise<void>; answer: () => OpenAnswer } | null {
+  if (resyncing) return { after: resynced(), answer: () => decide(kind, way) };
+  return decide(kind, way);
+}
+async function resynced(): Promise<void> {
+  while (resyncing) await resyncing;
+}
+type OpenAnswer = { result: { pending: true }; then: () => void } | null;
+function decide(kind: AccountKind, way: unknown): OpenAnswer {
   if (!takes(kind, root.dataset.signin, busy)) return null;
   return {
     result: { pending: true },
@@ -347,14 +357,21 @@ function storeMoved(e: WalletEvent): void {
   else return;
   void resync();
 }
-async function resync(): Promise<void> {
-  if (busy || !shell?.layer.hidden) return;
-  await run(async () => {
+// the resync in flight, which open kinds wait for (openKind)
+let resyncing: Promise<void> | null = null;
+function resync(): Promise<void> {
+  if (resyncing) return resyncing;
+  if (busy || !shell?.layer.hidden) return Promise.resolve();
+  const r: Promise<void> = run(async () => {
     const s = await readSeedSettled();
     if (!shell?.layer.hidden) return void s?.entropy.fill(0);
     if (s) return landed({ screen: "signed-in", seed: s });
     show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
-  }, false);
+  }, false).finally(() => {
+    if (resyncing === r) resyncing = null;
+  });
+  resyncing = r;
+  return r;
 }
 
 const topLevelOnly = (): void => {
@@ -435,9 +452,10 @@ async function saved(): Promise<void> {
   show("signed-in", shown(s));
 }
 // Cancel: back to the app as the store stands (signed in with a seed, signed out with none), from any page, an error's
-// included, so the state the open kinds read is the store's
+// included, so the state the open kinds read is the store's; a store that cannot be read (a broken seed record, a
+// failed decrypt) still lets Cancel go back to the app
 async function cancel(): Promise<void> {
-  const s = shell ? await readSeed() : undefined;
+  const s = shell ? await readSeed().catch(() => undefined) : undefined;
   if (s) return show("signed-in", shown(s));
   if (root.dataset.signin === "error") show(typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
   closeLayer();

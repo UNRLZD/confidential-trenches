@@ -332,3 +332,31 @@ test("no state event before the first state answer; a burst of changes makes one
   await p.idle();
   assert.equal(p.events().length, 1);
 });
+
+test("a kind whose handler answers later is answered with its result once it settles, in order, never refused", async () => {
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const ran: string[] = [];
+  startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: signedOutState,
+    // the page's resync holds the open kinds until its store read ends, then decides (src/main.ts openKind)
+    kinds: { "backup.open": () => ({ after: held, answer: () => ({ result: { pending: true as const }, then: () => void ran.push("then") }) }) },
+  });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  const a = uuid();
+  const b = uuid();
+  send({ v: 1, id: a, type: "backup.open", return_key: "settings" });
+  send(state(b));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(posted.filter((m) => (m as { id?: string }).id === a || (m as { id?: string }).id === b), [], "answered before the handler settled");
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  const answers = posted.filter((m) => (m as { id?: string }).id !== undefined);
+  assert.deepEqual(answers, [{ v: 1, id: a, ok: true, result: { pending: true } }, stateAnswer(b)]);
+  assert.deepEqual(ran, ["then"]);
+});

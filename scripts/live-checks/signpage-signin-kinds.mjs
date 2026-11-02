@@ -21,8 +21,11 @@
 //     wallet request made and no seed stored; I already have one draws Use passkey and Recovery code, still with no
 //     wallet request and no seed; Use passkey with a passkey that has no PRF there makes nothing and offers the 12 words
 //     and the passkey again, never Create passkey (W:932: before any seed is made).
-//   two tabs: tab A loaded signed out, tab B signs in; A takes backup.open and draws the account's 12 words, as A's app
-//     (which reads the same store) shows it signed in.
+//   two tabs: tab A loaded signed out, tab B signs in; A's read of the new seed is held 2.5 s (a hook on the seed's
+//     decrypt), and a backup.open A's app sends while that read runs waits for it, then is taken and draws the 12
+//     words, never refused for coming at that moment.
+//   broken store: signin.open opens the passkey page; a seed record that decrypts but fails checkSeed is put in the
+//     store; Cancel still goes back to the app.
 //   Every press waits out the page's 500 ms activation guard first, which each layer opening restarts.
 //   node scripts/live-checks/signpage-signin-kinds.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-signin-kinds.mjs --harness [--site <dir>] ...   the same steps on the app's
@@ -59,6 +62,42 @@ const WALLET_STUB = () => {
   Object.defineProperty(window, "phantom", { value: { solana: sol, ethereum: evm }, configurable: true });
 };
 
+// Before SIGN_HOST's own scripts: once a test sets __ctHoldSeed, the page's next decrypt of the seed record waits that
+// long (__ctHolding true meanwhile), so a step can be sent while the page reads its store.
+const HOLD_SEED_READ = () => {
+  if (location.hostname !== "sign.confidential.unrealized.trade" || window.top !== window) return;
+  const decrypt = SubtleCrypto.prototype.decrypt;
+  SubtleCrypto.prototype.decrypt = async function (alg, key, data) {
+    const aad = alg?.additionalData ? new TextDecoder().decode(alg.additionalData) : "";
+    const ms = globalThis.__ctHoldSeed ?? 0;
+    if (ms > 0 && aad === "ct/v1/seed") {
+      globalThis.__ctHoldSeed = 0;
+      globalThis.__ctHolding = true;
+      await new Promise((r) => setTimeout(r, ms));
+      globalThis.__ctHolding = false;
+    }
+    return decrypt.call(this, alg, key, data);
+  };
+};
+
+// In SIGN_HOST's page: a seed record the store decrypts but checkSeed refuses (no entropy), under the store's own key.
+const PLANT_BROKEN_SEED = async () => {
+  const req = (r) => new Promise((ok, no) => ((r.onsuccess = () => ok(r.result)), (r.onerror = () => no(r.error))));
+  const db = await req(indexedDB.open("ct-wallet"));
+  try {
+    const key = await req(db.transaction("meta").objectStore("meta").get("k_wrap"));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const aad = new TextEncoder().encode("ct/v1/seed");
+    const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, key, new TextEncoder().encode(JSON.stringify({ v: 1, source: "broken" })));
+    const tx = db.transaction("meta", "readwrite");
+    tx.objectStore("meta").put({ iv, ct }, "seed");
+    await new Promise((ok, no) => ((tx.oncomplete = ok), (tx.onerror = () => no(tx.error))));
+    return true;
+  } finally {
+    db.close();
+  }
+};
+
 // ------------------------------------------------------------------------------------------------ the verdict
 const HEX64 = /^[0-9a-f]{64}$/;
 export function judge(rec) {
@@ -87,8 +126,9 @@ export function judge(rec) {
   const fr = p.framed;
   say(!!fr && !pending(fr.answer) && fr.loaded === false && fr.signoutButtons === 0 && fr.refusals >= 1,
     `prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out (${fr ? (fr.loaded ? "loaded" : "not loaded") : "no step"}, ${fr?.answer?.ok === true ? "answered ok" : fr?.answer?.timeout ? "no answer" : fr?.answer?.error?.code ?? "?"}, ${fr?.signoutButtons ?? "?"} Sign out, ${fr?.refusals ?? "?"} frame-ancestors refusal(s))`);
-  say(inLayer(so.early, "signout") && so.early?.db === true && so.early?.account === A,
-    `prf: a press on Sign out within 500 ms of the page opening does nothing (${so.early?.state ?? "no step"}, store ${so.early?.db ? "kept" : "gone"})`);
+  const fast = so.early?.pressLanded === true && Number.isFinite(so.early?.pressMs) && so.early.pressMs >= 0 && so.early.pressMs < 500;
+  say(fast && inLayer(so.early, "signout") && so.early?.db === true && so.early?.account === A,
+    `prf: a press on Sign out within 500 ms of the page opening does nothing (${so.early?.state ?? "no step"}, store ${so.early?.db ? "kept" : "gone"}, press ${so.early?.pressLanded ? `landed at ${so.early.pressMs} ms` : "never landed"})`);
   say(backToApp(so.after, "signed-out") && so.after?.db === false && !so.after?.account,
     `prf: Sign out deletes the store and goes back to the app signed out (${so.after?.state}, store ${so.after?.db ? "kept" : "gone"})`);
   say(refusedNA(p.refused?.signout) && refusedNA(p.refused?.backup) && p.refused?.layer === "hidden",
@@ -116,9 +156,12 @@ export function judge(rec) {
   say(inLayer(ex, "no-prf") && ex?.create === 0 && ex?.use === 1 && ex?.recovery === 1 && ex?.seed === false,
     `wallet: Use passkey there with no PRF makes nothing and offers the passkey and the 12 words, never Create passkey (${ex?.state ?? "no step"}, ${ex?.create ?? "?"} Create passkey)`);
   const t = rec.twoTabs ?? {};
-  say(t.aLoaded?.state === "signed-out" && HEX64.test(t.bCreate?.account ?? "") && pending(t.backup?.answer) && inLayer(t.backup?.page, "backup")
-    && t.backup?.page?.words === 12 && t.backup?.page?.account === t.bCreate?.account,
-    `two tabs: tab A loaded signed out takes backup.open once tab B signed in (${t.backup?.answer?.ok === true ? "pending" : t.backup?.answer?.error?.code ?? "no step"}, ${t.backup?.page?.state ?? "?"})`);
+  say(t.aLoaded?.state === "signed-out" && HEX64.test(t.bCreate?.account ?? "") && t.heldAtSend === true && pending(t.backup?.answer)
+    && inLayer(t.backup?.page, "backup") && t.backup?.page?.words === 12 && t.backup?.page?.account === t.bCreate?.account,
+    `two tabs: a backup.open sent while tab A reads tab B's new seed waits for the read and is taken (${t.heldAtSend ? "sent during the read" : "not during a read"}, ${t.backup?.answer?.ok === true ? "pending" : t.backup?.answer?.error?.code ?? "no step"}, ${t.backup?.page?.state ?? "?"})`);
+  const bk = rec.broken ?? {};
+  say(inLayer(bk.open, "signed-out") && bk.planted === true && bk.cancel?.layer === "hidden" && bk.cancel?.frame === true,
+    `broken store: Cancel goes back to the app when the stored seed cannot be read (${bk.cancel?.state ?? "no step"}, layer ${bk.cancel?.layer ?? "?"})`);
   say(Array.isArray(rec.errors) && rec.errors.length === 0, `no page error or CSP violation (${Array.isArray(rec.errors) ? rec.errors.length : "no record"})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -314,7 +357,7 @@ async function press(page, action, not) {
 
 export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, site } = {}) {
   const errors = [];
-  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, noPrf: {}, wallet: {}, twoTabs: {}, errors };
+  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, noPrf: {}, wallet: {}, twoTabs: {}, broken: {}, errors };
   const h = await launch({ harness, site });
   try {
     // prf run
@@ -338,11 +381,24 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       p.backupCancel = await press(page, "cancel", ["backup"]);
       // past 500 ms from the last press, so only the opening's own restart of the guard can stop the early press below
       await page.waitForTimeout(GUARD_MS);
+      // the page's own clock: when the sign-out page is drawn, and when a pointerdown lands on its Sign out
+      await page.evaluate(() => {
+        const g = globalThis;
+        g.__ctDrawnAt = null;
+        g.__ctPressAt = null;
+        const m = document.getElementById("signin");
+        new MutationObserver(() => m?.dataset.signin === "signout" && g.__ctDrawnAt === null && (g.__ctDrawnAt = performance.now()))
+          .observe(m, { attributes: true, attributeFilter: ["data-signin"] });
+        addEventListener("pointerdown", (e) => e.target?.closest?.('[data-action="signout"]') && (g.__ctPressAt ??= e.timeStamp), true);
+      });
       const signout = await send(page, "signout", { return_key: "settings" });
       // a press as soon as the page is drawn, inside the 500 ms the opening restarts
       await page.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signout", null, { timeout: WAIT_MS }).catch(() => {});
       await page.click('[data-action="signout"]', { timeout: 1_000 }).catch(() => {});
       const early = await read(page);
+      const at = await page.evaluate(() => ({ d: globalThis.__ctDrawnAt, p: globalThis.__ctPressAt }));
+      early.pressLanded = typeof at.d === "number" && typeof at.p === "number";
+      early.pressMs = early.pressLanded ? Math.round(at.p - at.d) : null;
       const soPage = await read(page, ["signed-in"]);
       p.signout = { answer: signout, page: soPage, early, after: await press(page, "signout", ["signout"]) };
       p.refused = { signout: await send(page, "signout", { return_key: "settings" }), backup: await send(page, "backup.open", { return_key: "settings" }) };
@@ -388,6 +444,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
     // two tabs
     {
       const ctx = await h.browser.newContext();
+      await ctx.addInitScript(HOLD_SEED_READ);
       const a = await ctx.newPage();
       const b = await ctx.newPage();
       watch(a, errors);
@@ -400,10 +457,26 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await read(b);
       await send(b, "signin.open", { way: "passkey", return_key: "settings" });
       await read(b);
+      // A's next read of the seed (its resync on B's sign-in) is held 2.5 s
+      await a.evaluate(() => (globalThis.__ctHoldSeed = 2_500));
       t.bCreate = await press(b, "create", ["signed-out"]);
-      await a.waitForTimeout(1_000);
+      t.heldAtSend = await a.evaluate(() => globalThis.__ctHolding === true);
       t.backup = { answer: await send(a, "backup.open", { return_key: "settings" }) };
       t.backup.page = await read(a, ["signed-out", "signed-in"]);
+      await ctx.close();
+    }
+    // broken store
+    {
+      const ctx = await h.browser.newContext();
+      const page = await ctx.newPage();
+      watch(page, errors);
+      await page.goto(url);
+      await read(page);
+      const bk = record.broken;
+      await send(page, "signin.open", { way: "passkey", return_key: "settings" });
+      bk.open = await read(page);
+      bk.planted = await page.evaluate(PLANT_BROKEN_SEED).catch(() => false);
+      bk.cancel = await press(page, "cancel", ["signed-out"]);
       await ctx.close();
     }
   } finally {

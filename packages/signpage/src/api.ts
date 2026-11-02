@@ -80,10 +80,21 @@ export interface ApiHost {
   /**
    * Kinds the host answers itself (the shell's signin.open, nav and reload). A request reaches its handler only when its
    * params are exactly what the kit's schema for that kind allows (packages/kit/src/signpage/schema.ts); the handler
-   * returns the result, or null to refuse not_allowed. `then` runs once the answer is posted (the shell removes its
-   * frame after answering signin.open, so the answer must go first).
+   * returns the result, or null to refuse not_allowed, or a Deferred when it must wait for the page's own read first
+   * (src/main.ts: an open kind waits out a store read in flight); the queue holds every later message until it is
+   * answered, so answers keep their order. `then` runs once the answer is posted (the shell removes its frame after
+   * answering signin.open, so the answer must go first).
    */
-  kinds?: { [K in SignpageKind]?: (params: Record<string, unknown>) => HostAnswer<K> | null };
+  kinds?: { [K in SignpageKind]?: (params: Record<string, unknown>) => HostAnswer<K> | Deferred<K> | null };
+}
+
+/**
+ * A kind answered once `after` settles, by `answer()` then. Not a promise of the answer: a HostAnswer has a `then`, so
+ * a promise resolved with one would take it for a thenable and never settle.
+ */
+export interface Deferred<K extends SignpageKind> {
+  after: Promise<unknown>;
+  answer(): HostAnswer<K> | null;
 }
 
 /** A host-answered kind's result, and what runs once it is posted. */
@@ -164,7 +175,7 @@ function isStateRequest(m: Record<string, unknown>): boolean {
 }
 
 /** The host's own answer to `m`, when the host answers its kind and its params are exactly the kit's schema's. */
-function hostAnswer(host: ApiHost, m: Record<string, unknown>): HostAnswer<SignpageKind> | null {
+function hostAnswer(host: ApiHost, m: Record<string, unknown>): HostAnswer<SignpageKind> | Deferred<SignpageKind> | null {
   if (!Object.hasOwn(m, "v") || m.v !== 1 || !Object.hasOwn(m, "type") || typeof m.type !== "string") return null;
   const kind = m.type as SignpageKind;
   const run = host.kinds && Object.hasOwn(host.kinds, kind) ? host.kinds[kind] : undefined;
@@ -172,7 +183,7 @@ function hostAnswer(host: ApiHost, m: Record<string, unknown>): HostAnswer<Signp
   const params: Record<string, unknown> = {};
   for (const k of Object.keys(m)) if (k !== "v" && k !== "id" && k !== "type") params[k] = m[k];
   if (!SIGNPAGE_PARAM_SCHEMAS[kind](params)) return null;
-  return (run as (p: Record<string, unknown>) => HostAnswer<SignpageKind> | null)(params);
+  return (run as (p: Record<string, unknown>) => HostAnswer<SignpageKind> | Deferred<SignpageKind> | null)(params);
 }
 
 /**
@@ -205,7 +216,13 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     const first = answered.get(id);
     if (first) return post(first.sha === sha ? first.answer : { v: 1, id, ok: false, error: { code: "id_reused" } });
     if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() });
-    const own = hostAnswer(host, m);
+    // a Deferred is answered once its wait settles, either way; a plain answer is used as it is, in this task
+    const got = hostAnswer(host, m);
+    let own: HostAnswer<SignpageKind> | null;
+    if (got && "after" in got) {
+      await got.after.catch(() => {});
+      own = got.answer();
+    } else own = got;
     const answer: SignpageAnswer = own ? { v: 1, id, ok: true, result: own.result } : { v: 1, id, ok: false, error: { code: "not_allowed" } };
     answered.set(id, { sha, answer });
     if (answered.size > REMEMBERED_IDS) answered.delete(answered.keys().next().value as string);
