@@ -42,8 +42,11 @@ export const FEE_POOL_TOKENS = [NEAR_NETWORKS.mainnet.token, "wrap.near"] as con
  * The pool's USDC side must hold at least 250,000 USDC (a quarter of the 1,017,547 read 2026-11-02), else no cap and
  * no relayed withdrawal (fail closed). On a constant-product pool, raising the read price k-fold in one block takes
  * swapping in USDC (sqrt(k) - 1) x its USDC side [derived]: doubling it at the floor takes about 103,600 USDC in, at
- * 0.3 % pool fee (total_fee 30) about 311 USDC lost each way, while the cap it doubles is about 0.43 USDC per withdrawal.
- * The floor also bounds what Ref's upgradable contract could report for a drained or replaced pool.
+ * 0.3 % pool fee (total_fee 30) about 311 USDC lost each way, and arbitrage reversing the move takes about 30,300 USDC
+ * more, x (k^1/4 - k^-1/4)^2 with x the USDC side, while the cap it doubles is about 0.43 USDC per withdrawal.
+ * The floor stops a drained pool only. A hostile upgrade of Ref's contract could still report 250,000 USDC or more
+ * against a few yocto of NEAR and raise the price: a residual risk that needs Ref's owner and the relayer both bad,
+ * and the vault's MAX_RELAY_FEE_BPS backstop (50 % of the withdrawn amount) still holds.
  */
 export const FEE_POOL_MIN_TOKEN = 250_000_000_000n;
 
