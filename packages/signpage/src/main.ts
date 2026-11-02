@@ -45,7 +45,12 @@
 //   it makes no database before a sign-in). These screens draw in the shell's layer over the frame, hidden in every
 //   state until the app sends signin.open (signed out: the passkey or the words screen), and closed again on signed in
 //   or Cancel, so the terminal shows signed out too. While the layer shows, the frame is out of the document (src/shell.ts).
-//   backup.open, export.open, signout and withdraw.open stay refused until card signpage-signin-kinds builds them.
+//   Card signpage-signin-kinds adds the account's other open kinds (src/pages/open.ts decides which page each draws):
+//   signout (the backup first while the 12 words are the only copy, then Sign out, which closes the layer back to the
+//   app signed out), backup.open (the 12 words, then Saved or Cancel back to the app) and signin.open's wallet way (the
+//   store read first, then the two choices before the wallet is asked anything; I already have one draws Use passkey
+//   and Recovery code). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
+//   export.open and withdraw.open stay refused until their cards build them.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
@@ -55,13 +60,17 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
+import { afterSaved, pageFor, takes, type AccountKind } from "./pages/open.ts";
 
-type State = "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code";
+type State =
+  | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
+  | "choose" | "existing" | "signout";
 
 // DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801) and
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335). recovery is S2.1's [draft copy: Recovery code]
 // (09-design-brief.md:1811); backup is 06b ses.17's menu item; next is a draft for S2.5's submit, which has no words yet;
-// cancel is a draft for closing the shell's layer back to the app.
+// cancel is a draft for closing the shell's layer back to the app. new-account and have-one are wallet.md:50's two
+// choices, [draft copy: New account] and [draft copy: I already have one], for the owner's words pass (OD:343, OD:349).
 const WORDS = {
   create: "Create passkey",
   use: "Use passkey",
@@ -78,6 +87,8 @@ const WORDS = {
   next: "Continue",
   "invalid-code": "Invalid code",
   cancel: "Cancel",
+  "new-account": "New account",
+  "have-one": "I already have one",
 } as const;
 
 const framed = window.top !== window;
@@ -102,21 +113,45 @@ else {
     kinds: {
       // the sign-in screens for one way in, while no seed is stored (wallet.md:919: sign out first); the wallet way has
       // no screen yet. The answer goes first, then the layer opens (and the frame leaves).
-      "signin.open": (p) => {
-        const now = root.dataset.signin;
-        if (p.way === "wallet" || busy || now === "loading" || now === "signed-in" || now === "backup") return null;
-        return {
-          result: { pending: true },
-          then: () => {
-            show(p.way === "words" ? "words" : typeof PublicKeyCredential === "undefined" ? "unsupported" : "signed-out");
-            shell?.open();
-            reshown();
-          },
-        };
-      },
+      "signin.open": (p) => openKind("signin.open", p.way),
+      signout: () => openKind("signout"),
+      "backup.open": () => openKind("backup.open"),
     },
   });
   shell.layer.append(root);
+}
+
+// The account's open kinds (src/pages/open.ts): refused unless the page's state takes them; else the answer goes first,
+// then the page reads its own store, draws the kind's page and opens the layer. Nothing is asked of a wallet and no seed
+// is made before that read and the page it draws.
+let openedBy: AccountKind | null = null;
+function openKind(kind: AccountKind, way?: unknown): { result: { pending: true }; then: () => void } | null {
+  if (!takes(kind, root.dataset.signin, busy)) return null;
+  return {
+    result: { pending: true },
+    then: () =>
+      void run(async () => {
+        const seed = await readSeed();
+        const page = pageFor(kind, way, seed, typeof PublicKeyCredential !== "undefined");
+        openedBy = kind;
+        if (page === "signed-in") return landed({ screen: "signed-in", seed: seed! });
+        if (page === "signed-out") return show("signed-out");
+        if (page === "backup") showBackup(seed!);
+        else if (page === "signout") show("signout", shown(seed!));
+        else show(page === "passkey" ? "signed-out" : page);
+        openLayer();
+      }),
+  };
+}
+// The layer opens, and the activation guard restarts its 500 ms: a click lined up before cannot act on what it shows.
+function openLayer(): void {
+  shell?.open();
+  reshown();
+}
+// Back to the app: the layer closes on the page's signed-in or signed-out state.
+function closeLayer(): void {
+  openedBy = null;
+  shell?.close();
 }
 
 // The activation guard of the GUARDED controls (./guard.ts). Every trusted pointerdown and keydown in the window reaches it first
@@ -165,7 +200,7 @@ function button(action: string, label: string, onClick: () => void): HTMLButtonE
 
 function show(state: State, seed?: { account: string; code_saved: boolean; signout: boolean }, words?: string): void {
   root.dataset.signin = state;
-  if (state === "signed-in") shell?.close();
+  if (state === "signed-in") closeLayer();
   if (seed) {
     root.dataset.account = seed.account;
     root.dataset.codeSaved = String(seed.code_saved);
@@ -174,7 +209,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     delete root.dataset.codeSaved;
   }
   const parts: HTMLElement[] = [];
-  if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words") {
+  if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
+    && state !== "choose" && state !== "existing" && state !== "signout") {
     const p = document.createElement("p");
     p.textContent = WORDS[state];
     parts.push(p);
@@ -186,6 +222,21 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
     // the Backup dot: the 12 words are the only copy and not saved (ses.17, ses.18)
     if (!framed && seed && !seed.signout) parts.push(button("backup", WORDS.backup, () => void run(openBackup)));
+  } else if (state === "signout") {
+    // the sign-out page (W:913): top-level only, and drawn only once the 12 words are saved or are not the only copy
+    if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
+  } else if (!framed && state === "choose") {
+    // wallet.md:50: the two choices, before the wallet is asked anything or any seed is made. New account asks the
+    // wallet to sign; that request has no code yet, so it is drawn and not offered (data-pending) until it lands.
+    const fresh = button("new-account", WORDS["new-account"], () => {});
+    fresh.disabled = true;
+    fresh.dataset.pending = "wallet-signature";
+    parts.push(fresh);
+    parts.push(button("have-one", WORDS["have-one"], () => show("existing")));
+  } else if (!framed && state === "existing") {
+    // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
+    if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));
+    parts.push(button("recovery", WORDS.recovery, () => show("words")));
   } else if (state === "backup") {
     // the 12 words, top-level only (W:914): show() is never asked for them in a frame, and backupWords refuses there
     if (!framed && words) {
@@ -222,7 +273,9 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     parts.push(button("recovery", WORDS.recovery, () => show("words")));
   }
   // back to the app from any sign-in screen; the backup's words stay until Saved or a sign-in elsewhere
-  if (shell && state !== "loading" && state !== "signed-in" && state !== "backup") parts.push(button("cancel", WORDS.cancel, () => shell?.close()));
+  // and from a backup or sign-out page an open kind drew over a signed-in account (the words saved or not, as they were)
+  const cancellable = state !== "loading" && state !== "signed-in" && (state !== "backup" || openedBy === "backup.open" || openedBy === "signout");
+  if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
   root.replaceChildren(...parts);
 }
 
@@ -317,13 +370,21 @@ async function openBackup(): Promise<void> {
   if (!s) return show("signed-out");
   showBackup(s);
 }
-// Saved (ses.5): code_saved becomes true; the Backup dot clears and Sign out is drawn
+// Saved (ses.5): code_saved becomes true; the Backup dot clears and Sign out is drawn. Opened by signout, it goes on to
+// the sign-out page (W:913), else back to the app signed in.
 async function saved(): Promise<void> {
   topLevelOnly();
   await saveWords(await open());
   const s = await readSeed();
   if (!s) return show("signed-out");
+  if (afterSaved(openedBy) === "signout") return show("signout", shown(s));
   show("signed-in", shown(s));
+}
+// Cancel: back to the app as the store stands (signed in with a seed, signed out with none)
+async function cancel(): Promise<void> {
+  const s = shell && (root.dataset.signin === "backup" || root.dataset.signin === "signout") ? await readSeed() : undefined;
+  if (s) return show("signed-in", shown(s));
+  closeLayer();
 }
 
 async function signOut(): Promise<void> {
@@ -333,6 +394,8 @@ async function signOut(): Promise<void> {
   await s.signOut();
   store = null;
   show("signed-out");
+  // signed out by the signout kind: back to the app, which shows signed out
+  if (openedBy === "signout") closeLayer();
 }
 
 let busy = false;
