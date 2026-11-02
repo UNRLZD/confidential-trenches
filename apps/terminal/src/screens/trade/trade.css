@@ -1,0 +1,65 @@
+/* S8 the trade box, the buy side. Values are R5's (research repo design/proto/assets/u/unrlzd.css .tk-panel, .tk-trade,
+   .tk-sides, .tk-orderType, .tk-amount, .tk-amounts, .tk-sumReceive, .tk-sumWarn, .tk-cta, .tk-row, .tk-boxLine,
+   .tk-setPair and token.css at design-lock-r5), which carry the live UNRLZD terminal's ticket. */
+.trb {
+  --bg-panel: #0f0f0f; --border-panel: #1f1f1f; --border-strong: #2a2a2a;
+  --acc: #50e397; --acc-rgb: 80, 227, 151; --acc-hover: #6be9a8; --sell: #ff5d4d; --sell-rgb: 255, 93, 77; --on-acc: #0a0a0a; --blue: #5b8cff;
+  display: flex; flex-direction: column; gap: 12px; padding: 12px; min-width: 0;
+  background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px;
+}
+.trb button { border: 0; background: transparent; padding: 0; font-family: inherit; line-height: inherit; color: inherit; cursor: pointer; text-align: inherit; }
+.trb button:disabled { cursor: default; }
+.trb-sides { display: flex; gap: 8px; }
+.trb .trb-side { flex: 1; height: 50px; display: flex; align-items: center; justify-content: center; border-radius: 11px; font-size: 17px; font-weight: 600; background: var(--bg-raised); color: var(--text-2); }
+.trb .trb-side[data-on="buy"] { background: var(--acc); color: var(--on-acc); }
+.trb-ot { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.trb-tabs { display: flex; gap: 16px; flex: none; }
+.trb .trb-tab { position: relative; padding: 4px 0 6px; font-size: 13px; font-weight: 500; color: var(--text-3); }
+.trb .trb-tab[aria-selected="true"] { color: var(--text-1); }
+.trb .trb-tab[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px; background: currentColor; }
+.trb-avail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.trb-amount { height: 78px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-radius: 12px; background: var(--bg-page); border: 1px solid var(--border-panel); box-sizing: border-box; }
+.trb-amount[data-bad="true"] { border-color: var(--sell); }
+.trb-input { width: 0; flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 0; font: 500 34px var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; color: var(--text-1); }
+.trb-input::placeholder { color: var(--text-3); }
+.trb-unit { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; max-width: 50%; }
+.trb-unit > span { font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.trb-unit > span:first-child { font-size: 14px; font-weight: 600; }
+.trb-unit > span:last-child { font-size: 11px; color: var(--text-3); }
+.trb-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.trb .trb-preset { height: 40px; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 10px; font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; background: var(--bg-raised); color: var(--text-2); white-space: nowrap; overflow: hidden; }
+.trb .trb-preset svg { color: var(--acc); flex: none; }
+.trb .trb-preset[data-on] { background: rgba(var(--acc-rgb), 0.14); color: var(--acc); }
+.trb .trb-preset:disabled { opacity: 0.4; }
+.trb-receive { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 0 2px; }
+.trb-receive > span:first-child { font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.trb-receive > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; }
+.trb [data-pending] { opacity: 0.45; transition: opacity 0.12s ease-out; }
+.trb-warn { display: flex; align-items: center; justify-content: center; height: 16px; padding: 0 2px; font-size: 12px; line-height: 16px; color: var(--text-2); }
+.trb-warn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trb .trb-cta { width: 100%; height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 13px; font-size: 17px; font-weight: 600; text-align: center; background: var(--acc); color: var(--on-acc); box-shadow: 0 0 28px rgba(var(--acc-rgb), 0.28); white-space: nowrap; overflow: hidden; padding: 0 12px; }
+.trb .trb-cta:disabled { background: var(--bg-raised); color: var(--text-3); box-shadow: none; }
+.trb .trb-cta[data-kind="live"] { cursor: default; }
+.trb-ctaLbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.trb-cta [data-time] { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.trb-cta .trb-live { color: var(--blue); }
+.trb-line { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+.trb .trb-row { display: flex; align-items: center; gap: 8px; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; background: var(--bg-raised); font-size: 12px; font-weight: 500; line-height: 16px; color: var(--text-1); white-space: nowrap; box-sizing: border-box; }
+.trb .trb-row > svg { flex: none; color: var(--text-3); }
+.trb-rowLbl { min-width: 0; text-align: left; white-space: nowrap; }
+.trb-chev { display: flex; flex: none; margin-left: auto; color: var(--text-3); }
+.trb .trb-set { gap: 6px; justify-content: space-between; }
+.trb-pair { display: inline-flex; align-items: center; gap: 3px; flex: none; color: var(--text-3); }
+.trb-pair > span { font: 400 11px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-1); }
+@media (hover: hover) and (pointer: fine) {
+  .trb .trb-cta:not(:disabled):not([data-kind="live"]):hover { background: var(--acc-hover); }
+  .trb .trb-preset:not(:disabled):hover { filter: brightness(1.25); }
+}
+
+/* phone: every tap target at least 44 px (BAR-10) */
+@media (max-width: 767.98px) {
+  .trb .trb-tab { min-height: 44px; padding: 0; display: flex; align-items: center; }
+  .trb .trb-tab::before { content: ""; position: absolute; top: 0; bottom: 0; left: -8px; right: -8px; }
+  .trb .trb-preset { height: 44px; }
+  .trb .trb-row { height: 44px; }
+}
