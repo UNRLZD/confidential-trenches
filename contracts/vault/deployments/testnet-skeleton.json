@@ -20,5 +20,8 @@
   "scope": "20545538849474029115763149114674867753589201314404884747672366183146404171958",
   "version": "blindfill-vault 0.1.0 testnet",
   "build": "cargo +1.96.0 near build non-reproducible-wasm --no-embed-abi --features testnet --locked (cargo-near 0.22.0, rustc 1.96.0, x86_64 Linux box)",
-  "deployed_at": "2026-11-01T01:22:12.146Z"
+  "deployed_at": "2026-11-01T01:22:12.146Z",
+  "registration_tx": "Ckf7ijYthNUAJWkXE2Z6uTnfZKCYfxrcBX6Psng38qyg",
+  "registration_signer": "holder.bf-usdc-20261101t022248.testnet",
+  "registration_yocto": "1250000000000000000000"
 }
