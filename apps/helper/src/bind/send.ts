@@ -756,8 +756,8 @@ const big = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === "bigint" 
 
 /**
  * One view_access_key answer. nearcore answers an absent key (or account) with a result holding `error`, "access key
- * … does not exist while viewing", not with an RPC error (read live on mainnet, rpc.mainnet.fastnear.com and
- * archival-rpc.mainnet.fastnear.com, 2026-11-02); older nodes answer UNKNOWN_ACCESS_KEY or UNKNOWN_ACCOUNT. Any other
+ * … does not exist while viewing", not with an RPC error (read live on mainnet on FastNEAR's regular and archival
+ * RPCs, 2026-11-02); older nodes answer UNKNOWN_ACCESS_KEY or UNKNOWN_ACCOUNT. Any other
  * error is thrown.
  */
 async function readKey(r: Rpc, params: Record<string, unknown>): Promise<KeyRead & { block?: { height: bigint; hash: string } }> {
