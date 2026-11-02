@@ -11,6 +11,10 @@
 //      to the request with a live request taking only a live answer, the signed deadline and timestamp fresh, the
 //      device's own floors and MIN_DEPOSIT, W:409);
 //   5. the result from the checked quote alone: its signed deposit address, amounts and deadline.
+// The beta cap (HELPER_BIND_DEPOSIT_CAP, $1,000; app.md CH-023): the deposit call signs no note above it
+// (./deposit.ts), so no quote is asked above it either, or the money would sit in U. A USDC amount is compared
+// exactly; another asset at its higher price read against the destination's lower one, before anything is sent; and
+// the signed amountOut once more after the check, in case 1Click priced it above the device's reads. All "above_max".
 // A refusal carries a code and nothing else: "not_allowed" for a request no rule allows (the gate, an asset the device
 // cannot price, a bad amount), "quote_check_failed" for an answer that fails a check (W:888: nothing shown), "busy" and
 // "down" for a helper that is rate-limited or not answering, "not_available" for any other helper status.
@@ -19,6 +23,7 @@
 // to carry them) and the deposit's op record; the price reads for an asset other than USDC (the caller's `priced`).
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../../kit/src/checks/oneclick.ts";
 import type { ErrorCode, SignpageResults } from "../../../kit/src/signpage/messages.ts";
+import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
 import { askDepositQuote, depositQuoteRequest } from "../../../wallet/src/deposit/quote.ts";
 import { checkDepositQuote, DepositRuleRefused, type DepositQuoteContext } from "./deposit.ts";
 
@@ -57,6 +62,27 @@ function units(v: unknown, decimals: number): bigint | null {
   return BigInt(i + f.padEnd(decimals, "0"));
 }
 
+type Frac = { n: bigint; d: bigint };
+/** A price read as an exact positive fraction, or null (the kit's own check reads it again, strictly). */
+const PRICE = /^[0-9]+(\.[0-9]{1,18})?$/;
+function fraction(v: unknown): Frac | null {
+  if (typeof v !== "string" || !PRICE.test(v)) return null;
+  const [i = "", f = ""] = v.split(".");
+  const n = BigInt(i + f);
+  return n > 0n ? { n, d: 10n ** BigInt(f.length) } : null;
+}
+const higher = (a: Frac, b: Frac): Frac => (a.n * b.d >= b.n * a.d ? a : b);
+const lower = (a: Frac, b: Frac): Frac => (higher(a, b) === a ? b : a);
+
+/** True when `amount` of the origin is worth more than the cap: USDC exactly, another asset at its higher read. */
+function aboveCap(amount: bigint, decimalsIn: number, pricing: OneClickPricing): boolean | null {
+  if (pricing === "usdc") return amount * 10n ** BigInt(USDC_DECIMALS) > HELPER_BIND_DEPOSIT_CAP * 10n ** BigInt(decimalsIn);
+  const [i0, i1, o0, o1] = [pricing.in[0], pricing.in[1], pricing.out[0], pricing.out[1]].map(fraction);
+  if (!i0 || !i1 || !o0 || !o1) return null;
+  const pIn = higher(i0, i1), pOut = lower(o0, o1);
+  return amount * pIn.n * pOut.d * 10n ** BigInt(USDC_DECIMALS) > HELPER_BIND_DEPOSIT_CAP * pIn.d * pOut.n * 10n ** BigInt(decimalsIn);
+}
+
 /** Base units as a decimal at `decimals`, with no trailing zero in the fraction. */
 function decimal(v: bigint, decimals: number): string {
   const s = v.toString().padStart(decimals + 1, "0");
@@ -80,6 +106,9 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   if (!Number.isInteger(decimalsIn) || decimalsIn < 0 || decimalsIn > 36) return no("not_allowed");
   const amount = units(params.amount, decimalsIn);
   if (amount === null || amount === 0n) return no("not_allowed");
+  const over = aboveCap(amount, decimalsIn, pricing);
+  if (over === null) return no("not_allowed");
+  if (over) return no("above_max");
 
   // 3. The request to U, through the helper.
   const now = ctx.now ?? Date.now;
@@ -111,8 +140,9 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
     // the rule's own refusals are of the request; the kit's (OneClickQuoteError) and anything else are of the answer
     return no(e instanceof DepositRuleRefused ? "not_allowed" : "quote_check_failed");
   }
-  // A live answer always carries both (the kit refuses one without); timeEstimate is signed on a live answer.
-  const timeEstimate = (reply.body as { quote: Record<string, unknown> }).quote.timeEstimate;
+  if (checked.amountOut > HELPER_BIND_DEPOSIT_CAP) return no("above_max");
+  // A live answer always carries both (the kit refuses one without); its timeEstimate is signed, handed back unchecked.
+  const timeEstimate = checked.timeEstimate;
   if (checked.depositAddress === undefined || checked.deadline === undefined) return no("quote_check_failed");
   if (typeof timeEstimate !== "number" || !Number.isSafeInteger(timeEstimate) || timeEstimate < 0) return no("quote_check_failed");
 

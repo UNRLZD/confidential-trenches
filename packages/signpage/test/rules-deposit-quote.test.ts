@@ -8,8 +8,9 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { test } from "node:test";
-import { ONECLICK_SIGNING_KEYS, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
-import { DEPOSIT_QUOTE_URL } from "../../wallet/src/deposit/quote.ts";
+import { checkOneClickQuote, ONECLICK_SIGNING_KEYS, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
+import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
+import { DEPOSIT_QUOTE_URL, depositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import { depositQuoteKind, type DepositQuoteKindAnswer, type DepositQuoteKindContext } from "../src/rules/deposit-quote.ts";
 
 const U = "5d".repeat(32); // a test U: any 64-hex id; no key of it is used here
@@ -222,4 +223,107 @@ test("a request no rule allows is refused before anything is sent", async () => 
     refusedWith(await depositQuoteKind(params, ctx(m.fetch, over)), "not_allowed");
     assert.equal(m.sent.length, 0, JSON.stringify(params));
   }
+});
+
+// ---------- the beta cap, the checked time estimate, the priced path (review of 8e01570) ----------
+
+const WNEAR = "nep141:wrap.near";
+/** Base units as an exact decimal, as 1Click formats them. */
+const fmt = (v: bigint, d: number): string => {
+  const t = v.toString().padStart(d + 1, "0");
+  const f = t.slice(t.length - d).replace(/0+$/, "");
+  return `${t.slice(0, t.length - d)}${f ? `.${f}` : ".0"}`;
+};
+/** The mock answers at the device's USDC-to-USDC floors for whatever amount was asked (partner path, F 20, S 15). */
+const atUsdcFloor = (a: Answer): void => {
+  const amountIn = BigInt(a.quote.amountIn as string);
+  const out = amountIn - 5_328n - (amountIn * 35n) / 10_000n;
+  a.quote.amountInFormatted = fmt(amountIn, 6);
+  a.quote.amountOut = out.toString(); a.quote.amountOutFormatted = fmt(out, 6);
+  a.quote.minAmountOut = ((out * 9_900n + 9_999n) / 10_000n).toString();
+};
+
+test("the beta cap: an amount at HELPER_BIND_DEPOSIT_CAP is quoted, one base unit over is above_max and sends nothing", async () => {
+  assert.equal(HELPER_BIND_DEPOSIT_CAP, 1_000_000_000n); // $1,000 in USDC base units
+  const at = h1c({ before: atUsdcFloor });
+  const ok = await depositQuoteKind({ origin_asset: SOL_USDC, amount: "1000" }, ctx(at.fetch));
+  assert.equal(ok.ok, true);
+  assert.equal(at.sent[0].request.amount, HELPER_BIND_DEPOSIT_CAP.toString());
+  for (const amount of ["1000.000001", "1000000000"]) {
+    const over = h1c({ before: atUsdcFloor });
+    refusedWith(await depositQuoteKind({ origin_asset: SOL_USDC, amount }, ctx(over.fetch)), "above_max");
+    assert.equal(over.sent.length, 0, amount);
+  }
+});
+
+test("the time estimate comes from the checked quote: the kit hands back the signed timeEstimate", () => {
+  const request = depositQuoteRequest(U, SOL_USDC, 25_000_000n, NOW);
+  const a = liveAnswer(request, NOW - 500);
+  a.quote.timeEstimate = 37;
+  signAnswer(a, mockKey.privateKey);
+  const checked = checkOneClickQuote(request, a, { path: "partner", pricing: "usdc", decimalsIn: 6, decimalsOut: 6, intoVault: true, now: NOW });
+  assert.equal(checked.timeEstimate, 37);
+});
+
+test("a signed timeEstimate that is not a whole number of seconds gives no address", async () => {
+  for (const t of ["20", -1, 1.5]) {
+    const m = h1c({ before: (a) => { a.quote.timeEstimate = t; } });
+    refusedWith(await depositQuoteKind(PARAMS, ctx(m.fetch)), "quote_check_failed");
+  }
+});
+
+// 10 NEAR (24 decimals) at the device's two reads 2.5 and 2.5 into NEAR USDC: the other-pair floor (partner path) is
+// ⌈⌈10 × 2.5 × 10^6 × 9,965 / 10,000⌉ × 9,900 / 10,000⌉ − 5,328 = 24,663,375 − 5,328 = 24,658,047, for both amounts.
+const NEAR_FLOOR = 24_658_047n;
+const nearAt = (out: bigint) => (a: Answer): void => {
+  a.quote.amountInFormatted = "10.0";
+  a.quote.amountOut = out.toString(); a.quote.amountOutFormatted = fmt(out, 6); a.quote.minAmountOut = out.toString();
+};
+const near = (reads: [string, string]): Partial<DepositQuoteKindContext> => ({
+  priced: (asset) => (asset === WNEAR ? { decimals: 24, pricing: { in: reads, out: ["1", "1"] } } : null),
+});
+
+test("a priced asset: a quote at the floor of the device's own price reads passes, in that asset's units", async () => {
+  const m = h1c({ before: nearAt(NEAR_FLOOR) });
+  const a = await depositQuoteKind({ origin_asset: WNEAR, amount: "10" }, ctx(m.fetch, near(["2.5", "2.5"])));
+  assert.equal(m.sent[0].request.amount, "10000000000000000000000000");
+  assert.equal(a.ok, true);
+  assert.equal(a.ok && a.result.amount_in, "10");
+});
+
+test("a priced asset: the same quote under higher price reads is refused (the reads set the floor)", async () => {
+  for (const reads of [["2.6", "2.6"], ["2.51", "2.52"]] as [string, string][]) { // the floor takes the lower read
+    const m = h1c({ before: nearAt(NEAR_FLOOR) });
+    refusedWith(await depositQuoteKind({ origin_asset: WNEAR, amount: "10" }, ctx(m.fetch, near(reads))), "quote_check_failed");
+  }
+  const m = h1c({ before: nearAt(NEAR_FLOOR - 1n) });
+  refusedWith(await depositQuoteKind({ origin_asset: WNEAR, amount: "10" }, ctx(m.fetch, near(["2.5", "2.5"]))), "quote_check_failed");
+});
+
+test("a priced asset over the cap at the higher read is above_max before anything is sent", async () => {
+  // 400 NEAR at 2.5 is $1,000, the cap: quoted. At reads 2.5 and 2.51 the higher one makes it $1,004: refused.
+  const at = h1c({ before: nearAt(NEAR_FLOOR) });
+  await depositQuoteKind({ origin_asset: WNEAR, amount: "400" }, ctx(at.fetch, near(["2.5", "2.5"])));
+  assert.equal(at.sent.length, 1);
+  const over = h1c();
+  refusedWith(await depositQuoteKind({ origin_asset: WNEAR, amount: "400" }, ctx(over.fetch, near(["2.5", "2.51"]))), "above_max");
+  assert.equal(over.sent.length, 0);
+  for (const bad of [["0", "1"], ["x", "1"], ["1e3", "1"]] as [string, string][]) {
+    const m = h1c();
+    refusedWith(await depositQuoteKind({ origin_asset: WNEAR, amount: "1" }, ctx(m.fetch, near(bad))), "not_allowed");
+    assert.equal(m.sent.length, 0);
+  }
+});
+
+test("a signed amountOut above the cap gives no address (1Click priced it over the device's reads)", async () => {
+  const m = h1c({ before: nearAt(HELPER_BIND_DEPOSIT_CAP + 1n) });
+  refusedWith(await depositQuoteKind({ origin_asset: WNEAR, amount: "10" }, ctx(m.fetch, near(["2.5", "2.5"]))), "above_max");
+});
+
+test("an amount past 2^53 base units is sent exactly, never through a float", async () => {
+  const m = h1c();
+  const priced = { priced: () => ({ decimals: 18, pricing: { in: ["1", "1"], out: ["1", "1"] } as { in: [string, string]; out: [string, string] } }) };
+  await depositQuoteKind({ origin_asset: WNEAR, amount: "0.009007199254740993" }, ctx(m.fetch, priced));
+  assert.equal(m.sent.length, 1);
+  assert.equal(m.sent[0].request.amount, "9007199254740993");
 });
