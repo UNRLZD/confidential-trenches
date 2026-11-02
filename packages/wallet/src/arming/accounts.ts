@@ -19,7 +19,7 @@
 // Nothing here logs. No request carries a key or the words: each read names A or the token only (§2.9).
 import { base58, base64 } from "@scure/base";
 import { armAccount } from "../derive/index.ts";
-import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../deposit/account.ts";
+import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../deposit/account.ts";
 
 /** A's public side: its 64-hex implicit id and its one key. */
 export interface ArmingAccountId {
@@ -70,10 +70,7 @@ export async function readArmingRegistration(
   if (typeof account !== "string" || !HEX64.test(account)) throw new ArmingRegistrationRefused("input", "A must be a lowercase 64-hex implicit account id");
   if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new ArmingRegistrationRefused("input", `unknown network ${String(network)}`);
   const net = NEAR_NETWORKS[network];
-  const names = Array.isArray(rpcs) && rpcs.length === 2 ? rpcs.map((r) => (isObj(r) && typeof r.query === "function" ? r.name : undefined)) : [];
-  const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n);
-  if (!((fast(names[0]) && names[1] === net.drpc) || (names[0] === net.drpc && fast(names[1]))))
-    throw new ArmingRegistrationRefused("input", `the RPCs must be one of ${net.fastnear.join(", ")} and ${net.drpc}, exactly`);
+  if (nearPairNetwork(rpcs) !== network) throw new ArmingRegistrationRefused("input", nearPairRule(network));
 
   const view = (method_name: string, args: Obj) => ({
     request_type: "call_function",

@@ -81,6 +81,27 @@ export interface NearRpc {
   query(params: Record<string, unknown>): Promise<unknown>;
 }
 
+/**
+ * The network whose release pair `rpcs` is, or null: exactly one of its FastNEAR URLs and its dRPC URL, in either
+ * order, each provider named by the exact URL it reads (nearRpc's name). The one rule for every path that reads NEAR
+ * on two RPCs: two hosts of one operator are one read, so two of them, or any other name, give null.
+ */
+export function nearPairNetwork(rpcs: unknown): NearNetwork | null {
+  if (!Array.isArray(rpcs) || rpcs.length !== 2) return null;
+  const names = rpcs.map((r: unknown) => (typeof r === "object" && r !== null && typeof (r as NearRpc).query === "function" ? (r as NearRpc).name : undefined));
+  for (const network of Object.keys(NEAR_NETWORKS) as NearNetwork[]) {
+    const net = NEAR_NETWORKS[network];
+    const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n);
+    if ((fast(names[0]) && names[1] === net.drpc) || (names[0] === net.drpc && fast(names[1]))) return network;
+  }
+  return null;
+}
+/** The refusal's words for a pair that is not the network's (or, with none named, not any network's). */
+export function nearPairRule(network?: NearNetwork): string {
+  const nets = network === undefined ? (Object.keys(NEAR_NETWORKS) as NearNetwork[]) : [network];
+  return `the RPCs must be one of ${nets.map((n) => `${NEAR_NETWORKS[n].fastnear.join(", ")} and ${NEAR_NETWORKS[n].drpc}`).join("; or ")}, exactly`;
+}
+
 /** A provider by URL. A status other than 200, a body that is not JSON or no answer in time throws. */
 export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): NearRpc {
   return {
@@ -152,10 +173,7 @@ export async function checkDepositAccount(
   if (typeof amount !== "bigint" || amount < VAULT_CONSTANTS.MIN_DEPOSIT) throw new DepositAccountRefused("input", "the amount must be a bigint at or above MIN_DEPOSIT");
   if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new DepositAccountRefused("input", `unknown network ${String(network)}`);
   const net = NEAR_NETWORKS[network];
-  const names = Array.isArray(rpcs) && rpcs.length === 2 ? rpcs.map((r) => (isObj(r) && typeof r.query === "function" ? r.name : undefined)) : [];
-  const fast = (n: unknown) => (net.fastnear as readonly unknown[]).includes(n);
-  if (!((fast(names[0]) && names[1] === net.drpc) || (names[0] === net.drpc && fast(names[1]))))
-    throw new DepositAccountRefused("input", `the RPCs must be one of ${net.fastnear.join(", ")} and ${net.drpc}, exactly`);
+  if (nearPairNetwork(rpcs) !== network) throw new DepositAccountRefused("input", nearPairRule(network));
   const token = net.token;
   const publicKey = `ed25519:${base58.encode(Uint8Array.from(account.match(/../g)!, (h) => parseInt(h, 16)))}`;
   const args = base64.encode(new TextEncoder().encode(JSON.stringify({ account_id: account })));
