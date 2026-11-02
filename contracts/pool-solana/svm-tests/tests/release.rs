@@ -188,6 +188,23 @@ fn mark_data(env: &Env, pre: &[u8; 32]) -> Vec<u8> {
     a.data
 }
 
+/// The 8 bytes a release writes into its spent mark `["spent", nullifierHash]`: withdrawnValue u64 LE (M355 (3)).
+fn spent_data(env: &Env, nullifier: &[u8; 32]) -> Vec<u8> {
+    let a = env.svm.get_account(&pda(&[b"spent", nullifier], &env.program)).expect("the spent mark");
+    assert_eq!(a.owner, env.program, "the spent mark is the pool's");
+    assert_eq!(a.lamports, env.svm.minimum_balance_for_rent_exemption(8), "the spent mark holds rent for 8 bytes");
+    a.data
+}
+
+/// What a restore rebuilds from a spent mark alone: the release's withdrawnValue, the one the proof bound; and the
+/// mark's bytes are the fixture spend's `spent_mark`.
+fn assert_spent(env: &Env, r: &Rel, s: &Value) {
+    let m = spent_data(env, &r.nullifier);
+    assert_eq!(m.len(), 8, "the spent mark is 8 bytes");
+    assert_eq!(u64::from_le_bytes(m[..].try_into().unwrap()), r.withdrawn, "withdrawnValue rebuilt from the spent mark");
+    assert_eq!(hex(&m), s["spent_mark"].as_str().expect("the fixture's spent mark"), "the fixture's spent mark");
+}
+
 /// Leaf `index` of `tree`, read from its page.
 fn leaf_at(env: &Env, tree: u8, index: u64) -> [u8; 32] {
     let a = env.svm.get_account(&page(env, tree, index)).expect("page");
@@ -305,8 +322,12 @@ struct Rel {
 const FEE: u64 = 2_000_000;
 
 fn rel(env: &Env, name: &str) -> Rel {
-    let s = env.f["spends"].as_array().unwrap().iter().find(|s| s["name"] == name).unwrap().clone();
-    rel_of(env, &s)
+    rel_of(env, &spend_fx(env, name))
+}
+
+/// The fixture's spend `name`.
+fn spend_fx(env: &Env, name: &str) -> Value {
+    env.f["spends"].as_array().unwrap().iter().find(|s| s["name"] == name).unwrap().clone()
 }
 
 /// A release of the spend `s` (a fixture's `spends` entry), to W, paid by the fee payer.
@@ -441,6 +462,32 @@ fn the_same_note_twice_is_refused() {
     let r2 = rel(&env, "same_nullifier");
     assert_eq!(r2.nullifier, r.nullifier);
     assert_eq!(release(&mut env, &r2).err(), Some(NULLIFIER_ALREADY_SPENT));
+}
+
+// M355 (3): the spent mark holds withdrawnValue, for tag 2 and tag 3 (the page boundary's two releases are checked in
+// inserts_cross_the_page_boundary_in_both_trees).
+#[test]
+fn each_release_records_its_withdrawn_value_in_its_spent_mark() {
+    let mut env = with_deposits();
+    let r = rel(&env, "release");
+    let meta = release(&mut env, &r).expect("release");
+    println!("CU release {}", meta.compute_units_consumed);
+    println!("RENT spent mark {}", lamports(&env, &pda(&[b"spent", &r.nullifier], &env.program)));
+    assert_spent(&env, &r, &spend_fx(&env, "release"));
+    // a second release in the same pool, another amount
+    let r2 = rel(&env, "old_root");
+    release(&mut env, &r2).expect("old_root");
+    assert_spent(&env, &r2, &spend_fx(&env, "old_root"));
+    assert_spent(&env, &r, &spend_fx(&env, "release"));
+    // tag 3, the proof raw and compressed
+    for compressed in [false, true] {
+        let (mut env, tip_to, to) = with_buy_env();
+        let mut b = buy_of(&env, tip_to, to);
+        b.compressed = compressed;
+        let meta = send_buy(&mut env, &b).expect("tag 3 lands");
+        println!("CU tag3 transfer {} {}", if compressed { "compressed" } else { "raw" }, meta.compute_units_consumed);
+        assert_spent(&env, &b.r, &spend_fx(&env, "release"));
+    }
 }
 
 #[test]
@@ -807,6 +854,7 @@ fn inserts_cross_the_page_boundary_in_both_trees() {
     }
     let meta = release(&mut env, &r).expect("the release whose change opens state page 1 lands");
     println!("CU release opening a page {}", meta.compute_units_consumed);
+    assert_spent(&env, &r, &b["spends"][0]);
     let p1 = env.svm.get_account(&page(&env, 0, 1024)).unwrap();
     assert_eq!(p1.owner, env.program);
     assert_eq!(p1.data.len(), 16 + ENTRY);
@@ -842,6 +890,8 @@ fn inserts_cross_the_page_boundary_in_both_trees() {
     let w0 = lamports(&env, &env.w.pubkey());
     release(&mut env, &r2).expect("a release against page-1 roots lands");
     assert_eq!(lamports(&env, &env.w.pubkey()), w0 + r2.withdrawn - FEE);
+    assert_spent(&env, &r2, &b["spends"][1]);
+    assert_spent(&env, &r, &b["spends"][0]);
     assert_eq!(state_size(&env), 1027);
 }
 

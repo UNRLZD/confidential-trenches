@@ -149,6 +149,8 @@ async function spend(name, p, n, withdrawn, stateLeaves, labels, recipient = W) 
     new_commitment: b(publicSignals[0]),
     nullifier_hash: b(publicSignals[1]),
     withdrawn: String(withdrawn),
+    // the spent mark's 8 bytes after this release (M355 (3)): withdrawnValue u64 LE
+    spent_mark: hex(le(withdrawn, 8)),
     state_root_index: stateLeaves.length - 1,
     state_depth: sp.depth,
     label_root_index: labels - 1,
