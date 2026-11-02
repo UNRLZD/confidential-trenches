@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The pool program in LiteSVM (agave 3.0's runtime): six deposits, then releases with real withdraw proofs made for
-//! the pool's context (../fixtures/release-spends.json, made by ../fixtures/make-release-spends.mjs). Each refusal is
-//! checked by its error code. The program is the one cargo-build-sbf built: POOL_SO, else
-//! ../target/deploy/blindfill_pool_solana.so.
+//! The pool program in LiteSVM (litesvm 0.17, agave 4.3's runtime): six deposits, then releases with real withdraw
+//! proofs made for the pool's context (../fixtures/release-spends.json, made by ../fixtures/make-release-spends.mjs),
+//! and 1,025 deposits with two releases that carry both trees across a page boundary (../fixtures/boundary-spends.json,
+//! made by ../fixtures/make-boundary-spends.mjs). Each refusal is checked by its error code. The program is the one
+//! cargo-build-sbf built: POOL_SO, else ../target/deploy/blindfill_pool_solana.so.
 //!
 //! Prints `CU release <n>` and `BYTES release <n>` for the release transaction (a legacy message with a compute-limit
 //! instruction, no lookup table).
@@ -20,7 +21,10 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 const FIXTURE: &str = include_str!("../../fixtures/release-spends.json");
+const BOUNDARY: &str = include_str!("../../fixtures/boundary-spends.json");
 const SYSTEM: Pubkey = Pubkey::new_from_array([0; 32]);
+/// A page entry: leaf (32) ‖ root (32) ‖ the Clock's unix_timestamp at the insert (i64 LE).
+const ENTRY: usize = 72;
 const P_HEX: &str = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
 
 // the program's error codes (src/error.rs)
@@ -32,13 +36,16 @@ const FEE_PAYER_NOT_SIGNER: u32 = 7;
 const INVALID_TREE_DEPTH: u32 = 8;
 const UNKNOWN_STATE_ROOT: u32 = 9;
 const UNKNOWN_LABEL_ROOT: u32 = 10;
+const INVALID_WITHDRAWAL_AMOUNT: u32 = 11;
 const RELAY_FEE_OVER_CAP: u32 = 12;
+const RELAY_FEE_GREATER_THAN_MAX: u32 = 13;
 const INVALID_POOL_STATE: u32 = 14;
 const INVALID_PROOF: u32 = 15;
 const NULLIFIER_ALREADY_SPENT: u32 = 16;
 const MINIMUM_DEPOSIT_AMOUNT: u32 = 19;
 const INVALID_PRECOMMITMENT: u32 = 20;
 const PRECOMMITMENT_ALREADY_USED: u32 = 21;
+const WRONG_ACCOUNT: u32 = 22;
 const ALREADY_INITIALIZED: u32 = 23;
 
 fn fx() -> Value {
@@ -175,8 +182,20 @@ fn deposit(env: &mut Env, value: u64, precommitment: &[u8; 32], state_size: u64,
 /// The root at `index` of `tree`, read from its page.
 fn root_at(env: &Env, tree: u8, index: u64) -> [u8; 32] {
     let a = env.svm.get_account(&page(env, tree, index)).expect("page");
-    let at = 16 + (index % 1024) as usize * 64 + 32;
+    let at = 16 + (index % 1024) as usize * ENTRY + 32;
     a.data[at..at + 32].try_into().unwrap()
+}
+
+/// The time stored with entry `index` of `tree`.
+fn time_at(env: &Env, tree: u8, index: u64) -> i64 {
+    let a = env.svm.get_account(&page(env, tree, index)).expect("page");
+    let at = 16 + (index % 1024) as usize * ENTRY + 64;
+    i64::from_le_bytes(a.data[at..at + 8].try_into().unwrap())
+}
+
+/// The Clock's unix_timestamp at deposit `i` in `with_deposits`: a different second for each.
+fn deposit_time(i: u64) -> i64 {
+    1_800_000_000 + 13 * i as i64
 }
 
 /// `fresh()` with the fixture's six deposits; each root is checked against the fixture's off-chain trees.
@@ -185,12 +204,14 @@ fn with_deposits() -> Env {
     let deps = env.f["deposits"].as_array().unwrap().clone();
     for (i, d) in deps.iter().enumerate() {
         let value: u64 = d["value"].as_str().unwrap().parse().unwrap();
+        set_time(&mut env, deposit_time(i as u64));
         deposit(&mut env, value, &h32(d["precommitment"].as_str().unwrap()), i as u64, i as u64).expect("deposit");
         let i = i as u64;
+        assert_eq!((time_at(&env, 0, i), time_at(&env, 1, i)), (deposit_time(i), deposit_time(i)), "the time of entry {i}");
         assert_eq!(hex(&root_at(&env, 0, i)), env.f["state_roots"][i as usize].as_str().unwrap(), "state root after deposit {i}");
         assert_eq!(hex(&root_at(&env, 1, i)), env.f["label_roots"][i as usize].as_str().unwrap(), "label root after deposit {i}");
         let pa = env.svm.get_account(&page(&env, 0, i)).unwrap();
-        let at = 16 + i as usize * 64;
+        let at = 16 + i as usize * ENTRY;
         assert_eq!(hex(&pa.data[at..at + 32]), d["commitment"].as_str().unwrap(), "commitment {i}");
     }
     env
@@ -228,6 +249,11 @@ const FEE: u64 = 2_000_000;
 
 fn rel(env: &Env, name: &str) -> Rel {
     let s = env.f["spends"].as_array().unwrap().iter().find(|s| s["name"] == name).unwrap().clone();
+    rel_of(env, &s)
+}
+
+/// A release of the spend `s` (a fixture's `spends` entry), to W, paid by the fee payer.
+fn rel_of(env: &Env, s: &Value) -> Rel {
     let n = |k: &str| s[k].as_u64().unwrap();
     Rel {
         proof: unhex(s["proof"].as_str().unwrap()),
@@ -338,12 +364,12 @@ fn deposit_then_release_pays_w_and_the_fee_payer() {
     assert!(mark_rent > 0 && env.svm.get_account(&spent_mark).unwrap().owner == env.program, "the spent mark exists");
     let f1 = lamports(&env, &env.fee_payer.pubkey());
     // the fee payer: + fee, - the spent mark's rent, - the page entry's rent, - the transaction fee (2 signatures)
-    let entry_rent = env.svm.minimum_balance_for_rent_exemption(16 + 7 * 64) - env.svm.minimum_balance_for_rent_exemption(16 + 6 * 64);
+    let entry_rent = env.svm.minimum_balance_for_rent_exemption(16 + 7 * ENTRY) - env.svm.minimum_balance_for_rent_exemption(16 + 6 * ENTRY);
     assert_eq!(f1, f0 + FEE - mark_rent - entry_rent - 10_000, "the fee payer's balance");
     println!("RENT spent mark {mark_rent} page entry {entry_rent}");
     assert_eq!(hex(&root_at(&env, 0, 6)).len(), 64);
     let pa = env.svm.get_account(&page(&env, 0, 6)).unwrap();
-    assert_eq!(&pa.data[16 + 6 * 64..16 + 6 * 64 + 32], &r.new_commitment, "the change note is leaf 6");
+    assert_eq!(&pa.data[16 + 6 * ENTRY..16 + 6 * ENTRY + 32], &r.new_commitment, "the change note is leaf 6");
     assert_eq!(state_size(&env), 7);
 }
 
@@ -596,11 +622,11 @@ fn a_forged_page_is_refused() {
     let r = rel(&env, "other_pool");
     let s = env.f["spends"].as_array().unwrap().iter().find(|s| s["name"] == "other_pool").unwrap().clone();
     let forge = |tree: u8, root: [u8; 32]| {
-        let mut data = vec![0u8; 16 + 6 * 64];
+        let mut data = vec![0u8; 16 + 6 * ENTRY];
         data[0..8].copy_from_slice(b"bfpage01");
         data[8] = tree;
-        data[16 + 5 * 64..16 + 5 * 64 + 32].copy_from_slice(&[1; 32]);
-        data[16 + 5 * 64 + 32..16 + 6 * 64].copy_from_slice(&root);
+        data[16 + 5 * ENTRY..16 + 5 * ENTRY + 32].copy_from_slice(&[1; 32]);
+        data[16 + 5 * ENTRY + 32..16 + 5 * ENTRY + 64].copy_from_slice(&root);
         solana_account::Account { lamports: 10_000_000, data, owner: SYSTEM, executable: false, rent_epoch: 0 }
     };
     let (fs, fl) = (Keypair::new().pubkey(), Keypair::new().pubkey());
@@ -627,4 +653,101 @@ fn a_wrong_spent_mark_is_refused() {
     let w = env.w.insecure_clone();
     let payer = fp.pubkey();
     assert_eq!(send(&mut env, &[compute_limit(400_000), ix], &payer, &[&fp, &w]).err(), Some(22));
+}
+
+/// Each page entry holds the Clock's unix_timestamp at its insert, in both trees, for deposits and for a release's
+/// change note; an entry's time never changes after.
+#[test]
+fn each_page_entry_holds_the_clock_at_its_insert() {
+    let mut env = with_deposits(); // checks each deposit's time in both trees
+    let at = 1_800_000_500;
+    set_time(&mut env, at);
+    { let r = rel(&env, "release"); release(&mut env, &r) }.expect("release");
+    assert_eq!(time_at(&env, 0, 6), at, "the change note's entry");
+    for i in 0..6 {
+        assert_eq!((time_at(&env, 0, i), time_at(&env, 1, i)), (deposit_time(i), deposit_time(i)), "entry {i} kept its time");
+    }
+}
+
+/// Row 7 and the backstop of row 8, both before the proof is checked: withdrawnValue 0, and a fee within the cap but
+/// over half of withdrawnValue.
+#[test]
+fn a_zero_withdrawal_and_a_fee_over_the_backstop_are_refused() {
+    let mut env = with_deposits();
+    let mut z = rel(&env, "release");
+    z.withdrawn = 0;
+    z.relay_fee = 0;
+    assert_eq!(release(&mut env, &z).err(), Some(INVALID_WITHDRAWAL_AMOUNT));
+    let mut b = rel(&env, "release");
+    b.withdrawn = 3_000_000;
+    b.relay_fee = 1_500_001; // at most the cap (2,500,000), one over half of 3,000,000
+    assert!(b.relay_fee <= b.relay_fee_cap);
+    assert_eq!(release(&mut env, &b).err(), Some(RELAY_FEE_GREATER_THAN_MAX));
+    // exactly half passes the backstop and goes on to the proof, which binds another amount
+    b.relay_fee = 1_500_000;
+    assert_eq!(release(&mut env, &b).err(), Some(INVALID_PROOF));
+    { let r = rel(&env, "release"); release(&mut env, &r) }.expect("the real release still lands");
+}
+
+/// Both trees cross from page 0 to page 1 (1,024 entries a page): the state tree by a release's change note, the
+/// label tree by a deposit; then a release proves against roots read from page 1 of each. Proofs and roots from
+/// ../fixtures/boundary-spends.json.
+#[test]
+fn inserts_cross_the_page_boundary_in_both_trees() {
+    let mut env = fresh();
+    let b: Value = serde_json::from_str(BOUNDARY).unwrap();
+    let deps = b["deposits"].as_array().unwrap().clone();
+    assert_eq!(deps.len(), 1025);
+    let dep = |d: &Value| (d["value"].as_str().unwrap().parse::<u64>().unwrap(), h32(d["precommitment"].as_str().unwrap()));
+    for (i, d) in deps[..1024].iter().enumerate() {
+        let (v, pre) = dep(d);
+        deposit(&mut env, v, &pre, i as u64, i as u64).expect("deposit");
+    }
+    assert_eq!(hex(&root_at(&env, 0, 1023)), b["state_roots"]["1023"].as_str().unwrap());
+    assert_eq!(hex(&root_at(&env, 1, 1023)), b["label_roots"]["1023"].as_str().unwrap());
+    let full = 16 + 1024 * ENTRY;
+    assert_eq!(env.svm.get_account(&page(&env, 0, 0)).unwrap().data.len(), full, "state page 0 is full");
+    assert_eq!(env.svm.get_account(&page(&env, 1, 0)).unwrap().data.len(), full, "label page 0 is full");
+    assert!(env.svm.get_account(&page(&env, 0, 1024)).is_none());
+
+    // the state tree's insert at 1,024, by a release: neither page 0 nor any other address than page 1's is its page
+    let r = rel_of(&env, &b["spends"][0]);
+    assert_eq!((r.state_root_index, r.label_root_index), (1023, 1023));
+    let (fp, w) = (env.fee_payer.insecure_clone(), env.w.insecure_clone());
+    let payer = fp.pubkey();
+    for wrong in [page(&env, 0, 0), Keypair::new().pubkey()] {
+        let mut ix = release_ix(&env, &r);
+        ix.accounts[6] = AccountMeta::new(wrong, false);
+        assert_eq!(send(&mut env, &[compute_limit(400_000), ix], &payer, &[&fp, &w]).err(), Some(WRONG_ACCOUNT));
+    }
+    let meta = release(&mut env, &r).expect("the release whose change opens state page 1 lands");
+    println!("CU release opening a page {}", meta.compute_units_consumed);
+    let p1 = env.svm.get_account(&page(&env, 0, 1024)).unwrap();
+    assert_eq!(p1.owner, env.program);
+    assert_eq!(p1.data.len(), 16 + ENTRY);
+    assert_eq!(&p1.data[0..8], b"bfpage01");
+    assert_eq!((p1.data[8], &p1.data[9..13]), (0, &1u32.to_le_bytes()[..]), "state page 1's header");
+    assert_eq!(&p1.data[16..48], &r.new_commitment, "the change note is leaf 1,024");
+    assert_eq!(hex(&root_at(&env, 0, 1024)), b["state_roots"]["1024"].as_str().unwrap());
+    assert_eq!(env.svm.get_account(&page(&env, 0, 0)).unwrap().data.len(), full, "page 0 did not grow");
+
+    // the label tree's insert at 1,024, by a deposit: page 0 is not its page
+    let (v, pre) = dep(&deps[1024]);
+    assert_eq!(deposit(&mut env, v, &pre, 1025, 0).err(), Some(WRONG_ACCOUNT));
+    deposit(&mut env, v, &pre, 1025, 1024).expect("the deposit that opens label page 1 lands");
+    assert_eq!(env.svm.get_account(&page(&env, 1, 1024)).unwrap().data.len(), 16 + ENTRY);
+    assert_eq!(env.svm.get_account(&page(&env, 0, 1025)).unwrap().data.len(), 16 + 2 * ENTRY);
+    assert_eq!(hex(&root_at(&env, 0, 1025)), b["state_roots"]["1025"].as_str().unwrap());
+    assert_eq!(hex(&root_at(&env, 1, 1024)), b["label_roots"]["1024"].as_str().unwrap());
+
+    // a release against roots on page 1 of both trees
+    let r2 = rel_of(&env, &b["spends"][1]);
+    assert_eq!((r2.state_root_index, r2.label_root_index), (1025, 1024));
+    let mut x = r2.clone();
+    x.state_root_page = Some(page(&env, 0, 0));
+    assert_eq!(release(&mut env, &x).err(), Some(UNKNOWN_STATE_ROOT), "index 1,025 named on page 0");
+    let w0 = lamports(&env, &env.w.pubkey());
+    release(&mut env, &r2).expect("a release against page-1 roots lands");
+    assert_eq!(lamports(&env, &env.w.pubkey()), w0 + r2.withdrawn - FEE);
+    assert_eq!(state_size(&env), 1027);
 }

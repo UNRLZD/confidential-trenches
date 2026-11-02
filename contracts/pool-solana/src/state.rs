@@ -4,17 +4,22 @@
 //! | Account | Seeds | Holds |
 //! |---|---|---|
 //! | pool | `["pool"]` | the lamports every note holds, plus its own rent; `nonce`, `deposited`, `spent`; each tree's size, depth and 33 side nodes (`POOL_LEN` bytes) |
-//! | page | `["page", tree, page_no u32 LE]` | up to `PAGE_ENTRIES` (leaf, root) pairs of one tree, in insert order: entry `i` is leaf `page_no * PAGE_ENTRIES + i` and the tree's root right after it |
+//! | page | `["page", tree, page_no u32 LE]` | up to `PAGE_ENTRIES` entries (leaf, root, time) of one tree, in insert order: entry `i` is leaf `page_no * PAGE_ENTRIES + i`, the tree's root right after it, and the cluster Clock's `unix_timestamp` (i64 LE) at that insert |
 //! | spent mark | `["spent", nullifierHash]` | nothing: it exists once the note is spent |
 //! | precommitment mark | `["pre", precommitment]` | nothing: it exists once a deposit used it |
 //!
-//! A page grows by one entry (64 bytes) per insert, its rent paid by the inserting transaction's payer; the insert
+//! A page grows by one entry (72 bytes) per insert, its rent paid by the inserting transaction's payer; the insert
 //! at a page's first entry creates it. Nothing is ever removed or closed: a closed spent mark would reopen the spend.
+//!
+//! The time in each entry lets any client tell, from the pages alone, which root was the newest at a given chain
+//! time, so devices can prove against a shared root (the newest one before an epoch's start) instead of each
+//! reading its own. The program itself never reads it: a release names any root the pool had, by index.
 
 use crate::error::PoolError;
 use crate::tree::Side;
 use solana_program::{
     account_info::AccountInfo,
+    clock::Clock,
     instruction::{AccountMeta, Instruction},
     program::{invoke, invoke_signed},
     program_error::ProgramError,
@@ -47,7 +52,8 @@ const OFF_TREES: usize = 49;
 pub const POOL_LEN: usize = OFF_TREES + 2 * TREE_LEN;
 
 pub const PAGE_HEADER: usize = 16;
-pub const PAGE_ENTRY: usize = 64;
+/// One entry: leaf (32) ‖ root (32) ‖ unix_timestamp i64 LE (8).
+pub const PAGE_ENTRY: usize = 72;
 pub const PAGE_ENTRIES: u64 = 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -250,9 +256,9 @@ pub fn root_at(program_id: &Pubkey, page: &AccountInfo, tree: u8, size: u64, ind
     Some(root)
 }
 
-/// Writes entry `index` (the leaf and the root after it) into `page`, creating the page at its first entry and
-/// growing it by one entry otherwise; the rent comes from `payer`. Refuses a page that is not `index`'s, or not at
-/// its end (`WrongAccount`).
+/// Writes entry `index` (the leaf, the root after it and the Clock's unix_timestamp now) into `page`, creating the
+/// page at its first entry and growing it by one entry otherwise; the rent comes from `payer`. Refuses a page that
+/// is not `index`'s, or not at its end (`WrongAccount`).
 pub fn push_entry<'a>(
     program_id: &Pubkey,
     payer: &AccountInfo<'a>,
@@ -263,6 +269,7 @@ pub fn push_entry<'a>(
     leaf: &[u8; 32],
     root: &[u8; 32],
 ) -> Result<(), ProgramError> {
+    let now = Clock::get()?.unix_timestamp;
     let page_no = u32::try_from(index / PAGE_ENTRIES).map_err(|_| ProgramError::from(PoolError::MaxTreeDepthReached))?;
     let slot = index % PAGE_ENTRIES;
     let new_len = PAGE_HEADER + (slot as usize + 1) * PAGE_ENTRY;
@@ -291,5 +298,6 @@ pub fn push_entry<'a>(
     let at = PAGE_HEADER + slot as usize * PAGE_ENTRY;
     d[at..at + 32].copy_from_slice(leaf);
     d[at + 32..at + 64].copy_from_slice(root);
+    d[at + 64..at + 72].copy_from_slice(&now.to_le_bytes());
     Ok(())
 }

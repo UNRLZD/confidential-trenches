@@ -31,6 +31,10 @@ export const MUTANTS = [
   ["mark address", "src/state.rs", "    if addr != *mark.key {\n        return Err(PoolError::WrongAccount.into());", "    if false {\n        return Err(PoolError::WrongAccount.into());", "a_wrong_spent_mark_is_refused"],
   ["minimum deposit", "src/deposit.rs", "if value < MIN_DEPOSIT {", "if false {", "deposit_refusals"],
   ["precommitment unused", "src/deposit.rs", "state::put_mark(program_id, depositor, pre_mark, system, PRE_SEED, &precommitment, PoolError::PrecommitmentAlreadyUsed)?;", "let _ = (pre_mark, PRE_SEED);", "deposit_refusals"],
+  ["withdrawn not 0", "src/release.rs", "if r.withdrawn == 0 {", "if false {", "a_zero_withdrawal_and_a_fee_over_the_backstop_are_refused"],
+  ["fee backstop", "src/release.rs", "if !fee_within_backstop(r.relay_fee, r.withdrawn) {", "if false {", "a_zero_withdrawal_and_a_fee_over_the_backstop_are_refused"],
+  ["a new page at its address", "src/state.rs", "        if addr != *page.key {\n            return Err(PoolError::WrongAccount.into());", "        if false {\n            return Err(PoolError::WrongAccount.into());", "inserts_cross_the_page_boundary_in_both_trees"],
+  ["entry time", "src/state.rs", "    d[at + 64..at + 72].copy_from_slice(&now.to_le_bytes());", "    let _ = now;", "each_page_entry_holds_the_clock_at_its_insert"],
   ["init once", "src/state.rs", "    if target.owner == program_id {\n        return Err(exists.into());", "    if false {\n        return Err(exists.into());", "init_twice_is_refused"],
 ];
 

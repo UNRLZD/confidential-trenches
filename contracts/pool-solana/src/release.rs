@@ -31,8 +31,8 @@
 //! - Row 12: newCommitmentHash into the state tree, even when the change is 0, its page entry's rent from the fee payer.
 //! - Row 13: the pool pays `withdrawnValue - relay_fee` to W and `relay_fee` to the fee payer; `spent += withdrawnValue`.
 //!
-//! Rent: the fee payer pays the spent mark (an empty account's minimum) and the change note's page entry (64 bytes),
-//! and the transaction fee. The relay fee the device signs for covers them; the cap in the proof bounds it.
+//! Rent: the fee payer pays the spent mark (an empty account's minimum) and the change note's page entry (72 bytes),
+//! and the transaction fee. The relay fee the device signs for covers them; the cap in the proof bounds it (row 8).
 
 use crate::context::{context_of, scope_of, ContextFields};
 use crate::deposit::push;
@@ -187,7 +187,11 @@ pub fn release(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
     if r.withdrawn == 0 {
         return Err(PoolError::InvalidWithdrawalAmount.into());
     }
-    // row 8
+    // row 8. The fee payer's cost per release, at mainnet rent (read on two RPCs, 2 Nov 2026: 650,240 lamports for an
+    // empty account, 5,080 per byte): the spent mark 650,240 + the change entry 72 x 5,080 = 365,760 + the base fee of
+    // two signatures 10,000 = 1,026,000 lamports. The one release in 1,024 whose change opens a page pays the page
+    // account (16 + 72 bytes) instead of the entry: 650,240 + 1,097,280 + 10,000 = 1,757,520. A cap below that leaves
+    // the relayer short; the program does not hold a floor, since rent can change and the device sets the cap.
     if r.relay_fee > r.relay_fee_cap {
         return Err(PoolError::RelayFeeOverCap.into());
     }

@@ -26,7 +26,11 @@
 //!   its precommitment mark, all by the transaction's payer (src/state.rs).
 //! - The relay fee is an amount at most the cap the proof binds, under the vault's backstop.
 //! - No `LeafAlreadyExists` map (src/tree.rs gives the reason).
-//! - No ragequit yet: the vault's ragequit needs the commitment circuit's key and a depositor per label (a later card).
+//! - Each page entry also holds the Clock's unix_timestamp at its insert, so any client can tell from the pages alone
+//!   which root was the newest at a given chain time, and devices prove against a shared root (src/state.rs).
+//! - No ragequit. The pool puts every deposit's label into its own label tree, so a release proof always exists for
+//!   every note; ragequit would add a public exit that links a deposit to its exit, and a depositor record per label,
+//!   and buy nothing a release does not.
 
 // solana-poseidon 3.1.6 marks its API deprecated ahead of 4.0.0's `agave-unstable-api` feature; 3.1.6 is the version
 // pinned here.
