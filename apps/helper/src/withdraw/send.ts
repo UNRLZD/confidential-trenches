@@ -22,7 +22,7 @@
 //   A request with fund_recipient true (the kit sends it on every withdrawal): until H3.7's funding is built, it is
 //   carried only when its recipient is an implicit A (64 lowercase hex) that exists with key list exactly [A's own id
 //   key] and holds at least A_store, read at the same block on both providers (H3.7 item 1's resend rule, M:1567-1572);
-//   anything else is recipient_refused, nothing sent (CO call on card relayer-withdraw-send).
+//   anything else is recipient_refused, nothing sent (decided on card relayer-withdraw-send).
 //   relayer_low (H3.5, M:1511): in the queue, before signing, the gas account must hold one more withdraw's gas bought
 //   up front, its attachment and one settle's gas and attachment (WITHDRAW_FLOOR), else 503 relayer_low.
 //   The send: one FunctionCall withdraw(withdrawal, proof, public_signals) on the vault, 300 Tgas, the storage the
