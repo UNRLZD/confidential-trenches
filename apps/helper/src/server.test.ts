@@ -5,8 +5,9 @@ import { readFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
-import { PARTS } from "./health.ts";
+import { after, before, mock, test } from "node:test";
+import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
+import { PARTS, releaseOf } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import type { BindSender } from "./bind/env.ts";
 import { BIND_BODY_MAX, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
@@ -36,13 +37,35 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   const r = await call("GET", "/v1/health");
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
-  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])) });
+  // release: null, as this test's environment sets no HELPER_RELEASE
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])) });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
   assert.equal(r.headers["cache-control"], "no-store");
   assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   assert.equal(r.headers["set-cookie"], undefined);
+});
+
+// card helper-release-bump: the release HELPER_RELEASE names (deploy/redeploy.sh raises it per new commit) is in the
+// answer, so the live check can read that a deploy raised it
+test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the relayers would refuse is null", async () => {
+  assert.equal(releaseOf({ HELPER_RELEASE: "12" }), 12);
+  assert.equal(releaseOf({ HELPER_RELEASE: "999999999" }), 999999999);
+  for (const v of [undefined, "", "0", "07", "1.5", "-1", " 3", "3\n", "1000000000", "abc"]) assert.equal(releaseOf({ HELPER_RELEASE: v }), null, JSON.stringify(v));
+  const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 12));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  try {
+    const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+    assert.equal(r.status, 200);
+    const b = JSON.parse(r.body);
+    assert.equal(b.release, 12);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "parts"]);
+    assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
 });
 
 test("each of the two origins is echoed byte for byte, with Vary: Origin and no credentials", async () => {
@@ -291,6 +314,62 @@ test("POST /v1/bind: mounted; with no network set the helper starts and a body t
     assert.deepEqual([ok.status, JSON.parse(ok.body)], [200, { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" }]);
     assert.deepEqual(seen, [{ signed_delegate: decodable }]);
   } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the device's send waits for: a carry still running then answers in_flight and goes on to its own end; one that ends inside it answers its own", async () => {
+  const TX = "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL";
+  const turns = async (n = 50) => {
+    for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok));
+  };
+  let entered: () => void = () => undefined;
+  let finish: () => void = () => undefined;
+  let finished = 0;
+  const bind: BindSender = {
+    carry: async () => {
+      const gate = new Promise<void>((ok) => (finish = ok));
+      entered();
+      await gate; // the prepay and the delegate, read at final
+      finished++;
+      return { status: 200, body: { tx_hash: TX } };
+    },
+    warm: () => undefined,
+    stop: () => undefined,
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    // a carry still running at the bound
+    let inside = new Promise<void>((ok) => (entered = ok));
+    let answered: { status: number; body: string } | null = null;
+    const slow = call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "AAAA" }), to).then((r) => (answered = r));
+    await inside;
+    mock.timers.tick(HELPER_BIND_ANSWER_MS - 1);
+    await turns();
+    assert.equal(answered, null, "answered before the bound");
+    mock.timers.tick(1);
+    await turns();
+    if (answered === null) finish(); // no answer at the bound: let the carry end, so the assertion below names what came
+    const a = (await slow) as { status: number; body: string };
+    assert.deepEqual([a.status, JSON.parse(a.body)], [400, { error: { code: "in_flight" } }]);
+    assert.equal(finished, 0, "the carry was still running when the helper answered");
+    finish();
+    await turns();
+    assert.equal(finished, 1, "the carry went on to its own end");
+    // a carry that ends inside the bound answers its own
+    inside = new Promise<void>((ok) => (entered = ok));
+    const fast = call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "AAAA" }), to);
+    await inside;
+    mock.timers.tick(HELPER_BIND_ANSWER_MS - 1);
+    finish();
+    const b = await fast;
+    assert.deepEqual([b.status, JSON.parse(b.body)], [200, { tx_hash: TX }]);
+  } finally {
+    mock.timers.reset();
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
   }

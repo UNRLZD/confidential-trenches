@@ -1,10 +1,11 @@
 // The repo's gitleaks config (.gitleaks.toml) on planted cases: a NEAR secret key is always found; a 64-byte ed25519
 // signature passes only as a "signature" field of a JSON fixture under packages/kit/test/fixtures/ (card
-// wallet-1click-check). Each case is a throwaway tree scanned with `gitleaks dir` from its root, as CI scans the repo.
+// wallet-1click-check); Circle's USDC account id on NEAR mainnet passes generic-api-key only as that exact value (card
+// signpage-deposit-quote-wire: SIGN_HOST's bundle keeps it under `TOKEN:` without its source's gitleaks:allow). Each case is a throwaway tree scanned with `gitleaks dir` from its root, as CI scans the repo.
 //   node --test scripts/ci/gitleaks-config.test.mjs      (GITLEAKS=<path> to name the binary; CI's gitleaks job does)
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -65,3 +66,21 @@ for (const path of ['packages/kit/test/planted.json', 'packages/kit/src/planted.
     assert.deepEqual(scan(path, `{\n  "signature": "${SIG}"\n}\n`), ['near-ed25519-secret-key']);
   });
 }
+
+// Circle's native USDC account id on NEAR mainnet (packages/kit/src/vault/shapes.ts VAULT_CONSTANTS.TOKEN), a public value,
+// as a bundle writes it. A NEAR secret-key rule cannot match it in any form: that rule needs "ed25519:" and 86-88 base58
+// characters, and a 64-hex id is 64 characters with "0" in it, outside base58.
+const USDC = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+const OTHER = createHash('sha256').update('planted').digest('hex'); // a throwaway 64-hex, never a key
+const BUNDLE = 'packages/signpage/public/app.js';
+test("Circle's USDC account id on NEAR mainnet under TOKEN: in a bundle passes", () => {
+  assert.deepEqual(scan(BUNDLE, `const c={TOKEN:\`${USDC}\`,MAX_TREE_DEPTH:32};\n`), []);
+});
+for (const [what, value] of [['another 64-hex', OTHER], ['the USDC id with a character more', `${USDC}x`], ['the USDC id with its last character changed', `${USDC.slice(0, -1)}b`]]) {
+  test(`${what} under TOKEN: in a bundle is found`, () => {
+    assert.deepEqual(scan(BUNDLE, `const c={TOKEN:\`${value}\`,MAX_TREE_DEPTH:32};\n`), ['generic-api-key']);
+  });
+}
+test('a NEAR secret key is still found in the bundle beside the USDC id', () => {
+  assert.deepEqual(scan(BUNDLE, `const c={TOKEN:\`${USDC}\`};\nconst k=\`${SIG}\`;\n`), ['near-ed25519-secret-key']);
+});
