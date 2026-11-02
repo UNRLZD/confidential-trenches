@@ -35,14 +35,12 @@
 //!   checks (`LeafAlreadyExists`, `LeafCannotBeZero`, `MaxTreeDepthReached`), even when the change is 0. Every refusal
 //!   of rows 1-12 comes before the first write and the first log; then the change leaf, the `spent` row, the `spends`
 //!   record (status `in_flight`, `payer` the predecessor, the request's recipient, `relay_fee` as `fee`, its
-//!   `refund_precommitment` and `context`, refund fields 0) and `totals.spent += withdrawnValue` are written, and the
-//!   call logs exactly `leaf_inserted` (the change leaf) then `withdrawn`. A refused call logs nothing.
+//!   `refund_precommitment` and `context`, refund fields 0) and `totals.spent += withdrawnValue` are written.
 //!
-//! Rows 13-15 (the fee split, the storage charge and the payouts with `on_payout`) are card vault-withdraw-payouts'.
-//! Until they land, `withdraw` returns after row 12: the note is spent and its change note is in the tree, nothing is
-//! paid, `reserve` is 0, the attached NEAR stays with the vault and the bytes written are paid from the vault's own NEAR
-//! (row 14 charges the caller). This build is for tests only; the vault is first deployed with the payouts (vault.md
-//! V1.4, V1.6).
+//! Between rows 3 and 4 the gas pre-check, and after row 12 rows 13-15 (src/payout.rs): the fee split, the storage
+//! charge (`InsufficientStorageDeposit`, the last refusal, which rolls back every write above it) and the payouts with
+//! `on_payout`. Only then does the call log exactly `leaf_inserted` (the change leaf), `withdrawn` and
+//! `withdrawal_relayed`; a refused call logs nothing.
 //!
 //! Ported from Privacy Pools v1.3.0 `packages/contracts/src/contracts/PrivacyPool.sol:44-59` and `:115-128`
 //! (`withdraw`'s `validWithdrawal`: the processooor, the context, the depths and both roots; the proof, the nullifier
@@ -56,6 +54,8 @@ use crate::context::{context_of, salt_from_hex, ContextFields};
 use crate::events::Event;
 use crate::field::{self, U256};
 use crate::poseidon::PoseidonT3;
+use crate::tree::Inserted;
+use crate::{payout, promise};
 use crate::verifier::{self, EncodedProof, Proof};
 use crate::{Spend, Status, Vault, VaultExt};
 use near_sdk::json_types::U128;
@@ -232,7 +232,7 @@ impl Vault {
 
     /// Rows 11 and 12 on a request that passed rows 1-10: refuses a spent nullifier and a change leaf LeanIMT refuses,
     /// then writes the change leaf, the `spent` row, the `spends` record and `totals.spent`. Returns the spend index.
-    fn spend(&mut self, c: &Checked, withdrawn: u128, payer: AccountId) -> u64 {
+    fn spend(&mut self, c: &Checked, withdrawn: u128, payer: AccountId) -> (u64, Inserted) {
         let nullifier_hash = field::to_be(&c.signals[SIGNAL_NULLIFIER_HASH]);
         let new_commitment = field::to_be(&c.signals[SIGNAL_NEW_COMMITMENT]);
         // row 11, its check
@@ -265,27 +265,20 @@ impl Vault {
             context: field::to_be(&c.signals[SIGNAL_CONTEXT]),
         });
         self.totals.spent = U128(spent);
-        // every check has passed: the change leaf's leaf_inserted, then withdrawn
-        ins.event().emit();
-        Event::Withdrawn {
-            processor: &c.fields.processor,
-            value: withdrawn,
-            spent_nullifier: &nullifier_hash,
-            new_commitment: &new_commitment,
-        }
-        .emit();
-        index
+        // its leaf_inserted is logged by withdraw, after row 14
+        (index, ins)
     }
 }
 
 #[near]
 impl Vault {
-    /// Rows 1-12 of 2.5.2, in order, at this block's time: every refusal panics before any write. A request that
-    /// passes them spends its note and inserts its change note; rows 13-15 (the payouts) are not built yet, so nothing
-    /// is paid.
+    /// 2.5.2 at this block's time: rows 1-3, the gas pre-check, rows 4-12 (every refusal before any write), row 13,
+    /// row 14 (the last refusal: it rolls the writes back), then the three events, then row 15's payouts and
+    /// `on_payout` (src/payout.rs).
     #[payable]
     #[deny_unknown_arguments]
     pub fn withdraw(&mut self, withdrawal: Withdrawal, proof: Proof, public_signals: [String; 8]) {
+        let usage0 = env::storage_usage();
         let c = check_request(
             &withdrawal,
             &proof,
@@ -294,12 +287,38 @@ impl Vault {
             &crate::scope(),
             env::block_timestamp_ms(),
         );
-        let withdrawn = self.check_spend(&c.signals, c.fields.relay_fee);
+        let (register_deposit, fee) = (c.fields.register_deposit, c.fields.relay_fee);
+        payout::check_gas(env::prepaid_gas(), register_deposit, fee);
+        let withdrawn = self.check_spend(&c.signals, fee);
         // row 10
         if !verifier::verify_withdraw(&c.proof, &c.signals) {
             env::panic_str("InvalidProof");
         }
-        self.spend(&c, withdrawn, env::predecessor_account_id());
+        let payer = env::predecessor_account_id();
+        let (index, ins) = self.spend(&c, withdrawn, payer.clone());
+        // row 13
+        let to_recipient = payout::split(withdrawn, fee);
+        // row 14
+        self.charge_storage(index, usage0, register_deposit, fee);
+        // every check has passed: the change leaf's leaf_inserted, withdrawn, withdrawal_relayed
+        ins.event().emit();
+        Event::Withdrawn {
+            processor: &c.fields.processor,
+            value: withdrawn,
+            spent_nullifier: &field::to_be(&c.signals[SIGNAL_NULLIFIER_HASH]),
+            new_commitment: &field::to_be(&c.signals[SIGNAL_NEW_COMMITMENT]),
+        }
+        .emit();
+        Event::WithdrawalRelayed {
+            relayer: &payer,
+            recipient: &c.fields.recipient,
+            amount: to_recipient,
+            fee,
+            refund_precommitment: &c.fields.refund_precommitment,
+        }
+        .emit();
+        // row 15
+        promise::pay_then_on_payout(index, &c.fields.recipient, to_recipient, register_deposit, &c.fields.fee_recipient, fee);
     }
 }
 
@@ -758,14 +777,22 @@ mod spend_tests {
         serde_json::from_str(SPENDS).unwrap()
     }
 
-    /// A fresh mocked call at the fixture's vault on `storage`: its own gas and logs, the given records.
+    /// What every mocked call attaches unless a test sets it (`ATTACH`): 1 NEAR, the kit's 300 Tgas.
+    const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
+    thread_local! {
+        static ATTACH: std::cell::Cell<(u128, Gas)> = const { std::cell::Cell::new((ONE_NEAR, Gas::from_tgas(300))) };
+    }
+
+    /// A fresh mocked call at the fixture's vault on `storage`: its own gas and logs, the given records, `ATTACH`.
     fn call_on(storage: std::collections::HashMap<Vec<u8>, Vec<u8>>) {
+        let (deposit, gas) = ATTACH.get();
         env::set_blockchain_interface(near_sdk::MockedBlockchain::new(
             VMContextBuilder::new()
                 .current_account_id(fixture()["vault"].as_str().unwrap().parse().unwrap())
                 .predecessor_account_id(RELAYER.parse().unwrap())
                 .block_timestamp(1_800_000_000_000_000_000)
-                .prepaid_gas(Gas::from_tgas(300))
+                .attached_deposit(near_sdk::NearToken::from_yoctonear(deposit))
+                .prepaid_gas(gas)
                 .build(),
             near_sdk::test_vm_config(),
             near_sdk::RuntimeFeesConfig::test(),
@@ -871,9 +898,10 @@ mod spend_tests {
         assert_eq!(r["new_leaf_index"], 6);
         assert_eq!(r["refund_precommitment"], w.refund_precommitment);
         assert_eq!((r["refund_value"].as_str(), r["refund_label"].as_str(), r["refund_leaf_index"].as_u64()), (Some("0"), Some("0"), Some(0)));
-        assert_eq!(r["status"], "in_flight");
+        assert_eq!(r["status"], "in_flight", "on_payout has not run");
         assert_eq!(r["payer"], RELAYER);
-        assert_eq!(r["reserve"], "0");
+        // row 14: 1 NEAR less the 614 bytes written and 2 yocto (two ft_transfers; register_deposit 0)
+        assert_eq!(r["reserve"], (ONE_NEAR - 614 * 10_000_000_000_000_000_000 - 2).to_string());
         assert_eq!(r["recipient"], w.recipient.as_str());
         assert_eq!(r["fee"], w.relay_fee);
         assert_eq!(r["context"], s[SIGNAL_CONTEXT]);
@@ -1147,17 +1175,18 @@ mod spend_tests {
     }
 
     /// A landed call writes exactly its records (2.3: 710 B with a 64-byte payer and recipient; here the payer is 17 B
-    /// and the recipient 15 B, so 710 - 47 - 49 = 614, and 74 B more when the state tree grows a level) and logs exactly
-    /// the change leaf's leaf_inserted, then withdrawn.
+    /// and the recipient 15 B, so 710 - 47 - 49 = 614, and 74 B more when the state tree grows a level; row 14's
+    /// reserve is a same-size overwrite) and logs exactly the change leaf's leaf_inserted, withdrawn, then
+    /// withdrawal_relayed.
     #[test]
-    fn a_landed_call_writes_its_bytes_and_logs_leaf_inserted_then_withdrawn() {
+    fn a_landed_call_writes_its_bytes_and_logs_leaf_inserted_withdrawn_then_withdrawal_relayed() {
         let mut v = vault();
         let mut wrote = vec![];
         for name in ["same_call", "same_nullifier_a", "one_block_a"] {
             call();
             let before = env::storage_usage();
             let (w, p, s) = spend(name);
-            v.withdraw(w, p, s.clone());
+            v.withdraw(w.clone(), p, s.clone());
             wrote.push((env::storage_usage() - before, v.state_tree.depth));
             let root = field::to_decimal(&field::from_be(&v.state_tree.root()));
             let index = v.state_tree.size - 1;
@@ -1173,6 +1202,16 @@ mod spend_tests {
                         format!(
                             r#""processor":"vault.test.near","value":"{}","spent_nullifier":"{}","new_commitment":"{}""#,
                             s[SIGNAL_WITHDRAWN], s[SIGNAL_NULLIFIER_HASH], s[SIGNAL_NEW_COMMITMENT]
+                        )
+                    ),
+                    ev(
+                        "withdrawal_relayed",
+                        format!(
+                            r#""relayer":"{RELAYER}","recipient":"{}","amount":"{}","fee":"{}","refund_precommitment":"{}""#,
+                            w.recipient,
+                            s[SIGNAL_WITHDRAWN].parse::<u128>().unwrap() - w.relay_fee.parse::<u128>().unwrap(),
+                            w.relay_fee,
+                            w.refund_precommitment
                         )
                     ),
                 ],
@@ -1223,6 +1262,89 @@ mod spend_tests {
 
     /// The vault reads the 8 public signals at the positions the kit's VAULT_WITHDRAW_SIGNALS names, read from the
     /// kit's own source, so a change on either side fails here.
+    /// Row 14 (V:394) on a real spend: exactly (614 B + REFUND_RESERVE_BYTES) x the byte price + 1 yocto per
+    /// ft_transfer lands and keeps REFUND_RESERVE_BYTES' worth as the reserve; one yocto less, or nothing, is refused
+    /// with nothing logged and no payout made. same_call pays a fee (two transfers), same_nullifier_a none (one). The
+    /// mocked chain keeps a panicking call's writes, so "nothing written" is read on chain in tests/payouts.rs.
+    #[test]
+    fn row_14_one_yocto_short_is_refused_and_logs_nothing() {
+        let price = 10_000_000_000_000_000_000u128;
+        for (name, transfers) in [("same_call", 2u128), ("same_nullifier_a", 1)] {
+            let need = (614 + crate::constants::REFUND_RESERVE_BYTES as u128) * price + transfers;
+            for short in [need - 1, 0] {
+                let mut v = vault();
+                ATTACH.set((short, Gas::from_tgas(300)));
+                let e = withdraw(&mut v, spend(name)).unwrap_err();
+                assert!(e.contains("InsufficientStorageDeposit"), "{name} {short}: {e}");
+                assert_eq!(get_logs(), Vec::<String>::new(), "{name} {short}: logged before row 14");
+                assert!(near_sdk::test_utils::get_created_receipts().is_empty(), "{name} {short}: a payout was made");
+            }
+            let mut v = vault();
+            ATTACH.set((need, Gas::from_tgas(300)));
+            withdraw(&mut v, spend(name)).unwrap();
+            assert_eq!(v.spends.get(0).unwrap().reserve, crate::constants::REFUND_RESERVE_BYTES as u128 * price, "{name}");
+            ATTACH.set((ONE_NEAR, Gas::from_tgas(300)));
+        }
+    }
+
+    /// The gas pre-check (V:402-406): Σ static + 100 Tgas lands, one Tgas under is refused before rows 4-12 with
+    /// nothing written or logged (same_call: a fee, no registration, so 15 + 15 + 30 + 100 = 160 Tgas; same_nullifier_a:
+    /// no fee, 145 Tgas).
+    #[test]
+    fn the_gas_pre_check_refuses_one_tgas_under_the_bound_before_row_4() {
+        for (name, bound) in [("same_call", 160u64), ("same_nullifier_a", 145)] {
+            let mut v = vault();
+            ATTACH.set((ONE_NEAR, Gas::from_tgas(bound - 1)));
+            refused(&mut v, spend(name), "InsufficientGas");
+            // before row 5: an unknown root under too little gas names the gas
+            refused(&mut v, with_signal(spend(name), SIGNAL_STATE_ROOT, "4"), "InsufficientGas");
+            ATTACH.set((ONE_NEAR, Gas::from_tgas(bound)));
+            withdraw(&mut v, spend(name)).unwrap();
+            ATTACH.set((ONE_NEAR, Gas::from_tgas(300)));
+        }
+    }
+
+    /// Row 15 (V:395) from withdraw itself: part 0 to TOKEN, part 1 only with a fee, then on_payout after both, with
+    /// the spend's index and the exact split.
+    #[test]
+    fn a_landed_call_makes_its_payouts_then_on_payout() {
+        use near_sdk::mock::MockAction;
+        use near_sdk::test_utils::get_created_receipts;
+        let calls = |r: &near_sdk::mock::Receipt| -> Vec<(String, String, u128, u64)> {
+            r.actions
+                .iter()
+                .map(|a| match a {
+                    MockAction::FunctionCallWeight { method_name, args, attached_deposit, prepaid_gas, .. } => (
+                        String::from_utf8(method_name.clone()).unwrap(),
+                        String::from_utf8(args.clone()).unwrap(),
+                        attached_deposit.as_yoctonear(),
+                        prepaid_gas.as_tgas(),
+                    ),
+                    other => panic!("{other:?}"),
+                })
+                .collect()
+        };
+        let c = |m: &str, a: &str, d: u128, g: u64| (m.to_string(), a.to_string(), d, g);
+        let mut v = vault();
+        withdraw(&mut v, spend("same_call")).unwrap();
+        let r = get_created_receipts();
+        assert_eq!(r.len(), 3, "{r:?}");
+        assert_eq!(r[0].receiver_id.as_str(), crate::constants::TOKEN);
+        assert_eq!(calls(&r[0]), vec![c("ft_transfer", r#"{"receiver_id":"alice.test.near","amount":"1500000"}"#, 1, 15)]);
+        assert_eq!(r[1].receiver_id.as_str(), crate::constants::TOKEN);
+        assert_eq!(calls(&r[1]), vec![c("ft_transfer", r#"{"receiver_id":"relayer.test.near","amount":"500000"}"#, 1, 15)]);
+        assert_eq!(r[2].receiver_id.as_str(), "vault.test.near");
+        assert_eq!(r[2].receipt_indices, vec![0, 2]);
+        assert_eq!(calls(&r[2]), vec![c("on_payout", r#"{"spend_index":0,"to_recipient":"1500000","fee":"500000"}"#, 0, 30)]);
+        // no fee: one part, the callback after it
+        withdraw(&mut v, spend("same_nullifier_a")).unwrap();
+        let r = get_created_receipts();
+        assert_eq!(r.len(), 2, "{r:?}");
+        assert_eq!(calls(&r[0]), vec![c("ft_transfer", r#"{"receiver_id":"alice.test.near","amount":"1000000"}"#, 1, 15)]);
+        assert_eq!(r[1].receipt_indices, vec![0]);
+        assert_eq!(calls(&r[1]), vec![c("on_payout", r#"{"spend_index":1,"to_recipient":"1000000","fee":"0"}"#, 0, 30)]);
+    }
+
     #[test]
     fn the_signal_positions_are_the_kits() {
         const SHAPES: &str = include_str!("../../../packages/kit/src/vault/shapes.ts");
