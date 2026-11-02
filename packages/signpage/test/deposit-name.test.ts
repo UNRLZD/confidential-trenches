@@ -161,3 +161,165 @@ test("a quote waits for the first load's read, a naming in flight and a resync's
   await waiting;
   assert.ok((await w.get("meta", `deposit/${SCOPE}`)) !== undefined, "settled before the resync's naming wrote");
 });
+
+// Review of 395f261 (fold 2): two tabs, and each guard of the namer on its own.
+let dbs = 0;
+async function tab(idb: IDBFactory, name: string, seed = false): Promise<{ w: WalletStore; ns: NoteStore }> {
+  const w = await openWalletStore({ indexedDB: idb, name });
+  closers.push(() => w.close());
+  if (seed) await w.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 1 });
+  const ns = await openNoteStore(w);
+  closers.push(() => ns.close());
+  return { w, ns };
+}
+const gate = () => {
+  let open!: () => void;
+  const p = new Promise<void>((ok) => (open = ok));
+  return { p, open };
+};
+const tick = (ms = 20) => new Promise((ok) => setTimeout(ok, ms));
+
+test("two tabs: a naming that planned before money arrived never writes that funded index over the newer one", async () => {
+  const idb = new IDBFactory();
+  const name = `two-tabs-${process.pid}-${dbs++}`;
+  const a = await tab(idb, name, true);
+  const b = await tab(idb, name);
+  // tab A plans, then is slow before it names (a busy main thread, the seed lock held by another tab's naming)
+  const slow = gate();
+  const planned = gate();
+  const slowNotes = async (st: WalletStore) => {
+    const ns = await openNoteStore(st);
+    return {
+      planDeposit: async (s: bigint, f: (ref: NoteRef) => bigint) => {
+        const n = await ns.planDeposit(s, f);
+        planned.open();
+        await slow.p;
+        return n;
+      },
+      close: () => ns.close(),
+    };
+  };
+  const nA = namerOn(a.w, { openNotes: slowNotes });
+  nA.name(ENTROPY());
+  await planned.p;
+  // meanwhile, in tab B: money reaches that index, the note store moves on, and B names the next index
+  const first = (await deposits(b.ns)).find((n) => n.state === "PLANNED")!;
+  await b.ns.move(first.id, "PLANNED", "INCOMING");
+  const nB = namerOn(b.w);
+  nB.name(ENTROPY());
+  await nB.named();
+  const next = (await deposits(b.ns)).find((n) => n.state === "PLANNED")!;
+  assert.equal(((await b.w.get("meta", `deposit/${SCOPE}`)) as { index: number }).index, indexOf(next.ref));
+  // tab A goes on
+  slow.open();
+  await nA.named();
+  const rec = (await b.w.get("meta", `deposit/${SCOPE}`)) as { index: number };
+  assert.notEqual(rec.index, indexOf(first.ref), "a quote names the funded index again (W:355-358)");
+  assert.equal(rec.index, indexOf(next.ref));
+});
+
+// the published 7f..7f and 80..80 entropy vectors (BIP-39's), so a zeroed copy is told apart from the vector itself
+const V7F = () => new Uint8Array(16).fill(0x7f);
+const V80 = () => new Uint8Array(16).fill(0x80);
+
+test("the stored seed the namer reads to compare is zeroed, named or refused", async () => {
+  for (const entropy of [V7F(), V80()]) {
+    const { w } = await signedIn(V7F());
+    const read: Uint8Array[] = [];
+    const view = Object.create(w) as WalletStore;
+    view.get = (async (store: never, key: never) => {
+      const v = await w.get(store, key);
+      if (key === "seed") read.push((v as { entropy: Uint8Array }).entropy);
+      return v;
+    }) as WalletStore["get"];
+    const n = namerOn(w, { open: async () => view });
+    n.name(entropy);
+    await n.named();
+    assert.equal(read.length, 1);
+    assert.ok(read[0]!.every((b) => b === 0), "the stored seed's entropy was left in memory");
+    assert.ok((await w.keys("meta")).includes(`deposit/${SCOPE}`) === (entropy[0] === 0x7f), "named for the wrong seed");
+  }
+});
+
+test("the note store is closed after planning, planned or failed", async () => {
+  for (const fail of [false, true]) {
+    const { w } = await signedIn();
+    let closed = 0;
+    const n = namerOn(w, {
+      openNotes: async (st) => {
+        const ns = await openNoteStore(st);
+        return {
+          planDeposit: (s, f) => (fail ? Promise.reject(new Error("planned nothing")) : ns.planDeposit(s, f)),
+          close: () => (closed++, ns.close()),
+        };
+      },
+    });
+    n.name(ENTROPY());
+    await n.named();
+    assert.equal(closed, 1, fail ? "left open on a failed plan" : "left open");
+  }
+});
+
+test("the namer's own entropy copy is zeroed once its naming is done, named or failed", async () => {
+  for (const fail of [false, true]) {
+    const { w } = await signedIn(V7F());
+    const copies: Uint8Array<ArrayBuffer>[] = [];
+    class Tracked extends Uint8Array {
+      override slice(start?: number, end?: number): Uint8Array<ArrayBuffer> {
+        const c = Uint8Array.prototype.slice.call(this, start, end) as Uint8Array<ArrayBuffer>;
+        copies.push(c);
+        return c;
+      }
+    }
+    const n = namerOn(w, fail ? { openNotes: () => Promise.reject(new Error("no note store")) } : {});
+    n.name(new Tracked(16).fill(0x7f));
+    await n.named();
+    // the first is the namer's own; the store's nameDeposit takes its own copy of that one when it is called
+    assert.ok(copies.length >= 1);
+    for (const c of copies) assert.ok(c.every((b) => b === 0), "a copy was left in memory");
+  }
+});
+
+test("named() waits for a resync that starts while a naming is in flight, and that resync's naming", async () => {
+  const { w } = await signedIn();
+  const slow = gate();
+  let resync: Promise<void> | null = null;
+  const n = namerOn(w, {
+    resyncing: () => resync,
+    openNotes: async (st) => {
+      await slow.p;
+      return openNoteStore(st);
+    },
+  });
+  n.name(ENTROPY());
+  let settled = false;
+  const waiting = n.named().then(() => (settled = true));
+  await tick();
+  // another tab signs in: a resync starts while the first naming is still in flight
+  const rs = gate();
+  resync = rs.p.finally(() => (resync = null));
+  slow.open();
+  await tick();
+  assert.equal(settled, false, "settled during a resync that started while it waited");
+  rs.open();
+  await waiting;
+});
+
+test("namings run one at a time, in order", async () => {
+  const { w } = await signedIn();
+  const first = gate();
+  let opened = 0;
+  const n = namerOn(w, {
+    openNotes: async (st) => {
+      if (opened++ === 0) await first.p;
+      return openNoteStore(st);
+    },
+  });
+  n.name(ENTROPY());
+  n.name(ENTROPY());
+  await tick();
+  assert.equal(opened, 1, "the second naming started before the first was done");
+  first.open();
+  await n.named();
+  assert.equal(opened, 2);
+});
