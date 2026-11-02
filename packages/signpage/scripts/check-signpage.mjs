@@ -19,9 +19,24 @@
 //     reading the hosts, against the release it names unless --list or --release is given.
 import "../../../scripts/net-window.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readList } from "./release-list.mjs";
+
+// Node's own modules only (and the shared connect window), so the check runs from a plain checkout with no install.
+export const RELEASES = join(dirname(dirname(fileURLToPath(import.meta.url))), "releases");
+export const TAG = /^release-[1-9][0-9]*$/;
+
+/** The newest release list in releases/ by N, or the one named. */
+export function readList(tag = null) {
+  if (!tag) {
+    const n = readdirSync(RELEASES).map((f) => /^release-([1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean).map(Number);
+    if (!n.length) throw new Error(`no release list in ${RELEASES}`);
+    tag = `release-${Math.max(...n)}`;
+  }
+  if (!TAG.test(tag)) throw new Error(`${tag}: a release is named release-<N>, N from 1`);
+  return JSON.parse(readFileSync(join(RELEASES, `${tag}.json`), "utf8"));
+}
 
 /** The two ways a file is asked for: as a navigation, and as a plain fetch() from a page (mode cors, destination empty). */
 export const MODES = Object.freeze({

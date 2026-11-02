@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, namesOf, read, WEBAUTHN } from "./check-signpage.mjs";
-import { diffLists, headersFor, HOSTS, listDir, makeList, matches, parseRules, publishedPath, readList } from "./release-list.mjs";
+import { judge, namesOf, read, readList, WEBAUTHN } from "./check-signpage.mjs";
+import { diffLists, headersFor, HOSTS, listDir, makeList, matches, parseRules, publishedPath } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));

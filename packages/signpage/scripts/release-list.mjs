@@ -16,12 +16,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDir as checkApp } from "../../../apps/terminal/scripts/check-deploy.ts";
+import { readList, RELEASES, TAG } from "./check-signpage.mjs";
 import { build as buildSign, checkDir as checkSign } from "./deploy.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
-export const RELEASES = join(PKG, "releases");
-export const TAG = /^release-[1-9][0-9]*$/;
 export const HOSTS = Object.freeze({ SIGN_HOST: "https://sign.confidential.unrealized.trade", APP_HOST: "https://confidential.unrealized.trade" });
 // Pages reads these from the build as configuration and serves none of them (Cloudflare Pages docs: headers, redirects,
 // routing, Functions); each host's gate refuses _worker.js, and a build with any other one is refused below
@@ -143,17 +142,6 @@ export function diffLists(fresh, listed) {
 }
 
 export const listPath = (tag) => join(RELEASES, `${tag}.json`);
-
-/** The newest release list in releases/ by N, or the one named. */
-export function readList(tag = null) {
-  if (!tag) {
-    const n = readdirSync(RELEASES).map((f) => /^release-([1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean).map(Number);
-    if (!n.length) throw new Error(`no release list in ${RELEASES}`);
-    tag = `release-${Math.max(...n)}`;
-  }
-  if (!TAG.test(tag)) throw new Error(`${tag}: a release is named release-<N>, N from 1`);
-  return JSON.parse(readFileSync(listPath(tag), "utf8"));
-}
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const a = process.argv.slice(2);
