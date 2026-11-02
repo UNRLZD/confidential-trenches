@@ -33,7 +33,12 @@ import {
   SOLANA_SYSTEM_PROGRAM,
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
+  SOLANA_CLOSE_VOLUME_ACCUMULATOR,
+  SOLANA_TEARDOWN_CU,
+  solanaEventAuthority,
   solanaRouteCuCap,
+  type SolanaTeardownPlan,
+  type SolanaTeardownSimulation,
 } from "../../checks/solana/checks.ts";
 import type { SolanaFetch, SolanaRpc } from "./send.ts";
 
@@ -409,4 +414,99 @@ export function assembleSolanaSwap(req: SolanaBuildRequest, build: SolanaJupiter
   wire.set(message, 65);
   if (wire.length > SOLANA_MAX_TX_BYTES) throw new SolanaBuildError("too_large", `${wire.length} bytes > ${SOLANA_MAX_TX_BYTES}`);
   return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit, cuPrice: build.cuPrice, tablesUsed };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The teardown frames (row M1.4; 06c §3.1 S-4, S-5), built after the full sell has landed, from solanaTeardownPlan
+// over the device's own reads; checkSolanaTeardown judges them before they are signed. S-4: per token account the plan
+// closes, HarvestWithheldTokensToMint (mint, account) right before it when the account has Token-2022's transfer-fee
+// extension, then CloseAccount (account, the wallet, the wallet). S-5: close_user_volume_accumulator under each pump
+// program whose volume account the plan closes. S-4 and S-5 are separate frames, so a pump change that breaks S-5 never
+// holds back the token closes; S-4 splits into more frames when one would pass 1,232 bytes. No tips: a teardown is
+// never raced. Each frame asks only the compute it uses (SOLANA_TEARDOWN_CU), at the caller's price.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The teardown frames for one wallet; empty when the plan closes nothing. */
+export function buildSolanaTeardown(wallet: string, plan: SolanaTeardownPlan, chain: { blockhash: string; lastValidBlockHeight: number }, opts: { cuPrice?: bigint } = {}): SolanaAssembled[] {
+  if (!isKey(wallet)) throw new Error("the wallet must be an address");
+  if (!isKey(chain.blockhash) || !Number.isSafeInteger(chain.lastValidBlockHeight) || chain.lastValidBlockHeight <= 0) throw new Error("the blockhash must be the device's own read");
+  const price = opts.cuPrice ?? 0n;
+  if (typeof price !== "bigint" || price < 0n) throw new Error("the compute unit price must be a bigint of at least 0");
+  const cuPrice = price < SOLANA_CU_PRICE_MAX ? price : SOLANA_CU_PRICE_MAX;
+  const frame = (body: SolanaApiInstruction[], cu: number): SolanaAssembled => {
+    const cuLimit = 2 * SOLANA_TEARDOWN_CU.budget + cu;
+    const head = [ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(cuLimit)]), ...(cuPrice > 0n ? [ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [3, ...u64le(cuPrice)])] : [])];
+    const { message, tablesUsed } = compileV0(wallet, [...head, ...body], chain.blockhash, []);
+    const wire = new Uint8Array(1 + 64 + message.length);
+    wire[0] = 1;
+    wire.set(message, 65);
+    if (wire.length > SOLANA_MAX_TX_BYTES) throw new SolanaBuildError("too_large", `${wire.length} bytes > ${SOLANA_MAX_TX_BYTES}`);
+    return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit, cuPrice, tablesUsed };
+  };
+  const out: SolanaAssembled[] = [];
+  // S-4, packed greedily: an account's harvest and close never split across frames.
+  let body: SolanaApiInstruction[] = [];
+  let cu = 0;
+  for (const h of plan.close) {
+    if (h.kind !== "token") continue;
+    const group = [
+      ...(h.harvest ? [ix(SOLANA_TOKEN_2022_PROGRAM, [acc(h.mint, false, true), acc(h.address, false, true)], [26, 4])] : []),
+      ix(h.program, [acc(h.address, false, true), acc(wallet, false, true), acc(wallet, true, false)], [9]),
+    ];
+    const groupCu = SOLANA_TEARDOWN_CU.close + (h.harvest ? SOLANA_TEARDOWN_CU.harvest : 0);
+    if (body.length) {
+      try {
+        frame([...body, ...group], cu + groupCu);
+      } catch (e) {
+        if (!(e instanceof SolanaBuildError && e.code === "too_large")) throw e;
+        out.push(frame(body, cu));
+        body = [];
+        cu = 0;
+      }
+    }
+    body.push(...group);
+    cu += groupCu;
+  }
+  if (body.length) out.push(frame(body, cu));
+  // S-5.
+  const volumes = plan.close.filter((h) => h.kind === "volume");
+  if (volumes.length) {
+    out.push(frame(volumes.map((h) => ix(h.program, [acc(wallet, true, true), acc(h.address, false, true), acc(solanaEventAuthority(h.program), false, false), acc(h.program, false, false)], [...SOLANA_CLOSE_VOLUME_ACCUMULATOR])), volumes.length * SOLANA_TEARDOWN_CU.volume));
+  }
+  return out;
+}
+
+/** The most accounts api.mainnet-beta.solana.com reads back in one simulation ("Too many accounts provided; max 4", 2026-11-02). */
+export const SOLANA_SIMULATE_ACCOUNTS_MAX = 4;
+
+/**
+ * One provider's simulation of one teardown frame (sigVerify false, replaceRecentBlockhash true, at `confirmed`),
+ * reading back the wallet and every given address: one call per group of three addresses with the wallet. Each answer
+ * is hostile: shape-checked, and every call must report the same wallet lamports; the first error is returned as err.
+ */
+export async function simulateSolanaTeardown(rpc: SolanaRpc, wire: Uint8Array, wallet: string, addresses: readonly string[]): Promise<SolanaTeardownSimulation> {
+  const lamports = (a: unknown, what: string): bigint | null => {
+    if (a === null) return null;
+    const v = obj(a, what).lamports;
+    if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) return bad(`${what}.lamports is not a safe integer`);
+    return BigInt(v);
+  };
+  const per = SOLANA_SIMULATE_ACCOUNTS_MAX - 1;
+  const accounts: Record<string, bigint | null> = {};
+  let walletAfter: bigint | null = null;
+  for (let i = 0; i === 0 || i < addresses.length; i += per) {
+    const group = [wallet, ...addresses.slice(i, i + per)];
+    const r = obj(await rpc("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed", accounts: { addresses: group, encoding: "base64" } }]), "simulateTransaction");
+    const v = obj(r.value, "simulateTransaction.value");
+    if (v.err !== null && v.err !== undefined) return { err: v.err, wallet: 0n, accounts: {} };
+    const list = arr(v.accounts, "simulateTransaction.value.accounts", group.length);
+    if (list.length !== group.length) bad(`the simulation read back ${list.length} of ${group.length} accounts`);
+    const w = lamports(list[0], "the wallet");
+    if (w === null || (walletAfter !== null && w !== walletAfter)) bad("the simulations disagree on the wallet");
+    walletAfter = w;
+    group.slice(1).forEach((x, j) => {
+      accounts[x] = lamports(list[j + 1], x);
+    });
+  }
+  return { err: null, wallet: walletAfter as bigint, accounts };
 }
