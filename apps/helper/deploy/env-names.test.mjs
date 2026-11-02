@@ -23,6 +23,7 @@ import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
 import { solanaTokenFromEnv } from "../src/server.ts";
+import { releaseOf } from "../src/health.ts";
 
 const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Quoted constants in src/ that are not environment names: NEAR RPC error causes and a Ref pool kind. */
@@ -63,6 +64,7 @@ export const ENV_READERS = {
   withdrawSenderFromEnv: (env) => withdrawSenderFromEnv(env, noFee),
   bindSenderFromEnv: (env) => bindSenderFromEnv(env),
   solanaTokenFromEnv: (env) => solanaTokenFromEnv(env, noProxy, noLists),
+  releaseOf,
 };
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */
