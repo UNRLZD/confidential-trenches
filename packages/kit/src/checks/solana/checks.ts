@@ -73,6 +73,23 @@ export const SOLANA_SIM_TOL_BPS = 200;
 // accounts: authority (signer), user source, user destination, source mint, destination mint, source token program,
 // destination token program, destination_token_account (optional: the program id when absent), event authority, program.
 const ROUTE_V2 = [187, 100, 250, 204, 49, 196, 175, 20];
+// Jupiter v6 shared_accounts_route_v2, the instruction /swap/v2/build answers for many multi-hop routes (it has no
+// parameter to turn shared accounts off). From the same on-chain IDL account, read again 2026-11-02 06:22Z at slot
+// 464392865 on api.mainnet-beta.solana.com and 464392866 on solana-rpc.publicnode.com, the same bytes on both: account
+// data sha256 f42828e0fb580cb59890c76d96c7a919d184118c61002b984f229e9df5607d2e, its inflated IDL JSON sha256
+// e6c2b425ec740922ee91aa7a3278cea07f4bc00a3ed9efa4eca16facb481bfca (address JUP6…TaV4). Discriminator
+// [209,152,83,147,124,254,216,233]; args id u8, then route_v2's: in_amount u64, quoted_out_amount u64, slippage_bps
+// u16, platform_fee_bps u16, positive_slippage_bps u16, route_plan Vec<step>; 12 accounts: program_authority,
+// user_transfer_authority (signer), source_token_account, program_source_token_account,
+// program_destination_token_account, destination_token_account, source_mint, destination_mint, source_token_program,
+// destination_token_program, event_authority, program. The user pays in_amount from source_token_account into
+// program_source_token_account, the legs swap between the program authority's accounts, and the program pays the out
+// from program_destination_token_account into destination_token_account. The IDL names no seeds for the program
+// authority; on all 16 real builds read through the helper on 2026-11-02 05:05-06:34Z (ids 0 to 7, SPL Token and
+// Token-2022, buys and sells) it is Jupiter's PDA of ("authority", [id]), and each of its two accounts is its ATA of
+// that side's mint on every SPL Token side and the wallet's own account of that side on every Token-2022 side (Jupiter
+// then swaps that leg straight from or into the wallet's account). S6 takes either, and nothing else.
+const SHARED_ROUTE_V2 = [209, 152, 83, 147, 124, 254, 216, 233];
 // The pump.fun bonding-curve step variants of the Swap enum (same IDL; checks.js:58-64), for S8's cap only.
 const PUMP_BUY_STEPS = new Set([49, 90, 97, 112, 149, 152, 187, 191]);
 const PUMP_SELL_STEPS = new Set([50, 91, 98, 113, 150, 153, 192]);
@@ -117,6 +134,7 @@ export type SolanaQuoteVerdict = { ok: boolean; results: SolanaQuoteResult[] };
 
 type Ix = { index: number; program: string; accounts: SolanaAccountKey[]; data: Uint8Array };
 type Route = {
+  kind: "route_v2" | "shared_accounts_route_v2";
   inAmount: bigint;
   quotedOut: bigint;
   slippageBps: number;
@@ -124,7 +142,19 @@ type Route = {
   positiveSlippageBps: number;
   steps: number;
   firstStep: number | undefined;
-  a: SolanaAccountKey[];
+  authority: SolanaAccountKey; // the user's signer
+  source: SolanaAccountKey; // the user's account the input leaves
+  destination: SolanaAccountKey; // the account the output lands in
+  sourceMint: SolanaAccountKey;
+  destinationMint: SolanaAccountKey;
+  sourceTokenProgram: SolanaAccountKey;
+  destinationTokenProgram: SolanaAccountKey;
+  // route_v2's optional destination_token_account (the program id when absent); null on the shared route, which has none
+  destinationOverride: SolanaAccountKey | null;
+  eventAuthority: SolanaAccountKey;
+  program: SolanaAccountKey;
+  // the shared route's program authority: its id, its key and its two accounts; null on route_v2
+  shared: { id: number; authority: SolanaAccountKey; source: SolanaAccountKey; destination: SolanaAccountKey } | null;
 };
 type Ctx = {
   req: SolanaQuoteRequest;
@@ -152,22 +182,64 @@ const JUP_EVENT_AUTHORITY = solanaProgramAddress([new TextEncoder().encode("__ev
 export const solanaPumpVolumeAccumulator = (wallet: string): string =>
   solanaProgramAddress([new TextEncoder().encode("user_volume_accumulator"), base58.decode(wallet)], SOLANA_PUMP_PROGRAM);
 
+// The route from the instruction bytes and accounts, by the IDL layouts above; anything else throws.
 function decodeRoute(ix: Ix): Route {
   const d = ix.data;
-  if (d.length < 34 || !eqBytes(d.subarray(0, 8), Uint8Array.from(ROUTE_V2))) throw new Error(`Jupiter instruction ${hex(d)} is not route_v2`);
-  if (ix.accounts.length < 10) throw new Error(`route_v2 with ${ix.accounts.length} accounts`);
-  const steps = u32(d, 30);
-  return {
-    inAmount: u64(d, 8),
-    quotedOut: u64(d, 16),
-    slippageBps: u16(d, 24),
-    platformFeeBps: u16(d, 26),
-    positiveSlippageBps: u16(d, 28),
-    steps,
-    firstStep: d[34],
-    a: ix.accounts,
-  };
+  const a = ix.accounts;
+  const at = (i: number): SolanaAccountKey => a[i] as SolanaAccountKey;
+  if (d.length >= 34 && eqBytes(d.subarray(0, 8), Uint8Array.from(ROUTE_V2))) {
+    if (a.length < 10) throw new Error(`route_v2 with ${a.length} accounts`);
+    return {
+      kind: "route_v2",
+      inAmount: u64(d, 8),
+      quotedOut: u64(d, 16),
+      slippageBps: u16(d, 24),
+      platformFeeBps: u16(d, 26),
+      positiveSlippageBps: u16(d, 28),
+      steps: u32(d, 30),
+      firstStep: d[34],
+      authority: at(0),
+      source: at(1),
+      destination: at(2),
+      sourceMint: at(3),
+      destinationMint: at(4),
+      sourceTokenProgram: at(5),
+      destinationTokenProgram: at(6),
+      destinationOverride: at(7),
+      eventAuthority: at(8),
+      program: at(9),
+      shared: null,
+    };
+  }
+  if (d.length >= 35 && eqBytes(d.subarray(0, 8), Uint8Array.from(SHARED_ROUTE_V2))) {
+    if (a.length < 12) throw new Error(`shared_accounts_route_v2 with ${a.length} accounts`);
+    return {
+      kind: "shared_accounts_route_v2",
+      inAmount: u64(d, 9),
+      quotedOut: u64(d, 17),
+      slippageBps: u16(d, 25),
+      platformFeeBps: u16(d, 27),
+      positiveSlippageBps: u16(d, 29),
+      steps: u32(d, 31),
+      firstStep: d[35],
+      authority: at(1),
+      source: at(2),
+      destination: at(5),
+      sourceMint: at(6),
+      destinationMint: at(7),
+      sourceTokenProgram: at(8),
+      destinationTokenProgram: at(9),
+      destinationOverride: null,
+      eventAuthority: at(10),
+      program: at(11),
+      shared: { id: d[8] as number, authority: at(0), source: at(3), destination: at(4) },
+    };
+  }
+  throw new Error(`Jupiter instruction ${hex(d)} is neither route_v2 nor shared_accounts_route_v2`);
 }
+
+// Jupiter's program authority for a shared route's id.
+const jupiterAuthority = (id: number): string => solanaProgramAddress([new TextEncoder().encode("authority"), Uint8Array.of(id)], SOLANA_JUPITER_PROGRAM);
 
 // The sides of the swap from the request alone: what goes in and out, under which token program.
 function sides(c: Ctx): { inMint: string; outMint: string; inTp: string | null; outTp: string | null } {
@@ -190,14 +262,14 @@ function s1(c: Ctx): SolanaQuoteResult {
   const { inMint, outMint, inTp } = sides(c);
   const wrong: string[] = [];
   if (req.amount <= 0n || req.amount > req.spendable) wrong.push(`amount ${req.amount} is not within the spendable ${req.spendable}`);
-  if (r.a[0]?.key !== req.wallet || !r.a[0]?.signer) wrong.push(`route authority ${r.a[0]?.key} is not the signing wallet`);
-  if (r.a[3]?.key !== inMint) wrong.push(`input mint ${r.a[3]?.key} != ${inMint}`);
-  if (r.a[4]?.key !== outMint) wrong.push(`output mint ${r.a[4]?.key} != ${outMint}`);
+  if (r.authority.key !== req.wallet || !r.authority.signer) wrong.push(`route authority ${r.authority.key} is not the signing wallet`);
+  if (r.sourceMint.key !== inMint) wrong.push(`input mint ${r.sourceMint.key} != ${inMint}`);
+  if (r.destinationMint.key !== outMint) wrong.push(`output mint ${r.destinationMint.key} != ${outMint}`);
   if (r.inAmount !== req.amount) wrong.push(`in amount ${r.inAmount} != ${req.amount}`);
-  if (!isToken(inTp) || r.a[5]?.key !== inTp) wrong.push(`source token program ${r.a[5]?.key} != ${inTp}`);
-  else if (r.a[1]?.key !== solanaAta(req.wallet, inMint, inTp)) wrong.push(`source account ${r.a[1]?.key} is not the wallet's own`);
-  if (r.a[8]?.key !== JUP_EVENT_AUTHORITY || r.a[9]?.key !== SOLANA_JUPITER_PROGRAM) wrong.push("route event authority or program account changed");
-  return wrong.length ? fail("S1", wrong.join("; ")) : pass("S1", `${req.side} ${r.inAmount} of ${inMint} for ${outMint}, authority the wallet`);
+  if (!isToken(inTp) || r.sourceTokenProgram.key !== inTp) wrong.push(`source token program ${r.sourceTokenProgram.key} != ${inTp}`);
+  else if (r.source.key !== solanaAta(req.wallet, inMint, inTp)) wrong.push(`source account ${r.source.key} is not the wallet's own`);
+  if (r.eventAuthority.key !== JUP_EVENT_AUTHORITY || r.program.key !== SOLANA_JUPITER_PROGRAM) wrong.push("route event authority or program account changed");
+  return wrong.length ? fail("S1", wrong.join("; ")) : pass("S1", `${r.kind}: ${req.side} ${r.inAmount} of ${inMint} for ${outMint}, authority the wallet`);
 }
 
 // S2: every lookup table the message uses: owned by the table program, active, and the same bytes at every used index
@@ -327,19 +399,28 @@ function s13(c: Ctx, wk: Walk): SolanaQuoteResult {
   return off.length ? fail("S13", off.join("; ")) : pass("S13", `${wk.created.size} created, every one but the output closed to the wallet`);
 }
 
-// S6: the swap pays only into the wallet's own account of the output mint.
+// S6: the swap pays only into the wallet's own account of the output mint. On a shared route the legs run between the
+// program authority's accounts, so those must be Jupiter's or the wallet's own: the authority the PDA of the signed id,
+// and each of its two accounts its ATA of that side's mint or the wallet's own account of that side.
 function s6(c: Ctx): SolanaQuoteResult {
   const e = needRoute("S6", c);
   if (e) return e;
   const r = c.route as Route;
-  const { outMint, outTp } = sides(c);
+  const { inMint, outMint, inTp, outTp } = sides(c);
   if (!isToken(outTp)) return fail("S6", `output token program ${outTp} unknown`);
   const want = solanaAta(c.req.wallet, outMint, outTp);
   const wrong: string[] = [];
-  if (r.a[6]?.key !== outTp) wrong.push(`destination token program ${r.a[6]?.key} != ${outTp}`);
-  if (r.a[2]?.key !== want) wrong.push(`destination ${r.a[2]?.key} is not the wallet's account ${want}`);
-  if (r.a[7]?.key !== SOLANA_JUPITER_PROGRAM && r.a[7]?.key !== want) wrong.push(`destination_token_account ${r.a[7]?.key}`);
-  return wrong.length ? fail("S6", wrong.join("; ")) : pass("S6", `output to the wallet's account ${want}`);
+  if (r.destinationTokenProgram.key !== outTp) wrong.push(`destination token program ${r.destinationTokenProgram.key} != ${outTp}`);
+  if (r.destination.key !== want) wrong.push(`destination ${r.destination.key} is not the wallet's account ${want}`);
+  if (r.destinationOverride && r.destinationOverride.key !== SOLANA_JUPITER_PROGRAM && r.destinationOverride.key !== want) wrong.push(`destination_token_account ${r.destinationOverride.key}`);
+  if (r.shared) {
+    const pa = jupiterAuthority(r.shared.id);
+    if (r.shared.authority.key !== pa) wrong.push(`program authority ${r.shared.authority.key} is not Jupiter's authority ${r.shared.id} (${pa})`);
+    const src = isToken(inTp) ? [solanaAta(pa, inMint, inTp), solanaAta(c.req.wallet, inMint, inTp)] : [];
+    if (!src.includes(r.shared.source.key)) wrong.push(`program source account ${r.shared.source.key} is neither Jupiter's authority's account of ${inMint} nor the wallet's`);
+    if (![solanaAta(pa, outMint, outTp), want].includes(r.shared.destination.key)) wrong.push(`program destination account ${r.shared.destination.key} is neither Jupiter's authority's account of ${outMint} nor the wallet's`);
+  }
+  return wrong.length ? fail("S6", wrong.join("; ")) : pass("S6", `output to the wallet's account ${want}${r.shared ? ` through Jupiter's authority ${r.shared.id}` : ""}`);
 }
 
 // S7: the floor the Jupiter program enforces, decoded from the signed bytes, is at least minOut_k. The floor is

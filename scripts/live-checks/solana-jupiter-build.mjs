@@ -13,11 +13,12 @@
 // blockhash from getLatestBlockhash at finalized on the first (never the build's blockhashWithMetadata).
 // It passes only when every shape: answers 200; parses; assembles at most 1,232 bytes on the device's own blockhash
 // and tables; decodes back with that blockhash; and passes the quote checks on the frame the assembly builds (S2 tables,
-// S3 programs, S4 signer, S5 transfers and tips, S8 compute budget, S9 size, S13 creates and closes). The checks on the
-// route instruction and the mint (S1, S6, S7 with minOut 1, S10) are printed as info: they judge Jupiter's route and
-// the token, not the assembly (S1, S6 and S7 decode route_v2 only; for some multi-hop routes Jupiter answers
-// shared_accounts_route_v2, discriminator d19853937cfed8e9 = sha256("global:shared_accounts_route_v2")[0..8], read
-// 2026-11-02 05:05Z). S11 and S12 need a funded simulation and the reference pool, the buy flow's.
+// S3 programs, S4 signer, S5 transfers and tips, S8 compute budget, S9 size, S13 creates and closes) and on Jupiter's
+// route and the token (S1 request match, S6 the output to the wallet's own account, S7 the floor, S10 the mint), on
+// either route instruction /build answers: route_v2 (discriminator bb64facc31c4af14) or shared_accounts_route_v2
+// (d19853937cfed8e9, which /build answers for many multi-hop routes). S7's minOut is the floor of the build's own
+// outAmount at the slippage this check asked for, so the floor decoded from the signed bytes must be exactly what was
+// asked. S11 and S12 need a funded simulation and the reference pool, the buy flow's.
 //   node scripts/live-checks/solana-jupiter-build.mjs [--base <helper origin>] [--token <mint>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes every answer the run read, so the test can replay it.
 import "../net-window.mjs";
@@ -48,8 +49,9 @@ export const SHAPES = [
   { name: "S-2 sell, uncapped", side: "sell", maxAccounts: null },
 ];
 // The checks a build is judged by here; S11 and S12 need the buy flow's simulation and reference pool.
-export const JUDGED = ["S2", "S3", "S4", "S5", "S8", "S9", "S13"];
-export const INFO = ["S1", "S6", "S7", "S10"];
+export const JUDGED = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S13"];
+// The route instruction by its Anchor discriminator, for the line only (the checks decode the bytes themselves).
+const ROUTES = { bb64facc31c4af14: "route_v2", d19853937cfed8e9: "shared_accounts_route_v2" };
 
 // base58 of bytes (Bitcoin alphabet), for the per-run random taker only.
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -120,7 +122,14 @@ export async function judge(r) {
     }
     const dec = solanaDecodeTransaction(tx.wire);
     const sameHash = dec.message.blockhash === bh.blockhash;
-    const v = checkSolanaQuote(tx.wire, { ...req, spendable: req.amount, minOut: 1n }, {
+    // S7's minOut: the build's outAmount at the asked slippage, rounded down (the bound is read from the answer, so it
+    // is checked as a bounded integer first)
+    let out;
+    try { out = JSON.parse(s.calls.at(-1).body).outAmount; } catch { out = undefined; }
+    if (!/^[1-9]\d{0,19}$/.test(String(out))) { say(false, `${at} outAmount ${String(out).slice(0, 40)} is not a positive integer`); continue; }
+    const minOut = (BigInt(out) * BigInt(10_000 - SLIPPAGE_BPS)) / 10_000n;
+    const kind = ROUTES[Buffer.from(build.swap.data).subarray(0, 8).toString("hex")] ?? "an unknown Jupiter instruction";
+    const v = checkSolanaQuote(tx.wire, { ...req, spendable: req.amount, minOut }, {
       tables: pairs,
       mint: [accRead(ma), accRead(mb)],
       rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
@@ -128,13 +137,10 @@ export async function judge(r) {
       reference: null,
     });
     const off = v.results.filter((x) => JUDGED.includes(x.id) && !x.ok).map((x) => `${x.id} ${x.detail}`);
-    const info = v.results.filter((x) => INFO.includes(x.id)).map((x) => `${x.id} ${x.ok ? "pass" : `refuses: ${x.detail}`}`);
     const ok = tx.size <= SOLANA_MAX_TX_BYTES && sameHash && off.length === 0;
-    say(ok, `${at} ${tx.size} bytes (limit ${SOLANA_MAX_TX_BYTES}), route ${build.route.join(" + ")}, ${dec.message.instructions.length} instructions, ${tx.tablesUsed.length} table(s), CU limit ${tx.cuLimit}, build ${Math.round(ms)} ms${want.maxAccounts !== null && retried ? " (no route at 40, retried uncapped)" : ""}${sameHash ? "" : `, blockhash ${dec.message.blockhash} is not the device's`}${off.length ? `; refused: ${off.join("; ")}` : `; ${JUDGED.join(",")} pass`}`);
-    lines.push(`    info ${s.name}: ${info.join("; ")}`);
+    say(ok, `${at} ${tx.size} bytes (limit ${SOLANA_MAX_TX_BYTES}), route ${build.route.join(" + ")} by ${kind}, ${dec.message.instructions.length} instructions, ${tx.tablesUsed.length} table(s), CU limit ${tx.cuLimit}, build ${Math.round(ms)} ms${want.maxAccounts !== null && retried ? " (no route at 40, retried uncapped)" : ""}${sameHash ? "" : `, blockhash ${dec.message.blockhash} is not the device's`}${off.length ? `; refused: ${off.join("; ")}` : `; ${JUDGED.join(",")} pass`}`);
   }
-  const judged = lines.filter((l) => !l.startsWith("    info "));
-  return { ok: judged.length > 0 && judged.every((l) => l.startsWith("ok ")), lines };
+  return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
 // The token list only; every build goes through the kit's fetchSolanaJupiterBuild.

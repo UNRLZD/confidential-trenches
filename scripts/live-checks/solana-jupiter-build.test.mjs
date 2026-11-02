@@ -6,13 +6,16 @@
 // Raydium CLMM + Whirlpool) assembles to 1,244 bytes, refused too_large: FAIL. good and bad_oversize were recorded
 // before the check called the kit (one call per shape, {query, status, body}); each is kept as that one call, under
 // the URL the kit asks. Made from the good run: the capped buy answered "No routes found" first, retried uncapped:
-// PASS; a shape the helper answered 503; a record whose URL is not the kit's query: each FAIL.
+// PASS; a shape the helper answered 503; a record whose URL is not the kit's query: each FAIL. good_shared (06:34Z): the
+// Token-2022 token DEW9dSN6…WDP, whose two sells /build answered as shared_accounts_route_v2 (1,067 and 1,225 bytes), every
+// shape judged on S1, S6, S7 and S10 too: PASS. Made from it: the capped sell's destination changed to an account that
+// is not the wallet's: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge } from "./solana-jupiter-build.mjs";
+import { base58, judge } from "./solana-jupiter-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "solana-jupiter-build.answers.json"), "utf8"));
@@ -20,7 +23,7 @@ const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const copy = (x) => JSON.parse(JSON.stringify(x));
 const NAMES = ["S-1 buy, maxAccounts=40", "S-1 buy, uncapped", "S-2 sell, maxAccounts=40", "S-2 sell, uncapped"];
 
-for (const key of ["good", "good_token2022"]) {
+for (const key of ["good", "good_token2022", "good_shared"]) {
   test(`recorded ${key} run: the four shapes build through the helper and assemble within 1,232 bytes: PASS`, async () => {
     const r = await judge(A[key]);
     assert.equal(r.ok, true, r.lines.join("\n"));
@@ -66,4 +69,25 @@ test("made from the good run: a record whose capped call was asked without maxAc
   assert.equal(bad(r).length, 1);
   // the replay refuses the kit's call, which the kit reports as a helper that did not answer
   assert.match(bad(r)[0], /^BAD S-1 buy, maxAccounts=40: upstream: the helper did not answer: the kit asked https:\/\/api\.confidential\.unrealized\.trade\/v1\/proxy\/jupiter\/swap\/v2\/build\?/);
+});
+
+test("recorded shared-route run: both sells are shared_accounts_route_v2 and pass S1, S6, S7 and S10 with the frame: PASS", async () => {
+  const r = await judge(A.good_shared);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const name of NAMES.slice(2)) {
+    assert.ok(r.lines.some((l) => l.startsWith(`ok  ${name}: `) && l.includes(" by shared_accounts_route_v2, ") && l.endsWith("; S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S13 pass")), name);
+  }
+});
+
+test("made from the shared-route run: the capped sell's destination is not the wallet's account: FAIL", async () => {
+  const g = copy(A.good_shared);
+  const call = g.shapes[2].calls.at(-1);
+  const body = JSON.parse(call.body);
+  const planted = base58(new Uint8Array(32).fill(7));
+  body.swapInstruction.accounts[5].pubkey = planted;
+  call.body = JSON.stringify(body);
+  const r = await judge(g);
+  assert.equal(r.ok, false);
+  assert.equal(bad(r).length, 1);
+  assert.match(bad(r)[0], new RegExp(`^BAD S-2 sell, maxAccounts=40: .* by shared_accounts_route_v2, .*; refused: S6 destination ${planted} is not the wallet's account `));
 });
