@@ -140,7 +140,7 @@ test("stop() refuses the proof in the worker and every proof queued before it, a
   const three = [host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV))];
   host.stop();
   for (const p of three) await assert.rejects(soon(p), dead);
-  assert.deepEqual(log, []);
+  assert.equal(log.length, 0, `no worker started: ${log.join(", ")}`);
   // one running in the worker and two queued behind it: all three refused, no second worker
   const more = [host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV)), host.proveWithdraw(fixtureArgs(CV))];
   for (let i = 0; i < 50 && !log.includes("prove 1 withdraw"); i++) await new Promise((ok) => setTimeout(ok, 1));

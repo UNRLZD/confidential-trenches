@@ -10,10 +10,12 @@
 // - A worker that died (the kit's isProverDead reads it from the refusal) is ended and dropped; the next proof starts a
 //   new one, which loads the files again. Any other refusal keeps the worker.
 // - Proofs run one at a time, in the order asked: two at once in one worker only raise a phone's peak memory.
+// - stop() refuses the proof in the worker and every proof asked before it, so none of them starts a worker after it;
+//   a proof asked after stop() runs on a new worker.
 // - Every proof is the kit's vaultProveWithdraw: it refuses an input the vault would refuse before the worker sees it,
 //   and a worker answer that is not that input's.
 // Nothing here logs: the input holds the note's secrets.
-import { isProverDead, startProver, type Prover, type ProverOptions } from "../../kit/src/prover/client.ts";
+import { isProverDead, PROVER_DEAD_PREFIX, startProver, type Prover, type ProverOptions } from "../../kit/src/prover/client.ts";
 import { vaultProveWithdraw, type VaultProver, type VaultWithdrawProof } from "../../kit/src/prover/prove.ts";
 import type { VaultWithdrawInputArgs } from "../../kit/src/vault/inputs.ts";
 
@@ -36,10 +38,14 @@ function generation(start: (o: ProverOptions) => Prover): Generation {
   };
 }
 
+// the refusal a proof asked before stop() gets: the kit's isProverDead reads it as a worker that was ended
+const stopped = () => new Error(`${PROVER_DEAD_PREFIX}terminated`);
+
 /** The page's prover; `start` is the kit's startProver but in tests. */
 export function proverHost(start: (o: ProverOptions) => Prover = startProver): ProverHost {
   let gen: Generation | null = null;
   let queue: Promise<unknown> = Promise.resolve(); // the proof before this one, settled either way
+  let epoch = 0; // stop() moves it on: a proof asked in an earlier epoch is refused before it starts
   const drop = (g: Generation) => {
     if (gen !== g) return;
     gen = null;
@@ -47,7 +53,9 @@ export function proverHost(start: (o: ProverOptions) => Prover = startProver): P
   };
   return {
     proveWithdraw(args) {
+      const asked = epoch;
       const run = async () => {
+        if (asked !== epoch) throw stopped();
         const g = (gen ??= generation(start));
         try {
           return await vaultProveWithdraw(g, args);
@@ -61,6 +69,7 @@ export function proverHost(start: (o: ProverOptions) => Prover = startProver): P
       return p;
     },
     stop() {
+      epoch++;
       if (gen) drop(gen);
     },
   };

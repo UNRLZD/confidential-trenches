@@ -48,8 +48,6 @@ export function build(pkg = PKG) {
   return out;
 }
 
-const ws = (v) => v.trim().replace(/\s+/g, " ");
-
 /** Problems with a _headers file's text (empty = fine): one /* rule holding the whole policy, read as the live check reads a served answer. */
 export function checkHeadersFile(text) {
   const rules = [];
@@ -82,7 +80,7 @@ export function checkHeadersFile(text) {
     // each of its headers once, with its value (any other header is refused above)
     const once = (k, v) => {
       const hs = these[0].headers.filter(([h]) => h === k);
-      return hs.length === 1 && ws(hs[0][1]) === v;
+      return hs.length === 1 && hs[0][1].trim() === v; // trimmed as Pages does, then exact, as the live check reads it
     };
     const ok = these.length === 1 && Object.entries(exact).every(([k, v]) => once(k, v));
     if (!ok) p.push(`_headers must hold one ${path} rule that sets exactly ${want}`);
