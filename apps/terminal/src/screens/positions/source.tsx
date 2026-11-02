@@ -65,7 +65,11 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
 
   useEffect(() => {
     if (!kit.onProgress) return;
-    return kit.onProgress((id, stage) => setPhase((p) => progress(p, id, stage, src.now())));
+    // the time is read when the stage arrives, not when React renders it: a late render must not stretch Filled's time
+    return kit.onProgress((id, stage) => {
+      const at = src.now();
+      setPhase((p) => progress(p, id, stage, at));
+    });
   }, [kit.onProgress, src.now]);
 
   // Landing's counter and Slow: a tick every 100 ms while a sell runs, none otherwise
@@ -89,7 +93,10 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
       ref.current = next;
       setPhase(next);
       setBps(b);
-      void h.outcome.then((o) => setPhase((p) => outcome(p, h.id, o, src.now())));
+      void h.outcome.then((o) => {
+        const at = src.now();
+        setPhase((p) => outcome(p, h.id, o, at));
+      });
     },
   };
 }

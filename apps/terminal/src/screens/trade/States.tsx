@@ -1,13 +1,14 @@
-import { buttonTime, endView, isSlow, secs } from "./model.ts";
+import { buttonTime, endView, isSlow, secs, showsRetry } from "./model.ts";
 import type { Phase } from "./model.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 
 // What the main button and the line above it draw for a running or ended trade, shared by the buy side (TradeBox)
 // and the sell side (src/screens/positions/SellBox.tsx), so both show one set of states: Sending, Landing, Slow past
-// 5 s (S8.11), Filled, and for a trade the kit ended Retry on the button with one plain line above it: the reason for
-// the kit's code, or Failed (S8.23, S8.32), Not landed (S8.24, S8.36; CH-050), or the part filled (CH-045, S8.35).
-// No dialog, ever: the box stays where it is and Retry is one tap.
+// 5 s (S8.11), Filled, and for a trade the kit ended one plain line above the button: the reason for the kit's code,
+// or Failed (S8.23, S8.32), or Not landed (S8.24, S8.36; CH-050), each with Retry on the button; or the part filled
+// (CH-045, S8.35), with the button back to its ready label, since nothing should trade the whole amount again. No
+// dialog, ever: the box stays where it is and Retry is one tap.
 
 /** A word, marked when it is still the owner's draft. */
 function W({ id }: { id: WordId }) {
@@ -30,7 +31,10 @@ export function stateId(p: Phase, now: number, side: "buy" | "sell"): string | n
   return side === "buy" ? "partial" : "S8.35";
 }
 
-/** The main button's label for a running, filled or ended trade; null while ready. */
+/** The main button draws RunLabel, not its own ready label: a trade runs, filled, or ended where Retry shows. */
+export const hasRunLabel = (p: Phase): boolean => p.k !== "ready" && (p.k !== "ended" || showsRetry(p));
+
+/** The main button's label for a running, filled or ended trade; null where the box draws its ready label. */
 export function RunLabel({ phase, now }: { phase: Phase; now: number }) {
   if (phase.k === "sending" || phase.k === "landing") {
     if (isSlow(phase, now)) {
@@ -57,7 +61,7 @@ export function RunLabel({ phase, now }: { phase: Phase; now: number }) {
       </>
     );
   }
-  if (phase.k === "ended") return <W id="retry" />;
+  if (phase.k === "ended" && showsRetry(phase)) return <W id="retry" />;
   return null;
 }
 

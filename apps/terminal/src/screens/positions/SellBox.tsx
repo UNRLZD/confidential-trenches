@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { cents, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { busy } from "../trade/model.ts";
-import { EndLine, RunLabel, stateId } from "../trade/States.tsx";
+import { EndLine, hasRunLabel, RunLabel, stateId } from "../trade/States.tsx";
 import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount, shareCents } from "./model.ts";
 import { useSellKit } from "./source.tsx";
 import type { Sell, SellPreview } from "./source.tsx";
@@ -17,9 +17,9 @@ import "./positions.css";
 // it, `25%` `50%` `75%` `100%`, `You receive`, `Sell 50%`), in the buy side's own classes (src/screens/trade/trade.css)
 // with the sell's coral. A preset sells on one click; the box's percent sells on the main button. The button's states
 // are the buy side's (src/screens/trade/States.tsx: S8.30 Sending and Landing, S8.11 Slow, Filled, and for a sell
-// the kit ended S8.32 Failed, S8.36 Not landed or S8.35 part sold, each with Retry), run by `useSell`, one request
-// for a double tap. The side
-// switch's Buy goes to the mount (the buy side is TradeBox). No route (S8.33) turns the sell off. No dialog, no confirm.
+// the kit ended S8.32 Failed or S8.36 Not landed with Retry, S8.35 part sold with the ready label), run by `useSell`,
+// one request for a double tap. The side switch's Buy goes to the mount (the buy side is TradeBox). No route (S8.33)
+// turns the sell off. No dialog, no confirm.
 
 const pct = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
 
@@ -86,7 +86,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const state = stateId(s.phase, now, "sell") ?? (noRoute ? "S8.33" : "S8.29");
 
   let label;
-  if (s.phase.k !== "ready") label = <RunLabel phase={s.phase} now={now} />;
+  if (hasRunLabel(s.phase)) label = <RunLabel phase={s.phase} now={now} />;
   else if (noRoute) label = <W id="noRoute" />;
   else
     label = (

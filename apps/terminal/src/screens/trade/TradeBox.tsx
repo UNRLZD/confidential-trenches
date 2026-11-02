@@ -15,7 +15,7 @@ import {
   tap,
 } from "./model.ts";
 import type { Cents, Phase } from "./model.ts";
-import { EndLine, RunLabel, stateId } from "./States.tsx";
+import { EndLine, hasRunLabel, RunLabel, stateId } from "./States.tsx";
 import { useTradeSource } from "./source.tsx";
 import type { SetPreview } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -27,8 +27,8 @@ import "./trade.css";
 // ticket; unrlzd.css .tk-*): the side switch, the order tabs with `Bal`, the amount box, the four presets that buy on one
 // click, `You receive`, the max line, the main button and the Route & fees and settings line. States: S8.3 Ready,
 // S8.9 Sending, S8.10 Landing, S8.11 Slow, S8.12 Filled, and a buy the kit ended (States.tsx): S8.23 Failed, S8.24 Not
-// landed, part filled, each with Retry. Seams for the next cards: Sell, Limit and TP/SL are drawn off; Route & fees
-// opens on its own card. No dialog, no confirm, ever.
+// landed, each with Retry, and part filled, with the ready label back. Seams for the next cards: Sell, Limit and TP/SL
+// are drawn off; Route & fees opens on its own card. No dialog, no confirm, ever.
 
 /** A word, marked when it is still the owner's draft. */
 function W({ id }: { id: WordId }) {
@@ -108,7 +108,11 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   // the kit's stages for the running buy
   useEffect(() => {
     if (!kit.onProgress) return;
-    return kit.onProgress((id, stage) => setPhase((p) => progress(p, id, stage, src.now())));
+    // the time is read when the stage arrives, not when React renders it: a late render must not stretch Filled's time
+    return kit.onProgress((id, stage) => {
+      const at = src.now();
+      setPhase((p) => progress(p, id, stage, at));
+    });
   }, [kit.onProgress, src.now]);
 
   // Landing's counter and Slow: a tick every 100 ms while a buy runs, none otherwise
@@ -126,7 +130,10 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     const next = tap(phaseRef.current, h.id, src.now());
     phaseRef.current = next;
     setPhase(next);
-    void h.outcome.then((o) => setPhase((p) => outcome(p, h.id, o, src.now())));
+    void h.outcome.then((o) => {
+      const at = src.now();
+      setPhase((p) => outcome(p, h.id, o, at));
+    });
   }
 
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
@@ -138,7 +145,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   const canBuy = ready && !running && amountOk(amount, max, balance);
 
   let label;
-  if (phase.k !== "ready") label = <RunLabel phase={phase} now={now} />;
+  if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} />;
   else
     label = (
       <span className="trb-ctaLbl" title={`${WORDS.buy.text} ${symbol}`}>

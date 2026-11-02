@@ -9,8 +9,8 @@
 // The main button's states (09-design-brief S8.9, S8.10, S8.12): a tap sends the kit's `buy` and shows Sending, the
 // kit's `sent` turns it into Landing with a counter from the tap, and `filled` into Filled with the time from the tap
 // to the fill. The kit's other trade stages (part_filled, not_landed) and a refusal end the buy as `ended`, drawn by
-// `endView` as Failed (with the reason for the kit's code when the app has words for it), Not landed or part filled,
-// each with Retry; a trade still Sending or Landing past 5 s is Slow (S8.11), which never ends it. The sell side
+// `endView` as Failed (with the reason for the kit's code when the app has words for it) or Not landed, each with
+// Retry, or part filled, with the button back to its ready label (`showsRetry`); a trade still Sending or Landing past 5 s is Slow (S8.11), which never ends it. The sell side
 // (src/screens/positions/) runs the same machine.
 import type { ErrorCode, Stage } from "@blindfill/kit";
 
@@ -182,6 +182,13 @@ export interface EndView {
   k: "failed" | "notLanded" | "partial";
   reason: Reason | null;
 }
+
+/**
+ * Retry shows only where nothing moved: a trade that Failed or did Not land. After a part fill the main button goes back
+ * to its ready label, so any further tap is a new trade of the amount on screen: a retry of the whole amount would
+ * trade more than the user asked (a buy), or re-apply a share to the smaller balance (a sell).
+ */
+export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled";
 
 export function endView(p: Phase): EndView | null {
   if (p.k !== "ended") return null;

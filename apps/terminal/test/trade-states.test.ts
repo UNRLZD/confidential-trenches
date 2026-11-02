@@ -4,7 +4,7 @@
 // kit gives it, each with Retry on the main button. One model for the buy and the sell side.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { endView, isSlow, progress, READY, SLOW_MS, tap } from "../src/screens/trade/model.ts";
+import { endView, isSlow, progress, READY, showsRetry, SLOW_MS, tap } from "../src/screens/trade/model.ts";
 import type { Phase } from "../src/screens/trade/model.ts";
 import { WORDS } from "../src/screens/trade/words.ts";
 
@@ -42,6 +42,22 @@ test("an ended trade: a refusal is Failed with its code's reason, not_landed is 
   assert.equal(endView(s), null);
   assert.equal(endView(READY), null);
   assert.equal(endView({ k: "filled", id: "b1", at: T0, ms: 900 }), null);
+});
+
+test("Retry only where nothing moved: Failed and Not landed show it, a part fill never does (a retry would trade the whole amount again)", () => {
+  const end = (stage: "refused" | "not_landed" | "part_filled"): Phase => ({ k: "ended", id: "b1", at: T0, stage });
+  assert.equal(showsRetry(end("refused")), true);
+  assert.equal(showsRetry(end("not_landed")), true);
+  assert.equal(showsRetry(end("part_filled")), false);
+  for (const p of [READY, tap(READY, "b1", T0), { k: "filled", id: "b1", at: T0, ms: 900 } as Phase]) assert.equal(showsRetry(p), false);
+});
+
+test("the approved words stay approved: Sending and Landing are Portfolio's own entries, never drafts again", async () => {
+  const { WORDS: PF } = await import("../src/screens/portfolio/words.ts");
+  assert.equal(WORDS.sending, PF.sending);
+  assert.equal(WORDS.landing, PF.landing);
+  assert.equal(WORDS.sending.draft, false);
+  assert.equal(WORDS.landing.draft, false);
 });
 
 test("Retry is a new trade: a tap after an ended one starts Sending with a new id", () => {

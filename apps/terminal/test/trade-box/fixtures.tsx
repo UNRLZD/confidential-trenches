@@ -89,7 +89,11 @@ const kit: TradeKit = {
 };
 
 const snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v1", state: STATE, stale: false };
-const src: TradeSource = { snapshot, moneyOn: true, kit, now: Date.now };
+/** The screen's clock: the page's own, which the run pauses and moves; ?plant=clock runs it 25% fast from its first read
+ * (a planted fault: every time on the button then reads wrong and the run must FAIL). */
+let t0 = 0;
+const now = q.get("plant") === "clock" ? () => ((t0 ||= Date.now()), t0 + Math.round((Date.now() - t0) * 1.25)) : Date.now;
+const src: TradeSource = { snapshot, moneyOn: true, kit, now };
 
 function Page() {
   return (
