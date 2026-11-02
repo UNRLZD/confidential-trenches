@@ -20,7 +20,7 @@
 //   mainnet USDC's own code with its 6 decimals (contracts/vault/deployments/testnet-usdc.json; ft_metadata in
 //   test/vectors/withdraw-feemax.json), so a fee in it is priced as the USDC it copies.
 // - Everything is a bigint and the one division rounds up, so the cap is never below the formula's figure.
-import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule } from "../deposit/account.ts";
+import { heightSpreadOver, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule } from "../deposit/account.ts";
 
 /** Gas a withdrawal may burn, capped: 2 × 92.505 Tgas. */
 export const FEE_G_CAP = 185_010_000_000_000n;
@@ -38,6 +38,14 @@ export const FEE_A_FUND = 182n * STORAGE_YOCTO_PER_BYTE + 7_000_000_000_000_000_
 export const FEE_POOL_CONTRACT = "v2.ref-finance.near";
 export const FEE_POOL_ID = 4512;
 export const FEE_POOL_TOKENS = [NEAR_NETWORKS.mainnet.token, "wrap.near"] as const;
+/**
+ * The pool's USDC side must hold at least 250,000 USDC (a quarter of the 1,017,547 read 2026-11-02), else no cap and
+ * no relayed withdrawal (fail closed). On a constant-product pool, raising the read price k-fold in one block takes
+ * swapping in USDC (sqrt(k) - 1) x its USDC side [derived]: doubling it at the floor takes about 103,600 USDC in, at
+ * 0.3 % pool fee (total_fee 30) about 311 USDC lost each way, while the cap it doubles is about 0.43 USDC per withdrawal.
+ * The floor also bounds what Ref's upgradable contract could report for a drained or replaced pool.
+ */
+export const FEE_POOL_MIN_TOKEN = 250_000_000_000n;
 
 const U128 = 1n << 128n;
 const DEC = /^(0|[1-9][0-9]{0,38})$/;
@@ -103,10 +111,13 @@ const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object
 
 type Header = { height: number; hash: string; gasPrice: bigint };
 
-// The newest block both providers hold as final: the lower of their final heights, then that height's header on both,
-// the same hash and the same gas_price.
+// The newest block both providers hold as final: the lower of their final heights, which may differ by
+// HEIGHT_SPREAD_MAX blocks at most (heightSpreadOver), then that height's header on both, the same hash and gas_price.
 async function agreedBlock(rpcs: readonly [FeeRpc, FeeRpc], signal?: AbortSignal): Promise<Header> {
   const finals = await Promise.all(rpcs.map((r) => headerOf(r, { finality: "final" }, signal)));
+  // a provider that names an old block as final would have both read the past (an older gas price or pool)
+  const spread = heightSpreadOver([finals[0].height, finals[1].height]);
+  if (spread !== null) throw new FeeMaxRefused("disagree", `final: ${spread}`);
   const height = Math.min(finals[0].height, finals[1].height);
   const [x, y] = await Promise.all(rpcs.map((r) => headerOf(r, { block_id: height }, signal)));
   if (x.height !== height || y.height !== height) throw new FeeMaxRefused("rpc", `block ${height}: another height in the answer`);
@@ -167,5 +178,7 @@ async function readPool(rpcs: readonly [FeeRpc, FeeRpc], signal?: AbortSignal): 
   const amounts = pool.amounts;
   if (!Array.isArray(amounts) || amounts.length !== 2 || !amounts.every((x) => typeof x === "string" && DEC.test(x) && BigInt(x) > 0n))
     throw new FeeMaxRefused("pool", "the pool's amounts are not two u128 decimals above 0");
-  return { token: BigInt(amounts[0] as string), near: BigInt(amounts[1] as string) };
+  const token = BigInt(amounts[0] as string);
+  if (token < FEE_POOL_MIN_TOKEN) throw new FeeMaxRefused("pool", `the pool holds ${token} USDC base units, under its floor ${FEE_POOL_MIN_TOKEN}`);
+  return { token, near: BigInt(amounts[1] as string) };
 }

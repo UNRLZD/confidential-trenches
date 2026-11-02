@@ -156,3 +156,73 @@ test("the fee is in the network's own token: a request on another token, or an u
   await assert.rejects(withdrawRequest(argsFor(v, signalsProver(), { network: "testnet" })), /token/);
   await assert.rejects(withdrawRequest(argsFor(v, signalsProver(), { network: "devnet" as "mainnet" })), /network/);
 });
+
+// ---------- the review's cases ----------
+// A pair that serves any block: the recorded header and pool answer, renamed to the height asked, so both sides agree
+// byte for byte on any block. `finals` names each side's final height.
+function anyBlock(finals: [number, number]): [FeeRpc, FeeRpc] {
+  const rec = FEE_READS.answers.mainnet;
+  const one = (side: "a" | "b", k: 0 | 1): FeeRpc => ({
+    name: rec.final[side].url,
+    async block(p) {
+      const j = structuredClone(rec.at[side].json) as { result: { header: { height: number } } };
+      j.result.header.height = "finality" in p ? finals[k] : p.block_id;
+      return j;
+    },
+    async query(p) {
+      const j = structuredClone(rec.pool![side].json) as { result: { block_height: number } };
+      j.result.block_height = p.block_id as number;
+      return j;
+    },
+  });
+  return [one("a", 0), one("b", 1)];
+}
+const H = (FEE_READS.answers.mainnet.at.a.json as { result: { header: { height: number } } }).result.header.height;
+
+test("a stale final: one provider naming a block more than HEIGHT_SPREAD_MAX back is refused; 30 back is read", async () => {
+  const read = (finals: [number, number]) => readWithdrawFeeMax({ network: "mainnet", rpcs: anyBlock(finals), priceRpcs: anyBlock(finals), registerDeposit: REGISTER_DEPOSIT });
+  assert.equal(await read([H - 30, H]), FEE_MAX);
+  await refused(read([H - 31, H]), "disagree", /spread 31 blocks/);
+  await refused(read([H, H - 190_000]), "disagree", /spread/);
+  // on the network's pair alone (the price pair honest)
+  await refused(readWithdrawFeeMax({ network: "mainnet", rpcs: anyBlock([H - 31, H]), priceRpcs: anyBlock([H, H]), registerDeposit: 0n }), "disagree", /spread/);
+});
+
+test("each read's own checks: the header's height and gas price, the pool's block, error and bytes", async () => {
+  const testnet = (edit: FeeEdit) => readWithdrawFeeMax({ network: "testnet", rpcs: feeReplay("testnet", edit), priceRpcs: feeReplay("mainnet"), registerDeposit: 0n });
+  // a header at another height than asked (the price pair honest, so only the gas read can refuse it)
+  await refused(testnet((r, s, j) => (r === "at" && s === "a" && (header(j).height = header(j).height as number + 1), j)), "rpc", /another height/);
+  // a gas price that is not a canonical decimal, on both sides alike
+  await refused(testnet((r, _s, j) => (r === "at" && (header(j).gas_price = "1e8"), j)), "rpc", /gas price/);
+  // a height of 0 or below, on both sides alike
+  await refused(testnet((r, _s, j) => ((r === "final" || r === "at") && (header(j).height = -1), j)), "rpc", /not a block header/);
+  const pool = (edit: (j: Record<string, unknown>) => void) =>
+    readWithdrawFeeMax({ network: "mainnet", rpcs: feeReplay("mainnet"), priceRpcs: feeReplay("mainnet", (r, s, j) => (r === "pool" && s === "a" && edit(j.result as Record<string, unknown>), j)), registerDeposit: 0n });
+  await refused(pool((r) => (r.block_hash = "11111111111111111111111111111111")), "rpc", /not the pool/);
+  await refused(pool((r) => (r.error = "wasm execution failed")), "rpc", /not the pool/);
+  // bytes out of 0-255 on both sides alike (379 would wrap to 123, "{")
+  await refused(
+    readWithdrawFeeMax({ network: "mainnet", rpcs: feeReplay("mainnet"), priceRpcs: feeReplay("mainnet", (r, _s, j) => (r === "pool" && ((j.result as { result: number[] }).result[0] = 379), j)), registerDeposit: 0n }),
+    "rpc",
+    /not bytes/,
+  );
+});
+
+test("the pool's shape: exactly [USDC, wNEAR] and two amounts; its USDC side at or above the 250,000 USDC floor", async () => {
+  const both = (f: (p: Record<string, unknown>) => void): FeeEdit => (r, _s, j) => (r === "pool" ? poolBytes(j, f) : j);
+  const usdc = NEAR_NETWORKS.mainnet.token;
+  await refused(withEdit("mainnet", both((p) => (p.token_account_ids = [usdc, "usdt.tether-token.near"]))), "pool", /USDC/);
+  await refused(withEdit("mainnet", both((p) => (p.token_account_ids = [usdc, "wrap.near", "usdt.tether-token.near"]))), "pool", /USDC/);
+  await refused(withEdit("mainnet", both((p) => (p.amounts = [...(p.amounts as string[]), "1"]))), "pool", /amounts/);
+  await refused(withEdit("mainnet", both((p) => ((p.amounts as string[])[0] = "249999999999"))), "pool", /floor/);
+  const at = await withEdit("mainnet", both((p) => ((p.amounts as string[])[0] = "250000000000")));
+  assert.equal(at, (105_946_500_000_000_000_000_000n * 250_000_000_000n + BigInt(POOL.amounts[1]) - 1n) / BigInt(POOL.amounts[1]));
+});
+
+test("a bound read in one place: the deposit, arming, bind and fee reads share heightSpreadOver", async () => {
+  const { heightSpreadOver, HEIGHT_SPREAD_MAX } = await import("../src/deposit/account.ts");
+  assert.equal(HEIGHT_SPREAD_MAX, 30);
+  assert.equal(heightSpreadOver([100, 130]), null);
+  assert.equal(heightSpreadOver([131n, 100n]), "the reads' heights spread 31 blocks, over 30");
+  assert.equal(heightSpreadOver([100, 120, 131]), "the reads' heights spread 31 blocks, over 30");
+});

@@ -16,7 +16,7 @@ import { after, test } from "node:test";
 import { type HelperWithdrawAnswer, type HelperWithdrawFeeAnswer } from "@blindfill/kit";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { askWithdrawFee, type RelayDeps, type RelayRpc, relayWithdraw, sendWithdraw, WITHDRAW_FEE_URL, WITHDRAW_URL, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
+import { askWithdrawFee, type RelayDeps, type RelayRpc, relayWithdraw, WITHDRAW_FEE_URL, WITHDRAW_URL, withdrawAnswerOf, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
 import { type WithdrawRequest, WITHDRAW_SEND_MARGIN_MS, withdrawRequest } from "../src/withdraw/request.ts";
 import { argsFor, BLOCK_MS, closeVaults, FEE_MAX, type FeeEdit, feeReplay, RELAY_FEE, SEED, signalsProver, TOKEN, type Vault, vaultWith } from "./withdraw-fixture.ts";
 
@@ -84,9 +84,13 @@ test("the fee: every recorded bad answer is refused, and the amount bounds a goo
 
 // ---------- the send's answers ----------
 test("the send: submitted and the frozen codes at their status are answers; anything else is not", async () => {
-  assert.deepEqual(await sendWithdraw("{}", helper(() => A.withdraw.submitted)), { ok: true, txHash: SUBMITTED.tx_hash });
-  for (const [code, a] of Object.entries(A.withdraw.codes)) assert.deepEqual(await sendWithdraw("{}", helper(() => a)), { ok: false, code });
-  for (const [name, bad] of Object.entries(A.withdraw.bad)) await assert.rejects(sendWithdraw("{}", helper(() => bad)), WithdrawRelayRefused, name);
+  const res = (a: Answer) => new Response(typeof a.body === "string" ? a.body : JSON.stringify(a.body), { status: a.status });
+  assert.deepEqual(await withdrawAnswerOf(res(A.withdraw.submitted)), { ok: true, txHash: SUBMITTED.tx_hash });
+  for (const [code, a] of Object.entries(A.withdraw.codes)) assert.deepEqual(await withdrawAnswerOf(res(a)), { ok: false, code });
+  for (const [name, bad] of Object.entries(A.withdraw.bad)) await assert.rejects(withdrawAnswerOf(res(bad)), WithdrawRelayRefused, name);
+  // no sender but relayWithdraw: the send itself is not on the module's surface
+  const mod = await import("../src/withdraw/relay.ts");
+  assert.equal(Object.hasOwn(mod, "sendWithdraw"), false);
 });
 
 // ---------- a model vault's pages on two RPCs ----------
@@ -495,4 +499,34 @@ test("a note HELD by this very attempt (its context and deadline written, the pr
   const asHeld = { ...req, noteId: held.id, change: { ...req.change, l: held.leaf!.label } };
   await assert.rejects(relayWithdraw(SEED, asHeld, depsOf(v, new Chain(), helper(() => A.withdraw.submitted, sent))), (e: WithdrawRelayRefused) => e.code === "note");
   assert.equal(sent.length, 0);
+});
+
+test("the fee read's own edges: its input refusal is the caller's, a relay_fee that is not a decimal, no read while the pages fail", async () => {
+  {
+    const { v, req } = await reserved();
+    const huge = { ...req, body: { ...req.body, withdrawal: { ...req.body.withdrawal, register_deposit: String(1n << 128n) } } };
+    const sent: Sent[] = [];
+    await assert.rejects(relayWithdraw(SEED, huge, depsOf(v, new Chain(), helper(() => A.withdraw.submitted, sent))), (e: WithdrawRelayRefused) => e.code === "input" && /registerDeposit/.test(e.message));
+    assert.equal(sent.length, 0);
+  }
+  {
+    const { v, req } = await reserved();
+    const odd = { ...req, body: { ...req.body, withdrawal: { ...req.body.withdrawal, relay_fee: "3e4" } } };
+    await assert.rejects(relayWithdraw(SEED, odd, depsOf(v, new Chain(), helper(() => A.withdraw.submitted))), (e: WithdrawRelayRefused) => e.code === "input" && /relay_fee/.test(e.message));
+  }
+  // while one RPC is down the pages give no block, and fee_max is not read either
+  const { v, req } = await reserved();
+  const c = new Chain();
+  c.bDown = true;
+  let priceReads = 0;
+  let readsWhileDown = -1;
+  const price = priceRpcs().map((r) => ({ ...r, name: r.name, block: (p: Parameters<RelayRpc["block"]>[0]) => (priceReads++, r.block(p)), query: r.query })) as [RelayRpc, RelayRpc];
+  const script = (round: number) => {
+    if (round === 3) (readsWhileDown = priceReads), (c.bDown = false);
+    if (round === 6) landOwn(c, req);
+  };
+  const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.submitted), script, 1_000n, { priceRpcs: price }));
+  assert.equal(out.kind, "landed");
+  assert.equal(readsWhileDown, 0);
+  assert.ok(priceReads > 0);
 });

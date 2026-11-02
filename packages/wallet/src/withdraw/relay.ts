@@ -156,8 +156,9 @@ export async function askWithdrawFee(a: WithdrawFeeArgs): Promise<WithdrawFee> {
 /** The relayer's answer to one send, checked: submitted with a tx hash, or one of the frozen codes at its status. */
 export type WithdrawAnswer = { ok: true; txHash: string } | { ok: false; code: HelperWithdrawCode | HelperCommonCode };
 
-/** POSTs the body's bytes to the release's relayer; anything that is not a withdraw answer throws. */
-export async function sendWithdraw(bytes: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<WithdrawAnswer> {
+// POSTs the body's bytes to the release's relayer. Module-private: relayWithdraw is the only sender, so nothing is sent
+// without its note and fee_max checks.
+async function sendWithdraw(bytes: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<WithdrawAnswer> {
   const res = await fetchFn(WITHDRAW_URL, {
     ...HELPER_FETCH_INIT,
     redirect: "error",
@@ -166,6 +167,11 @@ export async function sendWithdraw(bytes: string, fetchFn: typeof fetch = fetch,
     body: bytes,
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(RELAY_TIMEOUT_MS)]) : AbortSignal.timeout(RELAY_TIMEOUT_MS),
   });
+  return withdrawAnswerOf(res);
+}
+
+/** The relayer's answer to a send, read: submitted with a tx hash, or a frozen code at its status; anything else throws. */
+export async function withdrawAnswerOf(res: Response): Promise<WithdrawAnswer> {
   const body = await jsonOf(res);
   if (res.status === 200 && isObj(body) && Object.keys(body).length === 2 && body.state === "submitted" && typeof body.tx_hash === "string") {
     let raw: Uint8Array | undefined;
