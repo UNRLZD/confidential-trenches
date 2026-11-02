@@ -5,14 +5,15 @@ ready proof's chunk to the fresh wallet W and then runs the instructions W signe
 signer privilege is the only one carried into them. The pool never signs with `invoke_signed`. Any venue W signed for
 works, and the venue's program id is an account of this instruction, so it loads from our lookup table.
 
-Written by card sol-pool-buy-tx. The kit builds this layout today, for its size only, in
-`packages/kit/src/trade/solana/pool-buy.ts` (`solanaEncodePoolTag3`, `buildSolanaPoolBuyTag3`). Until the program has
-tag 3, the kit sends shape A: tag 2, then the venue's buy as its own top-level instruction.
+Written by card sol-pool-buy-tx; the program has it since card pool-sol-buy-sell (`src/buy.rs`). Every Solana buy is
+tag 3 with the compressed proof: the kit builds and checks only this (`packages/kit/src/trade/solana/pool-buy.ts`,
+`buildSolanaPoolBuy`, `checkSolanaPoolBuy`), and the helper carries only compute budget plus one pool tag 2 or tag 3
+instruction (card helper-pool-senders).
 
 ## Why
 
-Shape A (tag 2 plus a top-level buy) works and has landed in LiteSVM on a copy of mainnet's pump program. Every
-program it invokes at the top level must be a static key, because a v0 message cannot invoke a program it loads from
+Tag 2 plus the buy as its own top-level instruction (shape A, no longer built) landed on pump, but every program it
+invokes at the top level must be a static key, because a v0 message cannot invoke a program it loads from
 a lookup table. On PumpSwap, the venue, the token program for the wrap, the ATA program and the system program are
 all static keys, and the transaction is 1,346 B without a tip and 1,364 B with one, over 1,232. Tag 3 invokes only
 the pool at the top level (besides the compute budget), so every venue account and program loads from the table.
@@ -69,43 +70,49 @@ and writable as the outer account is.
    - Flags with any bit other than bit 0 set, an inner count of 0 or more than 8, or an index past the accounts refuse
      with `InvalidInstructionData`.
    - An inner program that is this program refuses with `InnerInvokesPool`, so the pool never re-enters itself.
-   - An inner instruction that names account 0, 3, 4, 5 or 6 (the pool and its marks and pages) refuses with
-     `InnerNamesPoolAccount`.
-   - An inner account that is a signer and is not W refuses with `InnerSignerNotW`. The fee payer's signature never
-     reaches a venue, so a venue cannot debit the relayer.
+   - An inner account, or the tip account, that is the pool, its spent mark or a page this release reads or writes
+     (by key: the keys of accounts 0, 3, 4, 5 and 6, at whatever index they appear again), or any account this
+     program owns (by owner), refuses with `InnerNamesPoolAccount`.
+   - An inner account that signed this instruction and is not W (by key) refuses with `InnerSignerNotW`. The fee
+     payer's signature never reaches a venue, so a venue cannot debit the relayer.
 3. Pay, from the pool's own lamports: `withdrawnValue - relay_fee - tip` to W, `relay_fee` to the fee payer and `tip`
-   to account 8. `spent += withdrawnValue`.
+   to account 8. `spent += withdrawnValue`. Then a 0-lamport system transfer from W to the pool, naming the fee payer
+   and the tip account, so the runtime sees those balances before any venue runs.
 4. Each inner instruction runs in order with `invoke`, never `invoke_signed`. A failing inner instruction fails the
    whole transaction, which undoes the release and its spent mark with it.
 
-The device checks everything else before W signs. It rebuilds every inner instruction from the user's own request and
-the venue's accounts read on two RPCs, and checks the buy's minimum out against the reserves (`checkSolanaPoolBuy`).
-W's signature covers every byte and every account, so a relayer cannot change an inner instruction, add one or point
-the tip elsewhere.
+The device checks everything else before W signs (`checkSolanaPoolBuy`): the message carries the device's own
+blockhash; it is exactly CU limit, CU price and this instruction; every inner instruction is rebuilt from the user's
+own request and the venue's accounts read on two RPCs and compared as the pool will run it (program, data, keys,
+signer only on W, writable as the message gives it); the tip goes to a Jito tip account; the chunk
+(`withdrawnValue - relay_fee - tip`) covers the spend, W's token account (its Token-2022 size read from the mint), the
+venue's volume account and, on PumpSwap, the wrapped-SOL account at its peak, leaving W 0 or at least rent(0), on the
+Rent sysvar read on two RPCs; and the buy's minimum out holds against the reserves read at most 25 slots before. W's
+signature covers every byte and every account, so a relayer cannot change an inner instruction, add one or point the
+tip elsewhere.
 
 ## Limits it stays under
 
 - CPI depth: pool, then the venue, then the venue's own event self-CPI or a token CPI, is depth 3, under the limit of
   4. The ATA program's create reaches the token and system programs at depth 3.
-- Compute: 300,000 CU on pump and 400,000 on PumpSwap, the kit's `SOLANA_POOL_BUY_CU`. Measured in LiteSVM for shape
-  A on pump: 216,440 CU in all, with the release at 125,373 and pump at 72,018 plus 2,170 in the fee program.
+- Compute: 300,000 CU on pump and 400,000 on PumpSwap, the kit's `SOLANA_POOL_BUY_CU`. Measured in LiteSVM on copies
+  of mainnet's programs and accounts with the compressed proof (`packages/kit/test/svm/pool-buy.svm.mjs`,
+  2026-11-02 22:50Z): pump 244,485 CU in all with a tip (pump 68,203, its fee program 2,170); PumpSwap 293,144
+  (PumpSwap 89,050, fee program 2,116).
 
 ## Sizes
 
-These are bytes of the signed v0 transaction: 2 signatures, our lookup table holding the pool, its pages and every
-program-wide venue account. They come from `packages/kit/test/solana-pool-buy.test.ts` on the venues read from
-mainnet on 2026-11-02.
+Bytes of the signed v0 transaction: 2 signatures, our lookup table holding the pool, its pages and every program-wide
+venue account. From `packages/kit/test/solana-pool-buy.test.ts` on the venues read from mainnet on 2026-11-02, and the
+same in the LiteSVM run that landed each one.
 
-| Shape | Venue | Proof | No tip | With Jito tip | Fits 1,232 |
-|---|---|---|---|---|---|
-| A (tag 2 + top-level buy) | pump | raw | 1,138 | 1,187 | yes / yes |
-| A | PumpSwap | raw | 1,346 | 1,364 | no / no |
-| B (tag 3) | pump | raw | 1,105 | 1,107 | yes / yes |
-| B | pump | compressed | 977 | 979 | yes / yes |
-| B | PumpSwap | raw | 1,262 | 1,264 | no / no |
-| B | PumpSwap | compressed | 1,134 | 1,136 | yes / yes |
+| Venue | Proof | No tip | With Jito tip | Fits 1,232 |
+|---|---|---|---|---|
+| pump | compressed | 977 | 979 | yes / yes |
+| PumpSwap | compressed | 1,134 | 1,136 | yes / yes |
 
-So PumpSwap needs tag 3 with the compressed proof. Its inner instructions are: create W's wSOL account, move the
-spend into it, SyncNative, create W's token account, `buy_exact_quote_in`, then close the wSOL account. The venue's
-remaining accounts are the `pool-v2` PDA and a buyback recipient with its wSOL account, plus a cashback account on a
-cashback coin. A cashback coin adds one static key, 33 B more, and stays under 1,232.
+The raw proof adds 128 B: pump 1,105 / 1,107 and PumpSwap 1,262 / 1,264, over 1,232, so the kit sends only the
+compressed proof. PumpSwap's inner instructions are: create W's wSOL account, move the spend into it, SyncNative,
+create W's token account, `buy_exact_quote_in`, then close the wSOL account. The venue's remaining accounts are the
+`pool-v2` PDA and a buyback recipient with its wSOL account, plus a cashback account on a cashback coin. A cashback
+coin adds one static key, 33 B more, and stays under 1,232.

@@ -4,13 +4,12 @@
 // `user`. W and the fee payer are the two signers; W's signature covers every account and byte, so no relayer can
 // redirect the release or the buy.
 //
-// Shapes:
-// - A (lands now): the pool's tag 2 `release`, then the venue's buy as its own top-level instruction. Every invoked
-//   program is a static key (a v0 message never invokes a program it loads from a table).
-// - B (tag 3, release-and-buy, contracts/pool-solana/TAG3.md): one top-level instruction into the pool, which verifies,
-//   pays W, then invokes the inner instructions W signed for with W's signer privilege only (never invoke_signed). The
-//   venue's program id is then an account, loaded from our lookup table. Built here for its size only, until the pool
-//   has tag 3 (card pool-sol-buy-sell).
+// One shape: tag 3, release-and-buy (contracts/pool-solana/TAG3.md, src/buy.rs), with the compressed proof. One
+// top-level instruction into the pool, which verifies, pays W its chunk and the tip, then invokes the inner
+// instructions W signed for with W's signer privilege only (never invoke_signed); the venue's program is an account, so
+// it loads from our lookup table. The helper carries only compute budget plus one pool tag 2 or tag 3 instruction
+// (card helper-pool-senders), so there is no other path. Measured in LiteSVM on mainnet copies 2026-11-02 22:50Z: pump
+// 977 B (979 with a tip), 244k CU; PumpSwap 1,134 B (1,136), 294k CU.
 //
 // The release (tag 2), as contracts/pool-solana/src/release.rs lays it out at f0d85a8:
 // - data, 387 bytes: tag 2 ‖ proof (256) ‖ newCommitmentHash (32) ‖ existingNullifierHash (32) ‖ withdrawnValue u64 ‖
@@ -26,9 +25,11 @@
 // args spendable_quote_in u64, min_base_amount_out u64, track_volume OptionBool). Both spend an exact input, which is
 // what a chunk is. PumpSwap spends wrapped SOL, so W wraps exactly the spend first and closes the wrapped account after.
 //
-// Never sign on a server's word: checkSolanaPoolBuy rebuilds every instruction from the user's own request, the ready
-// proof and the venue's accounts read on two providers, and compares the message to it byte for byte; the buy's
-// min_out must also hold against the reference E read from the venue's reserves on both providers (pool.ts).
+// Never sign on a server's word: checkSolanaPoolBuy rebuilds every instruction, inner ones included, from the user's own
+// request, the ready proof, the venue's accounts read on two providers and the Rent sysvar, and compares the message to
+// it byte for byte and flag for flag, on the device's own blockhash; the chunk must cover the spend and W's new
+// accounts, and the buy's min_out must hold against the reference E read from the venue's reserves on both providers
+// (pool.ts) at most SOLANA_POOL_QUOTE_MAX_AGE_SLOTS ago.
 import { base58, base64 } from "@scure/base";
 import {
   SOLANA_ALT_PROGRAM,
@@ -213,11 +214,11 @@ export function solanaPoolReleaseAccounts(cfg: SolanaPoolConfig, wallet: string,
 /** What the buy needs from the venue's accounts, as both providers read them (readSolanaPoolBuyVenue). */
 export type SolanaPoolBuyVenue =
   | {
-      readonly kind: "pump-curve"; readonly mint: string; readonly tokenProgram: string; readonly curve: string; readonly creator: string; readonly feeRecipient: string;
+      readonly kind: "pump-curve"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly curve: string; readonly creator: string; readonly feeRecipient: string;
       readonly buybackFeeRecipients: readonly string[]; readonly buybackFeeRecipient: string;
     }
   | {
-      readonly kind: "pumpswap"; readonly mint: string; readonly tokenProgram: string; readonly pool: string; readonly baseVault: string;
+      readonly kind: "pumpswap"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly pool: string; readonly baseVault: string;
       readonly quoteVault: string; readonly coinCreator: string; readonly cashback: boolean; readonly protocolFeeRecipient: string;
       readonly buybackFeeRecipients: readonly string[]; readonly buybackFeeRecipient: string;
     };
@@ -347,6 +348,145 @@ export function solanaPoolBuySteps(venue: SolanaPoolBuyVenue, wallet: string, sp
   ];
 }
 
+// ------------------------------------------------------------------------------------------------- the proof
+
+const FIELD_Q = 21888242871839275222246405745257275088696311157297823662689037894645226208583n;
+const be32 = (x: bigint): number[] => Array.from({ length: 32 }, (_, i) => Number((x >> BigInt(8 * (31 - i))) & 0xffn));
+const negQ = (y: bigint): bigint => (y === 0n ? 0n : FIELD_Q - y);
+
+/**
+ * The proof in the alt_bn128 compressed form tag 3's flag bit 0 names, the inverse of solana-bn254 3.2.1
+ * `alt_bn128_g1_decompress_be` / `alt_bn128_g2_decompress_be` (ark-serialize's SW compression, byte order reversed):
+ * A and C as x (32, big-endian), B as x.c1 ‖ x.c0 (64); bit 7 of the first byte set when y > -y (for B, c1 is compared
+ * first, then c0, as ark-ff orders a quadratic extension). 256 bytes in, 128 out.
+ */
+export function solanaCompressPoolProof(proof: Uint8Array): Uint8Array {
+  if (!(proof instanceof Uint8Array) || proof.length !== SOLANA_POOL_PROOF_BYTES) throw new Error(`the proof must be ${SOLANA_POOL_PROOF_BYTES} bytes`);
+  const at = (o: number): bigint => {
+    const v = be(proof.subarray(o, o + 32));
+    if (v >= FIELD_Q) throw new Error("a proof coordinate is not below q");
+    return v;
+  };
+  const g1 = (o: number): number[] => {
+    const [x, y] = [at(o), at(o + 32)];
+    if (x === 0n && y === 0n) throw new Error("a proof point is the point at infinity");
+    const out = be32(x);
+    if (y > negQ(y)) out[0]! |= 0x80;
+    return out;
+  };
+  const [x1, x0, y1, y0] = [at(64), at(96), at(128), at(160)];
+  if (x1 === 0n && x0 === 0n && y1 === 0n && y0 === 0n) throw new Error("a proof point is the point at infinity");
+  const b = [...be32(x1), ...be32(x0)];
+  if (y1 !== negQ(y1) ? y1 > negQ(y1) : y0 > negQ(y0)) b[0]! |= 0x80;
+  return Uint8Array.from([...g1(0), ...b, ...g1(192)]);
+}
+
+// ------------------------------------------------------------------------------------------------- rent
+
+/** The Rent sysvar, as the device reads it on two providers: lamports per byte and the exemption factor (1 since
+ * SIMD-0194; 2 before). Read 2026-11-02 22:19Z on mainnet-beta and publicnode: 5,080 lamports a byte, factor 1.0. */
+export type SolanaRent = { readonly lamportsPerByte: bigint; readonly factor: 1n | 2n };
+export const SOLANA_RENT_SYSVAR = "SysvarRent111111111111111111111111111111111";
+const SOLANA_SYSVAR_OWNER = "Sysvar1111111111111111111111111111111111111";
+/** solana-rent 4.4.0 ACCOUNT_STORAGE_OVERHEAD. */
+const RENT_OVERHEAD = 128n;
+
+/** The Rent sysvar's 17 bytes: lamports_per_byte u64, exemption_threshold f64, burn_percent u8. Only a factor of
+ * exactly 1.0 or 2.0 is taken (the two solana-rent computes without floats); anything else is refused. */
+export function solanaRentOf(a: { owner: string; data: Uint8Array } | null): SolanaRent {
+  if (!a || a.owner !== SOLANA_SYSVAR_OWNER || a.data.length !== 17) throw new Error("not the Rent sysvar");
+  const v = new DataView(a.data.buffer, a.data.byteOffset, 17);
+  const lamportsPerByte = v.getBigUint64(0, true);
+  const t = v.getFloat64(8, true);
+  if (lamportsPerByte === 0n || lamportsPerByte > 1_000_000n) throw new Error("rent per byte out of range");
+  if (t !== 1 && t !== 2) throw new Error(`a rent exemption factor of ${t}`);
+  return { lamportsPerByte, factor: t === 1 ? 1n : 2n };
+}
+/** solana-rent's minimum_balance(size). */
+export const solanaRentMin = (rent: SolanaRent, size: number): bigint => (RENT_OVERHEAD + BigInt(size)) * rent.lamportsPerByte * rent.factor;
+
+/** The Rent sysvar read on both providers at `confirmed`; throws unless both give the same rate. */
+export async function readSolanaRent(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaRent> {
+  if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
+  const rents = await Promise.all(providers.map(async (rpc) => {
+    const r = await withTimeout(Promise.resolve().then(() => rpc("getAccountInfo", [SOLANA_RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }])), READ_TIMEOUT_MS);
+    const value = (r as { value?: { owner?: unknown; data?: unknown } } | null)?.value;
+    const d = value?.data;
+    if (!value || typeof value.owner !== "string" || !Array.isArray(d) || typeof d[0] !== "string" || d[1] !== "base64") throw new Error("a provider's answer is not an account read");
+    return solanaRentOf({ owner: value.owner, data: base64.decode(d[0]) });
+  }));
+  if (rents[0]!.lamportsPerByte !== rents[1]!.lamportsPerByte || rents[0]!.factor !== rents[1]!.factor) throw new Error("the providers disagree on rent");
+  return rents[0]!;
+}
+
+// ------------------------------------------------------------------------------------------------- the sell
+
+const SELL = [51, 230, 133, 164, 1, 127, 131, 173]; // Anchor "global:sell", pump's and PumpSwap's
+
+/**
+ * The least a sell of `amount` tokens may give, in lamports: E for exactly `amount` from the venue's reserves read on
+ * two providers (readSolanaReference, side "sell"), less the user's slippage. Never 1 lamport: a sell that would take
+ * anything is the sandwich a min out exists to stop. Throws without a reference for this venue, this amount and a
+ * floor above 0.
+ */
+export function solanaPoolSellMinOut(venue: SolanaPoolBuyVenue, amount: bigint, reference: { readonly amount: bigint; readonly ref: SolanaReference | null; readonly slippageBps: number }): bigint {
+  const { ref, slippageBps } = reference;
+  if (!isU64(amount) || amount === 0n || reference.amount !== amount) throw new Error("the reference is not for the amount sold");
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) throw new Error("slippage out of range");
+  const addr = venue.kind === "pump-curve" ? venue.curve : venue.pool;
+  const pool = ref?.pools.find((x) => x.address === addr && x.venue === venue.kind);
+  if (!pool) throw new Error(`no reference read for ${addr} on two providers`);
+  const floor = (pool.expectedOut * BigInt(10_000 - slippageBps)) / 10_000n;
+  if (floor === 0n) throw new Error("the sell's floor is 0");
+  return floor;
+}
+
+/**
+ * W's sell of `amount` tokens for at least `minOut` lamports (from solanaPoolSellMinOut). pump: `sell` with the IDL's
+ * 14 accounts, then the remaining ones @pump-fun/pump-sdk 4.3.1 getSellInstructionRaw passes (W's volume accumulator
+ * for a cashback coin only, bonding-curve-v2, the buyback recipient writable). PumpSwap: W's wrapped-SOL account made,
+ * `sell` (the buy's first 19 accounts, its fee config and fee program; remaining: for a cashback pool the volume
+ * accumulator's wSOL account and the accumulator, pool-v2 when the coin has a creator, the buyback recipient and its
+ * wSOL account), then the wrapped-SOL account closed so W ends with plain SOL (pump-swap-sdk 2.2.0
+ * sellInstructionsNoPool). The same steps contracts/pool-solana/fixtures/venues/dump.mjs ran on mainnet's code.
+ */
+export function solanaPoolSellSteps(venue: SolanaPoolBuyVenue, wallet: string, amount: bigint, minOut: bigint, cashbackCurve = false): SolanaApiInstruction[] {
+  if (!isU64(amount) || amount === 0n || !isU64(minOut) || minOut === 0n) throw new Error("amount and minOut must be u64s above 0");
+  const data = [...SELL, ...u64le(amount), ...u64le(minOut)];
+  const tp = venue.tokenProgram;
+  if (venue.kind === "pump-curve") {
+    return [ix(SOLANA_PUMP_PROGRAM, [
+      acc(PUMP_GLOBAL, false, false),
+      acc(venue.feeRecipient, false, true),
+      acc(venue.mint, false, false),
+      acc(venue.curve, false, true),
+      acc(solanaAta(venue.curve, venue.mint, tp), false, true),
+      acc(solanaAta(wallet, venue.mint, tp), false, true),
+      acc(wallet, true, true),
+      acc(SOLANA_SYSTEM_PROGRAM, false, false),
+      acc(solanaProgramAddress([enc("creator-vault"), base58.decode(venue.creator)], SOLANA_PUMP_PROGRAM), false, true),
+      acc(tp, false, false),
+      acc(solanaEventAuthority(SOLANA_PUMP_PROGRAM), false, false),
+      acc(SOLANA_PUMP_PROGRAM, false, false),
+      acc(PUMP_FEE_CONFIG, false, false),
+      acc(SOLANA_PUMP_FEES_PROGRAM, false, false),
+      ...(cashbackCurve ? [acc(solanaVolumeAccumulator(wallet, SOLANA_PUMP_PROGRAM), false, true)] : []),
+      acc(solanaProgramAddress([enc("bonding-curve-v2"), base58.decode(venue.mint)], SOLANA_PUMP_PROGRAM), false, false),
+      acc(venue.buybackFeeRecipient, false, true),
+    ], data)];
+  }
+  const buy = solanaPoolVenueBuy(venue, wallet, 1n, 1n);
+  const rest = buy.accounts.slice(23);
+  const vol = solanaVolumeAccumulator(wallet, SOLANA_PUMP_AMM_PROGRAM);
+  const remaining = venue.cashback ? [acc(solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), false, true), acc(vol, false, true), ...rest.slice(1)] : rest;
+  const wsol = solanaAta(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  return [
+    createIdempotent(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM),
+    ix(SOLANA_PUMP_AMM_PROGRAM, [...buy.accounts.slice(0, 19), ...buy.accounts.slice(21, 23), ...remaining], data),
+    ix(SOLANA_TOKEN_PROGRAM, [acc(wsol, false, true), acc(wallet, false, true), acc(wallet, true, false)], [9]), // CloseAccount
+  ];
+}
+
 // ------------------------------------------------------------------------------------------------- the build
 
 export type SolanaPoolBuyRequest = {
@@ -355,7 +495,7 @@ export type SolanaPoolBuyRequest = {
   readonly token: string;
   readonly spend: bigint; // lamports into the venue
   readonly minOut: bigint; // token base units, the least the buy may give
-  readonly tip: bigint; // lamports from W to a Jito tip account; 0 for none; at most the proof's tip cap
+  readonly tip: bigint; // lamports the pool pays a Jito tip account out of the chunk; 0 for none; at most the proof's tip cap
   readonly cuPrice: bigint; // micro-lamports per CU
 };
 export type SolanaPoolBuyChain = {
@@ -363,10 +503,10 @@ export type SolanaPoolBuyChain = {
   readonly lastValidBlockHeight: number;
   readonly table: { readonly address: string; readonly table: SolanaLookupTable }; // our lookup table, as the device read it
   readonly stateSize: number; // the pool's state tree size now, read by the device
+  readonly rent: SolanaRent; // the Rent sysvar, read on two providers
 };
 export type SolanaPoolBuyOptions = { readonly pick?: (n: number) => number };
 export type SolanaPoolBuyBuilt = {
-  readonly shape: "A";
   readonly wire: Uint8Array; // two zeroed signature slots (fee payer, W), then the message
   readonly message: Uint8Array;
   readonly size: number;
@@ -381,52 +521,50 @@ const randomIndex = (n: number): number => {
   return (u[0] as number) % n;
 };
 
-function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest): void {
+/** Account sizes W pays rent for during a buy: a legacy token account, and each venue's user volume accumulator, which
+ * the venue's buy makes for a W that has none: 137 bytes on both, as mainnet's pump and PumpSwap code made them in
+ * LiteSVM for a fresh W, 2026-11-02 22:50Z (W ended with exactly what solanaPoolBuyFunds says it keeps). */
+const TOKEN_ACCOUNT_SIZE = 165;
+export const SOLANA_POOL_VOLUME_ACCOUNT_SIZE = { "pump-curve": 137, pumpswap: 137 } as const;
+
+/**
+ * What W's chunk must cover, in lamports, on today's rent (every account counted as made new, which only raises W's
+ * balance when one already exists):
+ * - the spend, W's token account (its size from the mint: Token-2022 adds its extensions), the venue's volume account;
+ * - PumpSwap: W's wrapped-SOL account while the spend sits in it (its rent comes back when it is closed);
+ * - W after the buy holds 0 or at least rent(0), the runtime's floor for a system account.
+ * `peak` is what W pays out at its lowest point, `left` what W holds after.
+ */
+export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
+  const chunk = release.withdrawnValue - release.relayFee - req.tip;
+  const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venue.kind]) +
+    (venue.kind === "pumpswap" && venue.cashback ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
+  const peak = kept + (venue.kind === "pumpswap" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
+  const left = chunk - kept;
+  const floor = solanaRentMin(rent, 0);
+  const problem =
+    chunk < 0n ? "the relay fee and the tip are more than the release"
+    : chunk < peak ? `the chunk ${chunk} does not cover the spend and W's new accounts (${peak})`
+    : left > 0n && left < floor ? `W would keep ${left} lamports, under the ${floor} a wallet must hold or 0`
+    : null;
+  return { chunk, peak, left, problem };
+}
+
+function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, rent: SolanaRent): void {
   for (const k of [cfg.program, cfg.pool, req.wallet, req.feePayer, req.token]) if (!isKey(k)) throw new Error("program, pool, wallet, fee payer and token must be addresses");
   if (cfg.pool !== solanaPoolAccount(cfg.program)) throw new Error("the pool is not the program's pool account");
   if (req.wallet === req.feePayer || req.wallet === cfg.pool || req.feePayer === cfg.pool) throw new Error("W, the fee payer and the pool must differ");
   if (venue.mint !== req.token) throw new Error("the venue is not the token's");
   if (!isU64(req.tip) || req.tip > release.tipCap) throw new Error("the tip is over the proof's tip cap");
   if (!isU64(req.cuPrice) || req.cuPrice > SOLANA_CU_PRICE_MAX) throw new Error("the CU price is over its cap");
-  // W pays the spend and the tip out of the chunk the release pays it (withdrawn - relay_fee)
-  if (req.spend + req.tip > release.withdrawnValue - release.relayFee) throw new Error("the spend and the tip are more than the chunk W receives");
+  const f = solanaPoolBuyFunds(release, venue, req, rent);
+  if (f.problem) throw new Error(f.problem);
 }
-
-/** The instructions of shape A, in order. */
-export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, stateSize: number, tipAccount: string | null): SolanaApiInstruction[] {
-  checkRequest(cfg, release, venue, req);
-  const cu = SOLANA_POOL_BUY_CU[venue.kind];
-  return [
-    ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(cu)]),
-    ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [3, ...u64le(req.cuPrice)]),
-    ix(cfg.program, solanaPoolReleaseAccounts(cfg, req.wallet, req.feePayer, release, stateSize), solanaEncodePoolRelease(release)),
-    ...solanaPoolBuySteps(venue, req.wallet, req.spend, req.minOut),
-    ...(req.tip > 0n && tipAccount ? [transfer(req.wallet, tipAccount, req.tip)] : []),
-  ];
-}
-
-/** Shape A: the unsigned v0 transaction the fee payer and W sign. Refuses over 1,232 bytes. */
-export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: SolanaPoolBuyChain, opts: SolanaPoolBuyOptions = {}): SolanaPoolBuyBuilt {
-  if (!isKey(chain.blockhash) || !Number.isSafeInteger(chain.lastValidBlockHeight) || chain.lastValidBlockHeight <= 0) throw new Error("the blockhash must be the device's own read");
-  if (!solanaTableIsActive(chain.table.table)) throw new Error("our lookup table is deactivated");
-  const tipAccount = req.tip > 0n ? (SOLANA_JITO_TIP_ACCOUNTS[(opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length)] as string) : null;
-  const instructions = solanaPoolBuyInstructions(cfg, release, venue, req, chain.stateSize, tipAccount);
-  const { message } = solanaCompileV0(req.feePayer, instructions, chain.blockhash, [chain.table], [req.feePayer, req.wallet]);
-  const wire = new Uint8Array(1 + 128 + message.length);
-  wire[0] = 2;
-  wire.set(message, 129);
-  if (wire.length > SOLANA_MAX_TX_BYTES) throw new Error(`too_large: ${wire.length} bytes > ${SOLANA_MAX_TX_BYTES}`);
-  return { shape: "A", wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit: SOLANA_POOL_BUY_CU[venue.kind], instructions };
-}
-
-// ------------------------------------------------------------------------------------------------- tag 3 (shape B)
 
 /**
- * Tag 3's data (contracts/pool-solana/TAG3.md): tag 3 ‖ flags u8 (bit 0: compressed proof) ‖ proof (256 or 128) ‖ the
- * release's 130 field bytes as tag 2 ‖ tip u64 ‖ inner count u8 ‖ per inner instruction: program u8 (index into this
- * instruction's accounts) ‖ n u8 ‖ n account indexes u8 ‖ data length u16 LE ‖ data. The instruction's accounts are
- * the release's 8, then the tip account when the tip is above 0, then every account the inner instructions name, each
- * once; an inner instruction's signer and writable flags are the outer account's.
+ * Tag 3's data (contracts/pool-solana/TAG3.md, src/buy.rs): tag 3 ‖ flags u8 (bit 0: compressed proof) ‖ proof (256 or
+ * 128) ‖ the release's 130 field bytes as tag 2 ‖ tip u64 ‖ inner count u8 ‖ per inner instruction: program u8 (index
+ * into this instruction's accounts) ‖ n u8 ‖ n account indexes u8 ‖ data length u16 LE ‖ data.
  */
 export function solanaEncodePoolTag3(release: SolanaPoolRelease, compressed: boolean, tip: bigint, inner: readonly { program: number; accounts: readonly number[]; data: Uint8Array }[]): Uint8Array {
   checkRelease(release, compressed ? SOLANA_POOL_PROOF_COMPRESSED_BYTES : SOLANA_POOL_PROOF_BYTES);
@@ -440,12 +578,21 @@ export function solanaEncodePoolTag3(release: SolanaPoolRelease, compressed: boo
   return Uint8Array.from(out);
 }
 
-/** Shape B's unsigned v0 transaction (its size; the pool has no tag 3 yet). */
-export function buildSolanaPoolBuyTag3(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: SolanaPoolBuyChain, opts: SolanaPoolBuyOptions & { compressed: boolean }): { wire: Uint8Array; size: number } {
-  checkRequest(cfg, release, venue, req);
+/** Tag 3's head before the inner instructions: tag, flags, the compressed proof, the 130 field bytes, the tip. */
+const TAG3_HEAD = 2 + SOLANA_POOL_PROOF_COMPRESSED_BYTES + 130 + 8;
+
+/**
+ * The transaction's three instructions: CU limit, CU price, and tag 3 into the pool with the compressed proof. Tag 3's
+ * accounts are the release's eight, the tip account when the tip is above 0, then every account the steps name, each
+ * once with its flags merged; the steps (solanaPoolBuySteps) are its inner instructions.
+ */
+export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, stateSize: number, rent: SolanaRent, tipAccount: string | null): SolanaApiInstruction[] {
+  checkRequest(cfg, release, venue, req, rent);
+  if ((req.tip > 0n) !== (tipAccount !== null)) throw new Error("a tip account goes with a tip above 0, and only then");
+  if (tipAccount !== null && !SOLANA_JITO_TIP_ACCOUNTS.includes(tipAccount)) throw new Error("the tip account is not a Jito tip account");
   const steps = solanaPoolBuySteps(venue, req.wallet, req.spend, req.minOut);
-  const tipAccount = req.tip > 0n ? (SOLANA_JITO_TIP_ACCOUNTS[(opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length)] as string) : null;
-  const outer: SolanaApiAccount[] = [...solanaPoolReleaseAccounts(cfg, req.wallet, req.feePayer, release, chain.stateSize), ...(tipAccount ? [acc(tipAccount, false, true)] : [])];
+  const outer: SolanaApiAccount[] = [...solanaPoolReleaseAccounts(cfg, req.wallet, req.feePayer, release, stateSize), ...(tipAccount ? [acc(tipAccount, false, true)] : [])];
+  const head = outer.length;
   const indexOf = (a: SolanaApiAccount): number => {
     let i = outer.findIndex((o) => o.key === a.key);
     if (i < 0) i = outer.push({ ...a }) - 1;
@@ -453,17 +600,28 @@ export function buildSolanaPoolBuyTag3(cfg: SolanaPoolConfig, release: SolanaPoo
     return i;
   };
   const inner = steps.map((s) => ({ program: indexOf(acc(s.program, false, false)), accounts: s.accounts.map(indexOf), data: s.data }));
-  const data = solanaEncodePoolTag3(release, opts.compressed, req.tip, inner);
-  const ixs = [
+  // the pool refuses an inner account that is one of its own (by key or owner) or a signer other than W: never build one
+  if (outer.slice(head).some((a) => a.key === cfg.pool || a.key === cfg.program || a.key === req.feePayer)) throw new Error("a step names the pool or the fee payer");
+  const data = solanaEncodePoolTag3({ ...release, proof: solanaCompressPoolProof(release.proof) }, true, req.tip, inner);
+  return [
     ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(SOLANA_POOL_BUY_CU[venue.kind])]),
     ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [3, ...u64le(req.cuPrice)]),
     ix(cfg.program, outer, data),
   ];
-  const { message } = solanaCompileV0(req.feePayer, ixs, chain.blockhash, [chain.table], [req.feePayer, req.wallet]);
+}
+
+/** The unsigned v0 transaction the fee payer and W sign: one tag 3 release-and-buy. Refuses over 1,232 bytes. */
+export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: SolanaPoolBuyChain, opts: SolanaPoolBuyOptions = {}): SolanaPoolBuyBuilt {
+  if (!isKey(chain.blockhash) || !Number.isSafeInteger(chain.lastValidBlockHeight) || chain.lastValidBlockHeight <= 0) throw new Error("the blockhash must be the device's own read");
+  if (!solanaTableIsActive(chain.table.table)) throw new Error("our lookup table is deactivated");
+  const tipAccount = req.tip > 0n ? (SOLANA_JITO_TIP_ACCOUNTS[(opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length)] as string) : null;
+  const instructions = solanaPoolBuyInstructions(cfg, release, venue, req, chain.stateSize, chain.rent, tipAccount);
+  const { message } = solanaCompileV0(req.feePayer, instructions, chain.blockhash, [chain.table], [req.feePayer, req.wallet]);
   const wire = new Uint8Array(1 + 128 + message.length);
   wire[0] = 2;
   wire.set(message, 129);
-  return { wire, size: wire.length };
+  if (wire.length > SOLANA_MAX_TX_BYTES) throw new Error(`too_large: ${wire.length} bytes > ${SOLANA_MAX_TX_BYTES}`);
+  return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit: SOLANA_POOL_BUY_CU[venue.kind], instructions };
 }
 
 // ------------------------------------------------------------------------------------------------- the reads
@@ -472,6 +630,45 @@ const READ_TIMEOUT_MS = 5_000;
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
+}
+
+/** pump Global and PumpSwap GlobalConfig sizes, read on mainnet-beta and publicnode 2026-11-02 21:00Z; the offsets above
+ * hold only on these layouts, so any other size is refused. */
+export const SOLANA_PUMP_GLOBAL_SIZE = 1_088;
+export const SOLANA_PUMP_AMM_CONFIG_SIZE = 949;
+
+/** Token-2022 mint extensions (spl-token-2022 ExtensionType) that add nothing to a new token account. */
+const T22_MINT_ONLY = new Set([3, 4, 6, 10, 12, 16, 18, 19, 20, 21, 22, 23, 24, 25]);
+/** Mint extensions that a new token account carries one of (get_required_init_account_extensions): TransferFeeConfig
+ * -> TransferFeeAmount (8 bytes), NonTransferable -> NonTransferableAccount (0), TransferHook -> TransferHookAccount
+ * (1), Pausable -> PausableAccount (0). */
+const T22_ACCOUNT_EXT = new Map([[1, 8], [9, 0], [14, 1], [26, 0]]);
+
+/** The size of W's new associated token account for `mint`: 165 for Token; for Token-2022 165, the account type byte
+ * and a 4-byte TLV head per extension: ImmutableOwner (the associated token program always adds it) and the one each
+ * mint extension asks. A mint extension this list does not know is refused. */
+export function solanaTokenAccountSize(mint: { owner: string; data: Uint8Array }): number {
+  if (mint.owner === SOLANA_TOKEN_PROGRAM) {
+    if (mint.data.length !== 82) throw new Error("not a Token mint");
+    return TOKEN_ACCOUNT_SIZE;
+  }
+  if (mint.owner !== SOLANA_TOKEN_2022_PROGRAM) throw new Error(`mint owned by ${mint.owner}`);
+  const d = mint.data;
+  let size = TOKEN_ACCOUNT_SIZE + 1 + 4; // account type, ImmutableOwner
+  if (d.length === 82) return size;
+  if (d.length < 166 || d[165] !== 1) throw new Error("not a Token-2022 mint");
+  for (let at = 166; at < d.length; ) {
+    if (at + 4 > d.length) throw new Error("a Token-2022 extension runs past the mint");
+    const type = d[at]! | (d[at + 1]! << 8);
+    const len = d[at + 2]! | (d[at + 3]! << 8);
+    if (type === 0) break; // Uninitialized: the rest is padding
+    at += 4 + len;
+    if (at > d.length) throw new Error("a Token-2022 extension runs past the mint");
+    const extra = T22_ACCOUNT_EXT.get(type);
+    if (extra !== undefined) size += 4 + extra;
+    else if (!T22_MINT_ONLY.has(type)) throw new Error(`a Token-2022 mint extension ${type} not known here`);
+  }
+  return size;
 }
 
 /** The venue's buy accounts from one provider's read of [mint, curve, pump Global] or [mint, pool, GlobalConfig]; the
@@ -498,9 +695,10 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
     if (c.isMayhemMode) throw new Error("a Mayhem curve pays its reserved fee recipients, not built here");
     if (c.quoteMint !== SOLANA_SYSTEM_PROGRAM && c.quoteMint !== SOLANA_SOL_MINT) throw new Error("the curve is not quoted in SOL");
     solanaDecodePumpGlobal(global); // owner and discriminator
+    if (global.data.length !== SOLANA_PUMP_GLOBAL_SIZE) throw new Error(`pump Global is ${global.data.length} bytes, not ${SOLANA_PUMP_GLOBAL_SIZE}`);
     const feeRecipient = keyAt(global.data, PUMP_GLOBAL_FEE_RECIPIENT);
     if (feeRecipient === DEFAULT_KEY) throw new Error("pump Global has no fee recipient");
-    return { kind, mint, tokenProgram: m.owner, curve: addr.curve, creator: c.creator, feeRecipient, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
+    return { kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
   }
   const p = solanaDecodePumpSwapPool(main);
   if (p.index !== 0 || p.creator !== addr.poolAuthority || p.baseMint !== mint || p.quoteMint !== SOLANA_SOL_MINT) throw new Error("the pool is not the mint's canonical pool");
@@ -508,12 +706,13 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   const t22 = m.owner === SOLANA_TOKEN_2022_PROGRAM;
   if (p.baseVault !== (t22 ? addr.baseVaultToken2022 : addr.baseVaultToken) || p.quoteVault !== addr.quoteVault) throw new Error("the pool's vaults are not its token accounts");
   solanaDecodePumpSwapConfig(global); // owner and discriminator
+  if (global.data.length !== SOLANA_PUMP_AMM_CONFIG_SIZE) throw new Error(`GlobalConfig is ${global.data.length} bytes, not ${SOLANA_PUMP_AMM_CONFIG_SIZE}`);
   const protocolFeeRecipient = keyAt(global.data, AMM_PROTOCOL_FEE_RECIPIENTS);
   if (protocolFeeRecipient === DEFAULT_KEY) throw new Error("GlobalConfig has no protocol fee recipient");
   const cashback = main.data[AMM_POOL_CASHBACK];
   if (cashback !== 0 && cashback !== 1) throw new Error("the pool's cashback flag is not a bool");
   return {
-    kind, mint, tokenProgram: m.owner, pool: addr.pool, baseVault: p.baseVault, quoteVault: p.quoteVault, coinCreator: p.coinCreator, cashback: cashback === 1,
+    kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), pool: addr.pool, baseVault: p.baseVault, quoteVault: p.quoteVault, coinCreator: p.coinCreator, cashback: cashback === 1,
     protocolFeeRecipient, ...buyback(global.data, AMM_GLOBAL_BUYBACK_RECIPIENTS),
   };
 }
@@ -536,15 +735,25 @@ export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, Sol
 
 // ------------------------------------------------------------------------------------------------- the check
 
+/** The oldest reference QUOTE takes: 25 slots (about 10 s at 400 ms a slot) behind the device's own slot read. A quote
+ * completes in under 1 s and the tap follows it, so an older reference means a stale or held-back read. */
+export const SOLANA_POOL_QUOTE_MAX_AGE_SLOTS = 25;
+
 export type SolanaPoolBuyReads = {
-  /** Every lookup table the message uses, as each provider answered (owner and data). */
+  /** The blockhash the device read itself (getLatestBlockhash): the message must carry exactly this one. */
+  readonly blockhash: string;
+  /** The device's own slot read at `confirmed`, beside the blockhash. */
+  readonly slot: number;
+  /** Every lookup table the message uses, as each provider answered (owner and data) at `confirmed`. */
   readonly tables: Readonly<Record<string, readonly [{ owner: string; data: Uint8Array } | null, { owner: string; data: Uint8Array } | null]>>;
   /** The pool's state tree size now, read by the device. */
   readonly stateSize: number;
+  /** The Rent sysvar, read on two providers (readSolanaRent). */
+  readonly rent: SolanaRent;
   /** The reference E for exactly `amount` lamports in (readSolanaReference over two providers), and the user's slippage. */
   readonly reference: { readonly amount: bigint; readonly ref: SolanaReference | null; readonly slippageBps: number };
 };
-export type SolanaPoolBuyCheckId = "DECODE" | "TABLES" | "SIGNERS" | "RELEASE" | "BUY" | "FRAME" | "PRIVILEGES" | "QUOTE" | "SIZE";
+export type SolanaPoolBuyCheckId = "DECODE" | "BLOCKHASH" | "TABLES" | "SIGNERS" | "FRAME" | "RELEASE" | "BUY" | "PRIVILEGES" | "FUNDS" | "QUOTE" | "SIZE";
 export type SolanaPoolBuyVerdict = { ok: boolean; results: { id: SolanaPoolBuyCheckId; ok: boolean; detail: string }[] };
 
 // An instruction's program, data and account keys in order. Privileges are the message's, one per key (a key that
@@ -565,11 +774,44 @@ function privileges(ixs: readonly SolanaApiInstruction[]): Map<string, { signer:
   return m;
 }
 
+type InnerRun = { program: string; accounts: { key: string; signer: boolean; writable: boolean }[]; data: Uint8Array };
 /**
- * The device's check of a shape A transaction before W signs it: the message is decoded and its keys resolved from our
- * table as both providers read it; then every instruction must be the one this device builds from the user's request,
- * the ready proof and the venue read on two providers (the tip account may be any of the baked Jito accounts), and the
- * buy's min_out must hold against E for the spend from the venue's reserves on both providers.
+ * Tag 3's inner instructions as the pool runs them (src/buy.rs): each index resolved to the tag 3 instruction's
+ * account, the signer flag only on W, the writable flag the message gives that account. Null when the data does not
+ * parse as the pool parses it (count 1 to 8, every index in range, ending exactly).
+ */
+function innerRuns(data: Uint8Array, outer: readonly { key: string; signer: boolean; writable: boolean }[], wallet: string): InnerRun[] | null {
+  if (data.length < TAG3_HEAD + 1 || data[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || data[1] !== 1) return null;
+  const count = data[TAG3_HEAD]!;
+  if (count === 0 || count > SOLANA_POOL_TAG3_MAX_INNER) return null;
+  const out: InnerRun[] = [];
+  let at = TAG3_HEAD + 1;
+  for (let k = 0; k < count; k++) {
+    if (at + 2 > data.length) return null;
+    const program = data[at]!;
+    const n = data[at + 1]!;
+    if (at + 2 + n + 2 > data.length) return null;
+    const idx = Array.from(data.subarray(at + 2, at + 2 + n));
+    const len = data[at + 2 + n]! | (data[at + 3 + n]! << 8);
+    const from = at + 4 + n;
+    if (from + len > data.length || program >= outer.length || idx.some((i) => i >= outer.length)) return null;
+    out.push({ program: outer[program]!.key, accounts: idx.map((i) => ({ key: outer[i]!.key, signer: outer[i]!.key === wallet, writable: outer[i]!.writable })), data: data.slice(from, from + len) });
+    at = from + len;
+  }
+  return at === data.length ? out : null;
+}
+const sameRun = (a: InnerRun, b: InnerRun): boolean =>
+  a.program === b.program && eqBytes(a.data, b.data) && a.accounts.length === b.accounts.length &&
+  a.accounts.every((x, i) => x.key === b.accounts[i]!.key && x.signer === b.accounts[i]!.signer && x.writable === b.accounts[i]!.writable);
+
+/**
+ * The device's check before W signs: the message is decoded, must carry the device's own blockhash, and its keys are
+ * resolved from our table as both providers read it. It must be exactly CU limit, CU price and one tag 3 into the pool,
+ * and that tag 3 the one this device builds from the user's request, the ready proof, the venue read on two providers
+ * and today's rent (the tip account may be any of the baked Jito accounts): the release's bytes and accounts, then
+ * every inner instruction as the pool will run it (program, data, keys, signer and writable flags), then the merged
+ * privileges of every key. The chunk must cover the spend and W's new accounts, and min_out must hold against E for
+ * the spend from the venue's reserves on both providers, read at most SOLANA_POOL_QUOTE_MAX_AGE_SLOTS ago.
  */
 export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, reads: SolanaPoolBuyReads): SolanaPoolBuyVerdict {
   const results: SolanaPoolBuyVerdict["results"] = [];
@@ -603,56 +845,67 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
     fail("DECODE", (e as Error).message);
     return done();
   }
+  // BLOCKHASH: the device's own read, never the server's
+  if (!isKey(reads.blockhash) || m.blockhash !== reads.blockhash) fail("BLOCKHASH", `the message carries ${m.blockhash}, not the device's ${reads.blockhash}`);
+  else pass("BLOCKHASH", "the device's own read");
   // SIGNERS: the fee payer first, then W; nothing else signs
   const signers = keys.filter((k) => k.signer).map((k) => k.key);
   if (signers.length !== 2 || signers[0] !== req.feePayer || signers[1] !== req.wallet || m.readonlySigned !== 0) fail("SIGNERS", `signers ${signers.join(",")}`);
   else pass("SIGNERS", "the fee payer and W");
+  // FUNDS: the chunk covers the spend and W's new accounts, and W keeps 0 or at least rent(0)
+  const funds = solanaPoolBuyFunds(release, venue, req, reads.rent);
+  if (funds.problem) { fail("FUNDS", funds.problem); return done(); }
+  pass("FUNDS", `chunk ${funds.chunk}, W pays out ${funds.peak} at most, keeps ${funds.left}`);
   const got = m.instructions.map((x) => ({ program: keys[x.programIndex]?.key ?? "?", accounts: x.accounts.map((i) => keys[i] ?? { key: "?", signer: false, writable: false }), data: x.data }));
+  // the tip account the message names (tag 3's ninth account), held to the baked Jito accounts
+  const tipTo = req.tip > 0n ? got[2]?.accounts[8]?.key ?? null : null;
   let want: SolanaApiInstruction[];
   try {
-    want = solanaPoolBuyInstructions(cfg, release, venue, req, reads.stateSize, null);
+    if (req.tip > 0n && (!tipTo || !SOLANA_JITO_TIP_ACCOUNTS.includes(tipTo))) throw new Error(`the tip goes to ${tipTo}, not a Jito tip account`);
+    want = solanaPoolBuyInstructions(cfg, release, venue, req, reads.stateSize, reads.rent, tipTo);
   } catch (e) {
     fail("RELEASE", `the request itself is refused: ${(e as Error).message}`);
     return done();
   }
-  const releaseAt = 2;
-  const buyAt = want.findIndex((x) => x.program === (venue.kind === "pump-curve" ? SOLANA_PUMP_PROGRAM : SOLANA_PUMP_AMM_PROGRAM));
-  const g = (i: number) => got[i];
-  if (!g(releaseAt) || !same(want[releaseAt]!, g(releaseAt)!)) fail("RELEASE", "the release is not this proof's, to W, paid by the fee payer, into the pool's pages");
-  else pass("RELEASE", `tag 2: ${release.withdrawnValue} lamports to W, relay fee ${release.relayFee}`);
-  if (!g(buyAt) || !same(want[buyAt]!, g(buyAt)!)) fail("BUY", `the buy is not ${req.spend} lamports for at least ${req.minOut} of ${req.token} on ${venue.kind === "pump-curve" ? venue.curve : venue.pool}, W the user`);
-  else pass("BUY", `${venue.kind}: ${req.spend} lamports in, min out ${req.minOut}`);
-  // FRAME: the rest, in order; the tip (last, when asked) to one of the baked Jito accounts for exactly req.tip
-  const tipWanted = req.tip > 0n;
-  const frameOk =
-    got.length === want.length + (tipWanted ? 1 : 0) &&
-    want.every((w, i) => i === releaseAt || i === buyAt || same(w, g(i)!)) &&
-    (!tipWanted || (() => {
-      const t = g(want.length)!;
-      const to = t.accounts[1]?.key ?? "";
-      return SOLANA_JITO_TIP_ACCOUNTS.includes(to) && same(transfer(req.wallet, to, req.tip), t);
-    })());
-  if (!frameOk) fail("FRAME", "an instruction other than the release and the buy is not the one this device builds");
-  else pass("FRAME", `${got.length} instructions`);
+  // FRAME: exactly CU limit, CU price, tag 3 into the pool
+  if (got.length !== 3 || !same(want[0]!, got[0]!) || !same(want[1]!, got[1]!) || got[2]!.program !== cfg.program) fail("FRAME", `want CU limit, CU price and one tag 3 into ${cfg.program}; got ${got.length} instruction(s)`);
+  else pass("FRAME", "CU limit, CU price, tag 3");
+  const g = got[2];
+  const w = want[2]!;
+  const head = 8 + (req.tip > 0n ? 1 : 0);
+  // RELEASE: the head of tag 3 (tag, flags, this proof compressed, the release's fields, the tip) and its first
+  // accounts (the release's eight, then the tip account)
+  if (!g || g.program !== cfg.program || g.data.length < TAG3_HEAD || !eqBytes(g.data.subarray(0, TAG3_HEAD), w.data.subarray(0, TAG3_HEAD)) ||
+    g.accounts.length < head || w.accounts.slice(0, head).some((a, i) => a.key !== g.accounts[i]!.key)) {
+    fail("RELEASE", "the release is not this proof's, to W, paid by the fee payer, into the pool's pages, with this tip");
+  } else pass("RELEASE", `tag 3: ${release.withdrawnValue} lamports, relay fee ${release.relayFee}, tip ${req.tip}`);
+  // BUY: every inner instruction as the pool will run it, and nothing past them
+  const wantRuns = innerRuns(w.data, w.accounts.map((a) => ({ ...a, writable: privileges(want).get(a.key)!.writable })), req.wallet)!;
+  const gotRuns = g ? innerRuns(g.data, g.accounts, req.wallet) : null;
+  if (!g || !gotRuns || gotRuns.length !== wantRuns.length || gotRuns.some((r, i) => !sameRun(r, wantRuns[i]!)) || !same(w, g)) {
+    fail("BUY", `the inner instructions are not ${req.spend} lamports for at least ${req.minOut} of ${req.token} on ${venue.kind === "pump-curve" ? venue.curve : venue.pool}, W the user`);
+  } else pass("BUY", `${venue.kind}: ${req.spend} lamports in, min out ${req.minOut}, ${gotRuns.length} inner instructions`);
   // PRIVILEGES: the message gives every key exactly the signer and writable flags this device's instructions ask, and
   // holds no key they do not name (the fee payer is first: it pays the fee)
-  const tipTo = tipWanted ? got[want.length]?.accounts[1]?.key : undefined;
-  const p = privileges([...want, ...(tipTo ? [transfer(req.wallet, tipTo, req.tip)] : [])]);
+  const p = privileges(want);
   p.set(req.feePayer, { signer: true, writable: true });
-  const off = keys.filter((k) => { const w = p.get(k.key); return !w || w.signer !== k.signer || w.writable !== k.writable; }).map((k) => k.key);
+  const off = keys.filter((k) => { const x = p.get(k.key); return !x || x.signer !== k.signer || x.writable !== k.writable; }).map((k) => k.key);
   if (off.length || keys.length !== p.size) fail("PRIVILEGES", `keys with other privileges or not asked for: ${off.join(",") || `${keys.length} keys for ${p.size}`}`);
   else pass("PRIVILEGES", `${keys.length} keys, each with the privileges asked`);
-  // QUOTE: min_out within the user's slippage of E for exactly the spend, on this venue, from two providers' reads
+  // QUOTE: min_out within the user's slippage of E for exactly the spend, on this venue, from two providers' reads made
+  // at most SOLANA_POOL_QUOTE_MAX_AGE_SLOTS before the device's own slot
   const { amount, ref, slippageBps } = reads.reference;
   const venueAddr = venue.kind === "pump-curve" ? venue.curve : venue.pool;
-  const pool = ref?.pools.find((p) => p.address === venueAddr && p.venue === venue.kind);
+  const pool = ref?.pools.find((x) => x.address === venueAddr && x.venue === venue.kind);
+  const age = ref?.slot === undefined || !Number.isSafeInteger(reads.slot) ? null : reads.slot - ref.slot;
   if (amount !== req.spend) fail("QUOTE", `the reference is for ${amount} lamports, not the spend ${req.spend}`);
   else if (!pool) fail("QUOTE", `no reference read for ${venueAddr} on two providers`);
+  else if (age === null || age < 0 || age > SOLANA_POOL_QUOTE_MAX_AGE_SLOTS) fail("QUOTE", `the reference was read ${age ?? "?"} slots before the device's slot, over ${SOLANA_POOL_QUOTE_MAX_AGE_SLOTS}`);
   else if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) fail("QUOTE", "slippage out of range");
   else {
     const floor = (pool.expectedOut * BigInt(10_000 - slippageBps)) / 10_000n;
     if (req.minOut < floor || req.minOut === 0n) fail("QUOTE", `min out ${req.minOut} under ${floor} (E ${pool.expectedOut}, slippage ${slippageBps} bps)`);
-    else pass("QUOTE", `min out ${req.minOut} >= ${floor} (E ${pool.expectedOut})`);
+    else pass("QUOTE", `min out ${req.minOut} >= ${floor} (E ${pool.expectedOut}, ${age} slots old)`);
   }
   return done();
 }
