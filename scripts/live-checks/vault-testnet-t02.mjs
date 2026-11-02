@@ -2,14 +2,16 @@
 // Live check of card vault-testnet-t02 (vault.md 5, VT-T02): on the testnet vault, a deposit by U's signed call
 // carried by the relayer, and a withdrawal proved in a browser and carried by the relayer, both landed and stay as the
 // run record says (contracts/vault/deployments/testnet-t02-run.json, written from contracts/vault/scripts/testnet-t02.ts).
-// It reads only state that never changes once written, so it holds after every deploy and needs no tx read: on two
-// testnet operators (operatorProblems), at the final block,
+// It needs no tx read. On two testnet operators (operatorProblems), at the final block, it holds the run's rows, which
+// never change once settled, to their exact values, and balances only to lower bounds, which a later transfer in
+// cannot break:
 //   - the vault's key list is [] (no key was added by the run or since);
 //   - the deposits pages hold the record's precommitment once: depositor U, the value, the label and the leaf index;
 //     the leaf at that index is the record's note commitment;
 //   - the spends pages hold the note's nullifier hash once: recipient W, withdrawn, fee = the relay fee, payer the
 //     relayer, settled; the leaf at new_leaf_index is the record's change commitment, once in the leaves;
-//   - W and F have no key, so nobody can move what they hold: W holds exactly withdrawn - fee and F exactly the fee;
+//   - W and F have no key, so nobody can move out what they hold, though anyone may send them more: W holds at least
+//     withdrawn - fee and F at least the fee (the exact amounts are the spend row's, above);
 //   - the vault holds at least what its totals owe (deposited - spent + returned, I1: equal once nothing is in flight).
 //   node scripts/live-checks/vault-testnet-t02.mjs [--run <file>] [--record <file>]   PASS exit 0, FAIL 1, error 2
 // --record writes every RPC answer the run read to <file>, so the check's test can replay it.
@@ -91,8 +93,8 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS }) {
         view(fetchFn, url, TOKEN, "ft_balance_of", { account_id: VAULT }),
         view(fetchFn, url, VAULT, "totals", {}),
       ]);
-      say(BigInt(wu) === withdrawn - fee, `W holds exactly withdrawn - fee = ${withdrawn - fee} ${at}: ${wu}`);
-      say(BigInt(fu) === fee, `F holds exactly the fee ${fee} ${at}: ${fu}`);
+      say(BigInt(wu) >= withdrawn - fee, `W holds at least withdrawn - fee = ${withdrawn - fee} ${at}: ${wu}`);
+      say(BigInt(fu) >= fee, `F holds at least the fee ${fee} ${at}: ${fu}`);
       const owed = BigInt(totals.deposited) - BigInt(totals.spent) + BigInt(totals.returned);
       say(BigInt(vu) >= owed, `the vault holds at least what its totals owe ${at}: ${vu} >= ${owed}`);
     } catch (e) {

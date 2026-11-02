@@ -1,7 +1,7 @@
 // node --test contracts/vault/scripts/testnet-t02.test.ts: the pure parts of the VT-T02 run (testnet-t02.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { accountsOf, deadlineMsOf, entropyOf, keyTextOf, localProblems, runOf } from "./testnet-t02.ts";
+import { accountsOf, deadlineMsOf, entropyOf, keyTextOf, localProblems, pageRefusal, runOf } from "./testnet-t02.ts";
 
 const SEED = Buffer.alloc(32, 7);
 
@@ -30,4 +30,21 @@ test("a local path or a machine name in the record is refused", () => {
   assert.deepEqual(localProblems("Tx: near-testnet abc g.testnet", ["somehost"]), []);
   assert.equal(localProblems("see /Users/x/file", []).length, 1);
   assert.equal(localProblems("ran on somehost today", ["somehost"]).length, 1);
+});
+
+test("the page server refuses a Host other than 127.0.0.1 or localhost at its port", () => {
+  const t = "0123456789abcdef0123456789abcdef";
+  assert.equal(pageRefusal("127.0.0.1:47302", 47302, `/${t}/input.json`, t), null);
+  assert.equal(pageRefusal("localhost:47302", 47302, `/${t}/result`, t), null);
+  for (const host of [undefined, "", "127.0.0.1", "127.0.0.1:1", "evil.example:47302", "localhost.evil.example:47302", "[::1]:47302", "0.0.0.0:47302"])
+    assert.equal(pageRefusal(host, 47302, `/${t}/input.json`, t), "host", String(host));
+  assert.equal(pageRefusal("evil.example:47302", 47302, "/", t), "host");
+});
+
+test("the input and the result are refused without this run's token", () => {
+  const t = "0123456789abcdef0123456789abcdef";
+  const other = "f".repeat(32);
+  for (const p of ["/input.json", "/result", `/${other}/input.json`, `/${other}/result`]) assert.equal(pageRefusal("127.0.0.1:47302", 47302, p, t), "token", p);
+  assert.equal(pageRefusal("127.0.0.1:47302", 47302, "/", t), null);
+  assert.equal(pageRefusal("127.0.0.1:47302", 47302, "/prover-worker.js", t), null);
 });

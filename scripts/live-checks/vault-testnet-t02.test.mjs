@@ -1,10 +1,14 @@
 // node --test scripts/live-checks/vault-testnet-t02.test.mjs: the live check replays recorded runs on NEAR testnet's
 // two operators. The good answer (vault-testnet-t02.answers.json, read after the run of
-// contracts/vault/deployments/testnet-t02-run.json) must PASS. The recorded bad answer must FAIL:
-//   - vault-testnet-t02.bad.answers.json: the same vault read with a run record whose relay fee is one unit high and
-//     whose W and F are swapped (vault-testnet-t02.bad-run.json): the spend row's fee and both balances differ.
-// Four more are made here from the good answer, each changing one read so only that check can fail: a key on the
-// vault; the change leaf written twice; W holding one unit less; a spend row not yet settled.
+// contracts/vault/deployments/testnet-t02-run.json) must PASS. The two recorded bad answers must FAIL, each for its
+// own reason:
+//   - vault-testnet-t02.bad-fee.answers.json, the vault read with a record whose relay fee is one unit high
+//     (vault-testnet-t02.bad-fee-run.json): the spend row's fee differs and F holds less than that fee;
+//   - vault-testnet-t02.bad-swap.answers.json, the vault read with a record whose W and F are swapped
+//     (vault-testnet-t02.bad-swap-run.json): the spend row's recipient differs and W holds less than its amount.
+// More are made here from the good answer, each changing one read so only that check can fail: a key on the vault;
+// the change leaf written twice; W holding one unit less; a spend row not yet settled. And one that must still pass:
+// W holding one unit more (anyone may send W test USDC; nobody can take it out).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -40,12 +44,19 @@ test("the recorded run passes", async () => {
   assert.equal(r.ok, true);
 });
 
-test("the recorded bad run fails: the fee one unit high, W and F swapped", async () => {
-  const r = await check({ run: load("vault-testnet-t02.bad-run.json"), fetchFn: replay(load("vault-testnet-t02.bad.answers.json")) });
+test("the recorded bad run with the fee one unit high fails on the fee only", async () => {
+  const r = await check({ run: load("vault-testnet-t02.bad-fee-run.json"), fetchFn: replay(load("vault-testnet-t02.bad-fee.answers.json")) });
   assert.equal(r.ok, false);
-  assert.ok(bads(r).some((l) => /spend row: 1500000 to W, fee 204634/.test(l)), bads(r).join("\n"));
-  assert.ok(bads(r).some((l) => /W holds exactly/.test(l)), bads(r).join("\n"));
-  assert.ok(bads(r).some((l) => /F holds exactly/.test(l)), bads(r).join("\n"));
+  assert.equal(bads(r).length, 4, bads(r).join("\n"));
+  assert.ok(bads(r).every((l) => /spend row: 1500000 to W, fee 204634|F holds at least the fee 204634/.test(l)), bads(r).join("\n"));
+});
+
+test("the recorded bad run with W and F swapped fails on the recipient only", async () => {
+  const run2 = load("vault-testnet-t02.bad-swap-run.json");
+  const r = await check({ run: run2, fetchFn: replay(load("vault-testnet-t02.bad-swap.answers.json")) });
+  assert.equal(r.ok, false);
+  assert.equal(bads(r).length, 4, bads(r).join("\n"));
+  assert.ok(bads(r).every((l) => /spend row: 1500000 to W, fee 204633, .*: 1500000 to w-|W holds at least/.test(l)), bads(r).join("\n"));
 });
 
 test("a key on the vault fails", async () => {
@@ -66,7 +77,14 @@ test("W holding one unit less fails", async () => {
   const answers = withView(good(), "ft_balance_of", (v) => String(BigInt(v) - 1n), (args) => args.account_id === run.accounts.W);
   const r = await check({ run, fetchFn: replay(answers) });
   assert.equal(r.ok, false);
-  assert.ok(bads(r).every((l) => /W holds exactly/.test(l)), bads(r).join("\n"));
+  assert.ok(bads(r).every((l) => /W holds at least/.test(l)), bads(r).join("\n"));
+});
+
+test("W holding one unit more still passes", async () => {
+  const answers = withView(good(), "ft_balance_of", (v) => String(BigInt(v) + 1n), (args) => args.account_id === run.accounts.W);
+  const r = await check({ run, fetchFn: replay(answers) });
+  assert.deepEqual(bads(r), []);
+  assert.equal(r.ok, true);
 });
 
 test("a spend row not yet settled fails", async () => {

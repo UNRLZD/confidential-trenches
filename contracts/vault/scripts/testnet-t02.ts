@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// VT-T02's deposit leg on NEAR testnet (vault.md 5: "a deposit by U's own ft_transfer_call as a NEP-366 DelegateAction,
-// carried by the relayer (2.10)"), on the keyless vault of contracts/vault/deployments/testnet-v1.json and the team's
+// VT-T02 on NEAR testnet (vault.md 5: "a deposit by U's own ft_transfer_call as a NEP-366 DelegateAction, carried by
+// the relayer (2.10); a withdrawal with a proof made in" a browser), on the keyless vault of contracts/vault/deployments/testnet-v1.json and the team's
 // test USDC only. Card vault-testnet-t02. Testnet only: it refuses any other vault, token or network.
 //
 // The device's side is the wallet's own modules: the note store (packages/wallet/src/notes/store.ts on fake-indexeddb,
@@ -10,12 +10,26 @@
 // carryDeposit, createSendReads, startRelayer, createFileStore), run in this process and reached through bindDeposit's
 // fetchFn at RELEASE_BIND_URL: the deployed helper mounts no /v1/bind (src/server.ts MOUNTED). The answer honours the
 // device's abort (SEND_TIMEOUT_MS) as a server's would: a carry still running goes on, and the device sends the same
-// bytes again for its tx hash. The token watch is a stand-in answering a caught-up, open token (as
-// apps/helper/test/bind-send/carry.ts and the relayer-withdraw-send run); its pause history is read from the token.
+// bytes again for its tx hash.
+//
+// The withdraw leg: the kit's request and circuit input (vaultWithdrawRequest, vaultWithdrawInput on trees vaultSync
+// reads on two operators), the proof made in a browser on the page of t02-page/ (the kit's startProver), checked
+// against withdraw.vkey, then the helper's own carryWithdraw and outcomeRound (apps/helper/src/withdraw/send.ts) in this
+// process with R's key: the deployed helper answers every testnet withdrawal token_halted (src/server.ts gives the
+// withdraw sender mainnet's token watch only).
+//
+// Stand-ins, each named in the run record:
+//   - the token watch, on both legs: an answer of a caught-up, open token (the helper has no testnet watch);
+//   - the deposit's pausedAt (the watch's pause history): a read of the token's ft_balance_of at that block, which USDC
+//     refuses with "FiatToken: paused" while paused (as apps/helper/test/bind-send/carry.ts);
+//   - marginK 20: R4's margin K is not pinned in a release yet; 20 is the sandbox carry's (relayer_send.rs MARGIN_K);
+//   - the page: served from 127.0.0.1 with no CSP (SIGN_HOST's policy is not applied), so its load time is a local
+//     read, not a download;
+//   - a 503 from carryWithdraw that sent nothing is asked again, up to 5 more times, 3 s, 6 s, ... apart.
 //
 // Accounts:
-//   P  the vault's parent (--parent, its key from --key-file, outside the repo, never printed): pays NEAR only, on the
-//      host that holds its key (`setup`).
+//   P  the vault's parent (--parent, its key from --key-file, outside the repo, never printed): pays NEAR only, from the
+//      machine that holds P's key file (`setup`).
 //   D  T04's depositor (its key from T04's seed, --t04-state, read only, never printed): sends U the deposit's USDC.
 //   U  the deposit account U_{s,i}: s the vault's scope, i the note store's index; its 12 words from this run's seed.
 //   G  g-<run>.<P>: the bind relayer's gas account, a full-access key from this run's seed; prepays and carries.
@@ -26,11 +40,15 @@
 //
 //   node contracts/vault/scripts/testnet-t02.ts ids --state <path>
 //   node contracts/vault/scripts/testnet-t02.ts setup --parent <P> --key-file <path> --t04-state <path> --state <path>
-//        --run <id> --u <U> --g-pub <hex> --r-pub <hex>          (on the host holding P's key; its own --state)
+//        --run <id> --u <U> --g-pub <hex> --r-pub <hex>   (on the machine that holds P's key file; its own --state)
 //   node contracts/vault/scripts/testnet-t02.ts deposit --state <path> [--amount <base units>]
 //        (plans the note, prints U, waits until U holds the amount, then binds; the record in <state>.deposit.json)
+//   node contracts/vault/scripts/testnet-t02.ts withdraw --state <path> [--port <n>]
+//        (builds and serves the page; its address, with the run's token, in <state>.page-url; open it in the browser)
+//   node contracts/vault/scripts/testnet-t02.ts record --state <path> --setup <setup's setup-json, as a file>
+//        (writes contracts/vault/deployments/testnet-t02-run.json and scripts/live-checks/vault-testnet-t02.md)
 import "../../../scripts/net-window.mjs";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -51,7 +69,7 @@ export const R_NEAR = (NEAR * 8n) / 10n;
 export const PLAIN_NEAR = NEAR / 100n;
 /** FastNEAR's archival testnet RPC (money-gate.mjs RPCS["near-testnet"]), for the relayer's older outcomes. */
 export const ARCHIVAL = "https://archival-rpc.testnet.fastnear.com";
-/** R4's margin K: the sandbox carry's (contracts/vault/tests/relayer_send.rs MARGIN_K). */
+/** R4's margin K: a stand-in, the sandbox carry's (contracts/vault/tests/relayer_send.rs MARGIN_K); no release pins one yet. */
 export const MARGIN_K = 20n;
 const GAS_PLAIN = 30n * TGAS;
 const POLL_MS = 10_000;
@@ -227,6 +245,7 @@ async function deposit(argv: string[]) {
   const store = bind.createFileStore(`${path.resolve(v["--state"]!)}.bind`);
   if (!bind.relayerKey(G.secretKey).pub.every((b: number, k: number) => b === G.pub[k])) throw new Error("G's key text is not its key");
   const relayer = await bind.startRelayer(rpcs, bind.nearRpc(ARCHIVAL), G.id, G.secretKey, VAULT, store);
+  // stand-in (named in the record): the watch's pause history as a read of the token at that block
   const pausedAt = async (height: bigint): Promise<boolean | null> => {
     try {
       const r = (await (rpcs[0] as any)("query", { request_type: "call_function", block_id: Number(height), account_id: TOKEN, method_name: "ft_balance_of", args_base64: Buffer.from(JSON.stringify({ account_id: VAULT })).toString("base64") })) as { result?: unknown; error?: unknown };
@@ -242,6 +261,7 @@ async function deposit(argv: string[]) {
     reads: bind.createSendReads(rpcs, { vault: VAULT, token: TOKEN }),
     store,
     relayer,
+    // stand-in (named in the record): the token watch answering a caught-up, open token
     tokenStatus: async () => {
       const h = ((await (rpcs[0] as any)("block", { finality: "final" })) as { header: { height: number } }).header.height;
       return { token: TOKEN, caught_up: true, halted: false, vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height: h, last_event: null };
@@ -292,6 +312,19 @@ async function deposit(argv: string[]) {
 }
 
 // ---- withdraw: the proof made in a browser, the relayer's carry in this process ----
+
+/**
+ * The page server's gate: null to serve, else why it refuses. Every request must name the server as 127.0.0.1:<port>
+ * or localhost:<port> (a DNS name rebound to 127.0.0.1 carries its own Host and is refused); the input and the result
+ * live only under /<token>/, this run's random token; any other /<hex>/ path is refused.
+ */
+export function pageRefusal(host: string | undefined, port: number, pathname: string, token: string): "host" | "token" | null {
+  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return "host";
+  const m = /^\/([0-9a-f]{32})\/(input\.json|result)$/.exec(pathname);
+  if (pathname === "/input.json" || pathname === "/result") return "token";
+  if (m && (m[1]!.length !== token.length || !timingSafeEqual(Buffer.from(m[1]!), Buffer.from(token)))) return "token";
+  return null;
+}
 
 /** What W gets plus the fee, out of the 2,000,000 note: the change note keeps the rest. */
 export const WITHDRAWN = 1_500_000n;
@@ -374,7 +407,7 @@ async function withdraw(argv: string[]) {
     leaves: createLeavesIndex(rpcs, VAULT),
     store,
     relayers: [relayer],
-    // check 10's watch: a stand-in answering a caught-up, open token (the deployed helper has no testnet watch)
+    // stand-in (named in the record): check 10's watch answering a caught-up, open token (the helper has no testnet watch)
     tokenStatus: async () => ({ token: TOKEN, caught_up: true, halted: false, vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height: 0, last_event: null }),
   };
 
@@ -419,12 +452,18 @@ async function withdraw(argv: string[]) {
     const server = http.createServer(async (rq, rs) => {
       try {
         const url = new URL(rq.url ?? "/", "http://127.0.0.1");
-        if (url.pathname === "/input.json") {
+        const refused = pageRefusal(rq.headers.host, port, url.pathname, token);
+        if (refused !== null) {
+          log(`page: refused a request (${refused})`);
+          rs.writeHead(403).end();
+          return;
+        }
+        if (url.pathname === `/${token}/input.json`) {
           const body = await makeInput();
           rs.writeHead(200, { "content-type": TYPES[".json"]!, "cache-control": "no-store" }).end(body);
           return;
         }
-        if (url.pathname === "/result" && rq.method === "POST") {
+        if (url.pathname === `/${token}/result` && rq.method === "POST") {
           const chunks: Buffer[] = [];
           for await (const c of rq) chunks.push(c as Buffer);
           rs.writeHead(204).end();
@@ -439,9 +478,16 @@ async function withdraw(argv: string[]) {
         rs.writeHead(404).end();
       }
     });
+    // the input holds the note's spend secrets: its path and the result's carry this run's random token, and every
+    // request must name this server by its loopback host and port (a page elsewhere cannot rebind a name to it)
+    const token = randomBytes(16).toString("hex");
+    let port = 0;
     await new Promise<void>((ok) => server.listen(Number(v["--port"] ?? 0), "127.0.0.1", ok));
-    const port = (server.address() as { port: number }).port;
-    log(`page: open http://127.0.0.1:${port}/ in the browser`);
+    port = (server.address() as { port: number }).port;
+    // the token goes in the fragment, which the browser never sends; this prints a local address, not a secret
+    const pageUrl = `http://127.0.0.1:${port}/#${token}`;
+    writeFileSync(`${stateFile}.page-url`, pageUrl + "\n", { mode: 0o600 });
+    log(`page: the address to open is in ${path.basename(stateFile)}.page-url (mode 600)`);
     const r = await Promise.race([result, sleep(RESULT_BOUND_MS).then(() => ({ error: "no result in 15 min" }))]);
     server.close();
     if (r.error) throw new Error(`browser: ${r.error}`);
@@ -456,15 +502,17 @@ async function withdraw(argv: string[]) {
     save();
     log(`browser: ${r.userAgent}; load ${r.loadMs} ms, prove ${r.proveMs} ms (worker fullProve), ${r.pageProveMs} ms (page), verified against withdraw.vkey`);
     const t0 = Date.now();
+    // a harness retry (named in the record): a 503 that sent nothing (no send record) is asked again, up to 5 more times
     let ans = await carryWithdraw(request, deps);
-    for (let i = 1; ans.status === 503 && i < 6 && store.get(nf) === null; i++) {
+    let retries = 0;
+    for (let i = 1; ans.status === 503 && i < 6 && store.get(nf) === null; i++, retries++) {
       log(`carryWithdraw: ${ans.status} ${json(ans.body)}; again in ${3 * i} s`);
       await sleep(3000 * i);
       ans = await carryWithdraw(request, deps);
     }
     log(`carryWithdraw: ${ans.status} ${json(ans.body)} in ${Date.now() - t0} ms`);
     if (ans.status !== 200 || !("tx_hash" in ans.body)) throw new Error(`carryWithdraw answered ${ans.status} ${json(ans.body)}`);
-    w.carry = { tx_hash: ans.body.tx_hash, carry_ms: Date.now() - t0, answered_at: Date.now() };
+    w.carry = { tx_hash: ans.body.tx_hash, carry_ms: Date.now() - t0, answered_at: Date.now(), retries };
     save();
   }
 
@@ -564,8 +612,8 @@ async function record(argv: string[]) {
   const fee = BigInt(w.request.relay_fee);
   const prose = [
     `The run: contracts/vault/scripts/testnet-t02.ts on NEAR testnet, the keyless vault ${VAULT} on the team's test USDC ${TOKEN}.`,
-    `Deposit leg (by script, the wallet's own modules): the note store's planDeposit (fake-indexeddb), U = U_{s,i} (s the vault's scope, i ${d.i}) from this run's 12 words, U's ft_transfer_call signed as a NEP-366 DelegateAction (deposit/delegate.ts) and followed by bindDeposit (deposit/bind.ts) to the deposits pages on FastNEAR and dRPC; /v1/bind served by the helper's own carryDeposit (apps/helper/src/bind/send.ts) in the run's process with G as the gas account, because the deployed helper mounts no /v1/bind. The token watch was a stand-in answering a caught-up, open token. bindDeposit answered deposited in ${st.steps.deposit.bind_ms} ms; the device's 10 s send timeout (SEND_TIMEOUT_MS) ran out before the carry answered, and bind confirmed the note from the pages.`,
-    `Withdraw leg: the proof made in Chrome desktop (Google Chrome ${w.browser.brands?.find((x: { brand: string }) => x.brand === "Google Chrome")?.version ?? "?"}, ${w.browser.platform}, ${w.browser.hardwareConcurrency} threads reported) by the kit's prover (packages/kit/src/prover/client.ts startProver, the worker SIGN_HOST serves, packages/signpage/public/prover-worker.js, and the pinned setup files) on a page served from 127.0.0.1 (contracts/vault/scripts/t02-page/); the input by the kit's vaultWithdrawRequest and vaultWithdrawInput on trees read by vaultSync on two operators, the change and refund secrets the wallet's (noteSecrets change and refund, j 0); the proof checked against withdraw.vkey, then carried by the helper's own carryWithdraw and outcomeRound (apps/helper/src/withdraw/send.ts) in the run's process with R's key, because the deployed helper answers every testnet withdrawal token_halted (no testnet token watch). SIGN_HOST's withdraw form has no hand-off yet, so the page stands in for it.`,
+    `Deposit leg (by script, the wallet's own modules): the note store's planDeposit (fake-indexeddb), U = U_{s,i} (s the vault's scope, i ${d.i}) from this run's 12 words, U's ft_transfer_call signed as a NEP-366 DelegateAction (deposit/delegate.ts) and followed by bindDeposit (deposit/bind.ts) to the deposits pages on FastNEAR and dRPC; /v1/bind served by the helper's own carryDeposit (apps/helper/src/bind/send.ts) in the run's process with G as the gas account, because the deployed helper mounts no /v1/bind. Stand-ins on this leg: the token watch answered a caught-up, open token; its pause history (pausedAt) was a read of the token's ft_balance_of at the asked block; R4's margin K was 20, the sandbox carry's, as no release pins one yet. bindDeposit answered deposited in ${st.steps.deposit.bind_ms} ms; the device's 10 s send timeout (SEND_TIMEOUT_MS) ran out before the carry answered, and bind confirmed the note from the pages.`,
+    `Withdraw leg: the proof made in Chrome desktop (Google Chrome ${w.browser.brands?.find((x: { brand: string }) => x.brand === "Google Chrome")?.version ?? "?"}, ${w.browser.platform}, ${w.browser.hardwareConcurrency} threads reported) by the kit's prover (packages/kit/src/prover/client.ts startProver, the worker SIGN_HOST serves, packages/signpage/public/prover-worker.js, and the pinned setup files) on a page served from 127.0.0.1 (contracts/vault/scripts/t02-page/); the input by the kit's vaultWithdrawRequest and vaultWithdrawInput on trees read by vaultSync on two operators, the change and refund secrets the wallet's (noteSecrets change and refund, j 0); the proof checked against withdraw.vkey, then carried by the helper's own carryWithdraw and outcomeRound (apps/helper/src/withdraw/send.ts) in the run's process with R's key, because the deployed helper answers every testnet withdrawal token_halted (no testnet token watch). Stand-ins on this leg: the token watch answered a caught-up, open token; a 503 that sent nothing was asked again up to 5 more times (asked again ${w.carry.retries ?? 0} time(s) in this run); the page stands in for SIGN_HOST's withdraw form, which has no hand-off yet, and set no CSP (SIGN_HOST's policy was not applied).`,
     `Accounts: P ${parent} (pays NEAR for setup), D 4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a (T04's depositor, sends U the USDC), U ${d.U}, G ${a.G} (bind gas account), R ${a.R} (withdrawal relayer), F ${a.F} (fee recipient, no key), W ${a.W} (recipient, no key).`,
     `Every Tx above read back FINAL on https://test.rpc.fastnear.com and https://near-testnet.drpc.org, every receipt a success.`,
     `Deposit: the deposits page holds P ${d.precommitment} by U with ${d.leaf.value}, label ${d.leaf.label}, leaf ${d.leaf.leaf_index}.`,
@@ -574,7 +622,7 @@ async function record(argv: string[]) {
     `After the deposit (${b1.at}): U USDC ${b1.U_usdc}, vault USDC ${b1.vault_usdc}, U NEAR ${b1.U_near}, G NEAR ${b1.G_near}, totals ${JSON.stringify(b1.totals)}.`,
     `Before the withdrawal (${c0.at}): W USDC ${c0.W_usdc}, F USDC ${c0.F_usdc}, vault USDC ${c0.vault_usdc}, R NEAR ${c0.R_near}, totals ${JSON.stringify(c0.totals)}.`,
     `After the withdrawal (${c1.at}): W USDC ${c1.W_usdc} (= ${WITHDRAWN} - ${fee}), F USDC ${c1.F_usdc}, vault USDC ${c1.vault_usdc} (= the change note), R NEAR ${c1.R_near}, totals ${JSON.stringify(c1.totals)} (deposited - spent + returned = ${BigInt(c1.totals.deposited) - BigInt(c1.totals.spent) + BigInt(c1.totals.returned)} = the vault USDC).`,
-    `Prover, Chrome desktop: setup files loaded ${w.browser.loadMs} ms, fullProve in the worker ${w.browser.proveMs} ms (${w.browser.pageProveMs} ms seen by the page); request body ${w.request.body_bytes} bytes. iPhone Safari and Android Chrome: not run (they wait for the phones).`,
+    `Prover, Chrome desktop: setup files loaded ${w.browser.loadMs} ms (from 127.0.0.1, not a download), fullProve in the worker ${w.browser.proveMs} ms (${w.browser.pageProveMs} ms seen by the page); request body ${w.request.body_bytes} bytes. The iPhone Safari and Android Chrome legs are not run yet.`,
     `Times (the run's clock): carryWithdraw ${w.carry.carry_ms} ms to its 200; from the 200 to the send record reading succeeded ${w.carry.succeeded_ms} ms, to the settle done ${w.carry.settled_ms} ms (outcomeRound every 10 s).`,
   ];
   const text = [`CARD ${CARD} / live: PASS`, "Money path: yes", ...txs.map((t) => `Tx: near-testnet ${t.hash} ${t.signer}`), "", ...prose, ""].join("\n");
@@ -592,7 +640,7 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 if (isMain) {
   const run = cmd === "ids" ? async () => ids(rest) : cmd === "setup" ? () => setup(rest) : cmd === "deposit" ? () => deposit(rest) : cmd === "withdraw" ? () => withdraw(rest) : cmd === "record" ? () => record(rest) : null;
   if (!run) {
-    console.error("usage: testnet-t02.ts ids|setup|deposit --state <path> ...");
+    console.error("usage: testnet-t02.ts ids|setup|deposit|withdraw|record --state <path> ...");
     process.exit(2);
   }
   run().catch((e) => {

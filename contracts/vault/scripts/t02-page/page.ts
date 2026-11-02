@@ -2,20 +2,27 @@
 // VT-T02's browser leg (card vault-testnet-t02): the kit's own prover (packages/kit/src/prover/client.ts startProver,
 // the worker SIGN_HOST serves as /prover-worker.js, the six pinned setup files at /assets/zk/<sha256>.<ext>) proves one
 // withdrawal in this browser. The page asks its local run server (contracts/vault/scripts/testnet-t02.ts withdraw) for
-// the circuit input, loads the withdraw circuit, proves, and posts the proof with the times and the browser's name
-// back. The server checks the proof against withdraw.vkey and carries the withdrawal. Nothing here logs the input.
+// the circuit input (at /<token>/input.json, the run's token read from this page's fragment), loads the withdraw
+// circuit, proves, and posts the proof with the times and the browser's name back. The page sets no CSP of its own;
+// SIGN_HOST's policy is not applied here. The server checks the proof against withdraw.vkey and carries the
+// withdrawal. Nothing here logs the input.
 import { startProver } from "../../../../packages/kit/src/prover/client.ts";
 
 const out = document.getElementById("out")!;
 const say = (s: string) => {
   out.textContent = s;
 };
-const post = (body: unknown) => fetch("/result", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+// the run's token, from the fragment (never sent to a server): the input and the result live under /<token>/ only
+const token = location.hash.slice(1);
+const post = (body: unknown) => fetch(`/${token}/result`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 async function run(): Promise<void> {
   document.body.dataset.state = "running";
   say("input");
-  const input = await (await fetch("/input.json", { cache: "no-store" })).json();
+  if (!/^[0-9a-f]{32}$/.test(token)) throw new Error("no run token in the address");
+  const res = await fetch(`/${token}/input.json`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`input: HTTP ${res.status}`);
+  const input = await res.json();
   const violations: unknown[] = [];
   const t0 = performance.now();
   const prover = startProver({ onViolation: (v) => violations.push(v) });
