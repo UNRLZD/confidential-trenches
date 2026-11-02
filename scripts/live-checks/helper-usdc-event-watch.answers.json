@@ -1,0 +1,662 @@
+{
+ "good": {
+  "readAt": "2026-11-02T15:21:42.640Z",
+  "nets": {
+   "mainnet": {
+    "code": {
+     "https://rpc.mainnet.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222736795,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222736799,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://rpc.mainnet.fastnear.com": {
+      "halt": {
+       "at": 222736783,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222736783,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222736783
+      }
+     },
+     "https://near.drpc.org": {
+      "halt": {
+       "at": 222736786,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222736786,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222736786
+      }
+     }
+    }
+   },
+   "testnet": {
+    "code": {
+     "https://test.rpc.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275916896,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near-testnet.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275916900,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://test.rpc.fastnear.com": {
+      "halt": {
+       "at": 275916882,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275916882,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275916882
+      }
+     },
+     "https://near-testnet.drpc.org": {
+      "halt": {
+       "at": 275916885,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275916885,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275916885
+      }
+     }
+    }
+   }
+  },
+  "history": {
+   "indexer": {
+    "blocklist": [
+     {
+      "height": 99022747,
+      "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+      "tx": "7MUUMwtRc8VqKMEj8xh9uJakC8ztEUR1ToarQzC4Picw",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ],
+    "unblocklist": [
+     {
+      "height": 99023053,
+      "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+      "tx": "C1bumZzU6HKxFwSjQtYwEn9rey8dF3tNSoNLiF1ZaDay",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ]
+   },
+   "logs": {
+    "blocklist": {
+     "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"blocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    },
+    "unblocklist": {
+     "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"unblocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    }
+   },
+   "views": [
+    {
+     "at": 99022746,
+     "answer": "false"
+    },
+    {
+     "at": 99022747,
+     "answer": "true"
+    },
+    {
+     "at": 99023052,
+     "answer": "true"
+    },
+    {
+     "at": 99023053,
+     "answer": "false"
+    }
+   ]
+  },
+  "note": "recorded 2026-11-02 on a Mac: mainnet USDC on rpc.mainnet.fastnear.com and near.drpc.org, the testnet token on test.rpc.fastnear.com and near-testnet.drpc.org, the history on api.nearblocks.io and archival-rpc.mainnet.fastnear.com"
+ },
+ "bad_provider_mismatch": {
+  "readAt": "2026-11-02T15:21:42.640Z",
+  "nets": {
+   "mainnet": {
+    "code": {
+     "https://rpc.mainnet.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222736795,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222736799,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://rpc.mainnet.fastnear.com": {
+      "halt": {
+       "at": 222736783,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222736783,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222736783
+      }
+     },
+     "https://near.drpc.org": {
+      "halt": {
+       "at": 222736786,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222736786,
+       "answer": "true"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222736786
+      }
+     }
+    }
+   },
+   "testnet": {
+    "code": {
+     "https://test.rpc.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275916896,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near-testnet.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275916900,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://test.rpc.fastnear.com": {
+      "halt": {
+       "at": 275916882,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275916882,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275916882
+      }
+     },
+     "https://near-testnet.drpc.org": {
+      "halt": {
+       "at": 275916885,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275916885,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275916885
+      }
+     }
+    }
+   }
+  },
+  "history": {
+   "indexer": {
+    "blocklist": [
+     {
+      "height": 99022747,
+      "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+      "tx": "7MUUMwtRc8VqKMEj8xh9uJakC8ztEUR1ToarQzC4Picw",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ],
+    "unblocklist": [
+     {
+      "height": 99023053,
+      "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+      "tx": "C1bumZzU6HKxFwSjQtYwEn9rey8dF3tNSoNLiF1ZaDay",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ]
+   },
+   "logs": {
+    "blocklist": {
+     "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"blocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    },
+    "unblocklist": {
+     "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"unblocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    }
+   },
+   "views": [
+    {
+     "at": 99022746,
+     "answer": "false"
+    },
+    {
+     "at": 99022747,
+     "answer": "true"
+    },
+    {
+     "at": 99023052,
+     "answer": "true"
+    },
+    {
+     "at": 99023053,
+     "answer": "false"
+    }
+   ]
+  },
+  "note": "planted from the good run: dRPC answers is_blocklisted true on mainnet at its block while FastNEAR answers false (a provider mismatch)"
+ },
+ "bad_history_mismatch": {
+  "readAt": "2026-11-02T15:21:42.640Z",
+  "nets": {
+   "mainnet": {
+    "code": {
+     "https://rpc.mainnet.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222736795,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222736799,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://rpc.mainnet.fastnear.com": {
+      "halt": {
+       "at": 222736783,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222736783,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222736783
+      }
+     },
+     "https://near.drpc.org": {
+      "halt": {
+       "at": 222736786,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222736786,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222736786
+      }
+     }
+    }
+   },
+   "testnet": {
+    "code": {
+     "https://test.rpc.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275916896,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near-testnet.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275916900,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://test.rpc.fastnear.com": {
+      "halt": {
+       "at": 275916882,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275916882,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275916882
+      }
+     },
+     "https://near-testnet.drpc.org": {
+      "halt": {
+       "at": 275916885,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275916885,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275916885
+      }
+     }
+    }
+   }
+  },
+  "history": {
+   "indexer": {
+    "blocklist": [
+     {
+      "height": 99022747,
+      "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+      "tx": "7MUUMwtRc8VqKMEj8xh9uJakC8ztEUR1ToarQzC4Picw",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ],
+    "unblocklist": [
+     {
+      "height": 99023053,
+      "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+      "tx": "C1bumZzU6HKxFwSjQtYwEn9rey8dF3tNSoNLiF1ZaDay",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ]
+   },
+   "logs": {
+    "blocklist": {
+     "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"blocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    },
+    "unblocklist": {
+     "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"unblocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    }
+   },
+   "views": [
+    {
+     "at": 99022746,
+     "answer": "false"
+    },
+    {
+     "at": 99022747,
+     "answer": "false"
+    },
+    {
+     "at": 99023052,
+     "answer": "true"
+    },
+    {
+     "at": 99023053,
+     "answer": "false"
+    }
+   ]
+  },
+  "note": "planted from the good run: the archival view at the blocklist receipt's block reads false, against the indexer's event (a history mismatch)"
+ }
+}
