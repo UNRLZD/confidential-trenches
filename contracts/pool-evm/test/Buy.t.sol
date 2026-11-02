@@ -441,14 +441,19 @@ contract BuyTest is BuyBase {
   }
 
   /// W's signature for one proof of a note, paired with another proof of the same note (here, twice the fee cap), is
-  /// refused, as a buy and as a withdraw; the other proof lands with its own signature.
+  /// refused, as a buy and as a withdraw; the other proof lands with its own signature, as a buy or as a withdraw.
   function test_aSignatureForAnotherProofOfTheNoteIsRefused() public {
     assertEq(_proof('local.swap').pubSignals[1], _proof('local.buy').pubSignals[1], 'one note, one nullifier');
     assertTrue(_proof('local.swap').pubSignals[7] != _proof('local.buy').pubSignals[7], 'two contexts');
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
     vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
-    _buy('local.swap', 0.02 ether, _fixtureBuy(), _fixtureSig());
+    _buy('local.swap', 0.02 ether, _b, _fixtureSig());
     vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
     _withdrawWith('local.swap', 0.02 ether, _fixtureWithdrawSig());
+    uint256 _snap = vm.snapshotState();
+    _buy('local.swap', 0.02 ether, _b, _signed(_b, 'local.swap'));
+    assertEq(RELAYER.balance, 0.02 ether);
+    vm.revertToState(_snap);
     _withdrawWith('local.swap', 0.02 ether, _wsig('local.swap'));
     assertEq(RELAYER.balance, 0.02 ether);
   }
