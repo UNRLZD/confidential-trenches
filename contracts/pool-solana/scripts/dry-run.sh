@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# The local dry run of deploy.mjs on a fresh solana-test-validator: three runs, each funded with exactly the need the
+# script prints, from a local stand-in for the devnet wallet (a key made here, airdropped, never leaving this run):
+#   1. the whole run: build, deploy --final, init, deposit, sweep; then the live check on two loopback URLs, recorded;
+#   2. a planted failure after the deploy (--fail-after deploy): the cleanup sweeps, the program stays final;
+#   3. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps.
+# After each, the funder must hold 0. Outputs go to contracts/pool-solana/out/dry-run/ (ignored by git).
+#   scripts/heavy.sh pool-sol-deploy -- bash contracts/pool-solana/scripts/dry-run.sh
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+OUT="$ROOT/contracts/pool-solana/out/dry-run"
+rm -rf "$OUT" && mkdir -p "$OUT"
+W=$(mktemp -d)
+chmod 700 "$W"
+PORT=$((20000 + RANDOM % 20000))
+URL="http://127.0.0.1:$PORT"
+VPID=
+cleanup() { [ -n "$VPID" ] && kill "$VPID" 2>/dev/null; wait 2>/dev/null; rm -rf "$W"; }
+trap cleanup EXIT
+solana-test-validator --reset --quiet --ledger "$W/ledger" --rpc-port "$PORT" --faucet-port $((PORT + 2)) \
+  --gossip-port $((PORT + 3)) --dynamic-port-range $((PORT + 10))-$((PORT + 60)) >"$W/validator.log" 2>&1 &
+VPID=$!
+for _ in $(seq 60); do solana -u "$URL" cluster-version >/dev/null 2>&1 && break; sleep 1; done
+echo "dry-run: validator $(solana -u "$URL" cluster-version) at $URL"
+solana-keygen new --no-bip39-passphrase --silent --force -o "$W/d.json" >/dev/null
+D=$(solana-keygen pubkey "$W/d.json")
+solana -u "$URL" airdrop 10 "$D" >/dev/null
+echo "dry-run: stand-in wallet $D holds $(solana -u "$URL" balance "$D" --lamports)"
+
+sol() { node -e 'const n=BigInt(process.argv[1]);console.log(`${n/1000000000n}.${String(n%1000000000n).padStart(9,"0")}`)' "$1"; }
+# run <name> <deploy.mjs args...>: starts the script, funds exactly the printed need, waits; prints the funder after
+run() {
+  local name=$1; shift
+  local log="$OUT/$name.log"
+  node "$ROOT/contracts/pool-solana/scripts/deploy.mjs" --url "$URL" --return "$D" --out "$OUT/$name.json" "$@" >"$log" 2>&1 &
+  local pid=$!
+  for _ in $(seq 600); do grep -q "^deploy: waiting for" "$log" && break; kill -0 $pid 2>/dev/null || break; sleep 0.5; done
+  local line; line=$(grep "^deploy: waiting for" "$log")
+  local funder; funder=$(awk '{print $4}' <<<"$line")
+  local need; need=$(awk '{print $7}' <<<"$line")
+  solana -u "$URL" transfer --from "$W/d.json" --fee-payer "$W/d.json" --allow-unfunded-recipient "$funder" "$(sol "$need")" >/dev/null
+  echo "dry-run [$name]: funded $funder with exactly $need lamports"
+  if [ "$name" = stopped ]; then
+    # stop the CLI once its buffer exists, while it writes
+    for _ in $(seq 600); do solana -u "$URL" program show --buffers --buffer-authority "$funder" 2>/dev/null | grep -q "$funder" && break; sleep 0.1; done
+    pkill -TERM -P $pid -f "program deploy" || true
+    echo "dry-run [$name]: sent SIGTERM to the CLI while it writes"
+  fi
+  local rc=0; wait $pid || rc=$?
+  cat "$log"
+  echo "dry-run [$name]: exit $rc; funder $funder holds $(solana -u "$URL" balance "$funder" --lamports)"
+}
+run whole
+run planted --no-build --fail-after deploy
+run stopped --no-build
+echo "dry-run: stand-in wallet $D holds $(solana -u "$URL" balance "$D" --lamports) after the three runs"
+echo "dry-run: buffers left with any authority: $(solana -u "$URL" program show --buffers --all 2>&1 | tail -n +1 | grep -c '^ *[1-9A-HJ-NP-Za-km-z]\{32,44\} ' || true)"
+node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/whole.json" --rpc "$URL,http://localhost:$PORT" --record "$OUT/whole-answers.json"

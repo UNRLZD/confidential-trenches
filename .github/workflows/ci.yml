@@ -201,6 +201,10 @@ jobs:
         run: KIT_PROVER_E2E=1 node --test packages/kit/test/prove-e2e.test.ts
       - name: the vault's scripts' own tests
         run: pnpm run test:vault-scripts
+      # the Solana pool's deploy script: its cleanup never strands a lamport on the run key, and every committed
+      # deployment record's commitment is Poseidon(value, label, precommitment)
+      - name: the Solana pool's deploy script's own tests
+        run: node --test contracts/pool-solana/scripts/deploy.test.mjs
       # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins
       # one. rustup is on the ubuntu-24.04 image (actions/runner-images Ubuntu2404-Readme.md, read 2026-10-31 19:32Z).
       - name: the vault's own tests, without the sandbox suite
