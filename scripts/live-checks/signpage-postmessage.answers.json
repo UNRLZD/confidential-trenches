@@ -2,7 +2,7 @@
  "good": {
   "url": "https://sign.confidential.unrealized.trade/",
   "source": "local, SIGN_HOST answered from packages/signpage's build (deploy.mjs build())",
-  "at": "2026-11-01T15:12:18.979Z",
+  "at": "2026-11-02T13:39:06.456Z",
   "browser": "153.0.8010.12",
   "runs": [
    {
@@ -15,7 +15,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5048.399999976158,
+    "sentAt": 5033.89999999851,
     "scriptRan": false,
     "signRequests": [
      {
@@ -27,23 +27,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "bf4f7e5b-d0ef-4fb3-8ec5-5e11cc03f573",
+      "id": "534eec24-068d-4f50-95e3-9c33038e6833",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "08b5b78e-c828-4474-8cd3-a1719592f671",
+      "id": "9921ee7b-afc3-492a-92dc-12fc05068c7a",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "cee2736d-3caf-48bc-a967-381c74263b25",
+      "id": "cbc5252c-a7cf-4d50-8a59-a89ff3ca5d31",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "b18f9633-d481-477e-b8f6-4f9002748ea3",
+      "id": "45209d5f-59c5-4b7b-b797-dfc518e20c04",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -53,7 +53,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "e03160a4-1e8c-4c11-9e77-8bd2cd339f1f",
+      "id": "248616b8-6fec-4aa5-8650-8a8cbdf0d864",
       "type": "state"
      },
      "badId": {
@@ -63,7 +63,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "e577eb31-485a-4e18-93d7-d9447960ace0",
+      "id": "9d892dd4-f012-4d5b-a8f8-ac6fc0adbdfc",
       "type": "state"
      }
     },
@@ -82,7 +82,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5032.699999988079,
+    "sentAt": 5030,
     "scriptRan": false,
     "signRequests": [
      {
@@ -94,23 +94,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "b6c77a3c-3a52-4d3d-b312-787ebe38c442",
+      "id": "15e5bffe-9ff6-4b2b-8b9f-fef566a14d76",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "92e5521b-c2e2-4589-a29c-84fc099c44bb",
+      "id": "540e309c-0b13-4574-8d67-47df52f81acb",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "d60885dc-cad6-4bb2-b843-6d345803d39a",
+      "id": "2813ac89-fb87-48b3-aaa8-2a6be7cb8173",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "c42546f6-299c-484f-896d-6116f9e03138",
+      "id": "d9d4340d-4a47-417d-b986-1f3fd939e97c",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -120,7 +120,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "13bfb19e-babf-46b9-8f76-c7c78380e256",
+      "id": "0befd5f9-b0af-44a6-85c0-0262d19a0c91",
       "type": "state"
      },
      "badId": {
@@ -130,7 +130,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "294b1fbd-532e-4c34-a9f1-cadb744086ae",
+      "id": "65254e0f-0977-4cca-b5ab-75997c7b99d3",
       "type": "state"
      }
     },
@@ -152,7 +152,7 @@
      "elements": 1,
      "controls": []
     },
-    "sentAt": 5093.699999988079,
+    "sentAt": 5062.699999999255,
     "scriptRan": true,
     "signRequests": [
      {
@@ -169,23 +169,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "a1ab773a-b18f-4637-a9fd-829eee6e2215",
+      "id": "8cd9c213-95c2-4fbb-8262-bd321ee4a6b2",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "4e56a1e8-354a-471b-9e28-49276229f50d",
+      "id": "22cce580-7ffe-425e-8064-0dd6f0ed74a1",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "5bad961f-cd57-41ef-b468-1caa6235cf54",
+      "id": "c1e84433-fbfb-4a2a-be01-ef2caee6cb40",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "9267f2c5-c5a0-46aa-ab72-939b8b842bc3",
+      "id": "1dafa47c-8008-4333-80ec-2f500d2e6b8a",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -195,7 +195,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "63842ac8-b38a-46a9-8746-d8af1cc2ba21",
+      "id": "27a82256-b338-4058-85a3-45d5aaed256d",
       "type": "state"
      },
      "badId": {
@@ -205,7 +205,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "e3281bf4-2d2e-4637-bf98-8f45f6ae432e",
+      "id": "59928c0a-27fc-4f07-b2f9-22300b7eddd9",
       "type": "state"
      }
     },
@@ -222,7 +222,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5028.5,
+    "sentAt": 5033.599999997765,
     "scriptRan": false,
     "signRequests": [
      {
@@ -234,23 +234,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "13473595-20b5-4750-b2f4-d365d437a7dd",
+      "id": "56d71c01-d370-4c16-bdb0-703dc4b7082a",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "08e58509-f27d-44c7-8065-e8171c9acaa1",
+      "id": "b5afc10c-0402-48c9-a988-6b8cfc5806de",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "65c6010e-d3d0-4d1c-bd37-96a89be9187a",
+      "id": "02157e44-2705-40d8-bbc7-29ef0cb73f8e",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "d933ef3d-e738-4de0-b963-3245f420cf7c",
+      "id": "a842ed3e-c743-46f3-81ff-3d51fc84a79b",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -260,7 +260,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "f01aff93-03d9-4265-8226-b0d007beb6c0",
+      "id": "7eaca4d5-8fcb-4310-8d13-61c8db20c820",
       "type": "state"
      },
      "badId": {
@@ -270,7 +270,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "9d592f5c-bb93-47c9-a910-0674845f8734",
+      "id": "e0cbe108-9b40-4231-b292-3dedf94b1d64",
       "type": "state"
      }
     },
@@ -292,7 +292,7 @@
      "elements": 1,
      "controls": []
     },
-    "sentAt": 5095.199999988079,
+    "sentAt": 5053.599999997765,
     "scriptRan": true,
     "signRequests": [
      {
@@ -309,23 +309,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "ee94335d-1782-4890-862b-9606d1a18397",
+      "id": "cfc6f672-8796-4b3f-bbdf-4b5ccf4ef537",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "08d9e3c8-44af-4ad2-904d-cc63561d79b0",
+      "id": "9e4708da-d7af-4e3e-8354-7b2b92423446",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "ce41394e-d4f7-45e8-bb67-e85c37ed6704",
+      "id": "1f738340-6b1d-43c6-b62b-4996a9eec4ab",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "7e3186fc-d768-4901-92fa-55d9a15a881c",
+      "id": "586d2afe-6181-451a-98dd-34506f8b5816",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -335,7 +335,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "c39798a0-c641-4da6-b3aa-f60323c11d0c",
+      "id": "0dffa8e5-c14b-46e2-b668-b527ace774ac",
       "type": "state"
      },
      "badId": {
@@ -345,7 +345,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "e5cdb5ad-fa20-452c-9498-e9a9c234b6db",
+      "id": "41a49e79-f737-4a4e-920d-4e9d04c052b1",
       "type": "state"
      }
     },
@@ -362,7 +362,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5030.100000023842,
+    "sentAt": 5026.300000000745,
     "scriptRan": false,
     "signRequests": [
      {
@@ -374,23 +374,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "4b9c898d-2df0-46d9-9f77-f3190dad7080",
+      "id": "b6de1ba6-526d-4955-8173-12d05cd3ea2f",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "a25bd8a1-f447-4e20-bfa0-5f6c63095c1d",
+      "id": "44f6ad18-ba85-4e70-bfdc-1ee674588fbf",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "e59547dd-0c48-402d-8354-e1fc77034586",
+      "id": "c709902b-1e44-4873-81e5-471acae3b522",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "ab25f358-d5e1-45fe-906e-bcfff086fe74",
+      "id": "5233084c-a9d3-486a-a8e3-c21a1fb8b67e",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -400,7 +400,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "81dc8d8f-b6d0-4980-94d7-d92cc6a5f2bc",
+      "id": "2648ffa0-394a-4808-bd6d-a5963888cda5",
       "type": "state"
      },
      "badId": {
@@ -410,7 +410,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "31eb2f34-16c5-40f7-a425-531cebf8ae28",
+      "id": "67b16b68-5eb6-4861-ae4c-2d4809477e3d",
       "type": "state"
      }
     },
@@ -432,7 +432,7 @@
      "elements": 1,
      "controls": []
     },
-    "sentAt": 5100.699999988079,
+    "sentAt": 5056.800000000745,
     "scriptRan": true,
     "signRequests": [
      {
@@ -449,23 +449,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "19dd2a86-2c0a-4127-ae85-30cb9a3f2dfd",
+      "id": "34096322-c84c-4934-96a5-fc5c34f70220",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "75f229ae-ef69-468d-bcd9-5ed5088ac2ff",
+      "id": "9b80fc75-c00a-4815-8ecc-496e198a3bc1",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "72cd8890-e735-41a5-9895-407ebed599d4",
+      "id": "55138d80-ab0c-4033-b173-0af3b7a4c92d",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "7df6e2a8-9d35-43fb-8dbd-684c69d1ccec",
+      "id": "52c7955a-9a2c-4198-8aac-1025e5670155",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -475,7 +475,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "7ed135e8-51a5-4c4a-9490-cbd74a2c5618",
+      "id": "f4f8feab-6e25-46a4-9575-431f91590b3b",
       "type": "state"
      },
      "badId": {
@@ -485,7 +485,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "e32d920a-8b97-43f0-9ce9-29afc5e04440",
+      "id": "f82cc8d5-fdd5-41fe-8ac8-f4c892bcf335",
       "type": "state"
      }
     },
@@ -493,7 +493,625 @@
     "errors": []
    }
   ],
-  "note": "packages/signpage at card signpage-shell (frame-ancestors none), --local: PASS, APP_HOST blocked like every stranger"
+  "deposit": {
+   "signUrl": "https://sign.confidential.unrealized.trade/",
+   "ready": true,
+   "log": [
+    {
+     "t": 16.799999997019768,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 19.299999997019768,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "id": "62a03441-7b0f-41f8-859f-dfbf6eee5c34",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 19.399999998509884,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "id": "bd4ffe28-1dfb-4602-b5bd-6da25967c1f2",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    }
+   ],
+   "ids": {
+    "state": "62a03441-7b0f-41f8-859f-dfbf6eee5c34",
+    "quote": "bd4ffe28-1dfb-4602-b5bd-6da25967c1f2"
+   },
+   "asked": {
+    "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+    "amount": "25"
+   },
+   "helper": [],
+   "errors": []
+  }
+ },
+ "live": {
+  "url": "https://sign.confidential.unrealized.trade/",
+  "source": "live",
+  "at": "2026-11-02T13:41:51.427Z",
+  "browser": "153.0.8010.12",
+  "runs": [
+   {
+    "parent": "https://confidential.unrealized.trade",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://confidential.unrealized.trade/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 5582,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "963d769e-b9f4-447b-8ef8-b9e075fb18c4",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "f977db27-7155-4a17-87c7-a1150aba7cce",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "2e9c4e93-abf1-401c-a030-af6df8e20e79",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "d5c49482-c7c0-431c-a905-8f70079a8fd5",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "19825dbe-33ad-4797-ae76-60d216a8a66a",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "953b9ebd-341f-4216-943b-deb408c0365f",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://example.com",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://example.com/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 5799.100000023842,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "502297e3-230d-4d78-b6e6-d9ab6d2b0f7e",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "466ed78f-3f1d-4126-afb6-ed0d485bd0ba",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "39bbd95e-a461-491c-bc55-89f701b2eda8",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "1ca41bea-b11a-4eb5-ac12-d6f7961bd52b",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "51ce0012-b715-4495-b53b-d0ad1c140c4b",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "af9b1b99-e3b9-472f-b414-a0f5c9ec8d5f",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://example.com",
+    "headers": "lifted",
+    "loaded": true,
+    "frames": [
+     "https://example.com/",
+     "https://sign.confidential.unrealized.trade/",
+     "about:blank"
+    ],
+    "rendered": {
+     "elements": 1,
+     "controls": []
+    },
+    "sentAt": 6749.300000011921,
+    "scriptRan": true,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "status": 200
+     },
+     {
+      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "type": "script",
+      "status": 200
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "7bbe8e2b-1bea-41cf-ba15-ec22efb26668",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "a0a3809f-ff44-482f-829a-0b61ec25c089",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "bab99130-1b32-47e3-af37-11a9456b83bd",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "611a0236-e0cf-4087-9591-a10ac28d0f6d",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "84833a38-5fec-4a40-af97-c497220ea944",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "2362c4eb-282a-45bc-8c69-b265133dc1b4",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": []
+   },
+   {
+    "parent": "https://evil.ct.test",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://evil.ct.test/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 8290.299999952316,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "3b9cc921-834d-4e13-af0f-156efca07a81",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "b01fecc7-5aad-411c-9a63-3684a3710be4",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "8fc717aa-cc20-4fcd-b0fa-aee0977b07e9",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "a957340c-a11c-48f8-b9d0-238a667e7bf2",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "4a195a7f-b1fc-410a-98fb-550580886686",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "0c38ed31-4624-45cb-b82b-5a494f7a3d5f",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://evil.ct.test",
+    "headers": "lifted",
+    "loaded": true,
+    "frames": [
+     "https://evil.ct.test/",
+     "https://sign.confidential.unrealized.trade/",
+     "about:blank"
+    ],
+    "rendered": {
+     "elements": 1,
+     "controls": []
+    },
+    "sentAt": 6915.300000011921,
+    "scriptRan": true,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "status": 200
+     },
+     {
+      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "type": "script",
+      "status": 200
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "827c023e-39de-48f7-81bc-1d5acd8d2be8",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "04548828-8a3a-4d5f-a755-3fd7ea333df6",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "0484c07f-842b-4e69-92ac-6c49dc1ceb77",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "29a134ad-f7ac-4e94-86ec-6475a069b1de",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "157ab698-bfc6-4e79-98b5-3e744ce23973",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "01221775-3e60-4fe3-b1b0-d3f42eb1a7f6",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": []
+   },
+   {
+    "parent": "https://app.other.test",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://app.other.test/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 5851.600000023842,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "a20611b1-b06c-4e8a-a231-5aaea07b60ba",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "c76e8550-f515-4ff7-9dd3-3bdfadba04b1",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "4a35a745-c00f-4904-8e0a-89c4461016e3",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "c7990a50-b081-4b6d-8329-dd2a51d4e239",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "cb036be9-cccf-4db5-b9a7-bb44877a1a5d",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "9dc37dec-d1c9-4444-8f55-6e4652c9a9ae",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://app.other.test",
+    "headers": "lifted",
+    "loaded": true,
+    "frames": [
+     "https://app.other.test/",
+     "https://sign.confidential.unrealized.trade/",
+     "about:blank"
+    ],
+    "rendered": {
+     "elements": 1,
+     "controls": []
+    },
+    "sentAt": 11403.899999976158,
+    "scriptRan": true,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "status": 200
+     },
+     {
+      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "type": "script",
+      "status": 200
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "9df56d54-1e05-4f4f-8cad-980ce5fe16ef",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "19fa7a6a-5ac2-46b6-acc3-5551bbc4b2c4",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "c7386916-ab2f-420d-923c-11ef0c4dcca3",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "4337d9af-f13b-41a7-9d5d-6dc94e60a3dd",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "d5945a6e-cd58-4b75-8b8f-c0ee9451e9cb",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "9a023249-8893-4ac2-9493-c58d7e6aeecb",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": []
+   }
+  ],
+  "deposit": {
+   "signUrl": "https://sign.confidential.unrealized.trade/",
+   "ready": true,
+   "log": [
+    {
+     "t": 30.899999976158142,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 31.899999976158142,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "id": "0c3e2335-38ae-419a-a299-b1d180025dfd",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 32,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "id": "ee847a9d-1bf4-450a-8935-a50640e8cce3",
+      "ok": false,
+      "error": {
+       "code": "not_allowed"
+      }
+     }
+    }
+   ],
+   "ids": {
+    "state": "0c3e2335-38ae-419a-a299-b1d180025dfd",
+    "quote": "ee847a9d-1bf4-450a-8935-a50640e8cce3"
+   },
+   "asked": {
+    "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+    "amount": "25"
+   },
+   "helper": [],
+   "errors": []
+  }
  },
  "framed": {
   "url": "https://sign.confidential.unrealized.trade/",
@@ -2107,5 +2725,567 @@
    }
   ],
   "note": "the e9a673e build with the page origin and source check taken out and answers posted to *, integrity recomputed, --local; recorded on the pre-merge page (api.js at 25ebd81)"
+ },
+ "plantedDeposit": {
+  "url": "https://sign.confidential.unrealized.trade/",
+  "source": "local, SIGN_HOST answered from a planted build of this card's source: deposit.quote answers an address with no seed stored and no request sent",
+  "at": "2026-11-02T13:41:02.892Z",
+  "browser": "153.0.8010.12",
+  "runs": [
+   {
+    "parent": "https://confidential.unrealized.trade",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://confidential.unrealized.trade/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 5073.599999964237,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "83ea4fea-57fe-4e3c-9fa7-0551d2ec42d5",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "07ace33a-9998-41ab-a5bb-dc7d54e2e308",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "534df83d-d6c8-4e96-960c-5b43afbfdcae",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "46daceb6-fced-407d-b5e2-e5c993f32ff4",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "194f6d05-091f-4d6a-a596-9c3fb742f127",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "cef8b25b-f32a-4e21-bd1f-585faf32ae0e",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://example.com",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://example.com/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 5045.5,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "298dae2b-96f5-4da6-ab92-e10eb9b127ce",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "a20d214e-0b3e-4054-b629-59a7411e008f",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "b82a9bc5-a0a3-4b5b-9a89-d313aa633090",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "5a7d1245-bd08-4f10-8f41-5daef8f852e4",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "027465e9-0591-4a6f-bacb-07da1d2c3260",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "1f4eed4a-77f1-427a-b6e1-3009a6cdc0ca",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://example.com",
+    "headers": "lifted",
+    "loaded": true,
+    "frames": [
+     "https://example.com/",
+     "https://sign.confidential.unrealized.trade/",
+     "about:blank"
+    ],
+    "rendered": {
+     "elements": 1,
+     "controls": []
+    },
+    "sentAt": 5073.600000023842,
+    "scriptRan": true,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "status": 200
+     },
+     {
+      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "type": "script",
+      "status": 200
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "a9ebd91f-ae77-4948-8bb7-c3838805b713",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "b9fa4f61-7634-4036-bc25-03a154d2b5e8",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "f331f886-e231-4a0f-b5fb-b074b8a32f49",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "b363c214-b285-4d10-ae29-a81fb54bf8e7",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "7e8cd96b-ba74-4343-84e7-c80f7a3b5938",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "7f8b6447-6c40-41df-8457-22909baca12b",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": []
+   },
+   {
+    "parent": "https://evil.ct.test",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://evil.ct.test/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 5058.699999988079,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "242c65fb-19ec-4604-97bf-28aeb941d333",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "85d70a3d-6ced-4710-b298-726ef8b007d4",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "1864cf0b-1452-4c85-86ee-87df0c6b8646",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "c5f8fe76-16ce-4c90-8700-6514e0a522da",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "e6d47ca6-7257-4e46-84bd-33a4ccf05f6a",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "2c051512-f4d6-465f-b814-b00d61dd22ab",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://evil.ct.test",
+    "headers": "lifted",
+    "loaded": true,
+    "frames": [
+     "https://evil.ct.test/",
+     "https://sign.confidential.unrealized.trade/",
+     "about:blank"
+    ],
+    "rendered": {
+     "elements": 1,
+     "controls": []
+    },
+    "sentAt": 5072.900000035763,
+    "scriptRan": true,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "status": 200
+     },
+     {
+      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "type": "script",
+      "status": 200
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "281b3cd8-5899-4026-8482-2f8eed9b0bcb",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "a7ab635d-9520-47cd-bed7-f75f2b2df837",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "5f38391b-0db4-473f-a9b1-a455f7a27cd2",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "7f192e95-08b5-415b-a9b9-c24b652734af",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "552dc143-ffcb-422c-8cf0-5b06d4145534",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "1a19f75b-a1ba-4c3b-a59f-e1f3884a25e2",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": []
+   },
+   {
+    "parent": "https://app.other.test",
+    "headers": "served",
+    "loaded": false,
+    "frames": [
+     "https://app.other.test/",
+     "",
+     "about:blank"
+    ],
+    "rendered": null,
+    "sentAt": 5051.900000035763,
+    "scriptRan": false,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "failure": "net::ERR_BLOCKED_BY_RESPONSE"
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "683ef0cc-e733-44f9-a2e2-db5ab7a7f40e",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "83856046-8213-4181-9280-4ee23ab38e38",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "54921bd9-30ed-4991-823f-143f5f1d5bf7",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "0a055f75-5a16-4cf7-a6db-5e270c1a7bd7",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "eb15a11e-ab82-4db6-834f-8d13297d3800",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "ba9903b9-c37c-4519-8cfd-3911e3bc808e",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
+   },
+   {
+    "parent": "https://app.other.test",
+    "headers": "lifted",
+    "loaded": true,
+    "frames": [
+     "https://app.other.test/",
+     "https://sign.confidential.unrealized.trade/",
+     "about:blank"
+    ],
+    "rendered": {
+     "elements": 1,
+     "controls": []
+    },
+    "sentAt": 5060.200000047684,
+    "scriptRan": true,
+    "signRequests": [
+     {
+      "url": "https://sign.confidential.unrealized.trade/",
+      "type": "document",
+      "status": 200
+     },
+     {
+      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "type": "script",
+      "status": 200
+     }
+    ],
+    "sent": {
+     "state": {
+      "v": 1,
+      "id": "d36da04c-aa8b-4940-802e-b5d53892730b",
+      "type": "state"
+     },
+     "stateExtra": {
+      "v": 1,
+      "id": "b9c8265f-1de6-4246-a5ea-627d5afa35d8",
+      "type": "state",
+      "extra": true
+     },
+     "unknown": {
+      "v": 1,
+      "id": "558b090b-840b-4cac-80e0-1cb54599a298",
+      "type": "sign.anything"
+     },
+     "buy": {
+      "v": 1,
+      "id": "2ecd9341-a569-4d88-842b-9219b3f079c4",
+      "type": "buy",
+      "chain": "solana",
+      "token": "So11111111111111111111111111111111111111112",
+      "side": "buy",
+      "amount": "1",
+      "slippage_bps": 50
+     },
+     "badV": {
+      "v": 2,
+      "id": "06e1b251-02d8-492b-8742-16278c0947fb",
+      "type": "state"
+     },
+     "badId": {
+      "v": 1,
+      "id": "1",
+      "type": "state"
+     },
+     "wrongSource": {
+      "v": 1,
+      "id": "0465716b-5c26-4831-91f8-5744a6f3a084",
+      "type": "state"
+     }
+    },
+    "messages": [],
+    "errors": []
+   }
+  ],
+  "deposit": {
+   "signUrl": "https://sign.confidential.unrealized.trade/",
+   "ready": true,
+   "log": [
+    {
+     "t": 33.89999997615814,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "type": "ready",
+      "release": "unreleased",
+      "api": 1
+     }
+    },
+    {
+     "t": 36.69999998807907,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "id": "47d7a145-17b5-40ba-b77f-7245e19168ac",
+      "ok": true,
+      "result": {
+       "release": "unreleased",
+       "api": 1,
+       "signed_in": false,
+       "code_saved": false,
+       "vault_balance": "0",
+       "wallets": [],
+       "positions": [],
+       "orders": [],
+       "held": [],
+       "ops": []
+      }
+     }
+    },
+    {
+     "t": 36.799999952316284,
+     "origin": "https://sign.confidential.unrealized.trade",
+     "fromParent": true,
+     "data": {
+      "v": 1,
+      "id": "e92cfd94-b701-486f-97aa-e1387772e492",
+      "ok": true,
+      "result": {
+       "deposit_address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+       "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+       "amount_in": "25",
+       "min_amount_out": "24.7",
+       "deadline": "2026-11-05T00:00:00.000Z",
+       "time_estimate_s": 20
+      }
+     }
+    }
+   ],
+   "ids": {
+    "state": "47d7a145-17b5-40ba-b77f-7245e19168ac",
+    "quote": "e92cfd94-b701-486f-97aa-e1387772e492"
+   },
+   "asked": {
+    "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+    "amount": "25"
+   },
+   "helper": [],
+   "errors": []
+  }
  }
 }

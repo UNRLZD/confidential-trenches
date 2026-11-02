@@ -11,6 +11,15 @@
 //     arrives: the page's own origin check and targetOrigin are what refuse.
 // The API's shapes and refusals (packages/kit/src/signpage/messages.ts, api 1) are packages/signpage/test/api.test.ts's,
 // and the shell's answers to its frame are signpage-shell's.
+// One more run, the deposit.quote round trip (card signpage-deposit-quote-wire): SIGN_HOST top-level, as it is opened,
+// frames APP_HOST, which Playwright answers with a probe page; once the shell's ready arrives the probe asks `state`
+// and then deposit.quote (25 USDC from Solana) and records the answers, and the run records every request the page
+// sends to the helper's 1Click proxy. In a fresh browser the page holds no seed, so the answer must be a refusal,
+// not_allowed, with no request sent: nothing leaves the device for an account that is not there, and no address is
+// shown for a U the store has not recorded. A signed-in answer is judged by the same rule as the device's: an address
+// only after exactly one request, which names one id as recipient and refundTo. --local answers the helper with 503
+// itself (no network); live, a request goes to the helper as the page sends it. The live quote with an address is the
+// mainnet test vault's run (until a vault is named on the page's network, the page asks no quote at all).
 //   node scripts/live-checks/signpage-postmessage.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/signpage-postmessage.mjs --local [<dir>] [--record <file>]
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers
@@ -30,6 +39,12 @@ export const SIGN_URL = "https://sign.confidential.unrealized.trade/";
 export const STRANGERS = ["https://example.com", "https://evil.ct.test", "https://app.other.test"];
 export const READY_MS = 5_000;
 const SETTLE_MS = 1_500;
+/** The deposit quote's longest wait: the device's own helper timeout (10 s) and room. */
+export const QUOTE_MS = 15_000;
+export const HELPER_QUOTE = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote";
+const SOL_USDC = "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near";
+/** deposit.quote's answer codes (packages/signpage/src/rules/deposit-quote.ts). */
+export const QUOTE_CODES = ["not_allowed", "above_max", "busy", "down", "quote_check_failed", "not_available"];
 
 // ------------------------------------------------------------------------------------------------ the verdict
 /** Each parent and the headers it is judged under: APP_HOST as served, every stranger as served and lifted. */
@@ -53,7 +68,33 @@ export function judge(rec) {
       say(n === 0, `${label}: ${n} message(s) reached the parent${n ? ` (${JSON.stringify(s.messages.map((m) => m.data))})` : ""}, want none`);
     }
   }
+  judgeDeposit(rec.deposit, say);
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
+}
+
+/** The deposit.quote round trip: one answer; a refusal with a code; an address only after one request to U. */
+function judgeDeposit(d, say) {
+  if (!d) return say(false, "deposit.quote: no run");
+  say(d.ready === true, `deposit.quote: the shell's ready ${d.ready ? "arrived" : "did not arrive"} in the APP_HOST frame`);
+  const answers = (d.log ?? []).filter((m) => m.fromParent && m.origin === new URL(d.signUrl).origin && m.data?.id === d.ids?.quote);
+  say(answers.length === 1, `deposit.quote: ${answers.length} answer(s) to its id, want 1`);
+  const a = answers[0]?.data;
+  if (!a) return;
+  const state = (d.log ?? []).find((m) => m.fromParent && m.data?.id === d.ids?.state)?.data;
+  const signedIn = state?.ok === true && state.result?.signed_in === true;
+  const sent = d.helper ?? [];
+  if (a.ok === false) {
+    const code = a.error?.code;
+    say(QUOTE_CODES.includes(code) && Object.keys(a).sort().join() === "error,id,ok,v", `deposit.quote: refused ${JSON.stringify(code)}, a code and nothing else`);
+    if (!signedIn) say(code === "not_allowed", `deposit.quote with no seed stored: ${JSON.stringify(code)}, want not_allowed`);
+    if (code === "not_allowed" || code === "above_max") say(sent.length === 0, `deposit.quote refused ${code}: ${sent.length} request(s) to the helper, want none`);
+    return;
+  }
+  say(signedIn, `deposit.quote answered ok ${signedIn ? "signed in" : "with no seed stored: an address for a U the store has not recorded"}`);
+  const r = a.result ?? {};
+  say(typeof r.deposit_address === "string" && r.deposit_address.length > 0 && r.origin_asset === d.asked?.origin_asset, "deposit.quote: an address, for the asset asked");
+  const body = sent.length === 1 ? sent[0].body : null;
+  say(sent.length === 1 && /^[0-9a-f]{64}$/.test(body?.recipient ?? "") && body.refundTo === body.recipient, `deposit.quote: ${sent.length} request(s) to the helper, want 1 naming one id as recipient and refundTo`);
 }
 
 // ------------------------------------------------------------------------------------------------ the read
@@ -181,10 +222,64 @@ async function run(browser, { parent, headers, signUrl, dir }) {
   return { parent, headers, loaded, frames, rendered, sentAt, scriptRan, signRequests, sent, messages, errors };
 }
 
+// The APP_HOST frame inside SIGN_HOST's shell: waits for the shell's ready, then asks state and deposit.quote.
+const appProbeHtml = (signOrigin) => `<!doctype html><meta charset="utf-8"><body><script>
+window.__log = [];
+addEventListener("message", (e) => {
+  window.__log.push({ t: performance.now(), origin: e.origin, fromParent: e.source === parent, data: e.data });
+  if (e.source !== parent || e.data?.type !== "ready" || window.__ids) return;
+  const s = { v: 1, id: crypto.randomUUID(), type: "state" };
+  const q = { v: 1, id: crypto.randomUUID(), type: "deposit.quote", origin_asset: ${JSON.stringify(SOL_USDC)}, amount: "25" };
+  window.__ids = { state: s.id, quote: q.id };
+  window.__asked = { origin_asset: q.origin_asset, amount: q.amount };
+  parent.postMessage(s, ${JSON.stringify(signOrigin)});
+  parent.postMessage(q, ${JSON.stringify(signOrigin)});
+});
+</script></body>`;
+
+async function depositRun(browser, { signUrl, dir }) {
+  const signOrigin = new URL(signUrl).origin;
+  const ctx = await browser.newContext();
+  await ctx.route((u) => u.origin === APP_HOST, (r) => r.fulfill({ status: 200, contentType: "text/html", body: appProbeHtml(signOrigin) }));
+  if (dir) {
+    await ctx.route((u) => u.origin === signOrigin, serveDir(dir, false));
+    // no network: the helper answers "down" here
+    await ctx.route((u) => u.origin === new URL(HELPER_QUOTE).origin, (r) => r.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
+  }
+  const helper = [];
+  ctx.on("request", (req) => {
+    if (!req.url().startsWith(HELPER_QUOTE)) return;
+    let body = null;
+    try {
+      body = JSON.parse(req.postData() ?? "null");
+    } catch {}
+    helper.push({ url: req.url(), method: req.method(), body });
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(signUrl, { waitUntil: "load" });
+  const app = () => page.frames().find((f) => f.url().startsWith(`${APP_HOST}/`));
+  const until = Date.now() + READY_MS + QUOTE_MS;
+  let out = { log: [], ids: null, asked: null };
+  for (; Date.now() < until; await page.waitForTimeout(100)) {
+    const f = app();
+    if (!f) continue;
+    out = await f.evaluate(() => ({ log: window.__log, ids: window.__ids ?? null, asked: window.__asked ?? null })).catch(() => out);
+    if (out.ids && out.log.some((m) => m.data?.id === out.ids.quote)) break;
+  }
+  await page.waitForTimeout(SETTLE_MS);
+  const f = app();
+  if (f) out = await f.evaluate(() => ({ log: window.__log, ids: window.__ids ?? null, asked: window.__asked ?? null })).catch(() => out);
+  await ctx.close();
+  return { signUrl, ready: out.log.some((m) => m.fromParent && m.data?.type === "ready"), ...out, helper, errors };
+}
+
 export async function collect({ browser, signUrl = SIGN_URL, dir, source }) {
   const rec = { url: signUrl, source, at: new Date().toISOString(), browser: browser.version(), runs: [] };
   rec.runs.push(await run(browser, { parent: APP_HOST, headers: "served", signUrl, dir }));
   for (const parent of STRANGERS) for (const headers of ["served", "lifted"]) rec.runs.push(await run(browser, { parent, headers, signUrl, dir }));
+  rec.deposit = await depositRun(browser, { signUrl, dir });
   return rec;
 }
 
