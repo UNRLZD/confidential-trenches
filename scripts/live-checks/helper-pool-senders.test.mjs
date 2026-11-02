@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
 import { SOLANA_RELEASE_COST } from "../../apps/helper/src/pool/fee.ts";
-import { b58decode, b58encode, COST_MIN, judge, plant, read } from "./helper-pool-senders.mjs";
+import { b58decode, b58encode, COST_MIN, judge, plant, PLANTS, read } from "./helper-pool-senders.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-pool-senders.answers.json"), "utf8"));
@@ -38,21 +38,24 @@ test("made from the good run: a planted transaction carried, two fees, a fee und
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "1000000" })))).ok, false);
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "2000001" })))).ok, false);
   assert.equal(judge({ ...g, pool: "11111111111111111111111111111111" }).ok, false);
-  assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.asked !== "fee_off") }).ok, false);
+  for (const [asked] of PLANTS) {
+    assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.asked !== asked) }).ok, false, `${asked} missing`);
+    assert.equal(judge(edit(g, asked, (x) => ({ ...x, status: 200, body: '{"signature":"x"}' }))).ok, false, `${asked} carried`);
+  }
   assert.equal(COST_MIN, SOLANA_RELEASE_COST, "the check's floor is the helper's");
 });
 
-test("plant() builds what the helper's checks read: a changed byte is bad_signature, a fee one step off is fee_off, as is: ok", () => {
+test("plant() builds what the helper's checks read: each plant gets its own code from the bytes alone, as is: ok", () => {
   const f = JSON.parse(A.good.reads[0].body);
   const cfg = { program: f.program, pool: f.pool, feePayer: f.fee_payer };
   const fee = BigInt(f.fee);
+  const nowMs = 1_800_000_000_000;
   const at = (wire) => {
-    const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee });
+    const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee, nowMs });
     return c.ok ? "ok" : c.code;
   };
-  assert.equal(at(plant({ ...cfg, relayFee: fee, flip: true })), "bad_signature");
-  assert.equal(at(plant({ ...cfg, relayFee: fee + 100_000n })), "fee_off");
-  assert.equal(at(plant({ ...cfg, relayFee: fee })), "ok");
+  for (const [asked, code] of PLANTS) assert.equal(at(asked === "fee_off" ? plant({ ...cfg, relayFee: fee + 100_000n, nowMs }) : plant({ ...cfg, relayFee: fee, kind: asked, nowMs })), code, asked);
+  assert.equal(at(plant({ ...cfg, relayFee: fee, nowMs })), "ok");
   assert.equal(b58encode(b58decode(f.pool)), f.pool);
 });
 
@@ -65,6 +68,6 @@ test("read() asks the fee twice and plants two transactions for the pool (replay
     return new Response(r.body, { status: r.status, headers: r.headers });
   };
   const run = await read("http://h.invalid", A.good.pool, fetchFn);
-  assert.deepEqual(asked, ["GET /v1/pool/fee", "GET /v1/pool/fee", "POST /v1/pool/solana/send", "POST /v1/pool/solana/send"]);
-  assert.deepEqual(run.reads.map((x) => x.asked), ["fee", "fee", "changed", "fee_off"]);
+  assert.deepEqual(asked, ["GET /v1/pool/fee", "GET /v1/pool/fee", ...PLANTS.map(() => "POST /v1/pool/solana/send")]);
+  assert.deepEqual(run.reads.map((x) => x.asked), ["fee", "fee", ...PLANTS.map(([a]) => a)]);
 });

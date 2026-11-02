@@ -1,12 +1,12 @@
 {
  "good": {
-  "note": "apps/helper at card/helper-pool-senders 8ee9ec6 plus the fee_payer field (working tree), node src/server.ts on the Mac, POOL_SOLANA_*_DEVNET set: the program id of the pool-sol-buy-sell LiteSVM fixture (Grmxuo8j...), a throwaway fee payer key made for this run and never stored, fee 2000000, devnet RPCs api.devnet.solana.com and solana-devnet.drpc.org (never called: both planted transactions are refused before any read); read 2026-11-02T21:47:55.561Z (api.confidential.unrealized.trade does not serve the route yet)",
+  "note": "apps/helper at card/helper-pool-senders 7c3a4df (fold 2: the seven plants), node src/server.ts on the Mac, POOL_SOLANA_*_DEVNET set: the program id of the pool-sol-buy-sell LiteSVM fixture (Grmxuo8j...), a throwaway fee payer key made in the recording process and never printed or stored, fee 2000000, devnet RPCs api.devnet.solana.com and solana-devnet.drpc.org (never called: every planted transaction is refused on its bytes before any read); read 2026-11-02T23:49:49.815Z (api.confidential.unrealized.trade does not serve the route yet)",
   "pool": "6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1",
   "reads": [
    {
     "asked": "fee",
     "origin": true,
-    "readAt": "2026-11-02T21:47:55.561Z",
+    "readAt": "2026-11-02T23:49:49.815Z",
     "status": 200,
     "headers": {
      "access-control-allow-origin": "https://confidential.unrealized.trade",
@@ -15,36 +15,36 @@
      "connection": "keep-alive",
      "content-length": "287",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
     },
-    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"Grmxuo8jHWMnnGxG6Dy2GhJ1ej3tb9SUNxmR5jCxaq54\",\"pool\":\"6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1\",\"fee_payer\":\"2brexuRHMq9zex96AzmeEZYgw4GaJyyMGDjfTF9i2pBW\",\"epoch_ms\":60000,\"epoch_start_ms\":1793656020000,\"fee\":\"2000000\",\"step\":\"100000\"}"
+    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"Grmxuo8jHWMnnGxG6Dy2GhJ1ej3tb9SUNxmR5jCxaq54\",\"pool\":\"6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1\",\"fee_payer\":\"FZjeW8ExcQs8o81TL1xe3tmJWCFLfPZy66T12E61xgR6\",\"epoch_ms\":60000,\"epoch_start_ms\":1793663340000,\"fee\":\"2000000\",\"step\":\"100000\"}"
    },
    {
     "asked": "fee",
     "origin": false,
-    "readAt": "2026-11-02T21:47:55.564Z",
+    "readAt": "2026-11-02T23:49:49.817Z",
     "status": 200,
     "headers": {
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "287",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
     },
-    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"Grmxuo8jHWMnnGxG6Dy2GhJ1ej3tb9SUNxmR5jCxaq54\",\"pool\":\"6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1\",\"fee_payer\":\"2brexuRHMq9zex96AzmeEZYgw4GaJyyMGDjfTF9i2pBW\",\"epoch_ms\":60000,\"epoch_start_ms\":1793656020000,\"fee\":\"2000000\",\"step\":\"100000\"}"
+    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"Grmxuo8jHWMnnGxG6Dy2GhJ1ej3tb9SUNxmR5jCxaq54\",\"pool\":\"6azRMw7MSr3b36qWRxYMPZUy59cTPWzjxd5yotXkCUb1\",\"fee_payer\":\"FZjeW8ExcQs8o81TL1xe3tmJWCFLfPZy66T12E61xgR6\",\"epoch_ms\":60000,\"epoch_start_ms\":1793663340000,\"fee\":\"2000000\",\"step\":\"100000\"}"
    },
    {
     "asked": "changed",
     "origin": true,
-    "readAt": "2026-11-02T21:47:55.576Z",
+    "readAt": "2026-11-02T23:49:49.829Z",
     "status": 422,
     "headers": {
      "access-control-allow-origin": "https://confidential.unrealized.trade",
@@ -53,18 +53,18 @@
      "connection": "keep-alive",
      "content-length": "34",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
     },
     "body": "{\"error\":{\"code\":\"bad_signature\"}}"
    },
    {
     "asked": "fee_off",
     "origin": true,
-    "readAt": "2026-11-02T21:47:55.579Z",
+    "readAt": "2026-11-02T23:49:49.832Z",
     "status": 422,
     "headers": {
      "access-control-allow-origin": "https://confidential.unrealized.trade",
@@ -73,13 +73,113 @@
      "connection": "keep-alive",
      "content-length": "76",
      "content-type": "application/json; charset=utf-8",
-     "date": "Mon, 02 Nov 2026 21:47:55 GMT",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
      "keep-alive": "timeout=65",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "8ee9ec604a87cfcac53f923b68fc054ddf21d0bb"
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
     },
     "body": "{\"error\":{\"code\":\"fee_off\",\"detail\":\"relay_fee 2100000, published 2000000\"}}"
+   },
+   {
+    "asked": "extra_instruction",
+    "origin": true,
+    "readAt": "2026-11-02T23:49:49.834Z",
+    "status": 422,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "102",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
+    },
+    "body": "{\"error\":{\"code\":\"extra_instruction\",\"detail\":\"not exactly one instruction after the compute budget\"}}"
+   },
+   {
+    "asked": "fee_payer_named",
+    "origin": true,
+    "readAt": "2026-11-02T23:49:49.836Z",
+    "status": 422,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "71",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
+    },
+    "body": "{\"error\":{\"code\":\"fee_payer_named\",\"detail\":\"in an inner instruction\"}}"
+   },
+   {
+    "asked": "fee_below_cost",
+    "origin": true,
+    "readAt": "2026-11-02T23:49:49.838Z",
+    "status": 422,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "78",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
+    },
+    "body": "{\"error\":{\"code\":\"fee_below_cost\",\"detail\":\"relay_fee 2000000, cost 5025999\"}}"
+   },
+   {
+    "asked": "inner_program",
+    "origin": true,
+    "readAt": "2026-11-02T23:49:49.840Z",
+    "status": 422,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "103",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
+    },
+    "body": "{\"error\":{\"code\":\"inner_program\",\"detail\":\"an inner instruction invokes a program off the kit's list\"}}"
+   },
+   {
+    "asked": "deadline_near",
+    "origin": true,
+    "readAt": "2026-11-02T23:49:49.843Z",
+    "status": 422,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "87",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 23:49:49 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "7c3a4df336ee6240bb228611adfaf7ea67e2522d"
+    },
+    "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1793663390840, now 1793663389841\"}}"
    }
   ]
  },
