@@ -15,7 +15,12 @@
 // unblocklist receipts (NearBlocks) holds the one pair, each receipt's log on the archival provider is that x-fiat-token
 // event for the same account, and is_blocklisted of that account reads false, true, true, false at the blocklist's block
 // less one, its block, the unblocklist's block less one and its block (a view at block h includes h's receipts).
-//   node scripts/live-checks/helper-usdc-event-watch.mjs [--record <file>]
+// Then the helper itself (HELPER_HOST's GET /v1/token-status, read with Origin APP_HOST before the providers): on each
+// network it carries (CARRIED), caught_up true, not halted, the vault not blocked, the pin, at a block no more than
+// MAX_LAG behind the providers' final reads that follow it; on a network it does not carry yet (mainnet until its vault
+// is deployed: the watch reads the vault's own block, so with no vault it never answers caught up), the kit's
+// not-caught-up answer, halted, vault_blocked and code_hash_ok null.
+//   node scripts/live-checks/helper-usdc-event-watch.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
@@ -24,6 +29,11 @@ import { writeFileSync } from "node:fs";
 const KEY = "helper-usdc-event-watch";
 export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const PIN_SHA256 = "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6"; // the pin is base58 of it
+export const BASE = "https://api.confidential.unrealized.trade";
+export const APP = "https://confidential.unrealized.trade";
+/** The networks the helper carries, so its watch must answer caught up there; mainnet joins at its vault's deploy. */
+export const CARRIED = ["testnet"];
+export const MAX_LAG = 100; // blocks (about 60 s) the helper's answer may trail the providers' final reads after it
 export const MAX_SKEW = 30; // blocks between the two providers' final answers (about 18 s): more is a provider behind
 const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 /** Per network: the token, its two providers (two operators, scripts/ci/near-rpc-operators.mjs), the account whose block is read. */
@@ -89,6 +99,19 @@ export function judge(run) {
       at.push(s?.halt?.at);
     }
     say(at.every(Number.isSafeInteger) && Math.abs(at[0] - at[1]) <= MAX_SKEW, `[${net}] the two providers' blocks ${show(at)} within ${MAX_SKEW}`);
+    const hr = run.helper?.[net];
+    let hb;
+    try {
+      hb = JSON.parse(hr?.body ?? "");
+    } catch {}
+    say(hr?.status === 200 && hb?.token === token, `[${net}] helper GET /v1/token-status?token=${token} answers ${show(hr?.status)} for ${show(hb?.token)}`);
+    if (CARRIED.includes(net)) {
+      say(hb?.caught_up === true && hb.halted === false && hb.vault_blocked === false && hb.code_hash_ok === true && hb.code_hash === PIN, `[${net}] helper: caught_up ${show(hb?.caught_up)}, halted ${show(hb?.halted)}, vault_blocked ${show(hb?.vault_blocked)}, code_hash_ok ${show(hb?.code_hash_ok)}, code_hash the pin`);
+      const low = Math.min(...at);
+      say(Number.isSafeInteger(hb?.block_height) && hb.block_height > 0 && low - hb.block_height <= MAX_LAG, `[${net}] helper's block ${show(hb?.block_height)} at most ${MAX_LAG} behind the providers' ${show(low)}`);
+    } else {
+      say(hb?.caught_up === false && hb.halted === null && hb.vault_blocked === null && hb.code_hash_ok === null, `[${net}] helper, not carried yet: caught_up ${show(hb?.caught_up)}, halted, vault_blocked and code_hash_ok null`);
+    }
   }
   // mainnet: a view at a height equals the event history
   const h = run.history;
@@ -147,9 +170,12 @@ async function get(fetchFn, url, sleep) {
 const call = (token, method, args, at) => ({ request_type: "call_function", ...at, account_id: token, method_name: method, args_base64: b64(args) });
 
 /** Everything the check reads; the code is kept as its digest, never its 321 KB. */
-export async function read(fetchFn = fetch, sleep = wait) {
-  const run = { readAt: new Date().toISOString(), nets: {}, history: {} };
+export async function read(fetchFn = fetch, sleep = wait, base = BASE) {
+  const run = { readAt: new Date().toISOString(), base, helper: {}, nets: {}, history: {} };
   for (const [net, { token, pair, watched }] of Object.entries(NETS)) {
+    // the helper's answer first, so the providers' final reads after it bound how far it trails
+    const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/token-status?token=${encodeURIComponent(token)}`, { method: "GET", redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" }, signal: AbortSignal.timeout(30000) });
+    run.helper[net] = { status: r.status, body: (await r.text()).slice(0, 4096) };
     const n = (run.nets[net] = { code: {}, state: {} });
     // the two final reads first, back to back, so their blocks compare; then each provider's reads at its own block
     for (const u of pair) n.state[u] = { halt: viewOutcome(await post(fetchFn, u, "query", call(token, "ft_balance_of", { account_id: watched }, { finality: "final" }), sleep)) };
@@ -209,7 +235,7 @@ if (import.meta.main) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    const run = await read();
+    const run = await read(fetch, wait, opt("--base", BASE));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const { ok, lines } = judge(run);
     for (const l of lines) console.log(l);

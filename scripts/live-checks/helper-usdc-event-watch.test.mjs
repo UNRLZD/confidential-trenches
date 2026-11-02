@@ -1,6 +1,8 @@
 // node --test scripts/live-checks/helper-usdc-event-watch.test.mjs: the live check replays recorded runs
-// (helper-usdc-event-watch.answers.json). good: a run on a Mac on 2026-11-02 reading mainnet USDC and the testnet token on
-// FastNEAR and dRPC, the indexer and the archival provider: PASS. bad_provider_mismatch: dRPC's is_blocklisted answers
+// (helper-usdc-event-watch.answers.json). good: the helper at dd4ee99 run locally with testnet carried, and mainnet USDC
+// and the testnet token on FastNEAR and dRPC, the indexer and the archival provider, on 2026-11-02: PASS.
+// bad_deployed_before: the deployed helper at 350a7db, whose watch never answered caught up: FAIL on that line alone.
+// bad_provider_mismatch: dRPC's is_blocklisted answers
 // true where FastNEAR's answers false: FAIL on that line alone. bad_history_mismatch: the archival view at the blocklist's
 // block disagrees with the indexer's event: FAIL on that line alone. Made from the good run: a halted answer, an unknown
 // halt, two providers far apart: each FAIL. read() replayed through a stub provider: the shapes it records.
@@ -20,7 +22,30 @@ const DRPC = NETS.mainnet.pair[1];
 test("recorded good run: both networks' code, halt, block and code hash on two providers, and the history: PASS", () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 28);
+  assert.equal(r.lines.length, 33);
+  assert.ok(r.lines.includes("ok  [testnet] helper: caught_up true, halted false, vault_blocked false, code_hash_ok true, code_hash the pin"));
+});
+
+test("recorded bad run: the deployed helper before this card (350a7db) never answers caught up on testnet: FAIL on that line alone", () => {
+  const r = judge(A.bad_deployed_before);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r), ["BAD [testnet] helper: caught_up false, halted null, vault_blocked null, code_hash_ok null, code_hash the pin"]);
+});
+
+test("made from the good run: the helper halted, blocked, on another code, far behind, or mainnet answering caught up with nulls: each FAIL", () => {
+  const withHelper = (net, f) => {
+    const r = copy(A.good);
+    r.helper[net].body = JSON.stringify(f(JSON.parse(r.helper[net].body)));
+    return judge(r);
+  };
+  assert.equal(withHelper("testnet", (b) => ({ ...b, halted: true })).ok, false);
+  assert.equal(withHelper("testnet", (b) => ({ ...b, vault_blocked: true })).ok, false);
+  assert.equal(withHelper("testnet", (b) => ({ ...b, code_hash: "GT71B8i42Z2xegTKpA6TUJQYghRqZfyJUNJG6rKf21DT" })).ok, false);
+  assert.equal(withHelper("testnet", (b) => ({ ...b, block_height: b.block_height - 101 })).ok, false);
+  assert.equal(withHelper("mainnet", (b) => ({ ...b, caught_up: true })).ok, false);
+  const gone = copy(A.good);
+  gone.helper.testnet = { status: 404, body: "{}" };
+  assert.equal(judge(gone).ok, false);
 });
 
 test("recorded bad run, a provider mismatch: dRPC says blocklisted where FastNEAR does not: FAIL on that line alone", () => {
@@ -73,6 +98,7 @@ test("read() through a stub provider: it records each read's outcome, and a wasm
   const stub = async (url, init) => {
     asked.push(url);
     const json = (o) => new Response(JSON.stringify(o), { status: 200 });
+    if (url.startsWith("https://helper.example/")) return json(JSON.parse(A.good.helper[new URL(url).searchParams.get("token") === NETS.mainnet.token ? "mainnet" : "testnet"].body));
     if (url.startsWith("https://api.nearblocks.io/")) {
       const m = new URL(url).searchParams.get("method");
       const t = A.good.history.indexer[m][0];
@@ -90,7 +116,7 @@ test("read() through a stub provider: it records each read's outcome, and a wasm
     const hist = A.good.history.views.find((v) => v.at === at);
     return json({ result: { block_height: at, result: [...Buffer.from(hist ? hist.answer : "false")] } });
   };
-  const run = await read(stub, async () => {});
+  const run = await read(stub, async () => {}, "https://helper.example");
   const r = judge(run);
   assert.deepEqual(
     bad(r).map((l) => l.replace(/ view_code of .*/, " view_code").replace(/ the wasm exports .*/, " exports")),

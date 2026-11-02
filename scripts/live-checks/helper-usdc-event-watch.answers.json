@@ -1,12 +1,23 @@
 {
  "good": {
-  "readAt": "2026-11-02T15:21:42.640Z",
+  "readAt": "2026-11-02T15:51:11.070Z",
+  "base": "http://127.0.0.1:18094",
+  "helper": {
+   "mainnet": {
+    "status": 200,
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222739876,\"last_event\":null}"
+   },
+   "testnet": {
+    "status": 200,
+    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":275920000,\"last_event\":null}"
+   }
+  },
   "nets": {
    "mainnet": {
     "code": {
      "https://rpc.mainnet.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222736795,
+      "block_height": 222739890,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -29,7 +40,7 @@
      },
      "https://near.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222736799,
+      "block_height": 222739893,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -54,30 +65,30 @@
     "state": {
      "https://rpc.mainnet.fastnear.com": {
       "halt": {
-       "at": 222736783,
+       "at": 222739877,
        "answer": "\"20000\""
       },
       "blocked": {
-       "at": 222736783,
+       "at": 222739877,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222736783
+       "block_height": 222739877
       }
      },
      "https://near.drpc.org": {
       "halt": {
-       "at": 222736786,
+       "at": 222739879,
        "answer": "\"20000\""
       },
       "blocked": {
-       "at": 222736786,
+       "at": 222739879,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222736786
+       "block_height": 222739879
       }
      }
     }
@@ -86,7 +97,7 @@
     "code": {
      "https://test.rpc.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275916896,
+      "block_height": 275920017,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -109,7 +120,7 @@
      },
      "https://near-testnet.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275916900,
+      "block_height": 275920019,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -134,30 +145,30 @@
     "state": {
      "https://test.rpc.fastnear.com": {
       "halt": {
-       "at": 275916882,
+       "at": 275920001,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275916882,
+       "at": 275920001,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275916882
+       "block_height": 275920001
       }
      },
      "https://near-testnet.drpc.org": {
       "halt": {
-       "at": 275916885,
+       "at": 275920004,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275916885,
+       "at": 275920004,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275916885
+       "block_height": 275920004
       }
      }
     }
@@ -217,16 +228,27 @@
     }
    ]
   },
-  "note": "recorded 2026-11-02 on a Mac: mainnet USDC on rpc.mainnet.fastnear.com and near.drpc.org, the testnet token on test.rpc.fastnear.com and near-testnet.drpc.org, the history on api.nearblocks.io and archival-rpc.mainnet.fastnear.com"
+  "note": "apps/helper at dd4ee99 run locally (node src/server.ts) with testnet carried (BIND_*_TESTNET set, its relayer key a throwaway never on chain), read 2026-11-02 on a Mac: the helper on 127.0.0.1, mainnet USDC and the testnet token on FastNEAR and dRPC, the history on api.nearblocks.io and archival-rpc.mainnet.fastnear.com"
  },
- "bad_provider_mismatch": {
-  "readAt": "2026-11-02T15:21:42.640Z",
+ "bad_deployed_before": {
+  "readAt": "2026-11-02T15:53:11.432Z",
+  "base": "https://api.confidential.unrealized.trade",
+  "helper": {
+   "mainnet": {
+    "status": 200,
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222740090,\"last_event\":null}"
+   },
+   "testnet": {
+    "status": 200,
+    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":275920207,\"last_event\":null}"
+   }
+  },
   "nets": {
    "mainnet": {
     "code": {
      "https://rpc.mainnet.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222736795,
+      "block_height": 222740102,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -249,7 +271,7 @@
      },
      "https://near.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222736799,
+      "block_height": 222740105,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -274,30 +296,30 @@
     "state": {
      "https://rpc.mainnet.fastnear.com": {
       "halt": {
-       "at": 222736783,
+       "at": 222740090,
        "answer": "\"20000\""
       },
       "blocked": {
-       "at": 222736783,
+       "at": 222740090,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222736783
+       "block_height": 222740090
       }
      },
      "https://near.drpc.org": {
       "halt": {
-       "at": 222736786,
+       "at": 222740093,
        "answer": "\"20000\""
       },
       "blocked": {
-       "at": 222736786,
-       "answer": "true"
+       "at": 222740093,
+       "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222736786
+       "block_height": 222740093
       }
      }
     }
@@ -306,7 +328,7 @@
     "code": {
      "https://test.rpc.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275916896,
+      "block_height": 275920222,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -329,7 +351,7 @@
      },
      "https://near-testnet.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275916900,
+      "block_height": 275920226,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -354,30 +376,261 @@
     "state": {
      "https://test.rpc.fastnear.com": {
       "halt": {
-       "at": 275916882,
+       "at": 275920207,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275916882,
+       "at": 275920207,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275916882
+       "block_height": 275920207
       }
      },
      "https://near-testnet.drpc.org": {
       "halt": {
-       "at": 275916885,
+       "at": 275920210,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275916885,
+       "at": 275920210,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275916885
+       "block_height": 275920210
+      }
+     }
+    }
+   }
+  },
+  "history": {
+   "indexer": {
+    "blocklist": [
+     {
+      "height": 99022747,
+      "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+      "tx": "7MUUMwtRc8VqKMEj8xh9uJakC8ztEUR1ToarQzC4Picw",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ],
+    "unblocklist": [
+     {
+      "height": 99023053,
+      "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+      "tx": "C1bumZzU6HKxFwSjQtYwEn9rey8dF3tNSoNLiF1ZaDay",
+      "signer": "afed4c0a3a10daa967174eaf88a485c7ce018101b9620196c0d928e6021e0908",
+      "account": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+      "ok": true
+     }
+    ]
+   },
+   "logs": {
+    "blocklist": {
+     "receipt_id": "5MG37yPEUHR2r5iJeWBzG7rLpKJ7ncdoJeoCx4mSwrzA",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"blocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    },
+    "unblocklist": {
+     "receipt_id": "G4gFphFuNPjpozZ5tG8Mxwz4XqsFCUqusmHnYqfV2HLD",
+     "executor": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "log": "EVENT_JSON:{\"standard\":\"x-fiat-token\",\"version\":\"1.0.0\",\"event\":\"unblocklist\",\"data\":{\"account_id\":\"da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d\"}}"
+    }
+   },
+   "views": [
+    {
+     "at": 99022746,
+     "answer": "false"
+    },
+    {
+     "at": 99022747,
+     "answer": "true"
+    },
+    {
+     "at": 99023052,
+     "answer": "true"
+    },
+    {
+     "at": 99023053,
+     "answer": "false"
+    }
+   ]
+  },
+  "note": "the deployed helper at 350a7db (before this card): its watch never answers caught up, so every move on testnet is held"
+ },
+ "bad_provider_mismatch": {
+  "readAt": "2026-11-02T15:51:11.070Z",
+  "base": "http://127.0.0.1:18094",
+  "helper": {
+   "mainnet": {
+    "status": 200,
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222739876,\"last_event\":null}"
+   },
+   "testnet": {
+    "status": 200,
+    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":275920000,\"last_event\":null}"
+   }
+  },
+  "nets": {
+   "mainnet": {
+    "code": {
+     "https://rpc.mainnet.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222739890,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 222739893,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://rpc.mainnet.fastnear.com": {
+      "halt": {
+       "at": 222739877,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222739877,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222739877
+      }
+     },
+     "https://near.drpc.org": {
+      "halt": {
+       "at": 222739879,
+       "answer": "\"20000\""
+      },
+      "blocked": {
+       "at": 222739879,
+       "answer": "true"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 222739879
+      }
+     }
+    }
+   },
+   "testnet": {
+    "code": {
+     "https://test.rpc.fastnear.com": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275920017,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     },
+     "https://near-testnet.drpc.org": {
+      "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "block_height": 275920019,
+      "bytes": 321491,
+      "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
+      "exports": [
+       "execute_multisig_request",
+       "blocklist",
+       "unblocklist",
+       "upgrade",
+       "ft_balance_of",
+       "is_blocklisted"
+      ],
+      "strings": [
+       "x-fiat-token",
+       "paused",
+       "unpaused",
+       "blocklist",
+       "unblocklist",
+       "FiatToken: paused",
+       "EVENT_JSON:"
+      ]
+     }
+    },
+    "state": {
+     "https://test.rpc.fastnear.com": {
+      "halt": {
+       "at": 275920001,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275920001,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275920001
+      }
+     },
+     "https://near-testnet.drpc.org": {
+      "halt": {
+       "at": 275920004,
+       "answer": "\"500000\""
+      },
+      "blocked": {
+       "at": 275920004,
+       "answer": "false"
+      },
+      "account": {
+       "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+       "block_height": 275920004
       }
      }
     }
@@ -440,13 +693,24 @@
   "note": "planted from the good run: dRPC answers is_blocklisted true on mainnet at its block while FastNEAR answers false (a provider mismatch)"
  },
  "bad_history_mismatch": {
-  "readAt": "2026-11-02T15:21:42.640Z",
+  "readAt": "2026-11-02T15:51:11.070Z",
+  "base": "http://127.0.0.1:18094",
+  "helper": {
+   "mainnet": {
+    "status": 200,
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222739876,\"last_event\":null}"
+   },
+   "testnet": {
+    "status": 200,
+    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":275920000,\"last_event\":null}"
+   }
+  },
   "nets": {
    "mainnet": {
     "code": {
      "https://rpc.mainnet.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222736795,
+      "block_height": 222739890,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -469,7 +733,7 @@
      },
      "https://near.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222736799,
+      "block_height": 222739893,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -494,30 +758,30 @@
     "state": {
      "https://rpc.mainnet.fastnear.com": {
       "halt": {
-       "at": 222736783,
+       "at": 222739877,
        "answer": "\"20000\""
       },
       "blocked": {
-       "at": 222736783,
+       "at": 222739877,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222736783
+       "block_height": 222739877
       }
      },
      "https://near.drpc.org": {
       "halt": {
-       "at": 222736786,
+       "at": 222739879,
        "answer": "\"20000\""
       },
       "blocked": {
-       "at": 222736786,
+       "at": 222739879,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222736786
+       "block_height": 222739879
       }
      }
     }
@@ -526,7 +790,7 @@
     "code": {
      "https://test.rpc.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275916896,
+      "block_height": 275920017,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -549,7 +813,7 @@
      },
      "https://near-testnet.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275916900,
+      "block_height": 275920019,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -574,30 +838,30 @@
     "state": {
      "https://test.rpc.fastnear.com": {
       "halt": {
-       "at": 275916882,
+       "at": 275920001,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275916882,
+       "at": 275920001,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275916882
+       "block_height": 275920001
       }
      },
      "https://near-testnet.drpc.org": {
       "halt": {
-       "at": 275916885,
+       "at": 275920004,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275916885,
+       "at": 275920004,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275916885
+       "block_height": 275920004
       }
      }
     }
