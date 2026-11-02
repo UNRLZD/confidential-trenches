@@ -14,10 +14,10 @@
 //   `allow` (the app copies nothing). SIGN_HOST's CSP frame-src names APP_HOST only, so the frame cannot be sent
 //   anywhere else; its frame-ancestors 'none' keeps any page from framing the shell.
 // - The screens (sign-in, backup, the words) draw in `layer`, over the frame, in this document: a child frame cannot
-//   draw over its parent. The layer is hidden in every state until an open kind asks for it (src/main.ts: signin.open),
-//   and closes on signed in or Cancel. While it shows, the frame is out of the document: a frame under it could take
-//   the keyboard's focus back and read the 12 words as they are typed. At close a new frame comes, at the top window's
-//   address then.
+//   draw over its parent. The layer is hidden in every state until an open kind asks for it (src/main.ts: signin.open,
+//   signout, backup.open), and closes on signed in, a sign out the signout kind opened, or Cancel. While it shows, the
+//   frame is out of the document: a frame under it could take the keyboard's focus back and read the 12 words as they
+//   are typed. At close a new frame comes, at the top window's address then.
 // - nav: the app says where it is, and the shell puts that path and query in the top window's address with
 //   history.replaceState (never a navigation), so the address bar, a reload, a new frame and a shared link follow the
 //   app. reload: the shell reloads the top window (a reload of the frame alone would keep the old shell).
@@ -126,7 +126,7 @@ export interface Shell {
 /**
  * Draws the shell into `doc`: the APP_HOST frame filling the window at the top window's path and query, and the layer
  * over it, hidden until open() (an open kind asks for it), then starts the API to the frame. The shell answers nav and
- * reload itself; `host.kinds` adds the screens' own (src/main.ts: signin.open).
+ * reload itself; `host.kinds` adds the screens' own (src/main.ts: signin.open, signout, backup.open).
  */
 export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad">): Shell {
   const view = doc.defaultView!;

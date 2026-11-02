@@ -45,7 +45,7 @@ test("the frame's state path never calls get on meta/seed", async () => {
   await tab.insertSeed({ v: 1, entropy: new Uint8Array(16).fill(0x7f), source: "random", code_saved: false, created_ms: 1 });
   await tab.put("ops", crypto.randomUUID(), { kind: "deposit", stage: "waiting", txs: [], created_ms: 2 });
   const signedIn = await fs.state();
-  await tab.setCodeSaved();
+  await tab.setCodeSaved({ entropy: new Uint8Array(16).fill(0x7f) });
   const saved = await fs.state();
   await tab.signOut();
   await new Promise((ok) => setTimeout(ok, 30));

@@ -22,7 +22,7 @@ import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-prover-host"];
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host"];
 export const PROJECT = "confidential-trenches-sign";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves SIGN_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
