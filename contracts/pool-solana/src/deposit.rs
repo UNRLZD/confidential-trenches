@@ -12,17 +12,22 @@
 //! - the precommitment below p (`FieldOverflow`) and not 0 (`InvalidPrecommitment`), and unused: its mark
 //!   `["pre", precommitment]` must not exist (`PrecommitmentAlreadyUsed`), then it is made. Two notes with one
 //!   precommitment would share one nullifier, so spending one would end the other.
+//! - the mark records the deposit in its 16 bytes (`PRE_MARK_LEN`): `value u64 LE ‖ nonce u64 LE`, the nonce the one
+//!   its label hashes (M353). From the marks alone, one read of every account of this program, a device that knows
+//!   its precommitments rebuilds each of its notes (`label = keccak256(scope ‖ nonce) mod p`, `commitment =
+//!   Poseidon(value, label, precommitment)`) with no read that names a note. Both values are public in the deposit
+//!   transaction already.
 //! - `nonce += 1`, `label = keccak256(scope ‖ nonce) mod p`, `commitment = Poseidon(value, label, precommitment)`.
 //! - the commitment into the state tree, the label into the label tree (the pool approves every deposit; no ASP),
 //!   each with its page entry.
 //! - `value` lamports from the depositor to the pool (the system program's transfer), `deposited += value`.
 //!
-//! The depositor pays every rent the deposit makes: the precommitment mark and the two page entries.
+//! The depositor pays every rent the deposit makes: the precommitment mark (16 bytes) and the two page entries.
 
 use crate::context::{label_of, scope_of};
 use crate::error::PoolError;
 use crate::field;
-use crate::state::{self, Pool, TreeState, POOL_LEN, POOL_SEED, PRE_SEED, TREE_LABEL, TREE_STATE};
+use crate::state::{self, Pool, TreeState, POOL_LEN, POOL_SEED, PRE_MARK_LEN, PRE_SEED, TREE_LABEL, TREE_STATE};
 use crate::tree::{self, poseidon3};
 use crate::MIN_DEPOSIT;
 use solana_program::{account_info::AccountInfo, entrypoint::ProgramResult, program_error::ProgramError, pubkey::Pubkey};
@@ -77,8 +82,14 @@ pub fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
     if precommitment == [0; 32] {
         return Err(PoolError::InvalidPrecommitment.into());
     }
-    state::put_mark(program_id, depositor, pre_mark, system, PRE_SEED, &precommitment, PoolError::PrecommitmentAlreadyUsed)?;
+    state::put_mark_of(program_id, depositor, pre_mark, system, PRE_SEED, &precommitment, PRE_MARK_LEN, PoolError::PrecommitmentAlreadyUsed)?;
     pool.nonce = pool.nonce.checked_add(1).ok_or(PoolError::Overflow)?;
+    {
+        // the record a restore reads: value, then the nonce this deposit's label hashes
+        let mut d = pre_mark.try_borrow_mut_data()?;
+        d[0..8].copy_from_slice(&value.to_le_bytes());
+        d[8..16].copy_from_slice(&pool.nonce.to_le_bytes());
+    }
     let label = label_of(&scope_of(&program_id.to_bytes(), &pool_acc.key.to_bytes()), pool.nonce);
     let commitment = poseidon3(&field::of_u64(value), &label, &precommitment)?;
     push(program_id, depositor, state_page, system, TREE_STATE, &mut pool.state, &commitment)?;

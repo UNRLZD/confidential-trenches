@@ -5,7 +5,7 @@
 //
 // - Candidates, from the chain only: the pump.fun bonding curve PDA of the mint and the PumpSwap canonical pool PDA of
 //   the mint (quoted in WSOL). A complete curve is not a candidate. Each venue's accounts are read in one
-//   getMultipleAccounts at `processed`, base64, on both providers: two calls per provider, one per venue, since
+//   getMultipleAccounts at `confirmed` (card sol-pool-buy-tx F7), base64, on both providers: two calls per provider, one per venue, since
 //   solana-rpc.publicnode.com takes at most 10 accounts in one call, so each candidate rests on one slot per provider.
 // - Agree: static accounts byte-equal on both (the mint, pump's Global, both fee configs, the PumpSwap GlobalConfig,
 //   the curve and the pool with their moving fields masked); each reserve (the curve's virtual token and SOL
@@ -86,6 +86,8 @@ export type SolanaReference = {
   expectedOuts: bigint[];
   spotOut: bigint | null;
   pools: { venue: SolanaPoolVenue; address: string; depth: readonly [bigint, bigint]; expectedOut: bigint }[];
+  /** The oldest slot of the reads it rests on (readSolanaReference), so a check can bound its age. */
+  slot?: number;
 };
 export type SolanaReferenceRequest = { side: "buy" | "sell"; token: string; amount: bigint; amounts?: readonly bigint[] };
 /** The most legs one request prices. */
@@ -173,7 +175,7 @@ export function solanaDecodeTokenAccount(acc: SolanaPoolAccount): { mint: string
 
 export type SolanaBondingCurve = {
   virtualTokenReserves: bigint; virtualQuoteReserves: bigint; realTokenReserves: bigint; realQuoteReserves: bigint;
-  tokenTotalSupply: bigint; complete: boolean; creator: string; isMayhemMode: boolean; quoteMint: string; creatorFeeBps: bigint;
+  tokenTotalSupply: bigint; complete: boolean; creator: string; isMayhemMode: boolean; isCashbackCoin: boolean; quoteMint: string; creatorFeeBps: bigint;
 };
 /** pump BondingCurve: reserves u64 at 8, 16, 24, 32, supply 40, complete 48, creator 49, mayhem 81, cashback 82,
  * quote_mint 83, creator_fee_bps 115 (later fields not used). */
@@ -183,7 +185,7 @@ export function solanaDecodeBondingCurve(acc: SolanaPoolAccount): SolanaBondingC
   disc(d, DISC.bondingCurve, "BondingCurve", 49);
   return {
     virtualTokenReserves: u64(d, 8), virtualQuoteReserves: u64(d, 16), realTokenReserves: u64(d, 24), realQuoteReserves: u64(d, 32),
-    tokenTotalSupply: u64(d, 40), complete: bool(d, 48), creator: key(d, 49), isMayhemMode: bool(d, 81),
+    tokenTotalSupply: u64(d, 40), complete: bool(d, 48), creator: key(d, 49), isMayhemMode: bool(d, 81), isCashbackCoin: bool(d, 82),
     quoteMint: key(d, 83), creatorFeeBps: u64(d, 115),
   };
 }
@@ -577,20 +579,24 @@ export async function readSolanaReference(providers: readonly [SolanaRpc, Solana
   // one venue's accounts, one call per provider: each candidate rests on one slot per provider
   const readBoth = (list: string[]): Promise<[Read, Read]> =>
     Promise.all(providers.map((rpc) =>
-      withTimeout(Promise.resolve().then(() => rpc("getMultipleAccounts", [list, { encoding: "base64", commitment: "processed" }])), READ_TIMEOUT_MS).then(
+      withTimeout(Promise.resolve().then(() => rpc("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])), READ_TIMEOUT_MS).then(
         (ans) => solanaParseAccountsAnswer(ans, list.length),
         () => null,
       ),
     )) as Promise<[Read, Read]>;
   const lists: Record<SolanaPoolVenue, string[]> = { "pump-curve": addr.curveList, pumpswap: addr.poolList };
   const venues: SolanaPoolVenue[] = ["pump-curve", "pumpswap"];
+  const slots: number[] = [];
   const look = async (v: SolanaPoolVenue): Promise<Verdict> => {
     const [a, b] = await readBoth(lists[v]);
-    return judge(v, req, addr, a, b);
+    const verdict = judge(v, req, addr, a, b);
+    if (verdict.kind === "ok" && a && b) slots.push(a.slot, b.slot);
+    return verdict;
   };
   let verdicts = await Promise.all(venues.map(look));
   // one more read on both of a candidate that did not agree; if it still does not, the route is refused
   verdicts = await Promise.all(verdicts.map((v, i) => (v.kind === "bad" ? look(venues[i]!) : v)));
   if (verdicts.some((v) => v.kind === "bad")) return null;
-  return solanaReferenceSet(verdicts.flatMap((v) => (v.kind === "ok" ? [v.candidate] : [])));
+  const ref = solanaReferenceSet(verdicts.flatMap((v) => (v.kind === "ok" ? [v.candidate] : [])));
+  return ref && slots.length ? { ...ref, slot: Math.min(...slots) } : ref;
 }
