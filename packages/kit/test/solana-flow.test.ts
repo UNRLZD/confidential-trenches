@@ -398,3 +398,12 @@ test("the reference reads through the trade's paced providers: the same provider
   assert.ok(given[0] !== pa && given[1] !== pb, "wrapped, not the bare providers");
   assert.ok(solanaSameProvider(given[0]!, pa) && solanaSameProvider(given[1]!, pb), "the trade's own two providers");
 });
+
+test("heldMints that are not addresses refuse the trade before any read", async () => {
+  for (const heldMints of [["11111111"], ["not a key"], [base58.encode(new Uint8Array(31).fill(3))]]) {
+    const refs: unknown[] = [];
+    const providers: [SolanaRpc & { calls: Call[] }, SolanaRpc & { calls: Call[] }] = [reads(1_000), reads(1_001)];
+    await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 100, wallets: WALLETS, heldMints, legs: [{ wallet: W1, amount: 5n, arm: { own: true } }] }, deps({ providers, refs })), /heldMints must be mint addresses/);
+    assert.equal(refs.length + providers[0].calls.length + providers[1].calls.length, 0);
+  }
+});

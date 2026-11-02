@@ -220,6 +220,53 @@ test("one long-lived map: it grows only by new wallets and new keys, a wallet jo
   assert.equal(m.ownerOf(solanaAta(OTHER, allKeys(c.m).at(-1) as string, TOKEN)), OTHER, "and by the tx's keys");
 });
 
+test("grows in flight, seeded interleavings: a wallet the map holds always has its accounts and every finished key's, and S11's add() right after a holds() leaves nothing missing", async () => {
+  // grow() at slice 0 yields after every derivation; addWallets(), add() and S11's pattern run between the slices
+  let seed = 0x5eed_1234;
+  const rand = (): number => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4_294_967_296; };
+  const keyOf = (): string => base58.encode(Uint8Array.from({ length: 32 }, () => Math.floor(rand() * 256)));
+  const pick = <T>(a: readonly T[]): T => a[Math.floor(rand() * a.length)] as T;
+  const WS = Array.from({ length: 8 }, keyOf);
+  const KS = Array.from({ length: 10 }, keyOf);
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const missing: string[] = [];
+  const owns = (m: SolanaWalletLinks, o: string, k: string) => m.ownerOf(solanaAta(o, k, TOKEN)) === o && m.ownerOf(solanaAta(o, k, T22)) === o;
+  for (let round = 0; round < 30; round++) {
+    const m = new SolanaWalletLinks();
+    const done = new Set<string>([WSOL]);
+    const grows: Promise<void>[] = [];
+    for (let step = 0; step < 30; step++) {
+      const r = rand();
+      if (r < 0.35) {
+        const ws = Array.from({ length: 1 + Math.floor(rand() * 3) }, () => pick(WS));
+        const ks = Array.from({ length: Math.floor(rand() * 4) }, () => pick(KS));
+        grows.push(m.grow(ws, ks, 0).then(() => { for (const k of ks) done.add(k); }));
+      } else if (r < 0.45) {
+        m.addWallets([pick(WS)]);
+      } else if (r < 0.65) {
+        const others = [...m.wallets].filter(() => rand() < 0.6);
+        if (m.holds(others)) {
+          const ks = Array.from({ length: 1 + Math.floor(rand() * 3) }, () => pick(KS));
+          m.add(ks);
+          for (const k of ks) done.add(k);
+          for (const o of others) for (const k of ks) if (!owns(m, o, k)) missing.push(`round ${round} S11: ${o.slice(0, 4)} ${k.slice(0, 4)}`);
+        }
+      } else {
+        for (const o of m.wallets) {
+          const sva = solanaVolumeAccumulator(o, SOLANA_PUMP_AMM_PROGRAM);
+          for (const x of [o, solanaVolumeAccumulator(o, PUMP), sva, solanaAta(sva, WSOL, TOKEN)]) if (m.ownerOf(x) !== o) missing.push(`round ${round}: ${o.slice(0, 4)}'s base account`);
+          for (const k of done) if (!owns(m, o, k)) missing.push(`round ${round} held: ${o.slice(0, 4)} ${k.slice(0, 4)}`);
+        }
+      }
+      const turns = Math.floor(rand() * 4);
+      for (let i = 0; i < turns; i++) await new Promise((res) => setTimeout(res, 0));
+    }
+    await Promise.all(grows);
+    for (const o of m.wallets) for (const k of done) if (!owns(m, o, k)) missing.push(`round ${round} end: ${o.slice(0, 4)} ${k.slice(0, 4)}`);
+  }
+  assert.deepEqual(missing.slice(0, 5), []);
+});
+
 test("a mint another wallet holds that the tx never names: S11 refuses its token account once the caller names the mint", () => {
   const M = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 19 + 2) & 0xff));
   const named = () => { const c = buyCase(); addKey(c.m, solanaAta(OTHER, M, TOKEN)); return c; };
@@ -230,9 +277,13 @@ test("a mint another wallet holds that the tx never names: S11 refuses its token
     if (links) (c.req as { links?: SolanaWalletLinks }).links = links;
     refusedBy("S11", run(c));
   }
-  const bad = buyCase();
-  (bad.req as { heldMints?: unknown }).heldMints = ["not a key"];
-  refusedBy("S11", run(bad));
+  for (const m of ["not a key", "11111111", base58.encode(new Uint8Array(31).fill(3))]) {
+    const bad = buyCase();
+    (bad.req as { heldMints?: unknown }).heldMints = [m];
+    const v = run(bad);
+    refusedBy("S11", v);
+    assert.match(v.results.find((r) => r.id === "S11")!.detail, /held mints must be addresses/, m);
+  }
 });
 
 test("the paper's sell shape passes every check", () => {

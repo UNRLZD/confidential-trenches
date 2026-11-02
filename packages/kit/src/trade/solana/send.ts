@@ -159,6 +159,13 @@ function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: 
     }),
   };
 }
+/** How long a call of `method` on the provider would wait if asked now (0: it starts at once, behind no call of the
+ * method that waits there); it asks nothing and books nothing. */
+function methodWaitMs(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): number {
+  const queue = queueWith(rpc, limit);
+  const now = Date.now();
+  return Math.max(0, fitsAt(queue.slots, queue.limits.values(), method, Math.max(now, queue.lastOf.get(method) ?? 0)) - now);
+}
 /** Provider A's and B's requests a second when keyed; undefined in a place holds that provider to the keyless limit. */
 export type SolanaProviderRps = readonly [number | undefined, number | undefined];
 /** Each provider's limit: its requests a second when the caller names them (a keyed provider), else the keyless one. */
@@ -679,7 +686,6 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
     if (i < 0) return;
     fastCursor[p] = i;
     fastInFlight[p] = true;
-    fastReads[p]!++;
     status(p, i, false)
       .then((got) => {
         if (over || !got) return; // a broken answer is no answer
@@ -688,16 +694,8 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       }, () => {})
       .finally(() => { fastInFlight[p] = false; });
   }
-  /** The fill poll's period on p: pollMs over the undecided txs, one read in flight a provider, for the first half of
-   * the provider's budget for one method; then the other half spread over its window (keyless: 20 at once, then 2 a
-   * second), so the reads never spend the budget and stall, and every other caller of the method keeps room. */
-  const fastReads = [0, 0];
-  const fastPeriod = (p: 0 | 1): number => {
-    const spread = pollMs / Math.max(1, decided.filter((d) => !d).length);
-    const l = limits[p];
-    const burst = Math.floor(l.perMethod / 2);
-    return fastReads[p]! < burst ? spread : Math.max(spread, l.windowMs / Math.max(1, l.perMethod - burst));
-  };
+  /** The fill poll's period: pollMs over the undecided txs, one read in flight a provider. */
+  const fastPeriod = (): number => pollMs / Math.max(1, decided.filter((d) => !d).length);
 
   // The dead check on p, every rebroadcast: the finalized bank's height and slot; every undecided tx's blockhash at
   // processed; for each tx past its lastValidBlockHeight there, a status read with searchTransactionHistory: true. Each step's answer carries its bank's slot, which deadOn compares.
@@ -754,13 +752,18 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const leaves = limited.map((p, k) => paceJoin(p.paceKey ?? p, p.minIntervalMs!, () => nextFor(k)));
   const timers = [setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs)];
   const fastTimers: (ReturnType<typeof setTimeout> | undefined)[] = [undefined, undefined];
+  // A fill read is asked only when the provider can start it at once: it never books a later turn, so a lone set reads
+  // at the rate the provider's budget for the method allows, and any other call of the method that waits there (a
+  // history read, another caller's) goes first; with no room the poll waits for the first.
   const fastTick = (p: 0 | 1): void => {
     if (over) return;
+    const waitMs = methodWaitMs(opts.providers[p], limits[p], "getSignatureStatuses");
+    if (waitMs > 0) { fastTimers[p] = setTimeout(() => fastTick(p), waitMs); return; }
     readFast(p);
-    fastTimers[p] = setTimeout(() => fastTick(p), fastPeriod(p));
+    fastTimers[p] = setTimeout(() => fastTick(p), fastPeriod());
   };
-  fastTimers[0] = setTimeout(() => fastTick(0), fastPeriod(0));
-  fastTimers[1] = setTimeout(() => fastTick(1), fastPeriod(1));
+  fastTimers[0] = setTimeout(() => fastTick(0), fastPeriod());
+  fastTimers[1] = setTimeout(() => fastTick(1), fastPeriod());
   const deadline = setTimeout(end, deadlineMs);
 
   function end(): void {
