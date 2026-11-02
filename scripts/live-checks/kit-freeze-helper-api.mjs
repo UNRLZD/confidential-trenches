@@ -20,7 +20,9 @@
 //     pinned in SHAPES, and every frozen value (CORS, paths with their limits, the RPC allowlist, the HTTP statuses,
 //     the patterns and limits, the order's wire fields with orders/record.ts's ORDER_RECORD_FIELDS) equals VALUES;
 //   - after kit-v1, the additions only: the beta cap per deposit HELPER_BIND_DEPOSIT_CAP (1,000 USDC in base units,
-//     OD:262) and its code amount_above_cap right after amount_too_low (card kit-deposit-cap); and POST /v1/bind's
+//     OD:262) and its code amount_above_cap right after amount_too_low (card kit-deposit-cap);
+//     and the Solana RPC method isBlockhashValid, last on the Solana list (card solana-set-send's dead check); the
+//     pin is exact, so any other method, place or chain fails (card kit-freeze-pin-blockhash); and POST /v1/bind's
 //     answer bound HELPER_BIND_ANSWER_MS (60 s), which the helper answers within and the device's send waits for, one
 //     number both read (card wallet-bind-carry-wait);
 //   - after 06:00Z, main's v1.ts equals the tag's byte for byte.

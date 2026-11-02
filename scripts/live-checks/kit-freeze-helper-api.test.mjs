@@ -4,8 +4,10 @@
 //     helper host does not answer (a timeout), so the health part is skipped;
 //   good: v1.ts, orders/record.ts and index.ts as GitHub serves them once this card merges (all from the branch at
 //     5682bcf, index.ts with its export line), on main and on a stand-in for the 06:00Z tag, and the same real
-//     health timeout; v1.ts is the file with card kit-deposit-cap's additions (the cap and amount_above_cap) and
-//     card wallet-bind-carry-wait's (HELPER_BIND_ANSWER_MS; its text is v1.ts on that card's branch);
+//     health timeout; v1.ts is the file with the additions after kit-v1: card kit-deposit-cap's (the cap and
+//     amount_above_cap) and card solana-set-send's (isBlockhashValid on the Solana RPC list; its text is v1.ts at
+//     8713c64, which the card kit-freeze-pin-blockhash pins), and card wallet-bind-carry-wait's (HELPER_BIND_ANSWER_MS;
+//     its text is that v1.ts with the constant, as that card's branch holds it);
 //   live_kit_v1: the real run on GitHub main and the kit-v1 tag at 2026-11-01 08:32:10Z, before kit-deposit-cap
 //     merged: both v1.ts files lack the cap and its code, and the helper answers its health. Its two orders/record.ts
 //     reads answered the same text as good's main record.ts byte for byte, so the file names that answer
@@ -75,6 +77,19 @@ test("recorded real run on GitHub main and kit-v1, before the cap was added: the
   assert.ok(r.lines.includes("ok  main's v1.ts equals the tag kit-v1's byte for byte"));
 });
 
+test("a tag cut before isBlockhashValid (kit-v1.2 as GitHub serves it): the tag's pin and the byte-for-byte line FAIL, main passes", async () => {
+  const old = "kit-v1.2";
+  const answers = REC.good.map((a) => {
+    if (!a.url.includes(`/${TAG}/`)) return a;
+    const text = a.text.replace('    // the set send\'s dead check (trade/solana/send.ts): is the tx\'s blockhash still valid at processed\n    "isBlockhashValid",\n', "");
+    if (a.url.endsWith(V1)) assert.notEqual(text, a.text, "the edit changed nothing");
+    return { ...a, url: a.url.replace(`/${TAG}/`, `/${old}/`), text };
+  });
+  const r = await check({ fetchFn: replay(answers), now: AFTER, tag: old });
+  assert.equal(r.ok, false);
+  assert.deepEqual(failed(r), [`BAD ${old}: ${VALUE("HELPER_RPC_METHODS")}`, `BAD main's v1.ts equals the tag ${old}'s byte for byte`]);
+});
+
 test("recorded real run on GitHub main before the merge: v1.ts is missing: FAIL", async () => {
   const r = await check({ fetchFn: replay(REC.live_main), now: BEFORE });
   assert.equal(r.ok, false);
@@ -120,6 +135,11 @@ test("more bad answers, each caught by exactly the lines named", () => {
     ["/v1/log dropped", (t) => t.replace('  { method: "POST", path: "/v1/log", part: "log", limitBytes: 4096 },\n', ""), [/path list .*missing \[POST \/v1\/log\]/, /^every frozen value equals its pin: differs: HELPER_V1_PATHS$/]],
     ["a body limit raised", (t) => t.replace('{ method: "POST", path: "/v1/bind", part: "delegate", limitBytes: 4096 }', '{ method: "POST", path: "/v1/bind", part: "delegate", limitBytes: 65536 }'), [/^every frozen value equals its pin: differs: HELPER_V1_PATHS$/]],
     ["an RPC method added", (t) => t.replace('near: ["query",', 'near: ["query", "EXPERIMENTAL_changes",'), [/^every frozen value equals its pin: differs: HELPER_RPC_METHODS$/]],
+    ["another Solana method after isBlockhashValid", (t) => t.replace('    "isBlockhashValid",\n', '    "isBlockhashValid",\n    "getSlot",\n'), [/^every frozen value equals its pin: differs: HELPER_RPC_METHODS$/]],
+    ["another Solana method in place of isBlockhashValid", (t) => t.replace('    "isBlockhashValid",\n', '    "getSlot",\n'), [/^every frozen value equals its pin: differs: HELPER_RPC_METHODS$/]],
+    ["isBlockhashValid dropped", (t) => t.replace('    "isBlockhashValid",\n', ""), [/^every frozen value equals its pin: differs: HELPER_RPC_METHODS$/]],
+    ["isBlockhashValid also on Base", (t) => t.replace('  base: [\n    "eth_call",', '  base: [\n    "isBlockhashValid",\n    "eth_call",'), [/^every frozen value equals its pin: differs: HELPER_RPC_METHODS$/]],
+    ["isBlockhashValid before the others", (t) => t.replace('    "isBlockhashValid",\n', "").replace('  solana: [\n', '  solana: [\n    "isBlockhashValid",\n'), [/^every frozen value equals its pin: differs: HELPER_RPC_METHODS$/]],
     ["a third intent kind", (t) => t.replace("export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw;", 'export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw | { intent: "mt_withdraw" };'), [/intent kinds \[ft_withdraw,mt_withdraw,transfer\]/, /^every money-path shape equals its pin: differs: HelperIntent$/]],
     ["the deposit carried by ft_withdraw", (t) => t.replace('export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<"ft_transfer_call",', 'export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<"ft_withdraw",'), [/HelperBindDeposit's action is HelperFunctionCall<"ft_withdraw"/, /^every money-path shape equals its pin: differs: HelperBindDeposit$/]],
     ["the onward receiver loosened", (t) => t.replace("  receiver_id: typeof HELPER_ONWARD_RECEIVER;", "  receiver_id: HelperNearAccount;"), [/^every money-path shape equals its pin: differs: HelperOnwardArgs$/]],
