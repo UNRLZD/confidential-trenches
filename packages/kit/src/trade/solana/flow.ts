@@ -95,7 +95,13 @@ export type SolanaLegRecord = {
   refused?: string;
   /** From the first build call to the assembled, checked bytes. */
   quoteMs?: number;
+  /** The helper's build alone, both calls when the floor asked a second one. */
+  buildMs?: number;
   buildCalls?: number;
+  /** A sell of the wallet's whole balance, on both providers' pre-state: the teardown follows its fill. */
+  sellsAll?: boolean;
+  /** Why a provider gave no simulation, when one did not. */
+  simulationErrors?: string[];
   size?: number;
   verdict?: SolanaQuoteVerdict;
   signature?: string;
@@ -256,6 +262,19 @@ async function prepareLeg(
   const t0 = now();
   const breq: SolanaBuildRequest = { side: req.side, wallet: w, token: req.token, amount: leg.amount, slippageBps: req.slippageBps };
   const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}) };
+  // The build, and with it on both providers the reads that do not depend on it: the rents in play (the wallet's
+  // token account, its size from the mint, and the pump volume account) and the pre-state the simulation is held to
+  // (the wallet, its token account, its pump volume account, the set's other wallets), which also gives spendable.
+  const watch = [w, ata, uva];
+  const size = tokenAccountSize(mintA);
+  const rentOf = async (r: SolanaRpc) => {
+    const [t, v] = await Promise.all([r("getMinimumBalanceForRentExemption", [size]), r("getMinimumBalanceForRentExemption", [137])]);
+    if (!Number.isSafeInteger(t) || !Number.isSafeInteger(v)) throw new Error("rent is not a safe integer");
+    return [BigInt(t as number), BigInt(v as number)] as const;
+  };
+  const sideReads = Promise.all([both(rentOf, deps.providers), both((r) => readAccounts(r, [...watch, ...ctx.others], "confirmed"), deps.providers)]);
+  sideReads.catch(() => undefined); // awaited below; a refused build must not leave it unhandled
+  const tb0 = now();
   let built = await fetchSolanaJupiterBuild(deps.helper, breq, opts);
   let calls = built.calls.length;
   let amounts = solanaRouteAmounts(built.build.swap.data);
@@ -269,6 +288,7 @@ async function prepareLeg(
     if (!amounts || solanaRouteFloor(amounts) < minOut) { rec.refused = `the route's floor stays under ${minOut}`; return null; }
   }
   rec.buildCalls = calls;
+  rec.buildMs = now() - tb0;
   // The tables the build names, read on both providers; assembly uses provider A's, S2 holds B's to the same bytes.
   const tableKeys = [...built.build.tables];
   const [ta, tb] = tableKeys.length ? await both((r) => readAccounts(r, tableKeys, "processed"), deps.providers) : [[], []];
@@ -283,49 +303,49 @@ async function prepareLeg(
     }
   });
   const assembled = assembleSolanaSwap(breq, built.build, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, mintHasTransferFee(mintA) ? { transferFeeMints: [req.token] } : {});
-  // Rents in play, on both providers: the wallet's token account (its size from the mint) and the pump volume account.
-  const size = tokenAccountSize(mintA);
-  const rent = await both(async (r) => [BigInt(await r("getMinimumBalanceForRentExemption", [size]) as number), BigInt(await r("getMinimumBalanceForRentExemption", [137]) as number)] as const, deps.providers);
-  // Pre-state and simulation on both providers: the wallet, its token account and its pump volume account; then the
-  // set's other wallets, three to a simulation (api.mainnet-beta.solana.com reads back at most 4 accounts).
+  const [rent, pre] = await sideReads;
+  // The simulation on both providers, at once: the wallet, its token account and its pump volume account in one call,
+  // the set's other wallets three to a call (a provider may read back at most 4 accounts).
   const b64 = btoa(String.fromCharCode(...assembled.wire));
-  const watch = [w, ata, uva];
-  const simOne = async (rpc: SolanaRpc): Promise<SolanaSimulation | null> => {
+  const simErrors: string[] = [];
+  const simOne = async (rpc: SolanaRpc, at: "A" | "B", before: (Acc | null)[]): Promise<SolanaSimulation | null> => {
     try {
-      const pre = await readAccounts(rpc, [...watch, ...ctx.others], "confirmed");
       const run = async (group: string[]) => {
         const r = obj(await rpc("simulateTransaction", [b64, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed", accounts: { addresses: group, encoding: "base64" } }]), "simulateTransaction");
         const v = obj(r.value, "simulateTransaction.value");
         const accs = Array.isArray(v.accounts) && v.accounts.length === group.length ? v.accounts.map((x, j) => account(x, group[j] as string)) : null;
         return { err: v.err ?? null, accs };
       };
-      const main = await run(watch);
-      if (main.err !== null) return { err: main.err, walletLamports: { pre: 0n, post: 0n }, tokenAccount: { pre: 0n, post: 0n }, tokenAccountLamports: { pre: 0n, post: 0n }, pumpVolumeAccumulator: { pre: 0n, post: 0n }, otherWallets: [] };
-      if (!main.accs || !main.accs[0]) return null;
+      const groups: string[][] = [];
+      for (let i = 0; i < ctx.others.length; i += 3) groups.push(ctx.others.slice(i, i + 3));
+      const [main, ...rest] = await Promise.all([run(watch), ...groups.map(run)]);
+      if (main!.err !== null) return { err: main!.err, walletLamports: { pre: 0n, post: 0n }, tokenAccount: { pre: 0n, post: 0n }, tokenAccountLamports: { pre: 0n, post: 0n }, pumpVolumeAccumulator: { pre: 0n, post: 0n }, otherWallets: [] };
+      if (!main!.accs || !main!.accs[0]) { simErrors.push(`${at}: no wallet read back`); return null; }
       const otherWallets: { pre: bigint; post: bigint }[] = [];
-      for (let i = 0; i < ctx.others.length; i += 3) {
-        const group = ctx.others.slice(i, i + 3);
-        const r = await run(group);
-        if (r.err !== null || !r.accs) return null;
-        group.forEach((_, j) => otherWallets.push({ pre: pre[3 + i + j]?.lamports ?? 0n, post: r.accs![j]?.lamports ?? 0n }));
+      for (const [g, r] of rest.entries()) {
+        if (r.err !== null || !r.accs) { simErrors.push(`${at}: the other wallets' run did not match`); return null; }
+        (groups[g] as string[]).forEach((_, j) => otherWallets.push({ pre: before[3 + g * 3 + j]?.lamports ?? 0n, post: r.accs![j]?.lamports ?? 0n }));
       }
+      const m = main!.accs;
       return {
         err: null,
-        walletLamports: { pre: pre[0]?.lamports ?? 0n, post: main.accs[0].lamports },
-        tokenAccount: { pre: tokenAmount(pre[1] ?? null), post: tokenAmount(main.accs[1] ?? null) },
-        tokenAccountLamports: { pre: pre[1]?.lamports ?? 0n, post: main.accs[1]?.lamports ?? 0n },
-        pumpVolumeAccumulator: { pre: pre[2]?.lamports ?? 0n, post: main.accs[2]?.lamports ?? 0n },
+        walletLamports: { pre: before[0]?.lamports ?? 0n, post: (m[0] as Acc).lamports },
+        tokenAccount: { pre: tokenAmount(before[1] ?? null), post: tokenAmount(m[1] ?? null) },
+        tokenAccountLamports: { pre: before[1]?.lamports ?? 0n, post: m[1]?.lamports ?? 0n },
+        pumpVolumeAccumulator: { pre: before[2]?.lamports ?? 0n, post: m[2]?.lamports ?? 0n },
         otherWallets,
       };
-    } catch {
+    } catch (e) {
+      simErrors.push(`${at}: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
       return null;
     }
   };
-  const simulations = await Promise.all([simOne(pa), simOne(pb)]);
-  // Spendable, on both providers, the lower: lamports on a buy, the token account's balance on a sell.
-  const bal = await both((r) => readAccounts(r, [w, ata], "confirmed"), deps.providers);
+  const simulations = await Promise.all([simOne(pa, "A", pre[0]), simOne(pb, "B", pre[1])]);
+  if (simErrors.length) rec.simulationErrors = simErrors;
+  // Spendable, the lower of the two providers' pre-state: lamports on a buy, the token account's balance on a sell.
   const spend = (x: (Acc | null)[]) => (req.side === "buy" ? (x[0]?.lamports ?? 0n) : tokenAmount(x[1] ?? null));
-  const spendable = spend(bal[0]) < spend(bal[1]) ? spend(bal[0]) : spend(bal[1]);
+  const spendable = spend(pre[0]) < spend(pre[1]) ? spend(pre[0]) : spend(pre[1]);
+  rec.sellsAll = req.side === "sell" && leg.amount === spendable;
   const verdict = checkSolanaQuote(assembled.wire, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable, minOut }, {
     tables,
     mint: [ctx.mint[0], ctx.mint[1]],
@@ -357,7 +377,17 @@ async function signed(deps: SolanaTradeDeps, wallet: string, a: { wire: Uint8Arr
   return wire;
 }
 
+/** The teardown never throws into the trade: the sell has already run; a read or send that fails leaves the accounts
+ * open (their rent stays the wallet's) and is recorded. */
 async function teardown(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: SolanaTradeDeps, tokenProgram: string): Promise<SolanaLegRecord["teardown"]> {
+  try {
+    return await teardownOnce(req, rec, deps, tokenProgram);
+  } catch (e) {
+    const detail = String((e as Error)?.message ?? e).slice(0, 200);
+    return { verdict: { ok: false, plan: null, results: [{ id: "READ", ok: false, detail }] }, frames: 0, refused: detail };
+  }
+}
+async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: SolanaTradeDeps, tokenProgram: string): Promise<SolanaLegRecord["teardown"]> {
   const w = rec.wallet;
   const addresses = solanaTeardownAddresses(w, [{ mint: req.token, program: tokenProgram }]);
   const [ra, rb] = await both((r) => readAccounts(r, [w, ...addresses], "confirmed"), deps.providers);
@@ -449,7 +479,8 @@ export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeD
   if (deps.dry) {
     const d = await dryRunSolanaSet(set, sendOpts);
     prepared.forEach((p, i) => { p.rec.dry = d.txs[i]; });
-    if (req.side === "sell") await Promise.all(prepared.map(async (p) => { p.rec.teardown = await teardown(req, p.rec, deps, tokenProgram); }));
+    // Dry: nothing landed, so the teardown is planned and simulated on today's accounts, after each sell-all.
+    if (req.side === "sell") await Promise.all(prepared.map(async (p) => { if (p.rec.sellsAll) p.rec.teardown = await teardown(req, p.rec, deps, tokenProgram); }));
     return record;
   }
   const h = sendSolanaSet(set, sendOpts);
