@@ -232,7 +232,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // and the helper's main starts the server with the relayer it built
   const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
   assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, statusesOf\(watches\)\);/);
-  assert.match(main, /const bind = bindSenderFromEnv\(process\.env, statusesOf\(watches\)\);/);
+  assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;

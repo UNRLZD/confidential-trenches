@@ -38,7 +38,7 @@ test("the pin is the vault's USDC and its code hash as the repo pins them; the a
   assert.deepEqual(Object.keys(s), ["token", "caught_up", "halted", "vault_blocked", "code_hash_ok", "code_hash", "block_height", "last_event"]);
 });
 
-test("both providers agree on the pin: the code hash at the lower height, and still held (no event watch: not caught up)", async () => {
+test("both providers agree on the pin: the code hash at the lower height, and still held (no vault carried on the network: not caught up)", async () => {
   const p = providers({ [A]: () => view(USDC_CODE_HASH, 100), [B]: () => view(USDC_CODE_HASH, 98) });
   const w = createTokenWatch("mainnet", ENV, { fetch: p.fetch });
   const s = await w.status();
@@ -168,4 +168,118 @@ test("one watch per network: mainnet's reads USDC on mainnet's pair only, testne
   // the testnet token is the deployed one, and it runs USDC's own code
   const dep = JSON.parse(readFileSync(path.join(ROOT, "contracts/vault/deployments/testnet-usdc.json"), "utf8")) as { account_id: string; code_hash: string };
   assert.deepEqual([dep.account_id, dep.code_hash], [TESTNET_TOKEN, USDC_CODE_HASH]);
+});
+
+// ---- design (b): USDC's own views at one block on both providers ----
+const VAULT = "vault.test.near";
+const WITH_VAULT = { ...ENV, WITHDRAW_VAULT_MAINNET: VAULT };
+const PAUSED = 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })';
+type Views = { balance?: (h: number) => unknown; blocked?: (h: number) => unknown; code?: (h: number) => unknown; final?: number };
+/** A provider answering as nearcore does (FastNEAR and dRPC, read 2026-11-02): a value, or result.error for a panic. */
+function chain(v: Views) {
+  return async (body: { params: Record<string, unknown> }): Promise<Response> => {
+    const p = body.params;
+    const h = typeof p.block_id === "number" ? p.block_id : (v.final ?? 500);
+    const value = (x: unknown) => (typeof x === "object" && x !== null && "error" in x ? { block_height: h, block_hash: "x", logs: [], ...x } : { block_height: h, block_hash: "x", logs: [], result: [...Buffer.from(String(x))] });
+    let result: unknown;
+    if (p.request_type === "view_account") result = (v.code ?? (() => ({ code_hash: USDC_CODE_HASH })))(h) ?? undefined;
+    else if (p.method_name === "ft_balance_of") result = value((v.balance ?? (() => '"5"'))(h));
+    else if (p.method_name === "is_blocklisted") result = value((v.blocked ?? (() => "false"))(h));
+    if (result && p.request_type === "view_account") result = { amount: "0", locked: "0", storage_usage: 1, block_height: h, block_hash: "x", ...(result as object) };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+  };
+}
+function pair(a: Views, b: Views = a) {
+  const seen: { url: string; params: Record<string, unknown> }[] = [];
+  const fa = chain(a);
+  const fb = chain(b);
+  const fetch = async (url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { params: Record<string, unknown> };
+    seen.push({ url, params: body.params });
+    return url === A ? fa(body) : fb(body);
+  };
+  return { seen, fetch };
+}
+
+test("(b) open: both providers read a balance, the vault not blocklisted and the pin at one block each: caught up, not halted, not blocked, free", async () => {
+  const p = pair({ final: 500 }, { final: 497 });
+  const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: p.fetch });
+  assert.deepEqual(await w.status(), { token: USDC, caught_up: true, halted: false, vault_blocked: false, code_hash_ok: true, code_hash: USDC_CODE_HASH, block_height: 497, last_event: null });
+  assert.equal(await w.held(), false);
+  // per provider: ft_balance_of(vault) at final, then is_blocklisted(vault) and view_account at that same block
+  for (const [url, h] of [[A, 500], [B, 497]] as const) {
+    const mine = p.seen.filter((c) => c.url === url).map((c) => c.params);
+    const args = Buffer.from(JSON.stringify({ account_id: VAULT })).toString("base64");
+    assert.deepEqual(mine, [
+      { request_type: "call_function", finality: "final", account_id: USDC, method_name: "ft_balance_of", args_base64: args },
+      { request_type: "call_function", block_id: h, account_id: USDC, method_name: "is_blocklisted", args_base64: args },
+      { request_type: "view_account", block_id: h, account_id: USDC },
+    ]);
+  }
+});
+
+test("(b) USDC's exact paused panic on either provider is halted; is_blocklisted true on either is blocked; both hold", async () => {
+  for (const [what, a, b, want] of [
+    ["halted on A", { balance: () => ({ error: PAUSED }) }, {}, { halted: true, vault_blocked: false }],
+    ["halted on both", { balance: () => ({ error: PAUSED }) }, { balance: () => ({ error: PAUSED }) }, { halted: true, vault_blocked: false }],
+    ["blocked on B", {}, { blocked: () => "true" }, { halted: false, vault_blocked: true }],
+  ] as const) {
+    const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: pair(a as Views, b as Views).fetch });
+    const s = await w.status();
+    assert.deepEqual([s.caught_up, s.halted, s.vault_blocked, s.code_hash_ok], [true, want.halted, want.vault_blocked, true], what);
+    assert.equal(await w.held(), true, what);
+  }
+});
+
+test("(b) unknown holds: any answer that is not exactly the open one or USDC's paused panic, another code, or no vault: not caught up, all null, held", async () => {
+  const cases: [string, Views, Views?][] = [
+    ["another panic", { balance: () => ({ error: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: not paused" })' }) }],
+    ["the paused panic with more after it", { balance: () => ({ error: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused, and more" })' }) }],
+    ["a balance of the wrong shape", { balance: () => "null" }],
+    ["a method error, not a panic", { balance: () => ({ error: "wasm execution failed with error: MethodResolveError(MethodNotFound)" }) }],
+    ["is_blocklisted not a boolean", { blocked: () => '"false"' }],
+    ["is_blocklisted panics", { blocked: () => ({ error: PAUSED }) }],
+    ["view_account at another block", { code: (h) => ({ code_hash: USDC_CODE_HASH, block_height: h + 1 }) }],
+    ["both agree on another code: the views' meaning is the pin's only", { code: () => ({ code_hash: CHANGED }) }],
+    ["the providers' code differs", {}, { code: () => ({ code_hash: CHANGED }) }],
+  ];
+  for (const [what, a, b] of cases) {
+    const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: pair(a, b ?? {}).fetch });
+    const s = await w.status();
+    assert.deepEqual([s.caught_up, s.halted, s.vault_blocked, s.code_hash_ok], [false, null, null, null], what);
+    assert.equal(await w.held(), true, what);
+  }
+  const another = await createTokenWatch("mainnet", WITH_VAULT, { fetch: pair({ code: () => ({ code_hash: CHANGED }) }).fetch }).status();
+  assert.equal(another.code_hash, CHANGED, "the code read is shown, so the reason is visible");
+  const noVault = await createTokenWatch("mainnet", ENV, { fetch: pair({}).fetch }).status();
+  assert.deepEqual([noVault.caught_up, noVault.code_hash], [false, USDC_CODE_HASH], "no vault carried on the network: never caught up");
+});
+
+test("(b) the vault from WITHDRAW_VAULT_<NET> or BIND_VAULT_<NET>; two that differ or one that is not an account id stop the helper; each network its own", () => {
+  assert.equal(createTokenWatch("mainnet", { ...ENV, BIND_VAULT_MAINNET: VAULT }).vault, VAULT);
+  assert.equal(createTokenWatch("mainnet", { ...ENV, WITHDRAW_VAULT_MAINNET: VAULT, BIND_VAULT_MAINNET: VAULT }).vault, VAULT);
+  assert.equal(createTokenWatch("testnet", { ...ENV, WITHDRAW_VAULT_MAINNET: VAULT }).vault, undefined);
+  assert.throws(() => createTokenWatch("mainnet", { ...ENV, WITHDRAW_VAULT_MAINNET: VAULT, BIND_VAULT_MAINNET: "other.near" }), /WITHDRAW_VAULT_MAINNET and BIND_VAULT_MAINNET must name the same vault/);
+  assert.throws(() => createTokenWatch("mainnet", { ...ENV, BIND_VAULT_MAINNET: "Not An Id" }), /BIND_VAULT_MAINNET must be a NEAR account id/);
+});
+
+test("(b) pausedAt(h): ft_balance_of at h-1 and h and the code at h, on both providers; paused at either; null unless all known and agreed; a known answer is kept", async () => {
+  const at = async (views: Views, viewsB?: Views, h = 100n) => {
+    const p = pair(views, viewsB ?? views);
+    const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: p.fetch });
+    return { got: await w.pausedAt(h), p, w };
+  };
+  const pausedFrom = (x: number) => (h: number) => (h >= x ? { error: PAUSED } : '"5"');
+  assert.equal((await at({ balance: pausedFrom(100) })).got, true, "paused in the block");
+  assert.equal((await at({ balance: (h) => (h === 99 ? { error: PAUSED } : '"5"') })).got, true, "paused before, unpaused in the block");
+  assert.equal((await at({})).got, false, "open at both");
+  assert.equal((await at({ balance: pausedFrom(100) }, {})).got, null, "the providers disagree");
+  assert.equal((await at({ balance: pausedFrom(100), code: () => ({ code_hash: CHANGED }) })).got, null, "another code at the block");
+  assert.equal((await at({ balance: (h) => (h === 99 ? { error: "wasm execution failed with error: UNKNOWN_BLOCK" } : '"5"') })).got, null, "a block the provider no longer keeps");
+  const { p, w } = await at({ balance: pausedFrom(100) });
+  assert.deepEqual(p.seen.map((c) => `${c.url} ${String(c.params.method_name ?? c.params.request_type)} ${String(c.params.block_id)}`).sort(), [`${A} ft_balance_of 100`, `${A} ft_balance_of 99`, `${A} view_account 100`, `${B} ft_balance_of 100`, `${B} ft_balance_of 99`, `${B} view_account 100`]);
+  const n = p.seen.length;
+  assert.equal(await w.pausedAt(100n), true);
+  assert.equal(p.seen.length, n, "a known answer for a past block is kept, not read again");
+  assert.equal(await createTokenWatch("mainnet", ENV, { fetch: pair({ balance: pausedFrom(100) }).fetch }).pausedAt(100n), null, "no vault: not known");
 });

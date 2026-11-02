@@ -52,7 +52,8 @@ import {
   type TxOutcome,
   type TxRef,
 } from "./send.ts";
-import { USDC_CODE_HASH, pausedAt, type TokenStatus } from "../token-status/status.ts";
+import { createTokenWatch, pausedFrom, USDC, USDC_CODE_HASH, type TokenStatus } from "../token-status/status.ts";
+import { watchDeps } from "./env.ts";
 
 const VAULT = "vault.confidential.unrlzd.near";
 const RELAYER = "bind.test.near";
@@ -115,8 +116,8 @@ class Chain {
   resolved: string[] = [];
   statuses: TokenStatus[] = [OPEN];
   statusAsks = 0;
-  /** The watch's pause history's answer for a height (status.ts pausedAt). */
-  pausedAt: (height: bigint) => boolean | null = () => false;
+  /** The watch's answer for a height (status.ts pausedAt). */
+  pausedAt: (height: bigint) => boolean | null | Promise<boolean | null> = () => false;
   resolveOpts: { resend: boolean }[] = [];
   /** Runs inside a relayer send, after its durable write (a race). */
   during?: () => Promise<void>;
@@ -587,25 +588,65 @@ test("(i) R3's exception: USDC's own receipt failed with its paused error and th
   assert.equal(rec(w).landed, true);
 });
 
-test("PROBE N6: paused at the failure, unpaused, then a blocklist and another pause: the history still says paused there, not counted", async () => {
+test("PROBE N6, by views: paused at the failure, unpaused two blocks later, then another pause: the views at the failure's block and the one before still say paused there, not counted", async () => {
   const w = world();
   w.chain.fates = ["paused"];
   let failAt = 0n;
   w.chain.pausedAt = (h) => {
     failAt = h;
-    const at = Number(h);
-    return pausedAt({ from: 0, pausedAtFrom: false, caughtUpTo: at + 50, events: [{ name: "paused", block_height: at - 3 }, { name: "unpaused", block_height: at + 2 }, { name: "paused", block_height: at + 9 }] }, at);
+    // the halt switches at h-3 (paused), h+2 (unpaused), h+9 (paused): only h-1 and h are read
+    const open = (x: bigint) => !(x >= h - 3n && x < h + 2n) && x < h + 9n;
+    const o = (x: bigint) => (open(x) ? { at: Number(x), answer: '"5"' } : { at: Number(x), panic: "FiatToken: paused" });
+    return pausedFrom([o(h - 1n), o(h)], [o(h - 1n), o(h)]);
   };
   ok(await w.carry(next(w)));
   assert.ok(failAt > 0n);
   assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state], [0, "exempt"]);
 });
 
-test("status.ts pausedAt: the state at a height from the history; a pause or unpause in that block is paused; null outside what was read", () => {
-  const h = { from: 100, pausedAtFrom: false, caughtUpTo: 200, events: [{ name: "unpaused" as const, block_height: 150 }, { name: "paused" as const, block_height: 120 }] };
-  assert.deepEqual([110, 119, 120, 121, 149, 150, 151, 200].map((x) => pausedAt(h, x)), [false, false, true, true, true, true, false, false]);
-  assert.deepEqual([pausedAt(h, 99), pausedAt(h, 201)], [null, null]);
-  assert.equal(pausedAt({ ...h, pausedAtFrom: true, events: [] }, 150), true);
+test("status.ts pausedFrom: paused at the block before or at the block; null unless all four reads are known and the providers agree", () => {
+  const open = (at: number) => ({ at, answer: '"20000"' });
+  const paused = (at: number) => ({ at, panic: "FiatToken: paused" });
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), open(10)]), false);
+  assert.equal(pausedFrom([paused(9), open(10)], [paused(9), open(10)]), true, "paused before the block, unpaused in it: the receipt may have run before the unpause");
+  assert.equal(pausedFrom([open(9), paused(10)], [open(9), paused(10)]), true, "paused in the block");
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), paused(10)]), null, "the providers disagree");
+  assert.equal(pausedFrom([open(9), undefined], [open(9), open(10)]), null, "a read missing");
+  assert.equal(pausedFrom([open(9), { at: 10, panic: "FiatToken: paused!" }], [open(9), open(10)]), null, "a panic that is not exactly USDC's");
+  assert.equal(pausedFrom([open(9), { at: 10, answer: "null" }], [open(9), { at: 10, answer: "null" }]), null, "an answer that is not a balance");
+  // named limit: a pause and an unpause inside one block read as open at both heights
+  assert.equal(pausedFrom([open(9), open(10)], [open(9), open(10)]), false);
+});
+
+test("(i) through the network's own watch (env.ts watchDeps, status.ts pausedAt on two providers): a send that failed on USDC's paused error while USDC's views show it paused there is resolved exempt, and U is free again", async () => {
+  const w = world();
+  w.chain.fates = ["paused", "lands"];
+  const reads: { url: string; method: unknown; block_id: unknown }[] = [];
+  // two providers answering as nearcore does: USDC paused from the failure's block on, its code the pin
+  const provider = (async (url: string, init: RequestInit) => {
+    const p = (JSON.parse(String(init.body)) as { params: { request_type: string; method_name?: string; block_id?: number } }).params;
+    reads.push({ url, method: p.method_name ?? p.request_type, block_id: p.block_id });
+    const h = p.block_id!;
+    const result =
+      p.request_type === "view_account"
+        ? { amount: "0", locked: "0", code_hash: USDC_CODE_HASH, storage_usage: 1, block_height: h, block_hash: "x" }
+        : BigInt(h) >= w.chain.final
+          ? { block_height: h, block_hash: "x", logs: [], error: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })' }
+          : { block_height: h, block_hash: "x", logs: [], result: [...Buffer.from('"5"')] };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+  }) as typeof fetch;
+  const watch = createTokenWatch("mainnet", { NEAR_RPC_URL: "https://a.example", NEAR_RPC_URL_B: "https://b.example", BIND_VAULT_MAINNET: VAULT }, { fetch: provider });
+  const deps = watchDeps(watch, USDC);
+  w.chain.pausedAt = (h) => deps.pausedAt(h);
+  ok(await w.carry(next(w)));
+  assert.deepEqual([rec(w).failed, rec(w).sends[0]!.state, rec(w).sends[0]!.counted], [0, "exempt", false], "resolved, not counted");
+  assert.deepEqual(
+    [...new Set(reads.map((r) => `${new URL(r.url).host} ${String(r.method)} ${String(r.block_id)}`))].sort(),
+    ["a.example", "b.example"].flatMap((host) => [`${host} ft_balance_of ${w.chain.final - 1n}`, `${host} ft_balance_of ${w.chain.final}`, `${host} view_account ${w.chain.final}`]).sort(),
+  );
+  // U is free again: the next deposit from U is carried and lands (no in_flight on its P, no prepay_open for a new one)
+  ok(await w.carry(next(w)));
+  assert.equal(rec(w).landed, true);
 });
 
 test("(i) R3's exception waits for the watch: no answer at the failure's height leaves the send pending; a later call settles it", async () => {

@@ -1,14 +1,29 @@
 // GET /v1/token-status?token=<id> (markets paper H7 row, M:3336, and 7.1, M:3277) and the hold the relayers call before
 // any send (H3.4 check 10, M:1388-1404; V 2.10 (f), V:705-706). The answer is the kit's HelperTokenStatusAnswer.
 //
-// What this reads: USDC's code hash by view_account at final on two NEAR providers, which must answer and agree.
-// What it cannot read yet: the halt. USDC has no view of it (W D48, W:1494; the deployed wasm, 321,491 B, sha256
-// b98ccd53…cfe6, exports no pause view, read 2026-11-01 06:37Z) and view_state on it answers TOO_LARGE_CONTRACT_STATE
-// on both providers (read 06:38Z), so `halted` is known only by the paper's event watch from a pinned checkpoint
-// (M:1404-1420, "Where the watch starts"), which is not built. Until it is, the answer is the kit's not-caught-up one:
-// caught_up false, so halted, vault_blocked and code_hash_ok are null (v1.ts), and tokenHeld() holds every move. The
-// hold is the safe answer whenever anything is unknown: a provider that fails, two that disagree, a hash that is not
-// the pin, or no watch.
+// What this reads (card helper-usdc-event-watch, in place of the paper's event replay from a
+// pinned checkpoint, M:1407-1460, which needs two independent indexers and two archival operators: keyless there is one
+// of each, NearBlocks' testnet indexer is stalled and dRPC keeps 100k-200k blocks; scripts/live-checks/
+// helper-usdc-event-watch.mjs proves the sources). USDC has no view of its halt (W D48), but while it is halted its views
+// fail with its own panic "FiatToken: paused" (the real wasm in a sandbox, research RESULT 3.1), so on each of the
+// network's two providers, at one block:
+//   - ft_balance_of(vault) at final: a balance is open, exactly the paused panic is halted, anything else is not known;
+//   - is_blocklisted(vault) at that block: exactly true or false, anything else is not known;
+//   - view_account at that block: the code hash.
+// A view at block h includes h's receipts (the one mainnet blocklist: false at 99022746, true at 99022747, its block),
+// so the state read at a final block is the state the paper's replay would reach there. The answer is caught up only when
+// both providers answered all three at final, agree on the code hash and it is the pin: the views mean what they mean
+// only for the pinned code (an upgrade could change the panic), so another code hash holds everything. Then halted is
+// either provider's halt and vault_blocked either's block. last_event stays null: no event log is read.
+// pausedAt(h) (R3's exception for bind) reads ft_balance_of at h-1 and at h on both providers: paused at either.
+// Two named limits: (1) a provider keeps only recent blocks (dRPC at least 100k, about 16 h; FastNEAR's archive is the
+// one keyless archive), so a send older than that reads on one operator only and pausedAt stays null: the send stays
+// pending; (2) a pause and an unpause in one block read as open at both heights, so such a send counts as one of R3's
+// three tries; it costs a try, never money. Not covered here: the paper's "a pending Pause multisig request counts as a
+// halt" for the ids' deposit calls (check 10, M:1388-1404; V 2.5.1 case 3): USDC has no view of a pending request, it was
+// unmeasured in the paper too, and the card names it as open.
+// The hold is the safe answer whenever anything is unknown: a provider that fails, two that disagree on the code, a hash
+// that is not the pin, a view answer that is neither the open answer nor the exact paused panic, or no vault to read.
 //
 // Display only (H7, H10 U7): no move into the vault rests on this answer; the relayer's own tokenHeld() call is what
 // holds a move.
@@ -49,7 +64,6 @@ const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** The kit's HelperTokenStatusAnswer (packages/kit/src/helper/v1.ts). */
 export type TokenStatus = HelperTokenStatusAnswer;
-type Read = { code_hash: string; block_height: number };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 type Deps = { fetch?: Fetch; now?: () => number };
 
@@ -61,19 +75,72 @@ export function tokenHeld(s: TokenStatus): boolean {
   return !(s.caught_up === true && s.halted === false && s.vault_blocked === false && s.code_hash_ok === true && s.code_hash === USDC_CODE_HASH);
 }
 
-/** The answer from the two reads of `token`: the code hash only when both answered and agree; never more than was read. */
+/** USDC's own panic while it is halted (the wasm's data; bind/send.ts matches the same message on a failed receipt). */
+export const PAUSED_PANIC = "FiatToken: paused";
+/** Per network: where the watch finds the vault whose block it reads (the withdraw and bind senders' own names). */
+export const VAULT_ENV = {
+  mainnet: ["WITHDRAW_VAULT_MAINNET", "BIND_VAULT_MAINNET"],
+  testnet: ["WITHDRAW_VAULT_TESTNET", "BIND_VAULT_TESTNET"],
+} as const satisfies Record<TokenNetwork, readonly [string, string]>;
+
+/** One view's outcome: a value's text, a panic's message, or neither (any other answer). */
+export type ViewOutcome = { at: number; answer: string } | { at: number; panic: string } | { at?: undefined; other: true };
+/** What one provider read at one block: the halt from ft_balance_of, the block from is_blocklisted, the code hash. */
+export type Read = { block_height: number; halt: ViewOutcome; blocked?: ViewOutcome; code_hash?: string };
+
+/** The halt as one ft_balance_of outcome says it: false for a balance, true for exactly the paused panic, else null. */
+export function haltOf(o: ViewOutcome | undefined): boolean | null {
+  if (o === undefined) return null;
+  if ("answer" in o) return /^"\d{1,40}"$/.test(o.answer) ? false : null;
+  if ("panic" in o) return o.panic === PAUSED_PANIC ? true : null;
+  return null;
+}
+/** The vault's block as one is_blocklisted outcome says it: exactly true or false, else null. */
+export function blockedOf(o: ViewOutcome | undefined): boolean | null {
+  return o !== undefined && "answer" in o && (o.answer === "true" || o.answer === "false") ? o.answer === "true" : null;
+}
+
+/**
+ * The answer from the two providers' reads of `token`: caught up only when both read the halt, the block and the code
+ * hash, agree on the code hash and it is the pin; then halted and vault_blocked are either provider's. The code hash is
+ * shown whenever both read it and agree; never more than was read.
+ */
 export function statusFrom(a: Read | undefined, b: Read | undefined, token: string): TokenStatus {
-  const agreed = a !== undefined && b !== undefined && a.code_hash === b.code_hash;
+  const agreed = a?.code_hash !== undefined && a.code_hash === b?.code_hash;
+  const halts = [haltOf(a?.halt), haltOf(b?.halt)];
+  const blocks = [blockedOf(a?.blocked), blockedOf(b?.blocked)];
+  const known = agreed && a!.code_hash === USDC_CODE_HASH && !halts.includes(null) && !blocks.includes(null);
   return {
     token,
-    caught_up: false, // no event watch yet: the halt and the vault's block are not known (header)
-    halted: null,
-    vault_blocked: null,
-    code_hash_ok: null,
-    code_hash: agreed ? a.code_hash : "",
-    block_height: agreed ? Math.min(a.block_height, b.block_height) : 0,
+    caught_up: known,
+    halted: known ? halts.includes(true) : null,
+    vault_blocked: known ? blocks.includes(true) : null,
+    code_hash_ok: known ? true : null,
+    code_hash: agreed ? a!.code_hash! : "",
+    block_height: agreed ? Math.min(a!.block_height, b!.block_height) : 0,
     last_event: null,
   };
+}
+
+/**
+ * Was USDC paused at block `height`, from the two providers' ft_balance_of at height-1 and at height (each `[h-1, h]`):
+ * paused at either, since a receipt in block h ran after h-1's state and h's view includes h's receipts. null unless all
+ * four outcomes are known and the two providers agree at each height.
+ */
+export function pausedFrom(a: readonly [ViewOutcome | undefined, ViewOutcome | undefined], b: readonly [ViewOutcome | undefined, ViewOutcome | undefined]): boolean | null {
+  const ha = a.map(haltOf);
+  const hb = b.map(haltOf);
+  if ([...ha, ...hb].includes(null) || ha[0] !== hb[0] || ha[1] !== hb[1]) return null;
+  return ha.includes(true);
+}
+
+/** The vault the watch reads on a network: WITHDRAW_VAULT_<NET>, else BIND_VAULT_<NET>; two that differ are refused. */
+export function vaultOf(env: Record<string, string | undefined>, network: TokenNetwork): string | undefined {
+  const [w, bnd] = VAULT_ENV[network].map((n) => env[n] || undefined);
+  if (w !== undefined && bnd !== undefined && w !== bnd) throw new Error(`${VAULT_ENV[network][0]} and ${VAULT_ENV[network][1]} must name the same vault`);
+  const v = w ?? bnd;
+  if (v !== undefined && (v.length < 2 || v.length > 64 || !/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(v))) throw new Error(`${VAULT_ENV[network][w !== undefined ? 0 : 1]} must be a NEAR account id`);
+  return v;
 }
 
 /** A network's two provider URLs from the host's environment, else its public pair; two of the same are refused. */
@@ -95,22 +162,36 @@ export function readUrls(env: Record<string, string | undefined>, network: Token
   return [urls[0]!, urls[1]!];
 }
 
-/** One network's watch: its own token (WATCHED) read on its own pair. */
+/** One view's outcome from a provider's JSON answer: its value's text, its panic's message, or other. */
+export function viewOutcome(j: unknown): ViewOutcome {
+  const res = (j as { result?: { result?: unknown; error?: unknown; block_height?: unknown } } | null)?.result;
+  const at = res?.block_height;
+  if (typeof at !== "number" || !Number.isSafeInteger(at) || at <= 0) return { other: true };
+  if (Array.isArray(res!.result) && res!.result.every((x) => Number.isInteger(x) && x >= 0 && x < 256)) return { at, answer: Buffer.from(res!.result as number[]).toString("utf8") };
+  // a view that panics: both providers answer result.error "wasm execution failed with error: HostError(GuestPanic {
+  // panic_msg: \"...\" })" (read on FastNEAR and dRPC, 2026-11-02); the message is taken whole, up to its closing quote
+  const m = typeof res!.error === "string" ? /HostError\(GuestPanic \{ panic_msg: "([^"\\]*)" \}\)$/.exec(res!.error) : null;
+  return m ? { at, panic: m[1]! } : { other: true };
+}
+
+/** One network's watch: its own token (WATCHED) and the vault it carries (VAULT_ENV) read on its own pair. */
 export function createTokenWatch(network: TokenNetwork, env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const urls = readUrls(env, network);
   const token = WATCHED[network].token;
+  const vault = vaultOf(env, network);
   let cached: { at: number; status: TokenStatus } | undefined;
   let inflight: Promise<TokenStatus> | undefined;
+  const pausedCache = new Map<bigint, boolean>(); // a known answer for a past height never changes
 
-  /** One view_account of the network's token at final, or undefined on any failure or any answer of the wrong shape. */
-  async function read(url: string): Promise<Read | undefined> {
+  /** One query on one provider: its JSON answer, or undefined on any failure, any status but 200 or a large answer. */
+  async function query(url: string, params: Record<string, unknown>): Promise<unknown> {
     try {
       const r = await doFetch(url, {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { request_type: "view_account", finality: "final", account_id: token } }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params }),
         redirect: "error",
         signal: AbortSignal.timeout(READ_TIMEOUT_MS),
       });
@@ -123,15 +204,34 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
         if (n > ANSWER_MAX) return undefined;
         chunks.push(c);
       }
-      const text = Buffer.concat(chunks).toString("utf8");
-      const res = (JSON.parse(text) as { result?: { code_hash?: unknown; block_height?: unknown } }).result;
-      const code_hash = res?.code_hash;
-      const block_height = res?.block_height;
-      if (typeof code_hash !== "string" || !HASH.test(code_hash) || typeof block_height !== "number" || !Number.isSafeInteger(block_height) || block_height <= 0) return undefined;
-      return { code_hash, block_height };
+      return JSON.parse(Buffer.concat(chunks).toString("utf8"));
     } catch {
       return undefined;
     }
+  }
+  const view = (url: string, method: string, account_id: string, at: { finality: "final" } | { block_id: number }) =>
+    query(url, { request_type: "call_function", ...at, account_id: token, method_name: method, args_base64: Buffer.from(JSON.stringify({ account_id })).toString("base64") }).then(viewOutcome);
+  /** The token's code hash at a block (or final), or undefined on any answer of the wrong shape or another block. */
+  async function codeHash(url: string, at: { finality: "final" } | { block_id: number }): Promise<{ code_hash: string; block_height: number } | undefined> {
+    const res = ((await query(url, { request_type: "view_account", ...at, account_id: token })) as { result?: { code_hash?: unknown; block_height?: unknown } } | undefined)?.result;
+    const code_hash = res?.code_hash;
+    const block_height = res?.block_height;
+    if (typeof code_hash !== "string" || !HASH.test(code_hash) || typeof block_height !== "number" || !Number.isSafeInteger(block_height) || block_height <= 0) return undefined;
+    if ("block_id" in at && block_height !== at.block_id) return undefined;
+    return { code_hash, block_height };
+  }
+
+  /** One provider's read: the halt at final, then the vault's block and the code hash at that same block. */
+  async function read(url: string): Promise<Read | undefined> {
+    if (vault === undefined) {
+      // no vault carried on this network: the code hash only, never caught up (nothing to carry, nothing to free)
+      const c = await codeHash(url, { finality: "final" });
+      return c && { ...c, halt: { other: true } };
+    }
+    const halt = await view(url, "ft_balance_of", vault, { finality: "final" });
+    if (halt.at === undefined) return undefined;
+    const [blocked, c] = await Promise.all([view(url, "is_blocklisted", vault, { block_id: halt.at }), codeHash(url, { block_id: halt.at })]);
+    return { block_height: halt.at, halt, blocked, code_hash: c?.code_hash };
   }
 
   /** The status, read at most once per CACHE_MS, one pair of reads at a time. */
@@ -154,7 +254,28 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
     return tokenHeld(await status());
   }
 
-  return { network, token, status, held };
+  /**
+   * R3's exception for bind (bind/send.ts): was USDC paused at block `height`, by pausedFrom on both providers, with the
+   * pinned code at that block on both; null when anything is not known (header: the providers' kept blocks).
+   */
+  async function pausedAt(height: bigint): Promise<boolean | null> {
+    const known = pausedCache.get(height);
+    if (known !== undefined) return known;
+    if (vault === undefined || height < 2n || height > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    const h = Number(height);
+    const each = await Promise.all(
+      urls.map(async (url) => {
+        const [before, at, c] = await Promise.all([view(url, "ft_balance_of", vault, { block_id: h - 1 }), view(url, "ft_balance_of", vault, { block_id: h }), codeHash(url, { block_id: h })]);
+        return { pair: [before.at === h - 1 ? before : undefined, at.at === h ? at : undefined] as const, pinned: c?.code_hash === USDC_CODE_HASH };
+      }),
+    );
+    if (!each.every((e) => e.pinned)) return null;
+    const p = pausedFrom(each[0]!.pair, each[1]!.pair);
+    if (p !== null) pausedCache.set(height, p);
+    return p;
+  }
+
+  return { network, token, vault, status, held, pausedAt };
 }
 
 export type TokenWatch = ReturnType<typeof createTokenWatch>;
@@ -168,23 +289,5 @@ export function tokenWatchesFromEnv(env: Record<string, string | undefined>, dep
 /** What the relayers take: each network's status, and only its own. */
 export const statusesOf = (w: TokenWatches): Record<TokenNetwork, () => Promise<TokenStatus>> => ({ mainnet: w.mainnet.status, testnet: w.testnet.status });
 
-/** One pause or unpause of the token, as the watch read it from the token's own event log. */
-export type PauseEvent = { name: "paused" | "unpaused"; block_height: number };
-/** The watch's pause history: the state at `from`, every pause and unpause since, read through `caughtUpTo`. */
-export type PauseHistory = { from: number; pausedAtFrom: boolean; caughtUpTo: number; events: readonly PauseEvent[] };
-
-/**
- * Was the token paused at block `height` (R3's exception, M:1846): null outside what the watch has read. A receipt in
- * the same block as a pause or an unpause counts as paused there: its order inside the block is not known, and an
- * unpause in that block means it was paused before it. Later events (another pause, a blocklist) never change it.
- */
-export function pausedAt(h: PauseHistory, height: number): boolean | null {
-  if (height < h.from || height > h.caughtUpTo) return null;
-  let paused = h.pausedAtFrom;
-  for (const e of [...h.events].sort((x, y) => x.block_height - y.block_height)) {
-    if (e.block_height > height) break;
-    if (e.block_height === height) return true;
-    paused = e.name === "paused";
-  }
-  return paused;
-}
+/** What bind takes: each network's pausedAt, and only its own. */
+export const pausedAtsOf = (w: TokenWatches): Record<TokenNetwork, (height: bigint) => Promise<boolean | null>> => ({ mainnet: w.mainnet.pausedAt, testnet: w.testnet.pausedAt });
