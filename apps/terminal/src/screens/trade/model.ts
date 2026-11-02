@@ -8,8 +8,10 @@
 //
 // The main button's states (09-design-brief S8.9, S8.10, S8.12): a tap sends the kit's `buy` and shows Sending, the
 // kit's `sent` turns it into Landing with a counter from the tap, and `filled` into Filled with the time from the tap
-// to the fill. The kit's other trade stages (part_filled, not_landed) and a refusal end the buy as `ended`, which the
-// next card (app-trade-box-states) draws as Failed and Not landed; Slow (past 5 s) is that card's too.
+// to the fill. The kit's other trade stages (part_filled, not_landed) and a refusal end the buy as `ended`, drawn by
+// `endView` as Failed (with the reason for the kit's code when the app has words for it), Not landed or part filled,
+// each with Retry; a trade still Sending or Landing past 5 s is Slow (S8.11), which never ends it. The sell side
+// (src/screens/positions/) runs the same machine.
 import type { ErrorCode, Stage } from "@blindfill/kit";
 
 /** USD cents. */
@@ -155,4 +157,35 @@ export function buttonTime(p: Phase, now: number): string | null {
   if (p.k === "landing") return secs(now - p.at);
   if (p.k === "filled") return secs(p.ms);
   return null;
+}
+
+// ------------------------------------------------------------------------------------------------- the other states
+
+/** Slow: a trade still Sending or Landing this long after the tap (09-design-brief S8.11: past 5 s). */
+export const SLOW_MS = 5_000;
+
+/** The trade is still running past SLOW_MS. Display only: only the kit's stage ends a trade. */
+export const isSlow = (p: Phase, now: number): boolean => busy(p) && now - p.at >= SLOW_MS;
+
+/** A reason the app has words for, by the kit's code (words.ts). */
+export type Reason = "priceCheck" | "notSent";
+
+/**
+ * The kit's codes the app has a reason for: the device's quote check refused (S8.20 Price check failed), and the
+ * signing page down, so the request was never posted (the kit's client code, S8.28 Not sent). Any other code draws
+ * Failed alone: the app never makes up a reason.
+ */
+const REASONS: Record<string, Reason> = { quote_check_failed: "priceCheck", signpage_down: "notSent" };
+
+/** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), or part filled (CH-045). */
+export interface EndView {
+  k: "failed" | "notLanded" | "partial";
+  reason: Reason | null;
+}
+
+export function endView(p: Phase): EndView | null {
+  if (p.k !== "ended") return null;
+  if (p.stage === "not_landed") return { k: "notLanded", reason: null };
+  if (p.stage === "part_filled") return { k: "partial", reason: null };
+  return { k: "failed", reason: (p.code && REASONS[p.code]) || null };
 }

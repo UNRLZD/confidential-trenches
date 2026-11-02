@@ -33,6 +33,16 @@ export const WORDS = {
   sending: draft("Sending", "09-design-brief S8.9 [draft copy: Sending]"),
   landing: draft("Landing", "09-design-brief S8.10 [draft copy: Landing 0.4s]"),
   filled: draft("Filled", "09-design-brief S8.12 [draft copy: Filled 1.1s]"),
+  slow: draft("Slow", "09-design-brief S8.11 [draft copy: Slow 6.2s] (the time is data)"),
+  failed: draft("Failed", "09-design-brief S8.23 and S8.32 [draft copy: Failed · slippage]; the reason on its own line"),
+  retry: draft("Retry", "09-design-brief S8.23 and S8.32 [draft copy: Retry]"),
+  notLanded: draft("Not landed", "09-design-brief S8.36 [draft copy: Not landed]; S8.24's `· refunded` left out: no refund step, the money never left W (app.md CH-050)"),
+  priceCheck: draft("Price check failed", "09-design-brief S8.20 [draft copy: Price check failed]; the kit's quote_check_failed"),
+  notSent: draft("Not sent", "09-design-brief S8.28 [draft copy: Not sent]; the kit's signpage_down (never posted)"),
+  filledOf: draft("filled", "app.md CH-045 (the filled part shown), after 09-design-brief S8.35 [draft copy: 2/3 sold]: `2/3 filled`"),
+  soldOf: draft("sold", "09-design-brief S8.35 [draft copy: 2/3 sold]"),
+  partFilled: draft("Part filled", "app.md CH-045 (set partly filled); drawn when the kit gives no count"),
+  partSold: draft("Part sold", "09-design-brief S8.35, drawn when the kit gives no count"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

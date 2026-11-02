@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The sell side and Your position, their shots and checks (card app-sell-positions; A2.4, app.md:1449; AE-11's sell
-// rows, app.md:1352: a sell (S8.29, S8.30) and a double tap; 09-design-brief S8 Sell tab, Sell presets, Your position):
+// rows, app.md:1352: a sell (S8.29, S8.30) and a double tap; the trade states of card app-trade-box-states: S8.11
+// Slow, S8.32 Failed with its reason, S8.35 part sold, S8.36 Not landed, each with Retry; 09-design-brief S8 Sell tab, Sell presets, Your position):
 // the fixture page (fixtures.tsx, the trade box's kit stub) built with vite and served on 127.0.0.1, every state at
 // 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1), the page clock paused by Playwright. Per state: its own state id and
 // button, the presets and quick sells on or off as the position allows (dust, no route, Initials when not up), app-shell's
@@ -49,7 +50,13 @@ const STATES = [
   ["S8.30-sending", "up", "cta", 100, "S8.30", "Sending", HALF, "0000", "0000"],
   ["S8.30-landing", "up", "cta", 400, "S8.30", "Landing 0.4s", HALF, "0000", "0000"],
   ["filled", "up", "cta", 1_200, "filled", "Filled 1.1s", HALF, "1111", "1111"],
-  ["ended", "refuse", "cta", 400, "ended", "Sell 50%", HALF, "1111", "1111"],
+  ["S8.11", "slow", "cta", 6_200, "S8.11", "Slow 6.2s", HALF, "0000", "0000"],
+  ["S8.32", "refuse", "cta", 400, "S8.32", "Retry", HALF, "1111", "1111"],
+  ["S8.32-notsent", "notsent", "cta", 400, "S8.32", "Retry", HALF, "1111", "1111"],
+  ["S8.32-other", "other", "cta", 400, "S8.32", "Retry", HALF, "1111", "1111"],
+  ["S8.36", "notlanded", "cta", 3_100, "S8.36", "Retry", HALF, "1111", "1111"],
+  ["S8.35", "partial", "cta", 1_200, "S8.35", "Retry", HALF, "1111", "1111"],
+  ["S8.35-nocount", "partial-nocount", "cta", 1_200, "S8.35", "Retry", HALF, "1111", "1111"],
   ["quick-25", "up", '[data-quick="2500"]', 400, "S8.30", "Landing 0.4s", QUARTER, "0000", "0000"],
   ["S8.33", "noroute", null, 0, "S8.33", "No route", null, "0000", "0000"],
   ["down", "down", null, 0, "S8.29", "Sell 50%", null, "1111", "1110"],
@@ -130,7 +137,12 @@ try {
       check(got === want, `${tag}: state ${got}, want ${want}`);
       const lab = norm(await page.locator('[data-testid="sell-cta"]').innerText());
       check(lab === label, `${tag}: button "${lab}", want "${label}"`);
-      if (want === "ended") check((await box.getAttribute("data-stage")) === "refused", `${tag}: the refusal's stage`);
+      // an ended sell's one line above the button (app-trade-box-states), empty otherwise
+      const END = { refuse: "Price check failed", notsent: "Not sent", other: "Failed", notlanded: "Not landed", partial: "1/2 sold", "partial-nocount": "Part sold" };
+      const STAGE = { refuse: "refused", notsent: "refused", other: "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" };
+      const line = norm(await page.locator('[data-testid="sell-line"]').innerText());
+      check(line === (END[f] ?? ""), `${tag}: the line above the button "${line}", want "${END[f] ?? ""}"`);
+      if (STAGE[f]) check((await box.getAttribute("data-stage")) === STAGE[f], `${tag}: the end's stage`);
       const p = await onMap(page, "[data-pct]");
       check(p === presets, `${tag}: presets on ${p}, want ${presets}`);
       const qk = await onMap(page, "[data-quick]");
@@ -166,6 +178,21 @@ try {
         drafts.get(d).add(name);
       }
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}.png`), fullPage: true });
+      await ctx.close();
+    }
+
+    // Retry is one new sell of the same share, at once, with no dialog
+    {
+      const { ctx, page, dialogs } = await open(browser, w, "notlanded");
+      const cta = page.locator('[data-testid="sell-cta"]');
+      await cta.click();
+      await page.clock.runFor(3_100);
+      await cta.click();
+      await page.clock.runFor(100);
+      const c = await calls(page);
+      check(c.length === 2 && JSON.stringify(c[1].params) === sellOf(HALF), `@${w.name}: Retry sent ${JSON.stringify(c)}`);
+      check((await page.locator('[data-testid="sell-box"]').getAttribute("data-state")) === "S8.30", `@${w.name}: Retry not Sending`);
+      check(dialogs.length === 0, `@${w.name}: a dialog on Retry`);
       await ctx.close();
     }
 

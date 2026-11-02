@@ -4,7 +4,9 @@
 // position and the market's price. The stub answers the sell preview (the share's value less the 1% fee, $0.02 network)
 // and the kit's `buy` with `side: "sell"` with its stages on the page clock: signed at 80 ms, sent at 150 ms, filled at
 // 1,100 ms. ?f= picks the position: up (R5's NEARLY numbers: $100 in, $219 now), down, dust (3 base units), noroute,
-// refuse (the sell refused with quote_check_failed at 300 ms). Every request is recorded in window.__calls; every Share
+// refuse (the sell refused with quote_check_failed at 300 ms). The trade states (app-trade-box-states), on up's
+// position: notsent (signpage_down) and other (not_allowed) refusals, slow (filled at 8 s), notlanded (not_landed at 3 s),
+// partial (part_filled, the kit's count 1 of 2) and partial-nocount. Every request is recorded in window.__calls; every Share
 // tap in window.__shares. Test only.
 import type { SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode } from "react";
@@ -45,7 +47,7 @@ const POS: Record<string, { amount: string; cost: string; price: string; route: 
   dust: { amount: "0.000003", cost: "0.03", price: "12000", route: true },
   noroute: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: false },
 };
-const P = POS[f]!;
+const P = POS[f] ?? POS.up!;
 
 const STATE: SignpageState = {
   release: "signpage-v1",
@@ -82,8 +84,9 @@ const kit: TradeKit = {
     window.__calls.push({ kind, params, id });
     const emit = (stage: Stage) => listeners.forEach((l) => l(id, stage));
     const outcome = new Promise<SignpageOutcome<"buy">>((resolve) => {
-      if (f === "refuse") {
-        setTimeout(() => resolve({ ok: false, error: { code: "quote_check_failed" } }), 300);
+      const code = { refuse: "quote_check_failed", notsent: "signpage_down", other: "not_allowed" }[f];
+      if (code) {
+        setTimeout(() => resolve({ ok: false, error: { code } }), 300);
         return;
       }
       setTimeout(() => emit("signed"), 80);
@@ -91,10 +94,15 @@ const kit: TradeKit = {
         emit("sent");
         resolve({ ok: true, result: { stage: "sent", txs: [] } });
       }, 150);
-      setTimeout(() => emit("filled"), 1_100);
+      // slow: still landing past 5 s, filled at 8 s; notlanded: the deadline's re-read at 3 s; partial: 1 of 2 slices
+      if (f === "slow") setTimeout(() => emit("filled"), 8_000);
+      else if (f === "notlanded") setTimeout(() => emit("not_landed"), 3_000);
+      else if (f === "partial" || f === "partial-nocount") setTimeout(() => emit("part_filled"), 1_100);
+      else setTimeout(() => emit("filled"), 1_100);
     });
     return { id, outcome };
   }) as TradeKit["request"],
+  part: (id) => (f === "partial" && id.startsWith("sell-") ? { filled: 1, of: 2 } : null),
   onProgress: (fn) => {
     listeners.add(fn);
     return () => void listeners.delete(fn);

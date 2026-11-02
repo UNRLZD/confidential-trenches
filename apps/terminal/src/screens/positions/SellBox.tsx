@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { cents, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
-import { busy, buttonTime } from "../trade/model.ts";
+import { busy } from "../trade/model.ts";
+import { EndLine, RunLabel, stateId } from "../trade/States.tsx";
 import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount, shareCents } from "./model.ts";
 import { useSellKit } from "./source.tsx";
 import type { Sell, SellPreview } from "./source.tsx";
@@ -15,7 +16,9 @@ import "./positions.css";
 // side "sell", trenches-1440.html's ticket: `1.2M SYM held`, the percent in the amount box with the share's value under
 // it, `25%` `50%` `75%` `100%`, `You receive`, `Sell 50%`), in the buy side's own classes (src/screens/trade/trade.css)
 // with the sell's coral. A preset sells on one click; the box's percent sells on the main button. The button's states
-// are the buy side's (S8.30: Sending, Landing, then Filled), run by `useSell`, one request for a double tap. The side
+// are the buy side's (src/screens/trade/States.tsx: S8.30 Sending and Landing, S8.11 Slow, Filled, and for a sell
+// the kit ended S8.32 Failed, S8.36 Not landed or S8.35 part sold, each with Retry), run by `useSell`, one request
+// for a double tap. The side
 // switch's Buy goes to the mount (the buy side is TradeBox). No route (S8.33) turns the sell off. No dialog, no confirm.
 
 const pct = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
@@ -28,9 +31,6 @@ const Swap = () => (
 );
 const Chev = () => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
-);
-const Check = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5" /></svg>
 );
 const Sliders = () => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M2 4.5h12M2 11.5h12" /><circle cx="10" cy="4.5" r="1.6" fill="var(--bg-raised)" /><circle cx="6" cy="11.5" r="1.6" fill="var(--bg-raised)" /></svg>
@@ -82,23 +82,11 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const pending = shown === null && last !== null;
   const outC = (shown ?? last) ? cents((shown ?? last)!.out_usd) : null;
   const share = bps === null ? null : shareCents(row.value, bps);
-  const state = s.phase.k === "sending" ? "S8.30" : s.phase.k === "landing" ? "S8.30" : s.phase.k === "filled" ? "filled" : s.phase.k === "ended" ? "ended" : noRoute ? "S8.33" : "S8.29";
-  const time = buttonTime(s.phase, s.now());
+  const now = s.now();
+  const state = stateId(s.phase, now, "sell") ?? (noRoute ? "S8.33" : "S8.29");
 
   let label;
-  if (s.phase.k === "sending") label = <W id="sending" />;
-  else if (s.phase.k === "landing")
-    label = (
-      <>
-        <W id="landing" />&nbsp;<span className="trb-live" data-time={time}>{time}</span>
-      </>
-    );
-  else if (s.phase.k === "filled")
-    label = (
-      <>
-        <Check />&nbsp;<W id="filled" />&nbsp;<span data-time={time}>{time}</span>
-      </>
-    );
+  if (s.phase.k !== "ready") label = <RunLabel phase={s.phase} now={now} />;
   else if (noRoute) label = <W id="noRoute" />;
   else
     label = (
@@ -161,6 +149,9 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
       <div className="trb-receive">
         <span><W id="receive" /></span>
         <span data-pending={pending || undefined} data-testid="sell-receive">{outC === null ? "—" : `≈ ${usd(outC)}`}</span>
+      </div>
+      <div className="trb-warn" data-testid="sell-line">
+        {s.phase.k === "ended" && <EndLine phase={s.phase} side="sell" part={s.part} />}
       </div>
       <button
         type="button"

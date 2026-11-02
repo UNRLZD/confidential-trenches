@@ -2,7 +2,8 @@
 // The trade box's buy side, its shots and checks (card app-trade-box-buy; A2.3, app.md:1448; AE-11's buy rows,
 // app.md:1352; S8.3, S8.9, S8.10, S8.12 at 09-design-brief S8): the fixture page (fixtures.tsx, a kit stub) built with
 // vite and served on 127.0.0.1, every state at 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1), the page clock paused
-// by Playwright. Per state: its own state id, app-shell's BAR-10 rules (MEASURE: no text under 11 px, no phone tap box
+// by Playwright, and the trade box's other states (app-trade-box-states: S8.11 Slow, S8.23 Failed with its reason,
+// S8.24 Not landed, part filled, each with Retry). Per state: its own state id, app-shell's BAR-10 rules (MEASURE: no text under 11 px, no phone tap box
 // under 44 px, no horizontal scroll), no external request, no dialog and no navigation. Then: the set preview equals
 // the kit's set for the amount in the box (a typed amount too), the presets at Bal $73.18 and Max $100 ($100 off), a
 // preset buys at its size on one click, and a double tap is one buy.
@@ -33,15 +34,21 @@ const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
-// the state, the fixture, whether the main button is tapped, the page clock's ms after the tap, the button's time
+// the state, the fixture, whether the main button is tapped, the page clock's ms after the tap, the button's time, its
+// label, and the one line an ended buy draws above it (app-trade-box-states: S8.11, S8.23, S8.24, part filled)
 const STATES = [
-  ["S8.3", "ready", false, 0, null],
-  ["S8.9", "ready", true, 100, null],
-  ["S8.10", "ready", true, 400, "0.4s"],
-  ["S8.12", "ready", true, 1_200, "1.1s"],
-  ["ended", "refuse", true, 400, null],
+  ["S8.3", "ready", false, 0, null, "Buy TORCH", null],
+  ["S8.9", "ready", true, 100, null, "Sending", null],
+  ["S8.10", "ready", true, 400, "0.4s", "Landing 0.4s", null],
+  ["S8.11", "slow", true, 6_200, "6.2s", "Slow 6.2s", null],
+  ["S8.12", "ready", true, 1_200, "1.1s", "Filled 1.1s", null],
+  ["S8.23", "refuse", true, 400, null, "Retry", "Price check failed"],
+  ["S8.23", "notsent", true, 400, null, "Retry", "Not sent"],
+  ["S8.23", "other", true, 400, null, "Retry", "Failed"],
+  ["S8.24", "notlanded", true, 3_100, null, "Retry", "Not landed"],
+  ["partial", "partial", true, 1_200, null, "Retry", "1/2 filled"],
+  ["partial", "partial-nocount", true, 1_200, null, "Retry", "Part filled"],
 ];
-const LABEL = { "S8.3": "Buy TORCH", "S8.9": "Sending", "S8.10": "Landing 0.4s", "S8.12": "Filled 1.1s", ended: "Buy TORCH" };
 
 async function build() {
   const { build } = await import("vite");
@@ -115,7 +122,7 @@ const { chromium } = await import("playwright");
 const browser = await chromium.launch();
 try {
   for (const w of WIDTHS) {
-    for (const [want, f, tapIt, ms, time] of STATES) {
+    for (const [want, f, tapIt, ms, time, LABEL, end] of STATES) {
       const tag = `${want} @${w.name}`;
       const { ctx, page, external, dialogs, navs } = await open(browser, w, f);
       if (tapIt) {
@@ -126,16 +133,18 @@ try {
       const got = await box.getAttribute("data-state");
       check(got === want, `${tag}: state ${got}, want ${want}`);
       const label = norm(await page.locator('[data-testid="trade-cta"]').innerText());
-      check(label === LABEL[want], `${tag}: button "${label}", want "${LABEL[want]}"`);
+      check(label === LABEL, `${tag}: button "${label}", want "${LABEL}"`);
       if (time) check((await page.locator('[data-testid="trade-cta"] [data-time]').getAttribute("data-time")) === time, `${tag}: time, want ${time}`);
-      if (want === "ended") check((await box.getAttribute("data-stage")) === "refused", `${tag}: the refusal's stage`);
+      const stage = { refuse: "refused", notsent: "refused", other: "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" }[f];
+      if (stage) check((await box.getAttribute("data-stage")) === stage, `${tag}: the end's stage ${await box.getAttribute("data-stage")}, want ${stage}`);
       // the set preview equals the kit's set for $25 (20 + 5), and the estimate is drawn from it
       check((await box.getAttribute("data-set")) === kitSet(2500), `${tag}: set ${await box.getAttribute("data-set")}, want ${kitSet(2500)}`);
       check(norm(await page.locator('[data-testid="trade-receive"]').innerText()) === "≈ 1.2M TORCH", `${tag}: You receive`);
-      check(norm(await page.locator('[data-testid="trade-max"]').innerText()) === "Max $100", `${tag}: the max line`);
+      const line = norm(await page.locator('[data-testid="trade-max"]').innerText());
+      check(line === (end ?? "Max $100"), `${tag}: the line above the button "${line}", want "${end ?? "Max $100"}"`);
       // presets: $10, $25, $50 on and $100 off at Bal $73.18 while nothing runs; all off while a buy runs
       const off = await page.$$eval("[data-preset]", (bs) => bs.map((b) => `${b.getAttribute("data-preset")}:${b.disabled}`).join(" "));
-      const running = want === "S8.9" || want === "S8.10";
+      const running = want === "S8.9" || want === "S8.10" || want === "S8.11";
       const wantOff = running ? "10.00:true 25.00:true 50.00:true 100.00:true" : "10.00:false 25.00:false 50.00:false 100.00:true";
       check(off === wantOff, `${tag}: presets ${off}, want ${wantOff}`);
       const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
@@ -154,6 +163,29 @@ try {
         drafts.get(d).add(want);
       }
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}-${w.name}.png`) });
+      await ctx.close();
+    }
+
+    // Retry is one new buy of the same amount, at once, with no dialog; a slow buy still fills on the kit's stage
+    {
+      const { ctx, page, dialogs } = await open(browser, w, "notlanded");
+      const cta = page.locator('[data-testid="trade-cta"]');
+      await cta.click();
+      await page.clock.runFor(3_100);
+      await cta.click();
+      await page.clock.runFor(100);
+      const calls = await page.evaluate(() => window.__calls);
+      check(calls.length === 2 && JSON.stringify(calls[1].params) === BUY, `@${w.name}: Retry sent ${JSON.stringify(calls)}`);
+      check((await page.locator('[data-testid="trade-box"]').getAttribute("data-state")) === "S8.9", `@${w.name}: Retry not Sending`);
+      check(dialogs.length === 0, `@${w.name}: a dialog on Retry`);
+      await ctx.close();
+    }
+    {
+      const { ctx, page } = await open(browser, w, "slow");
+      await page.locator('[data-testid="trade-cta"]').click();
+      await page.clock.runFor(8_100);
+      check((await page.locator('[data-testid="trade-box"]').getAttribute("data-state")) === "S8.12", `@${w.name}: the slow buy did not fill`);
+      check(norm(await page.locator('[data-testid="trade-cta"]').innerText()) === "Filled 8.0s", `@${w.name}: the slow buy's fill time`);
       await ctx.close();
     }
 
