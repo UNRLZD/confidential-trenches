@@ -43,8 +43,9 @@ test("recorded good answer: the deployed skeleton, keys [] on two RPCs, its code
   assert.equal(new Set(answers.map((a) => a.url)).size, 2);
   const r = await check({ deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 12);
+  assert.equal(r.lines.length, 14);
   assert.equal(r.lines.filter((l) => /key list is \[\] on .*: 0 key\(s\)/.test(l) && l.startsWith("ok ")).length, 2);
+  assert.equal(r.lines.filter((l) => /^ok  withdraw is exported only with on_payout on .*: yes$/.test(l)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  code sha256 ${deployment.wasm_sha256} equals`)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  config() answers on `) && l.includes(`asset ${deployment.asset}`)).length, 2);
 });
@@ -173,6 +174,47 @@ test("the wasm rules: banned imports, promise imports outside the seven, exports
   assert.deepEqual(wasmProblems(tinyWasm("promise_create", "config")).promises, ["promise_create"]);
   assert.deepEqual(wasmProblems(tinyWasm("promise_batch_then", "new")).exports, ["new"]);
   const clean = wasmProblems(tinyWasm("promise_result", "totals"));
-  assert.deepEqual([clean.banned, clean.promises, clean.exports], [[], [], []]);
+  assert.deepEqual([clean.banned, clean.promises, clean.exports, clean.withdrawWithoutPayout], [[], [], [], []]);
   assert.throws(() => wasmProblems(Buffer.from("not wasm")), /not a wasm module/);
+});
+
+// a minimal wasm: one import env.<imp> of function type 0, and each of `exps` exported as that one function
+function wasmExporting(imp, exps) {
+  const name = (s) => [s.length, ...Buffer.from(s)];
+  const section = (id, body) => [id, ...leb(body.length), ...body];
+  const leb = (n) => (n < 128 ? [n] : [(n & 0x7f) | 0x80, n >> 7]);
+  const type = section(1, [1, 0x60, 0, 0]);
+  const imports = section(2, [1, ...name("env"), ...name(imp), 0, 0]);
+  const funcs = section(3, [1, 0]);
+  const exports = section(7, [exps.length, ...exps.flatMap((e) => [...name(e), 0, 1])]);
+  const code = section(10, [1, 2, 0, 0x0b]);
+  return Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, ...type, ...imports, ...funcs, ...exports, ...code]);
+}
+
+// card vault-withdraw-verify's build: withdraw spends a note, and no payout or on_payout exists yet (its function
+// exports as wasmProblems read them from the built wasm, sha256 a8996566...)
+const SPEND_ONLY = ["config", "contract_source_metadata", "deposits", "ft_on_transfer", "is_known_label_root", "is_known_state_root", "label_tree", "labels", "leaves", "spends", "state_tree", "storage_prepay", "totals", "withdraw"];
+
+test("bad answer: a wasm exporting withdraw without on_payout is refused; with on_payout that rule passes", () => {
+  const spendOnly = wasmProblems(wasmExporting("promise_result", SPEND_ONLY));
+  assert.deepEqual([spendOnly.banned, spendOnly.promises, spendOnly.exports], [[], [], []]);
+  assert.deepEqual(spendOnly.withdrawWithoutPayout, ["withdraw"]);
+  const paid = wasmProblems(wasmExporting("promise_result", [...SPEND_ONLY, "on_payout"]));
+  assert.deepEqual([paid.banned, paid.promises, paid.exports, paid.withdrawWithoutPayout], [[], [], [], []]);
+  // the skeleton, with neither, passes too
+  assert.deepEqual(wasmProblems(wasmExporting("promise_result", ["config", "totals"])).withdrawWithoutPayout, []);
+});
+
+test("the live check FAILs a deployed wasm exporting withdraw without on_payout", async () => {
+  // the good answer with view_code's result replaced by such a wasm and the record's sha256 set to it, so only this
+  // rule can fail
+  const wasm = wasmExporting("promise_result", SPEND_ONLY);
+  const sha = (await import("node:crypto")).createHash("sha256").update(wasm).digest("hex");
+  const answers = load("vault-skeleton.answers.json").map((a) =>
+    a.params?.request_type === "view_code" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_base64: wasm.toString("base64") } } } : a,
+  );
+  const r = await check({ deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD "));
+  assert.ok(bad.length > 0 && bad.every((l) => /withdraw is exported only with on_payout on .*: withdraw without on_payout/.test(l)), bad.join("\n"));
 });
