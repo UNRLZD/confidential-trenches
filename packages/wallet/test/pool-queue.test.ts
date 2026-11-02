@@ -11,7 +11,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import type { NoteRecord } from "../src/notes/store.ts";
 import { NEAR_EPOCH_MS, NEAR_LIFE_MS, USDC_LADDER, nearVaultPool } from "../src/pool/near.ts";
 import { NEWEST_GRACE_MS, TAKE_SLACK_MS, type Pool, type PoolBindArgs, type PoolTrees, type ReadyProof } from "../src/pool/pool.ts";
-import { openProofQueue, proofPoolSize, type ProofQueue } from "../src/pool/queue.ts";
+import { openProofQueue, proofPoolSize, readySetSize, type ProofQueue } from "../src/pool/queue.ts";
 import {
   BLOCK_MS, BLOCK_NS, closeVaults, FEE_MAX, FEE_RECIPIENT, feeReplay, REGISTER_DEPOSIT, SCOPE, SEED, signalsProver, TOKEN, VAULT, vaultWith, type Vault,
 } from "./withdraw-fixture.ts";
@@ -119,8 +119,16 @@ async function landDeposit(v: Vault, pool: Fake, value: bigint, nonce: bigint): 
   return v.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: BigInt(v.stateLeaves.length - 1) } });
 }
 
-test("pool size: min(hardwareConcurrency - 1, 3), at least 1", () => {
-  assert.deepEqual([undefined, 0, 1, 2, 3, 4, 8, 16, 2.5].map((h) => proofPoolSize(h)), [1, 1, 1, 1, 2, 3, 3, 3, 1]);
+test("one prover at a time; the ready set min(hardwareConcurrency - 1, 3), at least 1 (card signpage-prover-threads)", () => {
+  const hs = [undefined, 0, 1, 2, 3, 4, 8, 16, 2.5];
+  assert.deepEqual(hs.map((h) => proofPoolSize(h)), [1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(hs.map((h) => readySetSize(h)), [1, 1, 1, 1, 2, 3, 3, 3, 1]);
+});
+
+test("one thread budget: provers side by side x each prover's threads never exceed min(hardwareConcurrency - 1, 4)", () => {
+  // the kit's prover worker (packages/kit/src/prover/worker.js): min(hardwareConcurrency - 1, 4) threads, one below 2
+  const threadsOf = (h: number) => Math.max(1, Math.min(h - 1, 4));
+  for (let h = 1; h <= 64; h++) assert.ok(proofPoolSize(h) * threadsOf(h) <= Math.max(1, Math.min(h - 1, 4)), `${h} cores`);
 });
 
 test("the ready set: up to the provers' count, largest chunk first, each its rung, its own W and refund note, the note HELD", async () => {
@@ -232,8 +240,8 @@ test("at a boundary the old proofs stay ready while the new ones are made: a tap
   gate = new Promise<void>((ok) => (open_ = ok));
   pool.t.now = START + E + 10n; // 10 ms after the boundary
   const pass = q.refresh();
-  for (let k = 0; entered < 2 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
-  assert.equal(entered, 2, "both notes are being made again");
+  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  assert.equal(entered, 1, "one note is being made again: one prover at a time");
   assert.deepEqual(q.ready(), [x, y], "the ready set keeps the previous epoch's proofs during the remake");
   const timeout = new Promise<never>((_, no) => setTimeout(() => no(new Error("take waited for the prover")), 1_000).unref());
   const taken = await Promise.race([q.take(x!.noteId), timeout]);
@@ -361,8 +369,8 @@ test("a newest-root proof is handed out in the next epoch only until its replace
   gate = new Promise<void>((ok) => (open_ = ok));
   pool2.t.now = START + E + 5_000n;
   const pass = q2.refresh();
-  for (let k = 0; entered < 2 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
-  assert.equal(entered, 2);
+  for (let k = 0; entered < 1 && k < 2_000; k++) await new Promise((ok) => setImmediate(ok));
+  assert.equal(entered, 1); // one prover at a time: the deposit's note, largest chunk, first
   const t = await q2.take(dep2.id);
   assert.equal(t.root, "newest");
   assert.equal(t.epochStartMs, START);
@@ -723,7 +731,7 @@ test("in the background a pass does nothing", async () => {
   assert.equal((await q.refresh()).made.length, 1);
 });
 
-test("side by side: min(hardwareConcurrency - 1, 3) proofs at once, never more; a pool of one and of three make the same proofs", async () => {
+test("one proof at a time, whatever the cores; each pass makes a ready set of min(hardwareConcurrency - 1, 3); the same proofs either way", async () => {
   const values = [usd(2), usd(5), usd(10), usd(20), usd(50), usd(100)];
   const run = async (hwc: number) => {
     const v = await vaultWith(values);
@@ -767,7 +775,7 @@ test("side by side: min(hardwareConcurrency - 1, 3) proofs at once, never more; 
     return { peak, made: made.length, rounds, shape };
   };
   const one = await run(2), two = await run(3), three = await run(8);
-  assert.deepEqual([one.peak, two.peak, three.peak], [1, 2, 3]);
+  assert.deepEqual([one.peak, two.peak, three.peak], [1, 1, 1]); // one prover at a time, on its own threads
   assert.deepEqual([one.made, two.made, three.made], [6, 6, 6]);
   // each pass proves one ready set: the pool's size, never every prover handed in
   assert.deepEqual([one.rounds, two.rounds, three.rounds], [[1, 1, 1, 1, 1, 1], [2, 2, 2], [3, 3]]);

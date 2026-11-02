@@ -3,7 +3,7 @@
 //   2. snarkjs 0.7.5's browser build (build/snarkjs.min.js of the npm package the lockfile pins), byte for byte, refused
 //      unless its size and sha256 are SNARKJS_BUILD's (vault.md 2.14's 710,896 B);
 //   3. worker.js, with the setup files' pins (ZK_SETUP_FILES, zk/setup-files.ts) put in for its PINS and the thread
-//      file's pin for its THREAD.
+//      file's path for its THREAD.
 // It also writes prover-thread.js, the one file the worker starts its threads from (card signpage-prover-threads):
 // snarkjs.min.js starts each thread from a blob: (or data:) URL of its own thread code, which SIGN_HOST's CSP refuses,
 // so that code ships as a same-origin file instead: a licence header, then the thread code byte for byte as
@@ -114,12 +114,12 @@ export function proverThreadSource({ snarkjsPath = snarkjsBuildPath() } = {}) {
 /** The worker file's bytes; throws when snarkjs.min.js is not the pinned build. */
 export function proverWorkerSource({ snarkjsPath = snarkjsBuildPath() } = {}) {
   const sj = pinnedSnarkjs(snarkjsPath);
-  const thread = proverThreadSource({ snarkjsPath });
+  proverThreadSource({ snarkjsPath }); // refuses a build whose thread code is not the pinned one
   const body = readFileSync(join(HERE, "worker.js"), "utf8");
   if (body.split(PLACEHOLDER).length !== 2) throw new Error("worker.js must hold the pins placeholder exactly once");
   if (body.split(THREAD_PLACEHOLDER).length !== 2) throw new Error("worker.js must hold the thread placeholder exactly once");
   const pins = Object.fromEntries(Object.entries(ZK_SETUP_FILES).map(([name, p]) => [name, { bytes: p.bytes, sha256: p.sha256 }]));
-  const threadPin = { path: `/${PROVER_THREAD_FILE}`, bytes: thread.length, sha256: sha("sha256", thread) };
+  const threadPin = { path: `/${PROVER_THREAD_FILE}` };
   const head = HEADER.map((l) => `// ${l}\n`).join("");
   return Buffer.concat([
     Buffer.from(head),

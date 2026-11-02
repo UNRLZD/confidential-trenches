@@ -22,12 +22,16 @@ var snarkjs=function(t){"use strict";const a=[0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];f
 // Threads (card signpage-prover-threads): snarkjs proves on min(hardwareConcurrency - 1, 4) threads, one core left to
 // the page; with fewer than 2, or no Worker here, or THREAD unset, it proves single thread. snarkjs starts each thread
 // with `new Worker(<blob: or data: URL of its thread code>)`, which SIGN_HOST's CSP (worker-src 'self') and Trusted Types
-// refuse. So this worker stands in its own Worker for snarkjs's: whatever URL snarkjs asks for, it starts only the
-// same-origin file THREAD.path, byte for byte snarkjs's thread code (build.mjs), through this worker's own Trusted
-// Types policy prover-worker, which turns that one URL and nothing else into a TrustedScriptURL. At the first load it
-// fetches that file and checks its size and sha256 against THREAD, and refuses the load when they differ, so no thread
-// starts from a file that is not the pinned one. snarkjs reads the thread count from hardwareConcurrency, so this
-// worker sets its own navigator's to the count.
+// refuse; the boundary is that CSP and Trusted Types, and what follows is a compatibility shim inside it. This worker
+// stands in its own Worker for snarkjs's: whatever URL snarkjs asks for, it starts only the same-origin file
+// THREAD.path through this worker's own Trusted Types policy prover-worker, which turns that one URL and nothing else
+// into a TrustedScriptURL. That the file is byte for byte snarkjs's thread code rests on the deploy gate's byte compare
+// (packages/signpage/scripts/deploy.mjs) and on the live check's pin read after each deploy
+// (scripts/live-checks/signpage-prover-threads.mjs): a fetch here would not control what the browser then starts.
+// snarkjs reads the thread count from hardwareConcurrency, so this worker sets its own navigator's to the count.
+// A thread that fails to start, or gives no first reply within THREAD_START_MS, ends this worker: the error is thrown
+// again outside any promise, so the page's Worker fires `error` and the page drops the worker (client.ts), never a
+// proof that waits for ever.
 // The page moves each setup file here by transfer (client.ts); this worker checks every one's size and sha256 against
 // the pins before snarkjs sees it and refuses anything else, so a changed byte never reaches a proof.
 //   {id, cmd: "load", circuit, wasm: ArrayBuffer, zkey: ArrayBuffer}  -> {id, ok: true, value: {circuit}}
@@ -37,7 +41,7 @@ var snarkjs=function(t){"use strict";const a=[0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];f
 (() => {
   "use strict"; // inside the function: in prover-worker.js this code follows snarkjs.min.js, so a file-level one is no directive
   const PINS = {"withdraw.wasm":{"bytes":2607967,"sha256":"36cda22791def3d520a55c0fc808369cd5849532a75fab65686e666ed3d55c10"},"withdraw.zkey":{"bytes":17793015,"sha256":"2a893b42174c813566e5c40c715a8b90cd49fc4ecf384e3a6024158c3d6de677"},"withdraw.vkey":{"bytes":4208,"sha256":"666bd0983b20c1611543b04f7712e067fbe8cad69f07ada8a310837ff398d21e"},"commitment.wasm":{"bytes":2380442,"sha256":"254d2130607182fd6fd1aee67971526b13cfe178c88e360da96dce92663828d8"},"commitment.zkey":{"bytes":901233,"sha256":"494ae92d64098fda2a5649690ddc5821fcd7449ca5fe8ef99ee7447544d7e1f3"},"commitment.vkey":{"bytes":3477,"sha256":"7d48b4eb3dedc12fb774348287b587f0c18c3c7254cd60e9cf0f8b3636a570d8"}};
-  const THREAD = {"path":"/prover-thread.js","bytes":4285,"sha256":"d2d61af55de7f1c92e8d3edc2c5fd68fd37c4294b4a4d4da54b5b963aceb4e46"};
+  const THREAD = {"path":"/prover-thread.js"};
   const CIRCUITS = ["withdraw", "commitment"];
   const loaded = Object.create(null);
 
@@ -45,40 +49,40 @@ var snarkjs=function(t){"use strict";const a=[0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];f
   const NativeWorker = typeof self.Worker === "function" ? self.Worker : null;
   const THREADS = Math.max(1, Math.min(((nav && Number(nav.hardwareConcurrency)) | 0) - 1, 4));
   const threaded = THREADS > 1 && NativeWorker !== null && THREAD !== null;
-  let threadURL = null; // THREAD.path as this worker's prover-worker policy made it, once the served file matched THREAD
-  let threadCheck = null;
+  const THREAD_START_MS = 30000;
+  let started = 0; // threads this worker has started
+  // thrown outside any promise, so it reaches this worker's global scope and the page's Worker fires `error`
+  const die = (why) =>
+    setTimeout(() => {
+      throw new Error(`prover thread: ${why}`);
+    }, 0);
   if (threaded) {
+    const url = new URL(THREAD.path, self.location.origin).href;
+    const tt = self.trustedTypes;
+    const threadURL = tt
+      ? tt
+          .createPolicy("prover-worker", {
+            createScriptURL(input) {
+              if (input !== url) throw new TypeError(`prover-worker refuses ${input}`);
+              return input;
+            },
+          })
+          .createScriptURL(url)
+      : url;
     Object.defineProperty(nav, "hardwareConcurrency", { value: THREADS, configurable: true });
     self.Worker = function ProverThread() {
-      if (threadURL === null) throw new Error("prover thread: the thread file is not checked");
-      return new NativeWorker(threadURL, { name: "prover-thread" });
+      const w = new NativeWorker(threadURL, { name: "prover-thread" });
+      const n = ++started;
+      let answered = false;
+      const limit = setTimeout(() => answered || die(`thread ${n} gave no first reply in ${THREAD_START_MS / 1000} s`), THREAD_START_MS);
+      w.addEventListener("message", () => ((answered = true), clearTimeout(limit)), { once: true });
+      w.addEventListener("error", (e) => {
+        clearTimeout(limit);
+        die(`thread ${n} failed: ${String((e && e.message) || "it did not start")}`);
+      });
+      return w;
     };
   }
-
-  async function checkThread() {
-    const url = new URL(THREAD.path, self.location.origin).href;
-    const r = await self.fetch(url, { credentials: "omit", cache: "no-cache" });
-    if (!r.ok) throw new Error(`${THREAD.path}: HTTP ${r.status}`);
-    const buf = await r.arrayBuffer();
-    if (buf.byteLength !== THREAD.bytes) throw new Error(`${THREAD.path}: ${buf.byteLength} B, pinned ${THREAD.bytes} B`);
-    const sha256 = hex(await crypto.subtle.digest("SHA-256", buf));
-    if (sha256 !== THREAD.sha256) throw new Error(`${THREAD.path}: sha256 ${sha256}, pinned ${THREAD.sha256}`);
-    const tt = self.trustedTypes;
-    if (!tt) return void (threadURL = url);
-    const policy = tt.createPolicy("prover-worker", {
-      createScriptURL(input) {
-        if (input !== url) throw new TypeError(`prover-worker refuses ${input}`);
-        return input;
-      },
-    });
-    threadURL = policy.createScriptURL(url);
-  }
-  // the first load checks the thread file once; a failed check is tried again at the next load
-  const threadReady = () => {
-    if (!threaded || threadURL !== null) return Promise.resolve();
-    threadCheck ??= checkThread().finally(() => (threadCheck = null));
-    return threadCheck;
-  };
 
   self.addEventListener("securitypolicyviolation", (e) => {
     self.postMessage({
@@ -106,7 +110,6 @@ var snarkjs=function(t){"use strict";const a=[0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];f
       let value;
       if (m.cmd === "load") {
         delete loaded[m.circuit];
-        await threadReady();
         const wasm = await checked(`${m.circuit}.wasm`, m.wasm);
         const zkey = await checked(`${m.circuit}.zkey`, m.zkey);
         loaded[m.circuit] = { wasm, zkey };
@@ -117,7 +120,8 @@ var snarkjs=function(t){"use strict";const a=[0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];f
         if (typeof snarkjs !== "object" || !snarkjs || !snarkjs.groth16) throw new Error("snarkjs is missing");
         const t0 = performance.now();
         const { proof, publicSignals } = await snarkjs.groth16.fullProve(m.input, c.wasm, c.zkey, undefined, undefined, { singleThread: !threaded });
-        value = { proof, publicSignals, proveMs: Math.round(performance.now() - t0), threads: threaded ? THREADS : 1 };
+        // the threads snarkjs has started in this worker (it keeps them across proofs); 1 when it proves single thread
+        value = { proof, publicSignals, proveMs: Math.round(performance.now() - t0), threads: threaded ? started : 1 };
       } else {
         throw new Error("unknown command");
       }

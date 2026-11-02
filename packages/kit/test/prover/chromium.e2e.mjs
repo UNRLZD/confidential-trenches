@@ -72,13 +72,15 @@ async function site() {
   return { files, worker };
 }
 
-function serve(files, headers, { flipZkey = false, workerCsp = [WORKER_CSP] } = {}) {
+function serve(files, headers, { flipZkey = false, workerCsp = [WORKER_CSP], threadFailsAt = 0 } = {}) {
+  let threadAsks = 0; // the requests for the thread file so far
   const zkeyPath = `/assets/zk/${ZK_SETUP_FILES["withdraw.zkey"].sha256}.zkey`;
   const server = createServer((req, res) => {
     const path = new URL(req.url, "http://x").pathname;
     const f = files.get(path);
     for (const [k, v] of headers) res.setHeader(k, v);
     if (!f) return res.writeHead(404).end();
+    if (path === `/${PROVER_THREAD_FILE}` && ++threadAsks === threadFailsAt) return res.writeHead(500).end();
     let body = f.body;
     if (flipZkey && path === zkeyPath) {
       body = Buffer.from(body);
@@ -176,6 +178,16 @@ try {
   check("app-host: without 'wasm-unsafe-eval' no proof is made", () => {
     assert.equal(app.result, undefined);
     assert.match(app.proveError ?? "", /WebAssembly|wasm|Content Security Policy/i);
+  });
+  // a thread whose script answers 500 (fold 1, item 1): the worker ends, so the proof is refused within the start limit
+  const t0 = Date.now();
+  const dead = await runCase(browser, files, headers, input, { threadFailsAt: 2 });
+  const deadMs = Date.now() - t0;
+  console.log(JSON.stringify({ case: "thread-500", error: dead.loadError ?? dead.proveError ?? null, proved: !!dead.result, ms: deadMs }));
+  check("thread-500: the second thread's script answers 500: a \"prover worker:\" refusal within the 30 s start limit, no proof", () => {
+    assert.equal(dead.result, undefined);
+    assert.match(dead.proveError ?? "", /prover worker: .*prover thread: thread \d failed/);
+    assert.ok(deadMs < 30000, `${deadMs} ms`);
   });
 } finally {
   await browser.close();

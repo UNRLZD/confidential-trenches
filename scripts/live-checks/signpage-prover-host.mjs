@@ -315,17 +315,24 @@ export async function openBrowser(engine, serve) {
   }
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
-  const https = await import("node:https");
+  const http2 = await import("node:http2");
   const tls = mkdtempSync(path.join(tmpdir(), "ct-harness-tls-"));
-  const key = path.join(tls, "key.pem");
-  const cert = path.join(tls, "cert.pem");
-  const r = spawnSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", `/CN=${signHost}`, "-addext", `subjectAltName=DNS:${signHost},DNS:${appHost}`], { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`openssl: ${(r.stderr || "").trim().split("\n").at(-1)}`);
-  const server = https.createServer({ key: readFileSync(key), cert: readFileSync(cert) }, (req, res) => {
-    const a = answer(String(req.headers.host ?? "").replace(/:\d+$/, ""), new URL(req.url ?? "/", "https://x").pathname);
+  let creds;
+  try {
+    const key = path.join(tls, "key.pem");
+    const cert = path.join(tls, "cert.pem");
+    const r = spawnSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", `/CN=${signHost}`, "-addext", `subjectAltName=DNS:${signHost},DNS:${appHost}`], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`openssl: exit ${r.status}: ${(r.stderr || "").trim().split("\n").at(-1)}`);
+    creds = { key: readFileSync(key), cert: readFileSync(cert) };
+  } finally {
+    rmSync(tls, { recursive: true, force: true }); // nothing of the key stays on disk, whatever openssl did (fold 1, item 4)
+  }
+  // HTTP/2, as SIGN_HOST's production host serves it (fold 1); over HTTP/1.1 Chromium's run stalled with one thread's
+  // script never requested, a cause not yet named (the worker's 30 s thread start limit turns such a stall into a refusal)
+  const server = http2.createSecureServer(creds, (req, res) => {
+    const a = answer(String(req.headers[":authority"] ?? req.headers.host ?? "").replace(/:\d+$/, ""), new URL(req.url ?? "/", "https://x").pathname);
     res.writeHead(a.status, { ...a.headers, "content-length": a.body.length }).end(a.body);
   });
-  rmSync(tls, { recursive: true, force: true }); // the key is read; nothing of it stays on disk
   await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
   const port = server.address().port;
   const browser = await pw.chromium.launch({ args: [`--host-resolver-rules=MAP ${signHost} 127.0.0.1:${port},MAP ${appHost} 127.0.0.1:${port},MAP * ~NOTFOUND`] });

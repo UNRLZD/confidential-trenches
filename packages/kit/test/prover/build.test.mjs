@@ -41,13 +41,8 @@ test("prover-worker.js = GPL header + pinned snarkjs.min.js + worker.js with the
   assert.deepEqual(Object.keys(pins).sort(), Object.keys(ZK_SETUP_FILES).sort());
   for (const [name, p] of Object.entries(ZK_SETUP_FILES)) assert.deepEqual(pins[name], { bytes: p.bytes, sha256: p.sha256 });
   assert.ok(!body.includes("/*@PINS@*/"));
-  // the thread file's pin: prover-thread.js as build.mjs writes it
-  const thread = proverThreadSource();
-  assert.deepEqual(JSON.parse(body.match(/const THREAD = (\{.*?\});/)[1]), {
-    path: `/${PROVER_THREAD_FILE}`,
-    bytes: thread.length,
-    sha256: createHash("sha256").update(thread).digest("hex"),
-  });
+  // the thread file's path (its bytes rest on the deploy gate's compare and the live check's pin read)
+  assert.deepEqual(JSON.parse(body.match(/const THREAD = (\{.*?\});/)[1]), { path: `/${PROVER_THREAD_FILE}` });
   assert.ok(!body.includes("/*@THREAD@*/"));
   // no script loaded at run time, no eval; the one worker it makes is the pinned thread file, never snarkjs's own
   const code = body.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
