@@ -39,7 +39,11 @@ for (let i = 0; i < 2; i++) {
     continue;
   }
   const tx = await call("eth_getTransactionByHash", [h]);
-  const rc = await call("eth_getTransactionReceipt", [h]);
+  let rc = await call("eth_getTransactionReceipt", [h]);
+  for (let t = 0; rc === null && t < 20; t++) {
+    await new Promise((r) => setTimeout(r, 100)); // anvil mines on send, its receipt can trail by a moment
+    rc = await call("eth_getTransactionReceipt", [h]);
+  }
   const good = tx.from === sender && tx.to === POOL && tx.input === data && tx.type === "0x2" && rc?.status === "0x1" && tx.chainId === "0x7a69";
   nonces.push(Number(tx.nonce));
   console.log(`${good ? "ok " : "BAD"} carry ${i} in ${ms} ms: ${h} from ${tx.from} to ${tx.to} type ${tx.type} nonce ${Number(tx.nonce)} status ${rc?.status} input ${tx.input === data ? "= calldata" : "CHANGED"}`);
