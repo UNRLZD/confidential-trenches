@@ -99,6 +99,7 @@ function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQu
     tokenAccount: { pre: 0n, post: buyToken },
     tokenAccountLamports: { pre: 0n, post: 1_513_840n }, // the landed buy: ECDKZF… 0 -> 1,513,840 (meta)
     pumpVolumeAccumulator: { pre: 0n, post: 1_346_200n },
+    pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
     otherWallets: [{ pre: 9_874_873n, post: 9_874_873n }],
   };
   return {
@@ -131,6 +132,7 @@ function sellCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQ
     tokenAccount: { pre: buyToken, post: 0n },
     tokenAccountLamports: { pre: 1_513_840n, post: 1_513_840n },
     pumpVolumeAccumulator: { pre: 1_346_200n, post: 1_346_200n },
+    pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
     otherWallets: [],
   };
   const b = buyCase();
@@ -237,6 +239,10 @@ const CASES: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uin
   ["S11 token in below minOut", "S11", (c) => { (c.reads.simulations[1] as SolanaSimulation).tokenAccount.post = 46_256_353_719n; }],
   ["S11 another wallet of this user changes", "S11", (c) => { ((c.reads.simulations[0] as SolanaSimulation).otherWallets[0] as { post: bigint }).post -= 1n; }],
   ["S11 the pump volume account takes more than its rent", "S11", (c) => { (c.reads.simulations[0] as SolanaSimulation).pumpVolumeAccumulator.post = 1_346_201n; }],
+  ["S11 the PumpSwap volume account takes more than its rent", "S11", (c) => { const s = c.reads.simulations[0] as SolanaSimulation; s.pumpSwapVolumeAccumulator.post = 1_346_201n; s.walletLamports.post -= 1_346_201n; }],
+  ["S11 the PumpSwap volume account drained (delta < 0)", "S11", (c) => { for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.pumpSwapVolumeAccumulator = { pre: 1_346_200n, post: 0n }; x.walletLamports.post += 1_346_200n; } }],
+  ["S12 minOut below E_k less s, with E(a_k) above E_k", "S12", (c) => { (c.reads as { reference: unknown }).reference = { expectedOut: 51_111_993_061n, minOutBase: 51_111_993_061n, slippageBps: 900 }; }],
+  ["S12 E_k above E(a_k)", "S12", (c) => { (c.reads as { reference: unknown }).reference = { expectedOut: 51_111_993_061n, minOutBase: 51_111_993_062n, slippageBps: 950 }; }],
   ["S12 no reference pool", "S12", (c) => { (c.reads as { reference: unknown }).reference = null; }],
   ["S12 simulated out below E less 200 bps", "S12", (c) => { (c.reads.reference as { expectedOut: bigint }).expectedOut = (buyToken * 10_000n) / 9_800n + 2n; }],
   ["S12 minOut below E less s", "S12", (c) => { c.req.minOut = 46_256_353_719n; setU64(jupData(c.m), 16, 51_111_993_061n); }],
@@ -472,6 +478,33 @@ for (const [name, id, mutate] of R2) {
     refusedBy(id, run(c, bytes ?? undefined));
   });
 }
+
+test("accepted: a first PumpSwap buy from a fresh wallet that creates its PumpSwap volume account (rent 1,346,200)", () => {
+  const c = buyCase();
+  for (const s of c.reads.simulations) {
+    const x = s as SolanaSimulation;
+    x.pumpSwapVolumeAccumulator = { pre: 0n, post: 1_346_200n };
+    x.walletLamports.post -= 1_346_200n;
+  }
+  const v = run(c);
+  assert.ok(v.ok, JSON.stringify(v.results.filter((r) => !r.ok)));
+});
+
+test("accepted: S12 holds the simulated out to E(a_k) and minOut to E_k = floor(E(A) a_k / A) below it", () => {
+  const c = buyCase();
+  // E(a_k) above E_k, as a set's smaller leg prices on a convex curve; minOut_k stays on E_k's floor.
+  (c.reads as { reference: unknown }).reference = { expectedOut: 51_111_993_061n, minOutBase: 50_000_000_000n, slippageBps: 950 };
+  c.req.minOut = (50_000_000_000n * 9_050n) / 10_000n;
+  setU64(jupData(c.m), 16, (c.req.minOut * 10_000n + 9_049n) / 9_050n);
+  const v = run(c);
+  assert.ok(v.ok, JSON.stringify(v.results.filter((r) => !r.ok)));
+});
+
+test("refused: S11 a sell that funds the PumpSwap volume account", () => {
+  const c = sellCase();
+  for (const s of c.reads.simulations) (s as SolanaSimulation).pumpSwapVolumeAccumulator = { pre: 0n, post: 1_346_200n };
+  refusedBy("S11", run(c));
+});
 
 test("refused: S11 a sell that funds the pump volume account", () => {
   const c = sellCase();
