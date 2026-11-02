@@ -10,12 +10,11 @@ import {IBuyAdapter} from 'interfaces/IBuyAdapter.sol';
 import {IPrivacyPool, IPrivacyPoolSimple} from 'interfaces/IPrivacyPool.sol';
 import {IState} from 'interfaces/IState.sol';
 
-import {Deploy} from './Deploy.sol';
+import {Signing} from './Signing.sol';
 
-/// What the buy tests share: the pool's proofs from test/fixtures/buy-proofs.json, W's published test key (the Hardhat
-/// mnemonic's account 0) and the EIP-712 digest W signs, written here apart from the pool's.
-abstract contract BuyBase is Deploy {
-  string internal constant MNEMONIC = 'test test test test test test test test test test test junk';
+/// What the buy tests share: the pool's proofs from test/fixtures/buy-proofs.json and W's published test key (the
+/// Hardhat mnemonic's account 0); the EIP-712 digests are test/Signing.sol's.
+abstract contract BuyBase is Signing {
   uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
 
   string internal fx;
@@ -74,43 +73,26 @@ abstract contract BuyBase is Deploy {
     for (uint256 _i; _i < 8; ++_i) _p.pubSignals[_i] = _s[_i];
   }
 
-  /// EIP-712, as the device's wallet encodes it
+  /// The Buy digest for `_name`'s proof (its nullifier and context) on `_pool` at `_chainId`
   function _digest(
     IPrivacyPoolSimple.Buy memory _b,
-    uint256 _nullifier,
+    string memory _name,
     uint256 _chainId,
     address _pool
-  ) internal pure returns (bytes32) {
-    bytes32 _domain = keccak256(
-      abi.encode(
-        keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'),
-        keccak256('Blindfill'),
-        keccak256('1'),
-        _chainId,
-        _pool
-      )
-    );
-    bytes32 _struct = keccak256(
-      abi.encode(
-        keccak256('Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier)'),
-        _b.adapter,
-        keccak256(_b.data),
-        _b.minOut,
-        _b.token,
-        _nullifier
-      )
-    );
-    return keccak256(abi.encodePacked(hex'1901', _domain, _struct));
+  ) internal view returns (bytes32) {
+    ProofLib.WithdrawProof memory _p = _proof(_name);
+    return _buyDigest(_b, _p.pubSignals[1], _p.pubSignals[7], _chainId, _pool);
   }
 
-  function _sign(uint256 _key, bytes32 _d) internal pure returns (bytes memory) {
-    (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_key, _d);
-    return abi.encodePacked(_r, _s, _v);
+  /// W's signature that takes `_name`'s proof as a withdraw on this pool and chain
+  function _wsig(string memory _name) internal view returns (bytes memory) {
+    ProofLib.WithdrawProof memory _p = _proof(_name);
+    return _sign(W_KEY, _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], block.chainid, POOL));
   }
 
   /// W's signature of `_b` for `_name`'s note on this pool and chain
   function _signed(IPrivacyPoolSimple.Buy memory _b, string memory _name) internal view returns (bytes memory) {
-    return _sign(W_KEY, _digest(_b, _proof(_name).pubSignals[1], block.chainid, POOL));
+    return _sign(W_KEY, _digest(_b, _name, block.chainid, POOL));
   }
 
   function _buy(
@@ -171,19 +153,30 @@ contract BuyTest is BuyBase {
                               LANDS
   //////////////////////////////////////////////////////////////*/
 
-  /// W's signature, made by cast (alloy's EIP-712) as the device makes it, matches the test's digest and the pool's.
-  function test_theDevicesSignatureIsEIP712() public view {
+  /// W's signatures, made by cast (alloy's EIP-712) as the device makes them, match the test's digests and the pool's.
+  function test_theDevicesSignaturesAreEIP712() public view {
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
-    uint256 _nullifier = vm.parseJsonUint(fx, '.local.signed.message.nullifier');
-    assertEq(_nullifier, _proof('local.buy').pubSignals[1], 'the fixture signs the buy proofs nullifier');
-    bytes memory _sig = _fixtureSig();
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    assertEq(vm.parseJsonUint(fx, '.local.signed.message.nullifier'), _p.pubSignals[1], 'the buy proofs nullifier');
+    assertEq(vm.parseJsonUint(fx, '.local.signed.message.context'), _p.pubSignals[7], 'and context');
+    assertEq(_recover(_digest(_b, 'local.buy', 31_337, POOL), _fixtureSig()), W);
+    assertEq(vm.parseJsonUint(fx, '.local.signedWithdraw.message.nullifier'), _p.pubSignals[1]);
+    assertEq(vm.parseJsonUint(fx, '.local.signedWithdraw.message.context'), _p.pubSignals[7]);
+    assertEq(_recover(_withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], 31_337, POOL), _fixtureWithdrawSig()), W);
+  }
+
+  function _recover(bytes32 _d, bytes memory _sig) internal pure returns (address) {
     bytes32 _r;
     bytes32 _s;
     assembly {
       _r := mload(add(_sig, 0x20))
       _s := mload(add(_sig, 0x40))
     }
-    assertEq(ecrecover(_digest(_b, _nullifier, 31_337, POOL), uint8(_sig[64]), _r, _s), W);
+    return ecrecover(_d, uint8(_sig[64]), _r, _s);
+  }
+
+  function _fixtureWithdrawSig() internal view returns (bytes memory) {
+    return vm.parseJsonBytes(fx, '.local.signedWithdraw.signature');
   }
 
   function test_buyLandsAndWHoldsMinOut() public {
@@ -212,8 +205,11 @@ contract BuyTest is BuyBase {
   /// One ready proof serves either: the same proof and request land as a withdraw, or as a buy.
   function test_oneProofServesWithdrawOrBuy() public {
     uint256 _snap = vm.snapshotState();
+    IPrivacyPool.Withdrawal memory _w = _withdrawal('local.buy');
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    bytes memory _sig = _fixtureWithdrawSig();
     vm.prank(address(0xBEEF));
-    pool.withdraw(_withdrawal('local.buy'), _proof('local.buy'), 0.01 ether);
+    pool.withdraw(_w, _p, 0.01 ether, _sig);
     assertEq(W.balance, 0.39 ether);
     vm.revertToState(_snap);
     _buy('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig());
@@ -234,9 +230,9 @@ contract BuyTest is BuyBase {
 
   function test_aWrongSignerIsRefused() public {
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
-    bytes memory _sig = _sign(vm.deriveKey(MNEMONIC, 1), _digest(_b, _proof('local.buy').pubSignals[1], block.chainid, POOL));
-    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPoolSimple.InvalidSignature.selector);
-    _refusesBuy('local.buy', 0, _b, new bytes(65), IPrivacyPoolSimple.InvalidSignature.selector);
+    bytes memory _sig = _sign(vm.deriveKey(MNEMONIC, 1), _digest(_b, 'local.buy', block.chainid, POOL));
+    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPool.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _b, new bytes(65), IPrivacyPool.InvalidSignature.selector);
   }
 
   /// A signature replayed: once more on its own note (spent), and on W's other note (another nullifier).
@@ -244,13 +240,13 @@ contract BuyTest is BuyBase {
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
     _buy('local.buy', 0, _b, _fixtureSig());
     _refusesBuy('local.buy', 0, _b, _fixtureSig(), IState.NullifierAlreadySpent.selector);
-    _refusesBuy('local.buy2', 0, _b, _fixtureSig(), IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy2', 0, _b, _fixtureSig(), IPrivacyPool.InvalidSignature.selector);
   }
 
   /// W's signature for one note is refused with another of W's notes, before anything is spent.
   function test_aSignatureForAnotherNoteIsRefused() public {
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
-    _refusesBuy('local.buy2', 0, _b, _fixtureSig(), IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy2', 0, _b, _fixtureSig(), IPrivacyPool.InvalidSignature.selector);
     _buy('local.buy2', 0, _b, _signed(_b, 'local.buy2'));
   }
 
@@ -258,28 +254,26 @@ contract BuyTest is BuyBase {
   /// is refused here.
   function test_anotherChainsSignatureIsRefused() public {
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
-    uint256 _nullifier = _proof('local.buy').pubSignals[1];
-    _refusesBuy('local.buy', 0, _b, _sign(W_KEY, _digest(_b, _nullifier, 8453, POOL)), IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _b, _sign(W_KEY, _digest(_b, 'local.buy', 8453, POOL)), IPrivacyPool.InvalidSignature.selector);
     vm.chainId(8453);
-    _refusesBuy('local.buy', 0, _b, _fixtureSig(), IPrivacyPoolSimple.InvalidSignature.selector);
-    _buy('local.buy', 0, _b, _sign(W_KEY, _digest(_b, _nullifier, 8453, POOL)));
+    _refusesBuy('local.buy', 0, _b, _fixtureSig(), IPrivacyPool.InvalidSignature.selector);
+    _buy('local.buy', 0, _b, _sign(W_KEY, _digest(_b, 'local.buy', 8453, POOL)));
   }
 
   /// A signature for this pool is refused by the same code at another address (before the proof is looked at), and
   /// one for another pool is refused here.
   function test_anotherPoolsSignatureIsRefused() public {
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
-    uint256 _nullifier = _proof('local.buy').pubSignals[1];
     address _other = address(0xB1F1F002);
-    _refusesBuy('local.buy', 0, _b, _sign(W_KEY, _digest(_b, _nullifier, block.chainid, _other)), IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _b, _sign(W_KEY, _digest(_b, 'local.buy', block.chainid, _other)), IPrivacyPool.InvalidSignature.selector);
     deployCodeTo('PrivacyPoolSimple.sol:PrivacyPoolSimple', abi.encode(address(pool.WITHDRAWAL_VERIFIER())), _other);
     IPrivacyPool.Withdrawal memory _w = _withdrawal('local.buy');
     ProofLib.WithdrawProof memory _p = _proof('local.buy');
-    vm.expectRevert(IPrivacyPoolSimple.InvalidSignature.selector);
+    vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
     PrivacyPoolSimple(_other).buy(_w, _p, 0, _b, _fixtureSig());
     // signed for the other pool, the signature passes there, and the proof (made for this pool) does not
     vm.expectRevert(IPrivacyPool.InvalidProcessooor.selector);
-    PrivacyPoolSimple(_other).buy(_w, _p, 0, _b, _sign(W_KEY, _digest(_b, _nullifier, block.chainid, _other)));
+    PrivacyPoolSimple(_other).buy(_w, _p, 0, _b, _sign(W_KEY, _digest(_b, 'local.buy', block.chainid, _other)));
   }
 
   /// Each field of the buy, changed after W signed it, is refused.
@@ -287,16 +281,16 @@ contract BuyTest is BuyBase {
     bytes memory _sig = _fixtureSig();
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
     _b.adapter = address(0xADA2);
-    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPool.InvalidSignature.selector);
     _b = _fixtureBuy();
     _b.data = bytes.concat(_b.data, hex'00');
-    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPool.InvalidSignature.selector);
     _b = _fixtureBuy();
     _b.minOut -= 1;
-    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPool.InvalidSignature.selector);
     _b = _fixtureBuy();
     _b.token = address(0x70C2);
-    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _b, _sig, IPrivacyPool.InvalidSignature.selector);
     _buy('local.buy', 0, _fixtureBuy(), _sig);
   }
 
@@ -312,12 +306,12 @@ contract BuyTest is BuyBase {
     uint8 _v = uint8(_sig[64]) == 27 ? 28 : 27;
     bytes32 _highS = bytes32(N - uint256(_s));
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
-    assertEq(ecrecover(_digest(_b, _proof('local.buy').pubSignals[1], block.chainid, POOL), _v, _r, _highS), W);
-    _refusesBuy('local.buy', 0, _b, abi.encodePacked(_r, _highS, _v), IPrivacyPoolSimple.InvalidSignature.selector);
+    assertEq(ecrecover(_digest(_b, 'local.buy', block.chainid, POOL), _v, _r, _highS), W);
+    _refusesBuy('local.buy', 0, _b, abi.encodePacked(_r, _highS, _v), IPrivacyPool.InvalidSignature.selector);
   }
 
   function test_aSignatureWithATrailingByteIsRefused() public {
-    _refusesBuy('local.buy', 0, _fixtureBuy(), bytes.concat(_fixtureSig(), hex'00'), IPrivacyPoolSimple.InvalidSignature.selector);
+    _refusesBuy('local.buy', 0, _fixtureBuy(), bytes.concat(_fixtureSig(), hex'00'), IPrivacyPool.InvalidSignature.selector);
   }
 
   /*///////////////////////////////////////////////////////////////
@@ -355,7 +349,7 @@ contract BuyTest is BuyBase {
   function test_anAdapterCannotReenter() public {
     IPrivacyPoolSimple.Buy memory _b2 = _fixtureBuy();
     bytes[2] memory _calls = [
-      abi.encodeCall(pool.withdraw, (_withdrawal('local.buy2'), _proof('local.buy2'), 0)),
+      abi.encodeCall(pool.withdraw, (_withdrawal('local.buy2'), _proof('local.buy2'), 0, _wsig('local.buy2'))),
       abi.encodeCall(pool.buy, (_withdrawal('local.buy2'), _proof('local.buy2'), 0, _b2, _signed(_b2, 'local.buy2')))
     ];
     for (uint256 _i; _i < 2; ++_i) {
@@ -380,9 +374,10 @@ contract BuyTest is BuyBase {
     assertEq(_w.data.length, 224);
     ProofLib.WithdrawProof memory _p = _proof('local.trailing');
     assertEq(uint256(keccak256(abi.encode(_w, pool.SCOPE()))) % Constants_P, _p.pubSignals[7], 'the context binds it');
+    bytes memory _ws = _wsig('local.trailing');
     vm.prank(address(0xBEEF));
     vm.expectRevert(IPrivacyPool.InvalidRelayData.selector);
-    pool.withdraw(_w, _p, 0);
+    pool.withdraw(_w, _p, 0, _ws);
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
     bytes memory _sig = _signed(_b, 'local.trailing');
     vm.prank(address(0xBEEF));
@@ -392,6 +387,71 @@ contract BuyTest is BuyBase {
 
   uint256 internal constant Constants_P =
     21_888_242_871_839_275_222_246_405_745_257_275_088_548_364_400_416_034_343_698_204_186_575_808_495_617;
+
+  /*///////////////////////////////////////////////////////////////
+                       W PICKS THE RELEASE
+  //////////////////////////////////////////////////////////////*/
+
+  function _withdrawWith(string memory _name, uint256 _fee, bytes memory _sig) internal {
+    IPrivacyPool.Withdrawal memory _w = _withdrawal(_name);
+    ProofLib.WithdrawProof memory _p = _proof(_name);
+    vm.prank(address(0xBEEF));
+    pool.withdraw(_w, _p, _fee, _sig);
+  }
+
+  /// Whoever sees W's buy (the helper, the sequencer, anyone) cannot land its proof as a withdraw.
+  function test_aBuysSignatureIsRefusedAsAWithdraw() public {
+    vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+    _withdrawWith('local.buy', 0.01 ether, _fixtureSig());
+    _buy('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig());
+  }
+
+  function test_aWithdrawsSignatureIsRefusedAsABuy() public {
+    vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+    _buy('local.buy', 0, _fixtureBuy(), _fixtureWithdrawSig());
+    _withdrawWith('local.buy', 0, _fixtureWithdrawSig());
+    assertEq(W.balance, 0.4 ether);
+  }
+
+  /// A withdraw with no signature, a zero one, another key's, a high-s one or one with a trailing byte is refused,
+  /// and the note stays unspent.
+  function test_aWithdrawWithNoOrAWrongSignatureIsRefused() public {
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    bytes32 _d = _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], block.chainid, POOL);
+    bytes memory _good = _fixtureWithdrawSig();
+    bytes32 _r;
+    bytes32 _s;
+    assembly {
+      _r := mload(add(_good, 0x20))
+      _s := mload(add(_good, 0x40))
+    }
+    bytes[5] memory _bad = [
+      bytes(''),
+      new bytes(65),
+      _sign(vm.deriveKey(MNEMONIC, 1), _d),
+      abi.encodePacked(_r, bytes32(N - uint256(_s)), uint8(_good[64]) == 27 ? uint8(28) : uint8(27)),
+      bytes.concat(_good, hex'00')
+    ];
+    for (uint256 _i; _i < 5; ++_i) {
+      vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+      _withdrawWith('local.buy', 0, _bad[_i]);
+    }
+    assertFalse(pool.nullifierHashes(_p.pubSignals[1]), 'the note is not spent');
+    _withdrawWith('local.buy', 0, _good);
+  }
+
+  /// W's signature for one proof of a note, paired with another proof of the same note (here, twice the fee cap), is
+  /// refused, as a buy and as a withdraw; the other proof lands with its own signature.
+  function test_aSignatureForAnotherProofOfTheNoteIsRefused() public {
+    assertEq(_proof('local.swap').pubSignals[1], _proof('local.buy').pubSignals[1], 'one note, one nullifier');
+    assertTrue(_proof('local.swap').pubSignals[7] != _proof('local.buy').pubSignals[7], 'two contexts');
+    vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+    _buy('local.swap', 0.02 ether, _fixtureBuy(), _fixtureSig());
+    vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+    _withdrawWith('local.swap', 0.02 ether, _fixtureWithdrawSig());
+    _withdrawWith('local.swap', 0.02 ether, _wsig('local.swap'));
+    assertEq(RELAYER.balance, 0.02 ether);
+  }
 
   /*///////////////////////////////////////////////////////////////
                          SHARED CHECKS

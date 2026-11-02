@@ -10,10 +10,10 @@
 // groth16.fullProve with the pinned packages/kit/zk files, then checked with snarkjs groth16.verify.
 //
 // Run from the repo root after `pnpm install`: node contracts/pool-evm/test/fixtures/make-pool-proofs.mjs
-// With `buy` it writes buy-proofs.json instead: the buy's proofs, which bind a W whose key is a published test key
-// (the Hardhat mnemonic "test test ... junk", index 0), on chain 31337, Base (8453) and Robinhood (4663), and W's EIP-712 signature
-// of one buy, made by Foundry's `cast wallet sign --data` (alloy's EIP-712), so the pool's digest is checked against
-// an encoder that is not the pool's own.
+// With `buy` it writes buy-proofs.json instead: the buy's proofs on chain 31337, Base (8453) and Robinhood (4663), and
+// W's EIP-712 signatures of one Buy and one Withdraw, made by Foundry's `cast wallet sign --data` (alloy's EIP-712), so
+// the pool's digests are checked against an encoder that is not the pool's own. W is the Hardhat mnemonic's account 0
+// ("test test ... junk", a published test key) in both files.
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -35,10 +35,10 @@ const POOL = "0x00000000000000000000000000000000b1f1f001";
 let CHAIN_ID = 31337n;
 const NATIVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"; // Constants.NATIVE_ASSET
 const DEPOSITOR = "0x000000000000000000000000000000000000d0d0";
-let W = "0x0000000000000000000000000000000000000a11";
-// the Hardhat mnemonic's first two accounts: published test keys, never money
+// W signs every release (EIP-712), so W is a published test key's address: the Hardhat mnemonic's account 0, never
+// money
 const MNEMONIC = "test test test test test test test test test test test junk";
-const W_SIGNER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+const W = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const RELAYER = "0x000000000000000000000000000000000000fee1";
 const VALUES = [10n ** 18n, 5n * 10n ** 17n, 2n * 10n ** 18n];
 // 2033-05-18T03:33:20Z in ms; the tests warp below it, then past it
@@ -166,24 +166,8 @@ const deposits = () => ({
   commitments: notes.map((x) => String(x.commitment)),
 });
 
-if (process.argv[2] === "buy") {
-  W = W_SIGNER;
-  const cap = 10n ** 16n;
-  const local = {
-    ...deposits(),
-    buy: await spend("buy", 0, 4n * 10n ** 17n, 3, cap),
-    buy2: await spend("buy2", 1, 2n * 10n ** 17n, 3, cap),
-    // RelayData then one more word: abi.decode reads it as RelayData, so the pool must refuse it by its length
-    trailing: await spend("trailing", 0, 4n * 10n ** 17n, 3, cap, word(1n)),
-  };
-  // W signs one buy of `buy`'s note on this pool and chain, as the device does (eth_signTypedData_v4)
-  const message = {
-    adapter: "0x000000000000000000000000000000000000ada1",
-    data: "0x" + hexOf(new TextEncoder().encode("route")),
-    minOut: "1000",
-    token: "0x0000000000000000000000000000000000070c1e",
-    nullifier: local.buy.proof.pubSignals[1],
-  };
+// W's EIP-712 signature of `message` as `primaryType` (with its `fields`), on POOL and CHAIN_ID, as the device makes it
+function castSign(primaryType, fields, message) {
   const typed = {
     types: {
       EIP712Domain: [
@@ -192,20 +176,51 @@ if (process.argv[2] === "buy") {
         { name: "chainId", type: "uint256" },
         { name: "verifyingContract", type: "address" },
       ],
-      Buy: [
-        { name: "adapter", type: "address" },
-        { name: "data", type: "bytes" },
-        { name: "minOut", type: "uint256" },
-        { name: "token", type: "address" },
-        { name: "nullifier", type: "uint256" },
-      ],
+      [primaryType]: fields,
     },
-    primaryType: "Buy",
+    primaryType,
     domain: { name: "Blindfill", version: "1", chainId: Number(CHAIN_ID), verifyingContract: POOL },
     message,
   };
-  const signature = execFileSync("cast", ["wallet", "sign", "--mnemonic", MNEMONIC, "--data", JSON.stringify(typed)], { encoding: "utf8" }).trim();
-  local.signed = { message, signature };
+  return execFileSync("cast", ["wallet", "sign", "--mnemonic", MNEMONIC, "--data", JSON.stringify(typed)], { encoding: "utf8" }).trim();
+}
+
+if (process.argv[2] === "buy") {
+  const cap = 10n ** 16n;
+  const local = {
+    ...deposits(),
+    buy: await spend("buy", 0, 4n * 10n ** 17n, 3, cap),
+    buy2: await spend("buy2", 1, 2n * 10n ** 17n, 3, cap),
+    // RelayData then one more word: abi.decode reads it as RelayData, so the pool must refuse it by its length
+    trailing: await spend("trailing", 0, 4n * 10n ** 17n, 3, cap, word(1n)),
+    // the same note as buy with another fee cap: W's signature for one proof must not take the other
+    swap: await spend("swap", 0, 4n * 10n ** 17n, 3, 2n * cap),
+  };
+  // W signs one buy, and one withdraw, of `buy`'s proof on this pool and chain, as the device does
+  // (eth_signTypedData_v4)
+  const message = {
+    adapter: "0x000000000000000000000000000000000000ada1",
+    data: "0x" + hexOf(new TextEncoder().encode("route")),
+    minOut: "1000",
+    token: "0x0000000000000000000000000000000000070c1e",
+    nullifier: local.buy.proof.pubSignals[1],
+    context: local.buy.proof.pubSignals[7],
+  };
+  const buyFields = [
+    { name: "adapter", type: "address" },
+    { name: "data", type: "bytes" },
+    { name: "minOut", type: "uint256" },
+    { name: "token", type: "address" },
+    { name: "nullifier", type: "uint256" },
+    { name: "context", type: "uint256" },
+  ];
+  local.signed = { message, signature: castSign("Buy", buyFields, message) };
+  const wMessage = { nullifier: local.buy.proof.pubSignals[1], context: local.buy.proof.pubSignals[7] };
+  const wFields = [
+    { name: "nullifier", type: "uint256" },
+    { name: "context", type: "uint256" },
+  ];
+  local.signedWithdraw = { message: wMessage, signature: castSign("Withdraw", wFields, wMessage) };
   onChain(8453n);
   const base = { ...deposits(), buy: await spend("base_buy", 0, 4n * 10n ** 17n, 3, cap) };
   onChain(4663n);
@@ -214,7 +229,7 @@ if (process.argv[2] === "buy") {
     notes: [
       "Real proofs for contracts/pool-evm's buy tests. Test notes only, never money.",
       "Made by contracts/pool-evm/test/fixtures/make-pool-proofs.mjs buy with snarkjs 0.7.5 groth16.fullProve and packages/kit/zk; snarkjs groth16.verify passes each.",
-      "W is the Hardhat mnemonic's account 0, a published test key. local: chain 31337, the same three deposits as pool-proofs.json; buy spends note 1, buy2 note 2, trailing note 1 with one word after RelayData. signed: W's EIP-712 signature (cast wallet sign --data) of one Buy of buy's nullifier on this pool and chain. base: chain 8453, the same secrets under Base's scope; buy spends note 1. robinhood: the same on chain 4663.",
+      "W is the Hardhat mnemonic's account 0, a published test key. local: chain 31337, the same three deposits as pool-proofs.json; buy spends note 1, buy2 note 2, trailing note 1 with one word after RelayData, swap note 1 with twice buy's fee cap. signed and signedWithdraw: W's EIP-712 signatures (cast wallet sign --data) of one Buy and one Withdraw of buy's nullifier and context on this pool and chain. base: chain 8453, the same secrets under Base's scope; buy spends note 1. robinhood: the same on chain 4663.",
     ],
     local,
     base,

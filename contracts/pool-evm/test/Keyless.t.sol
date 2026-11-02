@@ -79,7 +79,7 @@ contract KeylessTest is Deploy {
       0xaffed0e0, // nonce()
       0x1f79a1e9, // nullifierHashes(uint256)
       0xa1cc748b, // usedPrecommitments(uint256)
-      0x8a3bff22, // withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)
+      0x94374b2b, // withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)
       0x3edadd79 // buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)
     ];
     (, bytes4[] memory _got) = _walk();

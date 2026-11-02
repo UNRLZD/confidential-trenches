@@ -58,16 +58,26 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
  11. buy (PrivacyPoolSimple, card pool-evm-buy), not in the source: a relayer releases a chunk into a swap for W in
      one transaction, and W, who holds no gas, authorizes it with an EIP-712 signature. It takes the same request and
      proof as withdraw (one ready proof serves either) and the same checks (_release: both payees, the fee against
-     the cap and the backstop, _spendChecked). W signs Buy(address adapter,bytes data,uint256 minOut,address token,
-     uint256 nullifier) under the domain {name "Blindfill", version "1", chainId, verifyingContract: the pool}; the
-     signature is 65 bytes with s in the lower half (EIP-2), and its signer must be the request's recipient. The fee
-     goes to the fee recipient, the rest of the chunk to the adapter, and W's balance of the token must rise by at
-     least minOut (never 0), else the whole call reverts. The reentrancy guard covers it. Adapters are separate
-     contracts with no owner and no storage; src/adapters/UniswapV3Adapter.sol is SwapRouter02's exactInput with
-     the native value (the router wraps it), the tokens out to W.
+     the cap, W's signature, _spendChecked, the backstop). W signs Buy(address adapter,bytes data,uint256 minOut,
+     address token,uint256 nullifier,uint256 context), with the proof's nullifier and context. The fee goes to the
+     fee recipient, the rest of the chunk to the adapter, and W's balance of the token must rise by at least minOut
+     (never 0), else the whole call reverts. The reentrancy guard covers it. Adapters are separate contracts with no
+     owner and no storage; src/adapters/UniswapV3Adapter.sol is SwapRouter02's exactInput with the native value (the
+     router wraps it), the tokens out to W.
  12. withdraw and buy both refuse a request that is not exactly abi.encode(RelayData), 192 bytes: abi.decode
      accepts trailing bytes, so a request made with more bytes is never read as RelayData (this closes the open item
      pool-evm-core left).
+ 13. W signs every release, withdraw included, as the Solana pool does (W signs every release there): withdraw takes
+     W's EIP-712 signature of Withdraw(uint256 nullifier,uint256 context), and buy of its Buy. Both are under the
+     domain {name "Blindfill", version "1", chainId, verifyingContract: the pool}, 65 bytes with s in the lower half
+     (EIP-2), and the signer must be the request's recipient, checked in _release before any spend or payment. In the
+     source the relayer alone picks what a proof does; here one ready proof still serves either method, and W's
+     signature at the tap picks which, so whoever sees a buy (a broken-in helper, the sequencer, anyone) cannot land
+     it as a withdraw, and a signature for one proof of a note never takes another proof of it (the context is
+     signed). The cost: one ecrecover a withdraw (withdraw gas 430,593 to 435,436 at depth 2).
+
+Spends are seen through two events: Withdrawn (withdraw) and Bought (buy), each with the spent nullifier and the
+new commitment. A reader of the pool's notes (card notes-per-pool-evm) reads both.
 
 The fork tests (test/BuyFork.t.sol, Base and Robinhood Chain at pinned blocks) run through test/fork-rpc.mjs, which
 answers forge from test/fixtures/fork-rpc.json: public chain data recorded once from mainnet.base.org and
