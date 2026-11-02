@@ -4,6 +4,9 @@
 .trb .trb-side[data-on="sell"] { background: var(--sell); color: var(--on-acc); }
 .trb.pos-sell .trb-preset[data-on] { background: rgba(var(--sell-rgb), 0.14); color: var(--sell); }
 .trb .trb-cta[data-tone="sell"]:not(:disabled) { background: var(--sell); color: var(--on-acc); box-shadow: 0 0 28px rgba(var(--sell-rgb), 0.28); }
+/* R5 draws no sell Landing state and has no sell rule for the time (its only one is the global .live blue, proto.css:48),
+   so the time on the coral button takes the button's own on-colour: blue on coral is near 1.4:1. The buy side keeps its blue. */
+.trb.pos-sell .trb-cta[data-tone="sell"] .trb-live { color: var(--on-acc); }
 @media (hover: hover) and (pointer: fine) {
   .trb .trb-cta[data-tone="sell"]:not(:disabled):not([data-kind="live"]):hover { background: var(--sell); filter: brightness(1.08); }
 }
