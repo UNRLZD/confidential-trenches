@@ -35,6 +35,11 @@
 //!   record appears: USDC refuses its views too while halted (`USDC_HALTED`), so a halt before the run would stop the
 //!   checks' balance read, never the send.
 //! - g. `bad_nonce_{mock,usdc}`: a call signed at U's key nonce, not above: 400 bad_nonce, nothing spent.
+//! - h. `overtaken_mock`: the prepay is signed and stored but its broadcast reaches no node (carry.ts `unsent`): 400
+//!   in_flight, nothing on chain. Another transaction of the relayer's key takes its nonce. The next run (a restart)
+//!   reads the key's changes at that block on the real node (`EXPERIMENTAL_changes`, single_access_key_changes), which
+//!   name the other transaction, not the prepay: the stored prepay is dropped by (a2), never on chain, and a fresh
+//!   prepay and the send land (200).
 //!
 //! Each prints its gas table (the harness's, for the seeds; each relayer transaction's receipts) and the relayer's
 //! balance before and after: per (U, P) it falls by at most 0.010501 N (vault.md 2.10, a struck U's maximum) plus the
@@ -204,13 +209,21 @@ impl World {
 
     /// One carry.ts process: `requests` sent concurrently, the token watch answering `status` in order.
     async fn carry(&self, status: &[&str], requests: &[&str]) -> R<Value> {
+        self.carry_with(status, requests, json!({})).await
+    }
+
+    /// carry with `extra` added to carry.ts's input (`unsent`, `waitMs`).
+    async fn carry_with(&self, status: &[&str], requests: &[&str], extra: Value) -> R<Value> {
         let rpc = self.h.worker.rpc_addr();
-        let input = json!({
+        let mut input = json!({
             "rpc": [rpc, rpc], "vault": self.h.vault, "token": self.h.token,
             "relayer": {"account_id": self.relayer.id(), "secret_key": self.relayer.secret_key().to_string()},
             "store": self.store, "marginK": MARGIN_K, "status": status,
             "requests": requests.iter().map(|r| json!({"signed_delegate": r})).collect::<Vec<_>>(),
         });
+        for (k, v) in extra.as_object().ok_or("carry: extra is not an object")? {
+            input[k] = v.clone();
+        }
         let out = node(cli("carry.ts")?, input).await?;
         println!("carry {status:?} x{}: answers {} record {}", requests.len(), out["answers"], out["record"]);
         if out["answers"].as_array().map(Vec::len) != Some(requests.len()) {
@@ -808,4 +821,73 @@ async fn bad_nonce_mock() -> R<()> {
 #[tokio::test]
 async fn bad_nonce_usdc() -> R<()> {
     bad_nonce(TokenKind::Usdc).await
+}
+
+// ---- h. a stored prepay whose nonce another transaction of the relayer's key took: (a2) on real nearcore ----
+
+async fn overtaken(kind: TokenKind) -> R<()> {
+    let w = World::new(kind, 3, "h").await?;
+    let p = "424242071";
+    let u = w.u("h1").await?;
+    let sd = w.sign(&u, p, None).await?;
+    let rn0 = w.relayer_nonce().await?;
+
+    // 1. the prepay signed and stored; its broadcast reaches no node
+    let out = w.carry_with(&["ok"], &[&sd], json!({"unsent": true, "waitMs": 3000})).await?;
+    let (st, body) = answer(&out, 0);
+    assert_eq!((st, code(body)), (400, "in_flight"), "overtaken: the unsent prepay's call: {}", out["answers"][0]);
+    let lost = hashes(&out["record"]["prepays"]);
+    assert_eq!(lost.len(), 1, "overtaken: prepays {}", out["record"]["prepays"]);
+    assert!(out["record"]["prepays"][0]["ok"].is_null(), "overtaken: the stored prepay is not open: {}", out["record"]);
+    let n: u64 = s(&out["record"]["prepays"][0]["nonce"])?.parse()?;
+    assert_eq!(w.relayer_nonce().await?, rn0, "overtaken: something of the relayer's landed");
+
+    // 2. another transaction of the relayer's key takes that nonce
+    let moved = w.relayer.transfer_near(u.acct.id(), NearToken::from_yoctonear(1)).await?;
+    assert!(moved.is_success(), "overtaken: the other transaction failed: {moved:?}");
+    let other = moved.outcome().transaction_hash.to_string();
+    let rn1 = w.relayer_nonce().await?;
+    assert!(rn1 >= n, "overtaken: the relayer key's nonce {rn1} is below the stored prepay's {n}");
+    // the key's changes at the block that applied it, as the relayer reads them: the real node's shape
+    let ot = w.tx(&other).await?;
+    let d = w.block_height(&ot["transaction_outcome"]["block_hash"]).await?;
+    let pk = w.relayer.secret_key().public_key().to_string();
+    let ch = w
+        .h
+        .rpc("EXPERIMENTAL_changes", json!({"changes_type": "single_access_key_changes", "keys": [{"account_id": w.relayer.id(), "public_key": pk}], "block_id": d}))
+        .await?;
+    println!("[h {kind:?}] the stored prepay {} at nonce {n}; the other transaction {other} applied at {d}; changes there: {}", lost[0], ch["result"]);
+    let changes = ch["result"]["changes"].as_array().ok_or_else(|| format!("EXPERIMENTAL_changes at {d}: {ch}"))?;
+    assert!(
+        changes.iter().any(|c| c["cause"]["type"] == "transaction_processing" && c["cause"]["tx_hash"] == other.as_str() && c["type"] == "access_key_update"),
+        "overtaken: the changes at {d} do not name the other transaction: {ch}"
+    );
+    assert!(changes.iter().all(|c| c["cause"]["tx_hash"] != lost[0].as_str()), "overtaken: the changes at {d} name the stored prepay: {ch}");
+
+    // 3. the next run (a restart): the stored prepay dropped by (a2), a fresh prepay and the send land
+    let out = w.carry(&["ok"], &[&sd]).await?;
+    let (st, body) = answer(&out, 0);
+    assert_eq!(st, 200, "overtaken: the next call: {}", out["answers"][0]);
+    let send = s(&body["tx_hash"])?;
+    let rec = &out["record"];
+    let prepays = hashes(&rec["prepays"]);
+    assert!(!prepays.contains(&lost[0]), "overtaken: the overtaken prepay is still in the record: {}", rec["prepays"]);
+    assert_eq!(prepays.len(), 1, "overtaken: prepays {}", rec["prepays"]);
+    assert_eq!(rec["prepaid_bytes"], B756, "overtaken: record {rec}");
+    assert_eq!(hashes(&rec["sends"]), vec![send.clone()], "overtaken: sends {}", rec["sends"]);
+    assert_eq!(rec["landed"], true, "overtaken: record {rec}");
+
+    // on chain: the stored prepay never landed; one fresh prepay, one send, P once
+    let v = w.h.rpc("tx", json!({"tx_hash": lost[0], "sender_account_id": w.relayer.id(), "wait_until": "NONE"})).await?;
+    assert_eq!(v["error"]["cause"]["name"], "UNKNOWN_TRANSACTION", "overtaken: the stored prepay is known on chain: {v}");
+    assert_eq!(w.relayer_nonce().await?, rn1 + 2, "overtaken: not exactly one fresh prepay and one send after the other transaction");
+    assert_eq!(w.rows_for(p).await?.len(), 1, "overtaken: P not in the pages once");
+    assert_eq!(w.prepaid(p, "final").await?, None, "overtaken: P's prepaid record not used by its deposit");
+    println!("[h {kind:?}] (a2): the stored prepay dropped, never on chain; fresh prepay {} and send {send} landed", prepays[0]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn overtaken_mock() -> R<()> {
+    overtaken(TokenKind::Mock).await
 }

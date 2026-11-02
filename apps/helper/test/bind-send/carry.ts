@@ -2,14 +2,15 @@
 // against a NEAR RPC with a relayer key made by the sandbox, through the real createSendReads, startRelayer and
 // createFileStore, so every process start is a restart of the relayer on the same store.
 //   stdin: {"rpc":[a,b],"vault","token","relayer":{"account_id","secret_key"},"store","marginK","status":["ok"|"halted",...],
-//           "requests":[{"signed_delegate"},...]}
+//           "requests":[{"signed_delegate"},...],"unsent"?:true,"waitMs"?:n}
 //   stdout: {"answers":[{"status","body"},...],"record":<U's record or null>}
 // `status` stands in for the token watch, which is not built (token-status/status.ts): each ask takes the next answer,
 // the last repeats; its pause history is read from the token itself at the asked block (pausedAt below). The requests
-// run at once.
+// run at once. `unsent`: every send_tx of this process is answered NONE and reaches no node (a broadcast lost on the
+// way), so its transactions stay stored and unsent; `waitMs`: the relayer's wait for an outcome (OUTCOME_WAIT_MS).
 import { readFileSync } from "node:fs";
 import { decodeSignedDelegate } from "../../src/bind/checks.ts";
-import { USDC_PAUSED, carryDeposit, createFileStore, createSendReads, nearRpc, startRelayer } from "../../src/bind/send.ts";
+import { USDC_PAUSED, carryDeposit, createFileStore, createSendReads, nearRpc, startRelayer, type Rpc } from "../../src/bind/send.ts";
 import { USDC_CODE_HASH, type TokenStatus } from "../../src/token-status/status.ts";
 
 type Input = {
@@ -21,9 +22,12 @@ type Input = {
   marginK: string;
   status: ("ok" | "halted")[];
   requests: { signed_delegate: string }[];
+  unsent?: boolean;
+  waitMs?: number;
 };
 const input = JSON.parse(readFileSync(0, "utf8")) as Input;
-const rpcs = [nearRpc(input.rpc[0]), nearRpc(input.rpc[1])] as const;
+const lost = (r: Rpc): Rpc => async (method, params) => (input.unsent === true && method === "send_tx" ? { final_execution_status: "NONE" } : r(method, params));
+const rpcs = [lost(nearRpc(input.rpc[0])), lost(nearRpc(input.rpc[1]))] as const;
 const store = createFileStore(input.store);
 let asks = 0;
 const tokenStatus = async (): Promise<TokenStatus> => {
@@ -55,7 +59,7 @@ const deps = {
   // the sandbox node keeps every block, so it stands in for the archival provider too
   // the validity period read live from both providers (EXPERIMENTAL_protocol_config), as the relayer starts
   // the relayer key's nonce counter and the blocks D it found live in the same store, so a restart signs the next nonce
-  relayer: await startRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault, store),
+  relayer: await startRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault, store, input.waitMs),
   tokenStatus,
   pausedAt,
 };
