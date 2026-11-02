@@ -137,8 +137,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const stSrc = readFileSync(st, "utf8");
       if (file === VERIFIER) writeFileSync(st, stSrc.replace(/(WITHDRAWAL_VERIFIER_CODEHASH = )0x[0-9a-f]{64}/, `$1${verifierHash(dir)}`));
       const r = run(dir, t);
+      if (file === VERIFIER) writeFileSync(st, stSrc);
       writeFileSync(f, src);
-      writeFileSync(st, stSrc);
       console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1} ${file}: ${find.trim().split("\n")[0].slice(0, 70)} -> ${t} ${r === "fail" ? "fails" : "PASSES"}`);
       if (r !== "fail") bad++;
     });
