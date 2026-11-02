@@ -1,9 +1,10 @@
 {
- "note": "recorded-run: good is the three launches, bad each planted prf launch, written by run.mjs --record. States, counts, times and boxes only.",
+ "note": "recorded-run: good is the three launches with the CPU slowed 4x, bad each planted prf launch, written by run.mjs --record. States, counts, times and boxes only.",
  "good": [
   {
    "run": "prf",
    "plant": null,
+   "cpu": 4,
    "browser": "153.0.8010.12",
    "widths": [
     {
@@ -56,7 +57,7 @@
        ]
       }
      },
-     "readyMs": 92,
+     "readyMs": 83,
      "landing": {
       "header": "S1.3",
       "sheet": 0,
@@ -65,7 +66,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 82,
+     "landMs": 130,
      "pages": 1,
      "creates": [
       {
@@ -96,69 +97,80 @@
       },
       {
        "step": "signin",
-       "t": 52
+       "t": 59
       },
       {
        "step": "passkey",
-       "t": 549
+       "t": 569
       },
       {
        "step": "create",
-       "t": 981
+       "t": 1005
       },
       {
        "step": "end",
-       "t": 1964
+       "t": 2057
       }
      ],
      "blank": {
-      "frames": 16,
+      "frames": 20,
       "white": 0,
-      "longestMs": 73,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 46,
-        "blankMs": 0
+        "ms": 56,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 99,
-        "blankMs": 0
+        "ms": 107,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 183,
-        "blankMs": 73
+        "ms": 251,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       65
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "8v5n62",
+        "doc": "gjdw8a",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "wa9u2y",
+        "doc": "ry4kgn",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "y955kw",
+        "doc": "brmzvo",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "ssbeti",
+        "doc": "nl9xqa",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -227,7 +239,7 @@
        ]
       }
      },
-     "readyMs": 70,
+     "readyMs": 98,
      "landing": {
       "header": "S1.3",
       "sheet": 0,
@@ -236,7 +248,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 87,
+     "landMs": 149,
      "pages": 1,
      "creates": [
       {
@@ -267,69 +279,80 @@
       },
       {
        "step": "signin",
-       "t": 32
+       "t": 52
       },
       {
        "step": "passkey",
-       "t": 501
+       "t": 540
       },
       {
        "step": "create",
-       "t": 904
+       "t": 938
       },
       {
        "step": "end",
-       "t": 1841
+       "t": 1951
       }
      ],
      "blank": {
-      "frames": 15,
+      "frames": 14,
       "white": 0,
-      "longestMs": 69,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 40,
-        "blankMs": 0
+        "ms": 53,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 84,
-        "blankMs": 0
+        "ms": 77,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 137,
-        "blankMs": 69
+        "ms": 212,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       68
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "4768mb",
+        "doc": "fny233",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "v2dqnh",
+        "doc": "c18pal",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "j8ulop",
+        "doc": "k9w8kv",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "hsa3cx",
+        "doc": "69kbwh",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -349,11 +372,12 @@
      }
     }
    ],
-   "ms": 6353
+   "ms": 7004
   },
   {
    "run": "no-prf",
    "plant": null,
+   "cpu": 4,
    "browser": "153.0.8010.12",
    "widths": [
     {
@@ -408,7 +432,7 @@
        ]
       }
      },
-     "readyMs": 63,
+     "readyMs": 95,
      "words": 12,
      "landing": {
       "header": "S1.3",
@@ -418,7 +442,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 157,
+     "landMs": 201,
      "pages": 1,
      "creates": [
       {
@@ -450,78 +474,92 @@
       },
       {
        "step": "signin",
-       "t": 61
+       "t": 53
       },
       {
        "step": "passkey",
-       "t": 540
+       "t": 564
       },
       {
        "step": "create",
-       "t": 969
+       "t": 998
       },
       {
        "step": "saved",
-       "t": 1720
+       "t": 1814
       },
       {
        "step": "end",
-       "t": 2696
+       "t": 2815
       }
      ],
      "blank": {
-      "frames": 20,
+      "frames": 25,
       "white": 0,
-      "longestMs": 14,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 32,
-        "blankMs": 0
+        "ms": 52,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 99,
-        "blankMs": 0
+        "ms": 105,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 95,
-        "blankMs": 0
+        "ms": 156,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "saved",
-        "ms": 175,
-        "blankMs": 14
+        "ms": 201,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       53
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "tgs4dv",
+        "doc": "emfvjl",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "94e93a",
+        "doc": "li2v5k",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0.006042092495676198
+        "sum": 0.006042092495676198,
+        "sources": [
+         "main#signin 0,0,390,21 -> 0,16,390,253"
+        ]
        },
        {
-        "doc": "ocppah",
+        "doc": "lhgp6i",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "yzifcc",
+        "doc": "diyz42",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -596,7 +634,7 @@
        ]
       }
      },
-     "readyMs": 92,
+     "readyMs": 95,
      "words": 12,
      "landing": {
       "header": "S1.3",
@@ -606,7 +644,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 150,
+     "landMs": 167,
      "pages": 1,
      "creates": [
       {
@@ -642,74 +680,88 @@
       },
       {
        "step": "passkey",
-       "t": 508
+       "t": 524
       },
       {
        "step": "create",
-       "t": 903
+       "t": 930
       },
       {
        "step": "saved",
-       "t": 1596
+       "t": 1702
       },
       {
        "step": "end",
-       "t": 2564
+       "t": 2680
       }
      ],
      "blank": {
-      "frames": 22,
+      "frames": 21,
       "white": 0,
-      "longestMs": 61,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 33,
-        "blankMs": 0
+        "ms": 52,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 72,
-        "blankMs": 0
+        "ms": 77,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 55,
-        "blankMs": 0
+        "ms": 133,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "saved",
-        "ms": 167,
-        "blankMs": 61
+        "ms": 177,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       50
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "i659l8",
+        "doc": "tsr8gz",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "lk47t9",
+        "doc": "fhwov5",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0.0033209876543209877
+        "sum": 0.0033209876543209877,
+        "sources": [
+         "main#signin 0,0,1440,21 -> 0,16,1440,253"
+        ]
        },
        {
-        "doc": "w1gogi",
+        "doc": "l5jqe8",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "2qsohv",
+        "doc": "e4a03k",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -733,11 +785,12 @@
      }
     }
    ],
-   "ms": 7768
+   "ms": 8513
   },
   {
    "run": "wallet",
    "plant": null,
+   "cpu": 4,
    "browser": "153.0.8010.12",
    "widths": [
     {
@@ -792,7 +845,7 @@
        ]
       }
      },
-     "readyMs": 80,
+     "readyMs": 92,
      "newAccount": "wallet-signature",
      "landing": {
       "header": "S1.3",
@@ -802,7 +855,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 181,
+     "landMs": 237,
      "pages": 1,
      "creates": [],
      "signinStates": [
@@ -830,87 +883,100 @@
       },
       {
        "step": "signin",
-       "t": 54
+       "t": 59
       },
       {
        "step": "wallet",
-       "t": 523
+       "t": 563
       },
       {
        "step": "have-one",
-       "t": 913
+       "t": 956
       },
       {
        "step": "recovery",
-       "t": 1010
+       "t": 1056
       },
       {
        "step": "continue",
-       "t": 1112
+       "t": 1171
       },
       {
        "step": "end",
-       "t": 2110
+       "t": 2214
       }
      ],
      "blank": {
-      "frames": 21,
+      "frames": 19,
       "white": 0,
-      "longestMs": 71,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 30,
-        "blankMs": 0
+        "ms": 58,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "wallet",
-        "ms": 46,
-        "blankMs": 0
+        "ms": 49,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "have-one",
-        "ms": 52,
-        "blankMs": 0
+        "ms": 57,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "recovery",
-        "ms": 55,
-        "blankMs": 0
+        "ms": 59,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "continue",
-        "ms": 198,
-        "blankMs": 71
+        "ms": 242,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       52
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "gxa98j",
+        "doc": "5n4998",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "6i5bno",
+        "doc": "d2143t",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "w4kkk7",
+        "doc": "7wshwi",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "v1e064",
+        "doc": "kaf5jq",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -989,7 +1055,7 @@
        ]
       }
      },
-     "readyMs": 64,
+     "readyMs": 100,
      "newAccount": "wallet-signature",
      "landing": {
       "header": "S1.3",
@@ -999,7 +1065,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 139,
+     "landMs": 186,
      "pages": 1,
      "creates": [],
      "signinStates": [
@@ -1027,94 +1093,106 @@
       },
       {
        "step": "signin",
-       "t": 33
+       "t": 39
       },
       {
        "step": "wallet",
-       "t": 481
+       "t": 520
       },
       {
        "step": "have-one",
-       "t": 826
+       "t": 893
       },
       {
        "step": "recovery",
-       "t": 869
+       "t": 949
       },
       {
        "step": "continue",
-       "t": 920
+       "t": 1017
       },
       {
        "step": "end",
-       "t": 1888
+       "t": 2047
       }
      ],
      "blank": {
-      "frames": 16,
+      "frames": 19,
       "white": 0,
-      "longestMs": 70,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 27,
-        "blankMs": 0
+        "ms": 57,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "wallet",
-        "ms": 19,
-        "blankMs": 0
+        "ms": 43,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "have-one",
-        "ms": 18,
-        "blankMs": 18
+        "ms": 23,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "recovery",
-        "ms": 25,
-        "blankMs": 25
+        "ms": 34,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "continue",
-        "ms": 168,
-        "blankMs": 70
+        "ms": 229,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": [
+      "resting": [],
+      "signhost": [
        {
-        "ms": 365,
-        "at": 512,
+        "ms": 427,
         "oneColour": 0.995,
-        "screen": "W2-words"
+        "screen": "W2-existing"
        }
+      ],
+      "hops": [
+       53
       ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "8eamvf",
+        "doc": "2a7mx7",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "4oel73",
+        "doc": "6veg5w",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "5sxafa",
+        "doc": "2n3rj3",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "m5k283",
+        "doc": "fbaces",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -1142,13 +1220,14 @@
      }
     }
    ],
-   "ms": 6528
+   "ms": 7256
   }
  ],
  "bad": {
   "jump": {
    "run": "prf",
    "plant": "jump",
+   "cpu": 4,
    "browser": "153.0.8010.12",
    "widths": [
     {
@@ -1201,7 +1280,7 @@
        ]
       }
      },
-     "readyMs": 64,
+     "readyMs": 79,
      "landing": {
       "header": "S1.3",
       "sheet": 0,
@@ -1210,7 +1289,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 87,
+     "landMs": 180,
      "pages": 1,
      "creates": [
       {
@@ -1241,69 +1320,82 @@
       },
       {
        "step": "signin",
-       "t": 64
+       "t": 71
       },
       {
        "step": "passkey",
-       "t": 552
+       "t": 599
       },
       {
        "step": "create",
-       "t": 986
+       "t": 1065
       },
       {
        "step": "end",
-       "t": 1966
+       "t": 2123
       }
      ],
      "blank": {
       "frames": 19,
       "white": 0,
-      "longestMs": 72,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 42,
-        "blankMs": 0
+        "ms": 54,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 103,
-        "blankMs": 0
+        "ms": 106,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 180,
-        "blankMs": 72
+        "ms": 258,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       65
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "az2z24",
+        "doc": "vab0to",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "73zm57",
+        "doc": "d8jgql",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "7hmy87",
+        "doc": "lr202t",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0.04851643044855237
+        "sum": 0.04851643044855237,
+        "sources": [
+         "main.screen 0,56,390,720 -> 0,104,390,672"
+        ]
        },
        {
-        "doc": "lt15mm",
+        "doc": "cugxvt",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -1372,7 +1464,7 @@
        ]
       }
      },
-     "readyMs": 64,
+     "readyMs": 90,
      "landing": {
       "header": "S1.3",
       "sheet": 0,
@@ -1381,7 +1473,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 87,
+     "landMs": 148,
      "pages": 1,
      "creates": [
       {
@@ -1412,69 +1504,84 @@
       },
       {
        "step": "signin",
-       "t": 36
+       "t": 40
       },
       {
        "step": "passkey",
-       "t": 514
+       "t": 537
       },
       {
        "step": "create",
-       "t": 911
+       "t": 928
       },
       {
        "step": "end",
-       "t": 1837
+       "t": 1935
       }
      ],
      "blank": {
       "frames": 17,
       "white": 0,
-      "longestMs": 58,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 44,
-        "blankMs": 0
+        "ms": 66,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 74,
-        "blankMs": 0
+        "ms": 72,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 126,
-        "blankMs": 58
+        "ms": 207,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       56
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "cq6205",
+        "doc": "5wjat7",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "4fujm4",
+        "doc": "gv4gb7",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "eonjf8",
+        "doc": "eask9d",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0.025
+        "sum": 0.025,
+        "sources": [
+         "main.screen 0,45,1440,831 -> 0,81,1440,819",
+         "header.tb 0,0,1440,45 -> 0,36,1440,45",
+         "footer.ft 0,876,1440,24 -> 0,0,0,0"
+        ]
        },
        {
-        "doc": "twnhly",
+        "doc": "ukm5j4",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -1494,11 +1601,12 @@
      }
     }
    ],
-   "ms": 6355
+   "ms": 7079
   },
   "missing-frame": {
    "run": "prf",
    "plant": "missing-frame",
+   "cpu": 4,
    "browser": "153.0.8010.12",
    "widths": [
     {
@@ -1550,7 +1658,7 @@
        ]
       }
      },
-     "readyMs": 79,
+     "readyMs": 84,
      "landing": {
       "header": "S1.3",
       "sheet": 0,
@@ -1559,7 +1667,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 74,
+     "landMs": 146,
      "pages": 1,
      "creates": [
       {
@@ -1594,65 +1702,76 @@
       },
       {
        "step": "passkey",
-       "t": 504
+       "t": 527
       },
       {
        "step": "create",
-       "t": 938
+       "t": 968
       },
       {
        "step": "end",
-       "t": 1907
+       "t": 2023
       }
      ],
      "blank": {
-      "frames": 17,
+      "frames": 16,
       "white": 0,
-      "longestMs": 62,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 38,
-        "blankMs": 0
+        "ms": 58,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 102,
-        "blankMs": 0
+        "ms": 117,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 168,
-        "blankMs": 62
+        "ms": 254,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       42
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "pzemdn",
+        "doc": "yzmlb8",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "qow9nd",
+        "doc": "2pphwl",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "drid7i",
+        "doc": "r9uaa2",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "1f5231",
+        "doc": "k9sx7v",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -1720,7 +1839,7 @@
        ]
       }
      },
-     "readyMs": 91,
+     "readyMs": 92,
      "landing": {
       "header": "S1.3",
       "sheet": 0,
@@ -1729,7 +1848,7 @@
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 85,
+     "landMs": 154,
      "pages": 1,
      "creates": [
       {
@@ -1760,69 +1879,80 @@
       },
       {
        "step": "signin",
-       "t": 34
+       "t": 37
       },
       {
        "step": "passkey",
-       "t": 484
+       "t": 508
       },
       {
        "step": "create",
-       "t": 871
+       "t": 909
       },
       {
        "step": "end",
-       "t": 1799
+       "t": 1908
       }
      ],
      "blank": {
       "frames": 16,
       "white": 0,
-      "longestMs": 58,
+      "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 41,
-        "blankMs": 0
+        "ms": 60,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 67,
-        "blankMs": 0
+        "ms": 79,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 127,
-        "blankMs": 58
+        "ms": 199,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       58
+      ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "yr28tp",
+        "doc": "gy3csj",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "rha0u4",
+        "doc": "ydtdni",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "poknyx",
+        "doc": "azu9m2",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "p02e5p",
+        "doc": "tcz5im",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -1842,11 +1972,12 @@
      }
     }
    ],
-   "ms": 6259
+   "ms": 6919
   },
   "prf-off": {
    "run": "prf",
    "plant": "prf-off",
+   "cpu": 4,
    "browser": "153.0.8010.12",
    "widths": [
     {
@@ -1882,7 +2013,7 @@
        ]
       }
      },
-     "readyMs": 63,
+     "readyMs": 84,
      "error": "the PRF launch drew the no-PRF backup after the create",
      "pages": 1,
      "creates": [
@@ -1911,59 +2042,69 @@
       },
       {
        "step": "signin",
-       "t": 59
+       "t": 69
       },
       {
        "step": "passkey",
-       "t": 537
+       "t": 591
       },
       {
        "step": "create",
-       "t": 953
+       "t": 1022
       }
      ],
      "blank": {
-      "frames": 13,
+      "frames": 16,
       "white": 0,
       "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 33,
-        "blankMs": 0
+        "ms": 64,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 85,
-        "blankMs": 0
+        "ms": 106,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 239,
-        "blankMs": 0
+        "ms": 304,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": []
      },
      "cls": {
       "pages": [
        {
-        "doc": "cyzcie",
+        "doc": "y9vqvv",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "p03c37",
+        "doc": "439801",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0.006042092495676198
+        "sum": 0.006042092495676198,
+        "sources": [
+         "main#signin 0,0,390,21 -> 0,16,390,253"
+        ]
        },
        {
-        "doc": "ouotp7",
+        "doc": "aznnbi",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -2011,7 +2152,7 @@
        ]
       }
      },
-     "readyMs": 82,
+     "readyMs": 80,
      "error": "the PRF launch drew the no-PRF backup after the create",
      "pages": 1,
      "creates": [
@@ -2040,15 +2181,15 @@
       },
       {
        "step": "signin",
-       "t": 39
+       "t": 38
       },
       {
        "step": "passkey",
-       "t": 513
+       "t": 530
       },
       {
        "step": "create",
-       "t": 897
+       "t": 924
       }
      ],
      "blank": {
@@ -2058,41 +2199,51 @@
       "steps": [
        {
         "step": "signin",
-        "ms": 43,
-        "blankMs": 0
+        "ms": 57,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "passkey",
-        "ms": 63,
-        "blankMs": 0
+        "ms": 75,
+        "blankMs": 0,
+        "colour": null
        },
        {
         "step": "create",
-        "ms": 177,
-        "blankMs": 0
+        "ms": 248,
+        "blankMs": 0,
+        "colour": null
        }
       ],
-      "resting": []
+      "resting": [],
+      "signhost": [],
+      "hops": []
      },
      "cls": {
       "pages": [
        {
-        "doc": "wog7ty",
+        "doc": "7i0cba",
         "host": "confidential.unrealized.trade",
         "top": true,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        },
        {
-        "doc": "epvhzg",
+        "doc": "hypbhy",
         "host": "sign.confidential.unrealized.trade",
         "top": true,
-        "sum": 0.0033209876543209877
+        "sum": 0.0033209876543209877,
+        "sources": [
+         "main#signin 0,0,1440,21 -> 0,16,1440,253"
+        ]
        },
        {
-        "doc": "rk6wri",
+        "doc": "2tbyk4",
         "host": "confidential.unrealized.trade",
         "top": false,
-        "sum": 0
+        "sum": 0,
+        "sources": []
        }
       ],
       "steps": [
@@ -2108,7 +2259,7 @@
      }
     }
    ],
-   "ms": 4449
+   "ms": 5137
   }
  }
 }

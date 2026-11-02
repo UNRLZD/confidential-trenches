@@ -73,6 +73,13 @@ export function framePixels(png) {
     }
   }
   let top = 0;
-  for (const v of counts.values()) if (v > top) top = v;
-  return { oneColour: n ? top / n : 1, bright: n ? bright / n : 0, blank: n === 0 || top / n >= 0.995, white: n > 0 && bright / n > 0.5 };
+  let colour = 0;
+  for (const [k, v] of counts) if (v > top) [top, colour] = [v, k];
+  return {
+    oneColour: n ? top / n : 1,
+    colour: `#${colour.toString(16).padStart(6, "0")}`,
+    bright: n ? bright / n : 0,
+    blank: n === 0 || top / n >= 0.995,
+    white: n > 0 && bright / n > 0.5,
+  };
 }

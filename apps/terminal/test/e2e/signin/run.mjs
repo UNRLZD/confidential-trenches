@@ -25,7 +25,8 @@
 // AS-01: one shot per frame and width, fr-<frame>-<state id>-<width>.png, read back from disk: a missing file fails.
 //
 //   node apps/terminal/test/e2e/signin/run.mjs [--runs prf,no-prf,wallet] [--shots <dir>] [--record <file>]
-//     [--plant jump | missing-frame | prf-off]      PASS exit 0, FAIL exit 1, error exit 2
+//     [--plant jump | missing-frame | prf-off] [--cpu <rate>]   --cpu 4 slows the page's CPU 4x (CDP
+//     Emulation.setCPUThrottlingRate), a slower device than the machine running it      PASS exit 0, FAIL exit 1, error exit 2
 // Needs the terminal's build (pnpm --filter terminal build) and Playwright's Chromium. --plant breaks one thing on
 // purpose so the run shows it red: jump moves the page 48 px inside the sign-in step, missing-frame drops FR-P1's shot,
 // prf-off gives the prf launch an authenticator with no PRF.
@@ -121,10 +122,12 @@ export function judge(rec) {
     // BAR-03: no blank frame over 100 ms in any step's transition and no white flash, from READY to the end
     const b = w.blank ?? {};
     say(b.frames > 0 && b.white === 0, `${at} BAR-03 ${b.frames ?? 0} frames, white flashes ${b.white ?? "-"}`);
-    for (const s of b.steps ?? []) say(s.blankMs <= BOUND.blankMs, `${at} BAR-03 step ${s.step}: ${s.ms} ms to the next screen, blank ${s.blankMs} ms`);
+    for (const s of b.steps ?? []) say(s.blankMs <= BOUND.blankMs, `${at} BAR-03 step ${s.step}: ${s.ms} ms to the next screen, blank ${s.blankMs} ms${s.colour ? ` (${s.colour})` : ""}`);
     for (const r of b.resting ?? []) lines.push(`note ${at} BAR-03 screen ${r.screen} rests near empty (${(r.oneColour * 100).toFixed(1)}% one colour) for ${r.ms} ms`);
+    for (const r of b.signhost ?? []) lines.push(`note ${at} BAR-03 SIGN_HOST screen ${r.screen} near empty (${(r.oneColour * 100).toFixed(1)}% one colour) for ${r.ms} ms`);
+    if (b.hops?.length) lines.push(`note ${at} BAR-03 hop back: the app's first paint ${b.hops.join(", ")} ms after SIGN_HOST's layer closed`);
     // BAR-04: CLS per page load, and none inside a step on a READY APP_HOST page
-    for (const p of w.cls?.pages ?? []) say(p.sum <= BOUND.clsPage, `${at} BAR-04 CLS ${p.host}${p.top ? " (top)" : ""} doc ${p.doc}: ${p.sum.toFixed(4)}`);
+    for (const p of w.cls?.pages ?? []) say(p.sum <= BOUND.clsPage, `${at} BAR-04 CLS ${p.host}${p.top ? " (top)" : ""} doc ${p.doc}: ${p.sum.toFixed(4)}${p.sum > 0 && p.sources?.length ? ` (${p.sources.join("; ")})` : ""}`);
     for (const s of w.cls?.steps ?? []) say(s.sum === 0, `${at} BAR-04 CLS in step ${s.step}: ${s.sum.toFixed(4)}`);
     // BAR-06: the last action to the first paint of the signed-in header
     say(typeof w.landMs === "number" && w.landMs <= BOUND.landMs, `${at} BAR-06 to signed in: ${w.landMs ?? "-"} ms`);
@@ -156,7 +159,16 @@ const PROBE = ({ sign, app, plant }) => {
   report({ kind: "doc", t: performance.timeOrigin });
   try {
     new PerformanceObserver((l) => {
-      for (const e of l.getEntries()) report({ kind: "shift", t: performance.timeOrigin + e.startTime, value: /** @type {any} */ (e).value });
+      for (const e of l.getEntries()) {
+        // what moved, for the report: each source's element and its box before and after
+        const sources = (/** @type {any} */ (e).sources ?? []).map((x) => {
+          const n = x.node;
+          const name = n ? `${n.nodeName.toLowerCase()}${n.id ? `#${n.id}` : ""}${typeof n.className === "string" && n.className ? `.${n.className.split(" ").join(".")}` : ""}` : "?";
+          const r = (b) => [b.x, b.y, b.width, b.height].map(Math.round).join(",");
+          return `${name} ${r(x.previousRect)} -> ${r(x.currentRect)}`;
+        });
+        report({ kind: "shift", t: performance.timeOrigin + e.startTime, value: /** @type {any} */ (e).value, sources });
+      }
     }).observe({ type: "layout-shift", buffered: true });
   } catch {}
   addEventListener("securitypolicyviolation", (e) => report({ kind: "csp", t: now(), directive: e.effectiveDirective, blocked: String(e.blockedURI).slice(0, 80) }));
@@ -175,7 +187,21 @@ const PROBE = ({ sign, app, plant }) => {
   let ready = false;
   let landed = false;
   let signin = null;
+  let layer = false;
+  try {
+    new PerformanceObserver((l) => {
+      for (const e of l.getEntries()) report({ kind: "paint", name: e.name, t: performance.timeOrigin + e.startTime });
+    }).observe({ type: "paint", buffered: true });
+  } catch {}
   const look = () => {
+    // SIGN_HOST's layer (its own screens over the app's frame), open or hidden
+    if (location.hostname === sign && window.top === window) {
+      const open = document.getElementById("screen")?.hidden === false;
+      if (open !== layer) {
+        layer = open;
+        report({ kind: "layer", t: now(), open });
+      }
+    }
     if (location.hostname === app && !ready && document.documentElement?.dataset.signpage === "ready") {
       ready = true;
       report({ kind: "ready", t: now() });
@@ -190,7 +216,7 @@ const PROBE = ({ sign, app, plant }) => {
       report({ kind: "signin", t: now(), state: s });
     }
   };
-  new MutationObserver(look).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-signpage", "data-header", "data-signin"] });
+  new MutationObserver(look).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-signpage", "data-header", "data-signin", "hidden"] });
   // the planted jump: 48 px pushed in above the page just after the sign-in tap, inside the step
   if (plant === "jump" && location.hostname === app) {
     addEventListener(
@@ -208,7 +234,7 @@ const PROBE = ({ sign, app, plant }) => {
   }
 };
 
-async function oneWidth(h, runName, w, { plant, shotDir }) {
+async function oneWidth(h, runName, w, { plant, shotDir, cpu }) {
   const out = { width: w.name, frames: [], shots: [], taps: 0, doubleTap: false };
   const shotsAt = [];
   const { context, rec } = await h.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
@@ -217,6 +243,8 @@ async function oneWidth(h, runName, w, { plant, shotDir }) {
   await context.addInitScript(PROBE, { sign: REAL.sign, app: REAL.app, plant });
   const page = await context.newPage();
   const cdp = await cdpFor(page);
+  // --cpu N: the page's CPU slowed N times (a slower device than the runner), for every document of the tab
+  if (cpu > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpu });
   const hasPrf = runName === "prf" ? plant !== "prf-off" : false;
   const auth = runName === "wallet" ? null : await addAuthenticator(page, { hasPrf });
   const cast = [];
@@ -392,9 +420,11 @@ async function oneWidth(h, runName, w, { plant, shotDir }) {
   out.csp = events.filter((e) => e.kind === "csp").map(({ host, directive, blocked }) => ({ host, directive, blocked }));
   out.marks = marks.map((m) => ({ step: m.step, t: m.t - marks[0]?.t }));
   // BAR-03 from READY (the P0 mark) to the end: a frame shows until the next one; consecutive blank frames are one run.
-  // Gated: the longest blank inside a step's transition (its tap to the next screen's arrival), and any white flash.
-  // A blank run while a screen rests (between its arrival and the next tap) is that screen drawn near empty: reported
-  // with the screen's name, as a finding on the screen, not a blank step.
+  // While SIGN_HOST's layer is open the screen is SIGN_HOST's own page: a near-empty frame there is that page drawn near
+  // empty, a note on the page (card signpage-signin-brand draws those pages and makes it gated). Outside the layer: gated, the
+  // longest blank inside a step's transition (its tap to the next screen's arrival; the hop back is the layer's close to
+  // the app's first frame with content); a blank while an app screen rests is a note on that screen. White flashes are
+  // gated everywhere.
   const p0 = marks.find((m) => m.step === "P0")?.t ?? Infinity;
   const end = Date.now();
   const flow = cast.filter((f, i) => (cast[i + 1]?.t ?? end) >= p0);
@@ -407,18 +437,44 @@ async function oneWidth(h, runName, w, { plant, shotDir }) {
     if (!px.blank) continue;
     const last = runs.at(-1);
     if (last && last.b === a) last.b = b;
-    else runs.push({ a, b, oneColour: Math.round(px.oneColour * 1000) / 1000 });
+    else runs.push({ a, b, colour: px.colour, oneColour: Math.round(px.oneColour * 1000) / 1000 });
   }
+  // the layer's open intervals, from SIGN_HOST's own reports
+  const layers = [];
+  for (const e of events.filter((x) => x.kind === "layer")) {
+    if (e.open) layers.push({ a: e.t, b: end });
+    else if (layers.length && layers.at(-1).b === end) layers.at(-1).b = e.t;
+  }
+  const overlap = (r, w) => Math.max(0, Math.min(r.b, w.b) - Math.max(r.a, w.a));
+  // each blank run cut into its parts outside the layer (the app's frame, or the shell with no frame yet) and inside it;
+  // a frame of one colour only (nothing drawn at all) is gated wherever it shows, the layer included
+  const outside = [];
+  for (const r of runs) {
+    let parts = [{ a: r.a, b: r.b }];
+    if (r.oneColour < 1) for (const l of layers) parts = parts.flatMap((p) => [{ a: p.a, b: Math.min(p.b, l.a) }, { a: Math.max(p.a, l.b), b: p.b }]).filter((p) => p.b > p.a);
+    for (const p of parts) outside.push({ ...p, colour: r.colour, oneColour: r.oneColour });
+  }
+  const screenAt = (t) => shotsAt.filter((x) => x.t <= t).at(-1)?.frame ?? null;
   const windows = marks
     .filter((m) => m.step !== "P0" && m.step !== "end")
     .map((m) => ({ step: m.step, a: m.t, b: arrivals.find((t) => t > m.t) ?? end }));
-  const overlap = (r, w) => Math.max(0, Math.min(r.b, w.b) - Math.max(r.a, w.a));
-  const blankSteps = windows.map((w) => ({ step: w.step, ms: Math.round(w.b - w.a), blankMs: Math.round(Math.max(0, ...runs.map((r) => overlap(r, w)))) }));
-  // the screen at rest during a blank run: the last frame shot before the run ends
-  const resting = runs
-    .map((r) => ({ ms: Math.round(r.b - r.a - windows.reduce((s, w) => s + overlap(r, w), 0)), at: Math.round(r.a - p0), oneColour: r.oneColour, screen: shotsAt.filter((x) => x.t <= r.b).at(-1)?.frame ?? null }))
+  const blankSteps = windows.map((w) => {
+    const hit = outside.map((p) => ({ ms: overlap(p, w), colour: p.colour })).sort((x, y) => y.ms - x.ms)[0];
+    return { step: w.step, ms: Math.round(w.b - w.a), blankMs: Math.round(hit?.ms ?? 0), colour: hit?.ms ? hit.colour : null };
+  });
+  const resting = outside
+    .map((p) => ({ ms: Math.round(p.b - p.a - windows.reduce((s, w) => s + overlap(p, w), 0)), at: Math.round(p.a - p0), oneColour: p.oneColour, screen: screenAt(p.b) }))
     .filter((r) => r.ms > BOUND.blankMs);
-  out.blank = { frames: flow.length, white, longestMs: Math.max(0, ...blankSteps.map((x) => x.blankMs)), steps: blankSteps, resting };
+  const signhost = runs
+    .filter((r) => r.oneColour < 1)
+    .map((r) => ({ ms: Math.round(layers.reduce((s, l) => s + overlap(r, l), 0)), oneColour: r.oneColour, screen: screenAt(r.b) }))
+    .filter((r) => r.ms > BOUND.blankMs);
+  // the hop back: the layer's close to the first paint of the app's new document (the shell alone in between)
+  const hops = layers.filter((l) => l.b < end).map((l) => {
+    const paint = events.find((e) => e.kind === "paint" && e.host === REAL.app && !e.top && e.t >= l.b);
+    return paint ? Math.round(paint.t - l.b) : null;
+  });
+  out.blank = { frames: flow.length, white, longestMs: Math.max(0, ...blankSteps.map((x) => x.blankMs)), steps: blankSteps, resting, signhost, hops };
   // BAR-04: per document, and per step on an APP_HOST document READY before the step began
   const docs = new Map();
   for (const e of events) if (e.kind === "doc") docs.set(e.doc, { host: e.host, top: e.top, t: e.t, sum: 0, shifts: [] });
@@ -435,7 +491,10 @@ async function oneWidth(h, runName, w, { plant, shotDir }) {
     }
     steps.push({ step: a.step, sum });
   }
-  out.cls = { pages: [...docs.entries()].filter(([, d]) => d.host === REAL.app || d.host === REAL.sign).map(([id, d]) => ({ doc: id, host: d.host, top: d.top, sum: d.sum })), steps };
+  out.cls = {
+    pages: [...docs.entries()].filter(([, d]) => d.host === REAL.app || d.host === REAL.sign).map(([id, d]) => ({ doc: id, host: d.host, top: d.top, sum: d.sum, sources: d.shifts.flatMap((x) => x.sources ?? []).slice(0, 6) })),
+    steps,
+  };
   out.shots = existsSync(shotDir) ? readdirSync(shotDir).filter((f) => f.endsWith(`-${w.name}.png`)) : [];
   await auth?.remove().catch(() => {});
   await context.close();
@@ -443,17 +502,17 @@ async function oneWidth(h, runName, w, { plant, shotDir }) {
 }
 
 /** One launch: its own harness and browser, both widths in turn. */
-export async function run(runName, { plant = null, shots }) {
+export async function run(runName, { plant = null, shots, cpu = 1 }) {
   const shotDir = path.join(shots, runName);
   rmSync(shotDir, { recursive: true, force: true });
   mkdirSync(shotDir, { recursive: true });
   // SIGN_HOST serves its shell at any path, as Pages does for a build with no 404.html: the top window keeps the app's
   // path (packages/signpage/src/shell.ts nav)
   const h = await startHarness({ realNames: true, edit: (sites) => (sites[HOSTS.sign].spa = true) });
-  const rec = { run: runName, plant, browser: h.browser.version(), widths: [] };
+  const rec = { run: runName, plant, cpu, browser: h.browser.version(), widths: [] };
   const t0 = Date.now();
   try {
-    for (const w of WIDTHS) rec.widths.push(await oneWidth(h, runName, w, { plant, shotDir }));
+    for (const w of WIDTHS) rec.widths.push(await oneWidth(h, runName, w, { plant, shotDir, cpu }));
   } finally {
     await h.close();
   }
@@ -468,8 +527,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   };
   const runs = opt("--runs", RUNS.join()).split(",");
   const plant = opt("--plant", null);
-  if (runs.some((r) => !RUNS.includes(r)) || (plant && !PLANTS.includes(plant))) {
-    console.error(`usage: run.mjs [--runs ${RUNS.join(",")}] [--plant ${PLANTS.join("|")}] [--shots <dir>] [--record <file>]`);
+  const cpu = Number(opt("--cpu", "1"));
+  if (runs.some((r) => !RUNS.includes(r)) || (plant && !PLANTS.includes(plant)) || !(cpu >= 1)) {
+    console.error(`usage: run.mjs [--runs ${RUNS.join(",")}] [--plant ${PLANTS.join("|")}] [--cpu <rate>] [--shots <dir>] [--record <file>]`);
     process.exit(2);
   }
   const temp = opt("--shots", null) ? null : mkdtempSync(path.join(tmpdir(), "ct-signin-e2e-"));
@@ -478,11 +538,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const recs = [];
   try {
     for (const r of runs) {
-      const rec = await run(r, { plant, shots });
+      const rec = await run(r, { plant, shots, cpu });
       recs.push(rec);
       const v = judge(rec);
       for (const l of v.lines) console.log(l);
-      console.log(`${v.ok ? "PASS" : "FAIL"} ${r} launch in ${(rec.ms / 1000).toFixed(1)} s (Chromium ${rec.browser}${plant ? `, planted ${plant}` : ""})`);
+      console.log(`${v.ok ? "PASS" : "FAIL"} ${r} launch in ${(rec.ms / 1000).toFixed(1)} s (Chromium ${rec.browser}${cpu > 1 ? `, CPU ${cpu}x slower` : ""}${plant ? `, planted ${plant}` : ""})`);
       ok &&= v.ok;
     }
   } catch (e) {
