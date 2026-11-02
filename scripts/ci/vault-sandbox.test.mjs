@@ -27,7 +27,9 @@ function planStepProblems(ci) {
 test("every file the sandbox suite reads is one the rule runs the suite for", () => {
   const reads = suiteReads();
   assert.ok(reads.includes("contracts/vault/src/lib.rs"));
-  for (const f of ["contracts/vault/scripts/deploy.mjs", "scripts/live-checks/vault-testnet-t01.mjs", "apps/helper/src/bind/send.ts", "apps/helper/test/bind-send/carry.ts", "packages/kit/zk/withdraw.vkey", "packages/kit/src/vault/shapes.ts", "packages/kit/test/vectors/vault-v1.json"]) {
+  for (const f of ["contracts/vault/scripts/deploy.mjs", "scripts/live-checks/vault-testnet-t01.mjs", "apps/helper/src/bind/send.ts", "apps/helper/test/bind-send/carry.ts", "packages/kit/zk/withdraw.vkey", "packages/kit/src/vault/shapes.ts", "packages/kit/test/vectors/vault-v1.json",
+    // relayer_withdraw.rs: the withdraw relayer's CLI, the send it drives (through its imports) and the fixture
+    "apps/helper/test/withdraw-send/carry.ts", "apps/helper/src/withdraw/send.ts", "apps/helper/src/withdraw/checks.ts", "apps/helper/src/withdraw/fee.ts", "contracts/vault/tests/fixtures/withdraw-spends.json"]) {
     assert.ok(reads.includes(f), `the suite reads ${f}, and suiteReads did not find it`);
   }
   assert.deepEqual(uncovered(reads), []);
@@ -35,7 +37,7 @@ test("every file the sandbox suite reads is one the rule runs the suite for", ()
 
 test("planted: a file the suite reads but the rule misses fails", () => {
   const reads = suiteReads();
-  for (const gone of ["apps/helper/src/token-status/", "packages/kit/zk/", "scripts/net-window.mjs", "packages/kit/test/vectors/"]) {
+  for (const gone of ["apps/helper/src/token-status/", "packages/kit/zk/", "scripts/net-window.mjs", "packages/kit/test/vectors/", "apps/helper/src/withdraw/", "apps/helper/test/withdraw-send/"]) {
     const missed = uncovered(reads, PATHS.filter((p) => p !== gone));
     assert.ok(missed.length > 0 && missed.every((f) => f.startsWith(gone)), `without ${gone} the rule still covers ${missed}`);
   }
