@@ -189,7 +189,7 @@ interface HeadProps {
   now: number;
 }
 
-function Equity({ src, t, loading, offline, ui, setUi, now }: HeadProps) {
+function Equity({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
   const change = t && pts.length ? t.total - pts[0]![1] : null;
   const v = (c: bigint | null, plus = true): ReactNode => (loading ? <Sk w={80} h={16} /> : c === null || !t ? DASH : <span className={sgn(c)}>{usd(c, plus)}</span>);
@@ -205,8 +205,8 @@ function Equity({ src, t, loading, offline, ui, setUi, now }: HeadProps) {
         </div>
         <span className="grow" />
         <div className="brk">
-          <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && t.unreal)}</div></div>
-          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && t.realized30)}</div></div>
+          <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null)}</div></div>
+          <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (rows.length || t.realized30) ? t.realized30 : null)}</div></div>
         </div>
       </div>
       <div className="eqsplit">
@@ -484,7 +484,7 @@ function Allocation({ rows, loading }: { rows: Row[]; loading: boolean }) {
         const big = w > 19 && h > 15;
         return (
           <div className="at" key={r.key} style={{ left: `${x}%`, top: `${y}%`, width: `calc(${w}% - 4px)`, height: `calc(${h}% - 4px)`, background: bg }}>
-            <div className="row-flex"><Avatar symbol={r.symbol} size={big ? 24 : 20} />{w > 13 && <span className="as ell">{r.symbol}</span>}</div>
+            <div className="row-flex">{big && <Avatar symbol={r.symbol} size={32} />}{w > 13 && <span className="as ell">{r.symbol}</span>}</div>
             {big && <div className="av3 num">{usd(r.value!)}<div className={sgn(r.pnl)}>{pct(r.pnlBps)}</div></div>}
           </div>
         );
@@ -507,7 +507,7 @@ function Plate() {
 
 // ------------------------------------------------------------------------------------------------------------ phone
 
-function PhoneTop({ src, t, loading, offline, ui, setUi, now }: HeadProps) {
+function PhoneTop({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
   const v = (c: bigint | null): ReactNode => (loading ? <Sk w={70} h={18} /> : c === null || !t ? "—" : <span className={sgn(c)}>{usd(c, true)}</span>);
   return (
@@ -527,8 +527,8 @@ function PhoneTop({ src, t, loading, offline, ui, setUi, now }: HeadProps) {
         </div>
       </div>
       <div className="brk two">
-        <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && t.unreal)}</div></div>
-        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && t.realized30)}</div></div>
+        <div><div className="k"><W id="unrealized" /></div><div className="v num">{v(t && rows.length ? t.unreal : null)}</div></div>
+        <div><div className="k"><W id="realized30" /></div><div className="v num">{v(t && (rows.length || t.realized30) ? t.realized30 : null)}</div></div>
       </div>
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>
