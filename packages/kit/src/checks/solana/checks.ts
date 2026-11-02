@@ -665,8 +665,16 @@ export const solanaVolumeAccumulator = (wallet: string, program: string): string
   solanaProgramAddress([new TextEncoder().encode("user_volume_accumulator"), base58.decode(wallet)], program);
 export const solanaEventAuthority = (program: string): string => solanaProgramAddress([new TextEncoder().encode("__event_authority")], program);
 // Token-2022 ExtensionType TransferFeeAmount (interface/src/extension/mod.rs, as EXT_* above) and ConfidentialTransferAccount.
+// ConfidentialTransferFeeAmount 17: CloseAccount refuses an account with a confidential withheld amount.
 const EXT_TRANSFER_FEE_AMOUNT = 2;
 const EXT_CONFIDENTIAL_ACCOUNT = 5;
+const EXT_CONFIDENTIAL_FEE_AMOUNT = 17;
+/**
+ * Compute units per teardown instruction, the bound each frame's limit must stay within (2 x budget + the sum over its
+ * instructions): the recorded simulations used 270 (an SPL Token close), 1,616 (a Token-2022 close) and 10,396 to
+ * 13,396 per volume close.
+ */
+export const SOLANA_TEARDOWN_CU = { budget: 300, close: 6_000, harvest: 8_000, volume: 25_000 } as const;
 const TOKEN_ACCOUNT_LEN = 165;
 
 /** One account as a provider answered it (getMultipleAccounts, base64). */
@@ -700,10 +708,22 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
     if (!a) continue;
     if (volumes.has(address)) {
       if (a.owner !== volumes.get(address)) throw new Error(`${address} is owned by ${a.owner}, not ${volumes.get(address)}`);
-      // UserVolumeAccumulator (the same IDLs): 8-byte discriminator, user, needs_claim bool, total_unclaimed_tokens u64.
-      // An account with incentive tokens still to claim stays open: closing it could give them up.
-      if (a.data.length < 49 || base58.encode(a.data.subarray(8, 40)) !== wallet) throw new Error(`${address} is not the wallet's volume account`);
-      if (a.data[40] !== 0 || u64(a.data, 41) > 0n) { plan.keep.push({ address, why: `unclaimed incentive tokens ${u64(a.data, 41)}` }); continue; }
+      // UserVolumeAccumulator (the same IDLs, fields in order after the 8-byte discriminator): user @8, needs_claim bool
+      // @40, total_unclaimed_tokens u64 @41, total_claimed_tokens @49, current_sol_volume @57, last_update_timestamp i64
+      // @65, has_total_claimed_tokens bool @73, cashback_earned u64 @74, total_cashback_claimed @82; pump's alone then
+      // stable_cashback_earned @90, total_stable_cashback_claimed @98. Closing it pays out only its own lamports, so it
+      // stays open while anything is owed elsewhere: incentive tokens to claim, volume still to settle, PumpSwap cashback
+      // (claim_cashback pays it from the account's own WSOL account) or pump's stable cashback (claim_cashback_v2 pays
+      // it from the account's own quote-mint account). Pump's other cashback is paid from the account's lamports
+      // (claim_cashback: user, the account, System), which the close returns to the wallet.
+      const v = a.data;
+      if (v.length < 90 || base58.encode(v.subarray(8, 40)) !== wallet) throw new Error(`${address} is not the wallet's volume account`);
+      const owed: string[] = [];
+      if (v[40] !== 0 || u64(v, 41) > 0n) owed.push(`unclaimed incentive tokens ${u64(v, 41)}`);
+      if (u64(v, 57) > 0n) owed.push(`volume ${u64(v, 57)} not settled`);
+      if (a.owner === SOLANA_PUMP_AMM_PROGRAM && u64(v, 74) > u64(v, 82)) owed.push(`cashback ${u64(v, 74) - u64(v, 82)} unclaimed`);
+      if (a.owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98)) owed.push(`stable cashback ${u64(v, 90) - u64(v, 98)} unclaimed`);
+      if (owed.length) { plan.keep.push({ address, why: owed.join(", ") }); continue; }
       plan.close.push({ kind: "volume", address, program: a.owner, lamports: a.lamports });
       continue;
     }
@@ -725,8 +745,9 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
         const len = u16(d, o + 2);
         if (type === 0) break;
         if (o + 4 + len > d.length) throw new Error(`${address}: extension ${type} runs past the data`);
-        if (type === EXT_TRANSFER_FEE_AMOUNT) harvest = true;
-        if (type === EXT_CONFIDENTIAL_ACCOUNT) confidential = true;
+        // TransferFeeAmount { withheld_amount u64 }: harvest only fees there are (a harvest into a closed mint fails).
+        if (type === EXT_TRANSFER_FEE_AMOUNT && len === 8 && u64(d, o + 4) > 0n) harvest = true;
+        if (type === EXT_CONFIDENTIAL_ACCOUNT || type === EXT_CONFIDENTIAL_FEE_AMOUNT) confidential = true;
         o += 4 + len;
       }
     }
@@ -762,7 +783,8 @@ export type SolanaTeardownVerdict = { ok: boolean; plan: SolanaTeardownPlan | nu
 
 /**
  * The device's check on the teardown frames before it signs them: the frames close every account the plan closes,
- * exactly once, to the wallet; a Token-2022 fee account is harvested right before its close; nothing else runs; and on
+ * exactly once, to the wallet; a Token-2022 fee account is harvested right before its close; nothing else runs; every
+ * frame closes something and asks no more compute than SOLANA_TEARDOWN_CU allows its instructions; and on
  * both providers every frame simulates clean, every account it closes is gone after it, and the wallet gains exactly
  * their lamports less the frame's fee. Any account the plan closes and the frames leave open is refused.
  */
@@ -837,7 +859,10 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
         wrong.push(`${at}: program ${ix.program} instruction ${hex(d)}`);
       }
       const fee = SOLANA_LAMPORTS_PER_SIGNATURE * BigInt(tx.signatures) + (price * BigInt(limit ?? 0) + 999_999n) / 1_000_000n;
-      if (price > 0n && limit === null) wrong.push(`frame ${f}: a price with no limit`);
+      // A frame closes something, and asks no more compute than its instructions are allowed.
+      const cap = 2 * SOLANA_TEARDOWN_CU.budget + ixs.reduce((n, x) => n + (x.program === SOLANA_COMPUTE_BUDGET_PROGRAM ? 0 : SOLANA_VOLUME_PROGRAMS.includes(x.program) ? SOLANA_TEARDOWN_CU.volume : x.data[0] === 26 ? SOLANA_TEARDOWN_CU.harvest : SOLANA_TEARDOWN_CU.close), 0);
+      if (closes.length === 0) wrong.push(`frame ${f}: closes nothing`);
+      if (limit === null || limit > cap) wrong.push(`frame ${f}: compute limit ${limit ?? "unset"} (want at most ${cap})`);
       frames.push({ closes, fee });
     }
   } catch (err) {

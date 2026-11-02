@@ -12,6 +12,7 @@ import {
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
   SOLANA_TOKEN_2022_PROGRAM,
+  SOLANA_TEARDOWN_CU,
   SOLANA_TOKEN_PROGRAM,
   checkSolanaTeardown,
   solanaTeardownAddresses,
@@ -23,7 +24,7 @@ import {
   type SolanaTeardownSimulation,
 } from "../src/checks/solana/checks.ts";
 import { solanaAta } from "../src/checks/solana/message.ts";
-import { SOLANA_TEARDOWN_CU, buildSolanaTeardown, simulateSolanaTeardown } from "../src/trade/solana/build.ts";
+import { buildSolanaTeardown, simulateSolanaTeardown } from "../src/trade/solana/build.ts";
 import type { SolanaRpc } from "../src/trade/solana/send.ts";
 
 type RawAcc = { owner: string; lamports: number; data: [string, string] } | null;
@@ -67,12 +68,25 @@ test("recorded: real wallets on both pump programs, two providers each", () => {
   assert.deepEqual(F.rpcs.length, 2);
   for (const w of F.wallets) {
     const plan = solanaTeardownPlan(w.wallet, accountsOf(w));
-    // Both volume accounts, the curve's and PumpSwap's, exist on every recorded wallet and are closed.
-    assert.equal(volumeCount(plan), 2, w.wallet);
-    assert.deepEqual(new Set(plan.close.filter((h) => h.kind === "volume").map((h) => h.program)), new Set([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]));
+    // Both volume accounts, the curve's and PumpSwap's, exist on every recorded wallet: each is closed or kept with its reason.
+    for (const p of [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]) {
+      const uva = solanaVolumeAccumulator(w.wallet, p);
+      assert.ok(plan.close.some((h) => h.address === uva) !== plan.keep.some((k) => k.address === uva), `${w.wallet} ${p}`);
+    }
     assert.deepEqual(w.addresses, solanaTeardownAddresses(w.wallet, w.mints));
   }
-  assert.ok(F.wallets.some((w) => solanaTeardownPlan(w.wallet, accountsOf(w)).close.some((h) => h.kind === "token")), "a wallet with a token account to close");
+  const plans = F.wallets.map((w) => solanaTeardownPlan(w.wallet, accountsOf(w)));
+  assert.ok(plans.some((p) => p.close.some((h) => h.kind === "token" && h.program === SOLANA_TOKEN_PROGRAM)), "an SPL Token account to close");
+  assert.ok(plans.some((p) => p.close.some((h) => h.kind === "token" && h.program === SOLANA_TOKEN_2022_PROGRAM)), "a Token-2022 account to close");
+  assert.ok(plans.some((p) => volumeCount(p) === 2), "a wallet closing both volume accounts");
+  assert.ok(plans.some((p) => p.keep.some((k) => /^holds /.test(k.why))), "a token account that stays, holding tokens");
+  // GATRKVEP…: its PumpSwap volume account is owed cashback (earned 12,742,862 lamports of WSOL, none claimed), so it
+  // stays out of every frame; the good test below reads it untouched after the frame on both providers.
+  const gatr = F.wallets.findIndex((w) => w.wallet === "GATRKVEPTF8smVdYcWVody5gUc768N2HxTfVDmcCb4zp");
+  assert.ok(gatr >= 0);
+  const uva = solanaVolumeAccumulator(F.wallets[gatr]!.wallet, SOLANA_PUMP_AMM_PROGRAM);
+  assert.deepEqual(plans[gatr]!.keep, [{ address: uva, why: "cashback 12742862 unclaimed" }]);
+  assert.ok(!plans[gatr]!.close.some((h) => h.address === uva));
 });
 
 test("good: the frames rebuild byte for byte from the reads, and every account the plan closes is gone with every lamport back", async () => {
@@ -112,16 +126,17 @@ test("bad: a frame set that leaves one account open is refused", async () => {
     const plan = solanaTeardownPlan(w.wallet, accountsOf(w));
     const reads = await readsOf(w);
     const wires = w.frames.map((x) => base64.decode(x));
-    // The S-5 frame left out: both volume accounts stay open.
+    // The S-5 frame left out: every volume account the plan closes stays open.
     const noS5 = checkSolanaTeardown(wires.slice(0, -1), w.wallet, { ...reads, simulations: reads.simulations.slice(0, -1) });
     assert.equal(noS5.ok, false);
     const cover = failed(noS5).find((x) => x.startsWith("COVER")) ?? "";
-    for (const p of [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]) assert.ok(cover.includes(`${solanaVolumeAccumulator(w.wallet, p)} closed 0 times (want 1)`), cover);
-    // The PumpSwap volume account dropped from the plan the frames are built from: it alone is left open.
-    const short = { ...plan, close: plan.close.filter((h) => !(h.kind === "volume" && h.program === SOLANA_PUMP_AMM_PROGRAM)) };
+    for (const h of plan.close.filter((x) => x.kind === "volume")) assert.ok(cover.includes(`${h.address} closed 0 times (want 1)`), cover);
+    // The last volume account dropped from the plan the frames are built from: it alone is left open.
+    const last = plan.close.filter((h) => h.kind === "volume").at(-1)!;
+    const short = { ...plan, close: plan.close.filter((h) => h !== last) };
     const v = checkSolanaTeardown(buildSolanaTeardown(w.wallet, short, w.chain).map((f) => f.wire), w.wallet, reads);
     assert.equal(v.ok, false);
-    assert.deepEqual(failed(v).filter((x) => x.startsWith("COVER")), [`COVER ${solanaVolumeAccumulator(w.wallet, SOLANA_PUMP_AMM_PROGRAM)} closed 0 times (want 1)`]);
+    assert.deepEqual(failed(v).filter((x) => x.startsWith("COVER")), [`COVER ${last.address} closed 0 times (want 1)`]);
   }
 });
 

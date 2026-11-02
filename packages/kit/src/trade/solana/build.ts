@@ -34,6 +34,7 @@ import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
   SOLANA_CLOSE_VOLUME_ACCUMULATOR,
+  SOLANA_TEARDOWN_CU,
   solanaEventAuthority,
   solanaRouteCuCap,
   type SolanaTeardownPlan,
@@ -424,9 +425,6 @@ export function assembleSolanaSwap(req: SolanaBuildRequest, build: SolanaJupiter
 // holds back the token closes; S-4 splits into more frames when one would pass 1,232 bytes. No tips: a teardown is
 // never raced. Each frame asks only the compute it uses (SOLANA_TEARDOWN_CU), at the caller's price.
 // ---------------------------------------------------------------------------------------------------------------
-
-/** Compute units per teardown instruction: SOLANA_TEARDOWN_CU bounds each with room over what the recorded simulations used. */
-export const SOLANA_TEARDOWN_CU = { budget: 300, close: 6_000, harvest: 8_000, volume: 25_000 } as const;
 
 /** The teardown frames for one wallet; empty when the plan closes nothing. */
 export function buildSolanaTeardown(wallet: string, plan: SolanaTeardownPlan, chain: { blockhash: string; lastValidBlockHeight: number }, opts: { cuPrice?: bigint } = {}): SolanaAssembled[] {

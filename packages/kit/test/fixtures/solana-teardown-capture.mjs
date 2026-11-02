@@ -4,7 +4,8 @@
 // two public RPCs, the frames buildSolanaTeardown makes from those reads, and simulateSolanaTeardown's calls of each
 // frame on both RPCs (sigVerify false, replaceRecentBlockhash true), every answer recorded as the RPC gave it.
 // Nothing is signed or sent, and no key is used.
-//   node packages/kit/test/fixtures/solana-teardown-capture.mjs <wallet>... > packages/kit/test/fixtures/solana-teardown.json
+// A wallet given as <wallet>:volumes reads only its wSOL and volume accounts (its token accounts left out).
+//   node packages/kit/test/fixtures/solana-teardown-capture.mjs <wallet>[:volumes]... > packages/kit/test/fixtures/solana-teardown.json
 import { base64 } from "@scure/base";
 import { SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan } from "../../src/checks/solana/checks.ts";
 import { buildSolanaTeardown, simulateSolanaTeardown } from "../../src/trade/solana/build.ts";
@@ -23,11 +24,12 @@ async function call(url, method, params) {
 const held = (a) => a && { owner: a.owner, lamports: BigInt(a.lamports), data: base64.decode(a.data[0]) };
 
 const out = { readAt: new Date().toISOString(), rpcs: RPCS, wallets: [] };
-for (const wallet of process.argv.slice(2)) {
+for (const arg of process.argv.slice(2)) {
+  const [wallet, only] = arg.split(":");
   // The mints the wallet holds an account of (getTokenAccountsByOwner, which only the first RPC serves); the device
   // knows its own mints from its trades. The candidates are then solanaTeardownAddresses' own.
   const mints = [];
-  for (const program of [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM]) {
+  for (const program of only === "volumes" ? [] : [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM]) {
     const r = await call(RPCS[0], "getTokenAccountsByOwner", [wallet, { programId: program }, { encoding: "jsonParsed" }]);
     for (const a of r.value) mints.push({ mint: a.account.data.parsed.info.mint, program });
   }
