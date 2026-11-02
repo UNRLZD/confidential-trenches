@@ -282,8 +282,6 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     }
     return tmp;
   };
-  // temps a crash left behind: never a record, swept once the lock is held
-  for (const f of fs.readdirSync(dir)) if (f.startsWith(".tmp-")) fs.unlinkSync(path(f));
 
   /** Create-if-absent: false when the name is there. */
   const createOnce = (name: string, v: string): boolean => {
@@ -320,9 +318,27 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     if (isOpen(rec)) openUs.add(rec.u);
     else openUs.delete(rec.u);
   };
-  for (const f of fs.readdirSync(dir)) {
-    const m = /^u-([0-9a-f]{64})\.json$/.exec(f);
-    if (m) track(JSON.parse(fs.readFileSync(path(f), "utf8")) as DepositRecord);
+  // everything a start reads once the lock is held: a throw gives the lock up, so this process can open the store again
+  try {
+    // temps a crash left behind: never a record, swept once the lock is held
+    for (const f of fs.readdirSync(dir)) if (f.startsWith(".tmp-")) fs.unlinkSync(path(f));
+    for (const f of fs.readdirSync(dir)) {
+      const m = /^u-([0-9a-f]{64})\.json$/.exec(f);
+      if (m === null) continue;
+      let rec: DepositRecord | null = null;
+      try {
+        rec = JSON.parse(fs.readFileSync(path(f), "utf8")) as DepositRecord;
+        if (rec.u !== m[1]) rec = null;
+        else track(rec);
+      } catch {
+        rec = null;
+      }
+      // unreadable: counted open, so each round tries it and its own catch keeps it
+      if (rec === null) openUs.add(m[1]!);
+    }
+  } catch (e) {
+    release();
+    throw e;
   }
   const uName = (u: string) => {
     if (!/^[0-9a-f]{64}$/.test(u)) throw new Error("store: U is not a 64-hex id");
@@ -332,6 +348,14 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
   const dName = (tx: string) => {
     if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tx)) throw new Error("store: not a transaction hash");
     return `d-${tx}.json`;
+  };
+  const forget = (tx: string) => {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tx)) return; // never a D's name: setFoundAt refuses it
+    try {
+      fs.unlinkSync(path(dName(tx)));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    }
   };
   const counter = (key: string): bigint | null => {
     const c = read<{ next: string }>(kName(key));
@@ -349,8 +373,18 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     },
     put(rec) {
       held();
+      let before: DepositRecord | null = null;
+      try {
+        before = read<DepositRecord>(uName(rec.u));
+      } catch {
+        // an unreadable record is still replaced; its entries' D, if any, stay
+      }
       replace(uName(rec.u), JSON.stringify(rec));
       track(rec);
+      // a D is read only while its entry is open (the relayer's judge): once the entry has a verdict or has left the
+      // record, its file goes
+      const still = new Set([...rec.prepays.filter((x) => x.ok === null), ...rec.sends.filter((x) => x.state === "pending")].map((x) => x.tx_hash));
+      for (const x of [...(before?.prepays ?? []), ...(before?.sends ?? []), ...rec.prepays, ...rec.sends]) if (!still.has(x.tx_hash)) forget(x.tx_hash);
     },
     bind(p, u) {
       held();
@@ -1081,21 +1115,26 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     return a.changes.length === 0 ? "empty" : ours ? "ours" : "other";
   };
   /** How far each transaction's receipt has been looked for: the last block read, so the next round goes on from it. */
-  const scanned = new Map<string, Block>();
+  const scanned = new Map<string, { last: Block; next: bigint }>();
   /**
    * The outcome of a prepay's receipt read from blocks, never from a lookup (markets.md l.1240-1262, T1b): r computed
    * from the hash and D's height; E the first block in (D, F] whose account_changes for the vault, the same on both,
    * name r under receipt_processing (it succeeded) or only under action_receipt_gas_reward (it failed and was rolled
-   * back, the s8 rule). A height with no block is passed only when the next block's prev_height shows the gap; null
-   * until E is found (r pending).
+   * back, F61). A height with no block is passed only when the next block's prev_height shows the gap; null until E is
+   * found (r pending). Each round reads up to RECEIPT_SCAN_MAX heights and the next goes on from the next height, kept
+   * apart from the last block, so a run of heights with no block longer than one round is crossed.
    */
   const receiptFromBlocks = async (tx: TxRef, d: Block, f: bigint): Promise<Receipt | null> => {
     const r = receiptIdOf(tx.tx_hash, d.height);
-    let last = scanned.get(tx.tx_hash) ?? d;
-    const end = f < last.height + RECEIPT_SCAN_MAX ? f : last.height + RECEIPT_SCAN_MAX;
-    for (let h = last.height + 1n; h <= end; h++) {
+    const at = scanned.get(tx.tx_hash) ?? { last: d, next: d.height + 1n };
+    let last = at.last;
+    const end = f < at.next - 1n + RECEIPT_SCAN_MAX ? f : at.next - 1n + RECEIPT_SCAN_MAX;
+    for (let h = at.next; h <= end; h++) {
       const b = await blockAt(h);
-      if (b === null) continue;
+      if (b === null) {
+        remember(scanned, tx.tx_hash, { last, next: h + 1n });
+        continue;
+      }
       if (b.prev !== last.height) throw new Error(`block ${h}: its prev_height ${b.prev} is not ${last.height}`);
       const [v0, v1] = await Promise.all(
         rpcs.map(async (q) => {
@@ -1118,7 +1157,7 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
         return { executor: vault, ok: v0 === "ran", failure: v0 === "ran" ? "" : `receipt ${r} failed at ${h} (read from blocks)`, height: h };
       }
       last = b;
-      remember(scanned, tx.tx_hash, b);
+      remember(scanned, tx.tx_hash, { last, next: h + 1n });
     }
     return null;
   };

@@ -2369,6 +2369,117 @@ test("F56: block reads that cannot be trusted keep the round: another hash, the 
   }
 });
 
+// ---- the a984d9e re-check (RC4) ----
+
+test("RC4-1: an unreadable u-*.json never stops a start: it counts as open, the round keeps it, and the store opens again in this process", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-rc4-"));
+  const s = createFileStore(dir);
+  s.put({ ...emptyRecord("ab".repeat(32)) });
+  s.close();
+  writeFileSync(join(dir, `u-${"cd".repeat(32)}.json`), "{ torn");
+  writeFileSync(join(dir, `u-${"ef".repeat(32)}.json`), "null");
+  const t = createFileStore(dir);
+  assert.deepEqual(t.open().sort(), ["cd".repeat(32), "ef".repeat(32)]);
+  const node = new Node();
+  await lockRound(node.deps(t, node.relayer(50))); // the round's own catch keeps each
+  assert.deepEqual(t.open().sort(), ["cd".repeat(32), "ef".repeat(32)]);
+  t.put({ ...emptyRecord("cd".repeat(32)) }); // an unreadable record can still be written over
+  assert.deepEqual(t.open(), ["ef".repeat(32)]);
+  t.close();
+  createFileStore(dir).close();
+});
+
+test("RC4-1: a start that throws once the lock is held gives the lock up, so this process can open the store again", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-rc4-throw-"));
+  createFileStore(dir).close();
+  const failing = { ...nodeFs, readdirSync: (() => { throw new Error("EIO: the directory cannot be read"); }) as unknown as typeof nodeFs.readdirSync };
+  assert.throws(() => createFileStore(dir, failing), /EIO/);
+  createFileStore(dir).close();
+});
+
+/** Moves a prepay's vault receipt from D+1 to D+gap+1, the heights between with no block (`skip`) or quiet blocks. */
+async function farE(node: Node, gap: bigint, skip: boolean) {
+  const { tx, e } = await prepaid(node);
+  const d = e - 1n;
+  for (const c of node.vaultChanges) if (c.height === e) c.height = d + gap + 1n;
+  if (skip) for (let h = d + 1n; h <= d + gap; h++) node.skipped.add(h);
+  node.final = d + gap + 20n;
+  return { tx, d };
+}
+
+test("RC4-2: F56 across a run of heights with no block longer than one round's reads: the next round goes on from the next height, so E is found", async () => {
+  const seen: string[] = [];
+  for (const gap of [150n, 250n, 450n]) {
+    const node = new Node();
+    const { tx } = await farE(node, gap, true);
+    const r = x1Relayer(node);
+    const kinds: string[] = [];
+    while (kinds.length < 4 && kinds.at(-1) !== "final") kinds.push((await r.resolve(tx, noResend)).kind);
+    seen.push(`gap ${gap}: ${kinds.join(",")}`);
+  }
+  assert.deepEqual(seen, ["gap 150: final", "gap 250: unknown,final", "gap 450: unknown,unknown,final"]);
+});
+
+test("RC4-3: F56 with E 450 quiet blocks after D: each round goes on from where the last stopped, found on the third; a restarted relayer reads again from D", async () => {
+  const node = new Node();
+  const { tx } = await farE(node, 450n, false);
+  for (const name of ["first", "restarted"]) {
+    const r = x1Relayer(node);
+    const kinds: string[] = [];
+    for (let i = 0; i < 3; i++) kinds.push((await r.resolve(tx, noResend)).kind);
+    assert.deepEqual(kinds, ["unknown", "unknown", "final"], name);
+  }
+});
+
+test("L4: a D the relayer stored is deleted once its entry closes (a verdict written, or the entry dropped from the record)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bind-d-"));
+  const s = createFileStore(dir);
+  const u = "ab".repeat(32);
+  const entry = (tx: string, ok: boolean | null) => ({ tx_hash: tx, nonce: "1", height: "1", block_hash: "h", signed_tx: "", bytes: 756, ok });
+  const [a, b] = ["11111111111111111111111111111111", "22222222222222222222222222222222"];
+  const send = { tx_hash: "33333333333333333333333333333333", nonce: "3", height: "1", block_hash: "h", signed_tx: "", sha256: "x", amount: "1", max_block_height: "9", state: "pending" as const, counted: true };
+  for (const t of [a, b, send.tx_hash]) s.setFoundAt(t, { height: "5", hash: "D" });
+  const ds = () => readdirSync(dir).filter((f) => f.startsWith("d-")).sort();
+  s.put({ ...emptyRecord(u), prepays: [entry(a, null), entry(b, null)], sends: [send] });
+  assert.equal(ds().length, 3, "open entries keep their D");
+  s.put({ ...emptyRecord(u), prepays: [entry(a, true), entry(b, null)], sends: [send] });
+  assert.deepEqual(ds(), [`d-${b}.json`, `d-${send.tx_hash}.json`].sort(), "a verdict deletes its D");
+  s.put({ ...emptyRecord(u), prepays: [entry(a, true)], sends: [send] });
+  assert.deepEqual(ds(), [`d-${send.tx_hash}.json`], "an entry dropped from the record deletes its D");
+  s.put({ ...emptyRecord(u), prepays: [entry(a, true)], sends: [{ ...send, state: "landed" as const }] });
+  assert.deepEqual(ds(), []);
+  assert.equal(s.foundAt(b), null);
+  // a record that could not be read is written over with a closed entry: its D goes too
+  s.setFoundAt(b, { height: "5", hash: "D" });
+  writeFileSync(join(dir, `u-${u}.json`), "{ torn");
+  s.put({ ...emptyRecord(u), prepays: [entry(b, false)] });
+  assert.deepEqual(ds(), []);
+  s.close();
+});
+
+test("L4: a deposit carried through a lookup that lags past D leaves no D in the store once its entries close", async () => {
+  const node = new Node();
+  const dir = mkdtempSync(join(tmpdir(), "bind-d-carry-"));
+  const store = createFileStore(dir);
+  node.landMs = () => 1_500;
+  const relayer = createRelayer(node.rpcs(), node.archival(), RELAYER, node.secret, VAULT, node.validity, store, 300);
+  const deps = node.deps(store, relayer);
+  const u = node.user();
+  const sd = signed(u, P, 101n, node.final + 100n);
+  assert.equal(code(await carryDeposit(sd, deps)), "in_flight");
+  await until(() => node.prepaid.get(P.toString()) === PREPAY_BYTES);
+  const prepay = store.get(u.id)!.prepays[0]!.tx_hash;
+  node.hideTx.set(prepay, 1_000); // applied at D, the lookups not there yet
+  assert.equal(code(await carryDeposit(sd, deps)), "in_flight");
+  assert.ok(existsSync(join(dir, `d-${prepay}.json`)), "D stored while the entry is open");
+  node.landMs = () => 1;
+  node.hideTx.delete(prepay);
+  for (let i = 0; i < 5 && code(await carryDeposit(sd, deps)) !== "ok"; i++);
+  assert.equal(store.get(u.id)!.landed, true);
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("d-")), []);
+  store.close();
+});
+
 test("(a2): K deleted before the transaction was applied: the deletion at D names no transaction of ours, so it is dropped", async () => {
   const node = new Node();
   const r = node.relayer(50);
