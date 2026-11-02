@@ -202,7 +202,7 @@ function helperOrigin(origin: string): string {
 export async function fetchSolanaJupiterBuild(
   origin: string,
   req: SolanaBuildRequest,
-  opts: { fetch?: SolanaFetch; timeoutMs?: number; now?: () => number } = {},
+  opts: { fetch?: SolanaFetch; timeoutMs?: number; now?: () => number; uncapped?: boolean } = {},
 ): Promise<SolanaBuildFetched> {
   const base = helperOrigin(origin);
   const doFetch: SolanaFetch = opts.fetch ?? ((u, i) => fetch(u, i));
@@ -232,9 +232,11 @@ export async function fetchSolanaJupiterBuild(
   };
   const noRoute = (a: { status: number; body: unknown }) =>
     a.status === 400 && typeof a.body === "object" && a.body !== null && (a.body as { error?: unknown }).error === SOLANA_JUPITER_NO_ROUTE;
-  let a = await once(SOLANA_JUPITER_MAX_ACCOUNTS);
-  let uncapped = false;
-  if (noRoute(a)) {
+  // `uncapped`: the build asked without the cap from the start (the live check's uncapped shapes), with no retry.
+  let uncapped = opts.uncapped === true;
+  let a = await once(uncapped ? null : SOLANA_JUPITER_MAX_ACCOUNTS);
+  if (uncapped && noRoute(a)) throw new SolanaBuildError("no_route", "no route uncapped");
+  if (!uncapped && noRoute(a)) {
     uncapped = true;
     a = await once(null);
     if (noRoute(a)) throw new SolanaBuildError("no_route", `no route at maxAccounts=${SOLANA_JUPITER_MAX_ACCOUNTS} or uncapped`);
@@ -276,11 +278,14 @@ function compact(n: number): number[] {
 }
 
 /**
- * A v0 message from instructions, the fee payer and the tables, as solana-sdk's v0::Message::try_compile lays it out:
- * every key once with its signer and writable flags merged; a key that signs or is a program id stays static; any
- * other key found in a table is loaded from the first table that holds it (that table's writable then readonly
- * indexes, in first-use order); static keys are writable signers (the payer first), readonly signers, writable
- * non-signers, readonly non-signers; loaded keys follow, every table's writable entries, then every table's readonly.
+ * A v0 message from instructions, the fee payer and the tables, laid out as @solana/web3.js 1.98.4's
+ * TransactionMessage.compileToV0Message does (src/message/compiled-keys.ts: keys in first-use order in a Map; the
+ * kit's test holds the bytes web3.js made for a recorded two-table build). solana-sdk's v0::Message::try_compile keeps
+ * its keys in a BTreeMap, so it orders them by address instead: a different, equally valid message. Every key once
+ * with its signer and writable flags merged; a key that signs or is a program id stays static; any other key found in
+ * a table is loaded from the first table that holds it (that table's writable then readonly indexes, in first-use
+ * order); static keys are writable signers (the payer first), readonly signers, writable non-signers, readonly
+ * non-signers; loaded keys follow, every table's writable entries, then every table's readonly.
  */
 function compileV0(payer: string, ixs: readonly SolanaApiInstruction[], blockhash: string, tables: readonly { address: string; table: SolanaLookupTable }[]): { message: Uint8Array; tablesUsed: string[] } {
   type Meta = { signer: boolean; writable: boolean; invoked: boolean };

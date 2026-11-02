@@ -342,3 +342,88 @@ test("the assembly refuses a blockhash or token program the device did not read"
   assert.throws(() => assembleSolanaSwap(reqOf(0), build, { ...chainOf(build), lastValidBlockHeight: 0 }));
   assert.throws(() => assembleSolanaSwap(reqOf(0), build, { ...chainOf(build), tokenProgram: SOLANA_ATA_PROGRAM }));
 });
+
+// ---- the compiler against @solana/web3.js, the pump curve caps, Token-2022 (Opus review of 4c4991e)
+
+type TwoTable = { name: string; side: "buy" | "sell"; wallet: string; mint: string; amount: string; body: string; accounts: Record<string, [Acc, Acc]>; blockhash: { blockhash: string; lastValidBlockHeight: number }; web3js: { version: string; message: string; flags: [string, boolean, boolean][] } };
+type Run = { wallet: string; mint: string; amount: string; body: string; accounts: Record<string, [Acc, Acc]>; blockhash: { blockhash: string; lastValidBlockHeight: number } };
+const X = JSON.parse(readFileSync(new URL("./fixtures/solana-builds.json", import.meta.url), "utf8")) as { twoTable: TwoTable[]; token2022buy: Run };
+const assembleRun = (r: Run, side: "buy" | "sell", build = parseSolanaJupiterBuild(JSON.parse(r.body))) => {
+  const req: SolanaBuildRequest = { side, wallet: r.wallet, token: r.mint, amount: BigInt(r.amount), slippageBps: 1000 };
+  const tables = tablesOf(r.accounts, build.tables);
+  const tx = assembleSolanaSwap(req, build, { blockhash: r.blockhash.blockhash, lastValidBlockHeight: r.blockhash.lastValidBlockHeight, tables, tokenProgram: r.accounts[r.mint]![0]!.owner }, { pick: () => 0 });
+  const v = checkSolanaQuote(tx.wire, { ...req, spendable: req.amount, minOut: 1n }, {
+    tables: Object.fromEntries(build.tables.map((t) => [t, [read(r.accounts[t]![0]), read(r.accounts[t]![1])] as const])),
+    mint: [read(r.accounts[r.mint]![0]), read(r.accounts[r.mint]![1])],
+    rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
+    simulations: [null, null],
+    reference: null,
+  });
+  return { req, build, tables, tx, v };
+};
+
+test("two recorded two-table builds compile to the exact bytes @solana/web3.js 1.98.4 made, with its signer and writable flag on every key", () => {
+  assert.equal(X.twoTable.length, 2);
+  for (const c of X.twoTable) {
+    const { tx, tables } = assembleRun(c, c.side);
+    assert.ok(tx.size <= SOLANA_MAX_TX_BYTES, c.name);
+    assert.equal(tx.tablesUsed.length, 2, c.name);
+    assert.equal(base64.encode(tx.message), c.web3js.message, c.name);
+    const dec = solanaDecodeTransaction(tx.wire);
+    const keys = solanaResolveKeys(dec.message, tables);
+    assert.deepEqual(keys.map((k) => [k.key, k.signer, k.writable]), c.web3js.flags, c.name);
+  }
+});
+
+test("a one-step pump.fun curve route gets the pump cap: 200,000 on a buy step, 150,000 on a sell step, and S8 passes", () => {
+  // the recorded buy's route_v2 data with its route plan set to one step of the given Swap variant (49 a pump buy, 50 a pump sell)
+  const withStep = (b: SolanaJupiterBuild, step: number): SolanaJupiterBuild => {
+    const d = Uint8Array.from(b.swap.data);
+    new DataView(d.buffer).setUint32(30, 1, true);
+    d[34] = step;
+    return { ...b, swap: { ...b.swap, data: d } };
+  };
+  for (const [i, step, cap] of [[0, 49, SOLANA_CU_LIMIT.pumpBuy], [2, 50, SOLANA_CU_LIMIT.pumpSell], [0, 7, SOLANA_CU_LIMIT.other]] as const) {
+    const build = withStep(goodBuild(i), step);
+    const tx = assembleSolanaSwap(reqOf(i), build, chainOf(build), { pick: () => 0 });
+    assert.equal(tx.cuLimit, cap, `step ${step}`);
+    const dec = solanaDecodeTransaction(tx.wire);
+    const keys = solanaResolveKeys(dec.message, chainOf(build).tables);
+    const limit = dec.message.instructions.find((x) => keys[x.programIndex]!.key === "ComputeBudget111111111111111111111111111111" && x.data[0] === 2)!;
+    assert.equal(new DataView(limit.data.buffer, limit.data.byteOffset).getUint32(1, true), cap);
+    const s8 = verdict(tx.wire, reqOf(i), build.tables).results.find((r) => r.id === "S8")!;
+    assert.ok(s8.ok, s8.detail);
+    assert.ok(s8.detail.includes(`cap ${cap}`), s8.detail);
+  }
+  assert.equal(SOLANA_CU_LIMIT.pumpBuy, 200_000);
+  assert.equal(SOLANA_CU_LIMIT.pumpSell, 150_000);
+});
+
+test("a Token-2022 token's buy keeps its output account under Token-2022, from Jupiter's setup or the device's own create", () => {
+  const r = X.token2022buy;
+  assert.equal(r.accounts[r.mint]![0]!.owner, SOLANA_TOKEN_2022_PROGRAM);
+  const out = solanaAta(r.wallet, r.mint, SOLANA_TOKEN_2022_PROGRAM);
+  const asIs = assembleRun(r, "buy");
+  const fails = asIs.v.results.filter((x) => FRAME.includes(x.id) && !x.ok).map((x) => `${x.id} ${x.detail}`);
+  assert.deepEqual(fails, []);
+  const built = parseSolanaJupiterBuild(JSON.parse(r.body));
+  const without = { ...built, setup: built.setup.filter((x) => !(x.program === SOLANA_ATA_PROGRAM && x.accounts[1]?.key === out)) };
+  assert.equal(without.setup.length, built.setup.length - 1);
+  const added = assembleRun(r, "buy", without);
+  assert.deepEqual(added.v.results.filter((x) => FRAME.includes(x.id) && !x.ok).map((x) => `${x.id} ${x.detail}`), []);
+  const dec = solanaDecodeTransaction(added.tx.wire);
+  const keys = solanaResolveKeys(dec.message, added.tables);
+  const creates = dec.message.instructions.filter((x) => keys[x.programIndex]!.key === SOLANA_ATA_PROGRAM).map((x) => [keys[x.accounts[1]!]!.key, keys[x.accounts[5]!]!.key]);
+  assert.ok(creates.some(([a, tp]) => a === out && tp === SOLANA_TOKEN_2022_PROGRAM), JSON.stringify(creates));
+  assert.ok(!creates.some(([a]) => a === solanaAta(r.wallet, r.mint, SOLANA_TOKEN_PROGRAM)));
+});
+
+test("uncapped from the start (the live check's uncapped shapes): one call without maxAccounts, never retried", async () => {
+  const s = stub([OK]);
+  const got = await fetchSolanaJupiterBuild(ORIGIN, R0, { fetch: s.f, uncapped: true });
+  assert.equal(got.uncapped, true);
+  assert.deepEqual(s.calls.map((c) => c.url), [`${ORIGIN}${SOLANA_JUPITER_BUILD_PROXY_PATH}?${solanaJupiterBuildQuery(R0, null)}`]);
+  const none = stub([NO_ROUTE, OK]);
+  await assert.rejects(fetchSolanaJupiterBuild(ORIGIN, R0, { fetch: none.f, uncapped: true }), (e: unknown) => e instanceof SolanaBuildError && e.code === "no_route");
+  assert.equal(none.calls.length, 1);
+});
