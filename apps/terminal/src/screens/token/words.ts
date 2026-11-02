@@ -4,7 +4,7 @@
 //
 // The owner's lists: the locked R5 prototype's own labels (research repo design/proto at design-lock-r5:
 // assets/token.js U.header and U.about, token-390.html's tiles, bar and timeframes) and owner-words-pass
-// (docs/owner-decisions.md:351).
+// (docs/owner-decisions.md:351), and the new draft words (owner 1 Nov 16:45Z, keep).
 
 export interface Word {
   text: string;
@@ -13,7 +13,6 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
-const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   mc: ok("MC", "R5 token.js U.header hd-mcLabel; token-390.html tile mc"),
@@ -28,9 +27,9 @@ export const WORDS = {
   buy: ok("Buy", "R5 token-390.html mb-buy (`Buy SYM`)"),
   chart: ok("Chart", "R5 token.js chart panel, the area's accessible name only (never drawn)"),
   retry: ok("Retry", "owner-words-pass (app-signpage-client)"),
-  loading: draft("Loading", "09-design-brief S7.1 skeleton: the page's accessible name only (never drawn); as Discover's"),
-  offline: draft("Offline", "09-design-brief S5.5 [draft copy: Offline], as Discover's error state"),
-  noToken: draft("No token", "card app-token-page: the empty state (no fixture or token by that name)"),
+  loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S7.1 skeleton: the page's accessible name only (never drawn); as Discover's"),
+  offline: ok("Offline", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.5 [draft copy: Offline], as Discover's error state"),
+  noToken: ok("No token", "owner 1 Nov 16:45Z, keep; drafted from card app-token-page: the empty state (no fixture or token by that name)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
