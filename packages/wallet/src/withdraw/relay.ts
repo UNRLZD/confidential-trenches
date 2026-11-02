@@ -12,11 +12,12 @@
 // - The send (relayWithdraw): POST /v1/withdraw with the request withdrawRequest made, as one fixed string of bytes,
 //   sent again unchanged and never re-proved (wallet.md l.990: a retry never re-signs). It is sent only while the
 //   note is RESERVED by exactly this attempt (its last context and deadline_ms are the body's: WU-06, nothing leaves
-//   before the store has it), and only while block time + WITHDRAW_SEND_MARGIN_MS is below deadline_ms (H3.4 check 9,
-//   markets.md l.1376-1377, 120 s since every request funds A). The answer counts only as one of the frozen codes
-//   with its own HTTP status, or 200 {tx_hash, state: "submitted"}; anything else is no answer. A busy or down answer (rate_limited, upstream,
-//   index_behind, relayer_low, token_halted, no answer) sends the same bytes again on the next round; submitted or
-//   in_flight waits RELAY_RESEND_MS for the pages before the same bytes go again, so a relayer that says submitted and
+//   before the store has it), and only while the pages' block time + WITHDRAW_SEND_MARGIN_MS is below deadline_ms
+//   (H3.4 check 9, markets.md l.1376-1377, 120 s since every request funds A), so nothing is sent while the two RPCs
+//   disagree. The answer counts only as one of the frozen codes with its own HTTP status, or 200 {tx_hash, state:
+//   "submitted"}; anything else is no answer. A busy or down answer (rate_limited, upstream, index_behind,
+//   relayer_low, token_halted, no answer) sends the same bytes again on the next round; submitted or in_flight waits
+//   RELAY_RESEND_MS for the pages before the same bytes go again, so a relayer that says submitted and
 //   drops the call costs time, never the withdrawal (route 1, markets.md l.1511-1517). withdraw_failed ends the
 //   sends and names route 2, self-submit (l.1518-1524: the exit tool, from the 12 words); every other code ends them.
 // - Confirm first (wallet.md l.424's rule for deposits, here for the change; §2.3 "own" l.227-230): the change
@@ -28,12 +29,18 @@
 //   this device recorded on the note (l.227-228); another device's spend of the note still makes this seed's change
 //   note j of label l (its secrets come from (l, j), wallet.md l.176-178), so it is recorded too, with own false: the
 //   caller then signs nothing from A (l.231-234).
-// - Nothing landed: only once the newest final block's time (the lower of two RPCs') is past deadline_ms and the pages,
-//   read at or above that block and equal on both RPCs, hold no spend of the note, does the note go RESERVED -> UNSPENT
-//   (the store's own rule, wallet.md l.201; the vault refuses a withdrawal past its deadline_ms, V@93b827c:354). While
+// - Nothing landed: only once the pages, equal on both RPCs at one block, hold no spend of the note and that very block's
+//   own time is past deadline_ms does the note go RESERVED -> UNSPENT (the store's own rule, wallet.md l.201; the vault
+//   refuses a withdrawal past its deadline_ms, V@93b827c:354). The time is the header.timestamp_nanosec of the block the
+//   pages were read at (vaultSync's height), read on both RPCs, its hash the pages' block hash on both and its time equal
+//   on both: any receipt the vault took ran in an earlier block, so its spend is in those pages. No other block's time
+//   counts, so an RPC that reports a low height with a late time frees nothing. The spends are read from the vault's
+//   first row on every call (vaultSyncStart), never from a caller's cursor, so no spend can sit before the read. While
 //   the RPCs disagree, or one is down, nothing is concluded either way, past the deadline too. A spend whose change
 //   leaf is not this seed's (no leaf at its index in the rows read, or another commitment) records nothing and frees
 //   nothing: the note stays RESERVED for restore's walk.
+// - The two RPCs are a release pair (../deposit/account.ts nearPairNetwork: one FastNEAR URL and the dRPC URL of the
+//   network), so one operator never counts as two; the vault is the release's for that network, never an argument.
 // - The seed is copied and the copy zeroed before the first await. Nothing here logs. The relayer gets the request's
 //   body alone: the withdrawal data, the proof and its public signals, none of which names another note or a key.
 //
@@ -44,6 +51,7 @@ import {
   HELPER_CODE_STATUS,
   HELPER_COMMON_CODES,
   HELPER_FETCH_INIT,
+  HELPER_RPC_METHODS,
   HELPER_V1_PATHS,
   HELPER_WITHDRAW_CODES,
   type HelperCommonCode,
@@ -56,6 +64,7 @@ import {
   type VaultSyncRpc,
 } from "@blindfill/kit";
 import { base58 } from "@scure/base";
+import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, nearRpc, RPC_TIMEOUT_MS } from "../deposit/account.ts";
 import { noteCommitment, noteSecrets } from "../notes/secrets.ts";
 import { type NoteRecord, type NoteStore, refKey } from "../notes/store.ts";
 import { blockTimeMsOf, WITHDRAW_SEND_MARGIN_MS, type WithdrawRequest } from "./request.ts";
@@ -67,7 +76,7 @@ export const WITHDRAW_URL = `${RELEASE_HELPER}/v1/withdraw`;
 /** Both answers are small (the frozen limits are 1 KB for the fee path); a longer one is refused unread. */
 export const RELAY_ANSWER_MAX_BYTES = 1_024;
 export const RELAY_TIMEOUT_MS = 10_000;
-/** The wait between rounds: one block-time read, one pages read, at most one send. */
+/** The wait between rounds: one pages read and its block's time, at most one send. */
 export const RELAY_POLL_MS = 1_000;
 /** After submitted or in_flight, the same bytes go again only once the pages have shown nothing for this long. */
 export const RELAY_RESEND_MS = 30_000;
@@ -177,22 +186,38 @@ const AGAIN = new Set<string>(["rate_limited", "upstream", "index_behind", "rela
 // The relayer carries it or has: the pages settle it; the same bytes go again only after RELAY_RESEND_MS.
 const CARRIED = new Set<string>(["in_flight"]);
 
+/** A NEAR provider for the pages (`query`) and for one block's header (`block`), named by its exact URL. */
+export interface RelayRpc extends VaultSyncRpc {
+  block(params: { block_id: number }, signal?: AbortSignal): Promise<unknown>;
+}
+const BLOCK_METHOD = "block";
+if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(BLOCK_METHOD)) throw new Error(`"${BLOCK_METHOD}" is not on the kit's NEAR method list`);
+
+/** A provider by URL, for both `query` (nearRpc) and `block`. A status other than 200 or no answer in time throws. */
+export function relayRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): RelayRpc {
+  const q = nearRpc(url, fetchFn, timeoutMs);
+  return {
+    name: q.name,
+    query: (params) => q.query(params),
+    async block(params, signal) {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: BLOCK_METHOD, params }),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    },
+  };
+}
+
 export type RelayDeps = {
   notes: NoteStore;
-  /** The release's vault. */
-  vault: string;
-  /** Two RPCs of different operators, for the vault's pages. */
-  rpcs: readonly [VaultSyncRpc, VaultSyncRpc];
-  /**
-   * The newest final block on the same two RPCs: the lower height and the lower header.timestamp_nanosec (a decimal
-   * string; never header.timestamp, never the device clock).
-   */
-  newestBlock: (signal?: AbortSignal) => Promise<{ height: number; timestampNanosec: string }>;
-  /**
-   * Where the pages are read from: a cursor a sync returned at or before the proof's tree read (every spend and leaf
-   * of this withdrawal comes after it). vaultSyncStart(vault), the whole pages, unless given.
-   */
-  cursor?: VaultSyncCursor;
+  /** The release's network: its vault and its RPC pair. */
+  network: NearNetwork;
+  /** The network's release pair (nearPairNetwork), for the vault's pages and the time of the block they are read at. */
+  rpcs: readonly [RelayRpc, RelayRpc];
   fetchFn?: typeof fetch;
   /** The wait between rounds; tests replace it. */
   sleep?: (ms: number) => Promise<void>;
@@ -227,7 +252,11 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
   } finally {
     seed.fill(0);
   }
-  const { notes, vault, rpcs, newestBlock, signal } = deps;
+  const { notes, network, rpcs, signal } = deps;
+  if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new WithdrawRelayRefused("input", `unknown network ${String(network)}`);
+  const vault = NEAR_NETWORKS[network].vault;
+  if (vault === null) throw new WithdrawRelayRefused("input", `the release names no vault on ${network}`);
+  if (nearPairNetwork(rpcs) !== network || !rpcs.every((r) => typeof r.block === "function")) throw new WithdrawRelayRefused("input", nearPairRule(network));
   const fetchFn = deps.fetchFn ?? fetch;
   const pollMs = deps.pollMs ?? RELAY_POLL_MS;
   const resendRounds = Math.max(1, Math.ceil((deps.resendMs ?? RELAY_RESEND_MS) / pollMs));
@@ -251,7 +280,7 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
   if (note.state !== "RESERVED" || last === undefined || last.context !== signals[7] || last.deadlineMs !== BigInt(deadline) || note.deadlineMs !== BigInt(deadline))
     throw new WithdrawRelayRefused("note", "the note is not RESERVED by this attempt: nothing of it is sent");
 
-  let cursor: VaultSyncCursor = deps.cursor ?? vaultSyncStart(vault);
+  let cursor: VaultSyncCursor = vaultSyncStart(vault); // every spend from the first: none can sit before the read
   const leaves = new Map<bigint, bigint>(); // leaf index -> leaf, every leaf both RPCs gave since the cursor
   let sending = true;
   let waitRounds = 0;
@@ -259,27 +288,17 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
   let lastAnswer: string | null = null;
   for (;;) {
     signal?.throwIfAborted();
-    // 1. Block time first, then the pages at or above that block: a spend that can still land is in them.
-    let block: { height: number; timeMs: bigint } | null = null;
-    try {
-      const b = await newestBlock(signal);
-      if (!Number.isSafeInteger(b.height) || b.height <= 0) throw new Error("not a height");
-      block = { height: b.height, timeMs: BigInt(blockTimeMsOf(b.timestampNanosec)) };
-    } catch {
-      signal?.throwIfAborted();
-    }
+    // 1. The pages on both RPCs at one block, then that same block's time on both.
     let spend: VaultSpendRow | undefined;
-    let read = false;
-    if (block !== null) {
-      try {
-        const s = await vaultSync({ vault, rpcs, cursor: { ...cursor, height: Math.max(cursor.height, block.height) }, lists: ["spends", "leaves"], ...(signal ? { signal } : {}) });
-        s.leaves.forEach((x, k) => leaves.set(BigInt(cursor.leaves + k), x));
-        spend = s.spends.find((r) => r.nullifierHash === nullifierHash);
-        cursor = s.cursor;
-        read = true;
-      } catch {
-        signal?.throwIfAborted(); // one RPC down, behind or disagreeing: nothing is concluded this round
-      }
+    let timeMs: bigint | null = null;
+    try {
+      const s = await vaultSync({ vault, rpcs, cursor, lists: ["spends", "leaves"], ...(signal ? { signal } : {}) });
+      s.leaves.forEach((x, k) => leaves.set(BigInt(cursor.leaves + k), x));
+      spend = s.spends.find((r) => r.nullifierHash === nullifierHash);
+      cursor = s.cursor;
+      timeMs = await blockTimeAt(rpcs, s.height, s.blockHash, signal);
+    } catch {
+      signal?.throwIfAborted(); // one RPC down, behind or disagreeing: nothing is concluded this round
     }
 
     // 2. Confirm first: the change is written only from the pages both RPCs gave.
@@ -292,10 +311,10 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
       return { kind: "landed", own, change: await recordChange(notes, note, change, precommitment, leaf), spend };
     }
 
-    // 3. Nothing landed: block time past deadline_ms, and the pages read at or above that block hold no spend.
-    if (read && block!.timeMs > BigInt(deadline)) {
+    // 3. Nothing landed: the pages hold no spend, and the time of the block they were read at is past deadline_ms.
+    if (timeMs !== null && timeMs > BigInt(deadline)) {
       try {
-        const freed = await notes.move(noteId, "RESERVED", "UNSPENT", { blockTimeMs: block!.timeMs });
+        const freed = await notes.move(noteId, "RESERVED", "UNSPENT", { blockTimeMs: timeMs });
         return { kind: "expired", note: freed, route, lastAnswer };
       } catch (e) {
         const now = await notes.get(noteId); // another tab freed it first, or a spend it read settled it
@@ -305,7 +324,7 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
     }
 
     // 4. The send: the same bytes, while the relayer's check 9 still takes them.
-    if (sending && block !== null && block.timeMs + BigInt(WITHDRAW_SEND_MARGIN_MS) < BigInt(deadline) && waitRounds <= 0) {
+    if (sending && timeMs !== null && timeMs + BigInt(WITHDRAW_SEND_MARGIN_MS) < BigInt(deadline) && waitRounds <= 0) {
       try {
         const a = await sendWithdraw(bytes, fetchFn, signal);
         lastAnswer = a.ok ? "submitted" : a.code;
@@ -321,6 +340,21 @@ export async function relayWithdraw(seed64: Uint8Array, req: WithdrawRequest, de
     waitRounds -= 1;
     await sleep(pollMs);
   }
+}
+
+// The time of block `height` on both RPCs, in ms: its header names that height and `hash` on each, and the two
+// timestamp_nanosec strings are equal. Anything else throws.
+async function blockTimeAt(rpcs: readonly [RelayRpc, RelayRpc], height: number, hash: string, signal?: AbortSignal): Promise<bigint> {
+  const one = async (r: RelayRpc): Promise<string> => {
+    const a = await r.block({ block_id: height }, signal);
+    const header = isObj(a) && a.error === undefined && isObj(a.result) ? a.result.header : undefined;
+    if (!isObj(header) || header.height !== height || header.hash !== hash || typeof header.timestamp_nanosec !== "string")
+      throw new Error(`${r.name}: block ${height}: not the pages' block`);
+    return header.timestamp_nanosec;
+  };
+  const [x, y] = await Promise.all([one(rpcs[0]), one(rpcs[1])]);
+  if (x !== y) throw new Error(`block ${height}: the RPCs' times differ`);
+  return BigInt(blockTimeMsOf(x));
 }
 
 // ---------- the change note ----------

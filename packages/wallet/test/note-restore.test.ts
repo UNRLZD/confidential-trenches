@@ -17,6 +17,7 @@ import { openNoteStore, refKey, type Leaf, type NoteRecord } from "../src/notes/
 import { RESTORE_GAP, RESTORE_LANES, restoreNotes, restorePages, walkLane, writeRestored, type NoteRestore } from "../src/notes/restore.ts";
 import type { VaultDepositRow, VaultSpendRow } from "@blindfill/kit";
 import { openWalletStore } from "../src/store/index.ts";
+import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 
 const VAULT = "vault.bf-restore.testnet";
 const TOKEN = "usdc.fakes.testnet";
@@ -124,6 +125,9 @@ type View = ReturnType<Vault["views"]>;
 type Sent = { rpc: string; params: Record<string, unknown> };
 type Lie = (method: string, view: unknown) => unknown;
 const H = 275_800_000;
+// the testnet release pair, named by URL as nearRpc names a provider (restore refuses any other pair)
+const RPC_A = NEAR_NETWORKS.testnet.fastnear[0];
+const RPC_B = NEAR_NETWORKS.testnet.drpc;
 // config() as lib.rs's Config writes it (the fields restore reads: asset and scope)
 const config = (token = TOKEN, scope = SCOPE) => ({ version: "blindfill-vault 0.1.0 testnet", asset: token, scope: String(scope), max_tree_depth: 32, min_deposit: "1000000", max_relay_fee_bps: 5000, page_max: VAULT_CONSTANTS.PAGE_MAX });
 function rpcs(v: View, opts: { sent?: Sent[]; lie?: Lie; lieA?: Lie; finals?: [number, number]; config?: object; configFinalB?: number } = {}): [VaultSyncRpc, VaultSyncRpc] {
@@ -133,7 +137,7 @@ function rpcs(v: View, opts: { sent?: Sent[]; lie?: Lie; lieA?: Lie; finals?: [n
       opts.sent?.push({ rpc: name, params: p });
       const method = p.method_name as string;
       const args = JSON.parse(atob(p.args_base64 as string)) as { from?: number; limit?: number };
-      const at = p.finality === "final" ? (p.method_name === "config" && name === "rpc-b" && opts.configFinalB !== undefined ? opts.configFinalB : final) : (p.block_id as number);
+      const at = p.finality === "final" ? (p.method_name === "config" && name === RPC_B && opts.configFinalB !== undefined ? opts.configFinalB : final) : (p.block_id as number);
       let view: unknown;
       if (method === "config") view = opts.config ?? config();
       else if (method === "state_tree" || method === "label_tree") view = v[method];
@@ -147,7 +151,7 @@ function rpcs(v: View, opts: { sent?: Sent[]; lie?: Lie; lieA?: Lie; finals?: [n
     },
   });
   const [fa, fb] = opts.finals ?? [H, H];
-  return [one("rpc-a", fa, opts.lieA), one("rpc-b", fb, opts.lie)];
+  return [one(RPC_A, fa, opts.lieA), one(RPC_B, fb, opts.lie)];
 }
 
 // ---------- the device's truth: every note it owns in the vault, as it wrote them ----------
@@ -670,7 +674,18 @@ test("the vault's config on both RPCs: a wrong token or scope is refused, the tw
   hang[1] = { name: b0.name, query: (p, sig) => (p.method_name === "config" ? (setTimeout(() => ctl.abort(new Error("stopped by the user")), 10), new Promise(() => {})) : b0.query(p, sig)) };
   await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: hang, gap: TEST_GAP, signal: ctl.signal }), /stopped by the user/);
   // an RPC whose final block, read after the pages, is below the block the pages were read at: refused
-  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { configFinalB: H - 1 }), gap: TEST_GAP }), /rpc-b: config: its final height .* is below the pages'/);
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v, { configFinalB: H - 1 }), gap: TEST_GAP }), /near-testnet\.drpc\.org: config: its final height .* is below the pages'/);
+});
+
+test("restore reads only a release pair: two hosts of one operator, or unnamed providers, are refused before any read", async () => {
+  const v = verifierOrder(rng(6)).v.views();
+  const sent: Sent[] = [];
+  const [a, b] = rpcs(v, { sent });
+  const as = (r: VaultSyncRpc, name: string): VaultSyncRpc => ({ name, query: r.query });
+  const net = NEAR_NETWORKS.testnet;
+  for (const pair of [[as(a, net.fastnear[0]), as(b, net.fastnear[1])], [as(a, "rpc-a"), as(b, "rpc-b")], [as(a, net.drpc), as(b, net.drpc)], [as(a, NEAR_NETWORKS.mainnet.fastnear[0]), b]] as [VaultSyncRpc, VaultSyncRpc][])
+    await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: pair, gap: TEST_GAP }), /exactly/);
+  assert.equal(sent.length, 0);
 });
 
 async function liveStore() {

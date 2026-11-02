@@ -44,6 +44,7 @@ import {
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { poseidon2 } from "poseidon-lite/poseidon2";
 import { poseidon3 } from "poseidon-lite/poseidon3";
+import { nearPairNetwork, nearPairRule } from "../deposit/account.ts";
 import { CHAINS, type Chain, masters, type SecondId } from "../derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "./secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "./store.ts";
@@ -92,7 +93,7 @@ export type RestoreArgs = {
   vault: string;
   /** the vault's token: the scope is computed from the vault and its token as the vault computes it */
   token: string;
-  /** two RPCs of different operators */
+  /** two RPCs of different operators: a network's release pair, each named by its URL (../deposit/account.ts nearPairNetwork) */
   rpcs: readonly [VaultSyncRpc, VaultSyncRpc];
   signal?: AbortSignal;
   /** tests only: RESTORE_GAP unless given */
@@ -106,6 +107,8 @@ export type RestoreArgs = {
 
 /** Steps 2 and 3: the vault's pages on two RPCs, then every note of this seed found in them. */
 export async function restoreNotes(a: RestoreArgs): Promise<NoteRestore> {
+  // two hosts of one operator are one read: a pair that is not a release pair is refused before any read
+  if (nearPairNetwork(a.rpcs) === null) throw new Error(nearPairRule());
   const scope = vaultScopeOf(keccak_256, a.vault, a.token);
   const s = await vaultSync({ vault: a.vault, rpcs: a.rpcs, cursor: vaultSyncStart(a.vault), lists: ["deposits", "spends", "leaves"], ...(a.signal ? { signal: a.signal } : {}) });
   if (s.leaves.length !== s.stateTree.size) throw new Error("the leaves read are not the whole state tree");

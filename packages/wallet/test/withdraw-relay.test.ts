@@ -13,11 +13,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
-import { type HelperWithdrawAnswer, type HelperWithdrawFeeAnswer, type VaultSyncRpc } from "@blindfill/kit";
+import { type HelperWithdrawAnswer, type HelperWithdrawFeeAnswer } from "@blindfill/kit";
+import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { askWithdrawFee, type RelayDeps, relayWithdraw, sendWithdraw, WITHDRAW_FEE_URL, WITHDRAW_URL, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
+import { askWithdrawFee, type RelayDeps, type RelayRpc, relayWithdraw, sendWithdraw, WITHDRAW_FEE_URL, WITHDRAW_URL, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
 import { type WithdrawRequest, WITHDRAW_SEND_MARGIN_MS, withdrawRequest } from "../src/withdraw/request.ts";
-import { argsFor, BLOCK_MS, closeVaults, RELAY_FEE, SEED, signalsProver, TOKEN, VAULT, type Vault, vaultWith } from "./withdraw-fixture.ts";
+import { argsFor, BLOCK_MS, closeVaults, RELAY_FEE, SEED, signalsProver, TOKEN, type Vault, vaultWith } from "./withdraw-fixture.ts";
 
 after(closeVaults);
 
@@ -85,46 +86,73 @@ test("the send: submitted and the frozen codes at their status are answers; anyt
 });
 
 // ---------- a model vault's pages on two RPCs ----------
-type Spend = { nh: bigint; withdrawn: bigint; newLeaf: number; context: bigint };
+// The testnet release pair, named by URL as nearRpc names a provider (relayWithdraw refuses any other pair).
+const NET = NEAR_NETWORKS.testnet;
+const RPC_A = NET.fastnear[0];
+const RPC_B = NET.drpc;
+type Spend = { nh: bigint; withdrawn: bigint; newLeaf: number; context: bigint; h: number };
+/** Blocks with their times; spends and leaves stamped with the block they landed in, served at any block. */
 class Chain {
   height = 175_000_000;
-  timeMs = BigInt(BLOCK_MS);
-  leaves: bigint[] = Array.from({ length: 8 }, (_, k) => BigInt(100 + k)); // the vault's leaves before this withdrawal
-  spends: Spend[] = [{ nh: 41n, withdrawn: 1_000_000n, newLeaf: 7, context: 43n }]; // another user's spend
-  hideLastFromB = false; // rpc-b has not got the newest spend yet, at the same height
+  times = new Map<number, bigint>([[this.height, BigInt(BLOCK_MS)]]);
+  leaves: { v: bigint; h: number }[] = Array.from({ length: 8 }, (_, k) => ({ v: BigInt(100 + k), h: 0 })); // the vault's leaves before this withdrawal
+  spends: Spend[] = [{ nh: 41n, withdrawn: 1_000_000n, newLeaf: 7, context: 43n, h: 0 }]; // another user's spend
+  status = "in_flight";
+  hideLastFromB = false; // rpc-b leaves out the newest spend and leaf, at the same block
   bDown = false;
-  land(nh: bigint, withdrawn: bigint, leaf: bigint, context: bigint): void {
-    this.spends.push({ nh, withdrawn, newLeaf: this.leaves.push(leaf) - 1, context });
+  lagB = 0; // rpc-b's final height this many blocks back
+  timeLieB = 0n; // rpc-b adds this to every block's time
+  hashLieB = false; // rpc-b names another hash for every block header
+  get timeMs(): bigint {
+    return this.times.get(this.height)!;
   }
-  views(hideLast: boolean) {
-    const leaves = hideLast ? this.leaves.slice(0, -1) : this.leaves;
-    const spends = hideLast ? this.spends.slice(0, -1) : this.spends;
+  set timeMs(t: bigint) {
+    this.times.set(this.height, t);
+  }
+  /** The next block, `step` ms later. */
+  next(step: bigint): void {
+    const t = this.timeMs;
+    this.height += 1;
+    this.timeMs = t + step;
+  }
+  land(nh: bigint, withdrawn: bigint, leaf: bigint, context: bigint): void {
+    this.leaves.push({ v: leaf, h: this.height });
+    this.spends.push({ nh, withdrawn, newLeaf: this.leaves.length - 1, context, h: this.height });
+  }
+  views(at: number, hideLast: boolean) {
+    let leaves = this.leaves.filter((l) => l.h <= at);
+    let spends = this.spends.filter((s) => s.h <= at);
+    if (hideLast) (leaves = leaves.slice(0, -1)), (spends = spends.slice(0, -1));
     const tree = (n: number) => ({ size: n, depth: n <= 1 ? 0 : Math.ceil(Math.log2(n)), root: "7" });
     return {
       state_tree: tree(leaves.length),
       label_tree: tree(0),
       spends: spends.map((s, index) => ({
         index, nullifier_hash: String(s.nh), withdrawn: String(s.withdrawn), new_leaf_index: s.newLeaf, refund_precommitment: "5",
-        refund_value: "0", refund_label: "0", refund_leaf_index: 0, status: "in_flight",
+        refund_value: "0", refund_label: "0", refund_leaf_index: 0, status: this.status,
         payer: "relayer.confidential.unrlzd.near", reserve: "0", recipient: "a".repeat(64), fee: "30000", context: String(s.context),
       })),
-      leaves: leaves.map(String),
-    };
+      leaves: leaves.map((l) => String(l.v)),
+    } as Record<string, unknown>;
   }
-  rpcs(): [VaultSyncRpc, VaultSyncRpc] {
-    const one = (name: string): VaultSyncRpc => ({
+  rpcs(names: [string, string] = [RPC_A, RPC_B]): [RelayRpc, RelayRpc] {
+    const one = (name: string, b: boolean): RelayRpc => ({
       name,
       query: async (p) => {
-        if (name === "rpc-b" && this.bDown) throw new Error("down");
-        const v = this.views(name === "rpc-b" && this.hideLastFromB) as Record<string, unknown>;
-        const method = p.method_name as string;
+        if (b && this.bDown) throw new Error("down");
+        const at = p.finality === "final" ? this.height - (b ? this.lagB : 0) : (p.block_id as number);
         const args = JSON.parse(atob(p.args_base64 as string)) as { from?: number; limit?: number };
-        let view = v[method];
+        let view = this.views(at, b && this.hideLastFromB)[p.method_name as string];
         if (Array.isArray(view)) view = view.slice(Math.min(args.from!, view.length), Math.min(args.from! + args.limit!, view.length));
-        return { jsonrpc: "2.0", id: "x", result: { block_hash: `hash-${this.height}`, block_height: this.height, logs: [], result: [...new TextEncoder().encode(JSON.stringify(view))] } };
+        return { jsonrpc: "2.0", id: "x", result: { block_hash: `hash-${at}`, block_height: at, logs: [], result: [...new TextEncoder().encode(JSON.stringify(view))] } };
+      },
+      block: async ({ block_id }) => {
+        if (b && this.bDown) throw new Error("down");
+        const t = this.times.get(block_id)! + (b ? this.timeLieB : 0n);
+        return { jsonrpc: "2.0", id: "x", result: { header: { height: block_id, hash: b && this.hashLieB ? `fork-${block_id}` : `hash-${block_id}`, timestamp: 0, timestamp_nanosec: (t * 1_000_000n).toString() } } };
       },
     });
-    return [one("rpc-a"), one("rpc-b")];
+    return [one(names[0], false), one(names[1], true)];
   }
 }
 
@@ -142,17 +170,15 @@ function depsOf(v: Vault, c: Chain, fetchFn: typeof fetch, script: (round: numbe
   let round = 0;
   return {
     notes: v.ns,
-    vault: VAULT,
+    network: "testnet",
     rpcs: c.rpcs(),
-    newestBlock: async () => ({ height: c.height, timestampNanosec: (c.timeMs * 1_000_000n).toString() }),
     fetchFn,
     pollMs: 1_000,
     resendMs: 5_000,
     sleep: async () => {
       round += 1;
       if (round > 5_000) throw new Error("the test ran away");
-      c.height += 1;
-      c.timeMs += step;
+      c.next(step);
       await script(round);
     },
     ...over,
@@ -199,16 +225,16 @@ test("confirm first: the relayer's submitted answer and one RPC's pages record n
 test("nothing landed: a lying RPC and a relayer that says submitted never record a change; past deadline_ms the note is UNSPENT", async () => {
   const { v, req } = await reserved();
   const c = new Chain();
-  // rpc-a lies: it shows this attempt's spend and change leaf; rpc-b, the honest one, never does
-  landOwn(c, req);
-  c.hideLastFromB = true;
   const sent: Sent[] = [];
   const deadline = BigInt(req.body.withdrawal.deadline_ms);
   let heldPast = 0;
-  const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.submitted, sent, c), async () => {
+  let lieFrom = 0n;
+  const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.submitted, sent, c), async (round) => {
     // while the RPCs disagree nothing is concluded, past the deadline too: the note stays RESERVED
     assert.equal((await v.ns.get(req.noteId))!.state, "RESERVED");
     assert.equal(await changeOf(v), undefined);
+    // from round 20, rpc-a lies: it shows this attempt's spend and change leaf; rpc-b, the honest one, never does
+    if (round === 20) (landOwn(c, req), (c.hideLastFromB = true), (lieFrom = c.timeMs));
     if (c.timeMs > deadline && ++heldPast === 3) (c.spends.pop(), c.leaves.pop(), (c.hideLastFromB = false)); // the lie ends
   }, 10_000n));
   assert.equal(heldPast, 3);
@@ -218,10 +244,10 @@ test("nothing landed: a lying RPC and a relayer that says submitted never record
   assert.equal(out.note.state, "UNSPENT");
   assert.equal(await changeOf(v), undefined);
   assert.ok(c.timeMs > deadline);
-  // the same bytes each time, every 5 s of rounds after submitted, never once check 9's margin is reached
+  // the same bytes each time, every 5 rounds after submitted, never while the RPCs disagree, never past check 9's margin
   assert.ok(sent.length >= 2);
   for (const s of sent) assert.equal(s.init.body, JSON.stringify(req.body));
-  for (const s of sent) assert.ok(s.timeMs + BigInt(WITHDRAW_SEND_MARGIN_MS) < deadline);
+  for (const s of sent) assert.ok(s.timeMs < lieFrom && s.timeMs + BigInt(WITHDRAW_SEND_MARGIN_MS) < deadline);
 });
 
 test("past deadline_ms, the note is freed only once both RPCs' pages are read at or above that block", async () => {
@@ -318,4 +344,113 @@ test("a stop by the caller ends the wait with nothing written; a later call find
   landOwn(c, req);
   const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.codes.in_flight!)));
   assert.equal(out.kind, "landed");
+});
+
+// ---------- the review's cases (one operator, a cursor, the block's time, the change another tab wrote) ----------
+test("two hosts of one operator are one read: a pair that is not the network's release pair is refused before any read or send", async () => {
+  const { v, req } = await reserved();
+  const c = new Chain();
+  const sent: Sent[] = [];
+  let reads = 0;
+  const counted = (pair: [RelayRpc, RelayRpc]): [RelayRpc, RelayRpc] =>
+    pair.map((r) => ({ name: r.name, query: (p: Record<string, unknown>) => (reads++, r.query(p)), block: (p: { block_id: number }) => (reads++, r.block(p)) })) as [RelayRpc, RelayRpc];
+  const pairs: [string, string][] = [
+    [NET.fastnear[0], NET.fastnear[1]], // FastNEAR's two hosts: one operator
+    [RPC_B, RPC_B],
+    ["rpc-a", "rpc-b"],
+    [NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc], // another network's pair
+  ];
+  for (const names of pairs) {
+    const deps = depsOf(v, c, helper(() => A.withdraw.submitted, sent), undefined, 1_000n, { rpcs: counted(c.rpcs(names)) });
+    await assert.rejects(relayWithdraw(SEED, req, deps), (e: WithdrawRelayRefused) => e.code === "input" && /exactly/.test(e.message), names.join(" + "));
+  }
+  // a provider with no block read is refused too
+  const noBlock = c.rpcs().map((r) => ({ name: r.name, query: r.query })) as unknown as [RelayRpc, RelayRpc];
+  await assert.rejects(relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.submitted, sent), undefined, 1_000n, { rpcs: noBlock })), WithdrawRelayRefused);
+  assert.equal(reads, 0);
+  assert.equal(sent.length, 0);
+  assert.equal((await v.ns.get(req.noteId))!.state, "RESERVED");
+});
+
+test("D1: a spend that landed and settled before the call is found (the spends are read from the first row)", async () => {
+  const { v, req } = await reserved();
+  const c = new Chain();
+  c.status = "settled";
+  landOwn(c, req);
+  for (let k = 0; k < 3; k++) c.land(BigInt(500 + k), 1_000_000n, BigInt(600 + k), BigInt(700 + k)); // later spends, settled too
+  const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.codes.in_flight!), undefined, 30_000n));
+  assert.equal(out.kind, "landed");
+  assert.equal((await v.ns.get(req.noteId))!.state, "SPENT");
+});
+
+test("D2: the time is the pages' own block's, on both RPCs: a lagging RPC that claims a later time frees nothing, and the spend is recorded", async () => {
+  for (const lie of [0n, 200_000n]) {
+    const { v, req } = await reserved();
+    const c = new Chain();
+    c.lagB = 100; // rpc-b's final height 100 blocks back: the pages are read there
+    c.timeLieB = lie; // and, in the second run, it says each block is 200 s later than it is
+    const D = BigInt(req.body.withdrawal.deadline_ms);
+    let landedAt = 0n;
+    const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.codes.in_flight!), async () => {
+      assert.equal((await v.ns.get(req.noteId))!.state, "RESERVED", `lie ${lie}: never freed while the spend can still show`);
+      if (landedAt === 0n && c.timeMs >= D - 5_000n) (landOwn(c, req), (landedAt = c.timeMs));
+    }));
+    assert.ok(landedAt > 0n && landedAt <= D, "the spend landed at or before deadline_ms: the vault took it");
+    assert.equal(out.kind, "landed", `lie ${lie}`);
+    assert.equal((await v.ns.get(req.noteId))!.state, "SPENT");
+  }
+});
+
+test("a change of the note another tab wrote first is taken only when it holds this very leaf", async () => {
+  const { v, req } = await reserved();
+  const c = new Chain();
+  const note = (await v.ns.get(req.noteId))!;
+  const P = noteSecrets(SEED, req.change).precommitment;
+  const label = note.leaf!.label;
+  const other = 1n; // another value, so another leaf, at another index
+  await assert.rejects(
+    relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.codes.in_flight!), async (round) => {
+      if (round === 1) await v.ns.add({ ref: req.change, scope: note.scope, precommitment: P, state: "UNSPENT", parent: note.id, leaf: { value: other, label, commitment: noteCommitment(other, label, P), leafIndex: 99n } });
+      if (round === 2) landOwn(c, req);
+    })),
+    /already in the store/,
+  );
+  assert.equal((await changeOf(v))!.leaf!.leafIndex, 99n, "the store keeps what it holds; nothing is taken as this spend's change");
+});
+
+test("the pages' block must be the same block on both RPCs: a header with another hash concludes nothing", async () => {
+  const { v, req } = await reserved();
+  const c = new Chain();
+  c.timeMs = BigInt(req.body.withdrawal.deadline_ms) + 1n; // already past
+  c.hashLieB = true;
+  let rounds = 0;
+  const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.submitted), async (round) => {
+    assert.equal((await v.ns.get(req.noteId))!.state, "RESERVED", "two blocks under one height: nothing is concluded");
+    if ((rounds = round) === 3) c.hashLieB = false;
+  }));
+  assert.equal(out.kind, "expired");
+  assert.equal(rounds, 3, "freed only once both RPCs name the pages' block");
+});
+
+test("busy without end: the same bytes every round up to check 9's margin, never past it", async () => {
+  const { v, req } = await reserved();
+  const c = new Chain();
+  const sent: Sent[] = [];
+  const deadline = BigInt(req.body.withdrawal.deadline_ms);
+  const out = await relayWithdraw(SEED, req, depsOf(v, c, helper(() => A.withdraw.codes.rate_limited!, sent, c), undefined, 10_000n));
+  assert.equal(out.kind, "expired");
+  const margin = BigInt(WITHDRAW_SEND_MARGIN_MS);
+  for (const s of sent) assert.ok(s.timeMs + margin < deadline, "never inside the margin");
+  assert.ok(sent.at(-1)!.timeMs + margin >= deadline - 10_000n, "sent up to the last round before the margin");
+  assert.equal(new Set(sent.map((s) => s.init.body)).size, 1);
+});
+
+test("a note HELD by this very attempt (its context and deadline written, the proof not yet RESERVED) is never sent", async () => {
+  const { v, req } = await reserved();
+  const other = v.notes.find((n) => n.id !== req.noteId && n.state === "UNSPENT")!;
+  const held = await v.ns.move(other.id, "UNSPENT", "HELD", { deadlineMs: BigInt(req.body.withdrawal.deadline_ms), context: req.body.public_signals[7] });
+  const sent: Sent[] = [];
+  const asHeld = { ...req, noteId: held.id, change: { ...req.change, l: held.leaf!.label } };
+  await assert.rejects(relayWithdraw(SEED, asHeld, depsOf(v, new Chain(), helper(() => A.withdraw.submitted, sent))), (e: WithdrawRelayRefused) => e.code === "note");
+  assert.equal(sent.length, 0);
 });
