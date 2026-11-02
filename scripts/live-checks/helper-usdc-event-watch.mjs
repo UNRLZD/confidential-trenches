@@ -20,11 +20,19 @@
 // MAX_LAG behind the providers' final reads that follow it; on a network it does not carry yet (mainnet until its vault
 // is deployed: the watch reads the vault's own block, so with no vault it never answers caught up), the kit's
 // not-caught-up answer, halted, vault_blocked and code_hash_ok null.
+// And the halt itself, seen once (PROBE): testnet's probe token, mainnet USDC's pinned code made with two pausers
+// (contracts/vault/deployments/testnet-usdc-probe.json), paused and unpaused at once by its pausers' multisig on
+// 2026-11-03. On FastNEAR's testnet archive (the one keyless archive), the four transactions read succeeded, and the
+// watch's own pausedAt rule (block h's header, ft_balance_of at its parent and at h by hash, the pin at both) reads
+// open then halted at the Pause's block and halted then open at the Unpause's. Every view is read through the helper's
+// own functions (apps/helper/src/token-status/status.ts viewOutcome, haltOf and pausedFrom), never a copy.
 //   node scripts/live-checks/helper-usdc-event-watch.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { haltOf, pausedFrom, viewOutcome } from "../../apps/helper/src/token-status/status.ts";
+export { haltOf, viewOutcome };
 
 const KEY = "helper-usdc-event-watch";
 export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
@@ -60,18 +68,20 @@ const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64");
 
-/** A view's outcome: { at, answer } for a value, { at, panic } for a panic, { error } for anything else. */
-export function viewOutcome(j) {
-  const r = j?.result;
-  if (r && Array.isArray(r.result)) return { at: r.block_height, answer: Buffer.from(r.result).toString("utf8") };
-  const text = JSON.stringify(j?.error ?? r?.error ?? j ?? null);
-  const m = /GuestPanic \{ panic_msg: \\*"([^"\\]*)/.exec(text) ?? /Smart contract panicked: ([^"\\]*)/.exec(text);
-  if (m) return { at: r?.block_height ?? j?.error?.cause?.info?.block_height, panic: m[1] };
-  return { error: text.slice(0, 200) };
-}
-
-/** The halt as one ft_balance_of answer says it: false for a balance, true for the paused panic, null for anything else. */
-export const haltOf = (o) => (o?.answer !== undefined && /^"\d+"$/.test(o.answer) ? false : o?.panic === "FiatToken: paused" ? true : null);
+/** The probe (header): its token and holder, the four transactions, the Pause's and the Unpause's blocks. */
+export const PROBE = {
+  token: "bf-usdc-20261102t164926.testnet", // gitleaks:allow (contracts/vault/deployments/testnet-usdc-probe.json)
+  holder: "holder.bf-usdc-20261102t164926.testnet", // gitleaks:allow
+  archive: "https://archival-rpc.testnet.fastnear.com",
+  txs: [
+    { hash: "GfFB4jfhviTTj4xQd3tLPLBKRSCbGZjwaLGsdRTeL8fK", signer: "pauser.bf-usdc-20261102t164926.testnet", what: "Pause: create and approve request 3" }, // gitleaks:allow
+    { hash: "3GXgvpDwGpf8v9j5NerAGUWdbYFqxatvueR7X86ZgPth", signer: "pauser2.bf-usdc-20261102t164926.testnet", what: "Pause: approve and execute request 3" }, // gitleaks:allow
+    { hash: "2eUSm5iLg8k8DRkSW444jWCWk7ebHsNue8D4Uyi3XmwZ", signer: "pauser.bf-usdc-20261102t164926.testnet", what: "Unpause: create and approve request 4" }, // gitleaks:allow
+    { hash: "DoQYjLCp6rwwxyHt4hiJXDy2pupUDETeg1zpDA9Tfmni", signer: "pauser2.bf-usdc-20261102t164926.testnet", what: "Unpause: approve and execute request 4" }, // gitleaks:allow
+  ],
+  paused: 275929377,
+  open: 275929392,
+};
 
 export function judge(run) {
   const lines = [];
@@ -112,6 +122,20 @@ export function judge(run) {
     } else {
       say(hb?.caught_up === false && hb.halted === null && hb.vault_blocked === null && hb.code_hash_ok === null, `[${net}] helper, not carried yet: caught_up ${show(hb?.caught_up)}, halted, vault_blocked and code_hash_ok null`);
     }
+  }
+  // the probe: the halt seen once, on FastNEAR's testnet archive, by the watch's own rule
+  const pr = run.probe;
+  for (const t of PROBE.txs) {
+    const r = pr?.txs?.[t.hash];
+    say(r?.final === "FINAL" && r?.ok === true, `[testnet] ${PROBE.archive} ${t.what} ${t.hash}: ${show(r?.final)}, ${r?.ok ? "succeeded" : show(r?.status)}`);
+  }
+  for (const [name, h, want] of [["Pause", PROBE.paused, [false, true]], ["Unpause", PROBE.open, [true, false]]]) {
+    const b = pr?.blocks?.[h];
+    const pair = [b?.before, b?.at];
+    const halts = pair.map((o) => haltOf(o));
+    const ofBlock = b?.height === h && b?.before?.block_hash === b?.prev_hash && b?.at?.block_hash === b?.hash;
+    const pinned = b?.code?.before === PIN && b?.code?.at === PIN;
+    say(ofBlock && pinned && halts[0] === want[0] && halts[1] === want[1] && pausedFrom(pair, pair) === true, `[testnet] ${PROBE.archive} the ${name}'s block ${h}: ft_balance_of(${PROBE.holder}) at its parent ${halts[0] ? "halted" : halts[0] === false ? "open" : "not known"}, at the block ${halts[1] ? "halted" : halts[1] === false ? "open" : "not known"}; the pin at both ${pinned}; answers of the blocks asked ${ofBlock}; pausedAt ${show(pausedFrom(pair, pair))}`);
   }
   // mainnet: a view at a height equals the event history
   const h = run.history;
@@ -171,7 +195,7 @@ const call = (token, method, args, at) => ({ request_type: "call_function", ...a
 
 /** Everything the check reads; the code is kept as its digest, never its 321 KB. */
 export async function read(fetchFn = fetch, sleep = wait, base = BASE) {
-  const run = { readAt: new Date().toISOString(), base, helper: {}, nets: {}, history: {} };
+  const run = { readAt: new Date().toISOString(), base, helper: {}, nets: {}, history: {}, probe: { txs: {}, blocks: {} } };
   for (const [net, { token, pair, watched }] of Object.entries(NETS)) {
     // the helper's answer first, so the providers' final reads after it bound how far it trails
     const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/token-status?token=${encodeURIComponent(token)}`, { method: "GET", redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" }, signal: AbortSignal.timeout(30000) });
@@ -226,6 +250,22 @@ export async function read(fetchFn = fetch, sleep = wait, base = BASE) {
   if (rec.blocklist && rec.unblocklist) {
     for (const at of [rec.blocklist.height - 1, rec.blocklist.height, rec.unblocklist.height - 1, rec.unblocklist.height]) {
       h.views.push(viewOutcome(await post(fetchFn, ARCHIVAL, "query", call(USDC, "is_blocklisted", { account_id: NETS.mainnet.watched }, { block_id: at }), sleep)));
+    }
+  }
+  // the probe on FastNEAR's testnet archive: each transaction's outcome; each switch block's header, then ft_balance_of
+  // and the code at its parent and at it, by hash, each answer kept with the block hash it names
+  for (const t of PROBE.txs) {
+    const st = (await post(fetchFn, PROBE.archive, "EXPERIMENTAL_tx_status", { tx_hash: t.hash, sender_account_id: t.signer, wait_until: "NONE" }, sleep))?.result;
+    run.probe.txs[t.hash] = { final: st?.final_execution_status, ok: st?.status !== undefined && Object.hasOwn(st.status, "SuccessValue"), status: st?.status };
+  }
+  for (const h of [PROBE.paused, PROBE.open]) {
+    const head = (await post(fetchFn, PROBE.archive, "block", { block_id: h }, sleep))?.result?.header;
+    const b = (run.probe.blocks[h] = { height: head?.height, hash: head?.hash, prev_hash: head?.prev_hash, code: {} });
+    if (typeof head?.hash !== "string" || typeof head?.prev_hash !== "string") continue;
+    for (const [k, id] of [["before", head.prev_hash], ["at", head.hash]]) {
+      const j = await post(fetchFn, PROBE.archive, "query", call(PROBE.token, "ft_balance_of", { account_id: PROBE.holder }, { block_id: id }), sleep);
+      b[k] = { ...viewOutcome(j), block_hash: j?.result?.block_hash };
+      b.code[k] = (await post(fetchFn, PROBE.archive, "query", { request_type: "view_account", block_id: id, account_id: PROBE.token }, sleep))?.result?.code_hash;
     }
   }
   return run;

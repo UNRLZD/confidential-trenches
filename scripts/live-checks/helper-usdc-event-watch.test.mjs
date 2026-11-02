@@ -1,6 +1,7 @@
 // node --test scripts/live-checks/helper-usdc-event-watch.test.mjs: the live check replays recorded runs
-// (helper-usdc-event-watch.answers.json). good: the helper at 66e1cbb run locally with testnet carried, and mainnet USDC
-// and the testnet token on FastNEAR and dRPC, the indexer and the archival provider, on 2026-11-03: PASS.
+// (helper-usdc-event-watch.answers.json). good: the helper at a3fb4a3 run locally with testnet carried, and mainnet USDC
+// and the testnet token on FastNEAR and dRPC, the indexer and the archival provider, and the probe's halted-then-open
+// run on FastNEAR's testnet archive, on 2026-11-03: PASS.
 // bad_deployed_before: the deployed helper at 350a7db, whose watch never answered caught up: FAIL on that line alone.
 // bad_provider_mismatch: dRPC's is_blocklisted answers
 // true where FastNEAR's answers false: FAIL on that line alone. bad_history_mismatch: the archival view at the blocklist's
@@ -11,18 +12,21 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { haltOf, judge, NETS, read, viewOutcome } from "./helper-usdc-event-watch.mjs";
+import { haltOf, judge, NETS, PROBE, read, viewOutcome } from "./helper-usdc-event-watch.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-usdc-event-watch.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const copy = (o) => JSON.parse(JSON.stringify(o));
 const DRPC = NETS.mainnet.pair[1];
+// the recorded bad runs were read before the probe ran (2026-11-03); each is judged with the good run's probe reads, so
+// its own fault stays the one line that fails
+for (const k of ["bad_deployed_before", "bad_provider_mismatch", "bad_history_mismatch"]) A[k].probe ??= A.good.probe;
 
 test("recorded good run: both networks' code, halt, block and code hash on two providers, and the history: PASS", () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 33);
+  assert.equal(r.lines.length, 39);
   assert.ok(r.lines.includes("ok  [testnet] helper: caught_up true, halted false, vault_blocked false, code_hash_ok true, code_hash the pin"));
 });
 
@@ -61,6 +65,22 @@ test("recorded bad run, a history mismatch: the view at the blocklist's block di
   assert.match(bad(r)[0], /^BAD \[mainnet\] is_blocklisted read at \[99022746,99022747,99023052,99023053\] answers \["false","false","true","false"\]/);
 });
 
+test("made from the good run, the probe: never halted, another code, a failed transaction, an answer of another block, not read: each FAIL on its line", () => {
+  const atPause = (f) => {
+    const r = copy(A.good);
+    f(r.probe.blocks[PROBE.paused], r);
+    return bad(judge(r));
+  };
+  assert.deepEqual(atPause((b) => (b.at = { ...b.before, block_hash: b.hash })).map((l) => l.slice(0, 80)), [`BAD [testnet] ${PROBE.archive} the Pause's block ${PROBE.paused}`.slice(0, 80)]);
+  assert.equal(atPause((b) => (b.code.at = "GT71B8i42Z2xegTKpA6TUJQYghRqZfyJUNJG6rKf21DT")).length, 1);
+  assert.equal(atPause((b) => (b.at.block_hash = b.prev_hash)).length, 1);
+  assert.equal(atPause((b) => (b.at = { other: true })).length, 1);
+  assert.equal(atPause((_, r) => (r.probe.txs[PROBE.txs[1].hash].ok = false)).length, 1);
+  const none = copy(A.good);
+  delete none.probe;
+  assert.equal(bad(judge(none)).length, PROBE.txs.length + 2);
+});
+
 test("made from the good run: halted, an unknown halt, providers far apart, a missing network: each FAIL", () => {
   const halted = copy(A.good);
   halted.nets.testnet.state["https://near-testnet.drpc.org"].halt = { at: 275916885, panic: "FiatToken: paused" };
@@ -76,15 +96,15 @@ test("made from the good run: halted, an unknown halt, providers far apart, a mi
   assert.ok(bad(judge(missing)).includes("BAD [testnet] not read"));
 });
 
-test("a view's outcome: a balance is not halted, USDC's paused panic is, any other error is not known", () => {
-  // the shapes providers answer: a value, the panic inside an error object (sandbox run 20261026T171345Z), the panic as a
-  // result.error string (D48's MethodNotFound came back this way)
+test("a view's outcome, by the helper's own functions (status.ts): a balance is not halted, USDC's paused panic is, any other answer is not known", () => {
+  // the shapes: a value; the panic as a result.error string, as FastNEAR and dRPC answer it (read 2026-11-02); the panic
+  // inside a top-level error object (a sandbox's shape, 20261026T171345Z): not a provider's answer, so not known, as the
+  // watch holds on it
   const balance = viewOutcome({ result: { block_height: 5, result: [...Buffer.from('"20000"')] } });
   assert.deepEqual(balance, { at: 5, answer: '"20000"' });
   assert.equal(haltOf(balance), false);
   const panicked = viewOutcome({ error: { cause: { name: "CONTRACT_EXECUTION_ERROR", info: { block_height: 6 } }, data: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })' } });
-  assert.deepEqual(panicked, { at: 6, panic: "FiatToken: paused" });
-  assert.equal(haltOf(panicked), true);
+  assert.equal(haltOf(panicked), null);
   const inResult = viewOutcome({ result: { block_height: 7, logs: [], error: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })' } });
   assert.equal(haltOf(inResult), true);
   assert.equal(haltOf(viewOutcome({ result: { block_height: 8, error: "wasm execution failed with error: MethodResolveError(MethodNotFound)" } })), null);
@@ -105,6 +125,21 @@ test("read() through a stub provider: it records each read's outcome, and a wasm
       return json({ txns: [{ receipt_id: t.receipt_id, transaction_hash: t.tx, predecessor_account_id: t.signer, receipt_block: { block_height: t.height }, receipt_outcome: { status: true }, actions: [{ method: m, args: JSON.stringify({ account_id: t.account }) }] }] });
     }
     const { method, params: p } = JSON.parse(init.body);
+    // the probe on the archive: its transactions, its switch blocks' headers, and its views by block hash
+    const probe = Object.values(A.good.probe.blocks);
+    if (method === "EXPERIMENTAL_tx_status" && PROBE.txs.some((t) => t.hash === p.tx_hash)) return json({ result: { final_execution_status: "FINAL", status: { SuccessValue: "" } } });
+    if (method === "block") {
+      const b = A.good.probe.blocks[p.block_id];
+      return json({ result: { header: { height: b.height, hash: b.hash, prev_hash: b.prev_hash } } });
+    }
+    const side = probe.flatMap((b) => [["before", b.prev_hash, b], ["at", b.hash, b]]).find(([, h]) => h === p.block_id);
+    if (side) {
+      const [k, hash, b] = side;
+      if (p.request_type === "view_account") return json({ result: { code_hash: b.code[k], block_hash: hash, block_height: 1 } });
+      const o = b[k];
+      const panic = 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "' + o.panic + '" })';
+      return json({ result: { block_height: o.at, block_hash: hash, ...(o.panic !== undefined ? { error: panic } : { result: [...Buffer.from(o.answer)] }) } });
+    }
     if (method === "EXPERIMENTAL_tx_status") {
       const log = Object.values(A.good.history.logs).find((l) => A.good.history.indexer[JSON.parse(l.log.slice(11)).event][0].tx === p.tx_hash);
       return json({ result: { receipts_outcome: [{ id: log.receipt_id, outcome: { executor_id: log.executor, logs: [log.log] } }] } });
