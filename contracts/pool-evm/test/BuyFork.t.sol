@@ -32,6 +32,9 @@ abstract contract BuyForkBase is BuyBase {
   function setUp() public {
     (string memory _rpc, string memory _set, uint256 _block) = _chain();
     vm.createSelectFork(_rpc, _block);
+    // Foundry 1.8 loads the block's coinbase account (warm since Shanghai) and 1.7 does not: read it here, so the
+    // recording holds it for either
+    emit log_named_uint('coinbase balance', block.coinbase.balance);
     // the chain's own Poseidon, at the address and with the code the pool requires
     assertEq(PoseidonT3.DEPLOYED.codehash, PoseidonT3.CODEHASH);
     assertEq(PoseidonT4.DEPLOYED.codehash, PoseidonT4.CODEHASH);

@@ -66,6 +66,9 @@
   "eth_getBalance [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x32f5690\"]": {
    "result": "0x0"
   },
+  "eth_getBalance [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x32f5690\"]": {
+   "result": "0x0"
+  },
   "eth_getBlockByNumber [\"0x32f5690\",false]": {
    "result": {
     "baseFeePerGas": "0x4c4b40",
@@ -290,6 +293,9 @@
   "eth_getCode [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x32f5690\"]": {
    "result": "0xef01008a67b5020ee254ef48e3b6a04927f39baf7e408a"
   },
+  "eth_getCode [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x32f5690\"]": {
+   "result": "0x"
+  },
   "eth_getStorageAt [\"0x00000000000000000000000000000000b1f1f001\",\"0x0\",\"0x32f5690\"]": {
    "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
   },
@@ -395,6 +401,9 @@
   "eth_getStorageAt [\"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913\",\"0x10d6a54a4754c8869d6886b5f5d7fbfa5b4522237ea5c60d11bc4e7a1ff9390b\",\"0x32f5690\"]": {
    "result": "0x0000000000000000000000004fc7850364958d97b4d3f5a08f79db2493f8ca44"
   },
+  "eth_getStorageAt [\"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913\",\"0x37ac1d21329731ea980eaebed60bcefb8b5b1c5e68ff455b669e72773dac8602\",\"0x32f5690\"]": {
+   "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "eth_getStorageAt [\"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913\",\"0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3\",\"0x32f5690\"]": {
    "result": "0x0000000000000000000000002ce6311ddae708829bc0784c967b7d77d19fd779"
   },
@@ -490,13 +499,22 @@
   },
   "eth_getTransactionCount [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x32f5690\"]": {
    "result": "0x348569"
+  },
+  "eth_getTransactionCount [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x32f5690\"]": {
+   "result": "0x0"
   }
  },
  "robinhood": {
+  "anvil_nodeInfo []": {
+   "error": {
+    "code": -32601,
+    "message": "the method anvil_nodeInfo does not exist/is not available"
+   }
+  },
   "eth_chainId []": {
    "result": "0x1237"
   },
-  "eth_getAccountInfo [\"0x3333333c0a88f9be4fd23ed0536f9b6c427e3b93\",\"0x63b8cf0\"]": {
+  "eth_getAccountInfo [\"0xa4b000000000000000000073657175656e636572\",\"0x63b8cf0\"]": {
    "error": {
     "code": -32601,
     "message": "the method eth_getAccountInfo does not exist/is not available"
@@ -566,6 +584,9 @@
    "result": "0x0"
   },
   "eth_getBalance [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x63b8cf0\"]": {
+   "result": "0x0"
+  },
+  "eth_getBalance [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x63b8cf0\"]": {
    "result": "0x0"
   },
   "eth_getBlockByNumber [\"0x63b8cf0\",false]": {
@@ -666,6 +687,9 @@
   },
   "eth_getCode [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x63b8cf0\"]": {
    "result": "0xef01008a67b5020ee254ef48e3b6a04927f39baf7e408a"
+  },
+  "eth_getCode [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x63b8cf0\"]": {
+   "result": "0x"
   },
   "eth_getStorageAt [\"0x00000000000000000000000000000000b1f1f001\",\"0x0\",\"0x63b8cf0\"]": {
    "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
@@ -793,6 +817,9 @@
   "eth_getStorageAt [\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc\",\"0x63b8cf0\"]": {
    "result": "0x00000000000000000000000068184c449e1a8f34fa18d289737129fd27b66f8f"
   },
+  "eth_getStorageAt [\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"0x3d76c6985e66b7484bab90b51b1d44f6e45a807dc0aeaaa0ca2d3a6a42e6df46\",\"0x63b8cf0\"]": {
+   "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "eth_getStorageAt [\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"0x4\",\"0x63b8cf0\"]": {
    "result": "0x00000000000000000000000000000000000000000000000001518000699cea00"
   },
@@ -885,6 +912,9 @@
   },
   "eth_getTransactionCount [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x63b8cf0\"]": {
    "result": "0x75d"
+  },
+  "eth_getTransactionCount [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x63b8cf0\"]": {
+   "result": "0x0"
   }
  }
 }

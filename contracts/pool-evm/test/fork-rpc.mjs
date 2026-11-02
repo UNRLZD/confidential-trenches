@@ -5,10 +5,11 @@
 // answered with an error that names it, so the test fails loudly instead of reaching a chain.
 //   node contracts/pool-evm/test/fork-rpc.mjs -- forge test --root contracts/pool-evm     replay, run forge, exit with its code
 //   node contracts/pool-evm/test/fork-rpc.mjs --record -- forge test --mp test/BuyFork.t.sol --no-storage-caching
-//                                   (from contracts/pool-evm) record from the public RPCs below, then write the file
+//                                   (from contracts/pool-evm) add what is not recorded yet from the public RPCs below
+//                                   (with up to 5 tries each), then write the file
 // foundry.toml's rpc_endpoints point at http://127.0.0.1:47545/<chain>.
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,12 +18,25 @@ const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/f
 const PORT = 47545;
 const UPSTREAM = { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" };
 
-const keyOf = (r) => `${r.method} ${JSON.stringify(r.params ?? [])}`;
+// A block named by its hash ({"blockHash": h}, as Foundry 1.8 asks) is the same block as its number (as 1.7 asks):
+// the key names it by number, read from the recorded eth_getBlockByNumber answer
+function keyOf(book, chain, r) {
+  const byHash = {};
+  for (const [k, v] of Object.entries(book[chain] ?? {})) {
+    if (k.startsWith("eth_getBlockByNumber ") && v.result?.hash) byHash[v.result.hash.toLowerCase()] = v.result.number;
+  }
+  const params = (r.params ?? []).map((p) =>
+    p && typeof p === "object" && !Array.isArray(p) && typeof p.blockHash === "string" && byHash[p.blockHash.toLowerCase()]
+      ? byHash[p.blockHash.toLowerCase()]
+      : p && typeof p === "object" && !Array.isArray(p) && typeof p.blockNumber === "string" ? p.blockNumber : p,
+  );
+  return `${r.method} ${JSON.stringify(params)}`;
+}
 
 /** Answers one JSON-RPC request (or a batch) for `chain` from `book`, or from upstream when recording. */
 async function answer(book, chain, req, record) {
   if (Array.isArray(req)) return Promise.all(req.map((r) => answer(book, chain, r, record)));
-  const key = keyOf(req);
+  const key = keyOf(book, chain, req);
   const have = book[chain]?.[key];
   if (have !== undefined) return { jsonrpc: "2.0", id: req.id, ...have };
   if (!record || !UPSTREAM[chain]) {
@@ -67,7 +81,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error("usage: fork-rpc.mjs [--record] -- <command...>");
     process.exit(2);
   }
-  const book = record ? {} : JSON.parse(readFileSync(FILE, "utf8"));
+  // recording adds to what is recorded, so runs with two Foundry versions each add what theirs asks
+  const book = existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : {};
   const server = await serve(book, record);
   // forge runs as a child while this process answers its requests
   const child = spawn(cmd[0], cmd.slice(1), { stdio: "inherit" });
