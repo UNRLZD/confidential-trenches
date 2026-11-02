@@ -115,8 +115,8 @@ test("fixture source: a token by name, the three states as labels, an unknown na
   assert.deepEqual(tokenData("?fx=__proto__"), { status: "empty" });
 });
 
-test("words: every draft is marked, and the drafts are exactly the three state labels", () => {
-  assert.deepEqual([...DRAFTS].sort(), ["loading", "noToken", "offline"]);
+test("words: every word has its source, and no draft is left (owner 1 Nov 16:45Z, keep)", () => {
+  assert.deepEqual([...DRAFTS], []);
   for (const w of Object.values(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0);
 });
 

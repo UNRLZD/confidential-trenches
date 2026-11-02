@@ -127,8 +127,8 @@ test("BAR-11: the counter from the kit's first sight of the send; the countdown 
   assert.equal(countdown(DEADLINE, Date.parse(DEADLINE) + 1), "00:00:00");
 });
 
-test("WORDS: every word carries its source; the drafts are exactly the listed ones", () => {
+test("WORDS: every word carries its source; no draft is left (owner 2 Nov 06:08Z, all approved)", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0, k);
-  assert.deepEqual([...DRAFTS].sort(), ["arrives", "busy", "done", "fees", "held", "heldLine", "max", "minimum", "quoteRefused", "refunded", "refundedLine", "short", "youGet"]);
+  assert.deepEqual([...DRAFTS], []);
   for (const k of ["asset", "chain", "amount", "expiresIn", "expired", "getAddress", "copy", "retry"] as const) assert.equal(WORDS[k].draft, false, k);
 });

@@ -66,11 +66,10 @@ type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
   | "choose" | "existing" | "signout";
 
-// DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801) and
-// "invalid-code" (CN-41, signed, 09-design-brief.md:2335). recovery is S2.1's [draft copy: Recovery code]
-// (09-design-brief.md:1811); backup is 06b ses.17's menu item; next is a draft for S2.5's submit, which has no words yet;
-// cancel is a draft for closing the shell's layer back to the app. new-account and have-one are wallet.md:50's two
-// choices, [draft copy: New account] and [draft copy: I already have one], both drafts until picked (OD:343, OD:349).
+// DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801),
+// "invalid-code" (CN-41, signed, 09-design-brief.md:2335) and the six the owner picked, each with its pick on its line.
+// Picked: recovery, S2.1's option (09-design-brief.md:1811); backup, 06b ses.17's menu item; next, S2.5's submit; cancel,
+// closing the shell's layer back to the app; new-account and have-one, wallet.md:50's two choices (OD:343, OD:349).
 const WORDS = {
   create: "Create passkey",
   use: "Use passkey",
@@ -80,15 +79,15 @@ const WORDS = {
   cancelled: "Cancelled",
   unsupported: "This browser has no passkeys. Use your 12 words.",
   error: "Something went wrong. Try again.",
-  recovery: "Recovery code",
-  backup: "Backup",
+  recovery: "Recovery code", // owner 1 Nov 16:45Z, keep
+  backup: "Backup", // owner 1 Nov 16:45Z, keep
   copy: "Copy",
   saved: "Saved",
-  next: "Continue",
+  next: "Continue", // owner 2 Nov 06:08Z, all approved
   "invalid-code": "Invalid code",
-  cancel: "Cancel",
-  "new-account": "New account",
-  "have-one": "I already have one",
+  cancel: "Cancel", // owner 2 Nov 06:08Z, all approved
+  "new-account": "New account", // owner 2 Nov 06:08Z, all approved
+  "have-one": "I already have one", // owner 2 Nov 06:08Z, all approved
 } as const;
 
 const framed = window.top !== window;
