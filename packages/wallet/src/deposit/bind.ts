@@ -201,7 +201,7 @@ async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: nu
     const res = resultOf(await rpc.query({ request_type: "call_function", account_id: vault, method_name: "deposits", args_base64: args, finality: "final" }));
     const bytes = res?.result;
     if (!Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) throw new Error("no page");
-    const page = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes)));
+    const page = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes)));
     if (!Array.isArray(page) || page.length > limit) throw new Error("not a page");
     const rows = page.map((x, k) => row(x, at + k));
     for (const r of rows) if (ps.includes(r.precommitment) && !found.has(r.precommitment)) found.set(r.precommitment, r);
@@ -333,7 +333,7 @@ function innerOf(call: CallBytes): { method_name: string; args: string; gas: big
   blob(); // sender_id
   blob(); // receiver_id
   if (uint(4) !== 1n || uint(1) !== 2n) throw new Error("not one FunctionCall");
-  const method_name = new TextDecoder("utf-8", { fatal: true }).decode(blob());
+  const method_name = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(blob());
   const args = base64.encode(blob());
   return { method_name, args, gas: uint(8), deposit: uint(16) };
 }

@@ -11,6 +11,10 @@
 // HELPER_HOST, which answers APP_HOST's origin only, so the run answers that one read with a snapshot of the screen's
 // fixtures (the recorded Solana read, with its edge rows): every row kind Discover draws is on screen. A screen that
 // breaks BAR-10 fails here, not after a deploy.
+// The shell's rules are read twice: with every answer at once, and with the answers late (LATE), so the lists and the
+// signing page's state land while the run clicks through the shell. A screen that moves when an answer is slow (card
+// app-shell-cls-zero: CI's "CLS 0.0010 inside the shell" on 1 Nov, the phone tabs and the header) then fails every
+// run, not only on a slow runner.
 //   node apps/terminal/test/bar10/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,6 +39,37 @@ const answer = (() => {
   L.new = [...(solana.lists.graduating ?? []), ...L.new];
   return { chain: "solana", as_of_ms: solana.as_of_ms, lists: { new: L.new, trending: L.trending_1h, trending_5m: L.trending_5m, trending_1h: L.trending_1h, graduating: L.graduating } };
 })();
+
+/** The late pass: the helper's lists 200 ms after the ask (after /discover's first paint, before the next click 400 ms
+ *  on); every message from the shell held until 2,600 ms after the terminal's load (the click-through starts 2,000 ms
+ *  after it), so the signing page's ready and state land mid-way through it, at any runner speed. */
+const LATE = { helperMs: 200, shellMs: 2_600 };
+
+/** Runs in every frame before its own code; in the terminal's frame it holds each "message" event (the shell's ready
+ *  and answers) until `ms` after the frame's load, then hands them on in order. */
+const HOLD_SHELL = ({ app, ms }) => {
+  if (location.origin !== app) return;
+  const held = [];
+  let open = false;
+  const wrapped = new WeakMap();
+  const add = window.addEventListener;
+  const remove = window.removeEventListener;
+  window.addEventListener = function (type, fn, opts) {
+    if (type !== "message" || typeof fn !== "function") return add.call(this, type, fn, opts);
+    if (!wrapped.has(fn)) wrapped.set(fn, (e) => (open ? fn.call(window, e) : held.push(() => fn.call(window, e))));
+    return add.call(this, type, wrapped.get(fn), opts);
+  };
+  window.removeEventListener = function (type, fn, opts) {
+    return remove.call(this, type, (type === "message" && wrapped.get(fn)) || fn, opts);
+  };
+  add.call(window, "load", () =>
+    setTimeout(() => {
+      open = true;
+      for (const deliver of held.splice(0)) deliver();
+    }, ms),
+  );
+};
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function build() {
   const { build } = await import("vite");
@@ -81,16 +116,29 @@ try {
   const route = await harnessRoute(dir, "signed");
   // the bytes served for a script are the build's own file at its path
   const fetchFn = async (u) => new Response(readFileSync(path.join(dir, decodeURIComponent(new URL(u).pathname))));
-  const prepare = async (ctx) => {
-    await ctx.route(LISTS_URL, (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify(answer) }));
+  // `late`: the answers come late (LATE); a page closed meanwhile drops its answer, which is no fault of the screen
+  const answering = (late) => async (ctx) => {
+    if (late) await ctx.addInitScript(HOLD_SHELL, { app: APP_HOST, ms: LATE.shellMs });
+    await ctx.route(LISTS_URL, async (r) => {
+      if (late) await wait(LATE.helperMs);
+      await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify(answer) }).catch(() => {});
+    });
   };
-  const rec = await collect({ url: APP_HOST, shots: SHOTS, fetchFn, route, prepare, source: "bar10, the build inside the stand-in shell" });
-  const { ok, lines } = judge(rec);
-  for (const l of lines) console.log(l);
+  const prepare = answering(false);
+  let ok = true;
+  let loads = 0;
+  for (const late of [false, true]) {
+    const rec = await collect({ url: APP_HOST, shots: SHOTS && (late ? path.join(SHOTS, "late") : SHOTS), fetchFn, route, prepare: answering(late), source: `bar10, the build inside the stand-in shell, answers ${late ? "late" : "at once"}` });
+    const j = judge(rec);
+    console.log(`-- answers ${late ? `late (the lists ${LATE.helperMs} ms, the shell ${LATE.shellMs} ms after the terminal's load)` : "at once"}`);
+    for (const l of j.lines) console.log(l);
+    ok &&= j.ok;
+    loads += rec.loads.length;
+  }
   const { chromium } = await import("playwright");
   const browser = await chromium.launch();
   const okStates = await states(browser, route, prepare).finally(() => browser.close());
-  console.log(`${ok && okStates ? "PASS" : "FAIL"} BAR-10 and the shell's rules on ${rec.loads.length} loads (every routed path, 390 and 1440) and Discover's offline and empty states${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+  console.log(`${ok && okStates ? "PASS" : "FAIL"} BAR-10 and the shell's rules on ${loads} loads (every routed path, 390 and 1440, answers at once and late) and Discover's offline and empty states${SHOTS ? `; shots in ${SHOTS}` : ""}`);
   code = ok && okStates ? 0 : 1;
 } catch (e) {
   console.error(`ERROR ${e?.stack ?? e}`);

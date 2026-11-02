@@ -144,7 +144,7 @@ export async function vaultSync(args: VaultSyncArgs): Promise<VaultSyncResult> {
     if (!sameBytes(x.bytes, y.bytes)) throw new VaultSyncStopped("disagree", `${method}(${JSON.stringify(a)}): the RPCs' answers differ`);
     let text: string;
     try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(x.bytes);
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(x.bytes);
     } catch {
       throw new VaultSyncStopped("row", `${method}: not UTF-8`);
     }
