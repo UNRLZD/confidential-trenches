@@ -192,6 +192,11 @@ test("deploy.mjs names every live check that reads APP_HOST in its success line"
     assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /"https:\/\/confidential\.unrealized\.trade\/?"/, `${k} does not hold APP_HOST's address`);
     assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   }
+  // and signpage-release, which reads APP_HOST alone against this commit's own build
+  assert.match(readFileSync(join(dir, "signpage-release.mjs"), "utf8"), /"https:\/\/confidential\.unrealized\.trade"/);
+  assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host app"), `the success line does not run signpage-release on APP_HOST alone: ${out}`);
+  const { LIVE_CHECKS } = await import("./deploy.mjs");
+  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release"], "LIVE_CHECKS holds only app-* checks and signpage-release");
 });
 
 // A build like BUILD with `edit` applied to a fresh copy; its problems from checkDir.
