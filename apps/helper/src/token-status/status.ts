@@ -75,7 +75,10 @@ const H_POLL_MS = 300; // about half a NEAR block between two reads of the laggi
 /** One 429 is waited out this long at most (markets.md check 6's budget: one 429 backed off 10 s). */
 export const BACKOFF_429_MS = 10_000;
 const BLOCKS_KEPT = 64;
-const ANSWER_MAX = 4_096;
+const ANSWER_MAX = 4_096; // a view's or view_account's answer: about 300 B
+// a block's answer lists one chunk header per shard: 19,180 B on mainnet and 13,207 B on testnet (both providers, read
+// 2026-11-03), so a cap well above a growing shard count
+const BLOCK_ANSWER_MAX = 1_048_576;
 const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** The kit's HelperTokenStatusAnswer (packages/kit/src/helper/v1.ts). */
@@ -261,12 +264,13 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
           continue;
         }
         if (r.status !== 200 || !r.body) return undefined;
-        // read up to ANSWER_MAX bytes, never more: a provider is an outside input
+        // read up to the method's cap, never more: a provider is an outside input
+        const max = method === "block" ? BLOCK_ANSWER_MAX : ANSWER_MAX;
         const chunks: Uint8Array[] = [];
         let n = 0;
         for await (const c of r.body) {
           n += c.byteLength;
-          if (n > ANSWER_MAX) return undefined;
+          if (n > max) return undefined;
           chunks.push(c);
         }
         return JSON.parse(Buffer.concat(chunks).toString("utf8"));

@@ -78,7 +78,7 @@ test("the safe answer when either provider fails or answers off shape: no code h
     ["an RPC error", () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000 } }), { status: 200 })],
     ["not JSON", () => new Response("<html>", { status: 200 })],
     ["no answer", () => Promise.reject(new Error("down"))],
-    ["an answer too large", () => new Response(JSON.stringify({ result: { code_hash: USDC_CODE_HASH, block_height: 1, pad: "x".repeat(5000) } }), { status: 200 })],
+    ["an answer too large", () => new Response(JSON.stringify({ result: { code_hash: USDC_CODE_HASH, block_height: 1, header: {}, pad: "x".repeat(1_048_577) } }), { status: 200 })],
   ];
   for (const [name, answer] of bad) {
     for (const url of [A, B]) {
@@ -92,6 +92,7 @@ test("the safe answer when either provider fails or answers off shape: no code h
     ["a changed hash on one", { code: () => ({ code_hash: CHANGED }) }],
     ["a hash of the wrong shape", { code: () => ({ code_hash: "0x" + "a".repeat(64) }) }],
     ["an answer of another block", { code: (h) => ({ block_hash: hashOf(h + 1) }) }],
+    ["a view_account answer over 4 KB (a block's answer may hold 1 MiB, a view's 4 KB)", { code: () => ({ pad: "x".repeat(4_096) }) }],
   ];
   for (const [name, v] of shapes) {
     const s = await createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair(v, {}).fetch }).status();

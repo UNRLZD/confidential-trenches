@@ -54,7 +54,8 @@ export function nearChain(v: Views) {
     const id = p.block_id;
     const h = p.finality === "final" ? final() : typeof id === "number" ? id : typeof id === "string" ? (heights.get(id) ?? -1) : -1;
     if (!has(h)) return json(unknownBlock);
-    if (body.method === "block") return json({ jsonrpc: "2.0", id: 1, result: { author: "x.near", header: header(h), chunks: [] } });
+    // one chunk header per shard, as nearcore lists them: about 19 KB on mainnet's nine shards (read 2026-11-03)
+    if (body.method === "block") return json({ jsonrpc: "2.0", id: 1, result: { author: "x.near", header: header(h), chunks: Array.from({ length: 9 }, (_, shard_id) => ({ shard_id, pad: "x".repeat(2_000) })) } });
     const at = { block_height: h, block_hash: hashOf(h, v.fork) };
     const value = (x: unknown) => (typeof x === "object" && x !== null && "error" in x ? { ...at, logs: [], ...x } : { ...at, logs: [], result: [...Buffer.from(String(x))] });
     let result: unknown;
