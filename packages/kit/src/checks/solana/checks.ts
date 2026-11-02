@@ -369,11 +369,18 @@ function budget(c: Ctx): Budget {
 function s8(c: Ctx): SolanaQuoteResult {
   const b = budget(c);
   if (typeof b === "string") return fail("S8", b);
-  const r = c.route;
-  const step = r && r.steps === 1 ? r.firstStep : undefined;
-  const cap = step !== undefined && PUMP_BUY_STEPS.has(step) ? SOLANA_CU_LIMIT.pumpBuy : step !== undefined && PUMP_SELL_STEPS.has(step) ? SOLANA_CU_LIMIT.pumpSell : SOLANA_CU_LIMIT.other;
+  const cap = c.route ? solanaRouteCuCap((c.ixs[c.jupAt] as Ix).data) : SOLANA_CU_LIMIT.other;
   const detail = `limit ${b.limit} (cap ${cap}), price ${b.price} micro-lamports per unit (cap ${SOLANA_CU_PRICE_MAX})`;
   return b.limit <= cap && b.price <= SOLANA_CU_PRICE_MAX ? pass("S8", detail) : fail("S8", detail);
+}
+
+// S8's compute cap for a Jupiter route_v2 instruction's data, which the build (trade/solana/build.ts) also sets as the
+// limit, so the two never differ: a one-step pump.fun curve route gets the pump cap of its step, every other route,
+// and any data that is not route_v2, the general one.
+export function solanaRouteCuCap(routeData: Uint8Array): number {
+  if (routeData.length < 34 || !eqBytes(routeData.subarray(0, 8), Uint8Array.from(ROUTE_V2))) return SOLANA_CU_LIMIT.other;
+  const step = u32(routeData, 30) === 1 ? routeData[34] : undefined;
+  return step !== undefined && PUMP_BUY_STEPS.has(step) ? SOLANA_CU_LIMIT.pumpBuy : step !== undefined && PUMP_SELL_STEPS.has(step) ? SOLANA_CU_LIMIT.pumpSell : SOLANA_CU_LIMIT.other;
 }
 
 // S9: the tx fits one packet.
