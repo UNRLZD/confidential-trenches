@@ -30,7 +30,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { b58encode, b58decode } from "./deploy-testnet.mjs";
+import { b58encode, b58decode } from "./near-tx.mjs";
 import { RPCS as GATE_RPCS, okOperators, proveRead, readTx } from "../../../scripts/ci/money-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -40,7 +40,7 @@ export const PIN = { bytes: 321_491, sha256: "b98ccd530f7e643cfef32f4529ade060ef
 export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 export const TESTNET_RPCS = GATE_RPCS["near-testnet"];
 const SEND_RPC = "https://test.rpc.fastnear.com";
-const FAUCET = "https://helper.nearprotocol.com/account"; // as contracts/vault/scripts/deploy-testnet.mjs
+const FAUCET = "https://helper.nearprotocol.com/account"; // near-cli-rs's testnet faucet (`create-account sponsor-by-faucet-service`)
 export const ROLES = ["admin", "owner", "pauser", "blocklister", "mm1", "mm2", "minter", "ctl1", "ctl2", "holder"];
 export const INIT_NAMES = ["admin_ids", "master_minter_ids", "owner_ids", "pauser_ids", "blocklister_id", "metadata"];
 export const ALLOWANCE = "1000000000000000"; // 1,000,000,000 USDC of allowance for the minter

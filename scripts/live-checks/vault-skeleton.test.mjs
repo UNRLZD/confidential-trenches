@@ -6,16 +6,14 @@
 //     (the account `testnet`, NEAR testnet's account registrar, 151,460 B; read 2026-11-01 01:23Z);
 //   - vault-skeleton.bad-asset.answers.json ({ note, answers }): a build without --features testnet as it would read
 //     once deployed, its config() naming mainnet USDC and version "... mainnet". It is the good answer with only
-//     config()'s result replaced (its note says so), a real read and not a deploy: the fixed deploy script refuses to
-//     send such a wasm (the test below). The check must FAIL it even when the deployment record names the same mainnet
+//     config()'s result replaced (its note says so), a real read and not a deploy: the deploy script refuses to send
+//     such a wasm (contracts/vault/scripts/deploy.test.mjs). The check must FAIL it even when the deployment record names the same mainnet
 //     id, since the asset is pinned in the check, never copied from the record.
-// One more bad answer is made here from the good one: config() naming mainnet USDC with the testnet version and the
-// real record, so only the asset is wrong.
+// Two more bad answers are made here from the good one: config() naming mainnet USDC with the testnet version and the
+// real record, so only the asset is wrong; and storage_balance_of(vault) answering null, as both RPCs read it before the
+// registration tx in testnet-skeleton.json (blocks 275,817,782 and 275,817,783), so only the registration is wrong.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -37,16 +35,33 @@ function replay(answers) {
 }
 const accountOf = (answers) => answers[0].params.account_id;
 
-test("recorded good answer: the deployed skeleton, keys [] on two RPCs, its code and config(): PASS", async () => {
+test("recorded good answer: the deployed skeleton, keys [] on two RPCs, its code, config() and its USDC registration: PASS", async () => {
   const answers = load("vault-skeleton.answers.json");
   assert.equal(accountOf(answers), deployment.account_id);
   assert.equal(new Set(answers.map((a) => a.url)).size, 2);
   const r = await check({ deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 12);
+  assert.equal(r.lines.length, 16);
   assert.equal(r.lines.filter((l) => /key list is \[\] on .*: 0 key\(s\)/.test(l) && l.startsWith("ok ")).length, 2);
+  assert.equal(r.lines.filter((l) => /^ok  withdraw is exported only with on_payout on .*: yes$/.test(l)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  code sha256 ${deployment.wasm_sha256} equals`)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  config() answers on `) && l.includes(`asset ${deployment.asset}`)).length, 2);
+  const reg = answers.filter((a) => a.params.method_name === "storage_balance_of");
+  assert.deepEqual(reg.map((a) => a.params.account_id), [TESTNET_USDC, TESTNET_USDC]);
+  for (const a of reg) assert.deepEqual(JSON.parse(Buffer.from(a.params.args_base64, "base64")), { account_id: deployment.account_id });
+  assert.equal(r.lines.filter((l) => l.startsWith(`ok  ${deployment.account_id} is registered on Circle's testnet USDC on `)).length, 2);
+  assert.match(deployment.registration_tx, /^[1-9A-HJ-NP-Za-km-z]{43,44}$/);
+});
+
+test("bad answer: storage_balance_of(vault) answers null on both RPCs, all else the good answer: FAIL on the registration only", async () => {
+  const answers = load("vault-skeleton.answers.json").map((a) =>
+    a.params.method_name === "storage_balance_of" ? { ...a, json: { ...a.json, result: { ...a.json.result, result: [...Buffer.from("null")] } } } : a,
+  );
+  const r = await check({ deployment, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(bad.length, 2, r.lines.join("\n"));
+  for (const l of bad) assert.match(l, /is registered on Circle's testnet USDC on .*: null at block/);
 });
 
 test("recorded bad answer: an ordinary account with one full-access key: FAIL on its key list", async () => {
@@ -54,6 +69,8 @@ test("recorded bad answer: an ordinary account with one full-access key: FAIL on
   const r = await check({ deployment, account: accountOf(answers), fetchFn: replay(answers) });
   assert.equal(r.ok, false);
   assert.equal(r.lines.filter((l) => /^BAD \S+ key list is \[\] on .*: 1 key\(s\) \(FullAccess\)/.test(l)).length, 2, r.lines.join("\n"));
+  // a real read too: the parent is not registered on the token
+  assert.equal(r.lines.filter((l) => /^BAD \S+ is registered on Circle's testnet USDC on .*: null at block/.test(l)).length, 2, r.lines.join("\n"));
 });
 
 test("recorded bad answer: a wasm importing promise_batch_action_add_key_with_full_access: FAIL on its imports", async () => {
@@ -123,30 +140,6 @@ test("the network rule reads the TOKEN ids only: the deployed testnet wasm passe
   assert.deepEqual(networkProblems(wasmWith(TESTNET_USDC, "mainnet")), []);
 });
 
-// The deploy script runs with fetch replaced by one that throws, so no test run can reach the faucet or an RPC.
-function deployOffline(wasm) {
-  const dir = mkdtempSync(path.join(tmpdir(), "vault-skeleton-"));
-  const f = path.join(dir, "build.wasm");
-  writeFileSync(f, wasm);
-  const stub = path.join(dir, "no-network.mjs");
-  writeFileSync(stub, 'globalThis.fetch = async (url) => { throw new Error(`network blocked by the test: ${url}`); };\n');
-  return spawnSync(process.execPath, ["--import", pathToFileURL(stub).href, path.join(HERE, "../../contracts/vault/scripts/deploy-testnet.mjs"), "--wasm", f, "--out", path.join(dir, "out.json")], { encoding: "utf8", timeout: 20_000 });
-}
-
-test("the deploy script refuses a mainnet build before any network call (fetch blocked)", () => {
-  const r = deployOffline(wasmWith(MAINNET_USDC));
-  assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, /refused before any send: not a testnet build: .*holds mainnet USDC/);
-  assert.doesNotMatch(r.stderr, /network blocked/);
-  assert.equal(r.stdout, "");
-});
-
-test("the fetch block holds: a wasm that passes the rules stops at the blocked faucet call", () => {
-  const r = deployOffline(wasmWith(TESTNET_USDC));
-  assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, /network blocked by the test: https:\/\/helper\.nearprotocol\.com\/account/);
-  assert.doesNotMatch(r.stdout, /made by the faucet/);
-});
 
 test("the same answers with a third of the RPCs gone: FAIL (two RPCs are required)", async () => {
   const answers = load("vault-skeleton.answers.json");
@@ -173,6 +166,47 @@ test("the wasm rules: banned imports, promise imports outside the seven, exports
   assert.deepEqual(wasmProblems(tinyWasm("promise_create", "config")).promises, ["promise_create"]);
   assert.deepEqual(wasmProblems(tinyWasm("promise_batch_then", "new")).exports, ["new"]);
   const clean = wasmProblems(tinyWasm("promise_result", "totals"));
-  assert.deepEqual([clean.banned, clean.promises, clean.exports], [[], [], []]);
+  assert.deepEqual([clean.banned, clean.promises, clean.exports, clean.withdrawWithoutPayout], [[], [], [], []]);
   assert.throws(() => wasmProblems(Buffer.from("not wasm")), /not a wasm module/);
+});
+
+// a minimal wasm: one import env.<imp> of function type 0, and each of `exps` exported as that one function
+function wasmExporting(imp, exps) {
+  const name = (s) => [s.length, ...Buffer.from(s)];
+  const section = (id, body) => [id, ...leb(body.length), ...body];
+  const leb = (n) => (n < 128 ? [n] : [(n & 0x7f) | 0x80, n >> 7]);
+  const type = section(1, [1, 0x60, 0, 0]);
+  const imports = section(2, [1, ...name("env"), ...name(imp), 0, 0]);
+  const funcs = section(3, [1, 0]);
+  const exports = section(7, [exps.length, ...exps.flatMap((e) => [...name(e), 0, 1])]);
+  const code = section(10, [1, 2, 0, 0x0b]);
+  return Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, ...type, ...imports, ...funcs, ...exports, ...code]);
+}
+
+// card vault-withdraw-verify's build: withdraw spends a note, and no payout or on_payout exists yet (its function
+// exports as wasmProblems read them from the built wasm, sha256 a8996566...)
+const SPEND_ONLY = ["config", "contract_source_metadata", "deposits", "ft_on_transfer", "is_known_label_root", "is_known_state_root", "label_tree", "labels", "leaves", "spends", "state_tree", "storage_prepay", "totals", "withdraw"];
+
+test("bad answer: a wasm exporting withdraw without on_payout is refused; with on_payout that rule passes", () => {
+  const spendOnly = wasmProblems(wasmExporting("promise_result", SPEND_ONLY));
+  assert.deepEqual([spendOnly.banned, spendOnly.promises, spendOnly.exports], [[], [], []]);
+  assert.deepEqual(spendOnly.withdrawWithoutPayout, ["withdraw"]);
+  const paid = wasmProblems(wasmExporting("promise_result", [...SPEND_ONLY, "on_payout"]));
+  assert.deepEqual([paid.banned, paid.promises, paid.exports, paid.withdrawWithoutPayout], [[], [], [], []]);
+  // the skeleton, with neither, passes too
+  assert.deepEqual(wasmProblems(wasmExporting("promise_result", ["config", "totals"])).withdrawWithoutPayout, []);
+});
+
+test("the live check FAILs a deployed wasm exporting withdraw without on_payout", async () => {
+  // the good answer with view_code's result replaced by such a wasm and the record's sha256 set to it, so only this
+  // rule can fail
+  const wasm = wasmExporting("promise_result", SPEND_ONLY);
+  const sha = (await import("node:crypto")).createHash("sha256").update(wasm).digest("hex");
+  const answers = load("vault-skeleton.answers.json").map((a) =>
+    a.params?.request_type === "view_code" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_base64: wasm.toString("base64") } } } : a,
+  );
+  const r = await check({ deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD "));
+  assert.ok(bad.length > 0 && bad.every((l) => /withdraw is exported only with on_payout on .*: withdraw without on_payout/.test(l)), bad.join("\n"));
 });

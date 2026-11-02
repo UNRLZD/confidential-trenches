@@ -16,7 +16,11 @@
 // bad18cd57a, the page at 18cd57a (no-PRF Create stores nothing and opens no backup; no typed words), fails on those five
 // lines only; bad3fd742b, the card's page at 3fd742b (Saved without the activation guard), fails on the early Saved
 // press only. Every record before it fails those four lines for that reason (its no-PRF Create was right then), checked
-// as such below.
+// as such below. Card app-in-shell-tab: good re-recorded on the shell page (SIGN_HOST top-level frames APP_HOST, whose
+// harness stand-in now holds a link and a button as the terminal does), the layer held as the shell's open() shows it
+// (the frame inert); badShellTab, the same harness run with the check's old hold (the layer shown over a live frame), and
+// liveShellTab, the deploy's run of that old check on the live hosts (e0b1cd69 and 48008988): the first Tab enters the
+// APP_HOST frame, so Tab then Enter never reaches Sign out, and both fail on that line only.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -104,6 +108,18 @@ function beforeR4(rec) {
   for (const l of R4) assert.ok(lines.includes(l), l);
   return lines.filter((l) => !R4.includes(l));
 }
+
+test("the check's old hold on the shell page (layer shown over a live frame) fails on Tab then Enter only; the good answer's first Tab lands on Sign out", () => {
+  assert.equal(answers.good.prf.protect.enter.tabTo, "signout");
+  assert.equal(answers.good.prf.protect.enter.pressOn, "signout");
+  for (const k of ["badShellTab", "liveShellTab"]) {
+    const r = judge(answers[k]);
+    assert.equal(r.pass, false, k);
+    assert.deepEqual(BAD(answers[k]), ["BAD prf: Tab then Enter within 500 ms of Sign out shown does nothing"], k);
+    assert.equal(answers[k].prf.protect.enter.pressOn, "BODY", `${k}: Enter's keydown never reached Sign out`);
+  }
+  assert.equal(answers.badShellTab.prf.protect.enter.tabTo, "IFRAME#app", "the first Tab enters the APP_HOST frame");
+});
 
 test("the recorded bad answer (no PRF falls back to a random seed without notice) fails on that line", () => {
   const r = judge(answers.bad);

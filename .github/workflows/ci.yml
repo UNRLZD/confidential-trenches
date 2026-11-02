@@ -153,7 +153,7 @@ jobs:
 
   # Each package's own fast tests. Two heavy suites stay out of this job: the near-sandbox tests (a
   # cargo test target with required-features = ["sandbox"], which a plain cargo test skips) and Playwright (a
-  # package's test:e2e script, never its test script), but for the terminal's return-hop run below.
+  # package's test:e2e script, never its test script), but for the terminal's in-shell run below.
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -174,14 +174,21 @@ jobs:
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
-      # Every way off APP_HOST (sign-in, backup, export, sign-out, withdraw) hops to SIGN_HOST and back on the app's
-      # harness (apps/terminal/test/return-hop/run.mjs, about 30 s after Chromium's install). Left to hand runs, a stale
-      # stand-in failed it on main unseen for hours. The same step runs BAR-10 (no text under 11 px, no phone tap box
-      # under 44 px) with the deployed app-shell check's own rules on the build, every routed path (test/bar10/run.mjs).
-      - name: the terminal's browser runs (return-hop, and BAR-10 on every routed path)
+      # The terminal runs inside SIGN_HOST's shell: a top-level visit to APP_HOST lands on SIGN_HOST with the path kept,
+      # and the framed terminal reads the shell's state with no hop (the live check app-in-shell in --harness mode, in
+      # Chromium). Left to hand runs, a stale stand-in once failed on main unseen for hours. The same step runs BAR-10
+      # (no text under 11 px, no phone tap box under 44 px) with the deployed app-shell check's own rules on the build,
+      # inside the shell, every routed path (test/bar10/run.mjs).
+      - name: the terminal's browser runs (in-shell, and BAR-10 on every routed path)
         run: |
           pnpm --filter terminal exec playwright install --with-deps chromium
           pnpm --filter terminal run test:e2e
+      # The kit's one call in headless Chromium: the real prover worker under SIGN_HOST's own headers proves the fixture's
+      # leaves, snarkjs accepts each proof, and a changed leaf or worker answer is refused (vault-prover-e2e; card
+      # signpage-prover-host). The Chromium is the one the step above installs: the kit and the terminal pin the same
+      # Playwright.
+      - name: the prover in Chromium (KIT_PROVER_E2E)
+        run: KIT_PROVER_E2E=1 node --test packages/kit/test/prove-e2e.test.ts
       - name: the vault's scripts' own tests
         run: pnpm run test:vault-scripts
       # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins

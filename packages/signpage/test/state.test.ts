@@ -135,7 +135,7 @@ test("a sign-in in another tab posts signed_in true; saving the words there post
   const e1 = await p.event((s) => s.signed_in === true);
   assert.equal(e1.code_saved, false);
   assert.equal(e1.way, "passkey");
-  await t.setCodeSaved();
+  await t.setCodeSaved({ entropy: ENTROPY() });
   const e2 = await p.event((s) => s.code_saved === true);
   assert.equal(e2.signed_in, true);
 });

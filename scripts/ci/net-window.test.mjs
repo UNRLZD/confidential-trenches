@@ -15,7 +15,7 @@ const SHARED = path.join(ROOT, "scripts/net-window.mjs");
 // Every entry that opens a connection (fetch, a library that fetches, a WebSocket): each one imports the shared module.
 export const CHANGED = [
   "apps/helper/deploy/create-server.mjs",
-  "contracts/vault/scripts/deploy-testnet.mjs",
+  "contracts/vault/scripts/deploy.mjs",
   "contracts/vault/scripts/testnet-usdc.mjs",
   "scripts/ci/money-gate.mjs",
   "scripts/live-checks/app-host-gate.mjs",
@@ -35,7 +35,9 @@ export const CHANGED = [
   "scripts/live-checks/money-gate-testnet.mjs",
   "scripts/live-checks/near-rpc-operators.mjs",
   "scripts/live-checks/signpage-postmessage.mjs",
+  "scripts/live-checks/signpage-prover-host.mjs",
   "scripts/live-checks/signpage-skeleton.mjs",
+  "scripts/live-checks/solana-jupiter-build.mjs",
   "scripts/live-checks/vault-setup-files.mjs",
   "scripts/live-checks/vault-skeleton.mjs",
   "scripts/live-checks/vault-testnet-usdc.mjs",
@@ -44,7 +46,8 @@ export const CHANGED = [
 
 // Scripts in the searched folders that open no connection from Node, and why.
 export const KEEP = {
-  "scripts/live-checks/app-signpage-client.mjs": "the connections are the browser's (Playwright) and a loopback harness; Node opens none to a remote host",
+  "scripts/webkit-harness/index.mjs": "a loopback HTTPS server and CONNECT proxy for the Mac's WKWebView, both on 127.0.0.1; Node opens none to a remote host",
+  "scripts/webkit-harness/self-test.mjs": "drives index.mjs's loopback harness; Node opens none to a remote host",
   "scripts/ci/verify-gate.mjs": "reads git history only, no network",
   "scripts/ci/kit-reach.mjs": "reads the tree only, no network",
   "scripts/perf-table.mjs": "reads files only, no network",

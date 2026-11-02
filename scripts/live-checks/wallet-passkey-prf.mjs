@@ -11,7 +11,8 @@
 //     to the ed25519 key (:68, :70-88). It must equal A.
 //   Also in the prf run: a second tab open before the first passkey is made then presses Create and runs no ceremony
 //     (its authenticator makes no passkey), and the stored seed is unchanged; the first tab's Sign out shows signed out
-//     in the second; the page framed by APP_HOST (a parent served at APP_HOST's address by this check) shows no sign-in
+//     in the second; the page framed by APP_HOST (a parent served at APP_HOST's address by this check; SIGN_HOST's
+//     frame-ancestors 'none' lifted for that frame alone, card signpage-shell) shows no sign-in
 //     or sign-out control; each signed-in step says code_saved false (data-code-saved, the Backup dot).
 //   race run: two tabs, each with its own passkey, press Create at once; both end on one account, the one stored.
 //   Sign out's activation guard (Chromium's InputEventActivationProtector, 500 ms): after a reload, a mouse press (the
@@ -54,7 +55,7 @@
 // words or a key. Every seed is a throwaway virtual authenticator's, never funded and never printed.
 import "../net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, hkdfSync, pbkdf2Sync } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -65,6 +66,8 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export const SIGN_HOST = "sign.confidential.unrealized.trade";
 export const APP_HOST = "confidential.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
 const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
+/** The harness's APP_HOST page inside the shell: the terminal's first controls, a link and a button. */
+export const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
 export const PRF_INPUT = "confidential-trenches/v1/seed";
 export const WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt";
 export const WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"; // BIP-39's own pin
@@ -74,6 +77,32 @@ export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector defau
 // page's scripts; a press's distance from it bounds the press's distance from the page's own guard time from above.
 // Also the data-action of the last press's target (pointerdown, keydown), so a step shows its press reached Sign out,
 // and every press's time and repeat flag (__ctPresses), so a step shows its gap to the press before.
+// SIGN_HOST top-level is the shell (card signpage-shell): its screens draw in a layer over the APP_HOST frame, hidden once
+// signed in. The signout and backup.open kinds will open it (card signpage-signin-kinds); here it is held open in every
+// SIGN_HOST top-level page, so this check reads and presses the same screens as before. It is held as the shell's own
+// open() shows it (packages/signpage/src/shell.ts): the layer shown and the APP_HOST frame inert, so the frame is out of
+// the tab order and the pointer's reach and a keyboard's first Tab lands in the layer. A layer shown over a live frame
+// is a state the shell never has: the frame comes first in the document, so Tab went into the terminal and Tab then
+// Enter never reached Sign out. In a frame (none: the CSP's frame-ancestors 'none') there is no layer.
+const HOLD_LAYER = () => {
+  if (location.hostname !== "sign.confidential.unrealized.trade" || window.top !== window) return;
+  const inert = () => {
+    const f = document.getElementById("app");
+    if (f && !f.inert) f.inert = true;
+  };
+  const hold = (l) => {
+    if (l.hidden) l.hidden = false;
+    new MutationObserver(() => l.hidden && (l.hidden = false)).observe(l, { attributes: true, attributeFilter: ["hidden"] });
+    // the shell's close() (on signed in) makes the frame live again, or puts a new one in: each is made inert again
+    inert();
+    new MutationObserver(inert).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["inert"] });
+  };
+  new MutationObserver((_, o) => {
+    const l = document.getElementById("screen");
+    if (l) (o.disconnect(), hold(l));
+  }).observe(document, { childList: true, subtree: true });
+};
+
 const DRAWN = () => {
   globalThis.__ctPresses = [];
   for (const t of ["pointerdown", "keydown"])
@@ -243,8 +272,13 @@ async function launch({ harness, site }) {
   const root = site ?? buildSignpage();
   // APP_HOST's address serves the framing parent here too: Chromium's local network access checks refuse a public
   // parent framing a host that resolves to this machine, so on the harness both are local.
+  // the framing parent at its own path; every other APP_HOST path is the stand-in for the terminal that SIGN_HOST's shell
+  // frames (card signpage-shell): a link and a button, as the terminal's header draws, so the frame holds focusable
+  // content and the shell's tab order is the live one (a blank frame is skipped by Tab, and hid a layer shown over a
+  // live frame)
   const app = mkdtempSync(path.join(tmpdir(), "ct-passkey-app-"));
-  writeFileSync(path.join(app, "index.html"), FRAME_PARENT);
+  writeFileSync(path.join(app, "index.html"), APP_STAND_IN);
+  writeFileSync(path.join(app, "__wallet-passkey-prf-frame.html"), FRAME_PARENT);
   const cert = makeCert([SIGN_HOST, APP_HOST]);
   const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root }, [APP_HOST]: { root: app, spa: true } } });
   const map = [SIGN_HOST, APP_HOST].map((h) => `MAP ${h} 127.0.0.1:${server.port}`).join(", ");
@@ -254,6 +288,7 @@ async function launch({ harness, site }) {
   return {
     browser,
     harnessApp: true,
+    root,
     close: async () => {
       await browser.close();
       await server.close();
@@ -359,10 +394,10 @@ async function early(page, press) {
     const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
     if (!b) return { pressed: false, after: await settled(page) };
     const box = await b.boundingBox();
-    await press({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    const read = await press({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
     const { withinMs, pressOn } = await page.evaluate(() => ({ withinMs: performance.now() - globalThis.__ctDrawn, pressOn: globalThis.__ctPressOn ?? null }));
     await page.waitForTimeout(1_000);
-    t = { pressed: true, withinMs, pressOn, after: await settled(page) };
+    t = { pressed: true, withinMs, pressOn, ...read, after: await settled(page) };
     if (t.after.state === "signed-out") await click(page, "use");
     if (withinMs < 400) break;
   }
@@ -454,6 +489,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
     try {
       const ctx = await h.browser.newContext();
       await ctx.addInitScript(DRAWN);
+      await ctx.addInitScript(HOLD_LAYER);
       const page = await ctx.newPage();
       watch(page, errors);
       const creds = await authenticator(page, true);
@@ -486,7 +522,13 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         }),
         enter: await early(page, async () => {
           await page.keyboard.press("Tab");
+          // where the first Tab put the focus, read before Enter (a few ms, inside the window)
+          const tabTo = await page.evaluate(() => {
+            const a = document.activeElement;
+            return a?.dataset?.action ?? (a ? `${a.nodeName}${a.id ? `#${a.id}` : ""}` : null);
+          });
           await page.keyboard.press("Enter");
+          return { tabTo };
         }),
       };
       // the guard's other triggers, with Sign out drawn well before each
@@ -534,10 +576,31 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       steps.signin = await click(page, "use");
       record.prf.steps = steps;
       // framed by APP_HOST: the parent is a page this check serves at APP_HOST's address; the frame is SIGN_HOST itself
-      const APP = `https://${APP_HOST}/__wallet-passkey-prf-frame`;
+      const APP = `https://${APP_HOST}/__wallet-passkey-prf-frame.html`;
       if (!h.harnessApp) await ctx.route(APP, (rt) => rt.fulfill({ status: 200, contentType: "text/html", body: FRAME_PARENT }));
       const parent = await ctx.newPage();
       watch(parent, errors);
+      // SIGN_HOST's frame-ancestors 'none' blocks this frame outright (card signpage-shell; signpage-skeleton holds the
+      // header). It is lifted here, for this parent's frame only, so the page's own rule still shows: in a frame it
+      // draws no sign-in or sign-out control.
+      await parent.route(`https://${SIGN_HOST}/`, async (rt) => {
+        let body;
+        let headers;
+        if (h.root) {
+          // the harness: the build's own page under its own _headers (Node cannot reach the browser's mapped host)
+          const { parseHeadersFile } = await import("../../apps/terminal/scripts/check-deploy.ts");
+          const { headersFor } = await import("../../apps/terminal/test/harness/server.mjs");
+          headers = Object.fromEntries(headersFor(parseHeadersFile(readFileSync(path.join(h.root, "_headers"), "utf8")).rules, "/"));
+          headers["content-type"] = "text/html; charset=utf-8";
+          body = readFileSync(path.join(h.root, "index.html"));
+        } else {
+          const r = await rt.fetch();
+          headers = { ...r.headers() };
+          body = await r.body();
+        }
+        headers["content-security-policy"] = (headers["content-security-policy"] ?? "").split(";").filter((d) => d.trim().split(/\s+/)[0] !== "frame-ancestors").join(";");
+        await rt.fulfill({ status: 200, headers, body });
+      });
       await parent.goto(APP);
       const frame = await (await parent.waitForSelector("iframe", { timeout: WAIT_MS })).contentFrame();
       await frame.waitForFunction(() => {
@@ -571,6 +634,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
     const h = await launch({ harness, site });
     try {
       const ctx = await h.browser.newContext();
+      await ctx.addInitScript(HOLD_LAYER);
       const [a, b] = [await ctx.newPage(), await ctx.newPage()];
       for (const t of [a, b]) {
         watch(t, errors);
@@ -592,6 +656,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
     try {
       const ctx = await h.browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
       await ctx.addInitScript(DRAWN);
+      await ctx.addInitScript(HOLD_LAYER);
       const page = await ctx.newPage();
       watch(page, errors);
       const creds = await authenticator(page, true);
@@ -639,6 +704,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
     try {
       const nctx = await h.browser.newContext();
       await nctx.addInitScript(DRAWN);
+      await nctx.addInitScript(HOLD_LAYER);
       const page = await nctx.newPage();
       watch(page, errors);
       await authenticator(page, false);
@@ -688,7 +754,9 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       // typed words, in a fresh store (its own context): first words whose checksum fails, then A.8's seed's 12 words
       const list = await wordlist(fetchFn);
       const a8 = [...Array(11).fill(list[0]), list[3]].join(" "); // 16 zero bytes: indices 0 x 11, then 3 (checksum)
-      const typing = await (await h.browser.newContext()).newPage();
+      const tctx = await h.browser.newContext();
+      await tctx.addInitScript(HOLD_LAYER);
+      const typing = await tctx.newPage();
       watch(typing, errors);
       await typing.goto(url);
       await settled(typing);

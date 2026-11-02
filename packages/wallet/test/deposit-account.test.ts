@@ -153,6 +153,14 @@ test("a wrong code hash stops it (edited on both RPCs)", async () => {
   await refused(checkDepositAccount(rec.good, ONE, "mainnet", pair({}, e, e)), "code_hash", /not the pin/);
 });
 
+test("a balance answer with a leading byte-order mark is refused: the BOM is kept, never dropped", async () => {
+  const bom = (r: Read, j: any) => {
+    if (r === "balance") j.result.result = [0xef, 0xbb, 0xbf, ...j.result.result];
+  };
+  await refused(checkDepositAccount(rec.good, ONE, "mainnet", pair({}, bom)), "rpc", /not JSON/);
+  await refused(checkDepositAccount(rec.good, ONE, "mainnet", pair({}, undefined, bom)), "rpc", /not JSON/);
+});
+
 test("a halt stops it: ft_balance_of failing with FiatToken: paused, on either RPC, in either error shape", async () => {
   // Edited: the real panic answer with the halted token's panic message (RESULT.md:153, run 20261026T162244Z).
   const halted = (r: Read, j: any) => {

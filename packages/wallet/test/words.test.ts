@@ -114,7 +114,7 @@ test("a no-PRF seed (ses.4) is random, not saved, and gets no deposit quote unti
   assert.equal(depositQuoteAllowed(await s.get("meta", "seed")), false);
   await assert.rejects(s.signOut(), /back up the 12 words/);
   // Saved: code_saved goes to true and nothing else changes; the deposit quote is then allowed
-  await saveWords(s);
+  await saveWords(s, stored);
   const after = checkSeed(await s.get("meta", "seed"))!;
   assert.deepEqual([after.source, after.code_saved, Buffer.from(after.entropy).toString("hex")],
     ["random", true, Buffer.from(stored.entropy).toString("hex")]);

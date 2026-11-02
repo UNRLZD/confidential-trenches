@@ -228,7 +228,7 @@ export async function checkDepositAccount(
       throw new DepositAccountRefused("rpc", `${rpcs[p].name}: the balance read has no bytes`);
     let v: unknown;
     try {
-      v = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes)));
+      v = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes)));
     } catch {
       throw new DepositAccountRefused("rpc", `${rpcs[p].name}: the balance is not JSON`);
     }

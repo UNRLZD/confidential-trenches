@@ -921,6 +921,26 @@ test("F2 (M50, M51): a deposits row at the wrong index, or with a value of 2^128
   assert.equal((await w.read()).state, "held");
 });
 
+test("a deposits page with a leading byte-order mark is not a page: unsure, the BOM kept, never dropped", async () => {
+  const t = await setup();
+  t.chain.addRow(t.note.precommitment);
+  const bom = (k: number) => {
+    const r = t.deps.rpcs[k];
+    return {
+      name: r.name,
+      tx: r.tx,
+      query: async (p: Record<string, unknown>) => {
+        const j = (await r.query(p)) as any;
+        if (p.method_name === "deposits") j.result.result = [0xef, 0xbb, 0xbf, ...j.result.result];
+        return j;
+      },
+    };
+  };
+  assert.equal((await new DepositsWatch(VAULT, t.note.precommitment, t.deps.rpcs).read()).state, "held");
+  for (const rpcs of [[bom(0), t.deps.rpcs[1]], [t.deps.rpcs[0], bom(1)]])
+    assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, rpcs as unknown as [BindRpc, BindRpc]).read(), { state: "unsure" });
+});
+
 test("F2 (M47): a lapse whose nonce moves between the device's read and the signer's: no call at another nonce is sent", async () => {
   const t = await setup(["tx"], () => () => {}); // carried, never lands
   const n0 = t.chain.a.nonce;

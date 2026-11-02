@@ -114,9 +114,18 @@ pub fn payout_results(fee: u128) -> (bool, bool) {
     read_parts(env::promise_results_count(), fee, part_ran)
 }
 
-/// Whether result `i` is Successful, its content never read.
+/// Whether result `i` is Successful, its content never read: each outcome by name, and any other panics (fails
+/// closed: a result the vault cannot name is never counted as paid, nor as returned).
 fn part_ran(i: u64) -> bool {
-    !matches!(env::promise_result_checked(i, 0), Err(PromiseError::Failed))
+    match env::promise_result_checked(i, 0) {
+        // Successful with an empty result (a plain ft_transfer returns nothing)
+        Ok(_) => true,
+        // Successful with a result longer than max_len 0: its content is never read
+        Err(PromiseError::TooLong(_)) => true,
+        Err(PromiseError::Failed) => false,
+        // PromiseError is #[non_exhaustive]: a variant a later near-sdk adds
+        Err(_) => env::panic_str("PayoutResults: a result that is neither Successful nor Failed"),
+    }
 }
 
 /// `payout_results` with the host reads passed in, so the rule is tested apart from the mocked host.
@@ -286,8 +295,8 @@ mod tests {
         );
     }
 
-    // near-sdk's mock takes several promise results only with a RuntimeFeesConfig, which it does not re-export, so the
-    // host read is tested with one result and the two-part rule through read_parts.
+    // The host read with one result here, the two-part rule through read_parts; src/payout.rs's tests run on_payout
+    // on two mocked results (testing_env! with near_sdk::RuntimeFeesConfig::test()).
 
     #[test]
     fn payout_results_reads_one_result_as_success_or_failure_only() {
