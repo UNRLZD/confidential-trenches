@@ -82,6 +82,7 @@ test("other policy breaks are refused", () => {
     "the worker's CSP with a remote connect-src": swap(WORKER_RULE, WORKER_RULE.replace("connect-src 'self'", "connect-src 'self' https://evil.ct.test")),
     "the worker's CSP with 'unsafe-eval'": swap(WORKER_RULE, WORKER_RULE.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'")),
     "the worker's CSP on another path": swap(WORKER_RULE, WORKER_RULE.replace("/prover-worker.js", "/*.js")),
+    "the worker's CSP also on another path": `${REAL}${WORKER_RULE.replace("/prover-worker.js", "/app.js")}`,
     "the worker rule sets a second header": swap(WORKER_RULE, `${WORKER_RULE}  Cross-Origin-Resource-Policy: cross-origin\n`),
     "the worker rule removes the site's CSP": swap(WORKER_RULE, `${WORKER_RULE}  ! Content-Security-Policy\n`),
   };
