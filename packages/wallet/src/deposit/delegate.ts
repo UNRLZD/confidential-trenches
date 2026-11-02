@@ -228,7 +228,7 @@ export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "s
   });
   let body: unknown;
   try {
-    body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await readCapped(res, BIND_ANSWER_MAX_BYTES)));
+    body = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readCapped(res, BIND_ANSWER_MAX_BYTES)));
   } catch (e) {
     throw new Error(`relayer: HTTP ${res.status}, ${e instanceof Error && e.message.startsWith("relayer:") ? e.message.slice(9) : "not JSON"}`);
   }

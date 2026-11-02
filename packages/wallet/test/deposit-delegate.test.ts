@@ -384,6 +384,10 @@ const answer = (status: number, body: unknown, calls: Call[] = [], headers: Reco
   }) as typeof fetch;
 const OUT = { signed_delegate: V.signed_delegate as string };
 
+test("send: an answer with a leading byte-order mark is not a bind answer (the BOM is kept, never dropped)", async () => {
+  await assert.rejects(sendDepositDelegate(OUT, answer(200, `\uFEFF${JSON.stringify({ tx_hash: HASH })}`)), /not JSON/);
+});
+
 test("send: only to the release's /v1/bind, the signed call alone, no cookies, no redirect", async () => {
   const calls: Call[] = [];
   assert.deepEqual(await sendDepositDelegate(OUT, answer(200, { tx_hash: HASH }, calls)), { ok: true, tx_hash: HASH });
