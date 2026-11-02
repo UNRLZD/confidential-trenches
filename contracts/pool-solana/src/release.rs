@@ -29,7 +29,10 @@
 //! - Row 11: the spent mark `["spent", existingNullifierHash]` must not exist (`NullifierAlreadySpent`); it is made, its
 //!   rent from the fee payer.
 //! - Row 12: newCommitmentHash into the state tree, even when the change is 0, its page entry's rent from the fee payer.
-//! - Row 13: the pool pays `withdrawnValue - relay_fee` to W and `relay_fee` to the fee payer; `spent += withdrawnValue`.
+//! - Row 8, tag 3 (src/buy.rs): the tip at most tip_cap (`TipOverCap`), and `relay_fee + tip` at most withdrawnValue
+//!   (`InvalidWithdrawalAmount`); tag 2's tip is 0.
+//! - Row 13: the pool pays `withdrawnValue - relay_fee - tip` to W, `relay_fee` to the fee payer and, for tag 3, `tip` to
+//!   the tip account; `spent += withdrawnValue`.
 //!
 //! Rent: the fee payer pays the spent mark (an empty account's minimum) and the change note's page entry (72 bytes),
 //! and the transaction fee. The relay fee the device signs for covers them; the cap in the proof bounds it (row 8).
@@ -47,7 +50,9 @@ use solana_program::{
     sysvar::Sysvar,
 };
 
-pub const RELEASE_LEN: usize = 1 + PROOF_LEN + 32 + 32 + 8 + 4 + 1 + 4 + 1 + 8 + 8 + 8 + 8 + 16;
+/// The field bytes after the proof: newCommitmentHash to salt.
+pub const FIELDS_LEN: usize = 32 + 32 + 8 + 4 + 1 + 4 + 1 + 8 + 8 + 8 + 8 + 16;
+pub const RELEASE_LEN: usize = 1 + PROOF_LEN + FIELDS_LEN;
 
 /// A release's instruction data, read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,18 +73,23 @@ pub struct Release {
 }
 
 impl Release {
-    /// On the heap, as the pool (SBF's 4 KiB stack frame).
+    /// Tag 2's data. On the heap, as the pool (SBF's 4 KiB stack frame).
     pub fn parse(data: &[u8]) -> Result<Box<Release>, PoolError> {
         if data.len() != RELEASE_LEN {
             return Err(PoolError::InvalidInstructionData);
         }
-        let mut at = 1;
+        Ok(Release::of(data[1..1 + PROOF_LEN].try_into().unwrap(), &data[1 + PROOF_LEN..]))
+    }
+
+    /// A release from its proof and its `FIELDS_LEN` field bytes (tag 2's data after the proof; tag 3 carries the same
+    /// bytes). `fields` must be `FIELDS_LEN` long.
+    pub fn of(proof: [u8; PROOF_LEN], fields: &[u8]) -> Box<Release> {
+        let mut at = 0;
         let mut take = |n: usize| {
-            let s = &data[at..at + n];
+            let s = &fields[at..at + n];
             at += n;
             s
         };
-        let proof: [u8; PROOF_LEN] = take(PROOF_LEN).try_into().unwrap();
         let new_commitment: [u8; 32] = take(32).try_into().unwrap();
         let nullifier_hash: [u8; 32] = take(32).try_into().unwrap();
         let withdrawn = u64::from_le_bytes(take(8).try_into().unwrap());
@@ -92,7 +102,7 @@ impl Release {
         let tip_cap = u64::from_le_bytes(take(8).try_into().unwrap());
         let deadline_ms = u64::from_le_bytes(take(8).try_into().unwrap());
         let salt: [u8; 16] = take(16).try_into().unwrap();
-        Ok(Box::new(Release {
+        Box::new(Release {
             proof,
             new_commitment,
             nullifier_hash,
@@ -106,7 +116,7 @@ impl Release {
             tip_cap,
             deadline_ms,
             salt,
-        }))
+        })
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -135,11 +145,27 @@ pub fn fee_within_backstop(relay_fee: u64, withdrawn: u64) -> bool {
 }
 
 pub fn release(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    let [pool_acc, recipient, fee_payer, spent_mark, state_root_page, label_root_page, state_page, system] = accounts else {
+    if accounts.len() != 8 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let r = Release::parse(data)?;
+    settle(program_id, accounts, &r, 0, None)
+}
+
+/// Rows 1 to 13 for tag 2 (`tip` 0, no tip account) and tag 3. `accounts` holds at least tag 2's eight; only those
+/// are read. Tag 3's `tip` is paid to `tip_to` from the chunk: at most the proof's tip cap, and with the relay fee at
+/// most withdrawnValue (row 8).
+pub(crate) fn settle<'a>(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo<'a>],
+    r: &Release,
+    tip: u64,
+    tip_to: Option<&AccountInfo<'a>>,
+) -> ProgramResult {
+    let [pool_acc, recipient, fee_payer, spent_mark, state_root_page, label_root_page, state_page, system, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
-    // row 1
-    let r = Release::parse(data)?;
+    // row 1 (the length: the caller's parse)
     if !field::is_field(&r.new_commitment) || !field::is_field(&r.nullifier_hash) {
         return Err(PoolError::FieldOverflow.into());
     }
@@ -198,6 +224,11 @@ pub fn release(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
     if !fee_within_backstop(r.relay_fee, r.withdrawn) {
         return Err(PoolError::RelayFeeGreaterThanMax.into());
     }
+    // row 8, tag 3: the tip the proof's tip cap bounds, and the fee and the tip together out of the chunk
+    if tip > r.tip_cap {
+        return Err(PoolError::TipOverCap.into());
+    }
+    let to_recipient = r.withdrawn.checked_sub(r.relay_fee).and_then(|v| v.checked_sub(tip)).ok_or(PoolError::InvalidWithdrawalAmount)?;
     // row 9
     let held = pool.deposited.checked_sub(pool.spent).ok_or(PoolError::InvalidPoolState)?;
     if r.withdrawn as u128 > held {
@@ -222,10 +253,12 @@ pub fn release(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
     // row 13: the pool owns its account, so it moves lamports out directly; row 9 keeps its rent untouched
     pool.spent = pool.spent.checked_add(r.withdrawn as u128).ok_or(PoolError::Overflow)?;
     pool.store(pool_acc)?;
-    let to_recipient = r.withdrawn - r.relay_fee; // the backstop keeps relay_fee at most half of withdrawn
     **pool_acc.try_borrow_mut_lamports()? = pool_acc.lamports().checked_sub(r.withdrawn).ok_or(PoolError::InvalidPoolState)?;
     **recipient.try_borrow_mut_lamports()? = recipient.lamports().checked_add(to_recipient).ok_or(PoolError::Overflow)?;
     **fee_payer.try_borrow_mut_lamports()? = fee_payer.lamports().checked_add(r.relay_fee).ok_or(PoolError::Overflow)?;
+    if let Some(t) = tip_to {
+        **t.try_borrow_mut_lamports()? = t.lamports().checked_add(tip).ok_or(PoolError::Overflow)?;
+    }
     Ok(())
 }
 

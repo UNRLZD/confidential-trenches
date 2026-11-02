@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# A hostile venue for the pool's LiteSVM tests only, never deployed: tag 3 calls it as an inner instruction and it
+# tries what a venue must not be able to do. Built with cargo-build-sbf into ../../out/evil_venue.so.
+[package]
+name = "evil-venue"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+solana-program = "=3.0.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("custom-heap", "custom-panic"))', 'cfg(target_os, values("solana"))'] }
+
+[workspace]

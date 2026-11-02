@@ -14,6 +14,7 @@
 //! - `0 init`: creates the pool account. Anyone, once; it takes nothing that could differ between callers.
 //! - `1 deposit(value u64, precommitment)`: src/deposit.rs.
 //! - `2 release(...)`: src/release.rs.
+//! - `3 release_and_buy(...)`: src/buy.rs; its byte layout is TAG3.md.
 //!
 //! Deviations from the NEAR vault, each for a named reason:
 //! - The release pays W and the fee payer in the same transaction, so there is no payout promise, no refund note and
@@ -28,6 +29,10 @@
 //! - No `LeafAlreadyExists` map (src/tree.rs gives the reason).
 //! - Each page entry also holds the Clock's unix_timestamp at its insert, so any client can tell from the pages alone
 //!   which root was the newest at a given chain time, and devices prove against a shared root (src/state.rs).
+//! - Tag 3 releases and buys in one instruction: the release, then the instructions W signed for, run with `invoke`
+//!   and W's signer privilege only (src/buy.rs); the vault has no such call. One transaction must hold the proof and
+//!   the venue's accounts in 1,232 bytes, which a v0 message reaches only when the venue's program loads from a
+//!   lookup table, and so only when the pool invokes it.
 //! - No ragequit. The pool puts every deposit's label into its own label tree, so a release proof always exists for
 //!   every note; ragequit would add a public exit that links a deposit to its exit, and a depositor record per label,
 //!   and buy nothing a release does not.
@@ -48,6 +53,7 @@
 // pinned here.
 #![allow(deprecated)]
 
+pub mod buy;
 pub mod context;
 pub mod deposit;
 pub mod error;
@@ -70,6 +76,7 @@ pub const MAX_RELAY_FEE_BPS: u64 = 5_000;
 pub const TAG_INIT: u8 = 0;
 pub const TAG_DEPOSIT: u8 = 1;
 pub const TAG_RELEASE: u8 = 2;
+pub const TAG_RELEASE_AND_BUY: u8 = 3;
 
 #[cfg(feature = "entrypoint")]
 solana_program::entrypoint!(process_instruction);
@@ -79,6 +86,7 @@ pub fn process_instruction(program_id: &Pubkey, accounts: &[AccountInfo], data: 
         Some(&TAG_INIT) if data.len() == 1 => deposit::init(program_id, accounts),
         Some(&TAG_DEPOSIT) => deposit::deposit(program_id, accounts, data),
         Some(&TAG_RELEASE) => release::release(program_id, accounts, data),
+        Some(&TAG_RELEASE_AND_BUY) => buy::release_and_buy(program_id, accounts, data),
         _ => Err(PoolError::InvalidInstructionData.into()),
     }
 }

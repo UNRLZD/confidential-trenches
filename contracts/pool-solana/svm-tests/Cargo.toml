@@ -26,6 +26,8 @@ solana-message = "=4.6.0"
 solana-signer = "=3.0.1"
 solana-transaction = "=4.3.0"
 serde_json = "1"
+# tag 3 tests compress the fixture proofs with the alt_bn128 `_be` forms (the version litesvm's lock already holds)
+solana-bn254 = "=3.2.1"
 sha2 = "0.10"
 
 [workspace]

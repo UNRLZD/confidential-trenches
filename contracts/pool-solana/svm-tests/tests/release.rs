@@ -832,3 +832,527 @@ fn a_release_counts_what_it_spends() {
     let rent = env.svm.minimum_balance_for_rent_exemption(POOL_LEN) as u128;
     assert_eq!(lamports(&env, &env.pool) as u128, rent + deposited - r.withdrawn as u128);
 }
+
+// ------------------------------------------------------------------------------------------------------------ tag 3
+// Release-and-buy (src/buy.rs; layout TAG3.md). These run tag 3 with a system transfer from W, the hostile venue
+// (svm-tests/evil-venue, EVIL_SO or ../out/evil_venue.so) or, in venue_*, copies of mainnet's pump and PumpSwap.
+
+const NOT_ENOUGH_ACCOUNTS: u32 = u32::MAX - 1;
+const INVALID_INSTRUCTION_DATA: u32 = 1;
+const TIP_OVER_CAP: u32 = 27;
+const INNER_INVOKES_POOL: u32 = 28;
+const INNER_NAMES_POOL_ACCOUNT: u32 = 29;
+const INNER_SIGNER_NOT_W: u32 = 30;
+const TIP: u64 = 10_000;
+
+/// A tag 3 release: `rel` plus the flags, the tip (to `tip_to` when above 0) and the inner instructions.
+#[derive(Clone)]
+struct Buy {
+    r: Rel,
+    compressed: bool,
+    flags: u8,
+    tip: u64,
+    tip_to: Pubkey,
+    inner: Vec<Instruction>,
+    /// bytes appended after the last inner instruction
+    trailing: Vec<u8>,
+    /// the inner count byte, when not inner.len()
+    count: Option<u8>,
+}
+
+fn compress(p: &[u8]) -> Vec<u8> {
+    use solana_bn254::compression::prelude::{alt_bn128_g1_compress_be, alt_bn128_g2_compress_be};
+    let mut c = alt_bn128_g1_compress_be(p[0..64].try_into().unwrap()).unwrap().to_vec();
+    c.extend_from_slice(&alt_bn128_g2_compress_be(p[64..192].try_into().unwrap()).unwrap());
+    c.extend_from_slice(&alt_bn128_g1_compress_be(p[192..256].try_into().unwrap()).unwrap());
+    c
+}
+
+/// The tag 3 instruction, as the kit's `buildSolanaPoolBuyTag3` lays it out: tag 2's 8 accounts, the tip account when
+/// the tip is above 0, then each inner account and program once, with the union of the flags asked.
+fn buy_ix(env: &Env, b: &Buy) -> Instruction {
+    let two = release_ix(env, &b.r);
+    let mut outer = two.accounts.clone();
+    if b.tip > 0 {
+        outer.push(AccountMeta::new(b.tip_to, false));
+    }
+    let mut index_of = |m: AccountMeta| -> u8 {
+        match outer.iter().position(|o| o.pubkey == m.pubkey) {
+            Some(i) => {
+                outer[i].is_signer |= m.is_signer;
+                outer[i].is_writable |= m.is_writable;
+                i as u8
+            }
+            None => {
+                outer.push(m);
+                (outer.len() - 1) as u8
+            }
+        }
+    };
+    let mut data = vec![3u8, if b.compressed { 1 } else { b.flags }];
+    data.extend_from_slice(&if b.compressed { compress(&b.r.proof) } else { b.r.proof.clone() });
+    data.extend_from_slice(&two.data[1 + 256..]);
+    data.extend_from_slice(&b.tip.to_le_bytes());
+    data.push(b.count.unwrap_or(b.inner.len() as u8));
+    for x in &b.inner {
+        let p = index_of(AccountMeta::new_readonly(x.program_id, false));
+        let idx: Vec<u8> = x.accounts.iter().map(|a| index_of(a.clone())).collect();
+        data.push(p);
+        data.push(idx.len() as u8);
+        data.extend_from_slice(&idx);
+        data.extend_from_slice(&(x.data.len() as u16).to_le_bytes());
+        data.extend_from_slice(&x.data);
+    }
+    data.extend_from_slice(&b.trailing);
+    Instruction { program_id: env.program, accounts: outer, data }
+}
+
+fn transfer_ix(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruction {
+    let mut data = 2u32.to_le_bytes().to_vec();
+    data.extend_from_slice(&lamports.to_le_bytes());
+    Instruction { program_id: SYSTEM, accounts: vec![AccountMeta::new(*from, true), AccountMeta::new(*to, false)], data }
+}
+
+fn evil_so() -> String {
+    std::env::var("EVIL_SO").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../out/evil_venue.so").into())
+}
+
+/// The hostile venue's id.
+fn evil() -> Pubkey {
+    Pubkey::new_from_array(Sha256::digest(b"pool-sol-buy-sell/evil-venue").into())
+}
+
+/// `with_deposits()` plus a funded tip account (as Jito's are), a funded receiver for W's transfer and the hostile
+/// venue.
+fn with_buy_env() -> (Env, Pubkey, Pubkey) {
+    let mut env = with_deposits();
+    let (tip_to, to) = (Keypair::new().pubkey(), Keypair::new().pubkey());
+    env.svm.airdrop(&tip_to, 1_000_000_000).unwrap();
+    env.svm.airdrop(&to, 1_000_000_000).unwrap();
+    env.svm.add_program_from_file(evil(), evil_so()).expect("the hostile venue .so (cargo-build-sbf in svm-tests/evil-venue, or EVIL_SO)");
+    (env, tip_to, to)
+}
+
+/// The fixture's release as tag 3: a tip of TIP, then W sends 1,000,000 lamports to `to`.
+fn buy_of(env: &Env, tip_to: Pubkey, to: Pubkey) -> Buy {
+    Buy {
+        r: rel(env, "release"),
+        compressed: false,
+        flags: 0,
+        tip: TIP,
+        tip_to,
+        inner: vec![transfer_ix(&env.w.pubkey(), &to, 1_000_000)],
+        trailing: vec![],
+        count: None,
+    }
+}
+
+/// Sends tag 3 signed by the fee payer (payer) and W; Err(code), NOT_ENOUGH_ACCOUNTS, or u32::MAX for another error.
+fn send_buy(env: &mut Env, b: &Buy) -> Result<TransactionMetadata, u32> {
+    send_buy_raw(env, b).map_err(|s| match s.find("Custom(") {
+        Some(at) => s[at + 7..].split(')').next().unwrap().parse().unwrap(),
+        None if s.contains("NotEnoughAccountKeys") => NOT_ENOUGH_ACCOUNTS,
+        None => u32::MAX,
+    })
+}
+
+/// As `send_buy`, the error as the runtime words it.
+fn send_buy_raw(env: &mut Env, b: &Buy) -> Result<TransactionMetadata, String> {
+    let ixs = [compute_limit(400_000), buy_ix(env, b)];
+    let (fp, w) = (env.fee_payer.insecure_clone(), env.w.insecure_clone());
+    env.svm.expire_blockhash();
+    let tx = Transaction::new(&[&fp, &w], Message::new(&ixs, Some(&fp.pubkey())), env.svm.latest_blockhash());
+    env.svm.send_transaction(tx).map_err(|e: FailedTransactionMetadata| {
+        if std::env::var("POOL_LOGS").is_ok() {
+            eprintln!("{:?}\n{:#?}", e.err, e.meta.logs);
+        }
+        format!("{:?} {:?}", e.err, e.meta.logs)
+    })
+}
+
+#[test]
+fn release_and_buy_pays_w_the_fee_payer_and_the_tip_then_runs_ws_instruction() {
+    for compressed in [false, true] {
+        let (mut env, tip_to, to) = with_buy_env();
+        let mut b = buy_of(&env, tip_to, to);
+        b.compressed = compressed;
+        let (pool0, f0, t0, to0) = (lamports(&env, &env.pool), lamports(&env, &env.fee_payer.pubkey()), lamports(&env, &tip_to), lamports(&env, &to));
+        let meta = send_buy(&mut env, &b).expect("tag 3 lands");
+        let kind = if compressed { "compressed" } else { "raw" };
+        println!("CU tag3 transfer {kind} {}", meta.compute_units_consumed);
+        println!("BYTES tag3 transfer {kind} {}", tx_bytes(&[compute_limit(400_000), buy_ix(&env, &b)], &env.fee_payer.pubkey(), 2));
+        assert_eq!(lamports(&env, &env.pool), pool0 - b.r.withdrawn, "the pool pays withdrawnValue");
+        assert_eq!(lamports(&env, &tip_to), t0 + TIP, "the tip account gets the tip");
+        assert_eq!(lamports(&env, &to), to0 + 1_000_000, "W's own instruction ran with W's signature");
+        assert_eq!(lamports(&env, &env.w.pubkey()), b.r.withdrawn - FEE - TIP - 1_000_000, "W keeps the rest");
+        let mark_rent = lamports(&env, &pda(&[b"spent", &b.r.nullifier], &env.program));
+        let entry_rent = env.svm.minimum_balance_for_rent_exemption(16 + 7 * ENTRY) - env.svm.minimum_balance_for_rent_exemption(16 + 6 * ENTRY);
+        assert_eq!(lamports(&env, &env.fee_payer.pubkey()), f0 + FEE - mark_rent - entry_rent - 10_000, "the fee payer's balance");
+        assert_eq!(state_size(&env), 7, "the change note is in");
+        assert_eq!(pool_u128(&env, 33), b.r.withdrawn as u128, "spent");
+        // tag 3 is the same spend as tag 2: the note is now spent for both
+        assert_eq!(send_buy(&mut env, &b).err(), Some(NULLIFIER_ALREADY_SPENT));
+        let r = rel(&env, "release");
+        assert_eq!(release(&mut env, &r).err(), Some(NULLIFIER_ALREADY_SPENT));
+    }
+}
+
+#[test]
+fn tag3_runs_every_tag2_check() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let b = buy_of(&env, tip_to, to);
+    let mut x = b.clone();
+    x.r.withdrawn += 1;
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_PROOF), "a changed public signal");
+    let mut x = b.clone();
+    x.r.tip_cap += 1;
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_PROOF), "another tip cap than the proof's");
+    let mut x = b.clone();
+    x.r.relay_fee = x.r.relay_fee_cap + 1;
+    assert_eq!(send_buy(&mut env, &x).err(), Some(RELAY_FEE_OVER_CAP));
+    let mut x = b.clone();
+    x.compressed = true;
+    x.r.withdrawn += 1;
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_PROOF), "a changed public signal, compressed proof");
+    // tag 2 first, then the same note by tag 3
+    let r = rel(&env, "release");
+    release(&mut env, &r).expect("tag 2");
+    assert_eq!(send_buy(&mut env, &b).err(), Some(NULLIFIER_ALREADY_SPENT));
+}
+
+#[test]
+fn a_tip_over_the_tip_cap_is_refused() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let mut b = buy_of(&env, tip_to, to);
+    b.tip = b.r.tip_cap + 1;
+    assert_eq!(send_buy(&mut env, &b).err(), Some(TIP_OVER_CAP));
+    b.tip = b.r.tip_cap;
+    send_buy(&mut env, &b).expect("a tip at the cap lands");
+    assert_eq!(lamports(&env, &tip_to), 1_000_000_000 + b.r.tip_cap);
+}
+
+#[test]
+fn a_fee_and_tip_over_the_chunk_is_refused() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let mut b = buy_of(&env, tip_to, to);
+    // within the fee cap, the backstop (half) and the tip cap, but together over withdrawnValue; refused at row 8,
+    // before the proof (which is for another withdrawnValue)
+    b.r.withdrawn = 1_000_000;
+    b.r.relay_fee = 500_000;
+    b.tip = 600_000;
+    assert_eq!(send_buy(&mut env, &b).err(), Some(INVALID_WITHDRAWAL_AMOUNT));
+    b.tip = 500_000;
+    assert_eq!(send_buy(&mut env, &b).err(), Some(INVALID_PROOF), "at exactly withdrawnValue it reaches the proof");
+}
+
+#[test]
+fn a_tip_with_no_tip_account_is_refused() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let mut b = buy_of(&env, tip_to, to);
+    b.inner = vec![];
+    b.count = Some(0);
+    b.tip = TIP;
+    // no tip account and no inner account: only tag 2's eight
+    let mut ix = buy_ix(&env, &b);
+    ix.accounts.truncate(8);
+    let (fp, w) = (env.fee_payer.insecure_clone(), env.w.insecure_clone());
+    let tx = Transaction::new(&[&fp, &w], Message::new(&[compute_limit(400_000), ix], Some(&fp.pubkey())), env.svm.latest_blockhash());
+    let e = format!("{:?}", env.svm.send_transaction(tx).err().unwrap().err);
+    assert!(e.contains("NotEnoughAccountKeys"), "{e}");
+}
+
+#[test]
+fn the_pool_never_calls_itself() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let mut b = buy_of(&env, tip_to, to);
+    b.inner.push(Instruction { program_id: env.program, accounts: vec![], data: vec![0] });
+    assert_eq!(send_buy(&mut env, &b).err(), Some(INNER_INVOKES_POOL));
+}
+
+#[test]
+fn a_venue_that_reenters_the_pool_is_refused_by_the_runtime() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let mut b = buy_of(&env, tip_to, to);
+    // the hostile venue calls the pool's deposit with W as the depositor
+    let pre = [7u8; 32];
+    let dep = deposit_ix(&env, 1_000_000, &pre, 7, 6);
+    let mut accounts = vec![AccountMeta::new_readonly(env.program, false)];
+    accounts.extend(dep.accounts.iter().cloned().map(|mut a| {
+        if a.pubkey == env.depositor.pubkey() {
+            a.pubkey = env.w.pubkey();
+        }
+        a
+    }));
+    // the pool and the pages are refused by name first: the venue gets only W, the precommitment mark and system
+    let named: Vec<AccountMeta> = accounts.iter().filter(|a| a.pubkey != env.pool && env.svm.get_account(&a.pubkey).map(|x| x.owner != env.program).unwrap_or(true)).cloned().collect();
+    let mut data = vec![0u8];
+    data.extend_from_slice(&dep.data);
+    b.inner = vec![Instruction { program_id: evil(), accounts: named, data }];
+    let e = send_buy_raw(&mut env, &b).err().expect("refused");
+    assert!(e.contains("ReentrancyNotAllowed"), "{e}");
+    // and naming the pool for it is refused by the pool itself
+    b.inner = vec![Instruction { program_id: evil(), accounts, data: vec![0] }];
+    assert_eq!(send_buy(&mut env, &b).err(), Some(INNER_NAMES_POOL_ACCOUNT));
+}
+
+#[test]
+fn an_inner_instruction_naming_a_pool_account_is_refused() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let b = buy_of(&env, tip_to, to);
+    let two = release_ix(&env, &b.r);
+    // the hostile venue taking 1 lamport from each of the pool, the spent mark and the three pages
+    for i in [0usize, 3, 4, 5, 6] {
+        let mut x = b.clone();
+        x.inner = vec![Instruction { program_id: evil(), accounts: vec![AccountMeta::new(two.accounts[i].pubkey, false), AccountMeta::new(to, false)], data: vec![1] }];
+        assert_eq!(send_buy(&mut env, &x).err(), Some(INNER_NAMES_POOL_ACCOUNT), "account {i}");
+    }
+    // the tip to the pool
+    let mut x = b.clone();
+    x.tip_to = env.pool;
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INNER_NAMES_POOL_ACCOUNT), "the tip to the pool");
+    // an account the pool owns that this release does not name: another note's spent mark
+    let mut first = b.clone();
+    first.r = rel(&env, "old_root");
+    first.inner = vec![Instruction { program_id: evil(), accounts: vec![], data: vec![2] }];
+    send_buy(&mut env, &first).expect("another release lands");
+    let other_mark = pda(&[b"spent", &first.r.nullifier], &env.program);
+    let mut x = b.clone();
+    x.inner = vec![Instruction { program_id: evil(), accounts: vec![AccountMeta::new(other_mark, false), AccountMeta::new(to, false)], data: vec![1] }];
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INNER_NAMES_POOL_ACCOUNT), "another spent mark");
+    send_buy(&mut env, &b).expect("the release itself lands");
+}
+
+#[test]
+fn an_inner_signer_other_than_w_is_refused() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let mut b = buy_of(&env, tip_to, to);
+    // the fee payer's signature to a callee: a transfer from the relayer
+    b.inner = vec![transfer_ix(&env.fee_payer.pubkey(), &to, 1)];
+    assert_eq!(send_buy(&mut env, &b).err(), Some(INNER_SIGNER_NOT_W));
+}
+
+#[test]
+fn a_failing_inner_instruction_undoes_the_release() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let mut b = buy_of(&env, tip_to, to);
+    let pool0 = lamports(&env, &env.pool);
+    b.inner = vec![transfer_ix(&env.w.pubkey(), &to, b.r.withdrawn)]; // more than W gets
+    assert!(send_buy(&mut env, &b).is_err());
+    assert_eq!(lamports(&env, &env.pool), pool0, "the pool keeps its lamports");
+    assert!(env.svm.get_account(&pda(&[b"spent", &b.r.nullifier], &env.program)).map(|a| a.lamports == 0).unwrap_or(true), "no spent mark");
+    let b = buy_of(&env, tip_to, to);
+    send_buy(&mut env, &b).expect("the same note then lands");
+}
+
+#[test]
+fn tag3_data_refusals() {
+    let (mut env, tip_to, to) = with_buy_env();
+    let b = buy_of(&env, tip_to, to);
+    let mut x = b.clone();
+    x.flags = 2;
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_INSTRUCTION_DATA), "an unknown flag");
+    let mut x = b.clone();
+    x.inner = vec![];
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_INSTRUCTION_DATA), "no inner instruction");
+    let mut x = b.clone();
+    x.inner = vec![Instruction { program_id: evil(), accounts: vec![], data: vec![2] }; 9];
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_INSTRUCTION_DATA), "nine");
+    let mut x = b.clone();
+    x.trailing = vec![0];
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_INSTRUCTION_DATA), "a byte after the last");
+    let mut x = b.clone();
+    x.count = Some(2); // says two, holds one: the second's program index reads past the data
+    assert_eq!(send_buy(&mut env, &x).err(), Some(INVALID_INSTRUCTION_DATA), "short");
+    // an index past the accounts: the transfer's `to` pointed one past the last
+    let mut ix = buy_ix(&env, &b);
+    let n = ix.accounts.len() as u8;
+    let last = ix.data.len() - 12 - 2; // the transfer: ... n=2 ‖ from ‖ to ‖ len u16 ‖ 12 data bytes
+    ix.data[last - 1] = n;
+    let (fp, w) = (env.fee_payer.insecure_clone(), env.w.insecure_clone());
+    env.svm.expire_blockhash();
+    let tx = Transaction::new(&[&fp, &w], Message::new(&[compute_limit(400_000), ix], Some(&fp.pubkey())), env.svm.latest_blockhash());
+    let e = format!("{:?}", env.svm.send_transaction(tx).err().unwrap().err);
+    assert!(e.contains("Custom(1)"), "an index past the accounts: {e}");
+    let mut x = b.clone();
+    x.inner = vec![Instruction { program_id: evil(), accounts: vec![], data: vec![2] }; 8];
+    send_buy(&mut env, &x).expect("eight inner instructions land");
+}
+
+// ---------------------------------------------------------------------------------------- tag 3 on mainnet copies
+// ../fixtures/venues/{pump,pumpswap}.json: a pump.fun curve and a PumpSwap pool read on two RPCs, with the steps W
+// runs (the kit's solanaPoolBuySteps) and a sell; their programs' code is in ../fixtures/venues/programs/, fetched by
+// `node fixtures/venues/dump.mjs --programs-only` (sha256-checked against the JSON; not committed: closed-source code).
+
+
+fn b64(s: &str) -> Vec<u8> {
+    let val = |c: u8| -> u32 {
+        match c {
+            b'A'..=b'Z' => (c - b'A') as u32,
+            b'a'..=b'z' => (c - b'a' + 26) as u32,
+            b'0'..=b'9' => (c - b'0' + 52) as u32,
+            b'+' => 62,
+            b'/' => 63,
+            _ => panic!("base64"),
+        }
+    };
+    let s = s.trim_end_matches('=').as_bytes();
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    for ch in s.chunks(4) {
+        let mut n = 0u32;
+        for (i, &c) in ch.iter().enumerate() {
+            n |= val(c) << (18 - 6 * i);
+        }
+        out.extend_from_slice(&n.to_be_bytes()[1..ch.len()]);
+    }
+    out
+}
+
+fn addr(v: &Value) -> Pubkey {
+    v.as_str().unwrap().parse().unwrap()
+}
+
+fn steps(v: &Value) -> Vec<Instruction> {
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|s| Instruction {
+            program_id: addr(&s["program"]),
+            accounts: s["accounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| AccountMeta { pubkey: addr(&a["address"]), is_signer: a["signer"].as_bool().unwrap(), is_writable: a["writable"].as_bool().unwrap() })
+                .collect(),
+            data: unhex(s["data"].as_str().unwrap()),
+        })
+        .collect()
+}
+
+/// The venue's JSON, its accounts and programs set in `env`, and the clock at its read.
+fn load_venue(env: &mut Env, name: &str) -> Value {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/venues/");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}{name}.json")).unwrap()).unwrap();
+    assert_eq!(addr(&v["wallet"]), env.w.pubkey(), "the venue's W is the pool fixture's");
+    for a in v["accounts"].as_array().unwrap() {
+        let data = b64(a["data"].as_str().unwrap());
+        env.svm
+            .set_account(
+                addr(&a["address"]),
+                solana_account::Account { lamports: a["lamports"].as_str().unwrap().parse().unwrap(), data, owner: addr(&a["owner"]), executable: false, rent_epoch: 0 },
+            )
+            .unwrap();
+    }
+    for p in v["programs"].as_array().unwrap() {
+        let file = format!("{dir}{}", p["file"].as_str().unwrap());
+        let elf = std::fs::read(&file).unwrap_or_else(|_| panic!("{file}: run `node fixtures/venues/dump.mjs --programs-only` in contracts/pool-solana"));
+        let sha: [u8; 32] = Sha256::digest(&elf).into();
+        assert_eq!(hex(&sha), p["sha256"].as_str().unwrap(), "{file} is the code the JSON was read with");
+        env.svm.add_program(addr(&p["address"]), &elf).unwrap();
+    }
+    set_time(env, v["unix_timestamp"].as_str().unwrap().parse().unwrap());
+    v
+}
+
+fn token_amount(env: &Env, ata: &Pubkey) -> u64 {
+    env.svm.get_account(ata).map(|a| u64::from_le_bytes(a.data[64..72].try_into().unwrap())).unwrap_or(0)
+}
+
+/// Bytes of the signed v0 transaction (2 signatures) with one lookup table holding every key of `ixs` but `stat`
+/// (the per-token and per-spend accounts, which no table can hold at the tap) and the signers.
+fn v0_bytes(ixs: &[Instruction], payer: &Pubkey, stat: &[Pubkey]) -> usize {
+    use solana_message::v0;
+    let mut table: Vec<Pubkey> = vec![];
+    for ix in ixs.iter().skip(2) {
+        for k in std::iter::once(ix.program_id).chain(ix.accounts.iter().filter(|a| !a.is_signer).map(|a| a.pubkey)) {
+            if !stat.contains(&k) && !table.contains(&k) && k != ixs[2].program_id {
+                table.push(k);
+            }
+        }
+    }
+    let lut = solana_message::AddressLookupTableAccount { key: Pubkey::new_from_array([9; 32]), addresses: table };
+    let m = v0::Message::try_compile(payer, ixs, &[lut], solana_message::Hash::default()).unwrap();
+    let cu = |n: usize| if n < 128 { 1 } else { 2 };
+    let mut n = 1 + 64 * 2 + 1 + 3 + cu(m.account_keys.len()) + 32 * m.account_keys.len() + 32 + cu(m.instructions.len());
+    for i in &m.instructions {
+        n += 1 + cu(i.accounts.len()) + i.accounts.len() + cu(i.data.len()) + i.data.len();
+    }
+    n += cu(m.address_table_lookups.len());
+    for l in &m.address_table_lookups {
+        n += 32 + cu(l.writable_indexes.len()) + l.writable_indexes.len() + cu(l.readonly_indexes.len()) + l.readonly_indexes.len();
+    }
+    n
+}
+
+/// Tag 3 on `name`'s venue: W's chunk pays for the buy, W ends holding at least min_out of the token. Returns W's token
+/// account for the sell.
+fn release_and_buy_on(env: &mut Env, name: &str, compressed: bool, ata_at: usize, stat_at: &[usize]) -> (Value, Pubkey) {
+    let v = load_venue(env, name);
+    let inner = steps(&v["buy"]);
+    let buy = inner.iter().find(|s| v["programs"].as_array().unwrap().iter().any(|p| addr(&p["address"]) == s.program_id)).unwrap().clone();
+    let ata = buy.accounts[ata_at].pubkey;
+    let tip_to = Keypair::new().pubkey();
+    env.svm.airdrop(&tip_to, 1_000_000_000).unwrap();
+    let b = Buy { r: rel(env, "release"), compressed, flags: 0, tip: TIP, tip_to, inner, trailing: vec![], count: None };
+    let pool0 = lamports(env, &env.pool);
+    let meta = send_buy(env, &b).unwrap_or_else(|e| panic!("{name}: release-and-buy lands (error {e}; POOL_LOGS=1 for the logs)"));
+    let got = token_amount(env, &ata);
+    let min_out: u64 = v["min_out"].as_str().unwrap().parse().unwrap();
+    assert!(got >= min_out && got > 0, "{name}: W holds {got}, min out {min_out}");
+    assert_eq!(lamports(env, &env.pool), pool0 - b.r.withdrawn, "{name}: the pool paid withdrawnValue only");
+    assert_eq!(lamports(env, &tip_to), 1_000_000_000 + TIP);
+    let kind = if compressed { "compressed" } else { "raw" };
+    let pool_cu: Vec<&String> = meta.logs.iter().filter(|l| l.starts_with(&format!("Program {} consumed", env.program))).collect();
+    println!("CU tag3 {name} {kind} total {} ({pool_cu:?})", meta.compute_units_consumed);
+    let ix = buy_ix(env, &b);
+    let mut stat: Vec<Pubkey> = stat_at.iter().map(|&i| buy.accounts[i].pubkey).collect();
+    stat.push(pda(&[b"spent", &b.r.nullifier], &env.program));
+    let ixs = [compute_limit(400_000), Instruction { program_id: "ComputeBudget111111111111111111111111111111".parse().unwrap(), accounts: vec![], data: [vec![3u8], 100_000u64.to_le_bytes().to_vec()].concat() }, ix];
+    println!("BYTES tag3 {name} {kind} v0 {} (W holds {got}, min out {min_out})", v0_bytes(&ixs, &env.fee_payer.pubkey(), &stat));
+    (v, ata)
+}
+
+/// pump buy's per-token and per-spend accounts: mint, curve, its token account, W's, W, creator vault, W's volume
+/// accumulator, bonding-curve-v2.
+const PUMP_STATIC: [usize; 8] = [2, 3, 4, 5, 6, 9, 13, 16];
+/// PumpSwap buy's: pool, W, mint, W's two token accounts, the two vaults, the creator vault's wSOL account and
+/// authority, W's volume accumulator, pool-v2.
+const PUMPSWAP_STATIC: [usize; 11] = [0, 1, 3, 5, 6, 7, 8, 17, 18, 20, 23];
+
+#[test]
+fn venue_pump_release_and_buy_then_sell_and_deposit() {
+    for compressed in [false, true] {
+        let mut env = with_deposits();
+        let (v, ata) = release_and_buy_on(&mut env, "pump", compressed, 5, &PUMP_STATIC);
+        if compressed {
+            continue;
+        }
+        // the sell: W sells on pump, then deposits a rung of the proceeds into the pool (tag 1, W the depositor), one
+        // transaction W signs and pays
+        let held = token_amount(&env, &ata);
+        let size0 = state_size(&env);
+        let (pool0, deposited0) = (lamports(&env, &env.pool), pool_u128(&env, 17));
+        let pre = [0x0e; 32]; // below p
+        let mut dep = deposit_ix(&env, 1_000_000, &pre, size0, 6);
+        dep.accounts[1] = AccountMeta::new(env.w.pubkey(), true);
+        let mut ixs = vec![compute_limit(400_000)];
+        ixs.extend(steps(&v["sell"]));
+        ixs.push(dep);
+        let w = env.w.insecure_clone();
+        let meta = send(&mut env, &ixs, &w.pubkey(), &[&w]).expect("the sell and its deposit land");
+        println!("CU sell pump + deposit {}", meta.compute_units_consumed);
+        println!("BYTES sell pump + deposit legacy {}", tx_bytes(&ixs, &w.pubkey(), 1));
+        let sold: u64 = v["min_out"].as_str().unwrap().parse().unwrap();
+        assert_eq!(token_amount(&env, &ata), held - sold, "W sold min_out");
+        assert_eq!(state_size(&env), size0 + 1, "the state tree gained the deposit");
+        assert_eq!(pool_u128(&env, 17), deposited0 + 1_000_000);
+        assert_eq!(lamports(&env, &env.pool), pool0 + 1_000_000);
+    }
+}
+
+#[test]
+fn venue_pumpswap_release_and_buy() {
+    for compressed in [false, true] {
+        let mut env = with_deposits();
+        release_and_buy_on(&mut env, "pumpswap", compressed, 5, &PUMPSWAP_STATIC);
+    }
+}
