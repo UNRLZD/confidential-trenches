@@ -804,6 +804,12 @@ test("PROBE N8 (carry side): an open send is re-sent only while its delegate is 
     assert.equal(code(await w.carry(signed(w.u, P, 101n, final + 100n))), "in_flight");
     assert.deepEqual(w.chain.resolveOpts, [want]);
   }
+  // R4 reads the newer provider's final: K ahead on the lower one but not on the newer is no re-send
+  w.chain.final = mbh - 20n;
+  w.chain.ahead = 1n;
+  w.chain.resolveOpts = [];
+  assert.equal(code(await w.carry(signed(w.u, P, 101n, w.chain.final + 100n))), "in_flight");
+  assert.deepEqual(w.chain.resolveOpts, [{ resend: false }]);
 });
 
 test("C: (f) holds at a re-send: a watch that turns halted after check 9 keeps a pending prepay's and a pending send's bytes in", async () => {
