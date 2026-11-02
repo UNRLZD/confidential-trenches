@@ -2,7 +2,7 @@
  "good": {
   "url": "https://sign.confidential.unrealized.trade/",
   "source": "local, SIGN_HOST answered from packages/signpage's build (deploy.mjs build())",
-  "at": "2026-11-02T13:39:06.456Z",
+  "at": "2026-11-02T14:34:07.912Z",
   "browser": "153.0.8010.12",
   "runs": [
    {
@@ -15,7 +15,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5033.89999999851,
+    "sentAt": 5059.20000000298,
     "scriptRan": false,
     "signRequests": [
      {
@@ -27,23 +27,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "534eec24-068d-4f50-95e3-9c33038e6833",
+      "id": "d38aec4d-449f-4cd0-b3c8-0549a0c22fcf",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "9921ee7b-afc3-492a-92dc-12fc05068c7a",
+      "id": "2946735b-3e26-4501-94e7-14d9b5cd55fb",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "cbc5252c-a7cf-4d50-8a59-a89ff3ca5d31",
+      "id": "b5608755-5dd5-4b1b-a2f9-e202706fcf99",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "45209d5f-59c5-4b7b-b797-dfc518e20c04",
+      "id": "0671f272-0406-45ca-98be-46ebf637b7fc",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -53,7 +53,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "248616b8-6fec-4aa5-8650-8a8cbdf0d864",
+      "id": "c5a12069-4ed8-4702-b1ff-b8fab1539aa0",
       "type": "state"
      },
      "badId": {
@@ -63,7 +63,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "9d892dd4-f012-4d5b-a8f8-ac6fc0adbdfc",
+      "id": "bc1b6c0c-d0d4-4422-8a74-39baf2775c68",
       "type": "state"
      }
     },
@@ -82,7 +82,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5030,
+    "sentAt": 5044.79999999702,
     "scriptRan": false,
     "signRequests": [
      {
@@ -94,23 +94,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "15e5bffe-9ff6-4b2b-8b9f-fef566a14d76",
+      "id": "153f4ae2-36a8-49ec-82f0-1bc25a55774c",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "540e309c-0b13-4574-8d67-47df52f81acb",
+      "id": "dfb0b276-e8ea-4076-b63c-f94c228e7d93",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "2813ac89-fb87-48b3-aaa8-2a6be7cb8173",
+      "id": "60bdf526-b14f-4081-8595-f515611bf011",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "d9d4340d-4a47-417d-b986-1f3fd939e97c",
+      "id": "a3790cc4-5031-446d-8d94-aef2eb3ed553",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -120,7 +120,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "0befd5f9-b0af-44a6-85c0-0262d19a0c91",
+      "id": "93d357bc-49a5-4581-9c56-c0695a248dc0",
       "type": "state"
      },
      "badId": {
@@ -130,7 +130,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "65254e0f-0977-4cca-b5ab-75997c7b99d3",
+      "id": "a9b0d46a-2840-4be2-a753-aee1957cf999",
       "type": "state"
      }
     },
@@ -152,7 +152,7 @@
      "elements": 1,
      "controls": []
     },
-    "sentAt": 5062.699999999255,
+    "sentAt": 5063.29999999702,
     "scriptRan": true,
     "signRequests": [
      {
@@ -169,23 +169,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "8cd9c213-95c2-4fbb-8262-bd321ee4a6b2",
+      "id": "1cc67832-0821-4621-be12-1a28d6d6bf4b",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "22cce580-7ffe-425e-8064-0dd6f0ed74a1",
+      "id": "0ee546f0-b7ae-4434-8eb7-22e492aeb35f",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "c1e84433-fbfb-4a2a-be01-ef2caee6cb40",
+      "id": "6b84c7d6-2f42-44b0-a81d-04b136f8daf1",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "1dafa47c-8008-4333-80ec-2f500d2e6b8a",
+      "id": "061ca28e-bb8b-498e-b923-67d7d9d4aaa2",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -195,7 +195,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "27a82256-b338-4058-85a3-45d5aaed256d",
+      "id": "813a6e61-c65a-4eff-9240-493a103e44e3",
       "type": "state"
      },
      "badId": {
@@ -205,7 +205,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "59928c0a-27fc-4f07-b2f9-22300b7eddd9",
+      "id": "66bdcff5-8c69-4b29-b082-5abbd88ea86d",
       "type": "state"
      }
     },
@@ -222,7 +222,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5033.599999997765,
+    "sentAt": 5030.79999999702,
     "scriptRan": false,
     "signRequests": [
      {
@@ -234,23 +234,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "56d71c01-d370-4c16-bdb0-703dc4b7082a",
+      "id": "f5adcc98-a53f-48be-bd5d-ba2f3adec729",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "b5afc10c-0402-48c9-a988-6b8cfc5806de",
+      "id": "49dfa989-2108-437e-b085-ee7ffd2ef7ca",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "02157e44-2705-40d8-bbc7-29ef0cb73f8e",
+      "id": "7bd5831a-9219-4c5b-ab8e-b77109372b69",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "a842ed3e-c743-46f3-81ff-3d51fc84a79b",
+      "id": "22df224a-3fe7-48fa-9d4f-b8fa847db5b6",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -260,7 +260,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "7eaca4d5-8fcb-4310-8d13-61c8db20c820",
+      "id": "11a5aada-384b-4658-994b-8d941a26ca9e",
       "type": "state"
      },
      "badId": {
@@ -270,7 +270,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "e0cbe108-9b40-4231-b292-3dedf94b1d64",
+      "id": "5bc666b1-be6c-47fd-b250-80f180b2ec96",
       "type": "state"
      }
     },
@@ -292,7 +292,7 @@
      "elements": 1,
      "controls": []
     },
-    "sentAt": 5053.599999997765,
+    "sentAt": 5055.39999999851,
     "scriptRan": true,
     "signRequests": [
      {
@@ -309,23 +309,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "cfc6f672-8796-4b3f-bbdf-4b5ccf4ef537",
+      "id": "71267cbb-c4c9-45c8-8c3a-c28cd589b2a8",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "9e4708da-d7af-4e3e-8354-7b2b92423446",
+      "id": "d8b79bf1-46ae-432d-8d32-d1192ada44d0",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "1f738340-6b1d-43c6-b62b-4996a9eec4ab",
+      "id": "2f8f070d-2022-4c3e-9f7c-b014f987b0e8",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "586d2afe-6181-451a-98dd-34506f8b5816",
+      "id": "e8e2a003-a391-42f2-ab0d-db38466d5fe0",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -335,7 +335,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "0dffa8e5-c14b-46e2-b668-b527ace774ac",
+      "id": "061e92f4-9b2c-4cf0-b4ae-2c169586d95c",
       "type": "state"
      },
      "badId": {
@@ -345,7 +345,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "41a49e79-f737-4a4e-920d-4e9d04c052b1",
+      "id": "d4d635a0-152b-45e4-ba63-189dd2d9d788",
       "type": "state"
      }
     },
@@ -362,7 +362,7 @@
      "about:blank"
     ],
     "rendered": null,
-    "sentAt": 5026.300000000745,
+    "sentAt": 5024.79999999702,
     "scriptRan": false,
     "signRequests": [
      {
@@ -374,23 +374,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "b6de1ba6-526d-4955-8173-12d05cd3ea2f",
+      "id": "033d1562-9507-465a-99f1-0c2e4c7800e0",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "44f6ad18-ba85-4e70-bfdc-1ee674588fbf",
+      "id": "cc995dce-a701-443d-8e5a-37076dd452de",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "c709902b-1e44-4873-81e5-471acae3b522",
+      "id": "f4554701-bc61-46da-a725-a709b5569c89",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "5233084c-a9d3-486a-a8e3-c21a1fb8b67e",
+      "id": "a236a867-4db4-4b98-9509-daeeb40ef714",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -400,7 +400,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "2648ffa0-394a-4808-bd6d-a5963888cda5",
+      "id": "f56447e8-6c3f-4e7e-abda-6368b27326f5",
       "type": "state"
      },
      "badId": {
@@ -410,7 +410,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "67b16b68-5eb6-4861-ae4c-2d4809477e3d",
+      "id": "b86a2ae1-5de1-4db3-a319-b693df0e8ecf",
       "type": "state"
      }
     },
@@ -432,7 +432,7 @@
      "elements": 1,
      "controls": []
     },
-    "sentAt": 5056.800000000745,
+    "sentAt": 5056.5,
     "scriptRan": true,
     "signRequests": [
      {
@@ -449,23 +449,23 @@
     "sent": {
      "state": {
       "v": 1,
-      "id": "34096322-c84c-4934-96a5-fc5c34f70220",
+      "id": "fbac6d87-f1c4-436e-adfc-3d62ed77de02",
       "type": "state"
      },
      "stateExtra": {
       "v": 1,
-      "id": "9b80fc75-c00a-4815-8ecc-496e198a3bc1",
+      "id": "9a86c1aa-af23-44ae-8c52-0a22b8245189",
       "type": "state",
       "extra": true
      },
      "unknown": {
       "v": 1,
-      "id": "55138d80-ab0c-4033-b173-0af3b7a4c92d",
+      "id": "15882938-d47f-42c2-8810-d92d5e976499",
       "type": "sign.anything"
      },
      "buy": {
       "v": 1,
-      "id": "52c7955a-9a2c-4198-8aac-1025e5670155",
+      "id": "cbb6a060-90ad-4f9f-8541-d2986bb033d7",
       "type": "buy",
       "chain": "solana",
       "token": "So11111111111111111111111111111111111111112",
@@ -475,7 +475,7 @@
      },
      "badV": {
       "v": 2,
-      "id": "f4f8feab-6e25-46a4-9575-431f91590b3b",
+      "id": "3004bbe7-c409-4900-9960-f99aae17c140",
       "type": "state"
      },
      "badId": {
@@ -485,7 +485,7 @@
      },
      "wrongSource": {
       "v": 1,
-      "id": "f82cc8d5-fdd5-41fe-8ac8-f4c892bcf335",
+      "id": "2ca61477-fa5d-4b35-8190-66c926296e3b",
       "type": "state"
      }
     },
@@ -498,7 +498,7 @@
    "ready": true,
    "log": [
     {
-     "t": 16.799999997019768,
+     "t": 15.699999995529652,
      "origin": "https://sign.confidential.unrealized.trade",
      "fromParent": true,
      "data": {
@@ -509,12 +509,12 @@
      }
     },
     {
-     "t": 19.299999997019768,
+     "t": 17.899999998509884,
      "origin": "https://sign.confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
-      "id": "62a03441-7b0f-41f8-859f-dfbf6eee5c34",
+      "id": "ce3a65ce-2742-4f48-bac6-7a57b3b7870e",
       "ok": true,
       "result": {
        "release": "unreleased",
@@ -531,12 +531,12 @@
      }
     },
     {
-     "t": 19.399999998509884,
+     "t": 17.899999998509884,
      "origin": "https://sign.confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
-      "id": "bd4ffe28-1dfb-4602-b5bd-6da25967c1f2",
+      "id": "f1eaf9da-c49e-4e5e-9587-1d3fb7166cab",
       "ok": false,
       "error": {
        "code": "not_allowed"
@@ -545,15 +545,23 @@
     }
    ],
    "ids": {
-    "state": "62a03441-7b0f-41f8-859f-dfbf6eee5c34",
-    "quote": "bd4ffe28-1dfb-4602-b5bd-6da25967c1f2"
+    "state": "ce3a65ce-2742-4f48-bac6-7a57b3b7870e",
+    "quote": "f1eaf9da-c49e-4e5e-9587-1d3fb7166cab"
    },
    "asked": {
     "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
     "amount": "25"
    },
    "helper": [],
+   "appJs": {
+    "status": 200,
+    "sha256": "a4920ce78e3c872e989c7e40c898268bf8ee50b4f9006cc743bc4c6c8f90ca5a"
+   },
    "errors": []
+  },
+  "pin": {
+   "release": "release-4",
+   "sha256": "a4920ce78e3c872e989c7e40c898268bf8ee50b4f9006cc743bc4c6c8f90ca5a"
   }
  },
  "liveRelease3": {
