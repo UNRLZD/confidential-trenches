@@ -25,7 +25,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const KEY = "pool-sol-deploy";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -34,10 +34,10 @@ export const RECORD = path.join(HERE, "pool-sol-deploy.md");
 
 // @noble/hashes and @noble/curves from the helper's own dependencies (apps/ is outside Blindfill, so this check
 // reaches nothing of the kit's but its own copies of the same audited libraries).
+// Static names only, so check:imports reads every one (Node 24 loads these ES modules through require).
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
-const imp = (m) => import(pathToFileURL(req.resolve(m)).href);
-const { keccak_256 } = await imp("@noble/hashes/sha3.js");
-const { ed25519 } = await imp("@noble/curves/ed25519.js");
+const { keccak_256 } = req("@noble/hashes/sha3.js");
+const { ed25519 } = req("@noble/curves/ed25519.js");
 
 // Devnet's genesis hash, read 2026-11-02 at 23:12Z from api.devnet.solana.com and solana-devnet.api.onfinality.io
 // (getGenesisHash), both answering EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG.
