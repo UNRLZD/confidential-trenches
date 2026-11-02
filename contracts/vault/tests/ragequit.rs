@@ -129,10 +129,15 @@ async fn ragequit(h: &Harness, by: &Account, a: Value, yocto: u128) -> R<Outcome
 /// Refused with `want` in the ragequit receipt, which logged nothing; no payout, and no state byte, storage use or
 /// token balance of the vault changed.
 async fn refused(h: &Harness, by: &Account, a: Value, want: &str) -> R<()> {
+    refused_call(h, by, "ragequit", a, want).await
+}
+
+/// `refused`, for a call of `method` (ragequit or withdraw) with 1 NEAR and 300 Tgas.
+async fn refused_call(h: &Harness, by: &Account, method: &str, a: Value, want: &str) -> R<()> {
     let (state, held) = (vault_state(h).await?, h.token_balance(&h.vault).await?);
     let used = h.account_view(&h.vault, "final").await?["storage_usage"].clone();
-    let o = ragequit(h, by, a, ONE_NEAR).await?;
-    let r = o.calls_exactly(&h.vault, "ragequit", 1)?[0];
+    let o = h.call_outcome(by, &h.vault, method, a, NearToken::from_yoctonear(ONE_NEAR), Gas::from_tgas(300)).await?;
+    let r = o.calls_exactly(&h.vault, method, 1)?[0];
     let f = r.failure().ok_or_else(|| format!("landed, want {want}"))?;
     assert!(f.contains(want), "want {want}, got {f}");
     assert!(r.logs.is_empty(), "{want}: logged {:?}", r.logs);
@@ -182,6 +187,10 @@ async fn vt_s09(kind: TokenKind) -> R<()> {
     assert_eq!(h.view(&h.vault, "leaves", json!({"from": 0, "limit": 20})).await?, json!(want_leaves));
     assert_eq!(h.token_balance(w.alice.id()).await?, 3_000_000);
 
+    // note 2, which change_w spent through withdraw: its commitment proof by its depositor
+    assert_eq!(rq_nullifier("withdrawn"), find("withdrawals", "change_w")["public_signals"][1], "withdrawn names change_w's nullifier");
+    refused(h, &w.u, rq_args("withdrawn"), "NullifierAlreadySpent").await?;
+
     // 2. note 3 (10,000,000): a stranger, the depositor (exactly row 6's requirement), the depositor again
     refused(h, &w.stranger, rq_args("deposit"), "OnlyOriginalDepositor").await?;
     refused(h, &w.q, rq_args("deposit"), "OnlyOriginalDepositor").await?;
@@ -198,6 +207,11 @@ async fn vt_s09(kind: TokenKind) -> R<()> {
     assert_eq!(r["reserve"], json!((REFUND_RESERVE_BYTES * YOCTO_PER_BYTE).to_string()));
     assert_eq!(r["refund_precommitment"], find("ragequits", "deposit")["refund_precommitment"]);
     refused(h, &w.u, rq_args("deposit"), "NullifierAlreadySpent").await?;
+    // a valid withdraw proof of note 3 on known roots, after the ragequit spent it
+    let s = find("withdrawals", "after_rq");
+    assert_eq!(s["public_signals"][1].as_str(), Some(rq_nullifier("deposit").as_str()), "after_rq names the ragequit's nullifier");
+    let a = json!({"withdrawal": s["withdrawal"], "proof": s["proof"], "public_signals": s["public_signals"]});
+    refused_call(h, &w.relayer, "withdraw", a, "NullifierAlreadySpent").await?;
 
     // 3. the change notes
     let o = ragequit(h, &w.u, rq_args("change"), ONE_NEAR).await?;

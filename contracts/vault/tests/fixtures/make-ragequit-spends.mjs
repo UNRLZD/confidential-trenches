@@ -8,7 +8,9 @@
 //   1. change_w: note 2 (5,000,000), withdraw 1,000,000 to alice.test.near: change note 4,000,000 (leaf 6);
 //   2. zero_w: note 1 (2,000,000) whole to alice.test.near: change note 0 (leaf 7);
 //   3. ragequits (commitment proofs): deposit (note 3, by u), change (change_w's change, by u), zero (zero_w's change,
-//      by u), unregistered (note 6, by q, register_deposit 0), unlanded (a note on note 3's label never inserted);
+//      by u), unregistered (note 6, by q, register_deposit 0), unlanded (a note on note 3's label never inserted),
+//      withdrawn (note 2, by u, which change_w already spent: refused); after_rq, a withdraw of 1,000,000 of note 3
+//      against the trees as step 2 leaves them (8 leaves, 6 labels), sent after u's ragequit of note 3: refused;
 //   4. settle writes unregistered's refund note (4,000,000, label of nonce 7, leaf 8, label 6): refund_note is its
 //      commitment proof (refused: no deposit has its label) and refund_w the private withdraw that spends it whole to
 //      alice.test.near, against the trees as step 4 leaves them (9 leaves, 7 labels).
@@ -117,6 +119,7 @@ const depositLabels = [...labels];
 const changeW = await withdraw("change_w", notes[1], 1_000_000n, deposits, depositLabels);
 const zeroW = await withdraw("zero_w", notes[0], 2_000_000n, deposits, depositLabels);
 leaves.push(changeW.change.commitment, zeroW.change.commitment);
+const afterRq = await withdraw("after_rq", notes[2], 1_000_000n, [...leaves], depositLabels);
 
 const unregistered = await ragequit("unregistered", notes[5], DEPOSITORS[5]);
 const ragequits = [
@@ -134,12 +137,14 @@ if (refund.precommitment !== BigInt(unregistered.refund_precommitment)) throw ne
 leaves.push(refund.commitment);
 labels.push(refundLabel);
 ragequits.push(await ragequit("refund_note", refund, DEPOSITORS[5]));
+ragequits.push(await ragequit("withdrawn", notes[1], DEPOSITORS[1]));
 const refundW = await withdraw("refund_w", refund, refund.value, leaves, labels);
 
 const out = {
   notes: [
     "Real proofs for VT-S09 (tests/ragequit.rs) and src/ragequit.rs's lib tests. Test notes only, never money.",
     "Made by contracts/vault/tests/fixtures/make-ragequit-spends.mjs on withdraw-spends.json's six deposits (notes 1-5 by u.test.near, note 6 by q.test.near): withdraw proofs by the kit's vaultWithdrawInput, commitment proofs on {value, label, nullifier, secret}; snarkjs 0.7.5 groth16.fullProve with packages/kit/zk, and groth16.verify passes each.",
+    "withdrawn: a ragequit of note 2, which change_w spends; after_rq: a withdraw of note 3, which the deposit ragequit spends. Both must be refused NullifierAlreadySpent.",
     "changes: the change leaves of change_w and zero_w, in order (leaves 6 and 7). refund: the note settle writes for the unregistered ragequit (label of nonce 7, leaf 8, label 6). leaves and labels: both trees after that settle, which refund_w is proved against.",
   ],
   vault: VAULT,
@@ -151,7 +156,7 @@ const out = {
     value: String(n.value),
     depositor: DEPOSITORS[i],
   })),
-  withdrawals: [changeW.spend, zeroW.spend, refundW.spend],
+  withdrawals: [changeW.spend, zeroW.spend, refundW.spend, afterRq.spend],
   changes: [String(changeW.change.commitment), String(zeroW.change.commitment)],
   ragequits,
   refund: { commitment: String(refund.commitment), label: String(refundLabel), value: String(refund.value), refund_precommitment: unregistered.refund_precommitment },

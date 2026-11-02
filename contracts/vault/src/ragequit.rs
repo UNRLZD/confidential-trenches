@@ -187,6 +187,11 @@ mod tests {
     /// the fixture's withdrawals made, in its order; the refund note, when `refund`, as settle writes it (its label in
     /// the label tree only).
     fn vault(refund: bool) -> Vault {
+        vault_of(true, refund)
+    }
+
+    /// `vault`, with the change leaves only when `changes` (without them, the state change_w and zero_w are proved on).
+    fn vault_of(changes: bool, refund: bool) -> Vault {
         call_on(Default::default(), "u.test.near", 0, Gas::from_tgas(300));
         let x = f();
         let mut v = Vault::default();
@@ -205,7 +210,7 @@ mod tests {
             });
             v.label_index.insert(&l, &(i as u64));
         }
-        for c in x["changes"].as_array().unwrap() {
+        for c in x["changes"].as_array().unwrap().iter().filter(|_| changes) {
             let _ = v.insert_commitment(&mut h, &be(c.as_str().unwrap()));
         }
         if refund {
@@ -232,6 +237,17 @@ mod tests {
         )
     }
 
+    /// The fixture's withdrawal `name`: (withdrawal, proof, public signals).
+    fn wd(name: &str) -> (crate::withdraw::Withdrawal, Proof, [String; 8]) {
+        let x = f();
+        let s = x["withdrawals"].as_array().unwrap().iter().find(|s| s["name"] == name).unwrap().clone();
+        (
+            serde_json::from_value(s["withdrawal"].clone()).unwrap(),
+            serde_json::from_value(s["proof"].clone()).unwrap(),
+            serde_json::from_value(s["public_signals"].clone()).unwrap(),
+        )
+    }
+
     fn ragequit_as(v: &mut Vault, by: &str, attached: u128, a: (Proof, [String; 4], String, String, String)) -> Result<(), String> {
         call(by, attached);
         catch_unwind(AssertUnwindSafe(|| v.ragequit(a.0, a.1, a.2, a.3))).map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
@@ -239,12 +255,17 @@ mod tests {
 
     /// Refused with `want`: nothing written, logged or sent.
     fn refused(v: &mut Vault, by: &str, attached: u128, gas: Gas, a: (Proof, [String; 4], String, String, String), want: &str) {
+        refused_call(v, by, attached, gas, want, |v| v.ragequit(a.0, a.1, a.2, a.3));
+    }
+
+    /// `call` on `v` by `by` is refused with `want`: nothing written, logged or sent.
+    fn refused_call(v: &mut Vault, by: &str, attached: u128, gas: Gas, want: &str, call: impl FnOnce(&mut Vault)) {
         call_on(near_sdk::mock::with_mocked_blockchain(|b| b.take_storage()), by, attached, gas);
         let struct_before = near_sdk::borsh::to_vec(&*v).unwrap();
         let s = near_sdk::mock::with_mocked_blockchain(|b| b.take_storage());
         let raw_before: BTreeMap<_, _> = s.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         call_on(s, by, attached, gas);
-        let e = match catch_unwind(AssertUnwindSafe(|| v.ragequit(a.0, a.1, a.2, a.3))) {
+        let e = match catch_unwind(AssertUnwindSafe(|| call(v))) {
             Ok(()) => panic!("passed, want {want}"),
             Err(e) => e.downcast::<String>().map(|s| *s).unwrap_or_default(),
         };
@@ -323,6 +344,34 @@ mod tests {
         let by = a.4.clone();
         ragequit_as(&mut v, &by, ONE_NEAR, a.clone()).unwrap();
         refused(&mut v, &by, ONE_NEAR, Gas::from_tgas(300), a, "NullifierAlreadySpent");
+    }
+
+    #[test]
+    fn a_note_a_withdraw_spent_is_refused() {
+        // note 2: change_w spends it through withdraw (and writes its change leaf), then u sends its commitment proof
+        let mut v = vault_of(false, false);
+        let (w, p, s) = wd("change_w");
+        call("relayer.test.near", ONE_NEAR);
+        v.withdraw(w, p, s.clone());
+        assert_ne!(v.spends.get(0).unwrap().context, [0; 32], "change_w's row is a withdraw's, not a ragequit's");
+        let a = rq("withdrawn");
+        assert_eq!(a.1[SIGNAL_NULLIFIER_HASH], s[1], "the ragequit names change_w's nullifier");
+        let by = a.4.clone();
+        refused(&mut v, &by, ONE_NEAR, Gas::from_tgas(300), a, "NullifierAlreadySpent");
+        assert_eq!(v.spends.len(), 1);
+    }
+
+    #[test]
+    fn a_note_a_ragequit_spent_cannot_be_withdrawn() {
+        // note 3: u ragequits it, then a relayer sends after_rq, a valid withdraw proof of the same note on known roots
+        let mut v = vault(false);
+        let a = rq("deposit");
+        let by = a.4.clone();
+        ragequit_as(&mut v, &by, ONE_NEAR, a.clone()).unwrap();
+        let (w, p, s) = wd("after_rq");
+        assert_eq!(s[1], a.1[SIGNAL_NULLIFIER_HASH], "after_rq names the ragequit's nullifier");
+        refused_call(&mut v, "relayer.test.near", ONE_NEAR, Gas::from_tgas(300), "NullifierAlreadySpent", |v| v.withdraw(w, p, s));
+        assert_eq!(v.spends.len(), 1);
     }
 
     #[test]
