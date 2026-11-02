@@ -4,10 +4,14 @@
 // stand-in shell, the release's NEAR RPCs reached live.
 //   good:       this card's build for testnet (VITE_NEAR_NETWORK=testnet): Verify drawn from a live read of
 //               vault.bf-vt-20261102t071444.testnet on test.rpc.fastnear.com (FastNEAR) and near-testnet.drpc.org
-//               (dRPC), every check ok at both widths, and the pill's second open read afresh: PASS;
+//               (dRPC), every check ok at both widths, each open leaving loading only once both RPCs answered it, every
+//               NEAR request to the pair and of the release's accounts, and the pill's second open read afresh: PASS;
 //   noVault:    the same tree built for mainnet (VITE_NEAR_NETWORK unset), as APP_HOST serves it until the mainnet vault
 //               is deployed: every check Unverified, no RPC named, no NEAR request: PASS (that network's end state);
-//   notMounted: the build of main before this card (Screen.tsx draws an empty main for /verify): FAIL, no panel.
+//   notMounted: the build of main before this card (Screen.tsx draws an empty main for /verify): FAIL, no panel;
+//   cached:     this card's build with one change in VerifyRoute.tsx: each read kept in a module-level LAST and drawn at
+//               once on the next open before it reads (`if (LAST) setView(LAST);`): FAIL, the pill's open leaves loading
+//               before either RPC answered it.
 // Each answer's `at` is when it was recorded. Each planted bad case is a recorded run with one thing changed.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -86,7 +90,7 @@ test("planted: the deploy record moved while release.ts did not, or names a vaul
 test("planted: the pill's second open starts from the last read, or reads nothing afresh: FAIL", () => {
   const cached = mut("good", (rec) => (desktop(rec).footer.firstState = "read"));
   assert.equal(cached.ok, false);
-  assert.ok(bad(cached).some((l) => /opens it again, starting read/.test(l)));
+  assert.ok(bad(cached).some((l) => /opens it again 1 time\(s\), starting read/.test(l)));
   const noReads = mut("good", (rec) => (desktop(rec).requests = desktop(rec).requests.filter((q) => q.phase !== "reopen")));
   assert.equal(noReads.ok, false);
   assert.ok(bad(noReads).some((l) => /^BAD desktop \/verify again: this page read test\.rpc\.fastnear\.com 0 time\(s\)/.test(l)));
@@ -94,8 +98,78 @@ test("planted: the pill's second open starts from the last read, or reads nothin
   assert.equal(mut("good", (rec) => (desktop(rec).footer.panel.checks.balance = "warn")).ok, false);
 });
 
+test("recorded bad answer: the pill's open draws the last read at once, then reads (a module-level cache): FAIL", () => {
+  const r = judge(ANSWERS.cached);
+  assert.equal(r.ok, false);
+  assert.match(ANSWERS.cached.source, /build-cached/);
+  const d = desktop(ANSWERS.cached);
+  // the panel is drawn loading and turns to the cached read before any answer: its first state alone does not show it
+  assert.deepEqual(d.timeline.filter((e) => e.open === 1).map((e) => e.state), ["loading", "read"]);
+  assert.ok(bad(r).some((l) => /^BAD desktop \/verify again: left loading for read at \d+ ms, 0 of 2 RPCs answered by then/.test(l)), r.lines.join("\n"));
+  // the same run had the cached open's own read answered 200 before the close: only the timing refuses it
+  const answered = mut("cached", (rec) => desktop(rec).requests.filter((q) => q.phase === "reopen").forEach((q) => (q.status = 200)));
+  assert.equal(answered.ok, false);
+  assert.deepEqual(bad(answered).map((l) => l.replace(/\d+ ms/, "N ms")), ["BAD desktop /verify again: left loading for read at N ms, 0 of 2 RPCs answered by then, 0 NEAR read(s) of this open still unanswered"]);
+  // the first open of each width has nothing cached and passes
+  assert.ok(r.lines.some((l) => /^ok  phone \/verify: left loading for read at \d+ ms, 2 of 2 RPCs answered by then, 0 NEAR read/.test(l)));
+});
+
+test("planted: an open that leaves loading before both RPCs answered it, or with a read of its own unanswered: FAIL", () => {
+  const early = mut("good", (rec) => {
+    const r = rec.runs[0];
+    const leave = r.timeline.find((e) => e.open === 0 && e.state !== "loading");
+    leave.t = Math.min(...r.rpcTiming.map((e) => e.end)) - 1;
+  });
+  assert.equal(early.ok, false);
+  assert.ok(bad(early).some((l) => /^BAD phone \/verify: left loading for read at \d+ ms, \d of 2 RPCs answered by then/.test(l)));
+  const pending = mut("good", (rec) => {
+    const r = rec.runs[0];
+    const leave = r.timeline.find((e) => e.open === 0 && e.state !== "loading");
+    r.rpcTiming.push({ name: "https://near-testnet.drpc.org/", start: leave.t - 5, end: leave.t + 500 });
+  });
+  assert.equal(pending.ok, false);
+  assert.ok(bad(pending).some((l) => /1 NEAR read\(s\) of this open still unanswered/.test(l)));
+  assert.equal(mut("good", (rec) => (desktop(rec).timeline = desktop(rec).timeline.filter((e) => !(e.open === 1 && e.state === "loading")))).ok, false);
+  assert.equal(mut("good", (rec) => (rec.runs[0].timeline = [])).ok, false);
+  assert.equal(mut("good", (rec) => (rec.runs[0].rpcTiming = [])).ok, false);
+});
+
+test("planted: the pill's click drawing two panels, or the second open read from the wrong index: FAIL", () => {
+  const twice = mut("good", (rec) => (desktop(rec).footer.newOpens = 2));
+  assert.equal(twice.ok, false);
+  assert.ok(bad(twice).some((l) => /opens it again 2 time\(s\)/.test(l)));
+  assert.equal(mut("good", (rec) => delete desktop(rec).footer.newOpens).ok, false);
+});
+
+test("planted: a NEAR read of an account that is not the release's vault or asset: FAIL", () => {
+  const other = mut("good", (rec) => (rec.runs[0].requests.find((q) => q.phase === "open" && q.account === rec.pins.vault).account = "vault.other.testnet"));
+  assert.equal(other.ok, false);
+  assert.ok(bad(other).some((l) => /^BAD phone \/verify: .*account vault\.other\.testnet in open/.test(l)));
+  assert.equal(mut("good", (rec) => (desktop(rec).requests.find((q) => q.phase === "reopen" && q.account).account = null)).ok, false);
+  for (const w of WIDTHS) {
+    const posts = ANSWERS.good.runs.find((x) => x.width === w.name).requests.filter((q) => q.method === "POST");
+    assert.ok(posts.length > 0 && posts.every((q) => [ANSWERS.good.pins.vault, ANSWERS.good.pins.asset].includes(q.account) && q.rpcId === "verify"), w.name);
+  }
+});
+
+test("planted: stray NEAR requests between and after the opens: FAIL", () => {
+  const post = (url, phase, rpcId = "other") => ({ url, method: "POST", type: "fetch", status: 200, phase, account: ANSWERS.good.pins.vault, rpcId });
+  const cases = [
+    ["noVault", "https://near.drpc.org/", "between", /no vault named: 1 NEAR request\(s\) over the whole run \(near\.drpc\.org in between\)/],
+    ["noVault", "https://rpc.mainnet.fastnear.com/", "after", /no vault named: 1 NEAR request\(s\) over the whole run \(rpc\.mainnet\.fastnear\.com in after\)/], // near-rpc-operators: one operator (planted strays, one request each)
+    ["good", "https://rpc.testnet.near.org/", "between", /rpc\.testnet\.near\.org \(not the pair\) in between/], // near-rpc-operators: one operator (planted strays, one request each)
+    ["good", "https://test.rpc.fastnear.com/", "after", /a Verify read in after/, "verify"], // near-rpc-operators: one operator (planted strays, one request each)
+    ["good", "https://rpc.mainnet.fastnear.com/", "after", /rpc\.mainnet\.fastnear\.com \(not the pair\) in after/], // near-rpc-operators: one operator (planted strays, one request each)
+  ];
+  for (const [name, url, phase, line, rpcId] of cases) {
+    const r = mut(name, (rec) => desktop(rec).requests.push(post(url, phase, rpcId)));
+    assert.equal(r.ok, false, `${name} ${url} ${phase}`);
+    assert.ok(bad(r).some((l) => l.startsWith("BAD desktop /verify: ") && line.test(l)), `${name} ${url} ${phase}\n${bad(r).join("\n")}`);
+  }
+});
+
 test("planted: any NEAR request with no vault named, or a panel naming an RPC it never asked: FAIL", () => {
-  const post = (url) => ({ url, method: "POST", type: "fetch", status: 200, phase: "open" });
+  const post = (url) => ({ url, method: "POST", type: "fetch", status: 200, phase: "open", account: ANSWERS.good.pins.vault, rpcId: "verify" });
   // a POST to a NEAR RPC the panel does not name (not one of the release's pair)
   assert.equal(mut("noVault", (rec) => rec.runs[0].requests.push(post("https://rpc.mainnet.near.org/"))).ok, false);
   // a panel naming no RPC while the page asks near.drpc.org

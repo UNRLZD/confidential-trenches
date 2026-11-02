@@ -5,8 +5,9 @@
 // (answers.json, made by record.ts), so nothing recorded is in the build. Three runs:
 //   recorded: the panel draws the read: both rows and every check ok, the pair named, the block read, and the footer
 //             pill's second open starts from loading and reads again (the live check's own verdict, judge());
-//   re-open:  the first open answered from the recording, then both RPCs refuse: the pill's second open draws every
-//             check Unverified, so it never shows the first open's read;
+//   re-open:  the first open answered from the recording, then both RPCs hold every answer 2 s and refuse: the pill's
+//             second open is sampled through the hold and stays loading, leaves it only after the hold, and draws every
+//             check Unverified, so it never shows the first open's read, not even for a moment;
 //   failed:   both RPCs refuse every request: the panel draws every check Unverified (its existing word), both rows
 //             amber, and no word the panel did not already have.
 // The unit test (test/verify-mount.test.ts) holds the refused pair and the other network's pair to the same view.
@@ -44,6 +45,17 @@ const recorded = async (route) => {
   return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(hit.answer) });
 };
 const refused = (route) => route.abort("connectionrefused");
+const HOLD_MS = 2_000;
+const held = (route) => new Promise((r) => setTimeout(r, HOLD_MS)).then(() => route.abort("connectionrefused"));
+/** The panel's state every 250 ms through the hold, from the moment the pill's panel is drawn. */
+async function sample(f) {
+  const out = [];
+  for (let t = 0; t < HOLD_MS - 250; t += 250) {
+    out.push(await f.evaluate(() => document.querySelector(".vfy")?.dataset.state ?? null));
+    await f.waitForTimeout(250);
+  }
+  return out;
+}
 
 const own = opt("--build") ? null : await build();
 const dir = path.resolve(opt("--build") ?? own);
@@ -65,12 +77,15 @@ try {
   if (!g.ok) fails.push("recorded: the panel did not draw the recorded read");
 
   let mode = recorded;
-  const again = await collect({ shots: shots && path.join(shots, "reopen"), route: await harnessRoute(dir, RPCS, (r) => mode(r)), network: "testnet", source: "recorded, then refused", beforeReopen: () => (mode = refused) });
+  const again = await collect({ shots: shots && path.join(shots, "reopen"), route: await harnessRoute(dir, RPCS, (r) => mode(r)), network: "testnet", source: "recorded, then held and refused", beforeReopen: () => (mode = held), duringReopen: sample });
   const d = again.runs.find((r) => r.width === "desktop");
   const first = d?.panel?.state === "read";
   const u = unverified(d?.footer?.panel);
-  const ok = first && d.footer.firstState === "loading" && u.ok;
-  console.log(`${ok ? "ok " : "BAD"} re-open: first open ${d?.panel?.state ?? "none"}; after the RPCs refuse, the pill's open starts ${d?.footer?.firstState ?? "nowhere"} and draws ${u.text}`);
+  const samples = d?.footer?.samples ?? [];
+  const leave = (d?.timeline ?? []).find((e) => e.open === d?.footer?.openIndex && e.state !== "loading");
+  const after = leave && Number.isFinite(d.footer.clickAt) ? Math.round(leave.t - d.footer.clickAt) : null;
+  const ok = first && d.footer.firstState === "loading" && d.footer.newOpens === 1 && samples.length >= 6 && samples.every((x) => x === "loading") && after !== null && after >= HOLD_MS - 100 && u.ok;
+  console.log(`${ok ? "ok " : "BAD"} re-open: first open ${d?.panel?.state ?? "none"}; the pill's open starts ${d?.footer?.firstState ?? "nowhere"}, through the ${HOLD_MS} ms hold reads ${samples.join(" ") || "nothing"}, leaves loading at ${after ?? "never"} ms and draws ${u.text}`);
   if (!ok) fails.push("re-open: the second open did not read afresh");
 
   const bad = await collect({ shots: shots && path.join(shots, "failed"), route: await harnessRoute(dir, RPCS, refused), network: "testnet", source: "refused reads" });
@@ -86,4 +101,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.join("; ")}`);
   process.exit(1);
 }
-console.log(`PASS the recorded read drawn at 390/1440 and read again on the pill's open; a re-open after the RPCs refuse draws Unverified; failed reads drawn Unverified at 390/1440${shots ? `; shots in ${shots}` : ""}`);
+console.log(`PASS the recorded read drawn at 390/1440 and read again on the pill's open; a re-open stays loading through a 2 s hold of both RPCs, then draws Unverified when they refuse; failed reads drawn Unverified at 390/1440${shots ? `; shots in ${shots}` : ""}`);
