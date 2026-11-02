@@ -846,10 +846,10 @@ async fn overtaken(kind: TokenKind) -> R<()> {
     let moved = w.relayer.transfer_near(u.acct.id(), NearToken::from_yoctonear(1)).await?;
     assert!(moved.is_success(), "overtaken: the other transaction failed: {moved:?}");
     let other = moved.outcome().transaction_hash.to_string();
+    let ot = w.tx(&other).await?; // at FINAL, so the key's final nonce below holds it
     let rn1 = w.relayer_nonce().await?;
     assert!(rn1 >= n, "overtaken: the relayer key's nonce {rn1} is below the stored prepay's {n}");
     // the key's changes at the block that applied it, as the relayer reads them: the real node's shape
-    let ot = w.tx(&other).await?;
     let d = w.block_height(&ot["transaction_outcome"]["block_hash"]).await?;
     let pk = w.relayer.secret_key().public_key().to_string();
     let ch = w
