@@ -558,15 +558,18 @@ export const LOCK_ROUND_MS = 10_000;
 export async function lockRound(deps: SendDeps): Promise<void> {
   for (const u of deps.store.open()) {
     if (inFlight.has(u)) continue;
-    const rec = deps.store.get(u);
-    if (rec === null) continue;
-    inFlight.set(u, BigInt(rec.p));
     try {
-      await settle(deps, rec, u, BigInt(rec.p));
+      const rec = deps.store.get(u);
+      if (rec === null) continue;
+      const p = BigInt(rec.p);
+      inFlight.set(u, p);
+      try {
+        await settle(deps, rec, u, p);
+      } finally {
+        inFlight.delete(u);
+      }
     } catch {
-      // kept: read again next round
-    } finally {
-      inFlight.delete(u);
+      // kept: read again next round; the records after it are still read in this one
     }
   }
 }

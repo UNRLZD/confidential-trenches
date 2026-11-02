@@ -34,6 +34,7 @@ import {
   relayerKey,
   remember,
   CACHE_MAX,
+  lockRound,
   receiptIdOf,
   startLockRounds,
   startRelayer,
@@ -2181,6 +2182,70 @@ test("RC3-5: a prepay that never landed is settled dropped by (b) in the backgro
   store.close();
 });
 
+test("the background round leaves a U being carried to that call, and holds U's slot while it settles U: U's call then answers in_flight and sends nothing", async () => {
+  const node = new Node();
+  node.landMs = () => 1_500;
+  const store = newStore();
+  let gets = 0;
+  const counted: DepositStore = { ...store, get: (u) => (gets++, store.get(u)) };
+  const deps = node.deps(counted, node.relayerOn(node.rpcs(), 300));
+  const u = node.user();
+  const sd = signed(u, P, 101n, node.final + 100n);
+  assert.equal(code(await carryDeposit(sd, deps)), "in_flight");
+  await until(() => node.prepaid.get(P.toString()) === PREPAY_BYTES);
+  // U's call holds U's slot: a round started while its send is out reads nothing of U's
+  node.landMs = () => 1;
+  const n0 = node.sent.length;
+  const call = carryDeposit(sd, deps);
+  await until(() => node.sent.length > n0);
+  gets = 0;
+  const skipped = lockRound(deps);
+  assert.equal(gets, 0, "the round read a record whose U is being carried");
+  await skipped;
+  assert.equal(code(await call), "ok");
+  // a round settling U holds U's slot: U's call meanwhile answers in_flight and sends nothing
+  const v = new Node();
+  v.landMs = () => 1_500;
+  const vs = newStore();
+  const slow = bothEdited(v, async (m, _p, real) => {
+    if (m === "tx") await sleepMs(300);
+    return real();
+  });
+  const vd = v.deps(vs, v.relayerOn(slow, 300));
+  const w = v.user();
+  const wd = signed(w, P, 101n, v.final + 100n);
+  assert.equal(code(await carryDeposit(wd, vd)), "in_flight");
+  await until(() => v.prepaid.get(P.toString()) === PREPAY_BYTES);
+  const sent = v.sent.length;
+  const round = lockRound(vd);
+  assert.equal(code(await carryDeposit(wd, vd)), "in_flight");
+  assert.equal(v.sent.length, sent, "U's call sent while the round held U's slot");
+  await round;
+  vs.close();
+  store.close();
+});
+
+test("an error on one record keeps it for the next round and never stops the round for the records after it", async () => {
+  const node = new Node();
+  node.landMs = () => 1_500;
+  const store = newStore();
+  const deps = node.deps(store, node.relayerOn(node.rpcs(), 300));
+  const [a, b] = [node.user(), node.user()];
+  assert.equal(code(await carryDeposit(signed(a, P, 101n, node.final + 100n), deps)), "in_flight");
+  assert.equal(code(await carryDeposit(signed(b, P + 1n, 101n, node.final + 100n), deps)), "in_flight");
+  assert.deepEqual(store.open(), [a.id, b.id]);
+  await until(() => node.prepaid.get((P + 1n).toString()) === PREPAY_BYTES);
+  let broken = true;
+  const deps2 = { ...deps, store: { ...store, get: (u: string) => (broken && u === a.id ? { ...store.get(u)!, p: "not a number" } : store.get(u)) } };
+  await lockRound(deps2);
+  assert.equal(store.get(b.id)!.prepays[0]!.ok, true, "the record after the broken one was not settled");
+  assert.equal(store.get(a.id)!.prepays[0]!.ok, null);
+  broken = false;
+  await lockRound(deps2);
+  assert.equal(store.get(a.id)!.prepays[0]!.ok, true, "kept for the next round");
+  store.close();
+});
+
 test("the store's open records survive a restart: read once as the lock is taken", () => {
   const dir = mkdtempSync(join(tmpdir(), "bind-open-"));
   const s = createFileStore(dir);
@@ -2188,6 +2253,14 @@ test("the store's open records survive a restart: read once as the lock is taken
   const pending = { ...emptyRecord(u), prepays: [{ tx_hash: "t", nonce: "1", height: "1", block_hash: "h", signed_tx: "", bytes: 756, ok: null }] };
   s.put(pending);
   s.put({ ...emptyRecord("cd".repeat(32)) });
+  assert.deepEqual(s.open(), [u]);
+  // a send not known yet is open too, and so is a record created open
+  const sending = { ...emptyRecord("ef".repeat(32)), sends: [{ tx_hash: "s", nonce: "2", height: "1", block_hash: "h", signed_tx: "", sha256: "x", amount: "1", max_block_height: "9", state: "pending" as const, counted: true }] };
+  s.put(sending);
+  assert.equal(s.create({ ...pending, u: "01".repeat(32) }).created, true);
+  assert.deepEqual(s.open().sort(), [u, "ef".repeat(32), "01".repeat(32)].sort());
+  s.put({ ...sending, sends: [{ ...sending.sends[0]!, state: "landed" as const }] });
+  s.put({ ...pending, u: "01".repeat(32), prepays: [] });
   assert.deepEqual(s.open(), [u]);
   s.close();
   const t = createFileStore(dir);
