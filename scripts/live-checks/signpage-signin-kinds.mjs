@@ -7,7 +7,10 @@
 //     closes, back to the app with a frame again. backup.open draws the 12 words in the layer (counted, never read) and
 //     Cancel goes back to the app, still signed in. signout opens the sign-out page in the top window (the frame out of
 //     the document, no Sign out in any frame); Sign out deletes the store and goes back to the app, signed out. A
-//     signout sent signed out, and a backup.open sent signed out, are refused (not_allowed).
+//     signout sent signed out, and a backup.open sent signed out, are refused (not_allowed). Signed in, the APP_HOST frame
+//     puts SIGN_HOST in a frame of its own and sends it signout: the framed page loads no sign-out (SIGN_HOST's
+//     frame-ancestors 'none', and its framed branch answers no open kind), so no answer is pending and no frame of the
+//     page holds a Sign out. The browser's report of that refused frame is kept apart from the page errors.
 //   no-prf run (hasPrf false): signin.open {way: passkey} then Create stores a random seed and opens the backup in the
 //     same visit. After a reload (signed in, the words not saved) signout draws the backup first, with no Sign out;
 //     Saved goes on to the sign-out page, whose Sign out deletes the store.
@@ -72,6 +75,9 @@ export function judge(rec) {
   const so = p.signout ?? {};
   say(pending(so.answer) && inLayer(so.page, "signout") && so.page?.signoutButtons === 1 && so.page?.framesWithSignout === 0,
     `prf: signout opens the sign-out page top-level only (${so.page?.state}, top ${so.page?.top}, ${so.page?.signoutButtons ?? 0} Sign out, ${so.page?.framesWithSignout ?? "?"} in a frame)`);
+  const fr = p.framed;
+  say(!!fr && !pending(fr.answer) && fr.loaded === false && fr.signoutButtons === 0,
+    `prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out (${fr ? (fr.loaded ? "loaded" : "not loaded") : "no step"}, ${fr?.answer?.ok === true ? "answered ok" : fr?.answer?.timeout ? "no answer" : fr?.answer?.error?.code ?? "?"}, ${fr?.signoutButtons ?? "?"} Sign out)`);
   say(backToApp(so.after, "signed-out") && so.after?.db === false && !so.after?.account,
     `prf: Sign out deletes the store and goes back to the app signed out (${so.after?.state}, store ${so.after?.db ? "kept" : "gone"})`);
   say(refusedNA(p.refused?.signout) && refusedNA(p.refused?.backup) && p.refused?.layer === "hidden",
@@ -135,9 +141,44 @@ async function authenticator(page, hasPrf) {
   });
 }
 
-function watch(page, errors) {
+function watch(page, errors, refusals = []) {
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
-  page.on("console", (m) => m.type() === "error" && errors.push(`console: ${m.text()}`));
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    // the check's own framed SIGN_HOST (prf.framed), refused by SIGN_HOST's frame-ancestors 'none'
+    if (/frame-ancestors/.test(m.text()) && m.text().includes(SIGN_HOST)) refusals.push(m.text().slice(0, 200));
+    else errors.push(`console: ${m.text()}`);
+  });
+}
+
+// Sign out buttons in every frame of the page, each read in its own frame (cross-origin ones too).
+async function framedSignouts(page) {
+  let n = 0;
+  for (const f of page.frames())
+    if (f !== page.mainFrame()) n += await f.evaluate(() => document.querySelectorAll('[data-action="signout"]').length).catch(() => 0);
+  return n;
+}
+
+// From inside the APP_HOST frame, SIGN_HOST in a frame of its own, sent signout as the terminal sends it.
+async function framedTry(page, refusals) {
+  const f = await appFrame(page);
+  const answer = await f.evaluate(({ src, origin }) => new Promise((done) => {
+    const fr = document.createElement("iframe");
+    fr.src = src;
+    document.body.append(fr);
+    const id = crypto.randomUUID();
+    const t = setTimeout(() => done({ timeout: true }), 4_000);
+    addEventListener("message", (e) => {
+      if (e.origin !== origin || e.data?.id !== id) return;
+      clearTimeout(t);
+      done(e.data);
+    });
+    fr.addEventListener("load", () => setTimeout(() => fr.contentWindow?.postMessage({ v: 1, id, type: "signout", return_key: "settings" }, origin), 500));
+  }), { src: `https://${SIGN_HOST}/`, origin: `https://${SIGN_HOST}` });
+  const loaded = page.frames().some((x) => x.parentFrame() === f && x.url().startsWith(`https://${SIGN_HOST}/`));
+  const signoutButtons = await framedSignouts(page);
+  await f.evaluate(() => document.querySelectorAll("iframe").forEach((x) => x.remove()));
+  return { answer, loaded, signoutButtons, refusals: refusals.length };
 }
 
 // The APP_HOST frame the shell holds now (a new one comes each time the layer closes).
@@ -174,7 +215,7 @@ async function read(page, not = []) {
   }, not, { timeout: WAIT_MS }).catch(() => {});
   // the frame leaves FRAME_LEAVE_MS (100 ms) after the layer shows, and a new one comes at close
   await page.waitForTimeout(300);
-  return page.evaluate(async () => {
+  const r = await page.evaluate(async () => {
     const m = document.getElementById("signin");
     const layer = document.getElementById("screen");
     const db = (await indexedDB.databases()).some((d) => d.name === "ct-wallet");
@@ -192,12 +233,6 @@ async function read(page, not = []) {
         r.onerror = () => ok(false);
       });
     const count = (a) => document.querySelectorAll(`[data-action="${a}"]`).length;
-    let framesWithSignout = 0;
-    for (const f of document.querySelectorAll("iframe")) {
-      try {
-        framesWithSignout += f.contentDocument?.querySelectorAll('[data-action="signout"]').length ?? 0;
-      } catch {}
-    }
     return {
       state: m?.dataset.signin ?? null,
       account: m?.dataset.account ?? null,
@@ -212,12 +247,13 @@ async function read(page, not = []) {
       newAccount: count("new-account"),
       haveOne: count("have-one"),
       signoutButtons: count("signout"),
-      framesWithSignout,
       walletAsks: globalThis.__ctWalletAsks ?? null,
       db,
       seed,
     };
   });
+  r.framesWithSignout = await framedSignouts(page);
+  return r;
 }
 
 // A press past the activation guard: waits GUARD_MS from now (the layer just opened or the control was just drawn).
@@ -236,7 +272,8 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
     {
       const ctx = await h.browser.newContext();
       const page = await ctx.newPage();
-      watch(page, errors);
+      const refusals = [];
+      watch(page, errors, refusals);
       await authenticator(page, true);
       await page.goto(url);
       await read(page);
@@ -244,6 +281,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const answer = await send(page, "signin.open", { way: "passkey", return_key: "settings" });
       p.signin = { answer, page: await read(page) };
       p.create = await press(page, "create", ["signed-out"]);
+      p.framed = await framedTry(page, refusals);
       const backup = await send(page, "backup.open", { return_key: "settings" });
       p.backup = { answer: backup, page: await read(page, ["signed-in"]) };
       p.backupCancel = await press(page, "cancel", ["backup"]);

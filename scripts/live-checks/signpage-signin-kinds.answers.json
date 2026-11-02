@@ -1,0 +1,1599 @@
+{
+ "note": "good: this card's page (27aeeab's build) on the browser harness. bad: main 89cd22c's page (no signout, backup.open or wallet choices). badSeedBeforeChoice: a planted page whose wallet way runs the no-PRF ceremony before drawing the choices (a seed made first). badFramable: this card's page served without frame-ancestors 'none' (the framed SIGN_HOST loads; its framed branch still answers not_allowed). badFramedSignout: badFramable edited so the framed page answers signout and draws Sign out (edited, not a run).",
+ "good": {
+  "key": "signpage-signin-kinds",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-02T01:39:04.785Z",
+  "prf": {
+   "signin": {
+    "answer": {
+     "v": 1,
+     "id": "8a190531-cbf0-4d41-82bb-6a7e53c13bb4",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "create": {
+    "state": "signed-in",
+    "account": "b16cc31c34826d560ddff5ea6302ec31522e8fbab1ee8f459d066b9caa5c8033",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "framed": {
+    "answer": {
+     "timeout": true
+    },
+    "loaded": false,
+    "signoutButtons": 0,
+    "refusals": 1
+   },
+   "backup": {
+    "answer": {
+     "v": 1,
+     "id": "740d095c-3bea-4cc5-a408-16edec178f3a",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "b16cc31c34826d560ddff5ea6302ec31522e8fbab1ee8f459d066b9caa5c8033",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "backupCancel": {
+    "state": "signed-in",
+    "account": "b16cc31c34826d560ddff5ea6302ec31522e8fbab1ee8f459d066b9caa5c8033",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "c4c2a6dc-9327-4587-b038-22043891893a",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signout",
+     "account": "b16cc31c34826d560ddff5ea6302ec31522e8fbab1ee8f459d066b9caa5c8033",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    },
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": false,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "refused": {
+    "signout": {
+     "v": 1,
+     "id": "96b3b968-1fc9-4738-b2b7-2d87cd0b8ad2",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "backup": {
+     "v": 1,
+     "id": "9868eedf-3162-4f38-b809-0c782114edcb",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "layer": "hidden"
+   }
+  },
+  "noPrf": {
+   "create": {
+    "state": "backup",
+    "account": "dbff2d649be0f17f277da408e7f0cae6eaceebf90e9bdfc3af1ab7884810e411",
+    "codeSaved": "false",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 12,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "9b7d5190-d799-4f37-b044-793dafccc41b",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "dbff2d649be0f17f277da408e7f0cae6eaceebf90e9bdfc3af1ab7884810e411",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "saved": {
+    "state": "signout",
+    "account": "dbff2d649be0f17f277da408e7f0cae6eaceebf90e9bdfc3af1ab7884810e411",
+    "codeSaved": "true",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "after": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": false,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "wallet": {
+   "answer": {
+    "v": 1,
+    "id": "426b0bdd-72eb-4ecc-a635-e303195018d0",
+    "ok": true,
+    "result": {
+     "pending": true
+    }
+   },
+   "choose": {
+    "state": "choose",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 1,
+    "haveOne": 1,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "existing": {
+    "state": "existing",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "errors": []
+ },
+ "bad": {
+  "key": "signpage-signin-kinds",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-02T01:39:29.892Z",
+  "prf": {
+   "signin": {
+    "answer": {
+     "v": 1,
+     "id": "35fb103b-958a-4381-a3e8-e588401a28d7",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "create": {
+    "state": "signed-in",
+    "account": "ab28c2d92deea6602104e9302e2554ee4d0bf4700838157ce1713dc05b0c01f6",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "framed": {
+    "answer": {
+     "timeout": true
+    },
+    "loaded": false,
+    "signoutButtons": 0,
+    "refusals": 1
+   },
+   "backup": {
+    "answer": {
+     "v": 1,
+     "id": "3d6716e7-5052-448d-9d6c-5e18fdecf681",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "page": {
+     "state": "signed-in",
+     "account": "ab28c2d92deea6602104e9302e2554ee4d0bf4700838157ce1713dc05b0c01f6",
+     "codeSaved": "false",
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "backupCancel": {
+    "state": "signed-in",
+    "account": "ab28c2d92deea6602104e9302e2554ee4d0bf4700838157ce1713dc05b0c01f6",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0,
+    "noButton": "cancel"
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "7474db23-b1f0-438c-8710-68411c7333f6",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "page": {
+     "state": "signed-in",
+     "account": "ab28c2d92deea6602104e9302e2554ee4d0bf4700838157ce1713dc05b0c01f6",
+     "codeSaved": "false",
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    },
+    "after": {
+     "state": "signed-in",
+     "account": "ab28c2d92deea6602104e9302e2554ee4d0bf4700838157ce1713dc05b0c01f6",
+     "codeSaved": "false",
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0,
+     "noButton": "signout"
+    }
+   },
+   "refused": {
+    "signout": {
+     "v": 1,
+     "id": "4d18887c-801c-4630-80f0-e496ce2e8195",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "backup": {
+     "v": 1,
+     "id": "e3ce93a8-1323-4401-8a6a-73cc82dcb7b0",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "layer": "hidden"
+   }
+  },
+  "noPrf": {
+   "create": {
+    "state": "backup",
+    "account": "9e4a3903298d8effb07ea6939e6dbbaa15c69b9b9043aced980c2ba44fec3744",
+    "codeSaved": "false",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 12,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "8e388f71-df95-460c-912e-8b85eca80db4",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "page": {
+     "state": "signed-in",
+     "account": "9e4a3903298d8effb07ea6939e6dbbaa15c69b9b9043aced980c2ba44fec3744",
+     "codeSaved": "false",
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "saved": {
+    "state": "signed-in",
+    "account": "9e4a3903298d8effb07ea6939e6dbbaa15c69b9b9043aced980c2ba44fec3744",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0,
+    "noButton": "saved"
+   },
+   "after": {
+    "state": "signed-in",
+    "account": "9e4a3903298d8effb07ea6939e6dbbaa15c69b9b9043aced980c2ba44fec3744",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0,
+    "noButton": "signout"
+   }
+  },
+  "wallet": {
+   "answer": {
+    "v": 1,
+    "id": "53209c01-455e-4ac8-8630-7a4204712c75",
+    "ok": false,
+    "error": {
+     "code": "not_allowed"
+    }
+   },
+   "choose": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "existing": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0,
+    "noButton": "have-one"
+   }
+  },
+  "errors": []
+ },
+ "badSeedBeforeChoice": {
+  "key": "signpage-signin-kinds",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-02T01:41:59.672Z",
+  "prf": {
+   "signin": {
+    "answer": {
+     "v": 1,
+     "id": "f19ee2f5-eb35-4e14-9f8e-4cd979fc5e0c",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "create": {
+    "state": "signed-in",
+    "account": "e556ccfae5898aa6f3261f90cdff71a14378b30b29b85a8ee7eb258fecb374c5",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "framed": {
+    "answer": {
+     "timeout": true
+    },
+    "loaded": false,
+    "signoutButtons": 0,
+    "refusals": 1
+   },
+   "backup": {
+    "answer": {
+     "v": 1,
+     "id": "1400fc21-503e-40dd-a90a-c10c6b0087b6",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "e556ccfae5898aa6f3261f90cdff71a14378b30b29b85a8ee7eb258fecb374c5",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "backupCancel": {
+    "state": "signed-in",
+    "account": "e556ccfae5898aa6f3261f90cdff71a14378b30b29b85a8ee7eb258fecb374c5",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "f05f485f-193a-4fff-be9a-c1ef4bba22bb",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signout",
+     "account": "e556ccfae5898aa6f3261f90cdff71a14378b30b29b85a8ee7eb258fecb374c5",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    },
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": false,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "refused": {
+    "signout": {
+     "v": 1,
+     "id": "92212805-61bb-448d-a331-3a368fb7ec73",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "backup": {
+     "v": 1,
+     "id": "2c65a4bf-d092-4323-bd9c-e6fdd4faab64",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "layer": "hidden"
+   }
+  },
+  "noPrf": {
+   "create": {
+    "state": "backup",
+    "account": "4dc44912daad9535edfb36b799a082fe04f70bef5cb266f9442b8b3851a8a1d4",
+    "codeSaved": "false",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 12,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "dfe122c1-297a-42eb-bc46-59f4beeadb9c",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "4dc44912daad9535edfb36b799a082fe04f70bef5cb266f9442b8b3851a8a1d4",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "saved": {
+    "state": "signout",
+    "account": "4dc44912daad9535edfb36b799a082fe04f70bef5cb266f9442b8b3851a8a1d4",
+    "codeSaved": "true",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "after": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": false,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "wallet": {
+   "answer": {
+    "v": 1,
+    "id": "e3609c69-95a5-4a08-a07a-35aa40262e89",
+    "ok": true,
+    "result": {
+     "pending": true
+    }
+   },
+   "choose": {
+    "state": "choose",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 1,
+    "haveOne": 1,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "existing": {
+    "state": "existing",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   }
+  },
+  "errors": []
+ },
+ "badFramable": {
+  "key": "signpage-signin-kinds",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-02T01:42:14.615Z",
+  "prf": {
+   "signin": {
+    "answer": {
+     "v": 1,
+     "id": "b585fc62-5064-4d90-bb0c-9d6a0dfab3b2",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "create": {
+    "state": "signed-in",
+    "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "framed": {
+    "answer": {
+     "v": 1,
+     "id": "42ffca7a-b33e-4f9b-b875-783f7ee25a06",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "loaded": true,
+    "signoutButtons": 0,
+    "refusals": 0
+   },
+   "backup": {
+    "answer": {
+     "v": 1,
+     "id": "a89909b5-00e2-430c-926c-91ab66f825a1",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "backupCancel": {
+    "state": "signed-in",
+    "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "6fcc8a54-c910-4381-98e9-031c3d241ddf",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signout",
+     "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    },
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": false,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "refused": {
+    "signout": {
+     "v": 1,
+     "id": "e58e58fd-704c-47a1-8e21-dba3728dc037",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "backup": {
+     "v": 1,
+     "id": "5271b5fd-ca26-469b-90a2-b3a645e4540a",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "layer": "hidden"
+   }
+  },
+  "noPrf": {
+   "create": {
+    "state": "backup",
+    "account": "6662a20085816b612f72a97f29e874fac860d66c7910045b81571561ec47b28c",
+    "codeSaved": "false",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 12,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "6610fc7a-f2ee-4a83-a376-a77a3da7a05b",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "6662a20085816b612f72a97f29e874fac860d66c7910045b81571561ec47b28c",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "saved": {
+    "state": "signout",
+    "account": "6662a20085816b612f72a97f29e874fac860d66c7910045b81571561ec47b28c",
+    "codeSaved": "true",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "after": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": false,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "wallet": {
+   "answer": {
+    "v": 1,
+    "id": "28d61414-1b26-4696-bfec-4185e006b1b5",
+    "ok": true,
+    "result": {
+     "pending": true
+    }
+   },
+   "choose": {
+    "state": "choose",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 1,
+    "haveOne": 1,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "existing": {
+    "state": "existing",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "errors": []
+ },
+ "badFramedSignout": {
+  "key": "signpage-signin-kinds",
+  "url": "https://sign.confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-02T01:42:14.615Z",
+  "prf": {
+   "signin": {
+    "answer": {
+     "v": 1,
+     "id": "b585fc62-5064-4d90-bb0c-9d6a0dfab3b2",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "create": {
+    "state": "signed-in",
+    "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "framed": {
+    "answer": {
+     "v": 1,
+     "id": "00000000-0000-4000-8000-000000000001",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "loaded": true,
+    "signoutButtons": 1,
+    "refusals": 0
+   },
+   "backup": {
+    "answer": {
+     "v": 1,
+     "id": "a89909b5-00e2-430c-926c-91ab66f825a1",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "backupCancel": {
+    "state": "signed-in",
+    "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+    "codeSaved": "false",
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "6fcc8a54-c910-4381-98e9-031c3d241ddf",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "signout",
+     "account": "be9f2d4f0d800c8863c22da97f90366fd7f7f272c29bee373957d918e3f60095",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 0,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 1,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    },
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "layer": "hidden",
+     "frame": true,
+     "top": true,
+     "words": 0,
+     "create": 1,
+     "use": 1,
+     "recovery": 1,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": false,
+     "seed": false,
+     "framesWithSignout": 0
+    }
+   },
+   "refused": {
+    "signout": {
+     "v": 1,
+     "id": "e58e58fd-704c-47a1-8e21-dba3728dc037",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "backup": {
+     "v": 1,
+     "id": "5271b5fd-ca26-469b-90a2-b3a645e4540a",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "layer": "hidden"
+   }
+  },
+  "noPrf": {
+   "create": {
+    "state": "backup",
+    "account": "6662a20085816b612f72a97f29e874fac860d66c7910045b81571561ec47b28c",
+    "codeSaved": "false",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 12,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "signout": {
+    "answer": {
+     "v": 1,
+     "id": "6610fc7a-f2ee-4a83-a376-a77a3da7a05b",
+     "ok": true,
+     "result": {
+      "pending": true
+     }
+    },
+    "page": {
+     "state": "backup",
+     "account": "6662a20085816b612f72a97f29e874fac860d66c7910045b81571561ec47b28c",
+     "codeSaved": "false",
+     "layer": "shown",
+     "frame": false,
+     "top": true,
+     "words": 12,
+     "create": 0,
+     "use": 0,
+     "recovery": 0,
+     "newAccount": 0,
+     "haveOne": 0,
+     "signoutButtons": 0,
+     "walletAsks": null,
+     "db": true,
+     "seed": true,
+     "framesWithSignout": 0
+    }
+   },
+   "saved": {
+    "state": "signout",
+    "account": "6662a20085816b612f72a97f29e874fac860d66c7910045b81571561ec47b28c",
+    "codeSaved": "true",
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 1,
+    "walletAsks": null,
+    "db": true,
+    "seed": true,
+    "framesWithSignout": 0
+   },
+   "after": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "layer": "hidden",
+    "frame": true,
+    "top": true,
+    "words": 0,
+    "create": 1,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": null,
+    "db": false,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "wallet": {
+   "answer": {
+    "v": 1,
+    "id": "28d61414-1b26-4696-bfec-4185e006b1b5",
+    "ok": true,
+    "result": {
+     "pending": true
+    }
+   },
+   "choose": {
+    "state": "choose",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 0,
+    "recovery": 0,
+    "newAccount": 1,
+    "haveOne": 1,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   },
+   "existing": {
+    "state": "existing",
+    "account": null,
+    "codeSaved": null,
+    "layer": "shown",
+    "frame": false,
+    "top": true,
+    "words": 0,
+    "create": 0,
+    "use": 1,
+    "recovery": 1,
+    "newAccount": 0,
+    "haveOne": 0,
+    "signoutButtons": 0,
+    "walletAsks": 0,
+    "db": true,
+    "seed": false,
+    "framesWithSignout": 0
+   }
+  },
+  "errors": [],
+  "edited": "badFramable with prf.framed edited: the framed SIGN_HOST answered signout pending and drew Sign out (a page whose framed branch takes open kinds)"
+ }
+}
