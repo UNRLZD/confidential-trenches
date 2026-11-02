@@ -21,8 +21,9 @@ import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { vaultProveWithdraw, type VaultProver, type VaultWithdrawProof } from "../src/prover/prove.ts";
-import type { VaultSnarkjsProof } from "../src/vault/shapes.ts";
+import { poolProveWithdraw, vaultProveWithdraw, type VaultProver, type VaultWithdrawProof } from "../src/prover/prove.ts";
+import { poolWithdrawInput, vaultWithdrawInput } from "../src/vault/inputs.ts";
+import { VAULT_FIELD_P, type VaultSnarkjsProof } from "../src/vault/shapes.ts";
 import { ZK_SETUP_FILES } from "../src/zk/setup-files.ts";
 import { fixtureArgs, fixtureSignals, type ContextVector } from "./fixtures/prove-fixture.ts";
 
@@ -74,6 +75,23 @@ test("node: one call from the fixture's leaves gives a proof snarkjs accepts wit
   assert.deepEqual(good.publicSignals, SIGNALS);
   assert.equal(await verify(good.publicSignals, good.proof), true);
   assert.deepEqual(log, ["load withdraw", "prove withdraw"]);
+});
+
+test("node: a pool's own context (card wallet-pool-ladder) proves on the same circuit, and snarkjs accepts it", async () => {
+  const { withdrawal: _w, vaultId: _v, scope: _s, nowMs: _n, ...rest } = fixtureArgs(CV);
+  // the vault's own context through the pool path gives the vault's input, byte for byte
+  assert.deepEqual(poolWithdrawInput({ ...rest, context: BigInt(SIGNALS[7]!) }), vaultWithdrawInput(fixtureArgs(CV)));
+  // another pool's context: the same proof shape, its context the 8th signal
+  const context = VAULT_FIELD_P - 12345n;
+  const log: string[] = [];
+  const p = await poolProveWithdraw(nodeProver(log), { ...rest, context });
+  assert.deepEqual(p.publicSignals, [...SIGNALS.slice(0, 7), String(context)]);
+  assert.equal(await verify(p.publicSignals, p.proof), true);
+  assert.equal(await verify([...SIGNALS.slice(0, 7), String(context - 1n)], p.proof), false);
+  // a context not below p is refused before anything is posted to the prover
+  const none: string[] = [];
+  await assert.rejects(poolProveWithdraw(nodeProver(none), { ...rest, context: VAULT_FIELD_P }), /context: not a field element/);
+  assert.deepEqual(none, []);
 });
 
 test("node: snarkjs refuses the proof with any one public signal changed", async () => {

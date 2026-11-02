@@ -156,6 +156,25 @@ export type VaultWithdrawInputArgs = {
  * 2^128 or more, the change nullifier equal to the spent one, and any value not below p.
  */
 export function vaultWithdrawInput(a: VaultWithdrawInputArgs): VaultWithdrawInput {
+  const scope = field(a.scope, "scope");
+  const { withdrawal, vaultId, nowMs, scope: _scope, ...rest } = a;
+  const problems = vaultWithdrawalProblems(withdrawal, field(a.withdrawn, "withdrawn"), vaultId, nowMs);
+  if (problems.length > 0) throw new Error(`withdrawal: ${problems.join("; ")}`);
+  return poolWithdrawInput({ ...rest, context: vaultContextOf(keccak_256, vaultContextInput(vaultId, withdrawal), scope) });
+}
+
+/**
+ * What the device knows when it spends a note in any pool on this circuit (the NEAR vault, the Solana and EVM pools):
+ * the same as VaultWithdrawInputArgs, with the context the pool's own context function computed in place of the
+ * vault's withdrawal, account id, scope and time. The pool checks its own request fields before it gives the context.
+ */
+export type PoolWithdrawInputArgs = Omit<VaultWithdrawInputArgs, "withdrawal" | "vaultId" | "scope" | "nowMs"> & { context: bigint };
+
+/**
+ * Withdraw(32)'s inputs for a spend in any pool, against the pool's newest roots, with the pool's context as the 8th
+ * public signal. Refuses what vaultWithdrawInput refuses, the vault's withdrawal checks aside, and a context not below p.
+ */
+export function poolWithdrawInput(a: PoolWithdrawInputArgs): VaultWithdrawInput {
   const value = field(a.note.value, "note.value");
   const label = field(a.note.label, "note.label");
   const nullifier = field(a.note.nullifier, "note.nullifier");
@@ -163,13 +182,10 @@ export function vaultWithdrawInput(a: VaultWithdrawInputArgs): VaultWithdrawInpu
   const newNullifier = field(a.newNullifier, "newNullifier");
   const newSecret = field(a.newSecret, "newSecret");
   const withdrawn = field(a.withdrawn, "withdrawn");
-  const scope = field(a.scope, "scope");
+  const context = field(a.context, "context");
   if (value >= U128) throw new Error("note.value: 2^128 or more");
   if (withdrawn > value) throw new Error("withdrawn: over the note's value");
   if (newNullifier === nullifier) throw new Error("newNullifier: equals the spent note's nullifier");
-  const problems = vaultWithdrawalProblems(a.withdrawal, withdrawn, a.vaultId, a.nowMs);
-  if (problems.length > 0) throw new Error(`withdrawal: ${problems.join("; ")}`);
-  const context = vaultContextOf(keccak_256, vaultContextInput(a.vaultId, a.withdrawal), scope);
 
   if (a.stateTree.root !== field(a.newestStateRoot, "newestStateRoot")) throw new Error("stateTree: its root is not the vault's newest");
   if (a.labelTree.root !== field(a.newestLabelRoot, "newestLabelRoot")) throw new Error("labelTree: its root is not the vault's newest");
