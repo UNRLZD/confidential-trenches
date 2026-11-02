@@ -3,9 +3,11 @@
 // and compares the response headers with the policy written out below, which is held here and not read from the
 // repo's _headers file, so a change to that file cannot pass this check by changing what it is compared with:
 //   - every CSP directive equals the policy's, with no directive missing and none added;
-//   - frame-src is exactly SIGN_HOST, and no header holds 'wasm-unsafe-eval';
-//   - Integrity-Policy, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options, X-Frame-Options and
-//     Permissions-Policy equal the policy's, and no Cross-Origin-Embedder-Policy is sent.
+//   - frame-ancestors is exactly SIGN_HOST (the terminal runs only inside SIGN_HOST's shell), frame-src is 'none', and
+//     no header holds 'wasm-unsafe-eval';
+//   - Integrity-Policy, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options and Permissions-Policy equal the
+//     policy's, and no Cross-Origin-Embedder-Policy and no X-Frame-Options is sent (any X-Frame-Options value would
+//     refuse the shell's frame).
 //   node scripts/live-checks/app-host-gate.mjs [--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the answer the run read ({ url, status, headers }) to <file>, so the check's test can replay it.
 import "../net-window.mjs";
@@ -28,8 +30,8 @@ export const CSP = [
   ["connect-src", `'self' https://${HELPER} wss://${HELPER} ${SIGN} ${RPCS}`],
   ["manifest-src", "'self'"],
   ["worker-src", "'none'"],
-  ["frame-src", SIGN],
-  ["frame-ancestors", "'none'"],
+  ["frame-src", "'none'"],
+  ["frame-ancestors", SIGN],
   ["object-src", "'none'"],
   ["base-uri", "'none'"],
   ["form-action", "'none'"],
@@ -44,7 +46,6 @@ export const HEADERS = {
   "cross-origin-resource-policy": "same-origin",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
-  "x-frame-options": "DENY",
   "permissions-policy":
     "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), " +
     "display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), " +
@@ -73,7 +74,7 @@ export function judge({ status, headers }) {
     for (const [k, want] of CSP) say(got.get(k) === want, `CSP ${k}: ${show(got.get(k))}${got.get(k) === want ? "" : `, want ${show(want)}`}`);
     const extra = [...got.keys()].filter((k) => !CSP.some(([n]) => n === k));
     say(extra.length === 0 && twice.length === 0, `CSP has no directive beyond the policy's${extra.length ? `: extra ${extra.join(" ")}` : ""}${twice.length ? `: twice ${twice.join(" ")}` : ""}`);
-    say(got.get("frame-src") === SIGN, `CSP frame-src is exactly ${SIGN}`);
+    say(got.get("frame-ancestors") === SIGN, `CSP frame-ancestors is exactly ${SIGN}`);
   }
   const wasm = Object.entries(headers).filter(([, v]) => v.includes("'wasm-unsafe-eval'")).map(([k]) => k);
   say(wasm.length === 0, `no header holds 'wasm-unsafe-eval'${wasm.length ? `: ${wasm.join(", ")}` : ""}`);
@@ -81,7 +82,7 @@ export function judge({ status, headers }) {
     const v = headers[k] === undefined ? undefined : ws(headers[k]);
     say(v === want, `${k}: ${show(v)}${v === want ? "" : `, want ${show(want)}`}`);
   }
-  say(headers["cross-origin-embedder-policy"] === undefined, `cross-origin-embedder-policy: ${show(headers["cross-origin-embedder-policy"])}, want none`);
+  for (const k of ["cross-origin-embedder-policy", "x-frame-options"]) say(headers[k] === undefined, `${k}: ${show(headers[k])}, want none`);
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 

@@ -16,6 +16,8 @@ export type SignpageSchema = (v: unknown) => boolean;
  * Requests are small, and the app is the side that could be swapped, so the signing page refuses a bigger one.
  */
 export const SIGNPAGE_MAX_REQUEST_BYTES = 65_536;
+/** The longest path a `nav` carries, in UTF-8 bytes (card signpage-shell). */
+export const SIGNPAGE_MAX_NAV_BYTES = 2_048;
 /**
  * The largest answer or event, page to app (origin and source already checked): a precaution far above real use, never
  * a user limit (a `state` with 9,000 orders is about 3 MiB).
@@ -93,6 +95,14 @@ const bool: SignpageSchema = (v) => typeof v === "boolean";
 const uint: SignpageSchema = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const bps = (min: number): SignpageSchema => (v) => uint(v) && (v as number) >= min && (v as number) <= 10_000;
 const iso: SignpageSchema = (v) => str(v) && /^\d{4}-\d{2}-\d{2}T/.test(v as string) && !Number.isNaN(Date.parse(v as string));
+/**
+ * nav's path: APP_HOST's own path and query, never another origin's: it starts with "/" and its second character is
+ * neither "/" nor "\\" (each would read as another host), no control character, at most SIGNPAGE_MAX_NAV_BYTES of UTF-8.
+ * The shell checks it again by its own rule (packages/signpage/src/shell.ts, appSrc).
+ */
+const navPath: SignpageSchema = (v) =>
+  typeof v === "string" && v.startsWith("/") && v[1] !== "/" && v[1] !== "\\" && !/[\u0000-\u001f\u007f]/.test(v) &&
+  new TextEncoder().encode(v).length <= SIGNPAGE_MAX_NAV_BYTES;
 /** A return key: a name from the release's fixed list (app.md §2.1 item 5). */
 const returnKey: SignpageSchema = (v) => typeof v === "string" && /^[a-z][a-z0-9_-]{0,63}$/.test(v);
 const lit = (x: unknown): SignpageSchema => (v) => v === x;
@@ -192,6 +202,8 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   signout: open,
   restore: obj({ stage: lit("started") }),
   state,
+  nav: obj({}),
+  reload: obj({}),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 
 const exit = obj({ trigger_price: dec, share_bps: bps(1) });
@@ -213,6 +225,8 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   signout: obj({ return_key: returnKey }),
   restore: obj({}),
   state: obj({}),
+  nav: obj({ path: navPath }),
+  reload: obj({}),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 
 /** The handshake, page to app. Any whole `api` passes here; the client refuses one it does not speak. */
@@ -224,6 +238,6 @@ export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
 export const signpageAnswerErrorSchema = obj({ v: lit(1), id: str, ok: lit(false), error: obj({ code: errorCode }) });
 
-/** True when `kind` is one of the fifteen. */
+/** True when `kind` is one of the seventeen. */
 export const signpageIsKind = (kind: unknown): kind is SignpageKind =>
   typeof kind === "string" && (SIGNPAGE_KINDS as readonly string[]).includes(kind);

@@ -1,6 +1,6 @@
 // The signing-page client (app.md §2.1 items 2-4, row A1.2, app.md:1435): the app's only way to SIGN_HOST. It mounts
 // one hidden iframe of SIGN_HOST's release URL, waits for the page's `ready` and then for that frame's first `state`
-// answer (READY: the state is known, BAR-09, app.md:1107), and then sends the fifteen kinds of messages.ts and reads
+// answer (READY: the state is known, BAR-09, app.md:1107), and then sends the seventeen kinds of messages.ts and reads
 // their answers. Every message from the page is dropped, with no change, unless its `origin` is SIGN_HOST's exactly,
 // its `source` is the current iframe's window, its shape passes the schema of what it claims to be (schema.ts), and an
 // answer's id is one this client is waiting for. The app never re-sends a kind on its own (APU-03, app.md:1328).
@@ -16,6 +16,14 @@
 // at once when the browser is back online or the page is shown again; these tries keep the down state until one
 // reaches READY, so the down state clears with no reload when SIGN_HOST returns. A ready
 // with an `api` this client does not speak is the update state (CH-146): money off until a reload, no retry.
+//
+// Parent mode (mode "parent"): the app runs framed inside SIGN_HOST's shell, the top window, since WebKit partitions a
+// framed SIGN_HOST's storage by the top origin. The client mounts no iframe: it posts to host.parent with SIGN_HOST's
+// origin, and a message counts only from host.parent. The shell posts its ready on each load of the app's frame, so an
+// app creates its client in its entry module, before its load ends. Down is the same minus the iframe's error and load.
+// A retry has no frame to replace: once the shell's ready has been seen, it asks `state` again and READY is that answer;
+// before it, it waits SIGNPAGE_HANDSHAKE_MS for a ready. Everything else is the iframe mode's, so an app sees the same
+// snapshots and outcomes in both.
 
 import { OPEN_KINDS } from "./messages.ts";
 import type { ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
@@ -63,6 +71,9 @@ export const SIGNPAGE_TIMEOUT_MS = {
   // restore reports `progress` at least every 10 s; a screen shows it stalled, the client never ends it
   restore: null,
   state: 5_000,
+  // the shell's (card signpage-shell): answered at once
+  nav: 5_000,
+  reload: 5_000,
 } as const satisfies Record<SignpageKind, number | null>;
 
 /** After one of these times out, the client asks `state` again (a new `state` request); the kind itself is never re-sent. */
@@ -109,10 +120,16 @@ export interface SignpageRequestHandle<K extends SignpageKind = SignpageKind> {
 /** The parts of the browser the client uses; a test passes its own. */
 export interface SignpageClientHost {
   window: Pick<Window, "addEventListener" | "removeEventListener">;
+  /** Unused in parent mode. */
   document: Pick<Document, "createElement">;
-  /** Where the iframe goes. */
+  /** Where the iframe goes; unused in parent mode. */
   mount: Pick<HTMLElement, "appendChild">;
+  /** Parent mode: the shell's window, the app's window.parent. */
+  parent?: Pick<Window, "postMessage">;
 }
+
+/** "iframe": a hidden iframe of SIGN_HOST (the default). "parent": the app runs inside SIGN_HOST's shell. */
+export type SignpageClientMode = "iframe" | "parent";
 
 export interface SignpageClientOptions {
   /** SIGN_HOST's release URL, for example "https://sign.confidential.unrealized.trade/": https, no query, no fragment. */
@@ -120,6 +137,7 @@ export interface SignpageClientOptions {
   host: SignpageClientHost;
   /** 0 turns the retry off. */
   retryMs?: number;
+  mode?: SignpageClientMode;
 }
 
 export interface SignpageClient {
@@ -130,7 +148,7 @@ export interface SignpageClient {
   onProgress(fn: (id: string, stage: Stage) => void): () => void;
   /** Sends one request once READY. Throws at once when its params are not exactly its kind's. */
   request<K extends SignpageKind>(kind: K, params: SignpageParams[K]): SignpageRequestHandle<K>;
-  /** A fresh iframe and a new handshake now. */
+  /** A fresh iframe (parent mode: none) and a new handshake now. */
   retry(): void;
   /** Messages dropped so far, by why. */
   dropped(): Record<SignpageDropReason, number>;
@@ -175,6 +193,13 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   const origin = signpageOrigin(opts.url);
   const { host } = opts;
   const retryMs = opts.retryMs ?? SIGNPAGE_RETRY_MS;
+  const mode: unknown = opts.mode === undefined ? "iframe" : opts.mode;
+  if (mode !== "iframe" && mode !== "parent") throw new TypeError(`signpage: no such mode ${String(mode)}`);
+  /** Parent mode's shell window; null in the iframe mode. */
+  const shell = mode === "parent" ? (host.parent ?? null) : null;
+  if (mode === "parent" && (shell === null || shell === (host.window as unknown))) {
+    throw new TypeError("signpage: parent mode needs host.parent, a window other than host.window");
+  }
 
   let snap: SignpageClientSnapshot = { status: "connecting", release: null, state: null, stale: false };
   const listeners = new Set<(s: SignpageClientSnapshot) => void>();
@@ -191,8 +216,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let retryTimer: Timer | null = null;
   /** The current frame's wait for its ready after its load. */
   let loadTimer: Timer | null = null;
-  /** True once the current frame has sent its ready. */
+  /** True once the current frame has sent its ready (the iframe mode only). */
   let readySeen = false;
+  /** The newest handshake `state` request: only its failure is down (a repeated ready asks again). */
+  let ask = 0;
   /** Retries since the client was last READY: the backoff's step. */
   let tries = 0;
   let destroyed = false;
@@ -210,6 +237,9 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   const clearTimer = (t: Timer | null) => {
     if (t !== null) clearTimeout(t);
   };
+
+  /** Where requests go and the only source a message counts from: the shell, or the current iframe's window. */
+  const peer = () => shell ?? frame?.contentWindow ?? null;
 
   const settle = (id: string, outcome: SignpageOutcome) => {
     const p = pending.get(id);
@@ -261,14 +291,32 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     leave("update");
   };
 
-  /** A fresh iframe and its handshake; `quiet`: a retry of the client's own, which keeps the down state until READY. */
+  /** No ready within SIGNPAGE_HANDSHAKE_MS from now: down. */
+  const waitReady = () => {
+    clearTimer(handshakeTimer);
+    handshakeTimer = setTimeout(() => {
+      handshakeTimer = null;
+      if (snap.status !== "ready") down();
+    }, SIGNPAGE_HANDSHAKE_MS);
+  };
+
+  /**
+   * A fresh iframe and its handshake (parent mode: a `state` request to the same shell at once, which answers at any
+   * time; its ready comes only when it loads the frame, so a client made after that load or a slow load must not wait
+   * for one); `quiet`: a retry of the client's own, which keeps the down state until READY.
+   */
   const mountFrame = (quiet = false) => {
     if (destroyed || snap.status === "update") return;
     clearTimer(retryTimer);
     retryTimer = null;
-    // an answer to the old frame can never pass the source check, so its requests end now, as client_timeout
+    // an answer to the old frame can never pass the source check, so its requests end now, as client_timeout (parent
+    // mode: they end the same way, so both modes answer alike, and a late answer is dropped by its id)
     endPosted();
     gen++;
+    if (shell !== null) {
+      if (!(quiet && snap.status === "down")) set({ status: "connecting", stale: snap.state !== null || snap.stale });
+      return askState();
+    }
     readySeen = false;
     clearTimer(loadTimer);
     loadTimer = null;
@@ -293,18 +341,14 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     });
     f.src = opts.url;
     frame = f;
-    clearTimer(handshakeTimer);
-    handshakeTimer = setTimeout(() => {
-      handshakeTimer = null;
-      if (snap.status !== "ready") down();
-    }, SIGNPAGE_HANDSHAKE_MS);
+    waitReady();
     if (!(quiet && snap.status === "down")) set({ status: "connecting", stale: snap.state !== null || snap.stale });
     host.mount.appendChild(f);
   };
 
   /** Posts a built request to the current frame and waits for its answer, its timeout or the frame's end. */
   const post = <K extends SignpageKind>(msg: SignpageRequest<K>, timeoutMs: number | null, onTimeout: () => void): Promise<SignpageOutcome<K>> => {
-    const win = frame?.contentWindow;
+    const win = peer();
     if (destroyed || !win) return Promise.resolve(DOWN);
     return new Promise<SignpageOutcome<K>>((resolve) => {
       const timer =
@@ -332,23 +376,32 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       void client.request("state", {});
       return;
     }
-    // READY is this frame's first `state` answer, within SIGNPAGE_HANDSHAKE_MS of its ready
+    askState();
+  };
+
+  /**
+   * READY is this frame's first `state` answer, within SIGNPAGE_HANDSHAKE_MS of its ready (parent mode: of the client's
+   * start, a retry or a ready). Any of this frame's asks may bring READY; only the newest one's failure is down.
+   */
+  const askState = () => {
     clearTimer(handshakeTimer);
     handshakeTimer = null;
     const g = gen;
+    const a = ++ask;
     const msgState = signpageBuildRequest("state", {}, crypto.randomUUID());
     void post(msgState, SIGNPAGE_HANDSHAKE_MS, () => {}).then((o) => {
       if (g !== gen || destroyed || snap.status === "update") return;
       if (o.ok) {
         tries = 0;
-        set({ status: "ready" });
-      } else down();
+        if (snap.status !== "ready") set({ status: "ready" });
+      } else if (a === ask && snap.status !== "ready") down();
     });
   };
 
   const onMessage = (ev: MessageEvent) => {
     if (ev.origin !== origin) return void drops.origin++;
-    if (frame === null || ev.source === null || ev.source !== frame.contentWindow) return void drops.source++;
+    const from = peer();
+    if (from === null || ev.source !== from) return void drops.source++;
     const data: unknown = ev.data;
     if (!signpageIsPlainMessage(data)) return void drops.shape++;
     const m = data as Record<string, unknown>;
@@ -393,7 +446,9 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       const msg = signpageBuildRequest(kind, params, id);
       const outcome = (async () => {
         if (snap.status === "connecting" && !destroyed) await new Promise<void>((r) => waiters.push(r));
-        if (destroyed || snap.status !== "ready") return DOWN;
+        // parent mode's update state: the shell still answers `reload` (it reloads the top window, shell and app)
+        const reloadInUpdate = shell !== null && kind === "reload" && snap.status === "update";
+        if (destroyed || (snap.status !== "ready" && !reloadInUpdate)) return DOWN;
         return post(msg, SIGNPAGE_TIMEOUT_MS[kind], () => onTimeout(kind));
       })();
       return { id, outcome };

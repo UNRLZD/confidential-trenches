@@ -1,16 +1,17 @@
-import { createSignpageClient } from "@blindfill/kit";
 import type { SignpageClient, SignpageClientSnapshot } from "@blindfill/kit";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { reloadAll } from "./in-shell.ts";
 import "./signpage-frame.css";
 
-// The terminal's one hidden iframe of SIGN_HOST (app.md §2.1 items 2-4; A1.2, app.md:1435), through the kit's client.
-// Every screen reads the client and its state from useSignpage(); money controls are on only while moneyOn is true.
-// The down state is a fixed toast, so it moves nothing on the page (BAR-04), and its Retry makes a fresh iframe. A
-// signing page whose message API this build does not speak is the update state (CH-146): money off until a reload.
+// The terminal's link to SIGN_HOST: the kit's client in parent mode, started by start.tsx (the terminal runs framed in
+// SIGN_HOST's shell, in-shell.ts). Every screen reads the client and its state from useSignpage(); money controls are
+// on only while moneyOn is true. The down state is a fixed toast, so it moves nothing on the page (BAR-04), and its
+// Retry asks the shell again. A signing page whose message API this build does not speak is the update state (CH-146):
+// money off until a reload, which the shell does for the top window (the shell and the app in it).
 // <html data-signpage="connecting|ready|down|update"> names the state for the browser tests and the live check.
 
-/** SIGN_HOST's release URL: the iframe's src, exactly (AX-06). */
+/** SIGN_HOST's release URL: the shell's origin, the only one the client posts to and hears. */
 export const SIGN_HOST_URL = "https://sign.confidential.unrealized.trade/";
 
 // Draft words (the live UNRLZD terminal's signerDown and retry lines, auth/copy.ts:190-191).
@@ -32,21 +33,14 @@ const Ctx = createContext<SignpageView>({ client: null, snapshot: START, moneyOn
 
 export const useSignpage = () => useContext(Ctx);
 
-export function SignpageFrame({ children }: { children: ReactNode }) {
-  const mount = useRef<HTMLDivElement>(null);
-  const [client, setClient] = useState<SignpageClient | null>(null);
-  const [snapshot, setSnapshot] = useState(START);
+/** `client` lives as long as the page (start.tsx made it before the first render); this only reads it. */
+export function SignpageFrame({ client, children }: { client: SignpageClient; children: ReactNode }) {
+  const [snapshot, setSnapshot] = useState(() => client.snapshot());
 
   useEffect(() => {
-    const c = createSignpageClient({ url: SIGN_HOST_URL, host: { window, document, mount: mount.current! } });
-    setClient(c);
-    setSnapshot(c.snapshot());
-    const off = c.subscribe(setSnapshot);
-    return () => {
-      off();
-      c.destroy();
-    };
-  }, []);
+    setSnapshot(client.snapshot());
+    return client.subscribe(setSnapshot);
+  }, [client]);
 
   useEffect(() => {
     document.documentElement.dataset.signpage = snapshot.status;
@@ -54,12 +48,11 @@ export function SignpageFrame({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider value={{ client, snapshot, moneyOn: snapshot.status === "ready" }}>
-      <div ref={mount} className="spframe" />
       {children}
       {snapshot.status === "down" && (
         <div className="spdown" role="status">
           <span className="tt">{DOWN}</span>
-          <button type="button" className="retry" onClick={() => client?.retry()}>
+          <button type="button" className="retry" onClick={() => client.retry()}>
             {RETRY}
           </button>
         </div>
@@ -67,7 +60,7 @@ export function SignpageFrame({ children }: { children: ReactNode }) {
       {snapshot.status === "update" && (
         <div className="spdown" role="status">
           <span className="tt">{UPDATE}</span>
-          <button type="button" className="retry" onClick={() => location.reload()}>
+          <button type="button" className="retry" onClick={() => void reloadAll(client, location)}>
             {RELOAD}
           </button>
         </div>

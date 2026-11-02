@@ -1,4 +1,4 @@
-// The signing-page client tests' fixtures: one valid request and answer per kind of the fifteen, typed against
+// The signing-page client tests' fixtures: one valid request and answer per kind of the seventeen, typed against
 // messages.ts so the kit's tsc refuses a fixture that drifts from the frozen shapes or a kind with none.
 import type { SignpageKind, SignpageParams, SignpageResults, SignpageState } from "../src/signpage/messages.ts";
 
@@ -53,5 +53,7 @@ export const FIXTURES = {
   signout: { params: { return_key: "settings" }, result: { pending: true } },
   restore: { params: {}, result: { stage: "started" } },
   state: { params: {}, result: STATE },
+  nav: { params: { path: "/token/solana/So11111111111111111111111111111111111111112?tab=trades" }, result: {} },
+  reload: { params: {}, result: {} },
 } satisfies { [K in SignpageKind]: { params: SignpageParams[K]; result: SignpageResults[K] } };
 
