@@ -451,11 +451,17 @@ test("a dead tab's tx that can never land frees its wallet: both providers' fina
   assert.deepEqual(op.txs.map((t) => t.state), ["not_landed"]);
 });
 
-test("a store write that never answers refuses the trade within its bound, and sign out's lock is granted", async () => {
+test("a store write that never answers refuses the trade within its bound, and sign out's lock is granted", async (c) => {
   let hang = false;
   const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }, { hangPut: (st) => st === "wallets" && hang });
   const p = page(s, { final: "filled", atStart: () => (hang = true) }, [noRpc, noRpc], 100);
-  const { answer } = await p.ask(buy("10"));
+  c.after(() => p.die()); // whatever the asserts say, the page's locks go, so a hung trade never holds the next tests
+  // raced against 2 s, so a store call left unbounded fails here by name, not at a test timeout CI does not set
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const r = await Promise.race([p.ask(buy("10")), new Promise<"no answer">((ok) => (t = setTimeout(() => ok("no answer"), 2_000)))]);
+  clearTimeout(t);
+  assert.notEqual(r, "no answer", "the trade gave no answer within 2 s: a store call is not bounded");
+  const { answer } = r as Exclude<typeof r, "no answer">;
   assert.deepEqual(answer, { error: "failed" }, "the signature's mark write never answered: nothing signed, refused");
   let out = false;
   await Promise.race([navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, async () => void (out = true)), new Promise((r) => setTimeout(r, 1_000))]);
