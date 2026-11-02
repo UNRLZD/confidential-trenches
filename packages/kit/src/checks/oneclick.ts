@@ -86,6 +86,7 @@ export interface OneClickChecked {
   withdrawFee: bigint | undefined; // signed: a live answer's only
   unsignedDryWithdrawFee: bigint | undefined; // a dry answer's figure, not signed (SDK 0.1.26 dist/index.mjs:1626-1636)
   deadline: string | undefined; // a live answer's signed deadline
+  timeEstimate: unknown; // a live answer's signed timeEstimate as it came (seconds), unchecked; never set for a dry one
   timestamp: string;
 }
 
@@ -330,5 +331,6 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
   if (amountOut < floor.amountOut) fail("floor", `amountOut ${amountOut} is below the device's floor ${floor.amountOut}`);
   if (minAmountOut < floor.minAmountOut) fail("floor", `minAmountOut ${minAmountOut} is below the device's floor ${floor.minAmountOut}`);
   return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee: request.dry ? undefined : fee,
-    unsignedDryWithdrawFee: request.dry ? fee : undefined, deadline, timestamp: a.timestamp as string };
+    unsignedDryWithdrawFee: request.dry ? fee : undefined, deadline, timeEstimate: request.dry ? undefined : q.timeEstimate,
+    timestamp: a.timestamp as string };
 }
