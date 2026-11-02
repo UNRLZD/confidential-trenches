@@ -23,7 +23,7 @@ import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CARGO_NEAR, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, registrationProblems, repoRoots, rpcProblems } from "./deploy.mjs";
 import { b58encode } from "./near-tx.mjs";
-import { TESTNET_USDC } from "../../../scripts/live-checks/vault-skeleton.mjs";
+import { TESTNET_TOKEN } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "deploy.mjs");
@@ -51,7 +51,7 @@ function keyFile(dir, account = PARENT, pub) {
 }
 
 // A wasm whose function exports are `exports` (all one function, `body` bytes), with `strings` in a custom section.
-function wasm({ body = 4, strings = [TESTNET_USDC], exports = ["config"] } = {}) {
+function wasm({ body = 4, strings = [TESTNET_TOKEN], exports = ["config"] } = {}) {
   const leb = (x) => {
     const o = [];
     do {
@@ -199,11 +199,22 @@ test("a mainnet build is refused on testnet before any send", () => {
   neverSent(r);
 });
 
+// card vault-testnet-t01: the 1 Nov skeleton's testnet build named Circle's testnet USDC, so the wallet's testnet
+// deposit (on the team's testnet USDC) was refused on chain; such a build is refused before any send
+test("a testnet build naming Circle's testnet USDC is refused on testnet before any send", () => {
+  const dir = fresh();
+  const k = keyFile(dir);
+  const r = run(dir, testnet(dir, k.file, path.join(dir, "build")), stubs(dir, wasm({ strings: ["3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"] })));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /refused before any send: .*not a testnet build: does not hold the testnet token bf-usdc-20261101t022248\.testnet.*holds Circle's testnet USDC/);
+  neverSent(r);
+});
+
 test("two clean builds that differ stop the run before any send, and both target dirs are gone", () => {
   const dir = fresh();
   const k = keyFile(dir);
   const buildDir = path.join(dir, "build");
-  const r = run(dir, testnet(dir, k.file, buildDir), stubs(dir, wasm(), wasm({ strings: [TESTNET_USDC, "another build"] })));
+  const r = run(dir, testnet(dir, k.file, buildDir), stubs(dir, wasm(), wasm({ strings: [TESTNET_TOKEN, "another build"] })));
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /the two clean builds differ: [0-9a-f]{64} \(\d+ B\) and [0-9a-f]{64} \(\d+ B\); nothing was sent/);
   neverSent(r);

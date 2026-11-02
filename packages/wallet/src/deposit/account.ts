@@ -50,13 +50,13 @@ export const NEAR_RPC_URLS = ["https://rpc.mainnet.fastnear.com", "https://rpc.m
 export const NEAR_NETWORKS = {
   // vault: the release's vault on this network, the only receiver a deposit call names (wallet.md:898, "the vault id
   // written into the release"); null until the release writes one, and the device signs no deposit call there.
-  // Mainnet: none yet (the vault is deployed at the freeze). Testnet: contracts/vault/deployments/testnet-skeleton.json,
-  // account_id. That vault's asset is Circle's testnet USDC (the same file, asset 3e2210e1…), not this token, so until a
-  // testnet vault on this token is deployed a testnet call is refused on chain and the token returns the USDC to U.
+  // Mainnet: none yet (the vault is deployed at the freeze). Testnet: contracts/vault/deployments/testnet-v1.json,
+  // account_id: a keyless vault whose config() names this token as its asset, registered on it (its registration_tx;
+  // scripts/live-checks/vault-testnet-t01.mjs reads both).
   mainnet: { token: VAULT_CONSTANTS.TOKEN, vault: null, fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
   testnet: {
     token: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (a public account id)
-    vault: "vault.bf-vs-20261101t012200.testnet",
+    vault: "vault.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
     fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], // near-rpc-operators: one operator (alternatives; the pair is one of these and drpc)
     drpc: "https://near-testnet.drpc.org",
   },

@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BYTES, RPCS as GATE_RPCS, okOperators, operatorOf, proveRead, readTx } from "../ci/money-gate.mjs";
+import { operatorProblems } from "./vault-skeleton.mjs";
 
 const KEY = "vault-testnet-usdc";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -62,7 +63,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
     lines.push(`${good ? "ok " : "BAD"} ${text}`);
   };
   const state = rpcs.slice(0, 2);
-  if (state.length < 2) say(false, `only ${state.length} RPC(s); want two`);
+  for (const p of operatorProblems(state)) say(false, p);
   for (const url of state) {
     const at = `on ${url}`;
     try {

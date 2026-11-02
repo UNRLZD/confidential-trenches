@@ -1,9 +1,9 @@
 {
-  "recorded_at": "2026-11-01T13:18:34.345Z",
-  "vault": "vault.bf-vs-20261101t012200.testnet",
+  "recorded_at": "2026-11-02T07:24:24.713Z",
+  "vault": "vault.bf-vt-20261102t071444.testnet",
   "params": {
     "request_type": "call_function",
-    "account_id": "vault.bf-vs-20261101t012200.testnet",
+    "account_id": "vault.bf-vt-20261102t071444.testnet",
     "method_name": "deposits",
     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
     "finality": "final"
@@ -15,8 +15,8 @@
       "json": {
         "jsonrpc": "2.0",
         "result": {
-          "block_hash": "8KUBaU4spwiZ6kGL4XnDMjojoxg7iEBGByXHyoGtL1JP",
-          "block_height": 275753808,
+          "block_hash": "7HVe9YNqfoofw59Gi3BeTnxqUF4WvTzV5Pb33tTDCyoT",
+          "block_height": 275867348,
           "logs": [],
           "result": [
             91,
@@ -33,8 +33,8 @@
         "id": "wallet-deposit-bind",
         "jsonrpc": "2.0",
         "result": {
-          "block_hash": "6ckZMQ362irusSNAmuQwh2XMyEwPgR2mZKXXpcTYLWzx",
-          "block_height": 275753809,
+          "block_hash": "CqXH6hRmqpyPMvBGvCmS1JkugFiH1dmNWXhjky3dWfEy",
+          "block_height": 275867349,
           "logs": [],
           "result": [
             91,
