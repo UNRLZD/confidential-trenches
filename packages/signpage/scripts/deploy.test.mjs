@@ -1,12 +1,16 @@
 // node --test packages/signpage/scripts/deploy.test.mjs: the deploy refuses a build whose headers break SIGN_HOST's
-// policy before anything is uploaded, and uploads the real build with wrangler at its pinned version.
+// policy before anything is uploaded, and uploads the real build with wrangler at its pinned version. The build carries
+// the prover (card signpage-prover-host): the worker under its own CSP too (W:880) and the six pinned setup files at
+// /assets/zk/<sha256>.<ext>; a changed, missing or extra setup file, a stale worker or a worker rule with another
+// policy is refused.
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, checkDir, checkHeadersFile, deploy } from "./deploy.mjs";
+import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, deploy } from "./deploy.mjs";
+import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REAL = readFileSync(join(PKG, "public", "_headers"), "utf8");
@@ -31,6 +35,9 @@ function recorder() {
   const run = (cmd, args, opts) => (calls.push({ cmd, args, opts }), { status: 0, stdout: cmd === "git" ? "abc\n" : "" });
   return { calls, run };
 }
+
+const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
+const ZK_RULE = "/assets/zk/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
 const swap = (from, to) => {
   assert.ok(REAL.includes(from), from);
@@ -70,6 +77,32 @@ test("other policy breaks are refused", () => {
     "font-src gone": swap(" font-src 'self';", ""),
     "unsafe-inline": swap("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'"),
     "a connect-src host added": swap("https://near.drpc.org", "https://near.drpc.org https://evil.ct.test"),
+    "no worker rule": swap(WORKER_RULE, ""),
+    "the worker rule twice": `${REAL}${WORKER_RULE}`,
+    "the worker's CSP without default-src": swap(WORKER_RULE, WORKER_RULE.replace("default-src 'none'; ", "")),
+    "the worker's CSP with a remote connect-src": swap(WORKER_RULE, WORKER_RULE.replace("connect-src 'self'", "connect-src 'self' https://evil.ct.test")),
+    "the worker's CSP with 'unsafe-eval'": swap(WORKER_RULE, WORKER_RULE.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'")),
+    "the worker's CSP on another path": swap(WORKER_RULE, WORKER_RULE.replace("/prover-worker.js", "/*.js")),
+    "the worker's CSP also on another path": `${REAL}${WORKER_RULE.replace("/prover-worker.js", "/app.js")}`,
+    "the worker rule sets a second header": swap(WORKER_RULE, `${WORKER_RULE}  Cross-Origin-Resource-Policy: cross-origin\n`),
+    "the worker rule removes the site's CSP": swap(WORKER_RULE, `${WORKER_RULE}  ! Content-Security-Policy\n`),
+    // the review's plants (signpage-prover-host round 2): every rule, header and removal off the allow-list
+    "/ sends Refresh to another site": `${REAL}/\n  Refresh: 0; url=https://evil.example/\n`,
+    "/index.html sends Refresh": `${REAL}/index.html\n  Refresh: 0; url=https://evil.example/\n`,
+    "/ sets a cookie": `${REAL}/\n  Set-Cookie: a=b; Secure\n`,
+    "/ adds Integrity-Policy-Report-Only": `${REAL}/\n  Integrity-Policy-Report-Only: blocked-destinations=(script)\n`,
+    "/* adds Service-Worker-Allowed": swap("  Integrity-Policy:", "  Service-Worker-Allowed: /\n  Integrity-Policy:"),
+    "/* adds a Cache-Control, joined onto /assets/zk/*'s": swap("  Integrity-Policy:", "  Cache-Control: no-store\n  Integrity-Policy:"),
+    "/assets/zk/* allows every origin": `${REAL.trimEnd()}\n  Access-Control-Allow-Origin: *\n`,
+    "/prover-* serves the worker as HTML": `${REAL}/prover-*\n  Content-Type: text/html\n`,
+    "/assets/zk/* without its Cache-Control": swap(ZK_RULE, ""),
+    "/assets/zk/* no-store": swap(ZK_RULE, ZK_RULE.replace("public, max-age=31536000, immutable", "no-store")),
+    "/assets/zk/* a second max-age": swap(ZK_RULE, ZK_RULE.replace("immutable", "immutable, max-age=0")),
+    "/assets/zk/* twice": `${REAL}${ZK_RULE}`,
+    // Pages trims only a value's ends, and the live check reads the value exactly: inner spaces would deploy, then fail it
+    "/assets/zk/* with inner double spaces": swap(ZK_RULE, ZK_RULE.replace("public, max-age", "public,  max-age")),
+    "/assets/zk/* sets its Cache-Control twice": swap(ZK_RULE, `${ZK_RULE}  Cache-Control: public, max-age=31536000, immutable\n`),
+    "/assets/zk/* removes a header": swap(ZK_RULE, `${ZK_RULE}  ! X-Content-Type-Options\n`),
   };
   for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
 });
@@ -84,14 +117,18 @@ test("a build carrying _worker.js or .well-known/webauthn is refused", () => {
   assert.equal(calls.length, 0);
 });
 
-test("--dry-run stops after the gate; the build holds the page and _headers only", () => {
+test("--dry-run stops after the gate and keeps the build, whose _headers is the package's", () => {
   const { calls, run } = recorder();
   const r = deploy(["--dry-run"], {}, run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   const dir = /gate ok on (\S+);/.exec(r.out[0])[1];
-  assert.deepEqual(checkDir(dir), []);
-  assert.equal(readFileSync(join(dir, "_headers"), "utf8"), REAL);
-  assert.equal(calls.length, 0);
+  try {
+    assert.deepEqual(checkDir(dir), []);
+    assert.equal(readFileSync(join(dir, "_headers"), "utf8"), REAL);
+    assert.equal(calls.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("with the gate passed and no token, nothing is uploaded", () => {
@@ -129,6 +166,48 @@ test("a deploy names every live check that reads SIGN_HOST in its success line",
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
-  assert.deepEqual([...LIVE_CHECKS].sort(), ["signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "wallet-passkey-prf"]);
+  assert.deepEqual([...LIVE_CHECKS].sort(), ["signpage-postmessage", "signpage-prover-host", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "wallet-passkey-prf"]);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
+});
+
+const zkPath = (name) => `assets/zk/${ZK_SETUP_FILES[name].sha256}.${name.split(".").pop()}`;
+
+test("the build holds the prover: the worker, the six setup files at /assets/zk/<sha256>.<ext> and the licences", () => {
+  const dir = build();
+  try {
+    assert.deepEqual(checkDir(dir), []);
+    assert.deepEqual(readdirSync(join(dir, "assets", "zk")).sort(), Object.keys(ZK_SETUP_FILES).map((n) => zkPath(n).slice("assets/zk/".length)).sort());
+    for (const n of Object.keys(ZK_SETUP_FILES)) assert.ok(readFileSync(join(dir, zkPath(n))).equals(readFileSync(join(PKG, "..", "kit", "zk", n))), n);
+    assert.ok(readFileSync(join(dir, "prover-worker.js")).equals(readFileSync(join(PKG, "public", "prover-worker.js"))));
+    assert.ok(readFileSync(join(dir, "licenses", "GPL-3.0.txt")).equals(readFileSync(join(PKG, "..", "kit", "zk", "LICENSE-GPL-3.0.txt"))));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a build whose setup files or worker are not the pinned ones is refused", () => {
+  const plants = {
+    "a setup file with one byte changed": (d) => {
+      const f = join(d, zkPath("withdraw.wasm"));
+      const b = readFileSync(f);
+      b[100] ^= 1;
+      writeFileSync(f, b);
+      return /assets\/zk\/36cda227[0-9a-f]+\.wasm: sha256 [0-9a-f]{64}, pinned 36cda227/;
+    },
+    "a setup file missing": (d) => (rmSync(join(d, zkPath("commitment.zkey"))), /assets\/zk\/494ae92d[0-9a-f]+\.zkey: missing/),
+    "a setup file under another name": (d) => (writeFileSync(join(d, "assets", "zk", `${"0".repeat(64)}.zkey`), "x"), /assets\/zk\/0{64}\.zkey: not a pinned setup file/),
+    "the worker changed": (d) => (writeFileSync(join(d, "prover-worker.js"), "postMessage(1)"), /prover-worker\.js is not the kit's prover worker build/),
+    "the worker missing": (d) => (rmSync(join(d, "prover-worker.js")), /prover-worker\.js is not the kit's prover worker build/),
+    "the GPL text missing": (d) => (rmSync(join(d, "licenses", "GPL-3.0.txt")), /licenses\/GPL-3\.0\.txt: missing/),
+  };
+  for (const [name, plant] of Object.entries(plants)) {
+    const dir = build();
+    try {
+      const want = plant(dir);
+      const p = checkDir(dir);
+      assert.ok(p.some((l) => want.test(l)), `${name}: ${p.join(" | ")}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });

@@ -1,12 +1,16 @@
 // node --test packages/signpage/scripts/build-app.test.mjs: the committed public/app.js and index.html are a fresh
-// build of src/main.ts, and the page runs that one script only, under its sha384 (Integrity-Policy, public/_headers).
+// build of src/main.ts, and the page runs that one script only, under its sha384 (Integrity-Policy, public/_headers);
+// the committed public/prover-worker.js is the kit's prover worker build (packages/kit/src/prover/build.mjs), byte for
+// byte; and the deploy build's copies of the six setup files and their licences are the pinned files (copyServed).
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, sha384 } from "./build-app.mjs";
+import { check, copyServed, SERVED, sha384 } from "./build-app.mjs";
+import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
+import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -31,9 +35,75 @@ test("a hand-edited bundle or a stale integrity is caught", async () => {
   const js = readFileSync(join(PKG, "public/app.js"), "utf8");
   writeFileSync(join(d, "public/app.js"), js.replace("sign.confidential.unrealized.trade", "sign.evil.test"));
   cpSync(join(PKG, "index.html"), join(d, "index.html"));
+  cpSync(join(PKG, "public/prover-worker.js"), join(d, "public/prover-worker.js"));
   assert.match((await check(PKG, d)).join("\n"), /public\/app\.js is not the build/);
   writeFileSync(join(d, "public/app.js"), js);
   writeFileSync(join(d, "index.html"), readFileSync(join(PKG, "index.html"), "utf8").replace(/sha384-[^"]+/, sha384(Buffer.from("x"))));
   assert.deepEqual(await check(PKG, d), ["index.html is not the page around public/app.js with its sha384"]);
   rmSync(d, { recursive: true, force: true });
+});
+
+test("public/prover-worker.js is the kit's prover worker build, byte for byte", () => {
+  assert.ok(readFileSync(join(PKG, "public/prover-worker.js")).equals(proverWorkerSource()));
+});
+
+test("a stale or hand-edited prover worker is caught", async () => {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-build-test-"));
+  try {
+    cpSync(join(PKG, "public"), join(d, "public"), { recursive: true });
+    cpSync(join(PKG, "index.html"), join(d, "index.html"));
+    const w = readFileSync(join(PKG, "public/prover-worker.js"), "utf8");
+    assert.ok(w.includes(ZK_SETUP_FILES["withdraw.zkey"].sha256));
+    writeFileSync(join(d, "public/prover-worker.js"), w.replace(ZK_SETUP_FILES["withdraw.zkey"].sha256, "0".repeat(64)));
+    assert.deepEqual(await check(PKG, d), ["public/prover-worker.js is not the kit's prover worker build: run node packages/signpage/scripts/build-app.mjs"]);
+    rmSync(join(d, "public/prover-worker.js"));
+    assert.deepEqual(await check(PKG, d), ["public/prover-worker.js is not the kit's prover worker build: run node packages/signpage/scripts/build-app.mjs"]);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("the deploy build serves the six setup files at /assets/zk/<sha256>.<ext> and the licence texts, as pinned", () => {
+  const zk = SERVED.filter((s) => s.to.startsWith("assets/zk/"));
+  assert.equal(zk.length, 6);
+  for (const [name, pin] of Object.entries(ZK_SETUP_FILES)) {
+    assert.ok(zk.some((s) => s.to === `assets/zk/${pin.sha256}.${name.split(".").pop()}` && s.bytes === pin.bytes && s.sha256 === pin.sha256), name);
+  }
+  assert.deepEqual(SERVED.filter((s) => !s.to.startsWith("assets/zk/")).map((s) => s.to), [
+    "licenses/GPL-3.0.txt",
+    "licenses/LGPL-3.0.txt",
+    "licenses/Apache-2.0.txt",
+    "licenses/zk-NOTICE.txt",
+  ]);
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-served-"));
+  try {
+    copyServed(d);
+    for (const s of SERVED) assert.ok(readFileSync(join(d, s.to)).equals(readFileSync(s.from)), s.to);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("copyServed refuses a setup file whose size or sha256 is not its pin, and writes nothing", () => {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-served-"));
+  const src = mkdtempSync(join(tmpdir(), "ct-signpage-kit-"));
+  try {
+    const name = "commitment.zkey";
+    const pin = ZK_SETUP_FILES[name];
+    const real = readFileSync(join(PKG, "..", "kit", "zk", name));
+    const flipped = Buffer.from(real);
+    flipped[flipped.length >> 1] ^= 1;
+    for (const [what, body, want] of [
+      ["one byte changed", flipped, new RegExp(`${name}: sha256 [0-9a-f]{64}, pinned ${pin.sha256}`)],
+      ["one byte short", real.subarray(1), new RegExp(`${name}: ${pin.bytes - 1} B, pinned ${pin.bytes} B`)],
+    ]) {
+      writeFileSync(join(src, name), body);
+      const list = SERVED.map((s) => (s.to.endsWith(`${pin.sha256}.zkey`) ? { ...s, from: join(src, name) } : s));
+      assert.throws(() => copyServed(d, list), want, what);
+      assert.deepEqual(readdirSync(d), [], what);
+    }
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
 });
