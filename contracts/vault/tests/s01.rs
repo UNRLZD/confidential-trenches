@@ -4,19 +4,18 @@
 //! `cargo test` builds this file empty.
 //!
 //! `nobody_holds_a_key_to_the_vault`: the harness deploys the release build (`VAULT_WASM`) by the 2.8 recipe
-//! (`Harness::deploy_vault`, signed by the sandbox's root account) and registers it on the real USDC at TOKEN. Not by
-//! contracts/vault/scripts/deploy.mjs: that script refuses this build before any send (it exports withdraw without
-//! on_payout), which tests/s20.rs proves. Then:
+//! (`Harness::deploy_vault`, signed by the sandbox's root account) and registers it on the real USDC at TOKEN
+//! (tests/s20.rs lands the same recipe through contracts/vault/scripts/deploy.mjs). Then:
 //! - `view_access_key_list` reads `keys: []` on two reads (optimistic and final; the sandbox has one RPC);
 //! - `storage_balance_of(vault)` on USDC is set;
 //! - AddKey, DeleteAccount and DeployContract on the vault, each sent by the parent and by a stranger, are each
 //!   refused with `ActorNoPermission` (NC `actions.rs` l.776-813), and afterwards the keys are still `[]`, the code
 //!   hash and the balance unchanged;
 //! - the wasm's imports hold none of 2.8's banned actions; its promise imports equal 2.8's seven less NOT_YET_PROMISES
-//!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (on this base the payout path has not landed:
-//!   no promise import yet, and no ragequit, on_payout or settle; the card that lands them empties both sets, and this
-//!   equality then fails until it does); its outgoing method names `storage_deposit`, `ft_transfer` and `on_payout` are
-//!   in its bytes while none of the token's other mutating methods is.
+//!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (withdraw's payouts and on_payout have landed;
+//!   ragequit and settle have not, and nothing calls a plain NEAR Transfer before settle; the cards that land them
+//!   empty both sets, and this equality fails until they do); its outgoing method names `storage_deposit`,
+//!   `ft_transfer` and `on_payout` are in its bytes while none of the token's other mutating methods is.
 #![cfg(feature = "sandbox")]
 
 mod harness;
@@ -73,14 +72,13 @@ const EXPORTS: [&str; 17] = [
     "totals",
     "contract_source_metadata",
 ];
-/// What the build does not hold yet, by name: the payout path (2.5.2-2.5.5) has not landed, so none of 2.8's seven
-/// promise imports and none of these three exports. Each set is compared for equality, so a build that gains or loses
-/// any one name fails here until the set is edited with it.
-const NOT_YET_PROMISES: [&str; 7] = PROMISES;
-const NOT_YET_EXPORTS: [&str; 3] = ["ragequit", "on_payout", "settle"];
-/// The vault's outgoing calls (2.5): to the token and to itself. Until the payout path lands, this presence check is
-/// met by other strings in the bytes (config()'s `gas_on_payout_tgas`, a log's `ft_transfer`), so it proves little;
-/// src/promise.rs's unit test, which reads the exact calls a payout makes, is the real check until then.
+/// What the build does not hold yet, by name: ragequit and settle (2.5.3, 2.5.5) have not landed, and settle is the
+/// only caller of a plain NEAR Transfer (src/promise.rs `transfer_near`). Each set is compared for equality, so a build
+/// that gains or loses any one name fails here until the set is edited with it.
+const NOT_YET_PROMISES: [&str; 1] = ["promise_batch_action_transfer"];
+const NOT_YET_EXPORTS: [&str; 2] = ["ragequit", "settle"];
+/// The vault's outgoing calls (2.5): to the token and to itself. A presence check only (other strings could meet it);
+/// src/promise.rs's and withdraw.rs's unit tests read the exact calls a payout makes.
 const OUTGOING: [&str; 3] = ["storage_deposit", "ft_transfer", "on_payout"];
 /// Token methods the vault never calls (2.5.7, src/promise.rs): NEP-141 and NEP-145 mutating methods past
 /// storage_deposit and ft_transfer, and the allowance methods of a token that has them.

@@ -16,6 +16,7 @@ pub mod context;
 pub mod deposit;
 pub mod events;
 pub mod field;
+pub mod payout;
 pub mod poseidon;
 pub mod prepay;
 pub mod promise;
