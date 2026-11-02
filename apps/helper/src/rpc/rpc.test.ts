@@ -74,6 +74,23 @@ test("an allowlisted call on each chain is forwarded to that chain's provider an
   }
 });
 
+test("the kit's Solana set send reads are forwarded: isBlockhashValid (card solana-set-send), the finalized blockhash, statuses and the send", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const r = rpc();
+  for (const [method, params] of [
+    ["isBlockhashValid", ["J7rBdM6AecPDEZp8aPq5iPSNKVkU5Q76F3oAV4eW5wsW", { commitment: "processed" }]],
+    ["getLatestBlockhash", [{ commitment: "finalized" }]],
+    ["getSignatureStatuses", [["x"], { searchTransactionHistory: true }]],
+    ["sendTransaction", ["AQ==", { encoding: "base64", skipPreflight: true, maxRetries: 0 }]],
+  ] as const) {
+    seen.length = 0;
+    const a = await call(r, "solana", { jsonrpc: "2.0", id: "12", method, params });
+    assert.equal(a.status, 200, method);
+    assert.equal(seen.length, 1, method);
+    assert.deepEqual(JSON.parse(seen[0]!.body), { jsonrpc: "2.0", id: "12", method, params });
+  }
+});
+
 test("no header of the caller reaches the provider: the helper sends its own few", async () => {
   next = { status: 200, type: JSON_T, body: echo };
   seen.length = 0;

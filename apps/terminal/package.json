@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test build/*.test.mjs scripts/check-deploy.test.ts test/*.test.ts test/harness/*.test.mjs",
     "harness": "vite build && node test/harness/selftest.mjs",
-    "test:e2e": "vite build && node ../../scripts/live-checks/app-in-shell.mjs --harness --engines chromium && node test/bar10/run.mjs && node test/deposit-sheet/run.mjs"
+    "test:e2e": "vite build && node ../../scripts/live-checks/app-in-shell.mjs --harness --engines chromium && node test/bar10/run.mjs && node test/deposit-sheet/run.mjs && node test/verify/run.mjs && node test/withdraw/run.mjs && node test/portfolio/run.mjs"
   },
   "dependencies": {
     "@blindfill/kit": "workspace:*",
