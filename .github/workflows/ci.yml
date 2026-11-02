@@ -1,7 +1,8 @@
 # CI needs no secret and no token beyond the read-only one GitHub gives every run.
 # Every action is pinned by commit sha, each read from its own repo on 2026-10-26 at 11:24Z:
 #   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0;
-#   actions/cache v6.1.0 read from its repo on 2026-11-02 at 12:40Z.
+#   actions/cache v6.1.0 read from its repo on 2026-11-02 at 12:40Z;
+#   foundry-rs/foundry-toolchain v1.9.1 read from its repo on 2026-11-02 at 20:20Z.
 # The five job ids are the required checks of main's ruleset: gitleaks, deep-import, verify-gate, money-gate, test.
 # The sixth, vault-sandbox, joins them when the owner adds it to the ruleset.
 name: ci
@@ -207,6 +208,19 @@ jobs:
         run: |
           rustup toolchain install 1.96.0 --profile minimal
           cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
+      # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
+      # version its tests were first run with, released 2026-05-08) through foundry-toolchain v1.9.1 (908c540, read
+      # 2026-11-02 20:20Z), solc 0.8.28 as its foundry.toml pins. The forge tests run the kit's real proofs through the
+      # verifiers the pool deploys; layout.test.mjs reads the pool's storage and ABI from the compiler.
+      - name: the EVM pool's forge-std
+        run: git submodule update --init contracts/pool-evm/lib/forge-std
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.7.1
+      - name: the EVM pool's tests
+        run: |
+          forge test --root contracts/pool-evm
+          node --test contracts/pool-evm/test/*.test.mjs
 
   # The vault's near-sandbox suite (contracts/vault/tests/harness/run.sh: the vault, the mock token and the harness's
   # probe built with cargo-near, the pinned mainnet USDC and intents.near wasm, near-sandbox 2.13.4), which the test
