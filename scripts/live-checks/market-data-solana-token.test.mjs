@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/market-data-solana-token.test.mjs: the live check replays recorded answers
-// (market-data-solana-token.answers.json). good: apps/helper at 9bc0caa run on a Mac against the real Jupiter, Solana
+// (market-data-solana-token.answers.json). good: apps/helper at f539855 run on a Mac against the real Jupiter, Solana
 // and GeckoTerminal (the deployed helper has no /v1/market/token yet): PASS. bad_not_deployed: the deployed helper
 // before this card, 404 on all three: FAIL. Made from the good answer: a page missing a Risk field, a row with an extra
 // field, the authorities not from the chain, a holder row with a stray field, a bar off the hour grid, bars out of
