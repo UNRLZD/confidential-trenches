@@ -408,12 +408,14 @@ const pacers = new Map<unknown, Pacer>();
 export function solanaSendPacerCount(): number {
   return pacers.size;
 }
-/** How many turns the provider's queue holds, booked (not yet started) and started (in the last minute): a diagnostic
- * read (the kit's tests check that a turn given up on leaves none behind). */
-export function solanaRpcQueueSize(rpc: SolanaRpc): { booked: number; started: number } {
+/** How many turns the provider's queue holds, booked (not yet started) and started (in the last minute), of one method
+ * when named: a diagnostic read (the kit's tests check that a turn given up on leaves none behind, and that the fill
+ * poll books none while it reads). */
+export function solanaRpcQueueSize(rpc: SolanaRpc, method?: string): { booked: number; started: number } {
   const bare = bareOf.get(rpc) ?? rpc;
   const q = bare.url === undefined ? queueOfFn.get(bare) : queueOfUrl.get(urlKey(bare.url));
-  return { booked: q?.slots.filter((x) => !x.started).length ?? 0, started: q?.slots.filter((x) => x.started).length ?? 0 };
+  const slots = (q?.slots ?? []).filter((x) => method === undefined || x.method === method);
+  return { booked: slots.filter((x) => !x.started).length, started: slots.filter((x) => x.started).length };
 }
 
 function paceFire(p: Pacer): boolean {
@@ -620,13 +622,14 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const eligible = (i: number): boolean => !decided[i] && !past(i);
 
   /** One call on provider p, in the provider's shared queue (rpcSlot), timed out, with its 429 back-off. Rejects on
-   * any failure, and without calling once the set is over. */
+   * any failure, and without calling once the set is over: a turn whose time comes after the end is given back
+   * (end() gives back the turns pending then; this one was asked after it, by a loop that had not seen the end). */
   function call(p: 0 | 1, method: string, params: readonly unknown[]): Promise<unknown> {
     const { run, wait, drop } = rpcSlot(opts.providers[p], limits[p], method);
     pending.add(drop);
     return (wait ?? Promise.resolve()).then(() => {
-      pending.delete(drop); // from here the turn is run, never dropped: end() gave back every turn still pending
-      if (over) throw new Error("the set is over");
+      pending.delete(drop);
+      if (over) { drop(); throw new Error("the set is over"); }
       return withTimeout(Promise.resolve().then(() => run(params)), callTimeoutMs);
     }).then(
       (v) => { backoffMs[p] = 0; return v; },
@@ -773,6 +776,7 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       // Every undecided tx's blockhash, from the first cycle on, so a fresh hash is read valid before it can read expired.
       const open = txs.map((_, i) => i).filter((i) => !decided[i]);
       for (const bh of new Set(open.map((i) => txs[i]!.blockhash))) {
+        if (over) return;
         let answer: unknown;
         try {
           answer = await call(p, "isBlockhashValid", [bh, { commitment: "processed" }]);
