@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { HelperTokenStatusAnswer } from "../../../../packages/kit/src/index.ts";
 import { start } from "../server.ts";
-import { CACHE_MS, createTokenWatch, readUrls, statusFrom, tokenHeld, USDC, USDC_CODE_HASH, WATCH_RPCS, type TokenStatus } from "./status.ts";
+import { CACHE_MS, createTokenWatch, readUrls, statusesOf, statusFrom, TESTNET_RPCS, TESTNET_TOKEN, tokenHeld, tokenWatchesFromEnv, USDC, USDC_CODE_HASH, WATCH_RPCS, type TokenStatus } from "./status.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const A = "https://a.example";
@@ -34,13 +34,13 @@ const ENV = { NEAR_RPC_URL: A, NEAR_RPC_URL_B: B };
 test("the pin is the vault's USDC and its code hash as the repo pins them; the answer has the kit's fields", () => {
   assert.match(readFileSync(path.join(ROOT, "contracts/vault/src/constants.rs"), "utf8"), new RegExp(`pub const TOKEN: &str = "${USDC}";`));
   assert.equal(JSON.parse(readFileSync(path.join(ROOT, "contracts/vault/deployments/testnet-usdc.json"), "utf8")).code_hash, USDC_CODE_HASH);
-  const s: HelperTokenStatusAnswer = statusFrom(undefined, undefined); // the kit's type: tsc checks the shape
+  const s: HelperTokenStatusAnswer = statusFrom(undefined, undefined, USDC); // the kit's type: tsc checks the shape
   assert.deepEqual(Object.keys(s), ["token", "caught_up", "halted", "vault_blocked", "code_hash_ok", "code_hash", "block_height", "last_event"]);
 });
 
 test("both providers agree on the pin: the code hash at the lower height, and still held (no event watch: not caught up)", async () => {
   const p = providers({ [A]: () => view(USDC_CODE_HASH, 100), [B]: () => view(USDC_CODE_HASH, 98) });
-  const w = createTokenWatch(ENV, { fetch: p.fetch });
+  const w = createTokenWatch("mainnet", ENV, { fetch: p.fetch });
   const s = await w.status();
   assert.deepEqual(s, { token: USDC, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: USDC_CODE_HASH, block_height: 98, last_event: null });
   assert.equal(await w.held(), true);
@@ -61,7 +61,7 @@ test("the safe answer when the providers disagree or either fails: no code hash,
   ];
   for (const [name, answer] of bad) {
     for (const order of [[answer, () => view(USDC_CODE_HASH)], [() => view(USDC_CODE_HASH), answer]] as const) {
-      const w = createTokenWatch(ENV, { fetch: providers({ [A]: order[0], [B]: order[1] }).fetch });
+      const w = createTokenWatch("mainnet", ENV, { fetch: providers({ [A]: order[0], [B]: order[1] }).fetch });
       const s = await w.status();
       assert.equal(s.code_hash, "", name);
       assert.equal(s.block_height, 0, name);
@@ -69,7 +69,7 @@ test("the safe answer when the providers disagree or either fails: no code hash,
     }
   }
   // both changed the same way: shown as read, and held (not the pin)
-  const both = createTokenWatch(ENV, { fetch: providers({ [A]: () => view(CHANGED), [B]: () => view(CHANGED) }).fetch });
+  const both = createTokenWatch("mainnet", ENV, { fetch: providers({ [A]: () => view(CHANGED), [B]: () => view(CHANGED) }).fetch });
   assert.equal((await both.status()).code_hash, CHANGED);
   assert.equal(await both.held(), true);
 });
@@ -94,7 +94,7 @@ test("tokenHeld: free only when caught up, not halted, the vault not blocked and
 test("one pair of reads per CACHE_MS however many callers ask", async () => {
   let t = 1_800_000_000_000;
   const p = providers({ [A]: () => view(USDC_CODE_HASH), [B]: () => view(USDC_CODE_HASH) });
-  const w = createTokenWatch(ENV, { fetch: p.fetch, now: () => t });
+  const w = createTokenWatch("mainnet", ENV, { fetch: p.fetch, now: () => t });
   await Promise.all([w.status(), w.status(), w.held()]);
   await w.status();
   assert.equal(p.seen.length, 2);
@@ -104,15 +104,16 @@ test("one pair of reads per CACHE_MS however many callers ask", async () => {
 });
 
 test("providers: two different http(s) URLs from the environment, else two public ones; errors name the variable only", () => {
-  assert.deepEqual(readUrls({}), WATCH_RPCS.map((r) => r.fallback));
+  assert.deepEqual(readUrls({}, "mainnet"), WATCH_RPCS.map((r) => r.fallback));
   assert.notEqual(new URL(WATCH_RPCS[0].fallback).host, new URL(WATCH_RPCS[1].fallback).host);
-  assert.throws(() => readUrls({ NEAR_RPC_URL: B, NEAR_RPC_URL_B: B }), /two different providers/);
-  for (const bad of ["nope", "ftp://x.example", "https://x.example/#f"]) assert.throws(() => readUrls({ NEAR_RPC_URL_B: bad }), (e: Error) => e.message.startsWith("NEAR_RPC_URL_B must be") && !e.message.includes(bad));
+  assert.throws(() => readUrls({ NEAR_RPC_URL: B, NEAR_RPC_URL_B: B }, "mainnet"), /two different providers/);
+  for (const bad of ["nope", "ftp://x.example", "https://x.example/#f"]) assert.throws(() => readUrls({ NEAR_RPC_URL_B: bad }, "mainnet"), (e: Error) => e.message.startsWith("NEAR_RPC_URL_B must be") && !e.message.includes(bad));
 });
 
 test("GET /v1/token-status on the server: the release's USDC answered in the kit's shape; any other token 404 token_not_watched", async () => {
-  const w = createTokenWatch(ENV, { fetch: providers({ [A]: () => view(USDC_CODE_HASH, 7), [B]: () => view(USDC_CODE_HASH, 7) }).fetch });
-  const server = start("0123456789abcdef0123456789abcdef01234567", 0, undefined, undefined, w);
+  const w = createTokenWatch("mainnet", ENV, { fetch: providers({ [A]: () => view(USDC_CODE_HASH, 7), [B]: () => view(USDC_CODE_HASH, 7) }).fetch });
+  const t = createTokenWatch("testnet", { NEAR_TESTNET_RPC_URL: A, NEAR_TESTNET_RPC_URL_B: B }, { fetch: providers({ [A]: () => view(USDC_CODE_HASH, 9), [B]: () => view(USDC_CODE_HASH, 9) }).fetch });
+  const server = start("0123456789abcdef0123456789abcdef01234567", 0, undefined, undefined, { mainnet: w, testnet: t });
   await new Promise<void>((ok) => server.on("listening", () => ok()));
   const port = (server.address() as AddressInfo).port;
   const call = (method: string, p: string) =>
@@ -135,10 +136,36 @@ test("GET /v1/token-status on the server: the release's USDC answered in the kit
       assert.equal(r.status, 404, p);
       assert.deepEqual(JSON.parse(r.body), { error: { code: "token_not_watched" } }, p);
     }
+    // the testnet token from testnet's own watch
+    const tn = await call("GET", `/v1/token-status?token=${TESTNET_TOKEN}`);
+    assert.equal(tn.status, 200);
+    assert.deepEqual(JSON.parse(tn.body), { token: TESTNET_TOKEN, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: USDC_CODE_HASH, block_height: 9, last_event: null });
     const post = await call("POST", `/v1/token-status?token=${USDC}`);
     assert.equal(post.status, 405);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((ok) => server.close(() => ok()));
   }
+});
+
+test("one watch per network: mainnet's reads USDC on mainnet's pair only, testnet's the testnet token on testnet's pair only; the relayers get each network's own", async () => {
+  const [TA, TB] = ["https://t-a.example", "https://t-b.example"];
+  const env = { ...ENV, NEAR_TESTNET_RPC_URL: TA, NEAR_TESTNET_RPC_URL_B: TB };
+  const p = providers({ [A]: () => view(USDC_CODE_HASH, 5), [B]: () => view(USDC_CODE_HASH, 5), [TA]: () => view(CHANGED, 6), [TB]: () => view(CHANGED, 6) });
+  const w = tokenWatchesFromEnv(env, { fetch: p.fetch });
+  const m = await w.mainnet.status();
+  assert.deepEqual(p.seen.map((c) => [c.url, (c.body as { params: { account_id: string } }).params.account_id]).sort(), [[A, USDC], [B, USDC]]);
+  const t = await w.testnet.status();
+  assert.deepEqual(p.seen.slice(2).map((c) => [c.url, (c.body as { params: { account_id: string } }).params.account_id]).sort(), [[TA, TESTNET_TOKEN], [TB, TESTNET_TOKEN]]);
+  assert.deepEqual([m.token, m.code_hash, t.token, t.code_hash], [USDC, USDC_CODE_HASH, TESTNET_TOKEN, CHANGED]);
+  const s = statusesOf(w);
+  assert.equal(s.mainnet, w.mainnet.status);
+  assert.equal(s.testnet, w.testnet.status);
+  // testnet's pair: the environment, else the release's public pair of two operators; one URL twice is refused
+  assert.deepEqual(readUrls({}, "testnet"), TESTNET_RPCS.map((r) => r.fallback));
+  assert.notEqual(new URL(TESTNET_RPCS[0].fallback).host, new URL(TESTNET_RPCS[1].fallback).host);
+  assert.throws(() => readUrls({ NEAR_TESTNET_RPC_URL: TA, NEAR_TESTNET_RPC_URL_B: TA }, "testnet"), /NEAR_TESTNET_RPC_URL and NEAR_TESTNET_RPC_URL_B must be two different providers/);
+  // the testnet token is the deployed one, and it runs USDC's own code
+  const dep = JSON.parse(readFileSync(path.join(ROOT, "contracts/vault/deployments/testnet-usdc.json"), "utf8")) as { account_id: string; code_hash: string };
+  assert.deepEqual([dep.account_id, dep.code_hash], [TESTNET_TOKEN, USDC_CODE_HASH]);
 });

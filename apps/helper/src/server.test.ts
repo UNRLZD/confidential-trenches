@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { PARTS } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
-import { handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
+import type { BindSender } from "./bind/env.ts";
+import { BIND_BODY_MAX, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
 import { FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
@@ -31,11 +32,11 @@ function call(method: string, path: string, headers: Record<string, string> = {}
   });
 }
 
-test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status) and the other four down, the commit in the body and in X-Helper-Commit", async () => {
+test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status), delegate up (/v1/bind) and the other three down, the commit in the body and in X-Helper-Commit", async () => {
   const r = await call("GET", "/v1/health");
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
-  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" ? "up" : "down"])) });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])) });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -230,8 +231,9 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.equal(warmed, 1, "start warms the withdrawal relayer: a restart resends its open sends before any request");
   // and the helper's main starts the server with the relayer it built
   const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
-  assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, \{ mainnet: watch\.status \}\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watch, lists, fee, withdraw\);/);
+  assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, statusesOf\(watches\)\);/);
+  assert.match(main, /const bind = bindSenderFromEnv\(process\.env, statusesOf\(watches\)\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   try {
@@ -254,6 +256,76 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
     const g = await call("GET", "/v1/withdraw", {}, undefined, to);
     assert.equal(g.status, 405);
     assert.equal(g.headers["allow"], "POST, OPTIONS");
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/bind: mounted; with no network set the helper starts and a body that does not decode is 400 bad_shape (networks.test.ts: a delegate on no carried token is token_not_accepted); over 4 KB 413; GET 405", async () => {
+  // the deployed composition (no sender handed in, nothing set): the helper starts and answers its not-configured codes
+  const decodable = "AAAAAA=="; // not one SignedDelegateAction: check 1
+  const a = await call("POST", "/v1/bind", { ...JSON_H, origin: APP }, JSON.stringify({ signed_delegate: decodable }));
+  assert.deepEqual([a.status, JSON.parse(a.body)], [400, { error: { code: "bad_shape" } }]);
+  assert.equal(a.headers["x-helper-commit"], COMMIT);
+  assert.equal(a.headers["access-control-allow-origin"], APP);
+  const n = await call("POST", "/v1/bind", JSON_H, "{not json");
+  assert.deepEqual([n.status, JSON.parse(n.body)], [400, { error: { code: "bad_shape" } }]);
+  const big = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "A".repeat(BIND_BODY_MAX) }));
+  assert.deepEqual([big.status, JSON.parse(big.body)], [413, { error: { code: "too_large" } }]);
+  const g = await call("GET", "/v1/bind");
+  assert.deepEqual([g.status, g.headers["allow"]], [405, "POST, OPTIONS"]);
+  // a sender handed in gets the parsed body, and start warms it
+  const seen: unknown[] = [];
+  let warmed = 0;
+  const bind: BindSender = {
+    carry: async (body) => (seen.push(body), { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" } }),
+    warm: () => void warmed++,
+    stop: () => undefined,
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  assert.equal(warmed, 1, "start warms the deposit relayer: a restart reads its open records before any request");
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  try {
+    const ok = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: decodable }), (helper.address() as AddressInfo).port);
+    assert.deepEqual([ok.status, JSON.parse(ok.body)], [200, { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" }]);
+    assert.deepEqual(seen, [{ signed_delegate: decodable }]);
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("POST /v1/bind is not tied to the request: a client that closes at 1 s does not cancel the carry, which runs to its answer and its record; the helper keeps serving", async () => {
+  const records: string[] = [];
+  let finished = 0;
+  const bind: BindSender = {
+    carry: async (body) => {
+      await new Promise((ok) => setTimeout(ok, 2_000)); // longer than the client waits
+      records.push(JSON.stringify(body)); // what the carry writes to its store
+      finished++;
+      return { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" } };
+    },
+    warm: () => undefined,
+    stop: () => undefined,
+  };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  try {
+    const closed = await new Promise<string>((ok) => {
+      const r = request({ host: "127.0.0.1", port: to, method: "POST", path: "/v1/bind", headers: JSON_H }, () => ok("answered"));
+      r.on("error", () => ok("closed"));
+      r.end(JSON.stringify({ signed_delegate: "AAAA" }));
+      setTimeout(() => r.destroy(), 1_000); // the device's send gives up
+    });
+    assert.equal(closed, "closed", "the client gave up before the answer");
+    assert.equal(finished, 0, "the carry was still running when the client closed");
+    await new Promise((ok) => setTimeout(ok, 1_500));
+    assert.equal(finished, 1, "the carry ran to its answer after the client closed");
+    assert.deepEqual(records, ['{"signed_delegate":"AAAA"}']);
+    const h = await call("GET", "/v1/health", {}, undefined, to);
+    assert.equal(h.status, 200, "the helper still serves");
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));

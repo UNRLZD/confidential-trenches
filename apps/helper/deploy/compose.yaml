@@ -41,6 +41,16 @@ services:
       WITHDRAW_RELAYER_KEYS_MAINNET: ${WITHDRAW_RELAYER_KEYS_MAINNET:-}
       WITHDRAW_VAULT_TESTNET: ${WITHDRAW_VAULT_TESTNET:-}
       WITHDRAW_RELAYER_KEYS_TESTNET: ${WITHDRAW_RELAYER_KEYS_TESTNET:-}
+      # POST /v1/bind per network (src/bind/env.ts; empty: that network's deposits are not carried): the release's vault
+      # (the same as WITHDRAW_VAULT_<NET> when both are set), the gas account that sends deposits and its one
+      # full-access key (gas and storage prepays only), and R4's margin K in blocks (the release's pin, 1 to 600)
+      BIND_VAULT_MAINNET: ${BIND_VAULT_MAINNET:-}
+      BIND_RELAYER_MAINNET: ${BIND_RELAYER_MAINNET:-}
+      BIND_RELAYER_KEY_MAINNET: ${BIND_RELAYER_KEY_MAINNET:-}
+      BIND_VAULT_TESTNET: ${BIND_VAULT_TESTNET:-}
+      BIND_RELAYER_TESTNET: ${BIND_RELAYER_TESTNET:-}
+      BIND_RELAYER_KEY_TESTNET: ${BIND_RELAYER_KEY_TESTNET:-}
+      BIND_MARGIN_K: ${BIND_MARGIN_K:-}
       HELPER_RELEASE: ${HELPER_RELEASE:-}
       # the relayers' durable store (src/store/durable.ts): the one writable path in a read-only container
       HELPER_STORE_DIR: /app/data
