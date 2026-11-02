@@ -58,6 +58,11 @@ interface IState {
    */
   error Reentrancy();
 
+  /**
+   * @notice Thrown at deployment when the code at `_at` (Poseidon or the withdrawal verifier) is not the expected code
+   */
+  error UnexpectedCode(address _at);
+
   /*///////////////////////////////////////////////////////////////
                               VIEWS
   //////////////////////////////////////////////////////////////*/

@@ -11,6 +11,8 @@ pragma solidity 0.8.28;
 ///         lean-imt/InternalLeanIMT.sol, which imports it, is unchanged.
 library PoseidonT3 {
   address internal constant DEPLOYED = 0x3333333C0A88F9BE4fd23ed0536F9B6c427e3B93;
+  /// @notice The hash of the code at DEPLOYED, read on Base and Robinhood; the pool's constructor checks it
+  bytes32 internal constant CODEHASH = 0x4495c92f7f5db02c3922c3e56cbe427af9cb349a77fd3faf41165afb3137d022;
 
   /// @notice Poseidon over 2 field elements; reverts when the code is missing or the call fails
   function hash(uint256[2] memory _inputs) internal pure returns (uint256) {

@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.28;
 
-import {Test} from 'forge-std/Test.sol';
 import {console} from 'forge-std/console.sol';
 
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
+import {Constants} from '../src/lib/Constants.sol';
 import {ProofLib} from '../src/lib/ProofLib.sol';
+import {PoseidonT3} from '../src/poseidon/PoseidonT3.sol';
+import {PoseidonT4} from '../src/poseidon/PoseidonT4.sol';
 import {WithdrawalVerifier} from '../src/verifiers/WithdrawalVerifier.sol';
 import {IPrivacyPool, IPrivacyPoolSimple} from 'interfaces/IPrivacyPool.sol';
 import {IState} from 'interfaces/IState.sol';
 
+import {Deploy} from './Deploy.sol';
+
 /// The pool with the kit's real proofs (test/fixtures/pool-proofs.json, made with packages/kit/zk) through the
 /// verifiers the pool deploys, and Poseidon at its CREATE2 address, put there by the same proxy and bytes as on chain.
-contract PoolTest is Test {
+contract PoolTest is Deploy {
   uint256 internal constant P = 21_888_242_871_839_275_222_246_405_745_257_275_088_548_364_400_416_034_343_698_204_186_575_808_495_617;
   // block time in the tests: 2030-03-17, below every request's deadline (2,000,000,000,000 ms)
   uint256 internal constant NOW = 1_900_000_000;
@@ -42,22 +46,6 @@ contract PoolTest is Test {
   /*///////////////////////////////////////////////////////////////
                               HELPERS
   //////////////////////////////////////////////////////////////*/
-
-  /// The deterministic deployment proxy, then PoseidonT3 and T4 through it, as on every chain.
-  function _deployPoseidon() internal {
-    string memory _d = vm.readFile('test/fixtures/poseidon-deploy.json');
-    address _proxy = vm.parseJsonAddress(_d, '.proxy.address');
-    vm.etch(_proxy, vm.parseJsonBytes(_d, '.proxy.runtime'));
-    assertEq(_proxy.codehash, vm.parseJsonBytes32(_d, '.proxy.codeHash'), 'the proxy is the one on chain');
-    string[2] memory _t = ['.T3', '.T4'];
-    for (uint256 _i; _i < 2; ++_i) {
-      (bool _ok, bytes memory _out) = _proxy.call(vm.parseJsonBytes(_d, string.concat(_t[_i], '.data')));
-      assertTrue(_ok, 'the proxy deploys Poseidon');
-      address _at = vm.parseJsonAddress(_d, string.concat(_t[_i], '.address'));
-      assertEq(address(bytes20(_out)), _at, 'at its CREATE2 address');
-      assertEq(_at.codehash, vm.parseJsonBytes32(_d, string.concat(_t[_i], '.codeHash')), 'the code read on chain');
-    }
-  }
 
   function _deposit(uint256 _i) internal returns (uint256 _commitment) {
     string memory _k = string.concat('[', vm.toString(_i), ']');
@@ -126,6 +114,50 @@ contract PoolTest is Test {
     assertEq(pool.SCOPE(), vm.parseJsonUint(fx, '.scope'));
   }
 
+  /// The same pool at the same address on another chain has another scope, and a proof made for this one fails there.
+  function test_scopeBindsTheChainId() public {
+    _depositAll();
+    vm.chainId(8453);
+    deployCodeTo('PrivacyPoolSimple.sol:PrivacyPoolSimple', abi.encode(address(pool.WITHDRAWAL_VERIFIER())), POOL);
+    assertEq(pool.SCOPE(), uint256(keccak256(abi.encodePacked(POOL, uint256(8453), Constants.NATIVE_ASSET))) % P);
+    assertTrue(pool.SCOPE() != vm.parseJsonUint(fx, '.scope'));
+    _refusesRelay(_request('relayed'), _withdrawProof('relayed'), 0, IPrivacyPool.ContextMismatch.selector);
+  }
+
+  /*///////////////////////////////////////////////////////////////
+                  THE CODE THE POOL CALLS IS THE CODE
+  //////////////////////////////////////////////////////////////*/
+
+  function test_aChainWithoutPoseidonT3IsRefused() public {
+    address _wv = address(pool.WITHDRAWAL_VERIFIER());
+    vm.etch(PoseidonT3.DEPLOYED, '');
+    vm.expectRevert(abi.encodeWithSelector(IState.UnexpectedCode.selector, PoseidonT3.DEPLOYED));
+    new PrivacyPoolSimple(_wv);
+  }
+
+  function test_aChainWithoutPoseidonT4IsRefused() public {
+    address _wv = address(pool.WITHDRAWAL_VERIFIER());
+    vm.etch(PoseidonT4.DEPLOYED, '');
+    vm.expectRevert(abi.encodeWithSelector(IState.UnexpectedCode.selector, PoseidonT4.DEPLOYED));
+    new PrivacyPoolSimple(_wv);
+  }
+
+  /// Another verifier (here: the Poseidon contract, then no code, then the real verifier with one byte changed).
+  function test_anotherVerifierIsRefused() public {
+    address[2] memory _bad = [PoseidonT3.DEPLOYED, address(0xBEEF)];
+    for (uint256 _i; _i < 2; ++_i) {
+      vm.expectRevert(abi.encodeWithSelector(IState.UnexpectedCode.selector, _bad[_i]));
+      new PrivacyPoolSimple(_bad[_i]);
+    }
+    address _wv = address(pool.WITHDRAWAL_VERIFIER());
+    bytes memory _code = _wv.code;
+    _code[_code.length - 1] = bytes1(uint8(_code[_code.length - 1]) ^ 1);
+    vm.etch(address(0xBEEF), _code);
+    vm.expectRevert(abi.encodeWithSelector(IState.UnexpectedCode.selector, address(0xBEEF)));
+    new PrivacyPoolSimple(address(0xBEEF));
+    assertGt(address(new PrivacyPoolSimple(_wv)).code.length, 0, 'the real verifier is accepted');
+  }
+
   function test_contextIsKeccakOfTheEncodedWithdrawalAndScope() public view {
     IPrivacyPool.RelayData memory _r = _request('relayed');
     bytes memory _pre = abi.encode(_withdrawal(_r), pool.SCOPE());
@@ -177,6 +209,20 @@ contract PoolTest is Test {
     vm.prank(DEPOSITOR);
     vm.expectRevert(IPrivacyPool.PrecommitmentAlreadyUsed.selector);
     pool.deposit{value: 1 ether}(1 ether, _pre);
+  }
+
+  /// X and X + p are the same field element in Poseidon: a second deposit of X + p would be a second note with the
+  /// same nullifier.
+  function test_aPrecommitmentAtOrAbovePIsRefused() public {
+    _deposit(0);
+    uint256 _x = vm.parseJsonUint(fx, '.precommitments[0]');
+    vm.startPrank(DEPOSITOR);
+    vm.expectRevert(IPrivacyPool.InvalidPrecommitment.selector);
+    pool.deposit{value: 1 ether}(1 ether, _x + P);
+    vm.expectRevert(IPrivacyPool.InvalidPrecommitment.selector);
+    pool.deposit{value: 1 ether}(1 ether, P);
+    pool.deposit{value: 1 ether}(1 ether, P - 1);
+    vm.stopPrank();
   }
 
   function test_plainEtherIsRefused() public {
@@ -241,6 +287,20 @@ contract PoolTest is Test {
     _depositAll();
     ProofLib.WithdrawProof memory _p = _withdrawProof('relayed');
     _p.pubSignals[5] = vm.parseJsonUint(fx, '.labels[0]') + 1;
+    _refusesRelay(_request('relayed'), _p, 0, IPrivacyPool.UnknownLabelRoot.selector);
+  }
+
+  function test_aLabelRootIsNotAStateRoot() public {
+    _depositAll();
+    ProofLib.WithdrawProof memory _p = _withdrawProof('relayed');
+    _p.pubSignals[3] = _p.pubSignals[5];
+    _refusesRelay(_request('relayed'), _p, 0, IPrivacyPool.UnknownStateRoot.selector);
+  }
+
+  function test_aStateRootIsNotALabelRoot() public {
+    _depositAll();
+    ProofLib.WithdrawProof memory _p = _withdrawProof('relayed');
+    _p.pubSignals[5] = _p.pubSignals[3];
     _refusesRelay(_request('relayed'), _p, 0, IPrivacyPool.UnknownLabelRoot.selector);
   }
 
@@ -363,6 +423,9 @@ contract PoolTest is Test {
     _p = _withdrawProof('relayed');
     _p.pubSignals[1] += P;
     _refusesRelay(_r, _p, 0, IPrivacyPool.InvalidProof.selector);
+    _p = _withdrawProof('relayed');
+    _p.pubSignals[0] += P;
+    _refusesRelay(_r, _p, 0, IPrivacyPool.InvalidProof.selector);
   }
 
   function test_aDepthOver32IsRefused() public {
@@ -373,6 +436,17 @@ contract PoolTest is Test {
     _p = _withdrawProof('relayed');
     _p.pubSignals[6] = 33;
     _refusesRelay(_request('relayed'), _p, 0, IPrivacyPool.InvalidTreeDepth.selector);
+  }
+
+  /// Depth 32 passes the depth check (and then fails the proof, whose depth signal changed).
+  function test_aDepthOf32PassesTheDepthCheck() public {
+    _depositAll();
+    ProofLib.WithdrawProof memory _p = _withdrawProof('relayed');
+    _p.pubSignals[4] = 32;
+    _refusesRelay(_request('relayed'), _p, 0, IPrivacyPool.InvalidProof.selector);
+    _p = _withdrawProof('relayed');
+    _p.pubSignals[6] = 32;
+    _refusesRelay(_request('relayed'), _p, 0, IPrivacyPool.InvalidProof.selector);
   }
 
   function test_aChangedProofPointIsRefused() public {
@@ -440,6 +514,23 @@ contract PoolTest is Test {
     assertFalse(pool.nullifierHashes(_withdrawProof('relayed').pubSignals[1]), 'the note is not spent');
   }
 
+  /// A fee recipient that refuses ether blocks only a fee: the same proof lands with fee 0, and no call is made to it.
+  function test_aHostileFeeRecipientIsBypassedWithFeeZero() public {
+    _depositAll();
+    vm.etch(RELAYER, hex'5f5ffd'); // PUSH0 PUSH0 REVERT
+    _refusesRelay(_request('relayed'), _withdrawProof('relayed'), 1, IPrivacyPoolSimple.FailedToSendNativeAsset.selector);
+    _relay(_request('relayed'), _withdrawProof('relayed'), 0);
+    assertEq(W.balance, 0.4 ether);
+  }
+
+  /// Two deposits from one contract in one transaction: the guard resets after each call.
+  function test_twoCallsInOneTransactionBothLand() public {
+    Batch _b = new Batch();
+    vm.deal(address(_b), 2 ether);
+    _b.two(pool, 1 ether, 777, 778);
+    assertEq(pool.nonce(), 2);
+  }
+
   function test_aZeroWithdrawalIsRefused() public {
     _depositAll();
     _refusesRelay(
@@ -466,6 +557,31 @@ contract PoolTest is Test {
     vm.prank(DEPOSITOR);
     vm.expectRevert(IState.MaxTreeDepthReached.selector);
     pool.deposit{value: 1 ether}(1 ether, 1);
+  }
+
+  /// Sets a tree (`_slot`: its size) to 2^31 leaves at depth 31: the next insert takes it to depth 32.
+  function _fillTo31(uint256 _slot) internal {
+    vm.store(POOL, bytes32(_slot), bytes32(uint256(1) << 31));
+    vm.store(POOL, bytes32(_slot + 1), bytes32(uint256(31)));
+    vm.store(POOL, keccak256(abi.encode(uint256(31), _slot + 2)), bytes32(uint256(1)));
+  }
+
+  function test_anInsertThatTakesTheStateTreeTo32Lands() public {
+    _fillTo31(3); // _merkleTree
+    vm.prank(DEPOSITOR);
+    pool.deposit{value: 1 ether}(1 ether, 1);
+    assertEq(pool.currentTreeDepth(), 32);
+    assertEq(pool.currentTreeSize(), (uint256(1) << 31) + 1);
+    assertTrue(pool.stateRootTimes(pool.currentRoot()) != 0);
+  }
+
+  function test_anInsertThatTakesTheLabelTreeTo32Lands() public {
+    _fillTo31(7); // _labelTree
+    vm.prank(DEPOSITOR);
+    pool.deposit{value: 1 ether}(1 ether, 1);
+    assertEq(pool.currentLabelTreeDepth(), 32);
+    assertEq(pool.currentLabelTreeSize(), (uint256(1) << 31) + 1);
+    assertTrue(pool.labelRootTimes(pool.currentLabelRoot()) != 0);
   }
 
   /*///////////////////////////////////////////////////////////////
@@ -501,6 +617,14 @@ contract PoolTest is Test {
     pool.deposit{value: 1 ether}(1 ether, 1);
     console.log('deposit (depth 20, index 0xAAAAA) gas:', _g - gasleft());
     assertEq(pool.currentTreeDepth(), 20);
+  }
+}
+
+/// Two deposits in one call.
+contract Batch {
+  function two(PrivacyPoolSimple _pool, uint256 _v, uint256 _a, uint256 _b) external {
+    _pool.deposit{value: _v}(_v, _a);
+    _pool.deposit{value: _v}(_v, _b);
   }
 }
 

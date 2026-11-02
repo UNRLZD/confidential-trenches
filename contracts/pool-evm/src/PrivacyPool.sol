@@ -73,6 +73,8 @@ abstract contract PrivacyPool is State, IPrivacyPool {
     if (_value < MIN_DEPOSIT) revert MinimumDepositAmount();
     if (_value >= type(uint128).max) revert InvalidDepositValue();
 
+    // A precommitment is a field element: X + p would hash as X, a second note with X's nullifier
+    if (_precommitmentHash >= Constants.SNARK_SCALAR_FIELD) revert InvalidPrecommitment();
     // Check the precommitment has not been used, then mark it
     if (usedPrecommitments[_precommitmentHash]) revert PrecommitmentAlreadyUsed();
     usedPrecommitments[_precommitmentHash] = true;

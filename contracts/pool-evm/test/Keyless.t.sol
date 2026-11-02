@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.28;
 
-import {Test} from 'forge-std/Test.sol';
-
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
+import {WithdrawalVerifier} from '../src/verifiers/WithdrawalVerifier.sol';
+
+import {Deploy} from './Deploy.sol';
 
 /// The pool's deployed code, read opcode by opcode: no DELEGATECALL, CALLCODE, SELFDESTRUCT, CREATE or CREATE2, and a
 /// dispatcher with exactly the listed selectors. Its storage layout and ABI are read by test/layout.test.mjs.
-contract KeylessTest is Test {
+contract KeylessTest is Deploy {
   bytes internal code;
+  address internal pool;
 
   function setUp() public {
-    code = address(new PrivacyPoolSimple(address(1))).code;
+    _deployPoseidon();
+    pool = address(new PrivacyPoolSimple(address(new WithdrawalVerifier())));
+    code = pool.code;
     assertGt(code.length, 0);
   }
 
@@ -96,7 +100,7 @@ contract KeylessTest is Test {
       0xe4b2fb79 // depositors(uint256)
     ];
     (, bytes4[] memory _got) = _walk();
-    address _pool = address(new PrivacyPoolSimple(address(1)));
+    address _pool = pool;
     for (uint256 _i; _i < 3; ++_i) {
       for (uint256 _j; _j < _got.length; ++_j) assertTrue(_got[_j] != _gone[_i], 'a ragequit selector is in the code');
       (bool _ok,) = _pool.call(abi.encodePacked(_gone[_i], new bytes(32 * 16)));
@@ -105,7 +109,7 @@ contract KeylessTest is Test {
   }
 
   function test_anUnknownSelectorAndPlainValueAreRefused() public {
-    address _pool = address(new PrivacyPoolSimple(address(1)));
+    address _pool = pool;
     (bool _ok,) = _pool.call(abi.encodeWithSignature('owner()'));
     assertFalse(_ok, 'no fallback');
     vm.deal(address(this), 1 ether);

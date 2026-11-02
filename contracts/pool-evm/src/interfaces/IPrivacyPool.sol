@@ -133,6 +133,11 @@ interface IPrivacyPool is IState {
   error PrecommitmentAlreadyUsed();
 
   /**
+   * @notice Thrown when a deposit names a precommitment at or above the field size
+   */
+  error InvalidPrecommitment();
+
+  /**
    * @notice Thrown when the withdrawn value is zero
    */
   error InvalidWithdrawalAmount();

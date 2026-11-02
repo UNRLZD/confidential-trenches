@@ -30,6 +30,8 @@ https://defi.sucks
 
 import {Constants} from './lib/Constants.sol';
 import {InternalLeanIMT, LeanIMTData} from 'lean-imt/InternalLeanIMT.sol';
+import {PoseidonT3} from 'poseidon-solidity/PoseidonT3.sol';
+import {PoseidonT4} from 'poseidon-solidity/PoseidonT4.sol';
 
 import {IState} from 'interfaces/IState.sol';
 import {IVerifier} from 'interfaces/IVerifier.sol';
@@ -43,6 +45,9 @@ abstract contract State is IState {
 
   /// @inheritdoc IState
   uint32 public constant MAX_TREE_DEPTH = 32;
+
+  /// @notice The hash of src/verifiers/WithdrawalVerifier.sol's deployed code, built with foundry.toml (no metadata)
+  bytes32 internal constant WITHDRAWAL_VERIFIER_CODEHASH = 0x54515096fff858166d381897047ecf92c8b6a595c01416cafa7b9b608670ab67;
 
   /// @inheritdoc IState
   address public immutable ASSET;
@@ -89,6 +94,10 @@ abstract contract State is IState {
     // Sanitize initial addresses
     if (_asset == address(0)) revert ZeroAddress();
     if (_withdrawalVerifier == address(0)) revert ZeroAddress();
+    // The code the pool calls is the code it was tested with, or the pool is not deployed
+    if (PoseidonT3.DEPLOYED.codehash != PoseidonT3.CODEHASH) revert UnexpectedCode(PoseidonT3.DEPLOYED);
+    if (PoseidonT4.DEPLOYED.codehash != PoseidonT4.CODEHASH) revert UnexpectedCode(PoseidonT4.DEPLOYED);
+    if (_withdrawalVerifier.codehash != WITHDRAWAL_VERIFIER_CODEHASH) revert UnexpectedCode(_withdrawalVerifier);
 
     // Store asset address
     ASSET = _asset;
