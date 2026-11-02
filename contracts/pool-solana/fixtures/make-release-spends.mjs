@@ -184,11 +184,13 @@ const out = {
   relay_fee_cap: String(RELAY_FEE_CAP),
   tip_cap: String(TIP_CAP),
   deadline_ms: String(DEADLINE_MS),
-  deposits: main.notes.map((x) => ({
+  deposits: main.notes.map((x, i) => ({
     value: String(x.value),
     precommitment: hex(be32(x.precommitment)),
     label: hex(be32(x.label)),
     commitment: hex(be32(x.commitment)),
+    // the precommitment mark's 16 bytes after this deposit (M353): value u64 LE ‖ nonce u64 LE
+    mark: hex(cat(le(x.value, 8), le(BigInt(i + 1), 8))),
   })),
   // the state tree's root after each deposit, and the label tree's
   state_roots: six.map((_, i) => hex(be32(new VaultTree(six.slice(0, i + 1)).root))),

@@ -179,6 +179,63 @@ fn deposit(env: &mut Env, value: u64, precommitment: &[u8; 32], state_size: u64,
     send(env, &[ix], &payer, &[&d])
 }
 
+/// The 16 bytes deposit writes into its precommitment mark `["pre", precommitment]`: value u64 LE, then the deposit's
+/// nonce u64 LE (the one its label hashes).
+fn mark_data(env: &Env, pre: &[u8; 32]) -> Vec<u8> {
+    let a = env.svm.get_account(&pda(&[b"pre", pre], &env.program)).expect("the precommitment mark");
+    assert_eq!(a.owner, env.program, "the mark is the pool's");
+    assert_eq!(a.lamports, env.svm.minimum_balance_for_rent_exemption(16), "the mark holds rent for 16 bytes");
+    a.data
+}
+
+/// Leaf `index` of `tree`, read from its page.
+fn leaf_at(env: &Env, tree: u8, index: u64) -> [u8; 32] {
+    let a = env.svm.get_account(&page(env, tree, index)).expect("page");
+    let at = 16 + (index % 1024) as usize * ENTRY;
+    a.data[at..at + 32].try_into().unwrap()
+}
+
+/// `x mod p` for a 32-byte big-endian x (x < 2^256 < 6p).
+fn mod_p(mut x: [u8; 32]) -> [u8; 32] {
+    let p = h32(P_HEX);
+    while x >= p {
+        let mut borrow = 0i16;
+        for i in (0..32).rev() {
+            let d = x[i] as i16 - p[i] as i16 - borrow;
+            borrow = (d < 0) as i16;
+            x[i] = (d + 256 * borrow) as u8;
+        }
+    }
+    x
+}
+
+/// What a restore rebuilds from a mark alone: `label = keccak256(scope ‖ nonce_be32) mod p` and `commitment =
+/// Poseidon(value, label, precommitment)` (src/context.rs, src/deposit.rs).
+fn rebuilt_from_mark(env: &Env, mark: &[u8], pre: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    use light_poseidon::{Poseidon, PoseidonBytesHasher};
+    use sha3::{Digest as _, Keccak256};
+    let (value, nonce) = (u64::from_le_bytes(mark[0..8].try_into().unwrap()), u64::from_le_bytes(mark[8..16].try_into().unwrap()));
+    let mut n = [0u8; 32];
+    n[24..].copy_from_slice(&nonce.to_be_bytes());
+    let label = mod_p(Keccak256::new().chain_update(h32(env.f["scope"].as_str().unwrap())).chain_update(n).finalize().into());
+    let mut v = [0u8; 32];
+    v[24..].copy_from_slice(&value.to_be_bytes());
+    let commitment = Poseidon::<ark_bn254::Fr>::new_circom(3).unwrap().hash_bytes_be(&[&v, &label, pre]).unwrap();
+    (label, commitment)
+}
+
+/// Deposit `nonce`'s mark holds `value` and `nonce` exactly, and the label and commitment rebuilt from it are the
+/// leaves at `label_index` and `state_index`.
+fn assert_mark(env: &Env, value: u64, pre: &[u8; 32], nonce: u64, state_index: u64, label_index: u64) {
+    let m = mark_data(env, pre);
+    let mut want = value.to_le_bytes().to_vec();
+    want.extend_from_slice(&nonce.to_le_bytes());
+    assert_eq!(hex(&m), hex(&want), "deposit {nonce}: the mark is value ‖ nonce");
+    let (label, commitment) = rebuilt_from_mark(env, &m, pre);
+    assert_eq!(hex(&label), hex(&leaf_at(env, 1, label_index)), "deposit {nonce}: the label from the mark is the label leaf");
+    assert_eq!(hex(&commitment), hex(&leaf_at(env, 0, state_index)), "deposit {nonce}: the commitment from the mark is the state leaf");
+}
+
 /// The root at `index` of `tree`, read from its page.
 fn root_at(env: &Env, tree: u8, index: u64) -> [u8; 32] {
     let a = env.svm.get_account(&page(env, tree, index)).expect("page");
@@ -574,6 +631,8 @@ fn a_funded_mark_address_blocks_nothing() {
     let pre = h32(&format!("{:064x}", 77));
     env.svm.airdrop(&pda(&[b"pre", &pre], &env.program), min + 5).unwrap();
     deposit(&mut env, 1_000_000, &pre, 7, 6).expect("the deposit lands");
+    // topped up to 16 bytes' rent and filled like any mark (mark_data checks the rent)
+    assert_mark(&env, 1_000_000, &pre, 7, 7, 6);
 }
 
 #[test]
@@ -585,7 +644,33 @@ fn deposit_refusals() {
     assert_eq!(deposit(&mut env, 1_000_000, &h32(P_HEX), 6, 6).err(), Some(FIELD_OVERFLOW));
     let used = h32(env.f["deposits"][0]["precommitment"].as_str().unwrap());
     assert_eq!(deposit(&mut env, 1_000_000, &used, 6, 6).err(), Some(PRECOMMITMENT_ALREADY_USED));
-    deposit(&mut env, 1_000_000, &pre, 6, 6).expect("a fresh precommitment lands");
+    let d0 = lamports(&env, &env.depositor.pubkey());
+    let meta = deposit(&mut env, 1_000_000, &pre, 6, 6).expect("a fresh precommitment lands");
+    println!("CU deposit {}", meta.compute_units_consumed);
+    println!("RENT deposit: mark {}, all rent {}", lamports(&env, &pda(&[b"pre", &pre], &env.program)), d0 - lamports(&env, &env.depositor.pubkey()) - 1_000_000 - 5_000);
+}
+
+/// M353: each deposit records value and nonce in its precommitment mark, so a restore from the 12 words rebuilds every
+/// note from one read of all marks; the fixture's `mark` is the program's.
+#[test]
+fn each_deposit_records_its_value_and_nonce_in_its_mark() {
+    let mut env = with_deposits();
+    let deps = env.f["deposits"].as_array().unwrap().clone();
+    for (i, d) in deps.iter().enumerate() {
+        let (value, pre) = (d["value"].as_str().unwrap().parse::<u64>().unwrap(), h32(d["precommitment"].as_str().unwrap()));
+        assert_mark(&env, value, &pre, i as u64 + 1, i as u64, i as u64);
+        assert_eq!(hex(&mark_data(&env, &pre)), d["mark"].as_str().expect("the fixture's mark"), "deposit {i}: the fixture's mark");
+    }
+    // a deposit after a release: its state leaf is one past its label leaf, its nonce the next
+    let r = rel(&env, "release");
+    release(&mut env, &r).expect("release");
+    let pre = h32(&format!("{:064x}", 77));
+    let d0 = lamports(&env, &env.depositor.pubkey());
+    let meta = deposit(&mut env, 3_000_000, &pre, 7, 6).expect("a deposit after a release");
+    let mark_rent = lamports(&env, &pda(&[b"pre", &pre], &env.program));
+    println!("CU deposit {}", meta.compute_units_consumed);
+    println!("RENT deposit: precommitment mark {mark_rent}, depositor paid {} beyond the value and the fee", d0 - lamports(&env, &env.depositor.pubkey()) - 3_000_000 - 5_000);
+    assert_mark(&env, 3_000_000, &pre, 7, 7, 6);
 }
 
 #[test]
@@ -739,6 +824,14 @@ fn inserts_cross_the_page_boundary_in_both_trees() {
     assert_eq!(env.svm.get_account(&page(&env, 0, 1025)).unwrap().data.len(), 16 + 2 * ENTRY);
     assert_eq!(hex(&root_at(&env, 0, 1025)), b["state_roots"]["1025"].as_str().unwrap());
     assert_eq!(hex(&root_at(&env, 1, 1024)), b["label_roots"]["1024"].as_str().unwrap());
+    // M353: every deposit's mark, across both pages of both trees (the 1,025th deposit's state leaf is 1,025, after
+    // the release's change at 1,024)
+    for (i, d) in deps.iter().enumerate() {
+        let (v, pre) = dep(d);
+        let i = i as u64;
+        assert_mark(&env, v, &pre, i + 1, if i < 1024 { i } else { 1025 }, i);
+        assert_eq!(hex(&mark_data(&env, &pre)), d["mark"].as_str().expect("the fixture's mark"), "deposit {i}: the fixture's mark");
+    }
 
     // a release against roots on page 1 of both trees
     let r2 = rel_of(&env, &b["spends"][1]);

@@ -12,7 +12,9 @@
 //!
 //! Instructions (tag, then fields, integers little-endian, field elements 32 bytes big-endian):
 //! - `0 init`: creates the pool account. Anyone, once; it takes nothing that could differ between callers.
-//! - `1 deposit(value u64, precommitment)`: src/deposit.rs.
+//! - `1 deposit(value u64, precommitment)`: src/deposit.rs. Its precommitment mark `["pre", precommitment]` holds
+//!   16 bytes, `value u64 LE ‖ nonce u64 LE` (the nonce its label hashes), so a restore from the 12 words finds
+//!   every deposit in one read of the pool's accounts (M353).
 //! - `2 release(...)`: src/release.rs.
 //! - `3 release_and_buy(...)`: src/buy.rs; its byte layout is TAG3.md.
 //!
