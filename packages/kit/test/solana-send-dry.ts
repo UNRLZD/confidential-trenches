@@ -30,11 +30,14 @@ if (!process.argv.includes("--dry")) {
   console.error("this script runs only with --dry: it simulates and never sends");
   process.exit(2);
 }
-// Provider B: the second public RPC the kit's quote fixtures were read on (test/fixtures/solana-capture.mjs:7).
+// The two providers are neither of the send paths: provider A is PublicNode's keyless Solana RPC (answered
+// getBlockHeight and isBlockhashValid from the Mac on 2026-11-02 02:58Z), provider B the second public RPC the kit's
+// quote fixtures were read on (test/fixtures/solana-capture.mjs:7). The public RPC stays a send path only.
+const PROVIDER_A = "https://solana-rpc.publicnode.com";
 const PROVIDER_B = "https://public.rpc.solanavibestation.com";
 const STAND_INS = ["H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9"];
 
-const a = solanaJsonRpc(SOLANA_PUBLIC_RPC_URL, { timeoutMs: 10_000 });
+const a = solanaJsonRpc(PROVIDER_A, { timeoutMs: 10_000 });
 const b = solanaJsonRpc(PROVIDER_B, { timeoutMs: 10_000 });
 
 const u32 = (n: number) => { const x = new Uint8Array(4); new DataView(x.buffer).setUint32(0, n, true); return [...x]; };
@@ -78,7 +81,8 @@ console.log(JSON.stringify({
   slot: latest.context.slot,
   blockhash: latest.value.blockhash,
   lastValidBlockHeight: latest.value.lastValidBlockHeight,
-  providers: [SOLANA_PUBLIC_RPC_URL, PROVIDER_B],
+  providers: [PROVIDER_A, PROVIDER_B],
+  sendPathRpc: SOLANA_PUBLIC_RPC_URL,
   paths: r.paths,
   sizes: set.map((s) => s.wire.length),
   txs: r.txs,

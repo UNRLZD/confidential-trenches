@@ -1,26 +1,35 @@
 // The Solana set send (markets paper T2.1 "Sending" and LD2, docs/plan1/markets.md l.93 and l.336-346; row M1.3).
 // Device side. It carries only bytes the device already signed: it holds no key, builds no transaction and changes no
 // byte. Signed bytes cannot be altered by whoever carries them and the first copy to land wins, so every path gets
-// the same bytes at once and no single path can hold a trade back (LD2).
+// the same bytes and no single path can hold a trade back (LD2).
 //
-// - Send: every tx of the set goes to every path in the same tick, before sendSolanaSet returns: Helius Sender
-//   `/fast?swqos_only=true`, the Jito block engine `/api/v1/transactions` and a public RPC, keyless from the device, and
-//   the helper's `/v1/rpc/solana` `sendTransaction`, keyed on the helper's side, when the app has a helper. A path that
-//   is down, refusing (keyless Sender answers 429 above 1 rps) or slow is recorded and holds nothing else back.
-// - Rebroadcast: every SOLANA_REBROADCAST_MS (2 s, the paper's DESIGN interval from P4S) until the tx is decided, and
-//   never once both providers' finalized block height is past the tx's lastValidBlockHeight (06c §3.4).
+// - Send: in the first tick, before sendSolanaSet returns, every tx goes to every path without a rate limit (a public
+//   RPC, and the helper's `/v1/rpc/solana` `sendTransaction`, keyed on the helper's side, when the app has a helper),
+//   and the set's first tx to each 1-request-a-second path (keyless Helius Sender `/fast?swqos_only=true` and the Jito
+//   block engine `/api/v1/transactions`, whose limits count refused requests too). A path that is down, refusing or
+//   slow is recorded and holds nothing else back.
+// - Rebroadcast: every SOLANA_REBROADCAST_MS (2 s, the paper's DESIGN interval from P4S) on the unlimited paths; one tx
+//   a second on each 1-rps path, rotating through the undecided txs. A tx is never sent again once it is decided, or
+//   once both providers' finalized height is past its lastValidBlockHeight and both read its blockhash as no longer
+//   valid at `processed` (06c §3.4).
 // - Fill: read on two providers (the same [A, B] pair the quote checks read, checks/solana/checks.ts SolanaQuoteReads;
-//   §2.0 LD1: at least one device-direct, the second may be the helper's /v1/rpc). A tx is filled only when both read
-//   it at `confirmed` or `finalized` with no error, failed only when both read it landed with an error, and dead
-//   (expired) only when both report a finalized height past lastValidBlockHeight and then neither has the signature
-//   (06c A4). Anything else, one provider's word included, decides nothing; at the deadline it stays "unknown", which
-//   the caller must re-read before it moves money on, never a fill and never dead.
+//   §2.0 LD1: at least one device-direct, the second may be the helper's /v1/rpc), never the same one twice. A tx is
+//   filled only when both have read it at `confirmed` or `finalized` with no error, failed only when both read it
+//   landed with an error. Dead (expired) follows 06c A4 (06c-chain-adapters.md l.98), on each provider: its finalized
+//   height past lastValidBlockHeight, its blockhash not valid at `processed` (so a lowered lastValidBlockHeight from
+//   whoever built the tx cannot make a live tx look dead), and then a status read with searchTransactionHistory: true
+//   (so a landing older than the status cache's 300 roots is still found) that has no signature, taken from a bank at
+//   or past the slot the height and the blockhash check were read at (so a node behind a load balancer that has not
+//   replayed the landing block cannot answer it). Anything else, one provider's word included, decides nothing; at
+//   the deadline it stays "unknown", which the caller must re-read before it moves money on, never a fill and never
+//   dead.
 //
 // Every answer from a path or a provider is hostile input: it is size-bounded, shape-checked, and an answer that fails
-// a check counts as no answer.
+// a check counts as no answer. A provider answering 429 is backed off, up to 8 s; a 429 is no answer.
 import { base58, base64 } from "@scure/base";
 import { HELPER_FETCH_INIT, HELPER_V1_PREFIX } from "../../helper/v1.ts";
 import { SOLANA_MAX_TX_BYTES, solanaDecodeTransaction } from "../../checks/solana/message.ts";
+import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
 
 // Helius Sender, the global HTTPS endpoint with the SWQoS-only route: https://www.helius.dev/docs/sending-transactions/sender.md
 // ("https://sender.helius-rpc.com/fast # Global HTTPS endpoint", which "resolves CORS preflight failures ... with
@@ -37,24 +46,36 @@ export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com";
 
 /** The paper's rebroadcast interval (T2.1, DESIGN from P4S). */
 export const SOLANA_REBROADCAST_MS = 2_000;
-/** How often the fill is read on each provider: about one slot (P4S measured slots of 214-219 ms; 400 ms is the
- * cluster's target slot time). A read still open when the next is due is not stacked. */
+/** Keyless Helius Sender and the Jito block engine each take 1 request a second per IP, refused ones included
+ * (helius.dev/docs/sending-transactions/sender.md "Keyless requests are limited to 1 request per second";
+ * docs.jito.wtf/lowlatencytxnsend "1 request per second per IP per region"). */
+export const SOLANA_KEYLESS_PATH_INTERVAL_MS = 1_000;
+/** How often the fill is read on each provider: about two slots (mainnet slots ran about 212 ms on 2026-11-02, the
+ * reviewer's getRecentPerformanceSamples read). A read still open when the next is due is not stacked. */
 export const SOLANA_STATUS_POLL_MS = 400;
 /** One path call or provider read is given up after this. */
 export const SOLANA_CALL_TIMEOUT_MS = 5_000;
-/** The set is given up after this, its undecided txs "unknown": a blockhash lives about 150 blocks (P4S [J1], about
- * 60 s) and a finalized height trails by about 32 slots, so a tx past this with no verdict needs a fresh read. */
+/** The set is given up after this, its undecided txs "unknown". A blockhash lives 150 blocks, about 32 s at 212 ms
+ * slots, and a finalized height trails the tip by about 32 slots, so a tx with no verdict by then needs a fresh read. */
 export const SOLANA_SET_DEADLINE_MS = 120_000;
 /** An answer larger than this is refused unread. A status or send answer is well under 64 KiB for a set of 256. */
 export const SOLANA_ANSWER_MAX_BYTES = 1024 * 1024;
+/** Agave answers getLatestBlockhash with lastValidBlockHeight = the bank's block height + MAX_PROCESSING_AGE (150)
+ * for the bank's own latest blockhash, so the finalized bank's height is that minus 150, from the same bank as its
+ * context.slot. */
+const MAX_PROCESSING_AGE = 150;
+/** A provider answering 429 waits 1 s, then twice as long each time, up to this. */
+const BACKOFF_MAX_MS = 8_000;
 /** getSignatureStatuses takes at most 256 signatures a call (Solana RPC docs); a larger set is read in chunks. */
 const STATUS_CHUNK = 256;
 
 export type SolanaFetch = (url: string, init: RequestInit) => Promise<Response>;
-/** One JSON-RPC call on one Solana provider: resolves the call's `result`, rejects on any other answer. */
-export type SolanaRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
-/** One send path: posts the base64 bytes, resolves the signature the path answered. */
-export type SolanaSendPath = { readonly name: string; readonly send: (base64Tx: string) => Promise<string> };
+/** One JSON-RPC call on one Solana provider: resolves the call's `result`, rejects on any other answer. `url`, when
+ * set (solanaJsonRpc sets it), is what tells two providers apart; the set send refuses two with the same one. */
+export type SolanaRpc = ((method: string, params: readonly unknown[]) => Promise<unknown>) & { readonly url?: string };
+/** One send path: posts the base64 bytes, resolves the signature the path answered. A path with `minIntervalMs` gets
+ * one tx per that interval, rotating through the set; one without gets every tx every rebroadcast. */
+export type SolanaSendPath = { readonly name: string; readonly send: (base64Tx: string) => Promise<string>; readonly minIntervalMs?: number };
 /** A tx the device signed, and the lastValidBlockHeight of its blockhash from the device's own getLatestBlockhash. */
 export type SolanaSignedTx = { readonly wire: Uint8Array; readonly lastValidBlockHeight: number };
 
@@ -127,13 +148,14 @@ function httpsUrl(raw: string, what: string): URL {
 }
 
 let nextId = 1;
-/** JSON-RPC over HTTP POST to one URL. `init` is merged into every request (the helper's HELPER_FETCH_INIT). */
+/** JSON-RPC over HTTP POST to one URL. `init` is merged into every request (the helper's HELPER_FETCH_INIT). The id is
+ * a string of digits, so an echo of it as the string or as the same number both match, and nothing else does. */
 export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: RequestInit; timeoutMs?: number } = {}): SolanaRpc {
-  httpsUrl(url, "an RPC URL");
+  const href = httpsUrl(url, "an RPC URL").href;
   const doFetch: SolanaFetch = opts.fetch ?? ((u, i) => fetch(u, i));
   const timeoutMs = opts.timeoutMs ?? SOLANA_CALL_TIMEOUT_MS;
-  return (method, params) => {
-    const id = nextId++;
+  const call = (method: string, params: readonly unknown[]): Promise<unknown> => {
+    const id = String(nextId++);
     const init: RequestInit = {
       ...opts.init,
       method: "POST",
@@ -148,7 +170,7 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
       const j = JSON.parse(text) as unknown;
       if (typeof j !== "object" || j === null || Array.isArray(j)) throw new Error("not a JSON-RPC answer");
       const o = j as Record<string, unknown>;
-      if (o.id !== id) throw new Error(`answer id ${JSON.stringify(o.id)} is not request id ${id}`);
+      if (!(o.id === id || (typeof o.id === "number" && String(o.id) === id))) throw new Error(`answer id ${JSON.stringify(o.id)} is not request id ${id}`);
       if (o.error !== undefined) {
         const e = o.error as { code?: unknown; message?: unknown } | null;
         throw new Error(`RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}`);
@@ -157,10 +179,11 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
       return o.result;
     });
   };
+  return Object.assign(call, { url: href });
 }
 
-/** The helper's POST /v1/rpc/solana (helper/v1.ts HELPER_RPC_METHODS: sendTransaction, getSignatureStatuses and
- * getBlockHeight are on its list), with the kit's HELPER_FETCH_INIT. `origin` is the helper's origin only. */
+/** The helper's POST /v1/rpc/solana (helper/v1.ts HELPER_RPC_METHODS: sendTransaction, getSignatureStatuses,
+ * getLatestBlockhash and isBlockhashValid are on its list), with the kit's HELPER_FETCH_INIT. `origin` is the helper's origin only. */
 export function solanaHelperRpc(origin: string, opts: { fetch?: SolanaFetch; timeoutMs?: number } = {}): SolanaRpc {
   const u = httpsUrl(origin, "the helper origin");
   if (u.pathname !== "/" || u.search !== "" || !(origin === u.origin || origin === `${u.origin}/`)) throw new Error("the helper origin must be an origin only");
@@ -169,9 +192,10 @@ export function solanaHelperRpc(origin: string, opts: { fetch?: SolanaFetch; tim
 
 const SEND_CONFIG = { encoding: "base64", skipPreflight: true, maxRetries: 0 } as const;
 
-function rpcPath(name: string, rpc: SolanaRpc, config: Record<string, unknown>): SolanaSendPath {
+function rpcPath(name: string, rpc: SolanaRpc, config: Record<string, unknown>, minIntervalMs?: number): SolanaSendPath {
   return {
     name,
+    ...(minIntervalMs === undefined ? {} : { minIntervalMs }),
     send: (b64) => rpc("sendTransaction", [b64, config]).then((sig) => {
       if (typeof sig !== "string") throw new Error("the path answered no signature");
       return sig;
@@ -186,21 +210,26 @@ function rpcPath(name: string, rpc: SolanaRpc, config: Record<string, unknown>):
 export function solanaSendPaths(opts: { helper?: SolanaRpc | null; rpcUrl?: string; fetch?: SolanaFetch; timeoutMs?: number } = {}): SolanaSendPath[] {
   const o = { ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) };
   const paths = [
-    rpcPath("sender", solanaJsonRpc(SOLANA_SENDER_FAST_URL, o), SEND_CONFIG),
-    rpcPath("jito", solanaJsonRpc(SOLANA_JITO_TRANSACTIONS_URL, o), { encoding: "base64" }),
+    rpcPath("sender", solanaJsonRpc(SOLANA_SENDER_FAST_URL, o), SEND_CONFIG, SOLANA_KEYLESS_PATH_INTERVAL_MS),
+    rpcPath("jito", solanaJsonRpc(SOLANA_JITO_TRANSACTIONS_URL, o), { encoding: "base64" }, SOLANA_KEYLESS_PATH_INTERVAL_MS),
     rpcPath("rpc", solanaJsonRpc(opts.rpcUrl ?? SOLANA_PUBLIC_RPC_URL, o), SEND_CONFIG),
   ];
   if (opts.helper) paths.push(rpcPath("helper", opts.helper, SEND_CONFIG));
   return paths;
 }
 
-type Prepared = { signature: string; b64: string; lvbh: number };
+type Prepared = { signature: string; b64: string; lvbh: number; blockhash: string };
 
 /** The set's own checks before anything is sent: signed bytes the kit can decode, each once, a usable height. */
 function prepare(set: readonly SolanaSignedTx[], opts: Pick<SolanaSetOptions, "paths" | "providers">): Prepared[] {
   if (!Array.isArray(set) || set.length === 0) throw new Error("the set is empty");
   if (!Array.isArray(opts.paths) || opts.paths.length === 0) throw new Error("no send path");
   if (!Array.isArray(opts.providers) || opts.providers.length !== 2 || typeof opts.providers[0] !== "function" || typeof opts.providers[1] !== "function") throw new Error("two providers are needed");
+  const [pa, pb] = opts.providers;
+  if (pa === pb || (pa.url !== undefined && pa.url === pb.url)) throw new Error("the two providers are the same provider: a fill must never rest on one provider's word");
+  for (const p of opts.paths) {
+    if (p.minIntervalMs !== undefined && !(Number.isSafeInteger(p.minIntervalMs) && p.minIntervalMs > 0)) throw new Error(`path ${p.name}: minIntervalMs ${String(p.minIntervalMs)}`);
+  }
   const seen = new Set<string>();
   return set.map((t, i) => {
     if (!(t?.wire instanceof Uint8Array)) throw new Error(`tx ${i}: no wire bytes`);
@@ -210,11 +239,16 @@ function prepare(set: readonly SolanaSignedTx[], opts: Pick<SolanaSetOptions, "p
     for (let s = 0; s < decoded.signatures; s++) {
       if (t.wire.subarray(1 + 64 * s, 65 + 64 * s).every((b: number) => b === 0)) throw new Error(`tx ${i}: signature ${s} is not signed`);
     }
+    // A durable-nonce tx (first instruction System AdvanceNonceAccount, u32 LE 4; Agave's get_durable_nonce) never
+    // expires by height, so lastValidBlockHeight says nothing of it.
+    const first = decoded.message.instructions[0];
+    const d = first?.data;
+    if (first && decoded.message.staticKeys[first.programIndex] === SOLANA_SYSTEM_PROGRAM && d && d.length >= 4 && d[0] === 4 && d[1] === 0 && d[2] === 0 && d[3] === 0) throw new Error(`tx ${i}: a durable nonce tx has no lastValidBlockHeight`);
     if (!Number.isSafeInteger(t.lastValidBlockHeight) || t.lastValidBlockHeight < 0 || t.lastValidBlockHeight >= 2 ** 53 - 1) throw new Error(`tx ${i}: lastValidBlockHeight ${String(t.lastValidBlockHeight)}`);
     const signature = base58.encode(t.wire.subarray(1, 65));
     if (seen.has(signature)) throw new Error(`tx ${i}: the same tx is in the set twice`);
     seen.add(signature);
-    return { signature, b64: base64.encode(t.wire), lvbh: t.lastValidBlockHeight };
+    return { signature, b64: base64.encode(t.wire), lvbh: t.lastValidBlockHeight, blockhash: decoded.message.blockhash };
   });
 }
 
@@ -222,12 +256,17 @@ function prepare(set: readonly SolanaSignedTx[], opts: Pick<SolanaSetOptions, "p
 type Read = "none" | "pending" | "ok" | "err" | "bad";
 type StatusRead = { kind: Read; slot?: number; err?: unknown };
 const STATUSES = new Set(["processed", "confirmed", "finalized"]);
+const isSlot = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
-function readStatuses(answer: unknown, n: number): StatusRead[] | null {
+/** A getSignatureStatuses answer for n signatures: each read, and the slot of the bank that answered; null when the
+ * answer is not one. */
+function readStatuses(answer: unknown, n: number): { reads: StatusRead[]; slot: number } | null {
   if (typeof answer !== "object" || answer === null) return null;
+  const slot = (answer as { context?: { slot?: unknown } }).context?.slot;
+  if (!isSlot(slot)) return null;
   const v = (answer as { value?: unknown }).value;
   if (!Array.isArray(v) || v.length !== n) return null;
-  return v.map((s): StatusRead => {
+  const reads = v.map((s): StatusRead => {
     if (s === null) return { kind: "none" };
     if (typeof s !== "object" || Array.isArray(s)) return { kind: "bad" };
     const o = s as Record<string, unknown>;
@@ -235,11 +274,30 @@ function readStatuses(answer: unknown, n: number): StatusRead[] | null {
     if (o.confirmationStatus === "processed") return { kind: "pending" };
     return o.err === null ? { kind: "ok", slot: o.slot as number } : { kind: "err", slot: o.slot as number, err: o.err };
   });
+  return { reads, slot };
+}
+
+/** A getLatestBlockhash answer at finalized: the bank's slot and block height. */
+function readAnchor(answer: unknown): { slot: number; height: number } | null {
+  if (typeof answer !== "object" || answer === null) return null;
+  const a = answer as { context?: { slot?: unknown }; value?: { lastValidBlockHeight?: unknown } };
+  const slot = a.context?.slot;
+  const lvbh = a.value?.lastValidBlockHeight;
+  if (!isSlot(slot) || !isSlot(lvbh) || lvbh < MAX_PROCESSING_AGE) return null;
+  return { slot, height: lvbh - MAX_PROCESSING_AGE };
+}
+
+/** An isBlockhashValid answer: the bank's slot and the verdict. */
+function readValid(answer: unknown): { slot: number; valid: boolean } | null {
+  if (typeof answer !== "object" || answer === null) return null;
+  const a = answer as { context?: { slot?: unknown }; value?: unknown };
+  if (!isSlot(a.context?.slot) || typeof a.value !== "boolean") return null;
+  return { slot: a.context.slot, valid: a.value };
 }
 
 /**
- * Sends a signed set on every path at once and reads its fills on two providers. Throws before any send when the set
- * fails its own checks; after that it never throws, and `done` resolves with one outcome per tx, in set order.
+ * Sends a signed set on every path and reads its fills on two providers. Throws before any send when the set fails
+ * its own checks; after that it never throws, and `done` resolves with one outcome per tx, in set order.
  */
 export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOptions): SolanaSetHandle {
   const txs = prepare(set, opts);
@@ -250,67 +308,115 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const t0 = Date.now();
   const outcomes: SolanaTxOutcome[] = txs.map((t) => ({ signature: t.signature, state: "unknown", sends: [] }));
   const decided = txs.map(() => false);
-  // Per provider: the latest status reads and the event count at that read's start; the latest finalized height and
-  // the event count when it arrived. A status read counts for "dead" only if it started after its provider's latest
-  // height answer, so a landing the height already covers is in that read. A provider whose status reads stay slower
-  // than its heights rise only delays "dead" until the deadline ("unknown"); it never makes a tx dead early.
-  let events = 0;
-  const latest: [StatusRead[] | null, StatusRead[] | null] = [null, null];
-  const latestAt: [number, number] = [-1, -1];
-  const height: [number | null, number | null] = [null, null];
-  const heightAt: [number, number] = [Infinity, Infinity];
-  const inFlight = [false, false];
+  // Per provider:
+  // - landed: the first landed read of each signature (ok or err). A confirmed tx stays confirmed, so a later null
+  //   from a node behind a load balancer, or from a status cache that has dropped it, never takes a landing back.
+  // - anchor: its finalized bank's slot and block height (one getLatestBlockhash answer, one bank).
+  // - invalidAt: per blockhash, the slot of the bank that read it as no longer valid at processed.
+  // - histNone: per signature, the slot of the bank of the latest searchTransactionHistory: true read that had none.
+  const landed = [new Map<string, StatusRead>(), new Map<string, StatusRead>()] as const;
+  const anchor: [{ slot: number; height: number } | null, { slot: number; height: number } | null] = [null, null];
+  const invalidAt = [new Map<string, number>(), new Map<string, number>()] as const;
+  const histNone = [new Map<string, number>(), new Map<string, number>()] as const;
+  const fastInFlight = [false, false];
+  const deadInFlight = [false, false];
+  const backoffMs = [0, 0];
+  const backoffUntil = [0, 0];
   let attempt = 0;
   let over = false;
   let finish!: (r: SolanaSetResult) => void;
   const done = new Promise<SolanaSetResult>((r) => { finish = r; });
 
-  const past = (i: number): boolean => {
-    const lvbh = txs[i]!.lvbh;
-    return height[0] !== null && height[1] !== null && height[0] > lvbh && height[1] > lvbh;
+  const unlimited = opts.paths.filter((p) => p.minIntervalMs === undefined);
+  const limited = opts.paths.filter((p) => p.minIntervalMs !== undefined);
+
+  const pastOn = (p: 0 | 1, i: number): boolean => {
+    const a = anchor[p];
+    return a !== null && a.height > txs[i]!.lvbh && invalidAt[p].has(txs[i]!.blockhash);
   };
+  const past = (i: number): boolean => pastOn(0, i) && pastOn(1, i);
+  const eligible = (i: number): boolean => !decided[i] && !past(i);
+
+  /** One call on provider p, timed out, with its 429 back-off. Rejects on any failure. */
+  function call(p: 0 | 1, method: string, params: readonly unknown[]): Promise<unknown> {
+    const rpc = opts.providers[p];
+    return withTimeout(Promise.resolve().then(() => rpc(method, params)), callTimeoutMs).then(
+      (v) => { backoffMs[p] = 0; return v; },
+      (e) => {
+        if (/\b429\b/.test(errText(e))) {
+          backoffMs[p] = Math.min(Math.max(backoffMs[p]! * 2, 1_000), BACKOFF_MAX_MS);
+          backoffUntil[p] = Date.now() + backoffMs[p]!;
+        }
+        throw e;
+      },
+    );
+  }
+  const backedOff = (p: 0 | 1): boolean => Date.now() < backoffUntil[p]!;
+
+  function sendOne(i: number, p: SolanaSendPath, n: number): void {
+    const t = txs[i]!;
+    const start = Date.now();
+    let sent: Promise<string>;
+    try {
+      sent = p.send(t.b64);
+    } catch (e) {
+      sent = Promise.reject(e);
+    }
+    withTimeout(Promise.resolve(sent), callTimeoutMs).then(
+      (sig) => {
+        if (over) return; // the result is final once `done` resolves
+        const ok = sig === t.signature;
+        outcomes[i]!.sends.push({ path: p.name, attempt: n, ok, ms: Date.now() - start, ...(ok ? {} : { error: "the path answered another signature" }) });
+      },
+      (e) => { if (!over) outcomes[i]!.sends.push({ path: p.name, attempt: n, ok: false, ms: Date.now() - start, error: errText(e) }); },
+    );
+  }
 
   function broadcast(): void {
     const n = attempt++;
-    for (let i = 0; i < txs.length; i++) {
-      if (decided[i] || past(i)) continue;
-      const t = txs[i]!;
-      for (const p of opts.paths) {
-        const start = Date.now();
-        let sent: Promise<string>;
-        try {
-          sent = p.send(t.b64);
-        } catch (e) {
-          sent = Promise.reject(e);
-        }
-        withTimeout(Promise.resolve(sent), callTimeoutMs).then(
-          (sig) => {
-            if (over) return; // the result is final once `done` resolves
-            const ok = sig === t.signature;
-            outcomes[i]!.sends.push({ path: p.name, attempt: n, ok, ms: Date.now() - start, ...(ok ? {} : { error: "the path answered another signature" }) });
-          },
-          (e) => { if (!over) outcomes[i]!.sends.push({ path: p.name, attempt: n, ok: false, ms: Date.now() - start, error: errText(e) }); },
-        );
-      }
+    for (let i = 0; i < txs.length; i++) if (eligible(i)) for (const p of unlimited) sendOne(i, p, n);
+  }
+
+  // Each 1-rps path: one tx per interval, the next eligible one after the last it was given.
+  const cursor = limited.map(() => -1);
+  const limitedSent = limited.map(() => 0);
+  function sendNext(k: number): void {
+    for (let step = 1; step <= txs.length; step++) {
+      const i = (cursor[k]! + step) % txs.length;
+      if (!eligible(i)) continue;
+      cursor[k] = i;
+      sendOne(i, limited[k]!, limitedSent[k]!++);
+      return;
     }
   }
 
+  function record(p: 0 | 1, sig: string, r: StatusRead): void {
+    if (r.kind !== "ok" && r.kind !== "err") return;
+    if (!landed[p].has(sig)) landed[p].set(sig, r);
+  }
+
+  function deadOn(p: 0 | 1, i: number): boolean {
+    const t = txs[i]!;
+    if (landed[p].has(t.signature) || !pastOn(p, i)) return false;
+    const seen = histNone[p].get(t.signature);
+    return seen !== undefined && seen >= anchor[p]!.slot && seen >= invalidAt[p].get(t.blockhash)!;
+  }
+
   function decide(): void {
-    const [a, b] = latest;
-    if (!a || !b) return;
     for (let i = 0; i < txs.length; i++) {
       if (decided[i]) continue;
-      const ra = a[i]!;
-      const rb = b[i]!;
+      const sig = txs[i]!.signature;
+      const ra = landed[0].get(sig);
+      const rb = landed[1].get(sig);
       const o = outcomes[i]!;
-      if (ra.kind === "ok" && rb.kind === "ok") {
+      if (ra?.kind === "ok" && rb?.kind === "ok") {
         o.state = "filled";
         o.slot = ra.slot!;
-      } else if (ra.kind === "err" && rb.kind === "err") {
+      } else if (ra?.kind === "err" && rb?.kind === "err") {
         o.state = "failed";
         o.slot = ra.slot!;
         o.err = [ra.err, rb.err];
-      } else if (ra.kind === "none" && rb.kind === "none" && past(i) && latestAt[0] > heightAt[0] && latestAt[1] > heightAt[1]) {
+      } else if (deadOn(0, i) && deadOn(1, i)) {
         o.state = "expired";
       } else continue;
       o.ms = Date.now() - t0;
@@ -319,54 +425,80 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
     if (decided.every(Boolean)) end();
   }
 
-  function readStatus(p: 0 | 1): void {
-    if (inFlight[p] || over) return;
-    inFlight[p] = true;
-    const startedAt = ++events;
-    const sigs = txs.map((t) => t.signature);
-    const chunks: string[][] = [];
-    for (let i = 0; i < sigs.length; i += STATUS_CHUNK) chunks.push(sigs.slice(i, i + STATUS_CHUNK));
-    const rpc = opts.providers[p];
-    Promise.all(chunks.map((c) => withTimeout(Promise.resolve().then(() => rpc("getSignatureStatuses", [c, { searchTransactionHistory: false }])), callTimeoutMs).then((ans) => readStatuses(ans, c.length))))
-      .then(
-        (parts) => {
-          if (over) return; // reads of one provider never overlap (inFlight), so this is its newest
-          if (parts.some((x) => x === null)) return; // a broken answer is no answer
-          latest[p] = (parts as StatusRead[][]).flat();
-          latestAt[p] = startedAt;
-          decide();
-        },
-        () => {},
-      )
-      .finally(() => { inFlight[p] = false; });
+  /** getSignatureStatuses for these txs on p, chunked; null when any chunk is not an answer. */
+  async function statuses(p: 0 | 1, idx: number[], history: boolean): Promise<{ i: number; r: StatusRead; slot: number }[] | null> {
+    const out: { i: number; r: StatusRead; slot: number }[] = [];
+    for (let c = 0; c < idx.length; c += STATUS_CHUNK) {
+      const part = idx.slice(c, c + STATUS_CHUNK);
+      const ans = readStatuses(await call(p, "getSignatureStatuses", [part.map((i) => txs[i]!.signature), { searchTransactionHistory: history }]), part.length);
+      if (!ans) return null;
+      part.forEach((i, k) => out.push({ i, r: ans.reads[k]!, slot: ans.slot }));
+    }
+    return out;
   }
 
-  function readHeights(): void {
-    for (const p of [0, 1] as const) {
-      const rpc = opts.providers[p];
-      withTimeout(Promise.resolve().then(() => rpc("getBlockHeight", [{ commitment: "finalized" }])), callTimeoutMs).then(
-        (h) => {
-          if (over || typeof h !== "number" || !Number.isSafeInteger(h) || h < 0) return;
-          if (height[p] !== null && h < height[p]!) return; // a height never goes back
-          if (height[p] !== null && h === height[p]) return;
-          height[p] = h;
-          heightAt[p] = ++events;
-        },
-        () => {},
-      );
-    }
+  // The fill poll: the status cache only (searchTransactionHistory: false), every undecided tx.
+  function readFast(p: 0 | 1): void {
+    if (fastInFlight[p] || over || backedOff(p)) return;
+    const idx = txs.map((_, i) => i).filter((i) => !decided[i]);
+    if (idx.length === 0) return;
+    fastInFlight[p] = true;
+    statuses(p, idx, false)
+      .then((got) => {
+        if (over || !got) return; // a broken answer is no answer
+        for (const g of got) record(p, txs[g.i]!.signature, g.r);
+        decide();
+      }, () => {})
+      .finally(() => { fastInFlight[p] = false; });
+  }
+
+  // The dead check on p, every rebroadcast: the finalized bank's height and slot; for each undecided tx past its
+  // lastValidBlockHeight there, its blockhash at processed; for each whose blockhash is no longer valid, a status read
+  // with searchTransactionHistory: true. Each step's answer carries its bank's slot, which deadOn compares.
+  function readDead(p: 0 | 1): void {
+    if (deadInFlight[p] || over || backedOff(p)) return;
+    deadInFlight[p] = true;
+    (async () => {
+      const a = readAnchor(await call(p, "getLatestBlockhash", [{ commitment: "finalized" }]));
+      if (a && (anchor[p] === null || (a.height >= anchor[p]!.height && a.slot >= anchor[p]!.slot))) anchor[p] = a; // never goes back
+      const cur = anchor[p];
+      if (over || cur === null) return;
+      const behind = txs.map((_, i) => i).filter((i) => !decided[i] && cur.height > txs[i]!.lvbh);
+      for (const bh of new Set(behind.map((i) => txs[i]!.blockhash))) {
+        const v = readValid(await call(p, "isBlockhashValid", [bh, { commitment: "processed" }]));
+        if (!v) continue;
+        if (v.valid) invalidAt[p].delete(bh);
+        else invalidAt[p].set(bh, v.slot);
+      }
+      const check = behind.filter((i) => invalidAt[p].has(txs[i]!.blockhash));
+      if (over || check.length === 0) return;
+      const got = await statuses(p, check, true);
+      if (over || !got) return;
+      for (const g of got) {
+        const sig = txs[g.i]!.signature;
+        record(p, sig, g.r);
+        if (g.r.kind === "none") histNone[p].set(sig, g.slot);
+        else histNone[p].delete(sig);
+      }
+      decide();
+    })()
+      .catch(() => {})
+      .finally(() => { deadInFlight[p] = false; });
   }
 
   broadcast(); // the first send, in this tick, before anything is awaited
-  const rebroadcast = setInterval(() => { readHeights(); broadcast(); }, rebroadcastMs);
-  const poll = setInterval(() => { readStatus(0); readStatus(1); }, pollMs);
+  limited.forEach((_, k) => sendNext(k));
+  const timers = [
+    setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs),
+    setInterval(() => { readFast(0); readFast(1); }, pollMs),
+    ...limited.map((p, k) => setInterval(() => sendNext(k), p.minIntervalMs)),
+  ];
   const deadline = setTimeout(end, deadlineMs);
 
   function end(): void {
     if (over) return;
     over = true;
-    clearInterval(rebroadcast);
-    clearInterval(poll);
+    for (const t of timers) clearInterval(t);
     clearTimeout(deadline);
     finish({ txs: outcomes });
   }

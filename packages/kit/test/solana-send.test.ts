@@ -23,45 +23,68 @@ import {
 } from "../src/index.ts";
 
 // ---- a signed-looking v0 tx: 1 signature slot, a message with one signer and the system program (test only)
-function tx(seed: number, lvbh = 1_000): SolanaSignedTx {
+function tx(seed: number, lvbh = 1_000, firstIxData: number[] = []): SolanaSignedTx {
   const sig = new Uint8Array(64).fill(seed);
   const payer = new Uint8Array(32).fill(seed + 1);
   const system = new Uint8Array(32);
   const blockhash = new Uint8Array(32).fill(7);
-  // v0: prefix, header (1 signer, 0 ro signed, 1 ro unsigned), 2 keys, blockhash, 1 ix (program 1, accounts [0], no
-  // data), no lookups
-  const msg = [0x80, 1, 0, 1, 2, ...payer, ...system, ...blockhash, 1, 1, 1, 0, 0, 0];
+  // v0: prefix, header (1 signer, 0 ro signed, 1 ro unsigned), 2 keys, blockhash, 1 ix (program 1 = System, accounts
+  // [0], data), no lookups
+  const msg = [0x80, 1, 0, 1, 2, ...payer, ...system, ...blockhash, 1, 1, 1, 0, firstIxData.length, ...firstIxData, 0];
   return { wire: Uint8Array.from([1, ...sig, ...msg]), lastValidBlockHeight: lvbh };
 }
 const sigOf = (t: SolanaSignedTx) => base58.encode(t.wire.subarray(1, 65));
+const BLOCKHASH = base58.encode(new Uint8Array(32).fill(7));
 
 type Status = null | { confirmationStatus: "processed" | "confirmed" | "finalized"; err: unknown; slot: number };
-// A fake provider: per-signature status and a finalized height the test sets; it records every call.
+// A fake provider, one bank: its finalized block height and slot (getLatestBlockhash at finalized answers the slot and
+// height + 150, Agave's MAX_PROCESSING_AGE), the processed slot its status and isBlockhashValid answers carry, whether
+// the tx's blockhash is still valid at processed, and per-signature statuses, with a separate answer under
+// searchTransactionHistory: true when `hist` has one. It records every call.
 type FakeProvider = {
   height: number;
+  slot: number;
+  statusSlot: number;
+  validSlot: number | null;
+  valid: boolean;
   statusAnswer: unknown;
   hang: boolean;
   calls: { method: string; params: readonly unknown[] }[];
   set(sig: string, s: Status): void;
+  hist: Map<string, Status>;
   rpc: SolanaRpc;
 };
 function provider(): FakeProvider {
   const st = new Map<string, Status>();
   const p: FakeProvider = {
     height: 0,
+    slot: 1_000,
+    statusSlot: 2_000,
+    validSlot: null, // isBlockhashValid answers from statusSlot unless set
+    valid: true,
     statusAnswer: undefined as unknown, // when set, answered as is (a hostile reply)
     hang: false,
     calls: [] as { method: string; params: readonly unknown[] }[],
     set(sig: string, s: Status) { st.set(sig, s); },
+    hist: new Map(),
     rpc: (async (method, params) => {
       p.calls.push({ method, params });
       if (p.hang) return new Promise(() => {});
       if (method === "getSignatureStatuses") {
         if (p.statusAnswer !== undefined) return p.statusAnswer;
         const sigs = params[0] as string[];
-        return { context: { slot: 1 }, value: sigs.map((s) => st.get(s) ?? null) };
+        const history = (params[1] as { searchTransactionHistory?: unknown } | undefined)?.searchTransactionHistory === true;
+        return { context: { slot: p.statusSlot }, value: sigs.map((s) => (history && p.hist.has(s) ? p.hist.get(s)! : st.get(s) ?? null)) };
       }
       if (method === "getBlockHeight") return p.height;
+      if (method === "getLatestBlockhash") {
+        const h = p.height as unknown;
+        return { context: { slot: p.slot }, value: { blockhash: "fakefinalizedhash", lastValidBlockHeight: typeof h === "number" ? h + 150 : h } };
+      }
+      if (method === "isBlockhashValid") {
+        if (params[0] !== BLOCKHASH) throw new Error(`isBlockhashValid on ${String(params[0])}`);
+        return { context: { slot: p.validSlot ?? p.statusSlot }, value: p.valid };
+      }
       if (method === "simulateTransaction") return { context: { slot: 1 }, value: { err: null, unitsConsumed: 450, logs: [] } };
       throw new Error(`unexpected ${method}`);
     }) as SolanaRpc,
@@ -163,6 +186,8 @@ test("rebroadcast stops when both providers' finalized height passes lastValidBl
   t.after(() => mock.timers.reset());
   const { paths, a, b, opts } = setup();
   const one = tx(41, 500);
+  a.valid = false; // the height is the only gate left here
+  b.valid = false;
   const h = sendSolanaSet([one], opts);
   await advance(SOLANA_REBROADCAST_MS);
   a.height = 501; // one provider past: not enough
@@ -172,6 +197,8 @@ test("rebroadcast stops when both providers' finalized height passes lastValidBl
   await advance(SOLANA_REBROADCAST_MS);
   assert.ok(paths[0]!.calls.length > mid, "one provider's height never stops the rebroadcast");
   b.height = 501;
+  a.valid = false;
+  b.valid = false;
   await advance(SOLANA_REBROADCAST_MS * 2);
   const r = await h.done;
   assert.equal(r.txs[0]!.state, "expired");
@@ -187,34 +214,10 @@ test("a landed tx read late is never called dead: past the height with a status 
   const h = sendSolanaSet([one], { ...opts, deadlineMs: 20_000 });
   a.height = 600;
   b.height = 600;
+  a.valid = false;
+  b.valid = false;
   a.set(sigOf(one), OK); // landed on A's view, B has not seen it yet
   await advance(SOLANA_REBROADCAST_MS * 3);
-  b.set(sigOf(one), OK);
-  await advance(SOLANA_STATUS_POLL_MS * 2);
-  const r = await h.done;
-  assert.equal(r.txs[0]!.state, "filled");
-});
-
-test("a status read started before the height answer never makes a tx dead", async (t) => {
-  t.after(() => mock.timers.reset());
-  const { a, b, opts } = setup();
-  const one = tx(43, 500);
-  let release: ((v: unknown) => void) | undefined;
-  let held = 0;
-  const slowA: SolanaRpc = (m, p) => {
-    if (m === "getSignatureStatuses" && held === 0) {
-      held++;
-      return new Promise((r) => { release = r; }); // in flight while the heights arrive
-    }
-    return a.rpc(m, p);
-  };
-  const h = sendSolanaSet([one], { ...opts, providers: [slowA, b.rpc], deadlineMs: 60_000 });
-  a.height = 600;
-  b.height = 600;
-  await advance(SOLANA_REBROADCAST_MS + 100); // heights read and past on both; A's first status read still open
-  release!({ context: { slot: 1 }, value: [null] }); // an answer from before the heights: says nothing of now
-  await flush();
-  a.set(sigOf(one), OK);
   b.set(sigOf(one), OK);
   await advance(SOLANA_STATUS_POLL_MS * 2);
   const r = await h.done;
@@ -267,6 +270,7 @@ test("a hostile or broken status answer is never a fill", async (t) => {
 test("a hostile height answer never stops the rebroadcast", async (t) => {
   t.after(() => mock.timers.reset());
   const { paths, a, b, opts } = setup();
+  a.valid = b.valid = false; // the height is the only gate left here
   const h = sendSolanaSet([tx(62, 500)], { ...opts, deadlineMs: 30_000 });
   for (const bad of [1e300, 600.5, "9999999", -1]) {
     (a as { height: unknown }).height = bad;
@@ -309,6 +313,8 @@ test("a tx past lastValidBlockHeight on both providers is never sent again, even
   await advance(SOLANA_REBROADCAST_MS);
   a.height = 501;
   b.height = 501;
+  a.valid = false;
+  b.valid = false;
   await advance(SOLANA_REBROADCAST_MS * 2);
   const after = paths.map((p) => p.calls.length);
   await advance(SOLANA_REBROADCAST_MS * 5);
@@ -342,7 +348,7 @@ test("a provider that hangs holds no fill back from being read once it answers, 
   assert.ok(reads <= 2, `a hung provider's reads are not stacked: ${reads} in 8 s with a 5 s call timeout`);
 });
 
-test("the set is refused before any send: unsigned, duplicate, too large, bad lastValidBlockHeight, empty", (t) => {
+test("the set is refused before any send: unsigned, duplicate, too large, bad lastValidBlockHeight, empty", async (t) => {
   t.after(() => mock.timers.reset());
   const { paths, opts } = setup();
   const unsigned = tx(0);
@@ -354,6 +360,14 @@ test("the set is refused before any send: unsigned, duplicate, too large, bad la
   assert.throws(() => sendSolanaSet([tx(74).wire.subarray(0, 40) as unknown as SolanaSignedTx], opts));
   assert.throws(() => sendSolanaSet([], opts), /empty/);
   assert.throws(() => sendSolanaSet([tx(75)], { ...opts, paths: [] }), /path/);
+  // R4: one provider passed twice would fill on one provider's word, as the same object or the same URL
+  assert.throws(() => sendSolanaSet([tx(76)], { ...opts, providers: [opts.providers[0], opts.providers[0]] }), /same provider/);
+  const u1 = solanaJsonRpc("https://rpc.example/", { fetch: () => Promise.reject(new Error("no")) });
+  const u2 = solanaJsonRpc("https://rpc.example/", { fetch: () => Promise.reject(new Error("no")) });
+  assert.throws(() => sendSolanaSet([tx(77)], { ...opts, providers: [u1, u2] }), /same provider/);
+  await assert.rejects(dryRunSolanaSet([tx(77)], { ...opts, providers: [u1, u2] }), /same provider/);
+  // R5: a durable-nonce tx (first instruction System AdvanceNonceAccount, u32 LE 4) has no lastValidBlockHeight
+  assert.throws(() => sendSolanaSet([tx(78, 500, [4, 0, 0, 0])], opts), /durable nonce/);
   for (const p of paths) assert.equal(p.calls.length, 0, "nothing was sent");
 });
 
@@ -361,13 +375,15 @@ test("the default paths: the paper's three keyless URLs and the helper's /v1/rpc
   const seen: { url: string; init: RequestInit }[] = [];
   const fakeFetch = (url: string, init: RequestInit) => {
     seen.push({ url, init });
-    const body = JSON.parse(String(init.body)) as { id: number; params: [string] };
+    const body = JSON.parse(String(init.body)) as { id: string; params: [string] };
     const sig = base58.encode(base64.decode(body.params[0]).subarray(1, 65));
     return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: sig }), { headers: { "content-type": "application/json" } }));
   };
   const helper = solanaHelperRpc("https://helper.example", { fetch: fakeFetch });
   const paths = solanaSendPaths({ helper, fetch: fakeFetch });
   assert.deepEqual(paths.map((p) => p.name), ["sender", "jito", "rpc", "helper"]);
+  // keyless Sender and Jito take 1 request per second per IP, 429s included: each gets one tx a second
+  assert.deepEqual(paths.map((p) => p.minIntervalMs), [1_000, 1_000, undefined, undefined]);
   const one = tx(81);
   const b64 = base64.encode(one.wire);
   const results = paths.map((p) => p.send(b64));
@@ -392,10 +408,14 @@ test("the default paths: the paper's three keyless URLs and the helper's /v1/rpc
 
 test("solanaJsonRpc refuses an answer that is not a JSON-RPC result for its own request", async () => {
   // each answer is built from the request's own id, so only the shape under test is wrong
-  const answer = (body: (id: number) => string, status = 200) => (_u: string, init: RequestInit) =>
-    Promise.resolve(new Response(body((JSON.parse(String(init.body)) as { id: number }).id), { status }));
+  const answer = (body: (id: string) => string, status = 200) => (_u: string, init: RequestInit) =>
+    Promise.resolve(new Response(body((JSON.parse(String(init.body)) as { id: string }).id), { status }));
   const call = (f: (u: string, i: RequestInit) => Promise<Response>) => solanaJsonRpc("https://rpc.example", { fetch: f })("getBlockHeight", []);
-  await assert.rejects(call(answer((id) => JSON.stringify({ jsonrpc: "2.0", id: id + 1, result: 5 }))), /id/);
+  await assert.rejects(call(answer((id) => JSON.stringify({ jsonrpc: "2.0", id: `${id}1`, result: 5 }))), /id/);
+  await assert.rejects(call(answer((id) => JSON.stringify({ jsonrpc: "2.0", id: Number(id) + 1, result: 5 }))), /id/);
+  // the id is a string of digits on every path, so an echo of it as a string or as the same number both hold
+  assert.equal(await call(answer((id) => { assert.match(String(id), /^[1-9][0-9]*$/); assert.equal(typeof id, "string"); return JSON.stringify({ jsonrpc: "2.0", id, result: 6 }); })), 6);
+  assert.equal(await call(answer((id) => JSON.stringify({ jsonrpc: "2.0", id: Number(id), result: 7 }))), 7);
   await assert.rejects(call(answer((id) => JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32005, message: "x" } }))), /-32005/);
   await assert.rejects(call(answer((id) => JSON.stringify({ jsonrpc: "2.0", id }))), /no result/);
   await assert.rejects(call(answer(() => "not json")));
@@ -420,4 +440,174 @@ test("dry: the set is simulated on both providers and no path is called", async 
     assert.deepEqual(sims.map((c) => c.params[0]), set.map((s) => base64.encode(s.wire)));
     assert.equal(p.calls.some((c) => c.method === "sendTransaction"), false);
   }
+});
+
+// ---- the Opus review of 694ecb9 (R1-R3 ported from its repros)
+
+test("High (R1): a tx that landed at 1 s and left the status cache is read with searchTransactionHistory and ends filled, never expired", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { paths, opts } = setup();
+  const one = tx(101, 500);
+  const flags: unknown[] = [];
+  // Agave keeps 300 roots of statuses (about 64 s at 212 ms slots); with searchTransactionHistory false a tx older than
+  // that answers null. Provider B is down for 70 s (a phone suspended, a helper restart, a run of 429s).
+  const prov = (downUntil: number): SolanaRpc => async (method, params) => {
+    const now = Date.now();
+    if (now < downUntil) throw new Error("HTTP 429");
+    if (method === "getBlockHeight") return 600;
+    if (method === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: "h", lastValidBlockHeight: 750 } };
+    if (method === "isBlockhashValid") return { context: { slot: 2_000 }, value: false };
+    if (method === "getSignatureStatuses") {
+      const hist = (params[1] as { searchTransactionHistory?: boolean }).searchTransactionHistory;
+      flags.push(hist);
+      const inCache = now < 65_000;
+      return { context: { slot: 2_000 }, value: (params[0] as string[]).map(() => (inCache ? OK : hist ? FIN : null)) };
+    }
+    throw new Error(method);
+  };
+  const h = sendSolanaSet([one], { ...opts, providers: [prov(0), prov(70_000)] });
+  await advance(90_000);
+  h.stop();
+  const r = await h.done;
+  assert.equal(r.txs[0]!.state, "filled", "a filled buy is never called dead");
+  assert.ok(flags.includes(true), "the reads past lastValidBlockHeight search the history");
+  void paths;
+});
+
+test("High: dead is decided only on reads made with searchTransactionHistory: true", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const one = tx(102, 500);
+  a.height = b.height = 600;
+  a.valid = b.valid = false;
+  a.hist.set(sigOf(one), FIN); // out of the cache: null under false, finalized under true
+  b.hist.set(sigOf(one), FIN);
+  const h = sendSolanaSet([one], { ...opts, deadlineMs: 20_000 });
+  await advance(20_000);
+  assert.equal((await h.done).txs[0]!.state, "filled");
+  for (const p of [a, b]) {
+    const hist = p.calls.filter((c) => c.method === "getSignatureStatuses" && (c.params[1] as { searchTransactionHistory?: boolean }).searchTransactionHistory === true);
+    assert.ok(hist.length > 0, "a history read was made once past");
+  }
+});
+
+test("Medium 1 (R2): a status answer whose context.slot is below the slot its provider's height was read at never counts toward dead", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const one = tx(103, 595);
+  a.height = b.height = 600;
+  a.slot = b.slot = 5_000; // the finalized bank the height came from
+  a.statusSlot = b.statusSlot = 4_960; // a node 40 slots behind it answers the statuses and the blockhash
+  a.valid = b.valid = false;
+  const h = sendSolanaSet([one], { ...opts, deadlineMs: 12_000 });
+  await advance(12_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
+});
+
+test("Medium 1: a history read from a bank behind the one that read the blockhash as expired never counts toward dead", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const one = tx(110, 595);
+  a.height = b.height = 600;
+  a.slot = b.slot = 5_000;
+  a.validSlot = b.validSlot = 6_000; // a node ahead answered isBlockhashValid
+  a.statusSlot = b.statusSlot = 5_500; // a node behind it answers the statuses
+  a.valid = b.valid = false;
+  const h = sendSolanaSet([one], { ...opts, deadlineMs: 12_000 });
+  await advance(12_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
+});
+
+test("Medium 1: the same reads at or above the height's slot do make it dead", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const one = tx(104, 595);
+  a.height = b.height = 600;
+  a.slot = b.slot = 5_000;
+  a.statusSlot = b.statusSlot = 5_000;
+  a.valid = b.valid = false;
+  const h = sendSolanaSet([one], { ...opts, deadlineMs: 12_000 });
+  await advance(12_000);
+  assert.equal((await h.done).txs[0]!.state, "expired");
+});
+
+test("Medium 2: a lowered lastValidBlockHeight never makes a live tx dead: isBlockhashValid still true on either provider", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { paths, a, b, opts } = setup();
+  const one = tx(105, 500); // the caller claims 500
+  a.height = b.height = 600; // both finalized heights are past the claim
+  a.valid = b.valid = true; // but the blockhash is still valid at processed on both
+  const h = sendSolanaSet([one], { ...opts, deadlineMs: 24_000 });
+  await advance(SOLANA_REBROADCAST_MS * 2);
+  const mid = paths[2]!.calls.length;
+  await advance(SOLANA_REBROADCAST_MS * 2);
+  assert.ok(paths[2]!.calls.length > mid, "the rebroadcast goes on while the blockhash is valid");
+  b.valid = false; // one provider's word is not enough
+  await advance(SOLANA_REBROADCAST_MS * 2);
+  const mid2 = paths[2]!.calls.length;
+  await advance(SOLANA_REBROADCAST_MS * 2);
+  assert.ok(paths[2]!.calls.length > mid2, "one provider's isBlockhashValid never stops the rebroadcast");
+  await advance(12_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
+  for (const p of [a, b]) {
+    const v = p.calls.filter((c) => c.method === "isBlockhashValid");
+    assert.ok(v.length > 0);
+    assert.deepEqual(v[0]!.params, [BLOCKHASH, { commitment: "processed" }]);
+  }
+});
+
+test("Medium 3 (R3): on a 1-rps path each tx of a set of 3 is admitted within 4 s; the other paths get every tx every tick", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { paths, opts } = setup();
+  let windowStart = -Infinity;
+  const admitted = new Map<string, number>();
+  const sent: string[] = [];
+  const oneRps: SolanaSendPath = {
+    name: "sender",
+    minIntervalMs: 1_000,
+    send: async (b64) => {
+      sent.push(b64);
+      const now = Date.now();
+      if (now - windowStart < 1_000) throw new Error("HTTP 429");
+      windowStart = now;
+      admitted.set(b64, (admitted.get(b64) ?? 0) + 1);
+      return base58.encode(base64.decode(b64).subarray(1, 65));
+    },
+  };
+  const set = [tx(106), tx(107), tx(108)];
+  const h = sendSolanaSet(set, { ...opts, paths: [oneRps, ...opts.paths.slice(2)] });
+  assert.deepEqual(sent, [base64.encode(set[0]!.wire)], "the 1-rps path gets the first tx in the first tick");
+  assert.equal(paths[2]!.calls.length, 3, "an unlimited path gets the whole set in the first tick");
+  await advance(4_000);
+  const counts = set.map((s) => admitted.get(base64.encode(s.wire)) ?? 0);
+  assert.ok(counts.every((n) => n >= 1), `admitted per tx in 4 s: ${counts}`);
+  assert.equal(sent.length - [...admitted.values()].reduce((x, y) => x + y, 0), 0, "nothing was refused for rate");
+  h.stop();
+  await h.done;
+});
+
+test("a provider answering 429 is backed off, and a 429 stays no answer", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { opts, b } = setup();
+  let calls = 0;
+  const limited: SolanaRpc = async () => { calls++; throw new Error("HTTP 429"); };
+  const h = sendSolanaSet([tx(109)], { ...opts, providers: [limited, b.rpc], deadlineMs: 20_000 });
+  b.set(sigOf(tx(109)), OK);
+  await advance(20_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
+  assert.ok(calls <= 12, `${calls} calls in 20 s on a provider answering 429 (25 a second-free poll would be 60+)`);
+});
+
+test("a provider that once read the tx landed never calls it dead, even when a later history read has none", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const one = tx(111, 500);
+  a.set(sigOf(one), OK); // A reads it landed in the first poll
+  const h = sendSolanaSet([one], { ...opts, deadlineMs: 20_000 });
+  await advance(SOLANA_STATUS_POLL_MS * 2);
+  a.set(sigOf(one), null); // then a node with no transaction history answers for A
+  a.height = b.height = 600;
+  a.valid = b.valid = false;
+  await advance(20_000);
+  assert.equal((await h.done).txs[0]!.state, "unknown");
 });
