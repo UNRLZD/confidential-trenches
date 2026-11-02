@@ -12,11 +12,14 @@
 //   - and in every page it reads, each script, worker preload, module preload and stylesheet must be a listed file of
 //     that host; one that is not is a script the release does not name.
 // It prints one line per read and MATCH only when every line is ok.
-//   node packages/signpage/scripts/check-signpage.mjs [--release release-<N>] [--list <file>]
-//     MATCH exit 0, no match exit 1, error exit 2
+//   node packages/signpage/scripts/check-signpage.mjs [--release release-<N>] [--list <file>] [--record <file>]
+//   node packages/signpage/scripts/check-signpage.mjs [--release ... | --list ...] --answer <file>
+//     MATCH exit 0, no match exit 1, error exit 2. The newest release by default. --record writes what the run read
+//     (sizes, hashes and the listed headers per path and mode, no bodies); --answer judges such a record instead of
+//     reading the hosts, against the release it names unless --list or --release is given.
 import "../../../scripts/net-window.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readList } from "./release-list.mjs";
 
@@ -143,8 +146,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const a = process.argv.slice(2);
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : null);
   try {
-    const list = opt("--list") ? JSON.parse(readFileSync(opt("--list"), "utf8")) : readList(opt("--release"));
-    const { ok, lines } = judge(list, await read(list));
+    const recorded = opt("--answer") ? JSON.parse(readFileSync(opt("--answer"), "utf8")) : null;
+    const list = opt("--list") ? JSON.parse(readFileSync(opt("--list"), "utf8")) : readList(opt("--release") ?? recorded?.release);
+    const answer = recorded ?? { ...(await read(list)), read_at: new Date().toISOString() };
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(answer, null, 1)}\n`);
+    const { ok, lines } = judge(list, answer);
     for (const l of lines) console.log(l);
     process.exit(ok ? 0 : 1);
   } catch (e) {
