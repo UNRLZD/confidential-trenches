@@ -16,13 +16,21 @@
 // --buyer names the buyers instead (each read live: a funded system account), e.g. a wallet with no PumpSwap volume
 // account for a graduated token's first PumpSwap buy.
 //
+// Every request this run makes, to both providers and the helper, is audited after each side: the addresses it names
+// are matched against every stand-in wallet and its accounts for the token (its token account under either program,
+// its WSOL account, its two volume accounts), and the run fails if any request names two wallets ("oneWallet").
+//
 // --record keeps every answer the flow was given (both providers' RPC answers, the helper's builds and the reference),
 // keyed by what was asked, for test/solana-flow-replay.test.ts to replay with no network.
 import { writeFileSync } from "node:fs";
 import { base58 } from "@scure/base";
 import {
   SOLANA_PUMP_AMM_PROGRAM,
+  SOLANA_PUMP_PROGRAM,
+  SOLANA_SOL_MINT,
   SOLANA_SYSTEM_PROGRAM,
+  SOLANA_TOKEN_2022_PROGRAM,
+  SOLANA_TOKEN_PROGRAM,
   readSolanaReference,
   runSolanaTrade,
   solanaAta,
@@ -136,6 +144,13 @@ const deps = {
   dry: true,
 } as const;
 
+// The audit: how many of the user's wallets one request names, by any of their addresses for this token.
+const linkedKeys = (w: string, mint: string) => [w, solanaAta(w, mint, SOLANA_TOKEN_PROGRAM), solanaAta(w, mint, SOLANA_TOKEN_2022_PROGRAM), solanaAta(w, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM)];
+function audit(asks: string[], wallets: readonly string[], mint: string) {
+  const keys = wallets.map((w) => linkedKeys(w, mint));
+  const per = asks.map((a) => keys.filter((ks) => ks.some((k) => a.includes(k))).length);
+  return { requests: asks.length, naming: per.filter((n) => n > 0).length, maxWallets: per.reduce((m, n) => Math.max(m, n), 0) };
+}
 const big = (_: string, v: unknown) => (typeof v === "bigint" ? v.toString() : v);
 const leg = (l: SolanaTradeRecord["legs"][number]) => ({
   wallet: l.wallet,
@@ -157,17 +172,23 @@ const runs: unknown[] = [];
 let good = true;
 for (const token of TOKENS) {
   const { sellers, buyers } = await standIns(token);
+  // the user's wallets, as the signing page passes them: every stand-in of this token
+  const wallets = [...new Set([...buyers, ...sellers].map((h) => h.owner))];
   const side = async (s: "buy" | "sell", legs: { wallet: string; amount: bigint }[]) => {
     const w0 = waits.length;
+    const r0 = recording.rpc.length;
+    const b0 = recording.builds.length;
     const t = performance.now();
-    const request = { side: s, token, slippageBps: SLIPPAGE_BPS, legs: legs.map((l) => ({ ...l, arm: { own: true } })) };
+    const request = { side: s, token, slippageBps: SLIPPAGE_BPS, wallets, legs: legs.map((l) => ({ ...l, arm: { own: true } })) };
     // "mint", not "token", in the files: gitleaks reads a base58 address under a "token" key as a secret.
-    recording.requests.push({ side: s, mint: token, slippageBps: SLIPPAGE_BPS, legs: request.legs });
+    recording.requests.push({ side: s, mint: token, slippageBps: SLIPPAGE_BPS, wallets, legs: request.legs });
     const r = await runSolanaTrade(request, deps);
     const ms = Math.round(performance.now() - t);
+    const oneWallet = audit([...recording.rpc.slice(r0).map((x) => x.ask), ...recording.builds.slice(b0).map((x) => x.url)], wallets, token);
+    good &&= oneWallet.maxWallets <= 1;
     good &&= r.legs.every((l) => !l.refused && l.dry?.state === "simulated" && (l.size ?? 9_999) <= 1_232);
     // The harness's waits after an HTTP 429 or 503: a leg's quoteMs includes any of these it met.
-    return { waits: waits.slice(w0), ms, reference: r.reference, blockhash: r.blockhash, legs: r.legs.map(leg) };
+    return { oneWallet, waits: waits.slice(w0), ms, reference: r.reference, blockhash: r.blockhash, legs: r.legs.map(leg) };
   };
   const buy = await side("buy", buyers.map((h) => ({ wallet: h.owner, amount: BUY_LAMPORTS })));
   const sell = await side("sell", sellers.map((h) => ({ wallet: h.owner, amount: h.amount })));

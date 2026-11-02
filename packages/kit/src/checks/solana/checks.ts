@@ -109,6 +109,9 @@ export type SolanaQuoteRequest = {
   amount: bigint; // a_k: lamports on a buy, the token's base units on a sell
   spendable: bigint; // W_k's spendable lamports on a buy, its token balance on a sell
   minOut: bigint; // minOut_k (§1.3): token base units on a buy, lamports on a sell
+  // Every other Solana wallet of this user (all of them, not only the set's): S11 refuses a tx that names any of them or
+  // its accounts for this trade, in any role, since even a read-only key links two of the user's wallets on chain.
+  otherWallets: readonly string[];
 };
 export type SolanaAccountRead = { owner: string; data: Uint8Array };
 // One provider's simulation of the whole tx at `confirmed` with sigVerify off, as the device read it.
@@ -119,7 +122,6 @@ export type SolanaSimulation = {
   tokenAccountLamports: { pre: bigint; post: bigint }; // the same account's lamports: 0 before means the tx creates it
   pumpVolumeAccumulator: { pre: bigint; post: bigint }; // W_k's own pump PDA, which a pump buy may fund
   pumpSwapVolumeAccumulator: { pre: bigint; post: bigint }; // W_k's own PumpSwap PDA, which a PumpSwap buy may fund
-  otherWallets: { pre: bigint; post: bigint }[]; // every other wallet of this user, lamports
 };
 export type SolanaQuoteReads = {
   tables: Readonly<Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]>>; // provider A, B
@@ -166,6 +168,7 @@ type Ctx = {
   req: SolanaQuoteRequest;
   reads: SolanaQuoteReads;
   tx: SolanaTransaction;
+  keys: readonly string[]; // every account the tx names: its static keys and its lookup tables' indexes, resolved
   ixs: Ix[];
   tokenProgram: string | null;
   route: Route | null;
@@ -526,8 +529,20 @@ function s10(c: Ctx): SolanaQuoteResult {
 // W_k's output account gaining, up to its rent (anyone can create or pre-fund that address, so the rent is never assumed)
 // + each of the wallet's own volume accounts (pump's and PumpSwap's), if the route funds it, each up to its rent; and its
 // token in reaches minOut_k. A sell's token out is exactly a_k, its native in, before fees and tips, reaches minOut_k,
-// and it funds neither volume account. No other wallet of this user changes.
+// and it funds neither volume account. No other wallet of this user is touched, read statically: the tx names none of
+// the user's other wallets, nor any of their accounts for this trade (the token account under either token program,
+// the WSOL account, the pump and PumpSwap volume accounts), in any role, statically or through a lookup table. So no
+// simulation ever needs another wallet in its request.
 function s11(c: Ctx): SolanaQuoteResult {
+  const others = c.req.otherWallets;
+  if (!Array.isArray(others)) return fail("S11", "no list of the user's other wallets");
+  const named = new Set(c.keys);
+  const linked: string[] = [];
+  for (const o of others) {
+    const accounts = [o, solanaAta(o, c.req.token, SOLANA_TOKEN_PROGRAM), solanaAta(o, c.req.token, SOLANA_TOKEN_2022_PROGRAM), solanaAta(o, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), solanaVolumeAccumulator(o, SOLANA_PUMP_PROGRAM), solanaVolumeAccumulator(o, SOLANA_PUMP_AMM_PROGRAM)];
+    for (const k of accounts) if (named.has(k)) linked.push(k === o ? `another wallet of this user ${o}` : `${o}'s account ${k}`);
+  }
+  if (linked.length) return fail("S11", `the tx names ${linked.join("; ")}`);
   const b = budget(c);
   if (typeof b === "string") return fail("S11", b);
   const fees = SOLANA_LAMPORTS_PER_SIGNATURE * BigInt(c.tx.signatures) + (b.price * BigInt(b.limit) + 999_999n) / 1_000_000n;
@@ -546,7 +561,6 @@ function s11(c: Ctx): SolanaQuoteResult {
     if (pva < 0n || pva > rentPa) wrong.push(`provider ${at}: the pump volume account moves by ${pva}`);
     const sva = sim.pumpSwapVolumeAccumulator.post - sim.pumpSwapVolumeAccumulator.pre;
     if (sva < 0n || sva > rentPa) wrong.push(`provider ${at}: the PumpSwap volume account moves by ${sva}`);
-    if (sim.otherWallets.some((x) => x.pre !== x.post)) wrong.push(`provider ${at}: another wallet of this user changes`);
     if (c.req.side === "buy") {
       const tal = sim.tokenAccountLamports;
       // What the output account gains, clamped to [0, its rent]: a new account's rent, or the rest of it when someone
@@ -632,7 +646,7 @@ export function checkSolanaQuote(txBytes: Uint8Array, req: SolanaQuoteRequest, r
         routeError = (err as Error).message;
       }
     }
-    c = { req, reads, tx, ixs, tokenProgram, route, routeError, jupAt: jup.length === 1 ? ixs.indexOf(jup[0] as Ix) : -1 };
+    c = { req, reads, tx, keys: keys.map((k) => k.key), ixs, tokenProgram, route, routeError, jupAt: jup.length === 1 ? ixs.indexOf(jup[0] as Ix) : -1 };
   } catch (err) {
     return { ok: false, results: [fail("DECODE", `cannot decode the transaction: ${(err as Error).message}`)] };
   }

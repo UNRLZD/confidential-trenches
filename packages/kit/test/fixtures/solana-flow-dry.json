@@ -8,44 +8,101 @@
  "slippageBps": 500,
  "runs": [
   {
-   "at": "2026-11-02T10:06:03.358Z",
+   "at": "2026-11-02T10:41:55.438Z",
    "buyLamports": "10000000",
    "mint": "7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump",
    "buyersWithoutPumpSwapVolumeAccount": [
     "6MkqQcHN2oWGPDzA5dz8bnsGKvjHtWPd1tunZqgLLWMa"
    ],
    "buy": {
+    "oneWallet": {
+     "requests": 53,
+     "naming": 21,
+     "maxWallets": 1
+    },
     "waits": [],
-    "ms": 4336,
-    "reference": "65951700541",
+    "ms": 3043,
+    "reference": "197051241554",
     "blockhash": {
-     "blockhash": "5iXpfWPKDKGkseUjHhhzEQ4E9zrBu91CHuEz1QJh8BxE",
-     "lastValidBlockHeight": 442476573,
-     "slot": 464455266
+     "blockhash": "FQ5du1nmodKCvWuZX6AhMTNXtHr28bZjZ5MEp3nytyP4",
+     "lastValidBlockHeight": 442486764,
+     "slot": 464465460
     },
     "legs": [
      {
       "wallet": "6MkqQcHN2oWGPDzA5dz8bnsGKvjHtWPd1tunZqgLLWMa",
       "amount": "10000000",
-      "expectedOut": "65951700541",
-      "legExpectedOut": "65951700541",
-      "minOut": "62654115513",
-      "quoteMs": 1835,
-      "buildMs": 1039,
+      "expectedOut": "65683747184",
+      "legExpectedOut": "65702386564",
+      "minOut": "62399559824",
+      "quoteMs": 1821,
+      "buildMs": 1020,
       "buildCalls": 1,
       "size": 803,
       "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
       "dry": {
-       "signature": "4Zx2iBER3v2Ewrgc9meZ6dNC8sjuBvEtWDEXS6SAPNrAN3oS57RGvRg6KfRn4UNAzZLk3qvpaq2eAWkCcWJNb99U",
+       "signature": "4JFFdyYeow2eMmiDwPJFMhqFBabjHn4jhnVhAbwLCj1c1B5hZ38WsCTtHZTbH312Ls3EFuStbDecrxaEEy8JYfuX",
        "state": "simulated",
        "simulations": [
         {
          "err": null,
-         "units": 83183
+         "units": 83184
         },
         {
          "err": null,
-         "units": 83183
+         "units": 83184
+        }
+       ]
+      }
+     },
+     {
+      "wallet": "78omi7BpCLQG6KoRhfxuPetreK835hp9BYCqxFoPm8bb",
+      "amount": "10000000",
+      "expectedOut": "65683747184",
+      "legExpectedOut": "65702386564",
+      "minOut": "62399559824",
+      "quoteMs": 1826,
+      "buildMs": 1019,
+      "buildCalls": 1,
+      "size": 803,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "5DJaPW4EKNybyq3sgs1rhT66FLMZhNU8HsBvpWqRevuVYcCDAiydzV7vxMVZC2oHyEWm9WZ84MRXPu5B7w4ofUwQ",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 95115
+        },
+        {
+         "err": null,
+         "units": 95115
+        }
+       ]
+      }
+     },
+     {
+      "wallet": "AszYE4kHT8aNvoNT2qYSKkJxF3HM7hwNarm9gneEUzW3",
+      "amount": "10000000",
+      "expectedOut": "65683747184",
+      "legExpectedOut": "65702386564",
+      "minOut": "62399559824",
+      "quoteMs": 1868,
+      "buildMs": 1018,
+      "buildCalls": 1,
+      "size": 803,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "51weJeSNmvQEvzLwGvXNANupET6rm6iigjfajJHHJsmtSBwt4jt4qpCwTLDDwpM4NNGs7pCCJM2WD1gFbozhVBAK",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 87615
+        },
+        {
+         "err": null,
+         "units": 87615
         }
        ]
       }
@@ -53,181 +110,101 @@
     ]
    },
    "sell": {
+    "oneWallet": {
+     "requests": 65,
+     "naming": 29,
+     "maxWallets": 1
+    },
     "waits": [
      {
       "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "getMinimumBalanceForRentExemption",
       "ms": 300
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "simulateTransaction",
       "ms": 300
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
-      "ms": 300
-     },
-     {
-      "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "getMinimumBalanceForRentExemption",
       "ms": 600
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "simulateTransaction",
       "ms": 600
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
-      "ms": 600
-     },
-     {
-      "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "getMinimumBalanceForRentExemption",
       "ms": 1200
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "simulateTransaction",
       "ms": 1200
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
-      "ms": 1200
-     },
-     {
-      "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "simulateTransaction",
       "ms": 2400
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "getMinimumBalanceForRentExemption",
       "ms": 2400
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
-      "ms": 2400
-     },
-     {
-      "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "simulateTransaction",
       "ms": 4800
      },
      {
       "at": "B",
-      "method": "getLatestBlockhash",
-      "ms": 4800
-     },
-     {
-      "at": "B",
-      "method": "getLatestBlockhash",
+      "method": "getMinimumBalanceForRentExemption",
       "ms": 4800
      }
     ],
-    "ms": 15444,
-    "reference": "11576942027",
+    "ms": 14661,
+    "reference": "11617156255",
     "blockhash": {
-     "blockhash": "8Gg4RJsJeyWxwQtCw3TSErhk2RbgYN7KfZnkAtrYwPUD",
-     "lastValidBlockHeight": 442476590,
-     "slot": 464455283
+     "blockhash": "Cv2xLsPy1gAsrb5FFYgjFLDZj2hL5Qa5V8E9KRCABUJk",
+     "lastValidBlockHeight": 442486777,
+     "slot": 464465473
     },
     "legs": [
      {
       "wallet": "5gjgcgdZ49QcYatiCTDNFVCSHTtcxcAcTKihUfSxQMg1",
       "amount": "32529539051367",
-      "expectedOut": "3997643586",
-      "legExpectedOut": "4494530028",
-      "minOut": "3797761406",
-      "quoteMs": 1619,
-      "buildMs": 263,
-      "buildCalls": 1,
-      "size": 770,
-      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
-      "dry": {
-       "signature": "3MviJRM8ssY4nzjPfVfGNeb5YWaumFzwwqBGABwmqvRbJkTLYLzcgsSriPXHfMfZX7AnQUy76RqkcgR5kc6VccYh",
-       "state": "simulated",
-       "simulations": [
-        {
-         "err": null,
-         "units": 77143
-        },
-        {
-         "err": null,
-         "units": 77143
-        }
-       ]
-      },
-      "teardown": {
-       "frames": 1,
-       "ok": true,
-       "plan": {
-        "close": [
-         {
-          "kind": "volume",
-          "address": "7fn9vxei3cegWePU9Co6TU6WavqWf6h9hAhN6yBJzfwt",
-          "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
-          "lamports": "1346200"
-         },
-         {
-          "kind": "volume",
-          "address": "9zm1w6FcCqRJVJPsrSLZTnPbEnCCg5cyuXLRnDqmRiQq",
-          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
-          "lamports": "1346200"
-         }
-        ],
-        "keep": [
-         {
-          "address": "3haXZytJYzYu8qmJAB9D3FJcfZQn1Zs3WSFpttFxpkzL",
-          "why": "holds 32529539051367 of 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump"
-         }
-        ]
-       },
-       "dry": [
-        {
-         "signature": "a2FK1znVJ3t6AeprxzRtF2vv5FTsJA8WkArTAbnQGTfvT8PeGxUijiRSaS9STDgL1kGUCu1LLhDKBFns3Tt58hR",
-         "state": "simulated",
-         "simulations": [
-          {
-           "err": null,
-           "units": 23791
-          },
-          {
-           "err": null,
-           "units": 23791
-          }
-         ]
-        }
-       ]
-      }
+      "expectedOut": "4011529995",
+      "legExpectedOut": "4511025559",
+      "minOut": "3810953495",
+      "refused": "build upstream: upstream: HTTP 400 500: {\"error\":\"Missing token program for 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoaj"
      },
      {
       "wallet": "7puGGEKSmELgzTq3GXBxLkGbnZhDPUPjg8xfRcKyRFRi",
       "amount": "31623276442068",
-      "expectedOut": "3886270507",
-      "legExpectedOut": "4377308722",
-      "minOut": "3691956981",
-      "quoteMs": 1865,
-      "buildMs": 1047,
+      "expectedOut": "3899770045",
+      "legExpectedOut": "4393388273",
+      "minOut": "3704781542",
+      "quoteMs": 12248,
+      "buildMs": 253,
       "buildCalls": 1,
       "size": 770,
       "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
       "dry": {
-       "signature": "4be3wvkLbwddKWpdTkJe8Zf8mJU8P55mXo1L7VL5emZyzj9uE2MgGwMfBrZniTMj1fCJnYSnGnsSmkDkoqGBK75",
+       "signature": "sSegDVKFN56UzJdPDgXFiRMwqqP2ue9LhNYHk5m7y6VFnfbfuSQfRXpSrDmWWTaE3YDQLmuyqc3qJ9dFdDsV1fZ",
        "state": "simulated",
        "simulations": [
         {
          "err": null,
-         "units": 90672
+         "units": 90673
         },
         {
          "err": null,
-         "units": 90672
+         "units": 90673
         }
        ]
       },
@@ -258,7 +235,7 @@
        },
        "dry": [
         {
-         "signature": "3Vr2yLW6ZhoJzwb9aM7rACrsmZqSm8HU5vaj6GVLi84M6nWzRRp2pAhYMK5y85g8M5zsWS4EYhGyNgRFnD3Y2yuW",
+         "signature": "5AnAEoH1J5p5TVXxaKt5gfQizNXP7cgVRzPfo7DPdQ8gjKMvcUqcjA6nbVv9KBRPS99Q4SeUTzpEenT8NvK2ErqB",
          "state": "simulated",
          "simulations": [
           {
@@ -277,25 +254,25 @@
      {
       "wallet": "23Emex2TAi2B8dyAdpUY3UR6DVuipvxtGozNqtksBhGp",
       "amount": "30050827139983",
-      "expectedOut": "3693027933",
-      "legExpectedOut": "4172897806",
-      "minOut": "3508376536",
-      "quoteMs": 1860,
-      "buildMs": 1046,
+      "expectedOut": "3705856214",
+      "legExpectedOut": "4188250146",
+      "minOut": "3520563403",
+      "quoteMs": 12835,
+      "buildMs": 261,
       "buildCalls": 1,
       "size": 770,
       "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
       "dry": {
-       "signature": "5hPrRB9nyQMZvDyfZ1g5pkGhLrAPBY1XYdrXSAszbPrxQc99C7pQk62ALn872cyomNN3RZtwK8mdB1KjW7dQkwpm",
+       "signature": "62MAJRaDrXEuUYQXRCp7LYtrZNTdjG5Q8rTHCh2CUdhh6yFYs1KpYruffPGEAoERAfjQAS3aGcnWjjNFrZsaVAqk",
        "state": "simulated",
        "simulations": [
         {
          "err": null,
-         "units": 78683
+         "units": 78673
         },
         {
          "err": null,
-         "units": 78683
+         "units": 78673
         }
        ]
       },
@@ -326,7 +303,7 @@
        },
        "dry": [
         {
-         "signature": "UmkXafzD9g9DygfmAZp2xMJjk2t16iHF5gCMXe2FUucw2vrW71b2G55cbjPveJwyPJggKZkK9vLg1KyeERyikzK",
+         "signature": "5Yoh65c97UWAzEU2RfBMsRXg3iqDZwdJ3diLSW1kjwHQc7iotaMj5FvcGwTemExp4U7jWGEihBeUezeuCqFNmDH7",
          "state": "simulated",
          "simulations": [
           {
@@ -346,20 +323,25 @@
    }
   },
   {
-   "at": "2026-11-02T10:08:51.656Z",
+   "at": "2026-11-02T10:40:30.460Z",
    "buyLamports": "10000000",
    "mint": "EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump",
    "buyersWithoutPumpSwapVolumeAccount": [
     "6MkqQcHN2oWGPDzA5dz8bnsGKvjHtWPd1tunZqgLLWMa"
    ],
    "buy": {
+    "oneWallet": {
+     "requests": 23,
+     "naming": 7,
+     "maxWallets": 1
+    },
     "waits": [],
-    "ms": 4835,
+    "ms": 3022,
     "reference": "534370622558",
     "blockhash": {
-     "blockhash": "8hXgBzUqaWq3Fz1dUNW17zE5qHVijZoo6sHbuDDVBucK",
-     "lastValidBlockHeight": 442477485,
-     "slot": 464456178
+     "blockhash": "DXiMLT2VHgLjLQRtXB2TiifKoHjDkMrcvymLFwfpYBSg",
+     "lastValidBlockHeight": 442486363,
+     "slot": 464465059
     },
     "legs": [
      {
@@ -368,13 +350,13 @@
       "expectedOut": "534370622558",
       "legExpectedOut": "534370622558",
       "minOut": "507652091430",
-      "quoteMs": 3115,
-      "buildMs": 2340,
+      "quoteMs": 1760,
+      "buildMs": 947,
       "buildCalls": 1,
       "size": 709,
       "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
       "dry": {
-       "signature": "5f44ckkPrg1vwLgcrNiM7FDfjfA57rz6XBpQHc9cGkf5jXHBUNGnwg9jeNJvcsoqJ4xXZryUXumUisyHfWntctrj",
+       "signature": "5D34s6qZdvgFnfZPeABuBh77ADxvdHop1fmMTU3KPyQz47NYdrSoZd8tMUvjprz9nvDCbgni2DAnxPVMtL6gCpZx",
        "state": "simulated",
        "simulations": [
         {
@@ -391,10 +373,20 @@
     ]
    },
    "sell": {
+    "oneWallet": {
+     "requests": 83,
+     "naming": 39,
+     "maxWallets": 1
+    },
     "waits": [
      {
       "at": "B",
-      "method": "simulateTransaction",
+      "method": "getLatestBlockhash",
+      "ms": 300
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
       "ms": 300
      },
      {
@@ -405,16 +397,6 @@
      {
       "at": "B",
       "method": "getLatestBlockhash",
-      "ms": 300
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 600
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
       "ms": 600
      },
      {
@@ -425,11 +407,11 @@
      {
       "at": "B",
       "method": "simulateTransaction",
-      "ms": 1200
+      "ms": 600
      },
      {
       "at": "B",
-      "method": "simulateTransaction",
+      "method": "getLatestBlockhash",
       "ms": 1200
      },
      {
@@ -440,11 +422,11 @@
      {
       "at": "B",
       "method": "simulateTransaction",
-      "ms": 2400
+      "ms": 1200
      },
      {
       "at": "B",
-      "method": "simulateTransaction",
+      "method": "getLatestBlockhash",
       "ms": 2400
      },
      {
@@ -455,25 +437,30 @@
      {
       "at": "B",
       "method": "simulateTransaction",
-      "ms": 4800
+      "ms": 2400
      },
      {
       "at": "B",
-      "method": "simulateTransaction",
+      "method": "getLatestBlockhash",
       "ms": 4800
      },
      {
       "at": "B",
       "method": "getLatestBlockhash",
+      "ms": 4800
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
       "ms": 4800
      }
     ],
-    "ms": 17023,
+    "ms": 15179,
     "reference": "138396082",
     "blockhash": {
-     "blockhash": "3avuVwobafKRTYUsQ96WcCMv3GZshTtPvabzCNJZhr5R",
-     "lastValidBlockHeight": 442477509,
-     "slot": 464456202
+     "blockhash": "Ct5jvQp2NSByKcQCyQxXwQUbMUsTxjEwt6Z3KpVdSWjs",
+     "lastValidBlockHeight": 442486373,
+     "slot": 464465069
     },
     "legs": [
      {
@@ -482,13 +469,13 @@
       "expectedOut": "112574652",
       "legExpectedOut": "112737588",
       "minOut": "106945919",
-      "quoteMs": 1065,
-      "buildMs": 317,
+      "quoteMs": 1100,
+      "buildMs": 248,
       "buildCalls": 1,
       "size": 677,
       "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
       "dry": {
-       "signature": "63z44fCm4q9K9VCK5V6QmRh7WDa4koP6qbBiECqCLafNKZq4ftHHGadi19kdkm5gXZK9wsfSiHnxXAevvEdi5zai",
+       "signature": "4vthhNJz6BkYxnXWAYwc6exBKGmt62LGuWvhZaTT2sA2ugkzgoBgc6XiVwZ23FCjPaBmA2NdLGsmLLBD8Ftxid1c",
        "state": "simulated",
        "simulations": [
         {
@@ -522,7 +509,7 @@
        },
        "dry": [
         {
-         "signature": "5Ju2yPxCGgigAPdQCjHMJc3htkDns2qKXMmfubPDPavZHead52z7LbhiWeEY1YfmRmV3HPQxPfrShgWErWJYdVa7",
+         "signature": "4bi3VwvGi2e4u3xRLoomFg5QUni54m3vGt7jwBBecabDaraEw78KYhGZt6W9dMAA6MXCuG7UkxiHeEY6UDayfTv1",
          "state": "simulated",
          "simulations": [
           {
@@ -544,13 +531,13 @@
       "expectedOut": "15972112",
       "legExpectedOut": "16082311",
       "minOut": "15173506",
-      "quoteMs": 3135,
-      "buildMs": 1037,
+      "quoteMs": 1752,
+      "buildMs": 958,
       "buildCalls": 1,
       "size": 677,
       "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
       "dry": {
-       "signature": "t7z4N4AYSPLWsxRWGETSEJHHesvugHq5xsDt4Jm1MdgEpxhbpQky8uSJvnzWvpdJAGHWpAskx6NffaSsZS5TFBF",
+       "signature": "4YzghE6ES7bFPwGDZ7C3QJfKJYQD3KsaMjjVwGuB2x6imnBfp12Xn2dxBn4pxcZmkvVPhZAoPNzvd7QiUeN6VJJv",
        "state": "simulated",
        "simulations": [
         {
@@ -584,7 +571,7 @@
        },
        "dry": [
         {
-         "signature": "5URVi9jawGYZ89qJ6sUEevdKt57r4JZwWnfjRLhe9cbzKekFwwCEJzWcvHjjJTixisdDcqbLMG1KkX8BFw8ctiAp",
+         "signature": "5tbFZHPAeZFKJpEXY8Ntah7z8UDy1Bgxoyxwwz3ECUMtSFKMw5ToLKbjaMQbM78Ztoa3aNzkL2dQd6DWEU5aCSqV",
          "state": "simulated",
          "simulations": [
           {
@@ -606,13 +593,13 @@
       "expectedOut": "9849316",
       "legExpectedOut": "9920694",
       "minOut": "9356850",
-      "quoteMs": 2380,
-      "buildMs": 1037,
+      "quoteMs": 1746,
+      "buildMs": 937,
       "buildCalls": 1,
       "size": 677,
       "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
       "dry": {
-       "signature": "1e6ACcpkjPsexK6enRkMBAvi31oH5zWQmFkgCLVN8xFKjDsDkMsx2gMwU7TNi91n1WQnc6XyvmfiHps68o62psa",
+       "signature": "2xXVeambnx8B8oLCe24tsvK2aFcAwBk2es45Jn4SjXs59ALoDPcazBRjsPhooch9YSUNb5DfR6ysYwodp4khsRza",
        "state": "simulated",
        "simulations": [
         {
@@ -637,7 +624,7 @@
           "mint": "So11111111111111111111111111111111111111112",
           "native": true,
           "harvest": false,
-          "lamports": "28736321187"
+          "lamports": "28772578629"
          }
         ],
         "keep": [
@@ -653,7 +640,7 @@
        },
        "dry": [
         {
-         "signature": "3kdzFhRUUZuxJsqbMfX4ieu93wXiknTSDGG7rRh5Ku6Yh3ixUNRwkPfLA12sTdQNAwpMeLQmBPFZZKj3pYdn64zC",
+         "signature": "4mzb7PHAiBdgd1HdQ7uw5o3R6C6ti5Z46EbP9QpvQT8zbJ6fqQScJCVETwn5KBCiUG4eMZHLYWXGjen5ChtBqFwC",
          "state": "simulated",
          "simulations": [
           {
@@ -667,295 +654,6 @@
          ]
         }
        ]
-      }
-     }
-    ]
-   }
-  },
-  {
-   "at": "2026-11-02T10:08:28.069Z",
-   "buyLamports": "60000000000",
-   "mint": "FqmuGbw5jtX5D8vsNvEG5M83py2s3RcWyxbWczw3pump",
-   "buyersWithoutPumpSwapVolumeAccount": [],
-   "buy": {
-    "waits": [],
-    "ms": 3092,
-    "reference": "211706810037794",
-    "blockhash": {
-     "blockhash": "7dv3W6w5VgDpUXwaJ1kHXK3XjcvnDj7MxxmcEnezp9Zm",
-     "lastValidBlockHeight": 442477392,
-     "slot": 464456085
-    },
-    "legs": [
-     {
-      "wallet": "He2MvrgaeTTXLsKJpiECLtPojxzGXPyGk8jLWNiWZgcU",
-      "amount": "60000000000",
-      "expectedOut": "211706810037794",
-      "legExpectedOut": "211706810037794",
-      "minOut": "201121469535904",
-      "quoteMs": 1932,
-      "buildMs": 1149,
-      "buildCalls": 1,
-      "size": 803,
-      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
-      "dry": {
-       "signature": "3U3vMVN7mw8k17PhrURg7SdSDxhwsNYuMaiB6UmhL1Bb4iwhmb7JoE2YBHLcK4ojCRrvBugmUb4jLXGx8mRV9obi",
-       "state": "simulated",
-       "simulations": [
-        {
-         "err": null,
-         "units": 103304
-        },
-        {
-         "err": null,
-         "units": 103304
-        }
-       ]
-      }
-     }
-    ]
-   },
-   "sell": {
-    "waits": [
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 300
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 300
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 600
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 600
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 1200
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 1200
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 2400
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 2400
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 4800
-     },
-     {
-      "at": "B",
-      "method": "simulateTransaction",
-      "ms": 4800
-     }
-    ],
-    "ms": 15464,
-    "reference": "9851587861",
-    "blockhash": {
-     "blockhash": "ACovdyyxYLnmu88AzRh6FNupQYd319qZ9ugt9pBoDUCv",
-     "lastValidBlockHeight": 442477405,
-     "slot": 464456098
-    },
-    "legs": [
-     {
-      "wallet": "5DYk6WUDN33fuZiRTAbPeNqYb3DE8aB6uKG5BojpzQxs",
-      "amount": "29679441874975",
-      "expectedOut": "3775712144",
-      "legExpectedOut": "4141989892",
-      "minOut": "3586926536",
-      "quoteMs": 1102,
-      "buildMs": 258,
-      "buildCalls": 1,
-      "size": 770,
-      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
-      "dry": {
-       "signature": "2B2bABvnMyp64r1scEX4q9GQ5tzUnvd8f9jz5cTaxAMndfCCJ9oXSYrzFW8sRXCERUuEN2GM71oKcJ9P9cUi9xRW",
-       "state": "simulated",
-       "simulations": [
-        {
-         "err": null,
-         "units": 75662
-        },
-        {
-         "err": null,
-         "units": 75662
-        }
-       ]
-      },
-      "teardown": {
-       "frames": 1,
-       "ok": true,
-       "plan": {
-        "close": [
-         {
-          "kind": "volume",
-          "address": "9Q9GPnQP4eDKDnHpWpyamAUSVhTTfZUmmVXVRurengFy",
-          "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
-          "lamports": "1346200"
-         },
-         {
-          "kind": "volume",
-          "address": "9bcW9WiBbYJWUXZKksx8JWu7EzbyEZnyJ1RoCGfQvUnZ",
-          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
-          "lamports": "1346200"
-         }
-        ],
-        "keep": [
-         {
-          "address": "7CertkwhCDQcqbNhCFeA83EpDKz1hNXVNMcHRE6HGD3m",
-          "why": "holds 29679441874975 of FqmuGbw5jtX5D8vsNvEG5M83py2s3RcWyxbWczw3pump"
-         }
-        ]
-       },
-       "dry": [
-        {
-         "signature": "31kfUdX6zTNi1mR2RYJsMJSo1x68T55WgxTXmbLgRuX5v1NKNwgP3UXQTRFyjsFe94Hi2bhYTeJFjtmxYd72UN8",
-         "state": "simulated",
-         "simulations": [
-          {
-           "err": null,
-           "units": 28291
-          },
-          {
-           "err": null,
-           "units": 28291
-          }
-         ]
-        }
-       ]
-      }
-     },
-     {
-      "wallet": "A9SJFYSjKqghgFdzan4ETSPJvyJh3JuuP5jLpk9hBkEW",
-      "amount": "25200986775676",
-      "expectedOut": "3205979149",
-      "legExpectedOut": "3549273671",
-      "minOut": "3045680191",
-      "quoteMs": 1852,
-      "buildMs": 1037,
-      "buildCalls": 1,
-      "size": 770,
-      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
-      "dry": {
-       "signature": "v4SCNpiu45dRb3NxjFPMWXCKiW1bXUaNxwz5VSZgNguefJULSWE5a75UXNFChQn8Dkfqje2w5z99axJfccVd22a",
-       "state": "simulated",
-       "simulations": [
-        {
-         "err": null,
-         "units": 66663
-        },
-        {
-         "err": null,
-         "units": 66663
-        }
-       ]
-      },
-      "teardown": {
-       "frames": 1,
-       "ok": true,
-       "plan": {
-        "close": [
-         {
-          "kind": "volume",
-          "address": "4jnKtEs5LCuKTkLe5QxFjo1Kr2TnK45pxRTTYJBWC3UV",
-          "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
-          "lamports": "1346200"
-         },
-         {
-          "kind": "volume",
-          "address": "EMt1fUNHwVTT7E5LxRrJNszT92TTrMmoXXRwS9KfLRWw",
-          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
-          "lamports": "1346200"
-         }
-        ],
-        "keep": [
-         {
-          "address": "3MgCZmY2FFJGu8Xms1FB5pxaJYcYt75znKHz76PvR8j6",
-          "why": "holds 25200986775676 of FqmuGbw5jtX5D8vsNvEG5M83py2s3RcWyxbWczw3pump"
-         }
-        ]
-       },
-       "dry": [
-        {
-         "signature": "4RqhR4K4k2uivL2Fqyt6J3RHyWfdvEUmuK4t8jiMtHSFSMiktkrxWjiv6tDLEQ35j1aL2pyaoTkk9vETn9CkxXTX",
-         "state": "sim-failed",
-         "simulations": [
-          {
-           "err": null,
-           "units": 22291
-          },
-          {
-           "error": "no answer in 5000 ms"
-          }
-         ]
-        }
-       ]
-      }
-     },
-     {
-      "wallet": "9LLqs8hGeZQUozvV5255eCuc6YrAvSGXbrNJV2MyiLLj",
-      "amount": "22559168985233",
-      "expectedOut": "2869896566",
-      "legExpectedOut": "3194502531",
-      "minOut": "2726401737",
-      "quoteMs": 1821,
-      "buildMs": 1033,
-      "buildCalls": 1,
-      "size": 770,
-      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
-      "dry": {
-       "signature": "3MgXDLYc9zxXRiyZtJQ1wRcrxx5uzWSacxQxfZ4oriiT8d6P2KvHJ1KPr7aEV2iday2ZuVZAyxND7ZZJg6A13Agy",
-       "state": "simulated",
-       "simulations": [
-        {
-         "err": null,
-         "units": 66660
-        },
-        {
-         "err": null,
-         "units": 66660
-        }
-       ]
-      },
-      "teardown": {
-       "frames": 0,
-       "ok": true,
-       "plan": {
-        "close": [],
-        "keep": [
-         {
-          "address": "BsaGuvC61FmrFqPxvp8ZVpYrVFX7FjS6V5P7Ck1oLRCb",
-          "why": "holds 22559168985233 of FqmuGbw5jtX5D8vsNvEG5M83py2s3RcWyxbWczw3pump"
-         },
-         {
-          "address": "B6Jx5uDEgV3PTm3VpUC96abNfeavAckZdzg51QKcVmuj",
-          "why": "stable cashback 17992072 unclaimed"
-         },
-         {
-          "address": "9rdPTG2Nm6oPKAzCDYVbgewzyaFmjtHJEhhptPDkXo45",
-          "why": "cashback 74485563 unclaimed"
-         }
-        ]
-       }
       }
      }
     ]

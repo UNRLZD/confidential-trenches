@@ -7,11 +7,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { base64 } from "@scure/base";
-import { runSolanaTrade, solanaRouteAmounts, solanaVolumeAccumulator, SOLANA_PUMP_AMM_PROGRAM, type SolanaRpc, type SolanaTradeDeps, type SolanaTradeRequest } from "../src/index.ts";
+import { base58, base64 } from "@scure/base";
+import {
+  SOLANA_PUMP_AMM_PROGRAM,
+  SOLANA_PUMP_PROGRAM,
+  SOLANA_SOL_MINT,
+  SOLANA_TOKEN_2022_PROGRAM,
+  SOLANA_TOKEN_PROGRAM,
+  runSolanaTrade,
+  solanaAta,
+  solanaRouteAmounts,
+  solanaVolumeAccumulator,
+  type SolanaRpc,
+  type SolanaTradeDeps,
+  type SolanaTradeRequest,
+} from "../src/index.ts";
 
 type Fixture = {
-  requests: { side: "buy" | "sell"; mint: string; slippageBps: number; legs: { wallet: string; amount: string; arm: { own: boolean } }[] }[];
+  requests: { side: "buy" | "sell"; mint: string; slippageBps: number; wallets: string[]; legs: { wallet: string; amount: string; arm: { own: boolean } }[] }[];
   references: { q: { side: string; mint: string; amount: string; amounts: string[] }; answer: { expectedOut: string; expectedOuts: string[] } | null }[];
   builds: { url: string; status: number; body: string }[];
   rpc: { at: "A" | "B"; ask: string; answer: unknown }[];
@@ -22,28 +35,13 @@ const askOf = (method: string, params: readonly unknown[]): string =>
   JSON.stringify(method === "simulateTransaction" ? [method, (params[1] as { accounts?: unknown })?.accounts] : [method, params]);
 
 type Edit = (at: "A" | "B", method: string, n: number, answer: unknown, params: readonly unknown[]) => unknown;
-/** Another wallet of the set that the message names (the flow then simulates it): a system account the recording
- * does not hold, answered here with `lamports` before and `lamports + delta` in its simulation. */
-type Other = { key: string; lamports: number; delta: number };
-const systemAccount = (lamports: number) => ({ data: ["", "base64"], executable: false, lamports, owner: "11111111111111111111111111111111", rentEpoch: 0, space: 0 });
 /** A provider answering from the recording: the n-th ask of a key gets the n-th recorded answer (the last repeats). */
-function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, other?: Other): SolanaRpc & { asks: string[] } {
+function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x): SolanaRpc & { asks: string[] } {
   const by = new Map<string, unknown[]>();
   for (const r of fx.rpc) if (r.at === at) by.set(r.ask, [...(by.get(r.ask) ?? []), r.answer]);
   const seen = new Map<string, number>();
   const asks: string[] = [];
   const fn = async (method: string, params: readonly unknown[]): Promise<unknown> => {
-    if (other && method === "getMultipleAccounts" && Array.isArray(params[0]) && params[0].length > 1 && params[0].includes(other.key)) {
-      const keys = params[0] as string[];
-      const i = keys.indexOf(other.key);
-      const r = (await fn(method, [keys.filter((x) => x !== other.key), params[1]])) as { value: unknown[] };
-      r.value.splice(i, 0, systemAccount(other.lamports));
-      return r;
-    }
-    const sim = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : undefined;
-    if (other && sim && sim.length === 1 && sim[0] === other.key) {
-      return { context: { slot: 1 }, value: { err: null, accounts: [systemAccount(other.lamports + other.delta)], logs: [] } };
-    }
     const k = askOf(method, params);
     asks.push(k);
     const list = by.get(k);
@@ -74,14 +72,14 @@ function builds(urls: string[] = [], keepSlippage = false) {
 }
 const request = (i: number): SolanaTradeRequest & { legs: SolanaTradeRequest["legs"][number][] } => {
   const r = fx.requests[i]!;
-  return { side: r.side, token: r.mint, slippageBps: r.slippageBps, legs: r.legs.map((l) => ({ wallet: l.wallet, amount: BigInt(l.amount), arm: l.arm })) };
+  return { side: r.side, token: r.mint, slippageBps: r.slippageBps, wallets: r.wallets, legs: r.legs.map((l) => ({ wallet: l.wallet, amount: BigInt(l.amount), arm: l.arm })) };
 };
-function deps(i: number, o: { edit?: Edit; scale?: bigint; urls?: string[]; keepSlippage?: boolean; other?: Other } = {}): SolanaTradeDeps {
+function deps(i: number, o: { edit?: Edit; scale?: bigint; urls?: string[]; keepSlippage?: boolean } = {}): SolanaTradeDeps & { providers: readonly [SolanaRpc & { asks: string[] }, SolanaRpc & { asks: string[] }] } {
   const ref = fx.references[i]!.answer!;
   const k = o.scale ?? 10_000n;
   return {
     helper: "https://api.confidential.unrealized.trade",
-    providers: [replay("A", o.edit, o.other), replay("B", o.edit, o.other)],
+    providers: [replay("A", o.edit), replay("B", o.edit)],
     reference: async () => ({ expectedOut: (BigInt(ref.expectedOut) * k) / 10_000n, expectedOuts: ref.expectedOuts.map((x) => (BigInt(x) * k) / 10_000n) }),
     fetch: builds(o.urls, o.keepSlippage),
     // A dry run never sends: this path fails the test if it is ever called.
@@ -157,16 +155,50 @@ test("a floor that rounds to 0 is refused before any build", async () => {
   assert.equal(urls.length, 0);
 });
 
-test("another wallet of the set that the message names is simulated: unchanged passes, changed refuses at S11", async () => {
-  // The set's other wallet, not armed (so it has no leg of its own), is the token's mint address: an account every
-  // buy message names. Its simulated lamports are its read ones (pass), or 1 lamport less (refuse).
-  const legs = (r: ReturnType<typeof request>) => ({ ...r, legs: [...r.legs, { wallet: r.token, amount: 1n, arm: { own: false } }] });
-  const other = { key: request(BUY).token, lamports: 1_461_600 };
-  const same = await runSolanaTrade(legs(request(BUY)), deps(BUY, { other: { ...other, delta: 0 } }));
-  assert.equal(same.legs[0]?.refused, undefined, same.legs[0]?.refused);
-  assert.match(same.legs[1]?.refused ?? "", /not armed/);
-  const moved = await runSolanaTrade(legs(request(BUY)), deps(BUY, { other: { ...other, delta: -1 } }));
-  assert.match(moved.legs[0]?.refused ?? "", /S11 .*another wallet of this user changes/);
+test("one wallet a request: every read and simulation of a buy and a three-wallet sell names one of the user's wallets", async () => {
+  for (const i of [BUY, SELL]) {
+    const req = request(i);
+    const urls: string[] = [];
+    const d = deps(i, { urls });
+    const r = await runSolanaTrade(req, d);
+    for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+    const asks = [...d.providers[0].asks, ...d.providers[1].asks, ...urls];
+    const linked = req.wallets.map((w) => [w, solanaAta(w, req.token, SOLANA_TOKEN_PROGRAM), solanaAta(w, req.token, SOLANA_TOKEN_2022_PROGRAM), solanaAta(w, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM)]);
+    assert.ok(req.wallets.length >= 3 && asks.length > 10);
+    for (const a of asks) {
+      const named = linked.filter((ks) => ks.some((k) => a.includes(k))).length;
+      assert.ok(named <= 1, `${named} wallets in ${a.slice(0, 200)}`);
+    }
+  }
+});
+
+test("S11 refuses a leg whose tx names another of the user's wallets; the user's other wallets elsewhere change nothing", async () => {
+  // the recorded buy names the token's mint read-only; as one of the user's "wallets", the buy is refused statically
+  const req = request(BUY);
+  const named = await runSolanaTrade({ ...req, wallets: [...req.wallets, req.token] }, deps(BUY));
+  assert.match(named.legs[0]?.refused ?? "", /S11 the tx names another wallet of this user/);
+  const clean = await runSolanaTrade({ ...req, wallets: [...req.wallets, base58.encode(new Uint8Array(32).fill(5))] }, deps(BUY));
+  assert.equal(clean.legs[0]?.refused, undefined, clean.legs[0]?.refused);
+});
+
+test("a token transfer into a wallet's token account between the read and the read after the simulation refuses that leg", async () => {
+  const req = request(SELL);
+  const w0 = req.legs[0]!.wallet;
+  const edit: Edit = (_at, method, n, x, params) => {
+    if (method === "getMultipleAccounts" && (params[0] as string[])[0] === w0 && (params[0] as string[]).length === 4 && n === 1) {
+      const acc = (x as { value: ({ lamports: number; data: [string, string] } | null)[] }).value[1];
+      if (acc) {
+        const d = base64.decode(acc.data[0]);
+        const v = new DataView(d.buffer, d.byteOffset);
+        v.setBigUint64(64, v.getBigUint64(64, true) + 1n, true); // the lamports stay: only the data moved
+        acc.data[0] = base64.encode(d);
+      }
+    }
+    return x;
+  };
+  const r = await runSolanaTrade(req, deps(SELL, { edit }));
+  assert.match(r.legs[0]?.refused ?? "", /changed while the trade was checked/);
+  for (const l of r.legs.slice(1)) assert.equal(l.refused, undefined, l.refused);
 });
 
 test("a reference with an E(a_k) of 0 is no reference", async () => {

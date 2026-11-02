@@ -9,8 +9,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
 import {
+  SOLANA_PUMP_AMM_PROGRAM,
   checkSolanaQuote,
   solanaPumpVolumeAccumulator,
+  solanaVolumeAccumulator,
   type SolanaAccountRead,
   type SolanaQuoteCheckId,
   type SolanaQuoteReads,
@@ -91,6 +93,8 @@ const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 // The buy's numbers: E from the G1 device's own pool read (live results[0].pool.expectedOut 51111993061), s = 950 bps
 // (the slippage in the signed route), so minOut_k = floor(E × 9050 / 10000) = 46256353720; S12's tolerance is the kit's
 // SOLANA_SIM_TOL_BPS = 200. The simulation is the landed tx's own balances (meta), the same on both providers.
+// Another wallet of the same user, which the good trades never name.
+const OTHER = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + 3) & 0xff));
 const buyToken = 55_991_176_135n; // the landed buy's token in (meta.postTokenBalances of the wallet's account)
 function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQuoteReads } {
   const sim: SolanaSimulation = {
@@ -100,11 +104,10 @@ function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQu
     tokenAccountLamports: { pre: 0n, post: 1_513_840n }, // the landed buy: ECDKZF… 0 -> 1,513,840 (meta)
     pumpVolumeAccumulator: { pre: 0n, post: 1_346_200n },
     pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
-    otherWallets: [{ pre: 9_874_873n, post: 9_874_873n }],
   };
   return {
     m: msgOf(BUY),
-    req: { side: "buy", wallet: W, token: F.mint, amount: 9_874_873n, spendable: BigInt(BUY.meta.preBalances[0] as number), minOut: 46_256_353_720n },
+    req: { side: "buy", wallet: W, token: F.mint, amount: 9_874_873n, spendable: BigInt(BUY.meta.preBalances[0] as number), minOut: 46_256_353_720n, otherWallets: [OTHER] },
     reads: {
       tables: Object.fromEntries(Object.entries(F.tables).map(([k, [a, b]]) => [k, [read(a), read(b)] as const])),
       mint: [read(F.mintReads[0]), read(F.mintReads[1])],
@@ -133,12 +136,11 @@ function sellCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQ
     tokenAccountLamports: { pre: 1_513_840n, post: 1_513_840n },
     pumpVolumeAccumulator: { pre: 1_346_200n, post: 1_346_200n },
     pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
-    otherWallets: [],
   };
   const b = buyCase();
   return {
     m,
-    req: { side: "sell", wallet: W, token: F.mint, amount: buyToken, spendable: buyToken, minOut: 8_738_870n },
+    req: { side: "sell", wallet: W, token: F.mint, amount: buyToken, spendable: buyToken, minOut: 8_738_870n, otherWallets: [] },
     reads: { ...b.reads, simulations: [sim, structuredClone(sim)], reference: { expectedOut: 9_656_210n, slippageBps: 950 } },
   };
 }
@@ -237,7 +239,17 @@ const CASES: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uin
   ["S11 no simulation on provider B", "S11", (c) => { (c.reads as { simulations: unknown }).simulations = [c.reads.simulations[0], null]; }],
   ["S11 native out 1 lamport over the bound", "S11", (c) => { const s = c.reads.simulations[0] as SolanaSimulation; s.walletLamports.post -= 1n + (s.walletLamports.pre - s.walletLamports.post - (9_874_873n + 13_001n + 15_000n + 1_513_840n + 1_346_200n)); }],
   ["S11 token in below minOut", "S11", (c) => { (c.reads.simulations[1] as SolanaSimulation).tokenAccount.post = 46_256_353_719n; }],
-  ["S11 another wallet of this user changes", "S11", (c) => { ((c.reads.simulations[0] as SolanaSimulation).otherWallets[0] as { post: bigint }).post -= 1n; }],
+  // One wallet a request: no other wallet of the user, nor its accounts for this trade, in the tx at all, in any role.
+  ["S11 the tx names another wallet of the user, read-only", "S11", (c) => { addKey(c.m, OTHER); }],
+  ["S11 the tx names another wallet of the user, writable", "S11", (c) => { const k = c.m.staticKeys[c.m.requiredSignatures] as string; assert.ok(c.m.requiredSignatures < c.m.staticKeys.length - c.m.readonlyUnsigned); (c.req as { otherWallets: readonly string[] }).otherWallets = [k]; }],
+  ["S11 the tx names another wallet of the user through a lookup table", "S11", (c) => { const k = allKeys(c.m)[c.m.staticKeys.length] as string; assert.ok(!c.m.staticKeys.includes(k)); (c.req as { otherWallets: readonly string[] }).otherWallets = [k]; }],
+  ["S11 the tx names another wallet's token account (Token-2022)", "S11", (c) => { addKey(c.m, solanaAta(OTHER, F.mint, T22)); }],
+  ["S11 the tx names another wallet's token account (Token)", "S11", (c) => { addKey(c.m, solanaAta(OTHER, F.mint, TOKEN)); }],
+  ["S11 the tx names another wallet's WSOL account", "S11", (c) => { addKey(c.m, solanaAta(OTHER, "So11111111111111111111111111111111111111112", TOKEN)); }],
+  ["S11 the tx names another wallet's pump volume account", "S11", (c) => { addKey(c.m, solanaVolumeAccumulator(OTHER, PUMP)); }],
+  ["S11 the tx names another wallet's PumpSwap volume account", "S11", (c) => { addKey(c.m, solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM)); }],
+  ["S11 the wallet in its own list of other wallets", "S11", (c) => { (c.req as { otherWallets: readonly string[] }).otherWallets = [W]; }],
+  ["S11 no list of the user's other wallets", "S11", (c) => { (c.req as { otherWallets: unknown }).otherWallets = undefined; }],
   ["S11 the pump volume account takes more than its rent", "S11", (c) => { (c.reads.simulations[0] as SolanaSimulation).pumpVolumeAccumulator.post = 1_346_201n; }],
   ["S11 the PumpSwap volume account takes more than its rent", "S11", (c) => { const s = c.reads.simulations[0] as SolanaSimulation; s.pumpSwapVolumeAccumulator.post = 1_346_201n; s.walletLamports.post -= 1_346_201n; }],
   ["S11 the PumpSwap volume account drained (delta < 0)", "S11", (c) => { for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.pumpSwapVolumeAccumulator = { pre: 1_346_200n, post: 0n }; x.walletLamports.post += 1_346_200n; } }],

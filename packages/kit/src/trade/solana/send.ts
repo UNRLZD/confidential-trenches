@@ -69,8 +69,10 @@ export const SOLANA_ANSWER_MAX_BYTES = 1024 * 1024;
 const MAX_PROCESSING_AGE = 150;
 /** A provider answering 429 waits 1 s, then twice as long each time, up to this. */
 const BACKOFF_MAX_MS = 8_000;
-/** getSignatureStatuses takes at most 256 signatures a call (Solana RPC docs); a larger set is read in chunks. */
-const STATUS_CHUNK = 256;
+/** A provider's request rate when the caller names none: Solana's public RPC allows 40 requests per 10 s per IP for one
+ * method and 100 for all (solana.com/docs/references/clusters.md, read 2026-10-25), and PublicNode publishes no
+ * number, so a keyless provider is held to 4 requests a second, every method counted. A keyed provider takes its own. */
+export const SOLANA_KEYLESS_RPC_RPS = 4;
 
 export type SolanaFetch = (url: string, init: RequestInit) => Promise<Response>;
 /** One JSON-RPC call on one Solana provider: resolves the call's `result`, rejects on any other answer. `url`, when
@@ -116,6 +118,8 @@ export type SolanaSetOptions = {
   readonly pollMs?: number;
   readonly deadlineMs?: number;
   readonly callTimeoutMs?: number;
+  /** Each provider's most requests a second, every call this set makes on it counted (default SOLANA_KEYLESS_RPC_RPS). */
+  readonly providerRps?: readonly [number, number];
 };
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e).slice(0, 200);
@@ -404,6 +408,9 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const pollMs = opts.pollMs ?? SOLANA_STATUS_POLL_MS;
   const deadlineMs = opts.deadlineMs ?? SOLANA_SET_DEADLINE_MS;
   const callTimeoutMs = opts.callTimeoutMs ?? SOLANA_CALL_TIMEOUT_MS;
+  const rps = opts.providerRps ?? [SOLANA_KEYLESS_RPC_RPS, SOLANA_KEYLESS_RPC_RPS];
+  if (!rps.every((r) => typeof r === "number" && Number.isFinite(r) && r > 0)) throw new Error("providerRps must be above 0");
+  const gapMs = [1_000 / rps[0]!, 1_000 / rps[1]!] as const;
   const t0 = Date.now();
   const outcomes: SolanaTxOutcome[] = txs.map((t) => ({ signature: t.signature, state: "unknown", sends: [] }));
   const decided = txs.map(() => false);
@@ -422,6 +429,10 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const invalidAt = [new Map<string, number>(), new Map<string, number>()] as const;
   const histNone = [new Map<string, number>(), new Map<string, number>()] as const;
   const fastInFlight = [false, false];
+  // Per provider: the earliest time its next call may start (calls start at least gapMs apart), and the fill poll's
+  // round-robin position over the undecided txs.
+  const nextAt = [0, 0];
+  const fastCursor = [-1, -1];
   const deadInFlight = [false, false];
   const backoffMs = [0, 0];
   const backoffUntil = [0, 0];
@@ -440,10 +451,18 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   const past = (i: number): boolean => pastOn(0, i) && pastOn(1, i);
   const eligible = (i: number): boolean => !decided[i] && !past(i);
 
-  /** One call on provider p, timed out, with its 429 back-off. Rejects on any failure. */
+  /** One call on provider p, started no sooner than gapMs after its last, timed out, with its 429 back-off. Rejects on
+   * any failure, and without calling once the set is over. */
   function call(p: 0 | 1, method: string, params: readonly unknown[]): Promise<unknown> {
     const rpc = opts.providers[p];
-    return withTimeout(Promise.resolve().then(() => rpc(method, params)), callTimeoutMs).then(
+    const now = Date.now();
+    const wait = Math.max(0, nextAt[p]! - now);
+    nextAt[p] = Math.max(now, nextAt[p]!) + gapMs[p];
+    const gate = wait > 0 ? new Promise<void>((r) => setTimeout(r, wait)) : Promise.resolve();
+    return gate.then(() => {
+      if (over) throw new Error("the set is over");
+      return withTimeout(Promise.resolve().then(() => rpc(method, params)), callTimeoutMs);
+    }).then(
       (v) => { backoffMs[p] = 0; return v; },
       (e) => {
         if (/\b429\b/.test(errText(e))) {
@@ -532,32 +551,35 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
     if (decided.every(Boolean)) end();
   }
 
-  /** getSignatureStatuses for these txs on p, chunked; null when any chunk is not an answer. */
-  async function statuses(p: 0 | 1, idx: number[], history: boolean): Promise<{ i: number; r: StatusRead; slot: number }[] | null> {
-    const out: { i: number; r: StatusRead; slot: number }[] = [];
-    for (let c = 0; c < idx.length; c += STATUS_CHUNK) {
-      const part = idx.slice(c, c + STATUS_CHUNK);
-      const ans = readStatuses(await call(p, "getSignatureStatuses", [part.map((i) => txs[i]!.signature), { searchTransactionHistory: history }]), part.length);
-      if (!ans) return null;
-      part.forEach((i, k) => out.push({ i, r: ans.reads[k]!, slot: ans.slot }));
-    }
-    return out;
+  /** getSignatureStatuses for one tx on p: one signature a request, never a batch, since each signature names its fee
+   * payer, one of the user's wallets, and no request may carry two of them. Null when it is not an answer. */
+  async function status(p: 0 | 1, i: number, history: boolean): Promise<{ r: StatusRead; slot: number } | null> {
+    const ans = readStatuses(await call(p, "getSignatureStatuses", [[txs[i]!.signature], { searchTransactionHistory: history }]), 1);
+    return ans ? { r: ans.reads[0]!, slot: ans.slot } : null;
   }
 
-  // The fill poll: the status cache only (searchTransactionHistory: false), every undecided tx.
+  // The fill poll: the status cache only (searchTransactionHistory: false), one undecided tx a call, in turn, so each
+  // is read about every pollMs and the calls are spread over it (fastPeriod), never sent in a burst.
   function readFast(p: 0 | 1): void {
     if (fastInFlight[p] || over || backedOff(p)) return;
-    const idx = txs.map((_, i) => i).filter((i) => !decided[i]);
-    if (idx.length === 0) return;
+    let i = -1;
+    for (let step = 1; step <= txs.length; step++) {
+      const k = (fastCursor[p]! + step) % txs.length;
+      if (!decided[k]) { i = k; break; }
+    }
+    if (i < 0) return;
+    fastCursor[p] = i;
     fastInFlight[p] = true;
-    statuses(p, idx, false)
+    status(p, i, false)
       .then((got) => {
         if (over || !got) return; // a broken answer is no answer
-        for (const g of got) record(p, txs[g.i]!.signature, g.r);
+        record(p, txs[i]!.signature, got.r);
         decide();
       }, () => {})
       .finally(() => { fastInFlight[p] = false; });
   }
+  /** The fill poll's period on p: pollMs over the undecided txs, never under the provider's gap. */
+  const fastPeriod = (p: 0 | 1): number => Math.max(pollMs / Math.max(1, decided.filter((d) => !d).length), gapMs[p]);
 
   // The dead check on p, every rebroadcast: the finalized bank's height and slot; every undecided tx's blockhash at
   // processed; for each tx past its lastValidBlockHeight there, a status read with searchTransactionHistory: true. Each step's answer carries its bank's slot, which deadOn compares.
@@ -594,12 +616,14 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
       // cache has dropped (a fill) whatever the blockhash reads; it counts toward dead only through deadOn's gates.
       const check = open.filter((i) => !decided[i] && cur.height > txs[i]!.lvbh);
       if (over || check.length === 0) return;
-      const got = await statuses(p, check, true);
-      if (over || !got) return;
-      for (const g of got) {
-        const sig = txs[g.i]!.signature;
-        record(p, sig, g.r);
-        if (g.r.kind === "none") histNone[p].set(sig, g.slot);
+      for (const i of check) {
+        if (over || decided[i]) continue;
+        const got = await status(p, i, true);
+        if (over) return;
+        if (!got) continue;
+        const sig = txs[i]!.signature;
+        record(p, sig, got.r);
+        if (got.r.kind === "none") histNone[p].set(sig, got.slot);
         else histNone[p].delete(sig);
       }
       decide();
@@ -610,16 +634,22 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
 
   broadcast(); // the first send, in this tick, before anything is awaited
   const leaves = limited.map((p, k) => paceJoin(p.paceKey ?? p, p.minIntervalMs!, () => nextFor(k)));
-  const timers = [
-    setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs),
-    setInterval(() => { readFast(0); readFast(1); }, pollMs),
-  ];
+  const timers = [setInterval(() => { readDead(0); readDead(1); broadcast(); }, rebroadcastMs)];
+  const fastTimers: (ReturnType<typeof setTimeout> | undefined)[] = [undefined, undefined];
+  const fastTick = (p: 0 | 1): void => {
+    if (over) return;
+    readFast(p);
+    fastTimers[p] = setTimeout(() => fastTick(p), fastPeriod(p));
+  };
+  fastTimers[0] = setTimeout(() => fastTick(0), fastPeriod(0));
+  fastTimers[1] = setTimeout(() => fastTick(1), fastPeriod(1));
   const deadline = setTimeout(end, deadlineMs);
 
   function end(): void {
     if (over) return;
     over = true;
     for (const t of timers) clearInterval(t);
+    for (const t of fastTimers) clearTimeout(t);
     for (const leave of leaves) leave();
     clearTimeout(deadline);
     finish({ txs: outcomes });

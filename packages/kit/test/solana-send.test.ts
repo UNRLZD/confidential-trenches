@@ -813,3 +813,63 @@ test("Low: a pacer leaves the map once its last set is done and its interval has
     assert.equal(count!(), before, `after set ${n}, its pacer is gone`);
   }
 });
+
+// ---- one signature a status request (the wallet paper's request table, row 8: one address per request; each
+// signature names its fee payer, one of the user's wallets), spread over the poll, within the provider's rate
+const statusCalls = (p: FakeProvider) => p.calls.map((c, k) => ({ ...c, k })).filter((c) => c.method === "getSignatureStatuses");
+
+test("every status read carries one signature, on both providers, for the fill poll and the history read", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const set = [tx(91), tx(92), tx(93)];
+  a.height = 2_000; // past every tx's lastValidBlockHeight, so the dead check reads the history too
+  b.height = 2_000;
+  const h = sendSolanaSet(set, { ...opts, deadlineMs: 6_000 });
+  await advance(6_000);
+  await h.done;
+  for (const p of [a, b]) {
+    const calls = statusCalls(p);
+    assert.ok(calls.some((c) => (c.params[1] as { searchTransactionHistory?: boolean }).searchTransactionHistory === true), "a history read ran");
+    assert.ok(calls.length >= 6, `${calls.length} status reads`);
+    for (const c of calls) assert.equal((c.params[0] as string[]).length, 1, "one signature a request");
+    for (const s of set) assert.ok(calls.some((c) => (c.params[0] as string[])[0] === sigOf(s)), "every tx is read");
+  }
+});
+
+test("the fill poll is spread over the interval: one tx a call, in turn, never two calls in the same tick", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: number[] = [];
+  const rpc: SolanaRpc = async (m, p) => { if (m === "getSignatureStatuses") at.push(Date.now()); return a.rpc(m, p); };
+  const set = [tx(94), tx(95), tx(96)];
+  // a fast keyed provider (100 a second), so the spread is pollMs / 3, not the rate's gap
+  const h = sendSolanaSet(set, { paths: [path("rpc").path], providers: [rpc, b.rpc], pollMs: 300, rebroadcastMs: 60_000, deadlineMs: 3_000, providerRps: [100, 100] });
+  for (let ms = 0; ms < 3_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await h.done;
+  assert.ok(at.length >= 20, `${at.length} reads`);
+  const gaps = at.slice(1).map((x, i) => x - at[i]!);
+  assert.ok(gaps.every((g) => g >= 90), `gaps ${gaps.join(",")}`);
+  const sigs = statusCalls(a).map((c) => (c.params[0] as string[])[0]);
+  assert.deepEqual(sigs.slice(0, 6), [...set, ...set].map(sigOf), "in turn");
+});
+
+test("a provider's request rate stays within its cap, every method counted", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: number[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push(Date.now()); return a.rpc(m, p); };
+  a.height = 2_000;
+  const set = [tx(97), tx(98), tx(99), tx(100), tx(101)];
+  const h = sendSolanaSet(set, { paths: [path("rpc").path], providers: [rpc, b.rpc], deadlineMs: 10_000 });
+  for (let ms = 0; ms < 10_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await h.done;
+  assert.ok(at.length >= 30, `${at.length} calls`);
+  for (const x of at) {
+    const inWindow = at.filter((y) => y >= x && y < x + 1_000).length;
+    assert.ok(inWindow <= kit.SOLANA_KEYLESS_RPC_RPS, `${inWindow} calls in the second from ${x} ms`);
+  }
+});

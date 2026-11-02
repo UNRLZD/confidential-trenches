@@ -29,6 +29,8 @@ const TOKEN = key(9);
 const W1 = key(1);
 const W2 = key(2);
 const W3 = key(3);
+// Every Solana wallet of the user: the set's and others the trade never names.
+const WALLETS = [W1, W2, W3, key(4)];
 
 type Call = { method: string; params: readonly unknown[] };
 function provider(answer: (c: Call) => unknown): SolanaRpc & { calls: Call[] } {
@@ -76,7 +78,7 @@ test("a wallet not armed by the device's own withdrawal is refused before anythi
   const fetched: string[] = [];
   const refs: unknown[] = [];
   const d = deps({ fetched, refs, sign: async () => assert.fail("never signed") });
-  const r = await runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 500, legs: [{ wallet: W1, amount: 10_000_000n, arm: { own: false } }, { wallet: W2, amount: 10_000_000n, arm: { own: false } }] }, { ...d, dry: false });
+  const r = await runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 500, wallets: WALLETS, legs: [{ wallet: W1, amount: 10_000_000n, arm: { own: false } }, { wallet: W2, amount: 10_000_000n, arm: { own: false } }] }, { ...d, dry: false });
   assert.deepEqual(fetched, []);
   assert.deepEqual(refs, []);
   for (const p of d.providers) assert.equal((p as unknown as { calls: Call[] }).calls.length, 0);
@@ -90,8 +92,7 @@ test("a wallet not armed by the device's own withdrawal is refused before anythi
 test("in a mixed set, only the legs armed by the device's own withdrawal are built, and the floors are over their size alone", async () => {
   const fetched: string[] = [];
   const refs: { amount: bigint }[] = [];
-  const r = await runSolanaTrade(
-    { side: "buy", token: TOKEN, slippageBps: 500, legs: [{ wallet: W1, amount: 30_000_000n, arm: { own: true } }, { wallet: W2, amount: 50_000_000n, arm: { own: false } }, { wallet: W3, amount: 10_000_000n, arm: { own: true } }] },
+  const r = await runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 500, wallets: WALLETS, legs: [{ wallet: W1, amount: 30_000_000n, arm: { own: true } }, { wallet: W2, amount: 50_000_000n, arm: { own: false } }, { wallet: W3, amount: 10_000_000n, arm: { own: true } }] },
     deps({ fetched, refs: refs as unknown[] }),
   );
   assert.deepEqual(refs.map((q) => q.amount), [40_000_000n]);
@@ -108,18 +109,22 @@ test("in a mixed set, only the legs armed by the device's own withdrawal are bui
 
 test("no reference pool, no build: every leg is refused", async () => {
   const fetched: string[] = [];
-  const r = await runSolanaTrade({ side: "sell", token: TOKEN, slippageBps: 100, legs: [{ wallet: W1, amount: 5n, arm: { own: true } }] }, deps({ fetched, reference: async () => null }));
+  const r = await runSolanaTrade({ side: "sell", token: TOKEN, slippageBps: 100, wallets: WALLETS, legs: [{ wallet: W1, amount: 5n, arm: { own: true } }] }, deps({ fetched, reference: async () => null }));
   assert.deepEqual(fetched, []);
   assert.match(r.legs[0]?.refused ?? "", /no reference pool/);
 });
 
 test("the request is checked before anything is read", async () => {
   const leg = { wallet: W1, amount: 1n, arm: { own: true } };
-  await assert.rejects(runSolanaTrade({ side: "buy", token: "x", slippageBps: 1, legs: [leg] }, deps()), /address/);
-  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 10_000, legs: [leg] }, deps()), /slippage/);
-  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, legs: [leg, leg] }, deps()), /twice/);
-  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, legs: [{ ...leg, amount: 0n }] }, deps()), /u64/);
-  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, legs: [leg] }, { ...deps(), dry: false }), /no signer/);
+  await assert.rejects(runSolanaTrade({ side: "buy", token: "x", slippageBps: 1, wallets: WALLETS, legs: [leg] }, deps()), /address/);
+  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 10_000, wallets: WALLETS, legs: [leg] }, deps()), /slippage/);
+  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, wallets: WALLETS, legs: [leg, leg] }, deps()), /twice/);
+  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, wallets: WALLETS, legs: [{ ...leg, amount: 0n }] }, deps()), /u64/);
+  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, wallets: WALLETS, legs: [leg] }, { ...deps(), dry: false }), /no signer/);
+  // the user's wallets: a list of addresses that holds every leg's wallet
+  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, wallets: [W2], legs: [leg] }, deps()), /not in the user's wallets/);
+  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, wallets: undefined as unknown as string[], legs: [leg] }, deps()), /user's wallet addresses/);
+  await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, wallets: [W1, "x"], legs: [leg] }, deps()), /user's wallet addresses/);
 });
 
 test("the blockhash is read at finalized on both providers, and the older read is used", async () => {
@@ -221,6 +226,15 @@ test("the signer's answer goes into the slot only when it verifies against the w
   assert.equal(dry.length, WIRE.length);
 });
 
+test("the message signed is the checked wire's own message: any other is refused before the signer is asked", async () => {
+  const never = { sign: async () => assert.fail("never signed") };
+  const other = Uint8Array.from([0x80, 1, 2, 3, 4, 6]);
+  await assert.rejects(solanaSignedWire(never, PK, { wire: WIRE, message: other }), /not the checked wire's message/);
+  await assert.rejects(solanaSignedWire(never, PK, { wire: WIRE, message: MSG.subarray(1) }), /not the checked wire's message/);
+  await assert.rejects(solanaSignedWire(never, PK, { wire: Uint8Array.from([2, ...new Uint8Array(128), ...MSG]), message: MSG }), /not the checked wire's message/);
+  await assert.rejects(solanaSignedWire({ dry: true }, PK, { wire: WIRE, message: other }), /not the checked wire's message/);
+});
+
 // ---- after the send
 type Acct = { owner: string; lamports: number; data: [string, string] } | null;
 const T = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -246,9 +260,9 @@ function after(statusOf: (sig: string) => unknown, acc: (key: string) => Acct | 
     return new Error(`unexpected ${c.method}`);
   });
 }
-const rec = (w: string) => ({ wallet: w, amount: 5n, expectedOut: 10n, minOut: 9n }) as Parameters<typeof finishSolanaSet>[1][number];
+const rec = (w: string, sellsAll = true) => ({ wallet: w, amount: 5n, expectedOut: 10n, minOut: 9n, sellsAll }) as Parameters<typeof finishSolanaSet>[1][number];
 const tx = (n: number, state: string) => ({ signature: base58.encode(new Uint8Array(64).fill(n)), state }) as unknown as SolanaTxOutcome;
-const sellReq = { side: "sell" as const, token: TOKEN, slippageBps: 100, legs: [] };
+const sellReq = { side: "sell" as const, token: TOKEN, slippageBps: 100, wallets: WALLETS, legs: [] };
 const fdeps = (a: SolanaRpc, b: SolanaRpc) => ({ ...deps(), providers: [a, b] as const, dry: false });
 
 test("after the send: an unknown none filled gives no stage, never not_landed, and no teardown behind it", async () => {
@@ -289,4 +303,32 @@ test("a filled sell keeps its record when the read after it fails: the failure i
   assert.equal(await finishSolanaSet(sellReq, r, [tx(1, "filled")], fdeps(a, b), T), "filled");
   assert.equal(r[0]?.outcome?.state, "filled");
   assert.match(r[0]?.teardown?.refused ?? "", /429/);
+});
+
+test("the stage goes out as soon as the fills are read, before any teardown read or send", async () => {
+  const log: string[] = [];
+  const atas = new Map([W1, W2].map((w) => [solanaAta(w, TOKEN, T), w]));
+  const mk = (who: string) => {
+    const p = after(() => ok, (k) => (atas.has(k) ? tokenAcc(0n, atas.get(k)) : null));
+    return Object.assign(async (m: string, params: readonly unknown[]) => { log.push(`${who} ${m}`); return p(m, params); }, { calls: p.calls });
+  };
+  const r = [rec(W1), rec(W2)];
+  const stage = await finishSolanaSet(sellReq, r, [tx(1, "filled"), tx(2, "filled")], fdeps(mk("A"), mk("B")), T, (s) => log.push(`STAGE ${s}`));
+  assert.equal(stage, "filled");
+  const at = log.indexOf("STAGE filled");
+  const firstTeardown = log.findIndex((x) => / getMultipleAccounts$/.test(x));
+  assert.ok(at >= 0 && firstTeardown > at, log.join(" | "));
+  assert.ok(r[0]?.teardown, "the teardown still ran, after the stage");
+});
+
+test("a filled sell of part of a balance is not torn down; only a sell of the whole balance is", async () => {
+  const atas = new Map([W1, W2].map((w) => [solanaAta(w, TOKEN, T), w]));
+  const a = after(() => ok, (k) => (atas.has(k) ? tokenAcc(0n, atas.get(k)) : null));
+  const b = after(() => ok, (k) => (atas.has(k) ? tokenAcc(0n, atas.get(k)) : null));
+  const r = [rec(W1, false), rec(W2, true)];
+  assert.equal(await finishSolanaSet(sellReq, r, [tx(1, "filled"), tx(2, "filled")], fdeps(a, b), T), "filled");
+  assert.equal(r[0]?.teardown, undefined);
+  assert.ok(r[1]?.teardown);
+  const read = (p: { calls: Call[] }) => p.calls.filter((c) => c.method === "getMultipleAccounts").flatMap((c) => c.params[0] as string[]);
+  assert.ok(!read(a).includes(solanaAta(W1, TOKEN, T)) && !read(b).includes(solanaAta(W1, TOKEN, T)), "nothing is read for the part sell's teardown");
 });

@@ -396,6 +396,21 @@ test("crossing: a buy past the curve's end buys the rest from the pool-to-be, as
   assert.throws(() => solanaCurveOut("buy", 5_000_000_000n, endCurve, G, pumpFees, BILLION, endCurve.realTokenReserves), /empty pool-to-be/);
 });
 
+test("crossing: a curve that stores WSOL as its quote is a SOL curve too (pump-sdk isLegacyQuoteMint): the migration fee comes off", () => {
+  const wsol = { ...endCurve, quoteMint: "So11111111111111111111111111111111111111112" };
+  assert.equal(solanaCurveOut("buy", 5_000_000_000n, wsol, G, pumpFees, BILLION, END_BALANCE).out, 12_337_575_211_021n);
+});
+
+test("crossing: a budget that covers the curve's end with under 2 lamports left after fees buys exactly the end", () => {
+  // what R costs: curveNet = R × vQ / (vT − R) + 1, and its ceil fees (95 + 30 bps)
+  const R = endCurve.realTokenReserves;
+  const curveNet = (R * vQ0) / (vT0 - R) + 1n;
+  const ceil = (x: bigint, bps: bigint) => (x * bps + 9_999n) / 10_000n;
+  const curveCost = curveNet + ceil(curveNet, 95n) + ceil(curveNet, 30n);
+  for (const left of [1n, 2n]) assert.equal(solanaCurveOut("buy", curveCost + left, endCurve, G, pumpFees, BILLION, END_BALANCE).out, R, `${left} left`);
+  assert.ok(solanaCurveOut("buy", curveCost + 1_000_000n, endCurve, G, pumpFees, BILLION, END_BALANCE).out > R, "more left buys past the end");
+});
+
 test("a mayhem curve stops at its end, as the program does", () => {
   const mayhem = { ...endCurve, isMayhemMode: true };
   assert.equal(solanaCurveOut("buy", 5_000_000_000n, mayhem, G, pumpFees, BILLION, END_BALANCE).out, endCurve.realTokenReserves);
