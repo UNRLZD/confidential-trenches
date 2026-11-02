@@ -6,6 +6,7 @@
 //   Tx: near <tx hash> <signer account>
 //   Tx: near-testnet <tx hash> <signer account>
 //   Tx: solana <signature>
+//   Tx: solana-devnet <signature>
 //   Tx: base <0x hash>
 //   Tx: robinhood <0x hash>
 //   Deleted: near <account>            a one-use account the record's own txs swept, now gone (also near-testnet)
@@ -67,9 +68,13 @@ export const RPCS = {
   // test.rpc.fastnear.com and near-testnet.drpc.org keep only recent txs (each answered UNKNOWN_TRANSACTION for a
   // 2026-10-26 tx that both archival RPCs read), so FastNEAR's archival RPC stands in for its test.rpc.
   "near-testnet": ["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.testnet.near.org"],
+  // Solana devnet, read 2026-11-02 between 23:12 and 23:14Z: the cluster's public RPC and OnFinality's public devnet
+  // endpoint each answered getTransaction for one devnet signature (rpc-operators.mjs names both).
+  "solana-devnet": ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
 };
 // test networks: read back like any chain, never real-money proof
-export const TESTNET = new Set(["near-testnet"]);
+export const TESTNET = new Set(["near-testnet", "solana-devnet"]);
+const SOLANA = new Set(["solana", "solana-devnet"]);
 const NEAR = new Set(["near", "near-testnet"]);
 // The build starts here: a tx before it is not this repo's (a pasted research tx, say).
 export const FLOOR = Date.parse("2026-11-01T00:00:00Z");
@@ -89,6 +94,7 @@ const FORMAT = {
   robinhood: /^0x[0-9a-f]{64}$/,
 };
 FORMAT["near-testnet"] = FORMAT.near;
+FORMAT["solana-devnet"] = FORMAT.solana;
 // a line that starts with Tx or Money path and a colon, in any shape (after a bullet "-", "*", "+" or "1.", a quote ">",
 // bold "**"): it must parse, or it is refused. The same words further into a line are prose (a Repro that quotes a
 // record line, a clause that cites "(tx: <hash>)"), not record lines.
@@ -306,7 +312,7 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       out.result = r;
       return when(Number(BigInt(ns) / 1000000n), floor);
     }
-    if (chain === "solana") {
+    if (SOLANA.has(chain)) {
       j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep, rateWait);
       if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
       if (!j.result) return "missing";

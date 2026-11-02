@@ -11,9 +11,14 @@
 //  - rpc.mainnet.chain.robinhood.com: Robinhood (docs.robinhood.com/chain/connecting, "RPC
 //    https://rpc.mainnet.chain.robinhood.com").
 //  - robinhood-rpc.publicnode.com: PublicNode (robinhood.publicnode.com, "RPC Endpoint ... https://robinhood-rpc.publicnode.com").
+//  - api.devnet.solana.com: the Solana cluster's public devnet RPC (docs.anza.xyz/clusters/available, "RPC URL for
+//    Devnet: https://api.devnet.solana.com").
+//  - solana-devnet.api.onfinality.io: OnFinality's public devnet endpoint (its /public path, keyless, rate-limited);
+//    it answered getGenesisHash with devnet's EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG on 2026-11-02 at 23:12Z.
 /** chain -> host -> operator */
 export const RPC_OPERATORS = Object.freeze({
   solana: Object.freeze({ "api.mainnet-beta.solana.com": "solana", "public.rpc.solanavibestation.com": "solanavibestation" }),
   base: Object.freeze({ "mainnet.base.org": "base", "base.drpc.org": "drpc" }),
   robinhood: Object.freeze({ "rpc.mainnet.chain.robinhood.com": "robinhood", "robinhood-rpc.publicnode.com": "publicnode" }),
+  "solana-devnet": Object.freeze({ "api.devnet.solana.com": "solana", "solana-devnet.api.onfinality.io": "onfinality" }),
 });
