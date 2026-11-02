@@ -470,6 +470,13 @@ function s8(c: Ctx): SolanaQuoteResult {
 // S8's compute cap for a Jupiter route_v2 instruction's data, which the build (trade/solana/build.ts) also sets as the
 // limit, so the two never differ: a one-step pump.fun curve route gets the pump cap of its step, every other route,
 // and any data that is not route_v2, the general one.
+/** The route's signed amounts (route_v2 or shared_accounts_route_v2, by the layouts above), or null for any other data. */
+export function solanaRouteAmounts(routeData: Uint8Array): { inAmount: bigint; quotedOut: bigint; slippageBps: number } | null {
+  const d = routeData;
+  if (d.length >= 34 && eqBytes(d.subarray(0, 8), Uint8Array.from(ROUTE_V2))) return { inAmount: u64(d, 8), quotedOut: u64(d, 16), slippageBps: u16(d, 24) };
+  if (d.length >= 35 && eqBytes(d.subarray(0, 8), Uint8Array.from(SHARED_ROUTE_V2))) return { inAmount: u64(d, 9), quotedOut: u64(d, 17), slippageBps: u16(d, 25) };
+  return null;
+}
 export function solanaRouteCuCap(routeData: Uint8Array): number {
   if (routeData.length < 34 || !eqBytes(routeData.subarray(0, 8), Uint8Array.from(ROUTE_V2))) return SOLANA_CU_LIMIT.other;
   const step = u32(routeData, 30) === 1 ? routeData[34] : undefined;

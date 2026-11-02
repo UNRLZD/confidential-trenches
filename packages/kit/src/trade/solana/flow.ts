@@ -1,0 +1,484 @@
+// The Solana trade on the device, joined (markets paper §6.1 rows M1.1-M1.3, T1.3 the standard-size set, T2.1, LD1).
+// One call takes the user's request and the set's wallets and runs: the device's own reads on two providers, one build
+// per wallet through the helper's Jupiter proxy (build.ts), the assembly on the device's own blockhash and tables, the
+// checks S1-S13 on the bytes about to be signed (checks.ts), the signatures (the caller's signer, on the device), the
+// send on every path at once and the fill read on two providers (send.ts); after a sell of a wallet's whole balance,
+// the teardown frames (06c S-4, S-5; build.ts, checks.ts). Nothing from the helper or the build is trusted for what is
+// signed: every leg signs only bytes that passed checkSolanaQuote on the device's own reads.
+//
+// - Wallets: a leg is signed only from a wallet whose arm (l, j) is the device's own withdrawal (wallet.md §2.3, the
+//   signing page's "Buy from fresh wallets" row); any other leg is refused before anything is read for it.
+// - Blockhash: getLatestBlockhash at `finalized` on both providers; the read from the lower slot is used, so both
+//   providers already hold it, with that read's own lastValidBlockHeight.
+// - Floors (T1.3): E(A) is the device's own pool read for the whole size A = Σ a_k (the caller's `reference`, never
+//   the helper or the route); each wallet's reference is E_k = ⌊E(A) × a_k / A⌋ and its floor minOut_k =
+//   ⌊E_k × (1 − s)⌋. The build is asked at the user's s; if the route's decoded floor is under minOut_k, it is asked once
+//   more at the slippage that puts the floor on minOut_k, and refused if the route's quoted out is not above minOut_k.
+// - Reads that gate a signature, all on both providers (LD1): the build's lookup tables, the mint, the rents in play,
+//   the wallet's balances and the simulation (sigVerify off, the blockhash replaced) with its post-state.
+// - Fill: sendSolanaSet's two-provider rule. A tx still "unknown" at the send's deadline is read again on both
+//   providers (searchTransactionHistory); it is filled or failed only when both say so, and otherwise stays unknown:
+//   never a fill, never dead, and no teardown runs behind it.
+import { base58 } from "@scure/base";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import {
+  SOLANA_TOKEN_2022_PROGRAM,
+  SOLANA_TOKEN_PROGRAM,
+  checkSolanaQuote,
+  checkSolanaTeardown,
+  solanaPumpVolumeAccumulator,
+  solanaRouteAmounts,
+  solanaTeardownAddresses,
+  solanaTeardownPlan,
+  type SolanaAccountRead,
+  type SolanaHeldRead,
+  type SolanaQuoteVerdict,
+  type SolanaSimulation,
+  type SolanaTeardownVerdict,
+} from "../../checks/solana/checks.ts";
+import { SOLANA_ALT_PROGRAM, solanaAta, solanaDecodeLookupTable, type SolanaLookupTable } from "../../checks/solana/message.ts";
+import {
+  SolanaBuildError,
+  assembleSolanaSwap,
+  buildSolanaTeardown,
+  fetchSolanaJupiterBuild,
+  readSolanaBlockhash,
+  simulateSolanaTeardown,
+  type SolanaAssembled,
+  type SolanaBlockhash,
+  type SolanaBuildRequest,
+} from "./build.ts";
+import { dryRunSolanaSet, sendSolanaSet, type SolanaDryTx, type SolanaFetch, type SolanaRpc, type SolanaSendPath, type SolanaTxOutcome } from "./send.ts";
+
+export type SolanaTradeLeg = {
+  readonly wallet: string;
+  /** a_k: lamports on a buy, the token's base units on a sell. */
+  readonly amount: bigint;
+  /** The wallet's arm (l, j): `own` is true only when its funding was this device's own withdrawal (wallet.md §2.3). */
+  readonly arm: { readonly own: boolean };
+};
+export type SolanaTradeRequest = {
+  readonly side: "buy" | "sell";
+  readonly token: string;
+  /** s, the user's slippage. */
+  readonly slippageBps: number;
+  readonly legs: readonly SolanaTradeLeg[];
+};
+export type SolanaTradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
+export type SolanaTradeDeps = {
+  /** The helper's origin, for the Jupiter build proxy. */
+  readonly helper: string;
+  /** Provider A (device-direct) and provider B (LD1). */
+  readonly providers: readonly [SolanaRpc, SolanaRpc];
+  /** E(A): the device's own pool read of the exact whole size (S12's reference), null when there is no reference pool. */
+  readonly reference: (q: { side: "buy" | "sell"; token: string; amount: bigint }) => Promise<bigint | null>;
+  /** Signs a message with the wallet's key, on the device; answers the 64-byte ed25519 signature. Unused when dry. */
+  readonly sign?: (wallet: string, message: Uint8Array) => Promise<Uint8Array>;
+  readonly paths: readonly SolanaSendPath[];
+  /** Simulate the signed set instead of sending it (row M1.3's --dry): no key is used and nothing is sent. */
+  readonly dry?: boolean;
+  readonly fetch?: SolanaFetch;
+  readonly now?: () => number;
+  readonly onProgress?: (stage: SolanaTradeStage) => void;
+  /** sendSolanaSet's deadline, for tests. */
+  readonly deadlineMs?: number;
+  readonly pollMs?: number;
+};
+
+export type SolanaLegRecord = {
+  wallet: string;
+  amount: bigint;
+  /** E_k and minOut_k, both from the device's own E(A). */
+  expectedOut: bigint | null;
+  minOut: bigint | null;
+  /** Why the leg was not signed, when it was not. */
+  refused?: string;
+  /** From the first build call to the assembled, checked bytes. */
+  quoteMs?: number;
+  buildCalls?: number;
+  size?: number;
+  verdict?: SolanaQuoteVerdict;
+  signature?: string;
+  outcome?: SolanaTxOutcome;
+  dry?: SolanaDryTx;
+  /** The unknown-at-deadline re-read, when one ran. */
+  reread?: { state: "filled" | "failed" | "unknown"; reads: readonly [unknown, unknown] };
+  teardown?: { verdict: SolanaTeardownVerdict; frames: number; outcomes?: SolanaTxOutcome[]; dry?: SolanaDryTx[]; refused?: string };
+};
+export type SolanaTradeRecord = { side: "buy" | "sell"; token: string; reference: bigint | null; blockhash: SolanaBlockhash | null; legs: SolanaLegRecord[] };
+
+const isKey = (v: unknown): v is string => {
+  if (typeof v !== "string" || v.length < 32 || v.length > 44) return false;
+  try {
+    return base58.decode(v).length === 32;
+  } catch {
+    return false;
+  }
+};
+const obj = (v: unknown, what: string): Record<string, unknown> => {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error(`${what} is not an object`);
+  return v as Record<string, unknown>;
+};
+type Acc = { owner: string; lamports: bigint; data: Uint8Array };
+function account(v: unknown, what: string): Acc | null {
+  if (v === null) return null;
+  const o = obj(v, what);
+  const d = o.data;
+  if (typeof o.owner !== "string" || !Number.isSafeInteger(o.lamports) || (o.lamports as number) < 0 || !Array.isArray(d) || typeof d[0] !== "string" || d[1] !== "base64") throw new Error(`${what} is not a base64 account`);
+  return { owner: o.owner, lamports: BigInt(o.lamports as number), data: Uint8Array.from(atob(d[0] as string), (c) => c.charCodeAt(0)) };
+}
+/** getMultipleAccounts on one provider, in groups of 10 (solana-rpc.publicnode.com's cap). */
+async function readAccounts(rpc: SolanaRpc, keys: readonly string[], commitment: "processed" | "confirmed"): Promise<(Acc | null)[]> {
+  const out: (Acc | null)[] = [];
+  for (let i = 0; i < keys.length; i += 10) {
+    const group = keys.slice(i, i + 10);
+    const r = obj(await rpc("getMultipleAccounts", [group, { encoding: "base64", commitment }]), "getMultipleAccounts");
+    const v = r.value;
+    if (!Array.isArray(v) || v.length !== group.length) throw new Error("getMultipleAccounts answered another count");
+    v.forEach((a, j) => out.push(account(a, group[j] as string)));
+  }
+  return out;
+}
+const both = <T>(f: (rpc: SolanaRpc) => Promise<T>, providers: readonly [SolanaRpc, SolanaRpc]) => Promise.all([f(providers[0]), f(providers[1])]) as Promise<[T, T]>;
+const u64 = (d: Uint8Array, o: number): bigint => new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(o, true);
+const tokenAmount = (a: Acc | null): bigint => (a && a.data.length >= 72 ? u64(a.data, 64) : 0n);
+
+/** The size of the wallet's account of a mint: 165 on Token; on Token-2022, 165 + the type byte + ImmutableOwner and
+ * the account extensions the mint's own extensions require (TransferFeeAmount 8, NonTransferableAccount 0,
+ * TransferHookAccount 1, each with its 4-byte header). A size below the real one only lowers S11's bound. */
+function tokenAccountSize(mint: Acc): number {
+  if (mint.owner === SOLANA_TOKEN_PROGRAM) return 165;
+  let size = 165 + 1 + 4;
+  const d = mint.data;
+  if (d.length > 166) {
+    for (let o = 166; o + 4 <= d.length; ) {
+      const t = d[o]! | (d[o + 1]! << 8);
+      const len = d[o + 2]! | (d[o + 3]! << 8);
+      if (t === 0) break;
+      if (t === 1) size += 4 + 8;
+      if (t === 9) size += 4;
+      if (t === 14) size += 4 + 1;
+      o += 4 + len;
+    }
+  }
+  return size;
+}
+
+/** Token-2022's TransferFeeConfig (extension 1) on the mint. */
+function mintHasTransferFee(mint: Acc): boolean {
+  if (mint.owner !== SOLANA_TOKEN_2022_PROGRAM || mint.data.length <= 166) return false;
+  for (let o = 166; o + 4 <= mint.data.length; ) {
+    const t = mint.data[o]! | (mint.data[o + 1]! << 8);
+    if (t === 0) return false;
+    if (t === 1) return true;
+    o += 4 + (mint.data[o + 2]! | (mint.data[o + 3]! << 8));
+  }
+  return false;
+}
+
+/** The older of two finalized reads, which both providers hold. */
+export async function readSolanaBlockhashBoth(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaBlockhash> {
+  const [a, b] = await both(readSolanaBlockhash, providers);
+  return a.slot <= b.slot ? a : b;
+}
+
+/** A signature read again on both providers with searchTransactionHistory: filled or failed only when both agree. */
+export async function rereadSolanaSignature(providers: readonly [SolanaRpc, SolanaRpc], signature: string): Promise<{ state: "filled" | "failed" | "unknown"; reads: readonly [unknown, unknown] }> {
+  const one = async (rpc: SolanaRpc) => {
+    try {
+      const v = obj(await rpc("getSignatureStatuses", [[signature], { searchTransactionHistory: true }]), "getSignatureStatuses").value;
+      if (!Array.isArray(v) || v.length !== 1) return { kind: "none" as const, raw: v };
+      const s = v[0] as { confirmationStatus?: unknown; err?: unknown } | null;
+      if (s === null) return { kind: "none" as const, raw: s };
+      const landed = s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized";
+      if (!landed) return { kind: "none" as const, raw: s };
+      return { kind: s.err === null || s.err === undefined ? ("ok" as const) : ("err" as const), raw: s };
+    } catch (e) {
+      return { kind: "none" as const, raw: String((e as Error)?.message ?? e).slice(0, 160) };
+    }
+  };
+  const [a, b] = await both(one, providers);
+  const state = a.kind === "ok" && b.kind === "ok" ? "filled" : a.kind === "err" && b.kind === "err" ? "failed" : "unknown";
+  return { state, reads: [a.raw, b.raw] };
+}
+
+/** T1.3's floors: E_k = ⌊E(A) × a_k / A⌋ and minOut_k = ⌊E_k × (1 − s)⌋, from the device's own E(A) for A = Σ a_k. */
+export function solanaSetFloors(e: bigint, amounts: readonly bigint[], slippageBps: number): { expectedOut: bigint; minOut: bigint }[] {
+  const total = amounts.reduce((n, a) => n + a, 0n);
+  if (e <= 0n || total <= 0n || amounts.some((a) => a <= 0n)) throw new Error("E(A) and every a_k must be above 0");
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) throw new Error("slippageBps must be 0 to 9,999");
+  return amounts.map((a) => {
+    const expectedOut = (e * a) / total;
+    return { expectedOut, minOut: (expectedOut * BigInt(10_000 - slippageBps)) / 10_000n };
+  });
+}
+
+/** The route's floor as S7 decodes it: ⌊quotedOut × (10,000 − slippageBps) / 10,000⌋. */
+export const solanaRouteFloor = (a: { quotedOut: bigint; slippageBps: number }): bigint => (a.quotedOut * BigInt(10_000 - a.slippageBps)) / 10_000n;
+
+/** The slippage to ask again with so the route's floor is at least minOut: ⌊(quotedOut − minOut) × 10,000 / quotedOut⌋;
+ * null when the route's quoted out is not above minOut (no slippage puts its floor on minOut, so the leg is refused). */
+export function solanaRebuildSlippage(quotedOut: bigint, minOut: bigint): number | null {
+  if (quotedOut <= minOut || minOut <= 0n) return null;
+  return Number(((quotedOut - minOut) * 10_000n) / quotedOut);
+}
+
+/** After the send: every tx the send left "unknown" at its deadline is read again on both providers; the others keep
+ * the send's own two-provider state. A state stays "unknown" unless both providers agree. */
+export async function settleSolanaSet(providers: readonly [SolanaRpc, SolanaRpc], txs: readonly SolanaTxOutcome[]): Promise<{ state: "filled" | "failed" | "expired" | "unknown"; reread?: Awaited<ReturnType<typeof rereadSolanaSignature>> }[]> {
+  return Promise.all(
+    txs.map(async (o) => {
+      if (o.state !== "unknown") return { state: o.state };
+      const reread = await rereadSolanaSignature(providers, o.signature);
+      return { state: reread.state, reread };
+    }),
+  );
+}
+
+type Prepared = { leg: SolanaTradeLeg; rec: SolanaLegRecord; assembled: SolanaAssembled };
+
+async function prepareLeg(
+  req: SolanaTradeRequest,
+  leg: SolanaTradeLeg,
+  rec: SolanaLegRecord,
+  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; others: readonly string[] },
+): Promise<Prepared | null> {
+  const { deps, blockhash } = ctx;
+  const [pa, pb] = deps.providers;
+  const now = deps.now ?? (() => performance.now());
+  const mintA = ctx.mint[0];
+  if (!mintA || (mintA.owner !== SOLANA_TOKEN_PROGRAM && mintA.owner !== SOLANA_TOKEN_2022_PROGRAM)) { rec.refused = "the mint is not a token mint on provider A"; return null; }
+  const tokenProgram = mintA.owner;
+  const w = leg.wallet;
+  const ata = solanaAta(w, req.token, tokenProgram);
+  const uva = solanaPumpVolumeAccumulator(w);
+  const minOut = rec.minOut as bigint;
+  const t0 = now();
+  const breq: SolanaBuildRequest = { side: req.side, wallet: w, token: req.token, amount: leg.amount, slippageBps: req.slippageBps };
+  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}) };
+  let built = await fetchSolanaJupiterBuild(deps.helper, breq, opts);
+  let calls = built.calls.length;
+  let amounts = solanaRouteAmounts(built.build.swap.data);
+  if (!amounts) { rec.refused = "the build's swap is not a route the device decodes"; return null; }
+  if (solanaRouteFloor(amounts) < minOut) {
+    const s = solanaRebuildSlippage(amounts.quotedOut, minOut);
+    if (s === null) { rec.refused = `the route quotes ${amounts.quotedOut}, not above the floor ${minOut}`; return null; }
+    built = await fetchSolanaJupiterBuild(deps.helper, { ...breq, slippageBps: s }, opts);
+    calls += built.calls.length;
+    amounts = solanaRouteAmounts(built.build.swap.data);
+    if (!amounts || solanaRouteFloor(amounts) < minOut) { rec.refused = `the route's floor stays under ${minOut}`; return null; }
+  }
+  rec.buildCalls = calls;
+  // The tables the build names, read on both providers; assembly uses provider A's, S2 holds B's to the same bytes.
+  const tableKeys = [...built.build.tables];
+  const [ta, tb] = tableKeys.length ? await both((r) => readAccounts(r, tableKeys, "processed"), deps.providers) : [[], []];
+  const tables: Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]> = {};
+  const decoded: Record<string, SolanaLookupTable> = {};
+  tableKeys.forEach((k, i) => {
+    const a = ta[i] ?? null;
+    const b = tb[i] ?? null;
+    tables[k] = [a, b];
+    if (a && a.owner === SOLANA_ALT_PROGRAM) {
+      try { decoded[k] = solanaDecodeLookupTable(a.data); } catch { /* S2 refuses */ }
+    }
+  });
+  const assembled = assembleSolanaSwap(breq, built.build, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, mintHasTransferFee(mintA) ? { transferFeeMints: [req.token] } : {});
+  // Rents in play, on both providers: the wallet's token account (its size from the mint) and the pump volume account.
+  const size = tokenAccountSize(mintA);
+  const rent = await both(async (r) => [BigInt(await r("getMinimumBalanceForRentExemption", [size]) as number), BigInt(await r("getMinimumBalanceForRentExemption", [137]) as number)] as const, deps.providers);
+  // Pre-state and simulation on both providers: the wallet, its token account and its pump volume account; then the
+  // set's other wallets, three to a simulation (api.mainnet-beta.solana.com reads back at most 4 accounts).
+  const b64 = btoa(String.fromCharCode(...assembled.wire));
+  const watch = [w, ata, uva];
+  const simOne = async (rpc: SolanaRpc): Promise<SolanaSimulation | null> => {
+    try {
+      const pre = await readAccounts(rpc, [...watch, ...ctx.others], "confirmed");
+      const run = async (group: string[]) => {
+        const r = obj(await rpc("simulateTransaction", [b64, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed", accounts: { addresses: group, encoding: "base64" } }]), "simulateTransaction");
+        const v = obj(r.value, "simulateTransaction.value");
+        const accs = Array.isArray(v.accounts) && v.accounts.length === group.length ? v.accounts.map((x, j) => account(x, group[j] as string)) : null;
+        return { err: v.err ?? null, accs };
+      };
+      const main = await run(watch);
+      if (main.err !== null) return { err: main.err, walletLamports: { pre: 0n, post: 0n }, tokenAccount: { pre: 0n, post: 0n }, tokenAccountLamports: { pre: 0n, post: 0n }, pumpVolumeAccumulator: { pre: 0n, post: 0n }, otherWallets: [] };
+      if (!main.accs || !main.accs[0]) return null;
+      const otherWallets: { pre: bigint; post: bigint }[] = [];
+      for (let i = 0; i < ctx.others.length; i += 3) {
+        const group = ctx.others.slice(i, i + 3);
+        const r = await run(group);
+        if (r.err !== null || !r.accs) return null;
+        group.forEach((_, j) => otherWallets.push({ pre: pre[3 + i + j]?.lamports ?? 0n, post: r.accs![j]?.lamports ?? 0n }));
+      }
+      return {
+        err: null,
+        walletLamports: { pre: pre[0]?.lamports ?? 0n, post: main.accs[0].lamports },
+        tokenAccount: { pre: tokenAmount(pre[1] ?? null), post: tokenAmount(main.accs[1] ?? null) },
+        tokenAccountLamports: { pre: pre[1]?.lamports ?? 0n, post: main.accs[1]?.lamports ?? 0n },
+        pumpVolumeAccumulator: { pre: pre[2]?.lamports ?? 0n, post: main.accs[2]?.lamports ?? 0n },
+        otherWallets,
+      };
+    } catch {
+      return null;
+    }
+  };
+  const simulations = await Promise.all([simOne(pa), simOne(pb)]);
+  // Spendable, on both providers, the lower: lamports on a buy, the token account's balance on a sell.
+  const bal = await both((r) => readAccounts(r, [w, ata], "confirmed"), deps.providers);
+  const spend = (x: (Acc | null)[]) => (req.side === "buy" ? (x[0]?.lamports ?? 0n) : tokenAmount(x[1] ?? null));
+  const spendable = spend(bal[0]) < spend(bal[1]) ? spend(bal[0]) : spend(bal[1]);
+  const verdict = checkSolanaQuote(assembled.wire, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable, minOut }, {
+    tables,
+    mint: [ctx.mint[0], ctx.mint[1]],
+    rent: { tokenAccount: [rent[0][0], rent[1][0]], pumpVolumeAccumulator: [rent[0][1], rent[1][1]] },
+    simulations,
+    reference: { expectedOut: rec.expectedOut as bigint, slippageBps: req.slippageBps },
+  });
+  rec.quoteMs = now() - t0;
+  rec.size = assembled.size;
+  rec.verdict = verdict;
+  if (!verdict.ok) { rec.refused = `checks: ${verdict.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join("; ").slice(0, 400)}`; return null; }
+  return { leg, rec, assembled };
+}
+
+/** The signature into the wire's one slot, checked against the wallet's key before anything is sent. */
+async function signed(deps: SolanaTradeDeps, wallet: string, a: { wire: Uint8Array; message: Uint8Array }): Promise<Uint8Array> {
+  let sig: Uint8Array;
+  if (deps.dry) {
+    // Dry: no key is used. A placeholder fills the slot; every simulation runs with sigVerify off.
+    sig = new Uint8Array(64);
+    globalThis.crypto.getRandomValues(sig);
+  } else {
+    if (!deps.sign) throw new Error("no signer");
+    sig = await deps.sign(wallet, a.message);
+    if (!(sig instanceof Uint8Array) || sig.length !== 64 || !ed25519.verify(sig, a.message, base58.decode(wallet))) throw new Error(`the signature for ${wallet} does not verify`);
+  }
+  const wire = Uint8Array.from(a.wire);
+  wire.set(sig, 1);
+  return wire;
+}
+
+async function teardown(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: SolanaTradeDeps, tokenProgram: string): Promise<SolanaLegRecord["teardown"]> {
+  const w = rec.wallet;
+  const addresses = solanaTeardownAddresses(w, [{ mint: req.token, program: tokenProgram }]);
+  const [ra, rb] = await both((r) => readAccounts(r, [w, ...addresses], "confirmed"), deps.providers);
+  const held = (x: Acc | null): SolanaHeldRead | null => x;
+  const accounts = Object.fromEntries(addresses.map((x, i) => [x, [held(ra[i + 1] ?? null), held(rb[i + 1] ?? null)] as const]));
+  let plan;
+  try {
+    plan = solanaTeardownPlan(w, accounts);
+  } catch (e) {
+    return { verdict: { ok: false, plan: null, results: [{ id: "READ", ok: false, detail: (e as Error).message }] }, frames: 0, refused: (e as Error).message };
+  }
+  const bh = await readSolanaBlockhashBoth(deps.providers);
+  const frames = buildSolanaTeardown(w, plan, bh);
+  const simulations = await Promise.all(frames.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers)));
+  const verdict = checkSolanaTeardown(frames.map((f) => f.wire), w, { accounts, wallet: [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], simulations });
+  if (!verdict.ok || frames.length === 0) return { verdict, frames: frames.length, ...(verdict.ok ? {} : { refused: "teardown checks" }) };
+  const set = await Promise.all(frames.map(async (f) => ({ wire: await signed(deps, w, f), lastValidBlockHeight: f.lastValidBlockHeight })));
+  const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}) };
+  if (deps.dry) return { verdict, frames: frames.length, dry: (await dryRunSolanaSet(set, sendOpts)).txs };
+  return { verdict, frames: frames.length, outcomes: (await sendSolanaSet(set, sendOpts).done).txs };
+}
+
+/**
+ * The trade: every leg quoted, built, checked, signed and sent at once, and its fill read. Legs from a wallet not armed
+ * by the device's own withdrawal, and legs whose checks fail, are refused and never signed; the others go on.
+ */
+export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeDeps): Promise<SolanaTradeRecord> {
+  if (req.side !== "buy" && req.side !== "sell") throw new Error("side must be buy or sell");
+  if (!isKey(req.token)) throw new Error("the token must be an address");
+  if (!Number.isInteger(req.slippageBps) || req.slippageBps < 0 || req.slippageBps >= 10_000) throw new Error("slippageBps must be 0 to 9,999");
+  if (!Array.isArray(req.legs) || req.legs.length === 0) throw new Error("no wallet in the set");
+  const seen = new Set<string>();
+  for (const l of req.legs) {
+    if (!isKey(l.wallet)) throw new Error("every wallet must be an address");
+    if (seen.has(l.wallet)) throw new Error(`wallet ${l.wallet} is in the set twice`);
+    seen.add(l.wallet);
+    if (typeof l.amount !== "bigint" || l.amount <= 0n || l.amount > 0xffff_ffff_ffff_ffffn) throw new Error("every amount must be a u64 above 0");
+  }
+  if (!deps.dry && typeof deps.sign !== "function") throw new Error("no signer");
+  const progress = (s: SolanaTradeStage) => { try { deps.onProgress?.(s); } catch { /* the caller's display never stops a trade */ } };
+  const recs: SolanaLegRecord[] = req.legs.map((l) => ({ wallet: l.wallet, amount: l.amount, expectedOut: null, minOut: null }));
+  const live = req.legs.flatMap((l, i) => {
+    if (l.arm?.own === true) return [i];
+    (recs[i] as SolanaLegRecord).refused = "the wallet was not armed by this device's own withdrawal";
+    return [];
+  });
+  const record: SolanaTradeRecord = { side: req.side, token: req.token, reference: null, blockhash: null, legs: recs };
+  if (live.length === 0) { progress("refused"); return record; }
+  const total = live.reduce((n, i) => n + (req.legs[i] as SolanaTradeLeg).amount, 0n);
+  const [e, blockhash, mint] = await Promise.all([
+    deps.reference({ side: req.side, token: req.token, amount: total }),
+    readSolanaBlockhashBoth(deps.providers),
+    both((r) => readAccounts(r, [req.token], "processed").then((x) => x[0] ?? null), deps.providers),
+  ]);
+  record.reference = e;
+  record.blockhash = blockhash;
+  if (e === null || e <= 0n) {
+    for (const i of live) (recs[i] as SolanaLegRecord).refused = "no reference pool";
+    progress("refused");
+    return record;
+  }
+  const floors = solanaSetFloors(e, live.map((i) => (req.legs[i] as SolanaTradeLeg).amount), req.slippageBps);
+  live.forEach((i, j) => {
+    const r = recs[i] as SolanaLegRecord;
+    Object.assign(r, floors[j]);
+    if ((r.minOut as bigint) <= 0n) r.refused = "the floor rounds to 0";
+  });
+  const wallets = req.legs.map((l) => l.wallet);
+  const prepared = (
+    await Promise.all(
+      live.map(async (i) => {
+        const rec = recs[i] as SolanaLegRecord;
+        if (rec.refused) return null;
+        try {
+          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, others: wallets.filter((x) => x !== rec.wallet) });
+        } catch (err) {
+          rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
+          return null;
+        }
+      }),
+    )
+  ).filter((x): x is Prepared => x !== null);
+  if (prepared.length === 0) { progress("refused"); return record; }
+  const set = await Promise.all(prepared.map(async (p) => ({ wire: await signed(deps, p.leg.wallet, p.assembled), lastValidBlockHeight: p.assembled.lastValidBlockHeight })));
+  prepared.forEach((p, i) => { p.rec.signature = base58.encode((set[i] as { wire: Uint8Array }).wire.subarray(1, 65)); });
+  progress("signed");
+  const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}) };
+  const tokenProgram = (mint[0] as Acc).owner;
+  if (deps.dry) {
+    const d = await dryRunSolanaSet(set, sendOpts);
+    prepared.forEach((p, i) => { p.rec.dry = d.txs[i]; });
+    if (req.side === "sell") await Promise.all(prepared.map(async (p) => { p.rec.teardown = await teardown(req, p.rec, deps, tokenProgram); }));
+    return record;
+  }
+  const h = sendSolanaSet(set, sendOpts);
+  progress("sent");
+  const done = await h.done;
+  const settled = await settleSolanaSet(deps.providers, done.txs);
+  const states = new Map<Prepared, string>();
+  prepared.forEach((p, i) => {
+    const st = settled[i] as Awaited<ReturnType<typeof settleSolanaSet>>[number];
+    p.rec.outcome = done.txs[i] as SolanaTxOutcome;
+    if (st.reread) p.rec.reread = st.reread;
+    states.set(p, st.state);
+  });
+  const state = (p: Prepared) => states.get(p);
+  const filled = prepared.filter((p) => state(p) === "filled").length;
+  const unknown = prepared.some((p) => state(p) === "unknown");
+  if (filled === prepared.length) progress("filled");
+  else if (filled > 0) progress("part_filled");
+  else if (!unknown) progress("not_landed");
+  // The teardown follows a filled sell of a wallet's whole balance, read on both providers after the fill.
+  if (req.side === "sell") {
+    await Promise.all(
+      prepared.map(async (p) => {
+        if (state(p) !== "filled") return;
+        const after = await both((r) => readAccounts(r, [solanaAta(p.rec.wallet, req.token, tokenProgram)], "confirmed"), deps.providers);
+        if (tokenAmount(after[0][0] ?? null) !== 0n || tokenAmount(after[1][0] ?? null) !== 0n) return;
+        p.rec.teardown = await teardown(req, p.rec, deps, tokenProgram);
+      }),
+    );
+  }
+  return record;
+}
