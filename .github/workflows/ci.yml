@@ -183,6 +183,12 @@ jobs:
         run: |
           pnpm --filter terminal exec playwright install --with-deps chromium
           pnpm --filter terminal run test:e2e
+      # The kit's one call in headless Chromium: the real prover worker under SIGN_HOST's own headers proves the fixture's
+      # leaves, snarkjs accepts each proof, and a changed leaf or worker answer is refused (vault-prover-e2e; card
+      # signpage-prover-host). The Chromium is the one the step above installs: the kit and the terminal pin the same
+      # Playwright.
+      - name: the prover in Chromium (KIT_PROVER_E2E)
+        run: KIT_PROVER_E2E=1 node --test packages/kit/test/prove-e2e.test.ts
       - name: the vault's scripts' own tests
         run: pnpm run test:vault-scripts
       # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins

@@ -2,13 +2,22 @@
 // 'wasm-unsafe-eval', so a prover there fails closed (M304 D-8; wallet.md 2.7). It starts the one same-origin worker,
 // prover-worker.js (build.mjs), through the Trusted Types policy `prover-worker`, which turns exactly that one URL into a
 // TrustedScriptURL and refuses every other (SIGN_HOST's CSP: require-trusted-types-for 'script'; trusted-types
-// prover-worker). It fetches each setup file from its own origin at /assets/zk/<sha256>.<ext> (zk/setup-files.ts) and
+// prover-worker). It fetches each setup file from its own origin at /assets/zk/<sha256>.<ext> (zk/setup-files.ts),
+// always asking the server (cache "no-cache": SIGN_HOST caches the files immutable, so a file that once came back wrong
+// under its pinned name would otherwise be read from the browser's cache at every retry; a right one costs a 304), and
 // moves the bytes to the worker by transfer, so no copy stays here; the worker checks every file's size and sha256
 // before snarkjs sees it (worker.js) and proves single thread.
 import { ZK_SETUP_FILES } from "../zk/setup-files.ts";
 import type { VaultSnarkjsProof } from "../vault/shapes.ts";
 
 export const PROVER_POLICY_NAME = "prover-worker";
+/** Every refusal of a worker that died or was ended starts with this; such a worker answers nothing again. */
+export const PROVER_DEAD_PREFIX = "prover worker: ";
+
+/** True when `e` is the refusal of a dead or ended prover worker: start a new one to prove again. */
+export function isProverDead(e: unknown): boolean {
+  return e instanceof Error && e.message.startsWith(PROVER_DEAD_PREFIX);
+}
 export const PROVER_WORKER_PATH = "/prover-worker.js";
 
 export type ProverCircuit = "withdraw" | "commitment";
@@ -90,9 +99,9 @@ export function startProver(opts: ProverOptions = {}): Prover {
     if (m.ok) p.resolve(m.value);
     else p.reject(new Error(m.error));
   });
-  worker.addEventListener("error", (ev: ErrorEvent) => failAll(new Error(`prover worker: ${ev.message || "failed to load"}`)));
+  worker.addEventListener("error", (ev: ErrorEvent) => failAll(new Error(`${PROVER_DEAD_PREFIX}${ev.message || "failed to load"}`)));
   // a reply the page cannot deserialize would leave its call waiting for ever; no timeout, as a slow phone's proof is not a hang
-  worker.addEventListener("messageerror", () => failAll(new Error("prover worker: a reply could not be read")));
+  worker.addEventListener("messageerror", () => failAll(new Error(`${PROVER_DEAD_PREFIX}a reply could not be read`)));
   const call = (msg: Record<string, unknown>, transfer: Transferable[] = []): Promise<unknown> =>
     new Promise((resolve, reject) => {
       if (dead) return reject(dead);
@@ -102,7 +111,7 @@ export function startProver(opts: ProverOptions = {}): Prover {
     });
 
   const fetchFile = async (name: "withdraw.wasm" | "withdraw.zkey" | "commitment.wasm" | "commitment.zkey"): Promise<ArrayBuffer> => {
-    const r = await fetch(setupFileURL(name, origin), { credentials: "omit" });
+    const r = await fetch(setupFileURL(name, origin), { credentials: "omit", cache: "no-cache" });
     if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
     return r.arrayBuffer();
   };
@@ -117,7 +126,7 @@ export function startProver(opts: ProverOptions = {}): Prover {
     },
     terminate() {
       worker.terminate();
-      failAll(new Error("prover worker: terminated"));
+      failAll(new Error(`${PROVER_DEAD_PREFIX}terminated`));
     },
   };
 }
