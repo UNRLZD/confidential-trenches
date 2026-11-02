@@ -18,7 +18,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createProxy } from "../src/proxy/proxy.ts";
 import { createRpc } from "../src/rpc/rpc.ts";
-import { createTokenWatch } from "../src/token-status/status.ts";
+import { bindSenderFromEnv } from "../src/bind/env.ts";
+import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
 import { solanaTokenFromEnv } from "../src/server.ts";
@@ -57,9 +58,10 @@ const noLists = { get: async () => ({ status: 503, body: "" }), warm: () => () =
 export const ENV_READERS = {
   createProxy,
   createRpc,
-  createTokenWatch,
+  tokenWatchesFromEnv,
   feeQuoterFromEnv,
   withdrawSenderFromEnv: (env) => withdrawSenderFromEnv(env, noFee),
+  bindSenderFromEnv: (env) => bindSenderFromEnv(env),
   solanaTokenFromEnv: (env) => solanaTokenFromEnv(env, noProxy, noLists),
 };
 
@@ -125,6 +127,13 @@ test("every environment name the helper's code reads when it runs is passed by c
   assert.ok(["HELPER_RELEASE", "WITHDRAW_VAULT_MAINNET", "WITHDRAW_RELAYER_KEYS_TESTNET"].every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
   const without = passedNames(read("deploy/compose.yaml").replace(/^ {6}WITHDRAW_RELAYER_KEYS_TESTNET:.*\n/m, ""), read("Dockerfile"));
   assert.deepEqual([...atRun].filter((n) => !without.has(n)), ["WITHDRAW_RELAYER_KEYS_TESTNET"]);
+  // POST /v1/bind's names (bind/env.ts), read when nothing is set: a compose without one is caught
+  const bind = ["BIND_VAULT_MAINNET", "BIND_RELAYER_MAINNET", "BIND_RELAYER_KEY_MAINNET", "BIND_VAULT_TESTNET", "BIND_RELAYER_TESTNET", "BIND_RELAYER_KEY_TESTNET", "BIND_MARGIN_K"];
+  assert.ok(bind.every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
+  for (const n of bind) {
+    const missing = passedNames(read("deploy/compose.yaml").replace(new RegExp(`^ {6}${n}:.*\\n`, "m"), ""), read("Dockerfile"));
+    assert.deepEqual([...atRun].filter((x) => !missing.has(x)), [n]);
+  }
 });
 
 test("planted: a name read in src/ that compose.yaml does not pass is caught; one it passes is not", () => {

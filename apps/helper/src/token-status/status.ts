@@ -12,6 +12,10 @@
 //
 // Display only (H7, H10 U7): no move into the vault rests on this answer; the relayer's own tokenHeld() call is what
 // holds a move.
+//
+// One watch per network (WATCHED): mainnet's reads USDC on mainnet's pair, testnet's reads the testnet token on
+// testnet's pair, never the other's, so a hold on one network never opens or holds the other. The testnet token runs
+// mainnet USDC's own code (contracts/vault/deployments/testnet-usdc.json code_hash), so both pin the same code hash.
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH, type HelperTokenStatusAnswer } from "@blindfill/kit";
 
 /** The vault's one token (the kit's VAULT_CONSTANTS.TOKEN, packages/kit/src/vault/shapes.ts). */
@@ -24,6 +28,20 @@ export const WATCH_RPCS = [
   { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
   { env: "NEAR_RPC_URL_B", fallback: "https://near.drpc.org" },
 ] as const;
+/** Testnet's two providers: the host's environment, else the device's release pair (FastNEAR and dRPC). */
+export const TESTNET_RPCS = [
+  { env: "NEAR_TESTNET_RPC_URL", fallback: "https://test.rpc.fastnear.com" },
+  { env: "NEAR_TESTNET_RPC_URL_B", fallback: "https://near-testnet.drpc.org" },
+] as const;
+/** The testnet token: contracts/vault/deployments/testnet-usdc.json account_id (status.test.ts reads the file). */
+export const TESTNET_TOKEN = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
+
+export type TokenNetwork = "mainnet" | "testnet";
+/** Each network's token and its pair of providers: a network's watch reads only these. */
+export const WATCHED = {
+  mainnet: { token: USDC, rpcs: WATCH_RPCS },
+  testnet: { token: TESTNET_TOKEN, rpcs: TESTNET_RPCS },
+} as const satisfies Record<TokenNetwork, { token: string; rpcs: readonly [{ env: string; fallback: string }, { env: string; fallback: string }] }>;
 export const READ_TIMEOUT_MS = 2_000; // check 10's reads answer within 1 s at p99 [design, M4.3]; one slow answer holds
 export const CACHE_MS = 1_000; // about one NEAR block: one pair of reads per block, however many callers ask
 const ANSWER_MAX = 4_096;
@@ -43,11 +61,11 @@ export function tokenHeld(s: TokenStatus): boolean {
   return !(s.caught_up === true && s.halted === false && s.vault_blocked === false && s.code_hash_ok === true && s.code_hash === USDC_CODE_HASH);
 }
 
-/** The answer from the two reads: the code hash only when both answered and agree; never more than was read. */
-export function statusFrom(a: Read | undefined, b: Read | undefined): TokenStatus {
+/** The answer from the two reads of `token`: the code hash only when both answered and agree; never more than was read. */
+export function statusFrom(a: Read | undefined, b: Read | undefined, token: string): TokenStatus {
   const agreed = a !== undefined && b !== undefined && a.code_hash === b.code_hash;
   return {
-    token: USDC,
+    token,
     caught_up: false, // no event watch yet: the halt and the vault's block are not known (header)
     halted: null,
     vault_blocked: null,
@@ -58,8 +76,10 @@ export function statusFrom(a: Read | undefined, b: Read | undefined): TokenStatu
   };
 }
 
-export function readUrls(env: Record<string, string | undefined>): [string, string] {
-  const urls = WATCH_RPCS.map(({ env: name, fallback }) => {
+/** A network's two provider URLs from the host's environment, else its public pair; two of the same are refused. */
+export function readUrls(env: Record<string, string | undefined>, network: TokenNetwork): [string, string] {
+  const pair = WATCHED[network].rpcs;
+  const urls = pair.map(({ env: name, fallback }) => {
     const v = env[name];
     if (v === undefined || v === "") return fallback;
     let u: URL;
@@ -71,24 +91,26 @@ export function readUrls(env: Record<string, string | undefined>): [string, stri
     if ((u.protocol !== "https:" && u.protocol !== "http:") || u.hash !== "") throw new Error(`${name} must be an http(s) URL with no fragment`);
     return v;
   });
-  if (urls[0] === urls[1]) throw new Error(`${WATCH_RPCS[0].env} and ${WATCH_RPCS[1].env} must be two different providers`);
+  if (urls[0] === urls[1]) throw new Error(`${pair[0].env} and ${pair[1].env} must be two different providers`);
   return [urls[0]!, urls[1]!];
 }
 
-export function createTokenWatch(env: Record<string, string | undefined>, deps: Deps = {}) {
+/** One network's watch: its own token (WATCHED) read on its own pair. */
+export function createTokenWatch(network: TokenNetwork, env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
-  const urls = readUrls(env);
+  const urls = readUrls(env, network);
+  const token = WATCHED[network].token;
   let cached: { at: number; status: TokenStatus } | undefined;
   let inflight: Promise<TokenStatus> | undefined;
 
-  /** One view_account of USDC at final, or undefined on any failure or any answer of the wrong shape. */
+  /** One view_account of the network's token at final, or undefined on any failure or any answer of the wrong shape. */
   async function read(url: string): Promise<Read | undefined> {
     try {
       const r = await doFetch(url, {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { request_type: "view_account", finality: "final", account_id: USDC } }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { request_type: "view_account", finality: "final", account_id: token } }),
         redirect: "error",
         signal: AbortSignal.timeout(READ_TIMEOUT_MS),
       });
@@ -118,7 +140,7 @@ export function createTokenWatch(env: Record<string, string | undefined>, deps: 
     if (!inflight) {
       inflight = Promise.all(urls.map(read))
         .then(([a, b]) => {
-          const s = statusFrom(a, b);
+          const s = statusFrom(a, b, token);
           cached = { at: now(), status: s };
           return s;
         })
@@ -132,8 +154,19 @@ export function createTokenWatch(env: Record<string, string | undefined>, deps: 
     return tokenHeld(await status());
   }
 
-  return { status, held };
+  return { network, token, status, held };
 }
+
+export type TokenWatch = ReturnType<typeof createTokenWatch>;
+export type TokenWatches = Record<TokenNetwork, TokenWatch>;
+
+/** Both networks' watches from the host's environment, each on its own pair. */
+export function tokenWatchesFromEnv(env: Record<string, string | undefined>, deps: Deps = {}): TokenWatches {
+  return { mainnet: createTokenWatch("mainnet", env, deps), testnet: createTokenWatch("testnet", env, deps) };
+}
+
+/** What the relayers take: each network's status, and only its own. */
+export const statusesOf = (w: TokenWatches): Record<TokenNetwork, () => Promise<TokenStatus>> => ({ mainnet: w.mainnet.status, testnet: w.testnet.status });
 
 /** One pause or unpause of the token, as the watch read it from the token's own event log. */
 export type PauseEvent = { name: "paused" | "unpaused"; block_height: number };

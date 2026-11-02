@@ -47,7 +47,7 @@ import { join } from "node:path";
 import { vaultWithdrawYocto, type HelperWithdrawCode } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, RpcError, startRelayer, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
-import { createTokenWatch, readUrls, tokenHeld, USDC, type TokenStatus } from "../token-status/status.ts";
+import { readUrls, statusesOf, tokenHeld, tokenWatchesFromEnv, USDC, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, decimal, isAccountId, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
 import { agreedBlock, FeeReadRefused, HEIGHT_SPREAD_MAX, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type Block, type FeeNetwork, type FeeQuoter } from "./fee.ts";
 import { checkNullifier, createLeavesIndex, createSpendsIndex, createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
@@ -454,7 +454,7 @@ export type WithdrawSender = {
 export function withdrawSenderFromEnv(
   env: Record<string, string | undefined>,
   fee: FeeQuoter,
-  status: Partial<Record<FeeNetwork, () => Promise<TokenStatus>>> = { mainnet: createTokenWatch(env).status },
+  status: Partial<Record<FeeNetwork, () => Promise<TokenStatus>>> = statusesOf(tokenWatchesFromEnv(env)),
   fetchFn: typeof fetch = fetch,
 ): WithdrawSender {
   const release = env[RELEASE_ENV] ?? "";
@@ -462,7 +462,7 @@ export function withdrawSenderFromEnv(
   const set = Object.fromEntries((Object.keys(SEND_ENV) as FeeNetwork[]).map((n) => [n, SEND_ENV[n].map((k) => env[k] ?? "")])) as Record<FeeNetwork, string[]>;
   const relayerOf = Object.fromEntries((Object.keys(RELAYER_ENV) as FeeNetwork[]).map((n) => [n, env[RELAYER_ENV[n][0]] ?? ""])) as Record<FeeNetwork, string>;
   const feeTo = Object.fromEntries((Object.keys(RELAYER_ENV) as FeeNetwork[]).map((n) => [n, env[RELAYER_ENV[n][1]] ?? ""])) as Record<FeeNetwork, string>;
-  const mainnet = readUrls(env);
+  const mainnet = readUrls(env, "mainnet");
   const testnet = TESTNET_RPCS.map(({ env: k, fallback }) => env[k] || fallback);
   const urls: Record<FeeNetwork, readonly string[]> = { mainnet, testnet };
 

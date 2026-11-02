@@ -5,12 +5,16 @@
  *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
  *     [SOLANA_RPC_URL=..] [SOLANA_HOLDERS_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..]
  *     [NEAR_TESTNET_RPC_URL=..] [NEAR_TESTNET_RPC_URL_B=..] [WITHDRAW_RELAYER_MAINNET=.. WITHDRAW_FEE_RECIPIENT_MAINNET=..]
- *     [WITHDRAW_RELAYER_TESTNET=.. WITHDRAW_FEE_RECIPIENT_TESTNET=..] node src/server.ts
+ *     [WITHDRAW_RELAYER_TESTNET=.. WITHDRAW_FEE_RECIPIENT_TESTNET=..] [WITHDRAW_VAULT_<NET>=.. WITHDRAW_RELAYER_KEYS_<NET>=..]
+ *     [BIND_VAULT_<NET>=.. BIND_RELAYER_<NET>=.. BIND_RELAYER_KEY_<NET>=.. BIND_MARGIN_K=..] [HELPER_RELEASE=.. HELPER_STORE_DIR=..]
+ *     node src/server.ts   (<NET>: MAINNET or TESTNET)
  *
  * The vendor keys come from the host's environment only (src/proxy/vendors.ts); a vendor with no key is called
  * without one. So do the RPC providers' URLs (src/rpc/rpc.ts), where a keyed provider holds its key; a chain with none
  * set uses its public endpoint, and the second NEAR provider USDC's watch reads (NEAR_RPC_URL_B; src/token-status/).
  * GET /v1/withdraw/fee quotes a network only when the release's relayer accounts for it are set (src/withdraw/fee.ts).
+ * POST /v1/withdraw and POST /v1/bind carry a network only when its sender's names are set (src/withdraw/send.ts,
+ * src/bind/env.ts); each network's carry is held by that network's own token watch (src/token-status/).
  *
  * Every answer carries X-Helper-Commit and Vary: Origin. Cross-origin reads are allowed for exactly APP_HOST and
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
@@ -23,24 +27,28 @@ import { health, type Part } from "./health.ts";
 import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
-import { createTokenWatch, USDC } from "./token-status/status.ts";
+import { BIND_MAX_BYTES } from "./bind/checks.ts";
+import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
+import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
-type Watch = ReturnType<typeof createTokenWatch>;
 type Lists = ReturnType<typeof createSolanaLists>;
 type Token = ReturnType<typeof createSolanaToken>;
 type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW] = MOUNTED.relay;
+const [BIND] = MOUNTED.delegate;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
+/** POST /v1/bind's body limit: the kit's HELPER_V1_PATHS row, as bind/checks.ts reads it (4 KB). */
+export const BIND_BODY_MAX = BIND_MAX_BYTES;
 const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
@@ -110,13 +118,16 @@ export function handler(
   commit: string,
   proxy: Proxy = createProxy(process.env),
   rpc: Rpc = createRpc(process.env),
-  watch: Watch = createTokenWatch(process.env),
+  watches: TokenWatches = tokenWatchesFromEnv(process.env),
   lists: Lists = createSolanaLists(proxy, rpc),
   fee: Fee = feeQuoterFromEnv(process.env),
-  withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status }),
+  withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, statusesOf(watches)),
   token: Token = solanaTokenFromEnv(process.env, proxy, lists),
+  bind: BindSender = bindSenderFromEnv(process.env, statusesOf(watches)),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
+  // GET /v1/token-status serves each network's token from that network's own watch
+  const watchOf = new Map<string, TokenWatch>(Object.values(watches).map((w) => [w.token, w]));
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
       [HELPER_COMMIT_HEADER]: commit,
@@ -153,9 +164,10 @@ export function handler(
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        // exactly one token, the release's USDC (H7: any other answers 404 token_not_watched)
+        // exactly one token, a watched network's (USDC, the testnet token; H7: any other answers 404 token_not_watched)
         const tokens = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("token");
-        if (tokens.length !== 1 || tokens[0] !== USDC) return send(404, { error: { code: "token_not_watched" } }, cors(req));
+        const watch = tokens.length === 1 ? watchOf.get(tokens[0]!) : undefined;
+        if (watch === undefined) return send(404, { error: { code: "token_not_watched" } }, cors(req));
         void watch
           .status()
           .then((s) => send(200, s, cors(req)))
@@ -187,6 +199,26 @@ export function handler(
               return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
             }
             const a = await withdraw.carry(body);
+            return { status: a.status, body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path === BIND) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // the deposit carry (bind/env.ts, bind/send.ts carryDeposit with bind/checks.ts); a body that is not one JSON
+        // value is check 1's bad_shape
+        void readBody(req, BIND_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            const a = await bind.carry(body);
             return { status: a.status, body: JSON.stringify(a.body) };
           })
           .then(reply)
@@ -299,16 +331,17 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   });
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watch?: Watch, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watch, lists, fee, withdraw, token),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind),
   );
   server.listen(port);
-  // the withdrawal relayer starts with the helper: a restart resends its open sends and settles before any request
+  // the relayers start with the helper: a restart resends their open sends and settles before any request
   withdraw?.warm();
+  bind?.warm();
   return server;
 }
 
@@ -324,10 +357,12 @@ if (import.meta.main) {
     const proxy = createProxy(process.env);
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);
-    const watch = createTokenWatch(process.env);
+    const watches = tokenWatchesFromEnv(process.env);
     const fee = feeQuoterFromEnv(process.env);
-    const withdraw = withdrawSenderFromEnv(process.env, fee, { mainnet: watch.status });
-    server = start(commit, port, proxy, rpc, watch, lists, fee, withdraw); // warms the withdrawal relayer
+    // each network's carry is held by its own watch only
+    const withdraw = withdrawSenderFromEnv(process.env, fee, statusesOf(watches));
+    const bind = bindSenderFromEnv(process.env, statusesOf(watches));
+    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind); // warms both relayers
     lists.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
