@@ -126,7 +126,7 @@ test("the vector: the device's bytes equal the shared vector, and the helper's d
 });
 
 test("the vault is the release's: testnet's from its deployment file, none on mainnet, and no argument names one", async () => {
-  const dep = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/testnet-skeleton.json", import.meta.url), "utf8"));
+  const dep = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/testnet-v1.json", import.meta.url), "utf8"));
   assert.equal(dep.network, "testnet");
   assert.equal(NET.vault, dep.account_id);
   assert.equal(V.expect.vault, dep.account_id);

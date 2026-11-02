@@ -70,7 +70,7 @@ fn config_names_the_token_scope_and_constants() {
     let c = Vault::default().config();
     assert_eq!(c.asset.as_str(), TOKEN);
     #[cfg(feature = "testnet")]
-    assert_eq!(c.asset.as_str(), "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af");
+    assert_eq!(c.asset.as_str(), "bf-usdc-20261101t022248.testnet"); // gitleaks:allow (a public account id)
     #[cfg(not(feature = "testnet"))]
     assert_eq!(c.asset.as_str(), "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1");
     assert_eq!(c.version, format!("blindfill-vault {} {}", env!("CARGO_PKG_VERSION"), NETWORK));

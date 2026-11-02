@@ -18,6 +18,8 @@ import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultContextInput, vaultContextOf, ZK_SETUP_FILES, type VaultProver, type VaultSnarkjsProof } from "@blindfill/kit";
 import { checkWithdraw } from "../../../apps/helper/src/withdraw/checks.ts";
+import { armingRegisterDepositOf } from "../src/arming/accounts.ts";
+import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../src/deposit/account.ts";
 import { armAccount } from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
 import { blockTimeMsOf, withdrawDeadlineMs, withdrawRequest, WITHDRAW_SEND_MARGIN_MS } from "../src/withdraw/request.ts";
@@ -325,4 +327,41 @@ test("boundaries: an exact cover, the deadline at T + 600,000, another scope's n
   assert.deepEqual(p.log, []);
   await assert.rejects(withdrawRequest(argsFor(v, p, { relayFee: -1n })), /relayFee: below 0/);
   assert.deepEqual(p.log, []);
+});
+
+// A's registration read on the network's two operators, from the recorded null answers and bounds
+// (test/vectors/arming-accounts.json): the answers do not depend on the account asked.
+const ARMING = JSON.parse(readFileSync(new URL("./vectors/arming-accounts.json", import.meta.url), "utf8")) as {
+  answers: Record<string, { a: { json: unknown }; b: { json: unknown } }>;
+};
+function nullRegistration(net: NearNetwork, seen: unknown[]): [NearRpc, NearRpc] {
+  const t = net === "testnet" ? "_testnet" : "";
+  const side = (s: "a" | "b", name: string): NearRpc => ({
+    name,
+    async query(params) {
+      seen.push(params);
+      const m = (params as { method_name: string }).method_name === "storage_balance_of" ? "reg_null" : "bounds";
+      return structuredClone(ARMING.answers[m + t]![s].json);
+    },
+  });
+  return [side("a", NEAR_NETWORKS[net].fastnear[0]), side("b", NEAR_NETWORKS[net].drpc)];
+}
+
+test("A's registration is read on the withdrawal's own token: another network's read is refused, nothing read, written or proved", async () => {
+  const v = await vaultWith();
+  const seen: unknown[] = [];
+  let writes = 0;
+  v.failPut.on = () => (writes++, false);
+  const p = signalsProver();
+  // TOKEN is mainnet's: a read set up for testnet would read another token's registration
+  await assert.rejects(withdrawRequest(argsFor(v, p, { registerDepositOf: armingRegisterDepositOf("testnet", nullRegistration("testnet", seen)) })), /token/);
+  assert.equal(seen.length, 0, "no read");
+  assert.equal(writes, 0, "no write");
+  assert.deepEqual(p.log, [], "no proof");
+  assert.deepEqual((await v.ns.list()).map((n) => n.state), ["UNSPENT", "UNSPENT", "UNSPENT"]);
+  // on its own network the read is made for the request's own A, and its register_deposit is the one bound
+  const r = await withdrawRequest(argsFor(v, signalsProver(), { registerDepositOf: armingRegisterDepositOf("mainnet", nullRegistration("mainnet", seen)) }));
+  assert.equal(seen.length, 4);
+  for (const q of seen as { account_id: string }[]) assert.equal(q.account_id, TOKEN);
+  assert.equal(r.body.withdrawal.register_deposit, "1250000000000000000000");
 });

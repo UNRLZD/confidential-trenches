@@ -1,0 +1,31 @@
+{
+  "network": "testnet",
+  "account_id": "vault.bf-vt-20261102t071444.testnet",
+  "parent": "bf-vt-20261102t071444.testnet",
+  "parent_tx": "EhGNFkDAKtdbQ16yJ74QraJ81E6s8hSTFsfNXZKpvDud",
+  "tx_hash": "5uYhrpNVE5xAoGwVrkZz43Trr3gX8L7soAREDzhrVpbF",
+  "tx_actions": [
+    "CreateAccount",
+    "Transfer",
+    "DeployContract",
+    "FunctionCall(config)"
+  ],
+  "transfer_yocto": "2309210000000000000000000",
+  "config_gas": "100000000000000",
+  "vault_receipt_gas_burnt": "23705760630815",
+  "wasm_sha256": "ab4ac612ce0d3257ceafee26f7010c6d1b635e865ff545db3074ed5cc11944d7",
+  "wasm_builds_sha256": [
+    "ab4ac612ce0d3257ceafee26f7010c6d1b635e865ff545db3074ed5cc11944d7",
+    "ab4ac612ce0d3257ceafee26f7010c6d1b635e865ff545db3074ed5cc11944d7"
+  ],
+  "wasm_bytes": 229821,
+  "largest_function_body": 14026,
+  "code_hash": "CXer6tYxd9w2Bgdcz1g2vGJTFoj927goSLscRCtgyEhc",
+  "asset": "bf-usdc-20261101t022248.testnet",
+  "scope": "1535477060801825460881825272651648228733961995907927460809153251087997597629",
+  "version": "blindfill-vault 0.1.0 testnet",
+  "registration_tx": "8RHhcqaYv7EaqpT4G3QbAMSdBhMBqcDM4vJff7WfGELm",
+  "registration_yocto": "1250000000000000000000",
+  "build": "cargo +1.96.0 near build non-reproducible-wasm --no-embed-abi --locked --env RUSTFLAGS=-C link-arg=-s --remap-path-prefix=<CARGO_HOME>=/cargo --features testnet (cargo-near-near 0.22.0, rustc 1.96.0 (ac68faa20 2026-05-25), linux x64)",
+  "deployed_at": "2026-11-02T07:16:47.752Z"
+}

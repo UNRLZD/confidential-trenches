@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 
 const KEY = "vault-skeleton";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -76,6 +77,18 @@ export const EXPORTS_ALLOWED = new Set([
   "totals",
   "contract_source_metadata",
 ]);
+
+// What keeps `rpcs` from being two independent reads of NEAR testnet: [] when its first two are testnet hosts of two
+// different operators (scripts/ci/near-rpc-operators.mjs). Two hosts of one operator are one read
+// (FastNEAR runs near.org's testnet hosts too), and a host the map does not hold is no read.
+export function operatorProblems(rpcs) {
+  const two = rpcs.slice(0, 2);
+  const named = two.map((u) => `${u} (${networkOf(u) === "testnet" ? (operatorOf(u) ?? "unknown") : "not a testnet host"})`);
+  const ops = new Set(two.filter((u) => networkOf(u) === "testnet").map(operatorOf).filter(Boolean));
+  if (two.length < 2) return [`only ${two.length} RPC(s): ${named.join(", ") || "none"}; want two of two operators`];
+  if (ops.size < 2) return [`only ${ops.size} operator(s) in ${named.join(", ")}; want two testnet operators`];
+  return [];
+}
 
 const banned = (name) => BANNED.some((b) => (b.endsWith("*") ? name.startsWith(b.slice(0, -1)) : name === b));
 
@@ -180,12 +193,13 @@ async function query(fetchFn, url, params) {
 
 export async function check({ deployment, account = deployment.account_id, fetchFn = fetch, rpcs = RPCS }) {
   const lines = [];
-  let ok = rpcs.length >= 2;
+  let ok = true;
   const say = (good, text) => {
     ok &&= good;
     lines.push(`${good ? "ok " : "BAD"} ${text}`);
   };
-  if (rpcs.length < 2) lines.push(`BAD only ${rpcs.length} RPC(s); want two`);
+  for (const p of operatorProblems(rpcs)) say(false, p);
+  rpcs = rpcs.slice(0, 2);
   for (const url of rpcs) {
     const at = `on ${url}`;
     try {

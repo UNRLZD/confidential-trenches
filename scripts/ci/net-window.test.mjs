@@ -41,6 +41,7 @@ export const CHANGED = [
   "scripts/live-checks/vault-setup-files.mjs",
   "scripts/live-checks/vault-skeleton.mjs",
   "scripts/live-checks/vault-testnet-usdc.mjs",
+  "scripts/live-checks/vault-testnet-t01.mjs",
   "scripts/live-checks/wallet-passkey-prf.mjs",
 ];
 

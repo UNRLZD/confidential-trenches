@@ -13,7 +13,8 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# The testnet build: TOKEN names Circle's testnet USDC. Every other byte of behaviour is the mainnet build's.
+# The testnet build: TOKEN names the team's testnet USDC (deployments/testnet-usdc.json). Every other byte of behaviour
+# is the mainnet build's.
 testnet = []
 # The near-sandbox suite (tests/harness, VT-S*): its tests are `[[test]]` targets that need this feature, so a plain
 # `cargo test` (CI) neither builds nor runs them, and nothing here reaches the wasm build. Run through
