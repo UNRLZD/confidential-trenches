@@ -40,7 +40,7 @@ const signedIn: SignpageClientSnapshot = {
   stale: false,
   state: { release: "signpage-v1", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "73.18", wallets: [], positions: [], orders: [], held: [], ops: [] },
 };
-const src: SigninSource = { snapshot: signedIn, moneyOn: true, locked: null, restored: null, hop: async () => null, restore: () => {} };
+const src: SigninSource = { snapshot: signedIn, moneyOn: true, locked: null, hop: async () => null, restore: () => {} };
 document.documentElement.dataset.fixture = f;
 
 function App() {

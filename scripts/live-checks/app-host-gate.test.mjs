@@ -1,8 +1,9 @@
 // node --test scripts/live-checks/app-host-gate.test.mjs: the live check replays recorded answers
-// (app-host-gate.answers.json). good: apps/terminal/public served by the Pages runtime of wrangler 4.151.1 on a Mac
-// (APP_HOST answered 522 before its first deploy, so no served answer exists yet): PASS. The bad answers are that
-// same answer with 'wasm-unsafe-eval' added to script-src, and with frame-src *: FAIL. predeploy: APP_HOST's real
-// 522 before its first deploy: FAIL.
+// (app-host-gate.answers.json). good: card app-in-shell's build (apps/terminal/dist) served by the Pages runtime of
+// wrangler 4.151.1 on a Mac, 2026-11-01: PASS. liveBefore: the live APP_HOST read the same day before app-in-shell's
+// deploy (frame-ancestors 'none', frame-src SIGN_HOST, X-Frame-Options DENY): FAIL. The other bad answers are the good
+// one with 'wasm-unsafe-eval' added to script-src, and with frame-ancestors *: FAIL. predeploy: APP_HOST's real 522
+// before its first deploy: FAIL.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -28,9 +29,21 @@ const replay = (a) => async () => ({ status: a.status, headers: new Headers(a.he
 test("recorded good answer: every header equals the policy: PASS", async () => {
   const r = judge(await read("https://confidential.unrealized.trade/", replay(GOOD)));
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.ok(r.lines.includes(`ok  CSP frame-src is exactly ${SIGN}`));
+  assert.ok(r.lines.includes(`ok  CSP frame-ancestors is exactly ${SIGN}`));
+  assert.ok(r.lines.includes(`ok  CSP frame-src: "'none'"`));
   assert.ok(r.lines.includes("ok  no header holds 'wasm-unsafe-eval'"));
-  assert.ok(r.lines.includes("ok  x-frame-options: \"DENY\""));
+  assert.ok(r.lines.includes("ok  x-frame-options: none, want none"));
+});
+
+test("recorded bad answer: the live APP_HOST before app-in-shell (not frameable by the shell, frames SIGN_HOST): FAIL", async () => {
+  const r = judge(await read(undefined, replay(ANSWERS.liveBefore)));
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [
+    `BAD CSP frame-src: "${SIGN}", want "'none'"`,
+    `BAD CSP frame-ancestors: "'none'", want "${SIGN}"`,
+    `BAD CSP frame-ancestors is exactly ${SIGN}`,
+    'BAD x-frame-options: "DENY", want none',
+  ]);
 });
 
 test("recorded bad answer: 'wasm-unsafe-eval' added to script-src: FAIL", async () => {
@@ -40,11 +53,11 @@ test("recorded bad answer: 'wasm-unsafe-eval' added to script-src: FAIL", async 
   assert.ok(r.lines.includes("BAD no header holds 'wasm-unsafe-eval': content-security-policy"));
 });
 
-test("recorded bad answer: frame-src *: FAIL", async () => {
-  const r = judge(await read(undefined, replay(withCsp(`frame-src ${SIGN};`, "frame-src *;"))));
+test("recorded bad answer: frame-ancestors *: FAIL", async () => {
+  const r = judge(await read(undefined, replay(withCsp(`frame-ancestors ${SIGN};`, "frame-ancestors *;"))));
   assert.equal(r.ok, false);
-  assert.ok(r.lines.includes(`BAD CSP frame-src: "*", want "${SIGN}"`), r.lines.join("\n"));
-  assert.ok(r.lines.includes(`BAD CSP frame-src is exactly ${SIGN}`));
+  assert.ok(r.lines.includes(`BAD CSP frame-ancestors: "*", want "${SIGN}"`), r.lines.join("\n"));
+  assert.ok(r.lines.includes(`BAD CSP frame-ancestors is exactly ${SIGN}`));
 });
 
 test("recorded bad answers: a directive added, a header off by one value, COEP sent, APP_HOST's 522: FAIL", async () => {
@@ -57,7 +70,7 @@ test("recorded bad answers: a directive added, a header off by one value, COEP s
   const pre = judge(ANSWERS.predeploy);
   assert.equal(pre.ok, false);
   assert.equal(pre.lines[0], "BAD GET answers 522");
-  assert.ok(pre.lines.includes('BAD x-frame-options: "SAMEORIGIN", want "DENY"'));
+  assert.ok(pre.lines.includes('BAD x-frame-options: "SAMEORIGIN", want none'));
 });
 
 test("the CLI on a host that does not answer is an error, exit 2", () => {

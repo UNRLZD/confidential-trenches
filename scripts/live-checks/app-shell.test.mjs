@@ -1,13 +1,14 @@
 // node --test scripts/live-checks/app-shell.test.mjs: the live check's verdict replays recorded runs
-// (app-shell.answers.json), each read on 2026-11-01 by app-shell.mjs --record in headless Chromium 153 from the shell's
-// build on 127.0.0.1, before APP_HOST's first deploy:
-//   good:         the build with app-host-gate's _headers (card/app-host-gate d889fb4), served by wrangler 4.151.1
-//                 pages dev: PASS;
-//   badCls:       the same build with a 120 px banner put above the shell 1 s after load, served with the same policy
-//                 (app.md:636-649) by a plain Node server: FAIL on CLS (the phone's 0.1422; the desktop's shift stays
-//                 under 0.1);
-//   badIntegrity: the same build with the script tag's integrity taken out, served the same way: FAIL on the
-//                 integrity (Integrity-Policy then blocks the script, so no route draws).
+// (app-shell.answers.json), each read on 2026-11-01 by app-shell.mjs --harness --record in headless Chromium 153 on the
+// Mac, the hosts' real names answered by route (APP_HOST: a terminal build under its own _headers; SIGN_HOST:
+// app-in-shell's stand-in shell):
+//   good:         card app-in-shell's build: every load runs inside the shell: PASS;
+//   bad:          main cf7b85a's build, before app-in-shell: APP_HOST stays top-level and frames SIGN_HOST, which the
+//                 shell's frame-ancestors 'none' refuses: FAIL on every load;
+//   badIntegrity: app-in-shell's build with the script tag's integrity taken out: FAIL on the integrity
+//                 (Integrity-Policy then blocks the script, so nothing moves to the shell and no route draws).
+// A late layout shift is planted on the good answer (a recorded plant moved the shell's bars by 0.06 at most, under the
+// limit, since every screen is empty today).
 // Screenshot paths are kept as <shots>/<file>.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -26,25 +27,34 @@ test("recorded good answer: every route at both widths, integrity equal, CLS 0, 
   assert.match(r.lines[0], /^ok  served with a CSP and an Integrity-Policy: CSP, Integrity-Policy blocked-destinations=\(script\)$/);
   assert.ok(r.lines.some((l) => /^ok  \S+\/assets\/index-[\w-]+\.js integrity equals the sha384 of the bytes served$/.test(l)));
   assert.ok(r.lines.includes(`ok  ${ROUTES.length * WIDTHS.length} loads of ${ROUTES.length * WIDTHS.length} (every route at both widths)`));
-  for (const w of WIDTHS) for (const [id, p] of ROUTES) assert.ok(r.lines.includes(`ok  ${w.name} ${p} (${id}): CLS 0.0000, no violation, no error`), `${w.name} ${p}`);
+  // the phone's header swaps Sign in for the balance when the shell's signed-in state lands: a shift of 0.0004 at most
+  for (const w of WIDTHS) for (const [id, p] of ROUTES) assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} ${p} \\(${id}\\): CLS 0\\.000\\d, no violation, no error$`).test(l)), `${w.name} ${p}`);
   assert.ok(r.lines.some((l) => /^ok  phone inside the shell, 4 link\(s\): CLS 0, no reload$/.test(l)));
   assert.ok(r.lines.some((l) => /^ok  desktop inside the shell, 6 link\(s\): CLS 0, no reload$/.test(l)));
 });
 
-test("recorded bad answer: a late banner moves the layout, CLS above 0.1: FAIL", () => {
-  const r = judge(ANSWERS.badCls);
+test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOST's shell: FAIL on every load", () => {
+  const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
-  const b = bad(r.lines);
-  assert.ok(b.length > 0);
-  assert.ok(b.every((l) => /CLS \d\.\d{4} (above 0\.1|inside the shell)/.test(l)), b.join("\n"));
-  assert.ok(b.some((l) => /^BAD phone \/ \(token\): CLS 0\.1422 above 0\.1$/.test(l)), b.join("\n"));
+  for (const w of WIDTHS) {
+    for (const [id, p] of ROUTES) assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} ${p} (${id}): not inside SIGN_HOST's shell (top window at https://confidential.unrealized.trade${p})`)), `${w.name} ${p}`);
+    assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} inside the shell, `) && l.includes("not inside SIGN_HOST's shell")), w.name);
+  }
+});
+
+test("planted on the good answer: a late shift above 0.1 on one load, and inside the shell: FAIL", () => {
+  const rec = structuredClone(ANSWERS.good);
+  rec.loads[0].cls = 0.1422;
+  rec.inShell[0].cls = 0.05;
+  const b = bad(judge(rec).lines);
+  assert.deepEqual(b, [`BAD phone / (token): CLS 0.1422 above 0.1`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
 });
 
 test("recorded bad answer: one script without its integrity: FAIL", () => {
   const r = judge(ANSWERS.badIntegrity);
   assert.equal(r.ok, false);
   assert.ok(bad(r.lines).some((l) => /^BAD \S+\/assets\/index-[\w-]+\.js has no sha384 integrity$/.test(l)), r.lines.join("\n"));
-  assert.ok(bad(r.lines).includes("BAD phone / (token): drew nothing"));
+  assert.ok(bad(r.lines).some((l) => l.startsWith("BAD phone / (token): not inside SIGN_HOST's shell") && l.includes("drew nothing")), r.lines.join("\n"));
 });
 
 test("planted on the good answer: served bytes that differ from the integrity, an inline script, a missing header: FAIL", () => {
@@ -59,30 +69,30 @@ test("planted on the good answer: served bytes that differ from the integrity, a
   assert.ok(bad(r.lines).includes("BAD an inline script"));
   r = mut((rec) => (rec.headers.integrityPolicy = ""));
   assert.match(bad(r.lines)[0], /no Integrity-Policy/);
-  r = mut((rec) => rec.loadedScripts.push({ url: `${rec.url}/assets/late.js`, frame: `${rec.url}/`, top: true }));
+  r = mut((rec) => rec.loadedScripts.push({ url: `${rec.url}/assets/late.js`, frame: `${rec.url}/`, app: true }));
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)));
   r = mut((rec) => (rec.loads[3].route = "token"));
   assert.ok(bad(r.lines).some((l) => /drew token/.test(l)));
 });
 
-test("scripts: only the top frame's count; the signing page's frame is left to SIGN_HOST's own checks", () => {
-  const frame = (rec, url, top) => ({ url, frame: top ? `${rec.url}/` : "https://sign.confidential.unrealized.trade/", top });
+test("scripts: only APP_HOST's documents' count; the shell's are left to SIGN_HOST's own checks", () => {
+  const frame = (rec, url, app) => ({ url, frame: app ? `${rec.url}/` : "https://sign.confidential.unrealized.trade/", app });
   const mut = (f) => {
     const rec = structuredClone(ANSWERS.good);
     f(rec);
     return judge(rec);
   };
-  // the hidden SIGN_HOST iframe's own script is not a tag of APP_HOST's page: PASS
-  let r = mut((rec) => rec.loadedScripts.push(frame(rec, "https://sign.confidential.unrealized.trade/app.js", false)));
+  // the shell's own script is not a tag of APP_HOST's page: PASS
+  let r = mut((rec) => rec.loadedScripts.push(frame(rec, "https://sign.confidential.unrealized.trade/shell.js", false)));
   assert.equal(r.ok, true, r.lines.join("\n"));
-  // an untagged script of APP_HOST's own top frame still FAILs
+  // an untagged script of an APP_HOST document still FAILs
   r = mut((rec) => rec.loadedScripts.push(frame(rec, `${rec.url}/assets/late.js`, true)));
   assert.equal(r.ok, false);
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
-  // the same file loaded by the iframe does not hide one from the top frame
+  // the same file loaded by the shell does not hide one from APP_HOST's document
   r = mut((rec) => rec.loadedScripts.push(frame(rec, `${rec.url}/assets/late.js`, false), frame(rec, `${rec.url}/assets/late.js`, true)));
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)));
-  // a record in the old shape (a bare address) or with no frame mark counts as the top frame's, so it never passes loosely
+  // a record in the old shape (a bare address) or with no app mark counts as APP_HOST's, so it never passes loosely
   r = mut((rec) => rec.loadedScripts.push(`${rec.url}/assets/late.js`));
   assert.ok(bad(r.lines).some((l) => /not a tag: \S+\/assets\/late\.js/.test(l)), r.lines.join("\n"));
   r = mut((rec) => rec.loadedScripts.push({ url: `${rec.url}/assets/late.js` }));

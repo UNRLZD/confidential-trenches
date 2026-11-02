@@ -1,24 +1,100 @@
 {
  "good": {
-  "url": "http://127.0.0.1:8791",
-  "at": "2026-11-01T00:21:07.870Z",
+  "url": "https://confidential.unrealized.trade",
+  "source": "harness, /Users/mackubucku/Downloads/confidential-trenches-public/.claude/worktrees/app-in-shell/apps/terminal/dist",
+  "at": "2026-11-01T14:07:33.788Z",
   "browser": "153.0.8010.12",
   "headers": {
-   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "integrityPolicy": "blocked-destinations=(script)"
   },
   "scripts": [
    {
-    "src": "http://127.0.0.1:8791/assets/index-4-aiKqcO.js",
-    "integrity": "sha384-+TTahq5cggmw6/S2IzTnCZqJVrzra+tJmAkaJ/SgNZkx/oG8ugjBvn6xUNsMF5za",
-    "served": "sha384-+TTahq5cggmw6/S2IzTnCZqJVrzra+tJmAkaJ/SgNZkx/oG8ugjBvn6xUNsMF5za"
+    "src": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "integrity": "sha384-p7ybGfHnE97cUNZ9ooym/iymD1xKKdRCeDHtOVASemGD86QsvxC5/KkWV9TKROkV",
+    "served": "sha384-p7ybGfHnE97cUNZ9ooym/iymD1xKKdRCeDHtOVASemGD86QsvxC5/KkWV9TKROkV"
    }
   ],
   "loadedScripts": [
    {
-    "url": "http://127.0.0.1:8791/assets/index-4-aiKqcO.js",
-    "frame": "http://127.0.0.1:8791/",
-    "top": true
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/",
+    "app": false
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/discover",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/discover",
+    "app": false
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/portfolio",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/portfolio",
+    "app": false
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/orders",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/orders",
+    "app": false
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/profile",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/profile",
+    "app": false
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/verify",
+    "app": false
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/privacy",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/privacy",
+    "app": false
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "frame": "https://confidential.unrealized.trade/terms",
+    "app": true
+   },
+   {
+    "url": "https://sign.confidential.unrealized.trade/shell.js",
+    "frame": "https://sign.confidential.unrealized.trade/terms",
+    "app": false
    }
   ],
   "loads": [
@@ -26,6 +102,8 @@
     "width": "phone",
     "path": "/",
     "expect": "token",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/",
     "route": "token",
     "violations": [],
     "consoleErrors": [],
@@ -34,12 +112,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-token.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-token.png"
    },
    {
     "width": "phone",
     "path": "/discover",
     "expect": "discover",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
     "consoleErrors": [],
@@ -48,12 +128,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-discover.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-discover.png"
    },
    {
     "width": "phone",
     "path": "/portfolio",
     "expect": "portfolio",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [],
@@ -62,54 +144,62 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-portfolio.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-portfolio.png"
    },
    {
     "width": "phone",
     "path": "/orders",
     "expect": "orders",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
     "consoleErrors": [],
-    "cls": 0,
-    "shiftCount": 0,
+    "cls": 0.00035195235581710505,
+    "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-orders.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-orders.png"
    },
    {
     "width": "phone",
     "path": "/profile",
     "expect": "profile",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
     "consoleErrors": [],
-    "cls": 0,
-    "shiftCount": 0,
+    "cls": 0.00035195235581710505,
+    "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-profile.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-profile.png"
    },
    {
     "width": "phone",
     "path": "/verify",
     "expect": "verify",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
     "consoleErrors": [],
-    "cls": 0,
-    "shiftCount": 0,
+    "cls": 0.00035195235581710505,
+    "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-verify.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-verify.png"
    },
    {
     "width": "phone",
     "path": "/privacy",
     "expect": "privacy",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
     "consoleErrors": [],
@@ -118,12 +208,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-privacy.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-privacy.png"
    },
    {
     "width": "phone",
     "path": "/terms",
     "expect": "terms",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
     "consoleErrors": [],
@@ -132,26 +224,30 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-terms.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/phone-terms.png"
    },
    {
     "width": "desktop",
     "path": "/",
     "expect": "token",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/",
     "route": "token",
     "violations": [],
     "consoleErrors": [],
-    "cls": 0,
-    "shiftCount": 0,
+    "cls": 0.00002036916473765432,
+    "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-token.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-token.png"
    },
    {
     "width": "desktop",
     "path": "/discover",
     "expect": "discover",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
     "consoleErrors": [],
@@ -160,12 +256,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-discover.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-discover.png"
    },
    {
     "width": "desktop",
     "path": "/portfolio",
     "expect": "portfolio",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [],
@@ -174,12 +272,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-portfolio.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-portfolio.png"
    },
    {
     "width": "desktop",
     "path": "/orders",
     "expect": "orders",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
     "consoleErrors": [],
@@ -188,12 +288,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-orders.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-orders.png"
    },
    {
     "width": "desktop",
     "path": "/profile",
     "expect": "profile",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
     "consoleErrors": [],
@@ -202,12 +304,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-profile.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-profile.png"
    },
    {
     "width": "desktop",
     "path": "/verify",
     "expect": "verify",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
     "consoleErrors": [],
@@ -216,40 +320,45 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-verify.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-verify.png"
    },
    {
     "width": "desktop",
     "path": "/privacy",
     "expect": "privacy",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
     "consoleErrors": [],
-    "cls": 0,
-    "shiftCount": 0,
+    "cls": 0.00002036916473765432,
+    "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-privacy.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-privacy.png"
    },
    {
     "width": "desktop",
     "path": "/terms",
     "expect": "terms",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
     "consoleErrors": [],
-    "cls": 0,
-    "shiftCount": 0,
+    "cls": 0.00002036916473765432,
+    "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-terms.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good/desktop-terms.png"
    }
   ],
   "inShell": [
    {
     "width": "phone",
+    "framed": true,
     "steps": [
      {
       "href": "/discover",
@@ -282,6 +391,7 @@
    },
    {
     "width": "desktop",
+    "framed": true,
     "steps": [
      {
       "href": "/discover",
@@ -325,11 +435,12 @@
     "consoleErrors": []
    }
   ],
-  "shots": "<shots>"
+  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-good"
  },
- "badCls": {
-  "url": "http://127.0.0.1:47312",
-  "at": "2026-11-01T00:18:01.020Z",
+ "bad": {
+  "url": "https://confidential.unrealized.trade",
+  "source": "harness, /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/main-cf7b85a/apps/terminal/dist",
+  "at": "2026-11-01T14:08:16.267Z",
   "browser": "153.0.8010.12",
   "headers": {
    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
@@ -337,16 +448,51 @@
   },
   "scripts": [
    {
-    "src": "http://127.0.0.1:47312/assets/index-4-aiKqcO.js",
-    "integrity": "sha384-bZHDSY3VcdDNyQzepCMDhvNepkzvkqoMHcWN7ubaSqIhxXs0a/OfHsfsKiYH3HKW",
-    "served": "sha384-bZHDSY3VcdDNyQzepCMDhvNepkzvkqoMHcWN7ubaSqIhxXs0a/OfHsfsKiYH3HKW"
+    "src": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "integrity": "sha384-wWYzzK+UkdIsuiOfDtcGB1y2eoWYS4kHIYLvSJW0Msm+qZ0+/CaihAHjZiCtwmwt",
+    "served": "sha384-wWYzzK+UkdIsuiOfDtcGB1y2eoWYS4kHIYLvSJW0Msm+qZ0+/CaihAHjZiCtwmwt"
    }
   ],
   "loadedScripts": [
    {
-    "url": "http://127.0.0.1:47312/assets/index-4-aiKqcO.js",
-    "frame": "http://127.0.0.1:47312/",
-    "top": true
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/discover",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/portfolio",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/orders",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/profile",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/privacy",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://confidential.unrealized.trade/terms",
+    "app": true
    }
   ],
   "loads": [
@@ -354,230 +500,339 @@
     "width": "phone",
     "path": "/",
     "expect": "token",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/",
     "route": "token",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-token.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-token.png"
    },
    {
     "width": "phone",
     "path": "/discover",
     "expect": "discover",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-discover.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-discover.png"
    },
    {
     "width": "phone",
     "path": "/portfolio",
     "expect": "portfolio",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-portfolio.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-portfolio.png"
    },
    {
     "width": "phone",
     "path": "/orders",
     "expect": "orders",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-orders.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-orders.png"
    },
    {
     "width": "phone",
     "path": "/profile",
     "expect": "profile",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-profile.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-profile.png"
    },
    {
     "width": "phone",
     "path": "/verify",
     "expect": "verify",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-verify.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-verify.png"
    },
    {
     "width": "phone",
     "path": "/privacy",
     "expect": "privacy",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-privacy.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-privacy.png"
    },
    {
     "width": "phone",
     "path": "/terms",
     "expect": "terms",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.14218009478672985,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0006003903318601018,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-terms.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/phone-terms.png"
    },
    {
     "width": "desktop",
     "path": "/",
     "expect": "token",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/",
     "route": "token",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-token.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-token.png"
    },
    {
     "width": "desktop",
     "path": "/discover",
     "expect": "discover",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-discover.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-discover.png"
    },
    {
     "width": "desktop",
     "path": "/portfolio",
     "expect": "portfolio",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-portfolio.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-portfolio.png"
    },
    {
     "width": "desktop",
     "path": "/orders",
     "expect": "orders",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-orders.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-orders.png"
    },
    {
     "width": "desktop",
     "path": "/profile",
     "expect": "profile",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-profile.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-profile.png"
    },
    {
     "width": "desktop",
     "path": "/verify",
     "expect": "verify",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-verify.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-verify.png"
    },
    {
     "width": "desktop",
     "path": "/privacy",
     "expect": "privacy",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-privacy.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-privacy.png"
    },
    {
     "width": "desktop",
     "path": "/terms",
     "expect": "terms",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
-    "consoleErrors": [],
-    "cls": 0.0625,
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ],
+    "cls": 0.0003194688585069444,
     "shiftCount": 1,
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-terms.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad/desktop-terms.png"
    }
   ],
   "inShell": [
    {
     "width": "phone",
+    "framed": false,
     "steps": [
      {
       "href": "/discover",
@@ -606,10 +861,16 @@
     ],
     "cls": 0,
     "violations": [],
-    "consoleErrors": []
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
    },
    {
     "width": "desktop",
+    "framed": false,
     "steps": [
      {
       "href": "/discover",
@@ -650,24 +911,30 @@
     ],
     "cls": 0,
     "violations": [],
-    "consoleErrors": []
+    "consoleErrors": [
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+    ]
    }
   ],
-  "shots": "<shots>"
+  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-bad"
  },
  "badIntegrity": {
-  "url": "http://127.0.0.1:47313",
-  "at": "2026-11-01T00:19:56.188Z",
+  "url": "https://confidential.unrealized.trade",
+  "source": "harness, /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/b-int",
+  "at": "2026-11-01T14:11:23.707Z",
   "browser": "153.0.8010.12",
   "headers": {
-   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "integrityPolicy": "blocked-destinations=(script)"
   },
   "scripts": [
    {
-    "src": "http://127.0.0.1:47313/assets/index-4-aiKqcO.js",
+    "src": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
     "integrity": "",
-    "served": "sha384-+TTahq5cggmw6/S2IzTnCZqJVrzra+tJmAkaJ/SgNZkx/oG8ugjBvn6xUNsMF5za"
+    "served": "sha384-p7ybGfHnE97cUNZ9ooym/iymD1xKKdRCeDHtOVASemGD86QsvxC5/KkWV9TKROkV"
    }
   ],
   "loadedScripts": [],
@@ -676,6 +943,8 @@
     "width": "phone",
     "path": "/",
     "expect": "token",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -684,12 +953,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-token.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-token.png"
    },
    {
     "width": "phone",
     "path": "/discover",
     "expect": "discover",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/discover",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -698,12 +969,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-discover.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-discover.png"
    },
    {
     "width": "phone",
     "path": "/portfolio",
     "expect": "portfolio",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/portfolio",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -712,12 +985,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-portfolio.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-portfolio.png"
    },
    {
     "width": "phone",
     "path": "/orders",
     "expect": "orders",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/orders",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -726,12 +1001,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-orders.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-orders.png"
    },
    {
     "width": "phone",
     "path": "/profile",
     "expect": "profile",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/profile",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -740,12 +1017,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-profile.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-profile.png"
    },
    {
     "width": "phone",
     "path": "/verify",
     "expect": "verify",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/verify",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -754,12 +1033,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-verify.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-verify.png"
    },
    {
     "width": "phone",
     "path": "/privacy",
     "expect": "privacy",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/privacy",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -768,12 +1049,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-privacy.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-privacy.png"
    },
    {
     "width": "phone",
     "path": "/terms",
     "expect": "terms",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/terms",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -782,12 +1065,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-terms.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/phone-terms.png"
    },
    {
     "width": "desktop",
     "path": "/",
     "expect": "token",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -796,12 +1081,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-token.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-token.png"
    },
    {
     "width": "desktop",
     "path": "/discover",
     "expect": "discover",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/discover",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -810,12 +1097,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-discover.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-discover.png"
    },
    {
     "width": "desktop",
     "path": "/portfolio",
     "expect": "portfolio",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/portfolio",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -824,12 +1113,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-portfolio.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-portfolio.png"
    },
    {
     "width": "desktop",
     "path": "/orders",
     "expect": "orders",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/orders",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -838,12 +1129,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-orders.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-orders.png"
    },
    {
     "width": "desktop",
     "path": "/profile",
     "expect": "profile",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/profile",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -852,12 +1145,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-profile.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-profile.png"
    },
    {
     "width": "desktop",
     "path": "/verify",
     "expect": "verify",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/verify",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -866,12 +1161,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-verify.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-verify.png"
    },
    {
     "width": "desktop",
     "path": "/privacy",
     "expect": "privacy",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/privacy",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -880,12 +1177,14 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-privacy.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-privacy.png"
    },
    {
     "width": "desktop",
     "path": "/terms",
     "expect": "terms",
+    "framed": false,
+    "top": "https://confidential.unrealized.trade/terms",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -894,12 +1193,13 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-terms.png"
+    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int/desktop-terms.png"
    }
   ],
   "inShell": [
    {
     "width": "phone",
+    "framed": false,
     "steps": [],
     "cls": 0,
     "violations": [],
@@ -907,12 +1207,13 @@
    },
    {
     "width": "desktop",
+    "framed": false,
     "steps": [],
     "cls": 0,
     "violations": [],
     "consoleErrors": []
    }
   ],
-  "shots": "<shots>"
+  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/shell-int"
  }
 }

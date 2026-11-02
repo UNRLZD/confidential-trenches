@@ -18,7 +18,8 @@
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
-import type { ReadyEvent, SignpageAnswer, SignpageKind, SignpageState, StateEvent } from "../../kit/src/signpage/messages.ts";
+import type { ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, StateEvent } from "../../kit/src/signpage/messages.ts";
+import { SIGNPAGE_PARAM_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
 export const APP_ORIGIN = "https://confidential.unrealized.trade";
@@ -54,7 +55,11 @@ export interface IncomingMessage {
 }
 
 export interface ApiHost {
-  /** The window that framed this page: the only source read and the only target posted to. */
+  /**
+   * The app's window: the only source read and the only target posted to. In a frame, the window that framed this page;
+   * in the shell (src/shell.ts), the framed APP_HOST's window (its iframe's contentWindow, the same object across the
+   * frame's loads).
+   */
   parent: PostTarget;
   /**
    * Adds the page's message listener. `data` must be what the browser's structured clone made (MessageEvent.data):
@@ -66,6 +71,25 @@ export interface ApiHost {
   state(): SignpageState | Promise<SignpageState>;
   /** Registers `fn`, called on every change of the state's source (another tab's sign-in, sign-out, words saved, op). */
   watch?(fn: () => void): void;
+  /**
+   * The shell's (src/shell.ts): no `ready` at start, only the caller's ready() on each load of the frame. At start the
+   * frame holds no APP_HOST document yet, and a message posted then can still reach the one that comes (the target
+   * origin is checked on delivery), which would be a second ready for one load.
+   */
+  readyOnLoad?: boolean;
+  /**
+   * Kinds the host answers itself (the shell's signin.open, nav and reload). A request reaches its handler only when its
+   * params are exactly what the kit's schema for that kind allows (packages/kit/src/signpage/schema.ts); the handler
+   * returns the result, or null to refuse not_allowed. `then` runs once the answer is posted (the shell removes its
+   * frame after answering signin.open, so the answer must go first).
+   */
+  kinds?: { [K in SignpageKind]?: (params: Record<string, unknown>) => HostAnswer<K> | null };
+}
+
+/** A host-answered kind's result, and what runs once it is posted. */
+export interface HostAnswer<K extends SignpageKind> {
+  result: SignpageResults[K];
+  then?: () => void;
 }
 
 /** The state of a page that holds no seed yet. */
@@ -139,6 +163,18 @@ function isStateRequest(m: Record<string, unknown>): boolean {
   return keys.length === 3 && Object.hasOwn(m, "v") && m.v === 1 && Object.hasOwn(m, "type") && m.type === STATE;
 }
 
+/** The host's own answer to `m`, when the host answers its kind and its params are exactly the kit's schema's. */
+function hostAnswer(host: ApiHost, m: Record<string, unknown>): HostAnswer<SignpageKind> | null {
+  if (!Object.hasOwn(m, "v") || m.v !== 1 || !Object.hasOwn(m, "type") || typeof m.type !== "string") return null;
+  const kind = m.type as SignpageKind;
+  const run = host.kinds && Object.hasOwn(host.kinds, kind) ? host.kinds[kind] : undefined;
+  if (!run || !Object.hasOwn(SIGNPAGE_PARAM_SCHEMAS, kind)) return null;
+  const params: Record<string, unknown> = {};
+  for (const k of Object.keys(m)) if (k !== "v" && k !== "id" && k !== "type") params[k] = m[k];
+  if (!SIGNPAGE_PARAM_SCHEMAS[kind](params)) return null;
+  return (run as (p: Record<string, unknown>) => HostAnswer<SignpageKind> | null)(params);
+}
+
 /**
  * Starts the API: listens, then posts `ready` to the parent. Messages are handled one at a time, in the order they came
  * (the SHA-256 is async). An answered id is kept with the SHA-256 of its request's JSON: the same request again gets
@@ -148,7 +184,7 @@ function isStateRequest(m: Record<string, unknown>): boolean {
  * last state sent (answer or event), so an event never overtakes a newer answer. A kind that moves money writes its id
  * to the wallet store before it signs (wallet.md §7 item 4), with that card.
  */
-export function startApi(host: ApiHost): { idle(): Promise<void> } {
+export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void } {
   const answered = new Map<string, { sha: string; answer: SignpageAnswer }>();
   const post = (msg: SignpageAnswer | ReadyEvent | StateEvent) => host.parent.postMessage(msg, APP_ORIGIN);
   // the JSON of the last state sent; null until the first `state` answer
@@ -169,10 +205,12 @@ export function startApi(host: ApiHost): { idle(): Promise<void> } {
     const first = answered.get(id);
     if (first) return post(first.sha === sha ? first.answer : { v: 1, id, ok: false, error: { code: "id_reused" } });
     if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() });
-    const answer: SignpageAnswer = { v: 1, id, ok: false, error: { code: "not_allowed" } };
+    const own = hostAnswer(host, m);
+    const answer: SignpageAnswer = own ? { v: 1, id, ok: true, result: own.result } : { v: 1, id, ok: false, error: { code: "not_allowed" } };
     answered.set(id, { sha, answer });
     if (answered.size > REMEMBERED_IDS) answered.delete(answered.keys().next().value as string);
     post(answer);
+    own?.then?.();
   };
 
   let queue: Promise<void> = Promise.resolve();
@@ -196,6 +234,8 @@ export function startApi(host: ApiHost): { idle(): Promise<void> } {
     const data = e.data;
     queue = queue.then(() => handle(data)).catch(() => {});
   });
-  post({ v: 1, type: "ready", release: RELEASE, api: API });
-  return { idle: () => queue };
+  const ready = (): void => post({ v: 1, type: "ready", release: RELEASE, api: API });
+  if (!host.readyOnLoad) ready();
+  // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
+  return { idle: () => queue, ready };
 }
