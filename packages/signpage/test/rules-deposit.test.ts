@@ -23,6 +23,7 @@ import {
   type DepositRead,
 } from "../src/rules/deposit.ts";
 import { VAULT_TOKEN_CODE_HASH } from "../../kit/src/vault/shapes.ts";
+import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 
 const vector = JSON.parse(readFileSync(new URL("../../wallet/test/vectors/deposit-delegate.json", import.meta.url), "utf8")) as {
   input: { s: string; i: number; amount: string; precommitment: string; window: number; read: { nonce: number; height: number } };
@@ -253,4 +254,224 @@ test("the deposit quote: the answer goes through the kit's 1Click check with its
   const c = qctx({ check: opts });
   (c.check as Record<string, unknown>).intoVault = false;
   assert.throws(() => checkDepositQuote(small.request, small.answer, c), (e: unknown) => e instanceof OneClickQuoteError && e.check === "floor");
+});
+
+// ---------- the review's cases (card signpage-deposit-kinds, Opus review on 158005f), on U ----------
+// Raw borsh pieces field by field, for shapes encodeDelegateAction refuses to make.
+const enc8 = (t: string) => new TextEncoder().encode(t);
+const BOM = [0xef, 0xbb, 0xbf];
+const strB = (b: number[]) => [...u32(b.length), ...b];
+const uread = (over: Partial<DepositRead> = {}) => read(U, over);
+const uctx = (over: Partial<DepositCallContext> = {}) => ctx(U, over);
+const ugood = (over: Partial<DelegateFields> = {}) => good(U, over);
+function rawU(o: { sender?: number[]; receiver?: number[]; method?: number[]; args?: number[]; nonce?: bigint; mbh?: bigint; key?: number[]; count?: number } = {}): Uint8Array {
+  return Uint8Array.from([
+    ...(o.sender ?? str(U.id)), ...(o.receiver ?? str(TOKEN)), ...u32(o.count ?? 1), 2,
+    ...(o.method ?? str("ft_transfer_call")), ...(o.args ?? str(argsOf(U))), ...le(180_000_000_000_000n, 8), ...le(1n, 16),
+    ...le(o.nonce ?? NONCE + 1n, 8), ...le(o.mbh ?? HEIGHT + 120n, 8), ...(o.key ?? [0, ...U.publicKey]),
+  ]);
+}
+const refusedAny = (f: () => unknown) => assert.throws(f, (e: unknown) => e instanceof DepositRuleRefused && e.code === "not_allowed");
+
+test("rawU rebuilds the good bytes exactly, so the raw cases below differ only where they say", () => {
+  assert.deepEqual(rawU(), ugood());
+  assert.equal(checkDepositCall(rawU(), uctx()).sender_id, U.id);
+});
+
+test("the key type: a secp256k1 key, and a tag-1 key followed by U's own 32 bytes, are refused", () => {
+  refused("public_key", () => checkDepositCall(rawU({ key: [1, ...new Uint8Array(64).fill(3)] }), uctx()));
+  refused("public_key", () => checkDepositCall(rawU({ key: [1, ...U.publicKey] }), uctx()));
+});
+
+test("lying length prefixes are refused (past the buffer, one short, one long, 2^32-1, a count whose low byte is 1)", () => {
+  const a = [...enc8(argsOf(U))];
+  refused("payload", () => checkDepositCall(rawU({ args: [...u32(0xffffffff), ...a] }), uctx()));
+  refusedAny(() => checkDepositCall(rawU({ args: [...u32(a.length - 1), ...a] }), uctx()));
+  refusedAny(() => checkDepositCall(rawU({ args: [...u32(a.length + 1), ...a] }), uctx()));
+  const sid = [...enc8(U.id)];
+  refusedAny(() => checkDepositCall(rawU({ sender: [...u32(sid.length + 4), ...sid] }), uctx()));
+  refusedAny(() => checkDepositCall(rawU({ count: 0x01000001 }), uctx()));
+});
+
+test("invalid UTF-8 (overlong, CESU surrogate, lone continuation) in any string is refused", () => {
+  for (const bad of [[0xc0, 0xaf], [0xed, 0xa0, 0x80], [0x80]]) {
+    refused("payload", () => checkDepositCall(rawU({ args: strB([...enc8(argsOf(U)), ...bad]) }), uctx()));
+    refused("payload", () => checkDepositCall(rawU({ method: strB([...enc8("ft_transfer_call"), ...bad]) }), uctx()));
+  }
+});
+
+test("a leading U+FEFF is kept, never dropped: a BOM in sender_id, receiver_id, method_name or args is refused", () => {
+  const withBom = rawU({ args: strB([...BOM, ...enc8(argsOf(U))]) });
+  assert.equal(withBom.length, ugood().length + 3); // the BOM's bytes are in what would be signed
+  refused("sender_id", () => checkDepositCall(rawU({ sender: strB([...BOM, ...enc8(U.id)]) }), uctx()));
+  refused("receiver_id", () => checkDepositCall(rawU({ receiver: strB([...BOM, ...enc8(TOKEN)]) }), uctx()));
+  refused("method", () => checkDepositCall(rawU({ method: strB([...BOM, ...enc8("ft_transfer_call")]) }), uctx()));
+  refused("args", () => checkDepositCall(withBom, uctx()));
+  refused("args", () => checkDepositCall(rawU({ args: strB([...BOM, ...BOM, ...enc8(argsOf(U))]) }), uctx()));
+});
+
+test("the u64 edges of nonce and max_block_height", () => {
+  const MAX = (1n << 64n) - 1n;
+  const at = [uread({ nonce: MAX }), uread({ nonce: MAX, height: HEIGHT + 3n })] as const;
+  refused("nonce", () => checkDepositCall(rawU({ nonce: MAX }), uctx({ reads: at })));
+  refused("nonce", () => checkDepositCall(rawU({ nonce: 0n }), uctx({ reads: at })));
+  refused("max_block_height", () => checkDepositCall(rawU({ mbh: MAX }), uctx()));
+  refused("max_block_height", () => checkDepositCall(rawU({ mbh: 0n }), uctx()));
+  refused("max_block_height", () => checkDepositCall(ugood({ max_block_height: HEIGHT + 119n }), uctx())); // below lower + 120
+});
+
+test("a payload that is not a Uint8Array, or is empty, is refused; the bytes returned are the rule's own copy", () => {
+  refused("payload", () => checkDepositCall([...ugood()] as unknown as Uint8Array, uctx()));
+  refused("payload", () => checkDepositCall(new Uint8Array(0), uctx()));
+  const mine = ugood();
+  const d = checkDepositCall(mine, uctx());
+  assert.deepEqual(d.bytes, ugood());
+  mine.fill(0); // a change after the check reaches nothing the caller signs
+  assert.deepEqual(d.bytes, ugood());
+  assert.notEqual(d.bytes.buffer, mine.buffer);
+});
+
+test("other spellings of the same args are refused (duplicate key, \\u escapes, whitespace, order, number amount)", () => {
+  const t = argsOf(U);
+  const spellings = [
+    t.replace('{"receiver_id"', `{"amount":"1","receiver_id"`),
+    t.replace(`"amount":"${AMOUNT}"`, `"amount":"${AMOUNT}","amount":"${AMOUNT}"`),
+    t.replace(`"receiver_id"`, `"\\u0072eceiver_id"`),
+    t.replace(VAULT, VAULT.replace("v", "\\u0076")),
+    t.replace(`\\"depositor\\"`, `\\"\\\\u0064epositor\\"`),
+    ` ${t}`, `${t}\n`, t.replace(":", ": "),
+    JSON.stringify({ amount: AMOUNT.toString(), receiver_id: VAULT, msg: JSON.parse(t).msg }),
+    t.replace(`"amount":"${AMOUNT}"`, `"amount":${AMOUNT}`),
+    t.replace(`"amount":"${AMOUNT}"`, `"amount":"0${AMOUNT}"`),
+    JSON.stringify({ ...JSON.parse(t), msg: JSON.stringify({ depositor: U.id, precommitment: P.toString() }) }),
+    JSON.stringify({ ...JSON.parse(t), msg: JSON.stringify({ precommitment: P.toString(), depositor: U.id }, null, 1) }),
+    JSON.stringify({ ...JSON.parse(t), memo: "" }),
+  ];
+  for (const sp of spellings) refusedAny(() => checkDepositCall(ugood({ args: enc8(sp) }), uctx()));
+});
+
+test("a depositor that is not the signer (upper case, another id, intents.near, the vault) is refused", () => {
+  for (const d of [U.id.toUpperCase(), "cd".repeat(32), "intents.near", VAULT]) {
+    const sp = JSON.stringify({ ...JSON.parse(argsOf(U)), msg: JSON.stringify({ precommitment: P.toString(), depositor: d }) });
+    refusedAny(() => checkDepositCall(ugood({ args: enc8(sp) }), uctx()));
+  }
+});
+
+test("upper-case signer ids and network names off the own list are refused", () => {
+  refused("signer", () => checkDepositCall(ugood(), uctx({ signer: { id: U.id.toUpperCase(), publicKey: U.publicKey } })));
+  for (const n of ["__proto__", "constructor", "toString", "hasOwnProperty"])
+    refused("network", () => checkDepositCall(ugood(), uctx({ network: n as "testnet" })));
+});
+
+test("one lying RPC cannot make the rule pass, and a lying low height only moves the window down", () => {
+  const lies: [string, Partial<DepositRead>][] = [
+    ["balance", { balance: AMOUNT - 1n }], ["keys", { keys: [] }], ["halted", { balance: "paused" }],
+    ["code_hash", { codeHash: "x" }], ["vault_storage", { vaultRegistered: false }],
+    ["precommitment_used", { precommitmentInVault: true }], ["prior_note", { priorInVault: false }],
+    ["pause_pending", { pausePending: true }], ["nonce", { nonce: NONCE - 1n }],
+  ];
+  for (const [rule, lie] of lies) {
+    refused(rule, () => checkDepositCall(ugood(), uctx({ reads: [uread(lie), uread({ height: HEIGHT + 3n })] })));
+    refused(rule, () => checkDepositCall(ugood(), uctx({ reads: [uread(), uread({ ...lie, height: HEIGHT + 3n })] })));
+  }
+  refused("max_block_height", () => checkDepositCall(ugood(), uctx({ reads: [uread(), uread({ height: HEIGHT - 50n })] })));
+});
+
+test("a short or empty reads list throws, never passes", () => {
+  assert.throws(() => checkDepositCall(ugood(), uctx({ reads: [uread()] as unknown as [DepositRead, DepositRead] })));
+  assert.throws(() => checkDepositCall(ugood(), uctx({ reads: [] as unknown as [DepositRead, DepositRead] })));
+});
+
+test("each read is checked by its type, never by truthiness: a missing or odd field is refused", () => {
+  const holes: [string, Partial<Record<keyof DepositRead, unknown>>][] = [
+    ["balance", { balance: undefined }], ["balance", { balance: "FiatToken: blacklisted" }], ["balance", { balance: Number.NaN }],
+    ["balance", { balance: 25_000_000 }], ["pause_pending", { pausePending: undefined }], ["pause_pending", { pausePending: 0 }],
+    ["precommitment_used", { precommitmentInVault: undefined }], ["vault_storage", { vaultRegistered: "false" }],
+    ["vault_storage", { vaultRegistered: 1 }], ["prior_note", { priorInVault: "true" }], ["keys", { keys: `ed25519:${b58(U.publicKey)}` }],
+    ["keys", { keys: { length: 1, 0: `ed25519:${b58(U.publicKey)}` } }],
+    ["nonce", { nonce: Number(NONCE) }], ["max_block_height", { height: Number(HEIGHT) }],
+  ];
+  for (const [rule, h] of holes) {
+    const bad = { ...uread(), ...h } as DepositRead;
+    refused(rule, () => checkDepositCall(ugood(), uctx({ reads: [bad, { ...bad, height: HEIGHT + 3n }] })));
+  }
+});
+
+test("the nonce is always the read nonce + 1; an unlanded call above it is refused, so two can never both land", () => {
+  refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE }), uctx({ unlandedNonce: NONCE })));
+  refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE - 1n }), uctx({ unlandedNonce: NONCE - 1n })));
+  refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE + 3n }), uctx({ unlandedNonce: NONCE + 2n })));
+  // an unlanded call at N > read + 1: neither read + 1 nor N signs
+  refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE + 1n }), uctx({ unlandedNonce: NONCE + 5n })));
+  refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE + 5n }), uctx({ unlandedNonce: NONCE + 5n })));
+  // an unlanded call at or below the read nonce has had its nonce used: the new call is the read nonce + 1
+  assert.equal(checkDepositCall(ugood(), uctx({ unlandedNonce: NONCE })).nonce, NONCE + 1n);
+  // nearcore's range (nonce < height x 1,000,000) is never reached: the nonce is the read's + 1
+  const big = HEIGHT * 1_000_000n + 7n;
+  refused("nonce", () => checkDepositCall(ugood({ nonce: big }), uctx({ unlandedNonce: big })));
+});
+
+test("an amount above HELPER_BIND_DEPOSIT_CAP is refused; the cap itself signs", () => {
+  const at = (amt: bigint) => uctx({ note: { precommitment: P, amount: amt }, reads: [uread({ balance: amt }), uread({ balance: amt, height: HEIGHT + 3n })] });
+  refused("cap", () => checkDepositCall(ugood({ args: enc8(argsOf(U, HELPER_BIND_DEPOSIT_CAP + 1n)) }), at(HELPER_BIND_DEPOSIT_CAP + 1n)));
+  assert.equal(checkDepositCall(ugood({ args: enc8(argsOf(U, HELPER_BIND_DEPOSIT_CAP)) }), at(HELPER_BIND_DEPOSIT_CAP)).sender_id, U.id);
+});
+
+test("info: P is not checked below the field here (P >= p or negative: the vault refuses it and the token returns the USDC to U)", () => {
+  const p = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+  for (const bad of [p, -1n]) {
+    const sp = JSON.stringify({ receiver_id: VAULT, amount: AMOUNT.toString(), msg: JSON.stringify({ precommitment: bad.toString(), depositor: U.id }) });
+    assert.equal(checkDepositCall(ugood({ args: enc8(sp) }), uctx({ note: { precommitment: bad, amount: AMOUNT } })).sender_id, U.id);
+  }
+});
+
+test("near-api-js 7.3.1's own deposit delegate (the helper's fixture) decodes whole: its refusal is the receiver, not the payload", () => {
+  const fx = JSON.parse(readFileSync(new URL("../../../apps/helper/src/bind/fixtures/near-api-js-deposit.json", import.meta.url), "utf8"));
+  const signed = new Uint8Array(Buffer.from(fx.signed_delegate, "base64"));
+  const delegate = signed.subarray(0, signed.length - 65);
+  const pk = Uint8Array.from(Buffer.from(fx.sender_id, "hex"));
+  assert.equal(`ed25519:${b58(pk)}`, fx.public_key);
+  refused("receiver_id", () => checkDepositCall(delegate, uctx({ signer: { id: fx.sender_id, publicKey: pk } })));
+  refused("payload", () => checkDepositCall(signed, uctx({ signer: { id: fx.sender_id, publicKey: pk } }))); // the signature left on
+});
+
+test("the backup gate for every no-PRF source, and code_saved other than true", () => {
+  for (const source of ["random", "code", "wallet", "PRF", "prf ", null])
+    for (const code_saved of [false, undefined, 1, "true"])
+      refused("backup", () => checkDepositQuote(req(), Q.answer, qctx({ seed: { source, code_saved } as DepositQuoteContext["seed"] })));
+});
+
+test("intoVault cannot be turned off by a getter, a proxy or a prototype on ctx.check", () => {
+  const now = Date.parse(small.answer.timestamp) + 1_000;
+  const base = { path: "keyless", pricing: "usdc", decimalsIn: 6, decimalsOut: 6, now };
+  const getter = Object.defineProperty({ ...base }, "intoVault", { get: () => false, enumerable: true });
+  const proto = Object.assign(Object.create({ intoVault: false }), base);
+  const proxy = new Proxy({ ...base, intoVault: false }, {});
+  for (const check of [getter, proto, proxy])
+    assert.throws(() => checkDepositQuote(small.request, small.answer, qctx({ check: check as DepositQuoteContext["check"] })),
+      (e: unknown) => e instanceof OneClickQuoteError && e.check === "floor");
+});
+
+test("no recipient or refund smuggled through extra request keys (both virtual-chain ids, appFees, an own __proto__)", () => {
+  for (const k of ["virtualChainRecipient", "virtualChainRefundRecipient", "appFees", "customRecipientMsg", "depositMode"])
+    refused("request", () => checkDepositQuote(req({ [k]: "x" }), Q.answer, qctx()));
+  const own = JSON.parse(`{"__proto__":{"recipient":"x"},${JSON.stringify(Q.request).slice(1)}`);
+  refused("request", () => checkDepositQuote(own, Q.answer, qctx()));
+  refused("request", () => checkDepositQuote([] as unknown as OneClickRequest, Q.answer, qctx()));
+});
+
+test("the request is read once: getters that show U to the rule and another id to the echo cannot pass", () => {
+  const OWN_U = "cd".repeat(32); // the device's own U for this deposit
+  const r = { ...Q.request } as Record<string, unknown>;
+  for (const k of ["recipient", "refundTo"]) {
+    let n = 0;
+    Object.defineProperty(r, k, { enumerable: true, get: () => (n++ === 0 ? OWN_U : QU) });
+  }
+  // the signed answer names QU; the rule read OWN_U once, and the kit's echo sees that same OWN_U
+  assert.throws(() => checkDepositQuote(r as unknown as OneClickRequest, Q.answer, qctx({ depositId: OWN_U })),
+    (e: unknown) => e instanceof OneClickQuoteError && e.check === "echo");
+});
+
+test("info: slippageTolerance reaches the kit unchanged, whose echo binds it to the signed answer", () => {
+  assert.throws(() => checkDepositQuote(req({ slippageTolerance: 9999 }), Q.answer, qctx()), (e: unknown) => e instanceof OneClickQuoteError);
 });

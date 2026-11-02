@@ -28,6 +28,7 @@ import {
   type OneClickChecked,
   type OneClickRequest,
 } from "../../../kit/src/checks/oneclick.ts";
+import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
 import { VAULT_CONSTANTS, VAULT_DEPOSIT_CARRIER, VAULT_TOKEN_CODE_HASH } from "../../../kit/src/vault/shapes.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../../wallet/src/deposit/account.ts";
 import { RELEASE_BIND_URL } from "../../../wallet/src/deposit/delegate.ts";
@@ -89,14 +90,18 @@ export interface DepositCallContext {
   note: { precommitment: bigint; amount: bigint };
   /** The same reads on two RPCs. */
   reads: readonly [DepositRead, DepositRead];
-  /** The nonce of this id's earlier call that has not landed (§2.4 "Nothing landed"), when there is one. */
+  /**
+   * The nonce of this id's earlier call that has not landed (§2.4 "Nothing landed"), when there is one: the new call
+   * re-signs at that same nonce, the read nonce + 1, and one above it is refused (two could both land, W:906).
+   */
   unlandedNonce?: bigint;
   /** Where the signed call goes. */
   route: string;
 }
 
-/** The decoded delegate the rule passed. */
+/** The decoded delegate the rule passed, with `bytes`: the rule's own copy of what it checked, the bytes to sign. */
 export interface DepositCall {
+  bytes: Uint8Array;
   sender_id: string;
   receiver_id: string;
   method_name: string;
@@ -109,8 +114,7 @@ export interface DepositCall {
 }
 
 /** borsh(DelegateAction) decoded only in the one shape a deposit call has: exactly one FunctionCall, no byte left. */
-function decodeDepositDelegate(bytes: Uint8Array): DepositCall {
-  if (!(bytes instanceof Uint8Array)) refuse("payload");
+function decodeDepositDelegate(bytes: Uint8Array): Omit<DepositCall, "bytes"> {
   let at = 0;
   const take = (n: number): Uint8Array => {
     if (at + n > bytes.length) refuse("payload");
@@ -125,9 +129,11 @@ function decodeDepositDelegate(bytes: Uint8Array): DepositCall {
     return v;
   };
   const blob = (): Uint8Array => take(Number(uint(4)));
+  // ignoreBOM: a leading U+FEFF is kept as nearcore keeps it (and the relayer, apps/helper/src/bind/checks.ts), never
+  // dropped, so a BOM-prefixed field is refused instead of read as the canonical one.
   const text = (): string => {
     try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(blob());
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(blob());
     } catch {
       return refuse("payload");
     }
@@ -173,7 +179,8 @@ const keysAre = (o: Record<string, unknown>, ks: readonly string[]): boolean => 
 
 /**
  * Checks the deposit call a one-time id (U, R or V) is about to sign: `delegate` is borsh(DelegateAction), the exact
- * bytes under the NEP-366 prefix. Returns the decoded call when every field holds; throws DepositRuleRefused otherwise.
+ * bytes under the NEP-366 prefix. The rule copies them first and returns that copy as `bytes`: the caller signs those
+ * bytes, so a change to `delegate` after the check reaches nothing signed. Throws DepositRuleRefused otherwise.
  */
 export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext): DepositCall {
   // The release's relayer only: never self-submitted, never another relayer.
@@ -187,7 +194,8 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   if (!IMPLICIT.test(signer.id) || signer.id !== hex(signer.publicKey)) refuse("signer");
   const ownKey = `ed25519:${base58(signer.publicKey)}`;
 
-  const d = decodeDepositDelegate(delegate);
+  const bytes = delegate instanceof Uint8Array ? Uint8Array.from(delegate) : refuse("payload");
+  const d = decodeDepositDelegate(bytes);
   if (d.sender_id !== signer.id) refuse("sender_id");
   if (!sameBytes(d.public_key, signer.publicKey)) refuse("public_key");
   if (d.receiver_id !== release.token) refuse("receiver_id");
@@ -220,31 +228,36 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   const canonicalMsg = JSON.stringify({ precommitment: note.precommitment.toString(), depositor: signer.id });
   if (d.args !== JSON.stringify({ receiver_id: vault, amount: note.amount.toString(), msg: canonicalMsg })) refuse("args");
 
-  // The amount: this note's, at least MIN_DEPOSIT, at most the id's balance on both RPCs; a halt is never a zero.
+  // The amount: this note's, at least MIN_DEPOSIT, at most the beta cap (the kit's one constant: the device never signs
+  // a deposit the relayer will not carry, kit/src/vault/messages.ts) and at most the id's balance on both RPCs.
   if (note.amount < VAULT_CONSTANTS.MIN_DEPOSIT) refuse("amount");
+  if (note.amount > HELPER_BIND_DEPOSIT_CAP) refuse("cap");
+  // Each read by its type, never by truthiness: a missing or odd field is refused, and a halt is never a zero.
   for (const r of reads) {
-    if (r.balance === "paused") refuse("halted");
-    if (r.pausePending) refuse("pause_pending");
+    if (typeof r.balance !== "bigint") refuse(r.balance === "paused" ? "halted" : "balance");
+    if (r.pausePending !== false) refuse("pause_pending");
     if (r.codeHash !== VAULT_TOKEN_CODE_HASH) refuse("code_hash");
     if (note.amount > (r.balance as bigint)) refuse("balance");
     // The id exists, holding its own key and no other.
-    if (r.keys.length !== 1 || r.keys[0] !== ownKey) refuse("keys");
-    if (!r.vaultRegistered) refuse("vault_storage");
-    if (r.precommitmentInVault) refuse("precommitment_used");
-    if (!r.priorInVault) refuse("prior_note");
+    if (!Array.isArray(r.keys) || r.keys.length !== 1 || r.keys[0] !== ownKey) refuse("keys");
+    if (r.vaultRegistered !== true) refuse("vault_storage");
+    if (r.precommitmentInVault !== false) refuse("precommitment_used");
+    if (r.priorInVault !== true) refuse("prior_note");
+    if (typeof r.nonce !== "bigint") refuse("nonce");
+    if (typeof r.height !== "bigint") refuse("max_block_height");
   }
 
-  // The nonce: the key nonce both RPCs read + 1, or the id's earlier call that has not landed, so two cannot both land.
+  // The nonce: the key nonce both RPCs read + 1, always. An earlier call that has not landed holds that same nonce (a
+  // re-sign at it, §2.4 "Nothing landed"); one held above it would leave two calls that can both land, so it is refused.
   const [r0, r1] = reads;
   if (r0.nonce !== r1.nonce) refuse("nonce");
-  const next = d.nonce === r0.nonce + 1n;
-  const unlanded = ctx.unlandedNonce !== undefined && ctx.unlandedNonce > r0.nonce && d.nonce === ctx.unlandedNonce;
-  if (!next && !unlanded) refuse("nonce");
+  if (d.nonce !== r0.nonce + 1n) refuse("nonce");
+  if (ctx.unlandedNonce !== undefined && ctx.unlandedNonce > r0.nonce + 1n) refuse("nonce");
 
   // The height bound: the lower of the two heights + Wd, never further.
   const lower = r0.height < r1.height ? r0.height : r1.height;
   if (d.max_block_height !== lower + DEPOSIT_WINDOW_BLOCKS) refuse("max_block_height");
-  return d;
+  return { ...d, bytes };
 }
 
 // ---------- the deposit quote (W:888) ----------
@@ -274,14 +287,17 @@ export function checkDepositQuote(request: OneClickRequest, answer: unknown, ctx
   if (ctx.seed.source !== "prf" && ctx.seed.code_saved !== true) refuse("backup");
   const u = ctx.depositId;
   if (!IMPLICIT.test(u)) refuse("deposit_id");
-  if (!isObj(request) || Object.keys(request).some((k) => !QUOTE_KEYS.has(k))) refuse("request");
-  if (request.swapType !== "EXACT_INPUT") refuse("swapType");
-  if (request.depositType !== "ORIGIN_CHAIN") refuse("depositType");
-  if (request.destinationAsset !== DEPOSIT_DESTINATION_ASSET) refuse("destinationAsset");
+  if (!isObj(request)) refuse("request");
+  // One read of each field: the rule and the kit's echo see the same request, whatever getters `request` has.
+  const req = { ...request } as OneClickRequest;
+  if (Object.keys(req).some((k) => !QUOTE_KEYS.has(k))) refuse("request");
+  if (req.swapType !== "EXACT_INPUT") refuse("swapType");
+  if (req.depositType !== "ORIGIN_CHAIN") refuse("depositType");
+  if (req.destinationAsset !== DEPOSIT_DESTINATION_ASSET) refuse("destinationAsset");
   // 1Click delivers on the token to U's own NEAR account; a refund lands under U inside intents.near.
-  if (request.recipient !== u) refuse("recipient");
-  if (request.recipientType !== "DESTINATION_CHAIN") refuse("recipientType");
-  if (request.refundTo !== u) refuse("refundTo");
-  if (request.refundType !== "INTENTS") refuse("refundType");
-  return checkOneClickQuote(request, answer, { ...ctx.check, intoVault: true });
+  if (req.recipient !== u) refuse("recipient");
+  if (req.recipientType !== "DESTINATION_CHAIN") refuse("recipientType");
+  if (req.refundTo !== u) refuse("refundTo");
+  if (req.refundType !== "INTENTS") refuse("refundType");
+  return checkOneClickQuote(req, answer, { ...ctx.check, intoVault: true });
 }
