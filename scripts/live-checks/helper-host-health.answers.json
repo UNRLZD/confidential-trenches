@@ -1,6 +1,82 @@
 {
  "good": {
-  "note": "apps/helper at 6aa24c5 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml on Docker 29.8.1 on a Mac, read 2026-11-01 01:04:08Z (api.confidential.unrealized.trade has no server yet)",
+  "note": "apps/helper at 4222596 (card helper-testnet-carry) run by node src/server.ts on a Mac with only HELPER_COMMIT and PORT set (no relayer network), read 2026-11-02T14:49:28Z; the helper is not deployed at this commit yet",
+  "commit": "4222596dbe7ca34aadca97614cd02798f663b586",
+  "base": "http://127.0.0.1:18093",
+  "reads": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "161",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+    },
+    "body": "{\"ok\":true,\"commit\":\"4222596dbe7ca34aadca97614cd02798f663b586\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://sign.confidential.unrealized.trade",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "161",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+    },
+    "body": "{\"ok\":true,\"commit\":\"4222596dbe7ca34aadca97614cd02798f663b586\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   },
+   {
+    "origin": "https://example.com",
+    "status": 200,
+    "headers": {
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "161",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+    },
+    "body": "{\"ok\":true,\"commit\":\"4222596dbe7ca34aadca97614cd02798f663b586\",\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}"
+   }
+  ],
+  "bind": {
+   "status": 400,
+   "headers": {
+    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
+    "cache-control": "no-store",
+    "connection": "keep-alive",
+    "content-length": "30",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Mon, 02 Nov 2026 14:49:19 GMT",
+    "keep-alive": "timeout=65",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-helper-commit": "4222596dbe7ca34aadca97614cd02798f663b586"
+   },
+   "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+  }
+ },
+ "bad_no_bind": {
+  "note": "apps/helper at 6aa24c5 in its Docker image behind deploy/Caddyfile (HELPER_SITE http://:80), run by deploy/compose.yaml on Docker 29.8.1 on a Mac, read 2026-11-01 01:04:08Z (api.confidential.unrealized.trade has no server yet); before /v1/bind was mounted: delegate down, POST /v1/bind answered 404 (not recorded then; the replay answers 404 not_found)",
   "commit": "6aa24c5e60d2c6fcf946e240acf15cd60064d495",
   "base": "http://127.0.0.1:18080",
   "reads": [
