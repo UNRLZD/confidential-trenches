@@ -406,3 +406,41 @@ test("a running kind (a trade) gets its id, holds no other message, runs once fo
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(posted.slice(7), [{ v: 1, id: a, ok: true, result: { stage: "sent", txs: [{ chain: "solana", hash: "sig" }] } }], "a repeat after the answer gets it again");
 });
+
+test("a running id's answer refreshes its place among the remembered ids, so ids answered while it ran never push it out", async () => {
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const runs: string[] = [];
+  const shas = new Map<string, string>();
+  startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: signedOutState,
+    kinds: {
+      buy: (p, ctx) => {
+        runs.push(ctx.id);
+        shas.set(ctx.id, ctx.sha);
+        if (p.side === "sell") return { error: "quote_check_failed" };
+        return { running: true, after: held, answer: () => ({ result: { stage: "sent" as const, txs: [] } }) };
+      },
+    },
+  });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  const buy = { v: 1, type: "buy", chain: "solana", token: "Mint", amount: "10", slippage_bps: 500 };
+  const a = uuid();
+  send({ ...buy, id: a, side: "buy" });
+  for (let i = 0; i < REMEMBERED_IDS - 1; i++) send({ ...buy, id: uuid(), side: "sell" });
+  await new Promise((r) => setTimeout(r, 50));
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  send({ ...buy, id: uuid(), side: "sell" }); // one more: the oldest remembered id goes, which is no longer a
+  send({ ...buy, id: a, side: "buy" });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(runs.filter((x) => x === a).length, 1, "a was remembered: its repeat got its answer, not a second run");
+  assert.deepEqual(posted.at(-1), { v: 1, id: a, ok: true, result: { stage: "sent", txs: [] } });
+  const bytes = new TextEncoder().encode(JSON.stringify({ ...buy, id: a, side: "buy" }));
+  assert.equal(shas.get(a), Buffer.from(await crypto.subtle.digest("SHA-256", bytes)).toString("hex"), "ctx.sha is the request's SHA-256");
+});

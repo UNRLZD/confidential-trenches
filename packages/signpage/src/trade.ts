@@ -4,34 +4,42 @@
 //
 // - The request is hostile. Only chain "solana" is taken here; every other chain is refused not_allowed until its card.
 //   A buy's `amount` is USD with at most two decimals, a sell's is the token's base units.
-// - Before anything is read or signed, the request's id is written to the store's "ops" as { kind, stage "pending",
-//   txs [], created_ms } (wallet.md §7 item 4). A request whose id already has an ops record is never run again: it is
-//   answered from the record (its trade stage and txs, or its code), or "id_reused" while the record is still pending
-//   (a run that a reload cut short may have signed). "pending" is no TradeStage, so the frame's state leaves it out.
-// - The legs come from the wallet store's arm records (packages/wallet/src/arming/records.ts) only, never from the
-//   request: a buy is the amount's ladder split (1-2-5 per power of ten from $2, largest first, wallet.md §2.5), each
-//   size a READY fresh wallet of that size, which spends its record's `spend` (a_k, set by the arming); a sell takes
-//   the IN_POSITION wallets of that token, reads each one's token balance on both providers (the lower), and splits the
-//   amount over them in proportion, so an amount equal to the held total sells each whole balance (T1.3 item 6). A
-//   size with no ready wallet, or a sell over what is held, is refused before anything is signed.
-// - runSolanaTrade (the kit) runs the reads, builds, checks S1-S13, signatures, sends and fill reads. Its signer is the
-//   wallet's solanaArmedSigner, which refuses any wallet without this device's own arm record before the seed opens,
-//   whatever the legs' `arm.own` says; the seed is zeroed when the trade ends.
-// - The answer: { stage "sent", txs } once every leg is signed and sent (the kit's "sent"); the fill then comes as a
-//   `progress` event (filled, part_filled, not_landed). A trade that ends before "sent" is answered with its code:
-//   quote_check_failed when a leg's price check refused it (the trade box's Price check failed), and otherwise
-//   not_armed, no_ready_set, no_position, over_held, no_route or failed (the trade box's Failed). Every stage is
-//   written to the op as it comes, so a `state` read after a client timeout shows it.
-// - After the fill, each filled buy leg's record moves READY → IN_POSITION with the token (moveArmRecord, which makes
-//   no record and never touches its own-withdrawal mark). Nothing here logs.
+// - Every trade runs holding the seed lock shared (a sign out in any tab waits for it) and its own op lock (its id; a
+//   second tab with the same id is answered id_reused at once). Its first step is under TRADE_PICK_LOCK, one tab at a
+//   time: the id's ops record is read and, when absent, written as { kind, sha (the request's SHA-256), stage
+//   "pending", txs [], created_ms } (wallet.md §7 item 4). An id that already has one is never run again: it is
+//   answered from the record (its trade stage and txs, or its code) when the hash is the same, else id_reused, and
+//   id_reused while it is pending (a run that a reload cut short may have signed). "pending" is no TradeStage.
+// - Still under that lock, the legs come from the wallet store's arm records (packages/wallet/src/arming/records.ts)
+//   only, never from the request, and each is marked as this trade's on its record (claimArm) before the lock goes.
+//   A record already marked by a trade whose op lock is free (its tab closed or reloaded) is resolved first on both
+//   providers: every tx filled or failed, its mark goes (a buy's filled wallet goes IN_POSITION with the token);
+//   anything unknown keeps it out. A buy is the fewest unmarked READY fresh wallets whose sizes sum to the amount
+//   (ladderSplit, wallet.md §2.5), each spending its record's `spend` (a_k); a sell takes the unmarked IN_POSITION
+//   wallets of that token, reads each one's token account on both providers, one address per request (wallet.md §2.9
+//   row 8; the lower), and splits the amount over them in proportion, so an amount equal to the held total sells
+//   each whole balance (T1.3 item 6). No wallet set, or a sell over what is held, is refused before anything is signed.
+// - runSolanaTrade (the kit) runs the reads, builds, checks S1-S13, signatures, sends and fill reads, given every
+//   arm record's address (userWallets) to refuse a tx naming another of the user's wallets. Its signer is the
+//   wallet's solanaArmedSigner, which signs only for a wallet with this device's own arm record marked by this trade,
+//   and gives each signature back only once the mark names it, so no tx is sent that a reload could lose.
+// - The answer: { stage "sent", txs } once every leg is signed and sent (the kit's "sent"); each fill stage (filled,
+//   part_filled, not_landed) then goes to the frame as a `progress` event as the kit reports it, before any teardown.
+//   A trade that ends before "sent" is answered with its code: quote_check_failed when a leg's price check refused it
+//   (the trade box's Price check failed), and otherwise not_armed, no_ready_set, no_position, over_held, no_route or
+//   failed (the trade box's Failed). Every stage is written to the op as it comes, so a `state` read shows it.
+// - At its end the trade takes its mark off each wallet whose txs it saw end (none signed, filled, failed or dead);
+//   a filled buy's wallet goes READY → IN_POSITION with the token. A wallet whose tx is still unknown keeps the mark,
+//   resolved by a later pick. Nothing here logs.
 import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
-import { runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
+import { rereadSolanaSignature, runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { solanaHelperRpc, solanaJsonRpc, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
-import { ArmRefused, armRecords, moveArmRecord, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
-import type { WalletStore } from "@blindfill/wallet/store";
+import { ladderSplit } from "@blindfill/wallet/arming/ladder";
+import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
+import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { HostAnswer, KindContext, Running } from "./api.ts";
 
 export type TradeStore = Pick<WalletStore, "get" | "put" | "keys">;
@@ -46,6 +54,8 @@ export interface TradeHost {
   /** runSolanaTrade; a test's stand-in. */
   run?: typeof runSolanaTrade;
   now?: () => number;
+  /** Web Locks (navigator.locks); a test's stand-in. With none, a trade is refused "failed" (the store signs in only with them). */
+  locks?: Pick<LockManager, "request"> | null;
 }
 
 /** The release's helper: the wallet's RELEASE_HELPER (withdraw/relay.ts; test/trade.test.ts holds them equal), not imported, so
@@ -72,28 +82,16 @@ const USD = /^(\d{1,15})(?:\.(\d{1,2}))?$/;
 const UNITS = /^[1-9]\d{0,19}$/;
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
 
-/** The ladder sizes of an amount in cents, largest first with repeats; null when it is not a sum of ladder sizes. */
-export function ladderSizes(cents: bigint): bigint[] | null {
-  const rungs: bigint[] = [];
-  for (let p = 100n; p <= cents; p *= 10n) for (const m of [1n, 2n, 5n]) if (p * m >= 200n && p * m <= cents) rungs.push(p * m);
-  rungs.reverse();
-  const out: bigint[] = [];
-  let rest = cents;
-  for (const r of rungs) while (rest >= r) (out.push(r), (rest -= r));
-  return rest === 0n && out.length > 0 ? out : null;
-}
-
-/** A buy's legs: one READY fresh wallet of each ladder size of the amount, each spending its record's a_k. */
+/** A buy's legs: the fewest unmarked READY fresh wallets whose sizes sum to the amount (ladderSplit), each spending its record's a_k. */
 export function buyLegs(records: readonly { key: string; rec: ArmRecord }[], cents: bigint): { legs: SolanaTradeLeg[]; keys: string[] } | null {
-  const sizes = ladderSizes(cents);
+  const free = records.filter((r) => r.rec.role === "fresh" && r.rec.state === "READY" && r.rec.inflight === undefined).sort((a, b) => (a.key < b.key ? -1 : 1));
+  const sizes = ladderSplit(cents, free.map((r) => r.rec.size_cents));
   if (!sizes) return null;
-  const free = records.filter((r) => r.rec.role === "fresh" && r.rec.state === "READY").sort((a, b) => (a.key < b.key ? -1 : 1));
   const used = new Set<string>();
   const legs: SolanaTradeLeg[] = [];
   const keys: string[] = [];
   for (const s of sizes) {
-    const r = free.find((x) => x.rec.size_cents === s && !used.has(x.key));
-    if (!r) return null;
+    const r = free.find((x) => x.rec.size_cents === s && !used.has(x.key))!;
     used.add(r.key);
     keys.push(r.key);
     legs.push({ wallet: r.rec.address, amount: r.rec.spend, arm: { own: true } });
@@ -116,31 +114,23 @@ export function sellSplit(amount: bigint, held: readonly bigint[]): bigint[] | n
 }
 
 type Acc = { owner: string; data: Uint8Array } | null;
-async function accounts(rpc: SolanaRpc, keys: readonly string[]): Promise<Acc[]> {
-  const out: Acc[] = [];
-  for (let i = 0; i < keys.length; i += 10) {
-    const group = keys.slice(i, i + 10);
-    const r = (await rpc("getMultipleAccounts", [group, { encoding: "base64", commitment: "confirmed" }])) as { value?: unknown };
-    if (!r || !Array.isArray(r.value) || r.value.length !== group.length) throw new Error("getMultipleAccounts answered another count");
-    for (const a of r.value as unknown[]) {
-      if (a === null) out.push(null);
-      else {
-        const o = a as { owner?: unknown; data?: unknown };
-        if (typeof o.owner !== "string" || !Array.isArray(o.data) || typeof o.data[0] !== "string" || o.data[1] !== "base64") throw new Error("not a base64 account");
-        out.push({ owner: o.owner, data: Uint8Array.from(atob(o.data[0]), (c) => c.charCodeAt(0)) });
-      }
-    }
-  }
-  return out;
+// one account per request (getAccountInfo): no request names two of the user's wallets (wallet.md §2.9 row 8)
+async function account(rpc: SolanaRpc, key: string): Promise<Acc> {
+  const r = (await rpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }])) as { value?: unknown } | null;
+  if (!r || typeof r !== "object" || !("value" in r)) throw new Error("getAccountInfo answered no value");
+  if (r.value === null) return null;
+  const o = r.value as { owner?: unknown; data?: unknown };
+  if (typeof o !== "object" || typeof o.owner !== "string" || !Array.isArray(o.data) || typeof o.data[0] !== "string" || o.data[1] !== "base64") throw new Error("not a base64 account");
+  return { owner: o.owner, data: Uint8Array.from(atob(o.data[0]), (c) => c.charCodeAt(0)) };
 }
 
 /** The token balance of each wallet's own account of `mint`, the lower of the two providers'; 0 for none. */
 export async function heldOnBoth(providers: readonly [SolanaRpc, SolanaRpc], mint: string, wallets: readonly string[]): Promise<bigint[]> {
-  const [ma, mb] = await Promise.all(providers.map((p) => accounts(p, [mint])));
-  const program = ma![0]?.owner;
-  if (program !== mb![0]?.owner || (program !== SOLANA_TOKEN_PROGRAM && program !== SOLANA_TOKEN_2022_PROGRAM)) throw new Error("the mint is not one token mint on both providers");
+  const [ma, mb] = await Promise.all(providers.map((p) => account(p, mint)));
+  const program = ma?.owner;
+  if (program !== mb?.owner || (program !== SOLANA_TOKEN_PROGRAM && program !== SOLANA_TOKEN_2022_PROGRAM)) throw new Error("the mint is not one token mint on both providers");
   const atas = wallets.map((w) => solanaAta(w, mint, program));
-  const reads = await Promise.all(providers.map((p) => accounts(p, atas)));
+  const reads = await Promise.all(providers.map((p) => Promise.all(atas.map((a) => account(p, a)))));
   const mintBytes = base58.decode(mint);
   const amountOf = (a: Acc, wallet: string): bigint => {
     if (!a) return 0n;
@@ -165,23 +155,31 @@ export function refusalCode(record: SolanaTradeRecord): ErrorCode {
   return "failed";
 }
 
-const filled = (l: SolanaTradeRecord["legs"][number]): boolean => l.outcome?.state === "filled" || l.reread?.state === "filled";
-// sent, and neither filled nor failed on both providers: its money may still move
-const unknown = (l: SolanaTradeRecord["legs"][number]): boolean =>
-  l.signature !== undefined && (l.reread ? l.reread.state === "unknown" : l.outcome === undefined || l.outcome.state === "unknown");
+type Leg = SolanaTradeRecord["legs"][number];
+const legState = (l: Leg): string | undefined => (l.reread ? l.reread.state : l.outcome?.state);
+const filled = (l: Leg): boolean => l.outcome?.state === "filled" || l.reread?.state === "filled";
+// landed with an error on both providers, or dead (06c A4, the kit's send.ts): its money moves no more
+const ended = (l: Leg): boolean => legState(l) === "failed" || legState(l) === "expired";
 
 type Answer = HostAnswer<"buy">;
+type Locks = Pick<LockManager, "request">;
+
+/** The cross-tab lock every pick runs under: its op insert, the marks it resolves and the marks it makes. */
+export const TRADE_PICK_LOCK = "ct-wallet/trade-pick";
+/** Held by a trade for its whole run, in the tab that runs it: a mark whose op lock is free is a dead tab's. */
+export const tradeLock = (op: string): string => `ct-wallet/trade/${op}`;
+
+export type TradeKind = ((params: Record<string, unknown>, ctx: KindContext) => Running<"buy"> | null) & {
+  /** Settles once no trade of this page is running (the shell's reload waits for it). */
+  idle(): Promise<void>;
+};
 
 /** The `buy` kind's handler for the shell's `kinds` (src/main.ts). */
-export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ctx: KindContext) => Running<"buy"> | null {
+export function tradeKind(host: TradeHost): TradeKind {
   const run = host.run ?? runSolanaTrade;
   const now = host.now ?? Date.now;
-  // the arm records of wallets a trade of this page is using: no second trade picks one until the first has ended, and
-  // one whose tx is still unknown stays out for the page's life (its money may yet move)
-  const busy = new Set<string>();
-  // the picks run one at a time, from the records read to the keys marked busy, so two trades never pick one wallet
-  let picking: Promise<unknown> = Promise.resolve();
-  return (params, ctx) => {
+  const runs = new Set<Promise<void>>();
+  const kind = (params: Record<string, unknown>, ctx: KindContext): Running<"buy"> | null => {
     if (params.chain !== "solana") return null;
     const side = params.side as "buy" | "sell";
     const token = params.token as string;
@@ -205,21 +203,32 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
       answer = a;
       settle();
     };
-    void trade().catch(() => give({ error: "failed" }));
+    const locks: Locks | null = host.locks === undefined ? (globalThis.navigator?.locks ?? null) : host.locks;
+    const p = (locks ? held(locks) : Promise.resolve(give({ error: "failed" }))).catch(() => give({ error: "failed" }));
+    runs.add(p);
+    void p.finally(() => runs.delete(p));
     return { running: true, after, answer: () => answer };
 
-    async function trade(): Promise<void> {
+    // the trade's run: the seed lock shared (sign out, in any tab, waits for it) and its own op lock (a second tab
+    // with the same id is refused id_reused at once)
+    async function held(locks: Locks): Promise<void> {
+      await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, () =>
+        locks.request(tradeLock(ctx.id), { mode: "exclusive", ifAvailable: true }, async (lock) => {
+          if (!lock) return give({ error: "id_reused" });
+          await trade(locks);
+        }),
+      );
+    }
+
+    async function trade(locks: Locks): Promise<void> {
       const store = await host.store();
-      const prior = await store.get("ops", ctx.id);
-      if (prior !== undefined) return give(fromRecord(prior));
-      const op: { kind: "buy" | "sell"; stage: string; txs: TxRef[]; code?: ErrorCode; created_ms: number } = { kind: side, stage: "pending", txs: [], created_ms: now() };
-      let writes: Promise<void> = store.put("ops", ctx.id, { ...op });
+      const op: { kind: "buy" | "sell"; sha: string; stage: string; txs: TxRef[]; code?: ErrorCode; created_ms: number } = { kind: side, sha: ctx.sha, stage: "pending", txs: [], created_ms: now() };
+      let writes: Promise<void> = Promise.resolve();
       const write = (patch: Partial<typeof op>): void => {
         Object.assign(op, patch);
         const snap = { ...op, txs: op.txs.map((t) => ({ ...t })) };
         writes = writes.then(() => store.put("ops", ctx.id, snap)).catch(() => {});
       };
-      await writes;
       const refuse = async (code: ErrorCode): Promise<void> => {
         write({ stage: "refused", code });
         await writes;
@@ -228,34 +237,16 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
 
       // a read that fails before the answer refuses the trade; the op says so
       try {
-        const pick = async (): Promise<{ legs: SolanaTradeLeg[]; keys: string[] } | ErrorCode> => {
-          const records = (await armRecords(store, "sol")).filter((r) => !busy.has(r.key));
-          if (side === "buy") return buyLegs(records, cents) ?? "no_ready_set";
-          const pos = records.filter((r) => r.rec.role === "fresh" && r.rec.state === "IN_POSITION" && r.rec.token === token);
-          if (pos.length === 0) return "no_position";
-          const held = await heldOnBoth(host.deps.providers, token, pos.map((r) => r.rec.address));
-          const split = sellSplit(units, held);
-          if (!split) return "over_held";
-          return {
-            legs: pos.flatMap((r, i) => (split[i]! > 0n ? [{ wallet: r.rec.address, amount: split[i]!, arm: { own: true } }] : [])),
-            keys: pos.flatMap((r, i) => (split[i]! > 0n ? [r.key] : [])),
-          };
-        };
-        const picked = picking.then(async () => {
-          const p = await pick();
-          if (typeof p !== "string") for (const k of p.keys) busy.add(k);
-          return p;
+        const set = await locks.request(TRADE_PICK_LOCK, { mode: "exclusive" }, async () => {
+          // the op first, under the lock: one id is run once in every tab, and a reload answers it from its record
+          const prior = await store.get("ops", ctx.id);
+          if (prior !== undefined) return { answer: fromRecord(prior, ctx.sha) };
+          await store.put("ops", ctx.id, { ...op });
+          return pick(store, locks);
         });
-        picking = picked.catch(() => {});
-        const set = await picked;
         if (typeof set === "string") return refuse(set);
-        const { legs, keys } = set;
-        let keep = keys;
-        try {
-          keep = await legsRun(store, legs, keys, write, refuse);
-        } finally {
-          for (const k of keys) if (!keep.includes(k)) busy.delete(k);
-        }
+        if ("answer" in set) return give(set.answer);
+        await legsRun(store, set, write, refuse);
       } catch (e) {
         if (!answer) return refuse("failed");
         throw e;
@@ -264,67 +255,123 @@ export function tradeKind(host: TradeHost): (params: Record<string, unknown>, ct
       }
     }
 
-    /** Runs the trade on its legs; answers the keys whose txs are still unknown at its end (all of them on a throw after the answer). */
+    /**
+     * Under the pick lock: each wallet a dead tab's trade marked is resolved on both providers first (filled: a buy's
+     * goes IN_POSITION; failed: the mark goes; unknown: it stays out), then the legs come from the unmarked records and
+     * each one is marked as this trade's before the lock is let go.
+     */
+    async function pick(store: TradeStore, locks: Locks): Promise<{ legs: SolanaTradeLeg[]; keys: string[]; all: string[] } | ErrorCode> {
+      for (const { key, rec } of await armRecords(store, "sol")) {
+        const m = rec.inflight;
+        if (!m) continue;
+        const live = await locks.request(tradeLock(m.op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
+        if (live) continue;
+        const states = await Promise.all(m.txs.map((sig) => rereadSolanaSignature(host.deps.providers, sig).then((r) => r.state)));
+        if (states.includes("unknown")) continue;
+        await settleArm(store, key, m.op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
+      }
+      const records = await armRecords(store, "sol");
+      const all = records.map((r) => r.rec.address);
+      let set: { legs: SolanaTradeLeg[]; keys: string[] } | ErrorCode;
+      if (side === "buy") set = buyLegs(records, cents) ?? "no_ready_set";
+      else {
+        const pos = records.filter((r) => r.rec.role === "fresh" && r.rec.state === "IN_POSITION" && r.rec.token === token && r.rec.inflight === undefined);
+        if (pos.length === 0) return "no_position";
+        const held = await heldOnBoth(host.deps.providers, token, pos.map((r) => r.rec.address));
+        const split = sellSplit(units, held);
+        if (!split) return "over_held";
+        set = {
+          legs: pos.flatMap((r, i) => (split[i]! > 0n ? [{ wallet: r.rec.address, amount: split[i]!, arm: { own: true } }] : [])),
+          keys: pos.flatMap((r, i) => (split[i]! > 0n ? [r.key] : [])),
+        };
+      }
+      if (typeof set === "string") return set;
+      const claimed: string[] = [];
+      for (const key of set.keys) {
+        if (!(await claimArm(store, key, { op: ctx.id, side, token }).catch(() => false))) {
+          for (const k of claimed) await settleArm(store, k, ctx.id).catch(() => false);
+          return "failed";
+        }
+        claimed.push(key);
+      }
+      return { ...set, all };
+    }
+
+    /** Runs the trade on its legs, then takes this trade's mark off each wallet whose txs it saw fill or fail. */
     async function legsRun(
       store: TradeStore,
-      legs: SolanaTradeLeg[],
-      keys: string[],
+      set: { legs: SolanaTradeLeg[]; keys: string[]; all: string[] },
       write: (patch: { stage?: string; txs?: TxRef[] }) => void,
       refuse: (code: ErrorCode) => Promise<void>,
-    ): Promise<string[]> {
-      const signer = solanaArmedSigner(store, host.seed64);
+    ): Promise<void> {
+      const { legs, keys } = set;
+      const signer = solanaArmedSigner(store, host.seed64, ctx.id);
       const signed: TxRef[] = [];
       let last: SolanaTradeStage | null = null;
+      // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
       const onProgress = (stage: SolanaTradeStage): void => {
         last = stage;
         if (stage === "signed") write({ stage, txs: signed.slice() });
         else if (stage === "sent") {
           write({ stage, txs: signed.slice() });
           give({ result: { stage: "sent", txs: signed.slice() } });
+        } else if (answer && "result" in answer && (stage === "filled" || stage === "part_filled" || stage === "not_landed")) {
+          write({ stage });
+          ctx.progress(stage);
         }
       };
-      let record: SolanaTradeRecord;
+      let record: SolanaTradeRecord | null = null;
       try {
-        record = await run(
-          { side, token, slippageBps: params.slippage_bps as number, legs },
-          {
-            ...host.deps,
-            sign: async (wallet, message) => {
-              const sig = await signer.sign(wallet, message);
-              // the legs sign before "signed"; a teardown's frames sign after the fill and are not the trade's txs
-              if (last === null) signed.push({ chain: "solana", hash: base58.encode(sig) });
-              return sig;
-            },
-            onProgress,
+        // userWallets: every arm record's address on Solana, so the kit refuses a tx naming another of the user's wallets
+        const req: SolanaTradeRequest & { userWallets: string[] } = { side, token, slippageBps: params.slippage_bps as number, legs, userWallets: set.all };
+        record = await run(req, {
+          ...host.deps,
+          sign: async (wallet, message) => {
+            const sig = await signer.sign(wallet, message);
+            // the legs sign before "signed"; a teardown's frames sign after the fill and are not the trade's txs
+            if (last === null) signed.push({ chain: "solana", hash: base58.encode(sig) });
+            return sig;
           },
-        );
+          onProgress,
+        });
       } catch (e) {
-        if (!answer) return (await refuse(e instanceof ArmRefused ? "not_armed" : "failed"), []);
+        if (!answer) return (await refuse(e instanceof ArmRefused ? "not_armed" : "failed"), undefined);
         throw e;
       } finally {
         signer.close();
+        await unmark(store, keys, record);
       }
       const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature }] : []));
-      if (!answer) return (await refuse(refusalCode(record)), []);
-      const final = last as SolanaTradeStage | null;
-      if (final === "filled" || final === "part_filled" || final === "not_landed") {
-        write({ stage: final, txs });
-        ctx.progress(final);
-      } else write({ txs });
-      if (side === "buy") {
-        await Promise.all(
-          record.legs.map((l, i) => (filled(l) ? moveArmRecord(store, keys[i]!, "READY", "IN_POSITION", token).catch(() => false) : false)),
-        );
-      }
-      return keys.filter((_, i) => unknown(record.legs[i]!));
+      if (!answer) return refuse(refusalCode(record));
+      write({ txs });
+    }
+
+    // each wallet's mark goes when its txs' end is known here: none signed, its swap filled (a buy's goes IN_POSITION)
+    // or failed or dead; any other keeps its mark, resolved at a later pick once this trade's lock is free
+    async function unmark(store: TradeStore, keys: readonly string[], record: SolanaTradeRecord | null): Promise<void> {
+      await Promise.all(
+        keys.map(async (key, i) => {
+          const rec = armRecordOf(key, await store.get("wallets", key).catch(() => undefined));
+          if (rec?.inflight?.op !== ctx.id) return;
+          const leg = record?.legs[i];
+          if (rec.inflight.txs.length === 0) return settleArm(store, key, ctx.id);
+          if (leg && filled(leg)) return settleArm(store, key, ctx.id, side === "buy" ? { from: "READY", to: "IN_POSITION", token } : undefined);
+          if (leg && ended(leg)) return settleArm(store, key, ctx.id);
+        }).map((x) => x.catch(() => false)),
+      );
     }
   };
+  return Object.assign(kind, {
+    async idle(): Promise<void> {
+      while (runs.size > 0) await Promise.allSettled([...runs]);
+    },
+  });
 }
 
-/** A repeated id's answer from its ops record: its trade stage and txs, its code, or id_reused while it is pending. */
-function fromRecord(rec: unknown): Answer {
-  const r = rec as { kind?: unknown; stage?: unknown; txs?: unknown; code?: unknown } | null;
-  if (!r || (r.kind !== "buy" && r.kind !== "sell")) return { error: "id_reused" };
+/** A repeated id's answer from its ops record: its trade stage and txs, its code; id_reused while it is pending or when the request differs. */
+function fromRecord(rec: unknown, sha: string): Answer {
+  const r = rec as { kind?: unknown; sha?: unknown; stage?: unknown; txs?: unknown; code?: unknown } | null;
+  if (!r || (r.kind !== "buy" && r.kind !== "sell") || typeof r.sha !== "string" || r.sha !== sha) return { error: "id_reused" };
   if (typeof r.code === "string") return { error: r.code };
   if (typeof r.stage === "string" && TRADE_STAGES.includes(r.stage) && Array.isArray(r.txs)) {
     const txs = (r.txs as { chain?: unknown; hash?: unknown }[]).filter((t) => t && t.chain === "solana" && typeof t.hash === "string").map((t) => ({ chain: "solana" as const, hash: t.hash as string }));

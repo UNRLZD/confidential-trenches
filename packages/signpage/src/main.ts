@@ -110,7 +110,11 @@ else {
   // another tab's seed write or sign out: the page's own state follows, so the open kinds it takes match what the app
   // shows (it reads the same store); the page's store handle hears nothing once a sign out has closed it
   channel.addEventListener("message", (m) => storeMoved(m.data as WalletEvent));
+  // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
+  const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });
   shell = mountShell(document, {
+    // reload waits for a running trade; sign out does too, in every tab (the trade holds the seed lock shared)
+    settle: () => trades.idle(),
     state: fs.state,
     watch: fs.watch,
     kinds: {
@@ -119,8 +123,7 @@ else {
       "signin.open": (p) => openKind("signin.open", p.way),
       signout: () => openKind("signout"),
       "backup.open": () => openKind("backup.open"),
-      // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
-      buy: tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() }),
+      buy: trades,
     },
   });
   shell.layer.append(root);

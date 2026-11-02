@@ -126,9 +126,9 @@ export interface Shell {
 /**
  * Draws the shell into `doc`: the APP_HOST frame filling the window at the top window's path and query, and the layer
  * over it, hidden until open() (an open kind asks for it), then starts the API to the frame. The shell answers nav and
- * reload itself; `host.kinds` adds the screens' own (src/main.ts: signin.open, signout, backup.open).
+ * reload itself (once `host.settle` does); `host.kinds` adds the screens' own (src/main.ts: signin.open, signout, backup.open).
  */
-export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad">): Shell {
+export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad"> & { settle?: () => Promise<void> }): Shell {
   const view = doc.defaultView!;
   const layer = doc.createElement("section");
   layer.id = "screen";
@@ -170,7 +170,8 @@ export function mountShell(doc: Document, host: Omit<ApiHost, "parent" | "listen
           view.history.replaceState(null, "", url);
           return { result: {} };
         },
-        reload: () => ({ result: {}, then: () => view.location.reload() }),
+        // a running trade settles first (src/trade.ts idle): its marks are written either way, but no reload cuts it
+        reload: () => ({ result: {}, then: () => void (host.settle?.() ?? Promise.resolve()).then(() => view.location.reload()) }),
       },
     },
   );

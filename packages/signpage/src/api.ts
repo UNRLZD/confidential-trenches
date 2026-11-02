@@ -94,6 +94,8 @@ export interface ApiHost {
 /** What a host-answered kind knows of its request: its id, and the poster of its `progress` events. */
 export interface KindContext {
   id: string;
+  /** The SHA-256 (hex) of the request's JSON: a kind that keeps its id past a reload keeps it too (wallet.md §7 item 4). */
+  sha: string;
   progress(stage: Stage): void;
 }
 
@@ -244,7 +246,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     };
     // a progress event before the id's answer waits for it (give posts it after)
     held.set(id, []);
-    const got = hostAnswer(host, m, { id, progress });
+    const got = hostAnswer(host, m, { id, sha, progress });
     if (got && "running" in got) {
       answered.set(id, { sha, answer: null });
       void got.after.catch(() => {}).then(() => give(id, sha, got.answer(), progress));
