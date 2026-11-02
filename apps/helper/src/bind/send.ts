@@ -13,9 +13,10 @@
 //   5. R1's binding of P to U, then R7's record for U, each by an atomic create-if-absent; R2's one open P per U.
 //   6. Every earlier transaction of (U, P) whose outcome is not known is settled first: its stored signed bytes go out
 //      again (a send's only while U's delegate is K or more ahead, as R4 holds for the first send; none while the
-//      token is held, as (f) holds) and it is read on both providers and an archival one. It is "dropped" (never
-//      landed, never will) only with its hash unknown on all three, read twice on finals a block apart, past its
-//      validity period (markets.md l.1300 (b)); until it is known the call answers in_flight and nothing new goes out
+//      token is held, as (f) holds) and it is read by block_id at F, the lower final, on both providers. It is
+//      "dropped" (never landed, never will) only by (a2), the relayer key's nonce passed it at a block D whose changes
+//      do not name it, or by (b), the key's nonce still below its own at F past its validity period (markets.md
+//      l.1215-1232, l.1298-1300; createRelayer); until it is known the call answers in_flight and nothing new goes out
 //      on (U, P).
 //      R2's move to a new P settles the old P's this way first.
 //   7. (h) the prepay: 904 B whenever a tree may grow or a send on P already went (R5's top-up), else 756 B; never above
@@ -94,16 +95,16 @@ export type SendReads = BindReads & {
 };
 
 /**
- * One of the relayer's own transactions: its hash, its key nonce, the height b0 of the block it was signed on (its
- * validity runs from there) and its signed bytes (base64), kept to resend.
+ * One of the relayer's own transactions: its hash, its key nonce, the height b0 and hash of the block it was signed on
+ * (its validity runs from there) and its signed bytes (base64), kept to resend.
  */
-export type TxRef = { tx_hash: string; nonce: string; height: string; signed_tx: string };
+export type TxRef = { tx_hash: string; nonce: string; height: string; block_hash: string; signed_tx: string };
 export type Receipt = { executor: string; ok: boolean; failure: string; height: bigint };
 
 /** One relayer transaction's outcome. */
 export type TxOutcome =
   | { kind: "final"; tx_hash: string; receipts: Receipt[] }
-  /** It never landed and never can: unknown on every provider, read twice past its validity period. */
+  /** It never landed and never can: (a2) K's nonce passed it at a block D whose changes do not name it, or (b) K's nonce is below its own at F past b0 + the validity period. */
   | { kind: "dropped"; tx_hash: string; why: string }
   /** Not known yet: it may still land. */
   | { kind: "unknown"; tx_hash: string; why: string };
@@ -184,6 +185,16 @@ export type DepositStore = {
   /** R1: create-if-absent on P; the U it is bound to. */
   bind(p: bigint, u: string): string;
   boundTo(p: bigint): string | null;
+  /** The relayer key's next-nonce counter (markets.md, the send record); null before the key's first signing. */
+  nonceNext(key: string): bigint | null;
+  /**
+   * The counter set to `next` by a compare-and-set on `expected`, the value read, durable before it returns; false,
+   * with nothing written, when it no longer holds `expected`.
+   */
+  nonceCas(key: string, expected: bigint | null, next: bigint): boolean;
+  /** D, the block that spent one of the relayer's transactions' nonce, once found: final, so found once. */
+  foundAt(tx_hash: string): { height: string; hash: string } | null;
+  setFoundAt(tx_hash: string, d: { height: string; hash: string }): void;
   /** Gives the store's lock up (a test's restart; the process's exit does it too). */
   close(): void;
 };
@@ -298,6 +309,15 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
     if (!/^[0-9a-f]{64}$/.test(u)) throw new Error("store: U is not a 64-hex id");
     return `u-${u}.json`;
   };
+  const kName = (key: string) => `k-${createHash("sha256").update(key).digest("hex")}.json`;
+  const dName = (tx: string) => {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tx)) throw new Error("store: not a transaction hash");
+    return `d-${tx}.json`;
+  };
+  const counter = (key: string): bigint | null => {
+    const c = read<{ next: string }>(kName(key));
+    return c === null ? null : BigInt(c.next);
+  };
   return {
     get: (u) => read<DepositRecord>(uName(u)),
     create(rec) {
@@ -315,6 +335,21 @@ export function createFileStore(dir: string, fs: StoreFs = nodeFs): DepositStore
       return read<{ u: string }>(`p-${p}.json`)!.u;
     },
     boundTo: (p) => read<{ u: string }>(`p-${p}.json`)?.u ?? null,
+    nonceNext: counter,
+    nonceCas(key, expected, next) {
+      held();
+      // one process holds the store and this runs with no await, so the read and the write are one step
+      if (counter(key) !== expected) return false;
+      const v = JSON.stringify({ next: next.toString() });
+      if (expected === null) return createOnce(kName(key), v);
+      replace(kName(key), v);
+      return true;
+    },
+    foundAt: (tx) => read<{ height: string; hash: string }>(dName(tx)),
+    setFoundAt(tx, d) {
+      held();
+      createOnce(dName(tx), JSON.stringify({ height: d.height, hash: d.hash }));
+    },
     close: release,
   };
 }
@@ -614,6 +649,30 @@ const u64 = (x: unknown, what: string): bigint => {
 const big = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? `${x}n` : x));
 
 /**
+ * One view_access_key answer. nearcore answers an absent key (or account) with a result holding `error`, "access key
+ * … does not exist while viewing", not with an RPC error (read live on mainnet, rpc.mainnet.fastnear.com and
+ * archival-rpc.mainnet.fastnear.com, 2026-11-02); older nodes answer UNKNOWN_ACCESS_KEY or UNKNOWN_ACCOUNT. Any other
+ * error is thrown.
+ */
+async function readKey(r: Rpc, params: Record<string, unknown>): Promise<KeyRead & { block?: { height: bigint; hash: string } }> {
+  let k: unknown;
+  try {
+    k = await r("query", { request_type: "view_access_key", ...params });
+  } catch (e) {
+    if (e instanceof RpcError && e.cause_name === "UNKNOWN_ACCOUNT") return { kind: "no_account" };
+    if (e instanceof RpcError && e.cause_name === "UNKNOWN_ACCESS_KEY") return { kind: "no_key" };
+    throw e;
+  }
+  if (!isObj(k)) throw new Error("view_access_key: not an object");
+  const block = typeof k.block_hash === "string" && k.block_height !== undefined ? { height: u64(k.block_height, "view_access_key block_height"), hash: k.block_hash } : undefined;
+  if (k.error !== undefined) {
+    if (typeof k.error === "string" && /^access key .{1,200} does not exist while viewing$/.test(k.error)) return { kind: "no_key", ...(block && { block }) };
+    throw new Error(`view_access_key: ${String(k.error).slice(0, 200)}`);
+  }
+  return { kind: "key", permission: k.permission, nonce: u64(k.nonce, "nonce"), ...(block && { block }) };
+}
+
+/**
  * The reads, each on both providers at one final height (the lower of their two finals), refused unless both answer
  * the same: the call is held, nothing spent on an unknown. The deposits pages are indexed as read, page by page.
  */
@@ -669,15 +728,8 @@ export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string;
     newestFinalHeight,
     accessKey: (account, publicKey) =>
       both(async (r, h): Promise<KeyRead> => {
-        try {
-          const k = await r("query", { request_type: "view_access_key", block_id: Number(h), account_id: account, public_key: publicKey });
-          if (!isObj(k)) throw new Error("view_access_key: not an object");
-          return { kind: "key", permission: k.permission, nonce: u64(k.nonce, "nonce") };
-        } catch (e) {
-          if (e instanceof RpcError && e.cause_name === "UNKNOWN_ACCOUNT") return { kind: "no_account" };
-          if (e instanceof RpcError && e.cause_name === "UNKNOWN_ACCESS_KEY") return { kind: "no_key" };
-          throw e;
-        }
+        const { block: _block, ...k } = await readKey(r, { block_id: Number(h), account_id: account, public_key: publicKey });
+        return k;
       }),
     ftBalance: (account) => both(async (r, h) => u128(await view(r, h, cfg.token, "ft_balance_of", { account_id: account }), "ft_balance_of")),
     deposit,
@@ -760,7 +812,7 @@ export function relayerKey(secretKey: string): { priv: ReturnType<typeof createP
   return { priv, pub: sk.subarray(32) };
 }
 
-/** At most this many entries in each of the relayer's caches (block heights, first reads past the validity period). */
+/** At most this many entries in the relayer's cache of receipt block heights. */
 export const CACHE_MAX = 4_096;
 /** A Map entry kept, the oldest dropped past `CACHE_MAX`: forgetting one only costs a read again. */
 export const remember = <K, V>(m: Map<K, V>, k: K, v: V) => {
@@ -779,31 +831,52 @@ export async function transactionValidityPeriod(rpcs: readonly [Rpc, Rpc]): Prom
   return ps[0]!;
 }
 
+/** The relayer's part of the store: its key's next-nonce counter and the blocks D it found. */
+export type RelayerStore = Pick<DepositStore, "nonceNext" | "nonceCas" | "foundAt" | "setFoundAt">;
+
+/** nearcore refuses a nonce at or above (the height of the block that added the key) x 10^6 (F58). */
+const NONCE_RANGE = 1_000_000n;
+/** Heights the search for D walks past a height with no block to find the next one (a skip is a few heights). */
+const SKIP_MAX = 64n;
+/** Steps of the search for D in one round (a binary search over 86,400 blocks takes 17). */
+const SEARCH_MAX = 200;
+/** Changes to one key in one block that a change list may hold. */
+const CHANGES_MAX = 1_000;
+
 /** The relayer as it starts: the validity period read from both providers first, then the gas account. */
-export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, waitMs = OUTCOME_WAIT_MS): Promise<Relayer> {
-  return createRelayer(rpcs, archival, account, secretKey, vault, await transactionValidityPeriod(rpcs), waitMs);
+export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Promise<Relayer> {
+  return createRelayer(rpcs, archival, account, secretKey, vault, await transactionValidityPeriod(rpcs), store, waitMs);
 }
 
 /**
- * The gas account: one key. Its queue holds only the guard, the signing, the durable write and the send to both
- * providers, never the wait for FINAL. Each transaction is signed from one view_access_key answer at final (markets.md
- * send record): its block hash and height b0 from that answer, its nonce one above the larger of the key's nonce there
- * and the last nonce this relayer handed out, so transactions in flight never share one and a key whose nonce jumped
- * is followed at the next signing. They go by send_tx with wait_until NONE, which validates nothing before it answers
- * (nearcore send_tx: NONE is send_tx_async, chain/jsonrpc lib.rs l.1191-1206), so a refusal is never read from the
- * send: only the chain says what happened.
+ * The gas account: one plain full-access key K. Its queue holds only the guard, the signing, the durable writes and the
+ * send to both providers, never the wait for FINAL.
  *
- * A transaction is dropped (never landed, never will) only when its hash is unknown on both providers and on the
- * archival one (a regular node forgets a landed transaction after its garbage collection, an archival one never) and
- * the newest final is more than `validity` blocks past b0, so no block can include it (markets.md l.1300 (b)); that
- * is read twice, on finals at least a block apart, so a provider whose `tx` index lags its own final cannot make a
- * landed transaction look dropped. Nothing else drops one: not UNKNOWN_TRANSACTION on its own, not a nonce past it.
+ * Signing (markets.md, the send record and "Whether the Transfer was applied"): b0, its hash and K's nonce come from
+ * one view_access_key answer at final; n = max(that nonce + 1, the key's counter in the store), and the counter is set
+ * to n + 1 by a compare-and-set on the value read, durable before the transaction is written or sent, so a restart or
+ * a second signer on the key never signs n again (the one that loses takes the next n; nothing of the lost n was
+ * signed). n at or above b0 x 10^6 is refused (F58). Transactions go by send_tx with wait_until NONE, which validates
+ * nothing before it answers (nearcore send_tx_async, chain/jsonrpc lib.rs l.1191-1206), so only the chain says what
+ * happened.
+ *
+ * Reading one (each round): F is the lower of the two providers' finals, read by block_id on both with the same hash,
+ * and b0 is read on both with the hash it was signed on; an error, a missing answer or a disagreement anywhere keeps
+ * the round. P(x): at block x, view_access_key shows K full-access with a nonce below n, the same on both.
+ *   - P at F: not applied through F. Dropped by (b) once F > b0 + transaction_validity_period, read live.
+ *   - P fails at F: D is the block in (b0, F] where P fails with P holding at the block before, found by a binary
+ *     search by block_id (UNKNOWN_BLOCK counts as a skipped height only when the next block's prev_height shows the
+ *     gap), its hash the same on both; final, so found once and kept in the store. EXPERIMENTAL_changes for K at D on
+ *     both: a change caused by this transaction means it was applied at D, and its outcome is read from a lookup that
+ *     names D (a lookup naming any other block keeps); a list that does not name it means K can never verify these
+ *     bytes, (a2), dropped; an empty list keeps (a node that does not save state changes, F54).
+ * Nothing else drops one: not UNKNOWN_TRANSACTION, not a failed outcome on its own, not a timer.
  */
-export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, validity: bigint, waitMs = OUTCOME_WAIT_MS): Relayer {
+export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, validity: bigint, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Relayer {
   const { priv, pub } = relayerKey(secretKey);
   const publicKey = `ed25519:${base58(pub)}`;
+  const counterKey = `${account}/${publicKey}`;
   let queue: Promise<unknown> = Promise.resolve();
-  let last = 0n; // the last nonce handed out
 
   const broadcast = async (signed: string): Promise<void> => {
     await Promise.allSettled(rpcs.map((r) => r("send_tx", { signed_tx_base64: signed, wait_until: "NONE" })));
@@ -818,55 +891,156 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     }
     return h;
   };
-  const finalOf = async (r: Rpc): Promise<bigint | null> => {
-    try {
-      return u64(((await r("block", { finality: "final" })) as { header?: { height?: unknown } }).header?.height, "block.height");
-    } catch {
-      return null;
-    }
+
+  type Block = { height: bigint; hash: string; prev: bigint };
+  const header = (a: unknown): Block => {
+    const h = isObj(a) && isObj(a.header) ? a.header : {};
+    if (typeof h.hash !== "string") throw new Error("block: no hash");
+    return { height: u64(h.height, "block.height"), hash: h.hash, prev: u64(h.prev_height, "block.prev_height") };
   };
-  type Read = { final: Receipt[] | null; unknownTx: boolean };
-  const readTx = async (r: Rpc, tx: TxRef): Promise<Read | null> => {
+  const unknownBlock = (e: unknown) => e instanceof RpcError && e.cause_name === "UNKNOWN_BLOCK";
+  /** The block at height h on both providers, its hash and prev_height the same on both; null when neither has one. */
+  const blockAt = async (h: bigint): Promise<Block | null> => {
+    const [a, b] = await Promise.all(
+      rpcs.map(async (r) => {
+        try {
+          const x = header(await r("block", { block_id: Number(h) }));
+          if (x.height !== h) throw new Error(`block ${h}: answered ${x.height}`);
+          return x;
+        } catch (e) {
+          if (unknownBlock(e)) return null;
+          throw e;
+        }
+      }),
+    );
+    if (a === null && b === null) return null;
+    if (a === null || b === null || a!.hash !== b!.hash || a!.prev !== b!.prev) throw new Error(`the providers disagree on block ${h}`);
+    return a!;
+  };
+  const mustBlock = async (h: bigint): Promise<Block> => {
+    const b = await blockAt(h);
+    if (b === null) throw new Error(`no block at ${h}`);
+    return b;
+  };
+  /** P at height h, the same on both; null when neither has a block there. */
+  const pAt = async (h: bigint, n: bigint): Promise<boolean | null> => {
+    const [a, b] = await Promise.all(
+      rpcs.map(async (r) => {
+        try {
+          return await readKey(r, { block_id: Number(h), account_id: account, public_key: publicKey });
+        } catch (e) {
+          if (unknownBlock(e)) return null;
+          throw e;
+        }
+      }),
+    );
+    if (a === null && b === null) return null;
+    if (a === null || b === null || big(a) !== big(b)) throw new Error(`the providers disagree on K at ${h}`);
+    if (a!.block !== undefined && a!.block.height !== h) throw new Error(`view_access_key at ${h}: answered ${a!.block.height}`);
+    return a!.kind === "key" && a!.permission === "FullAccess" && a!.nonce < n;
+  };
+  /** D: the block in (b0, F] where P fails, with P holding at the block before it. */
+  const findD = async (b0: bigint, f: bigint, n: bigint): Promise<Block> => {
+    let lo = b0; // P holds at lo, and fails at hi; both are blocks
+    let hi = f;
+    for (let step = 0; hi - lo > 1n; step++) {
+      if (step >= SEARCH_MAX) throw new Error("the search for D did not end");
+      const mid = (lo + hi) / 2n;
+      const p = await pAt(mid, n);
+      if (p !== null) {
+        if (p) lo = mid;
+        else hi = mid;
+        continue;
+      }
+      // no block at mid on either: a skipped height only when the next block's prev_height shows the gap
+      let next: Block | null = null;
+      for (let h = mid + 1n; h <= hi && next === null; h++) {
+        if (h - mid > SKIP_MAX) throw new Error(`no block for ${SKIP_MAX} heights past ${mid}`);
+        next = await blockAt(h);
+      }
+      if (next === null || next.prev >= mid || next.prev < lo) throw new Error(`UNKNOWN_BLOCK at ${mid}, and the next block does not show a gap there`);
+      // the heights between next.prev and next have no block
+      const at = next.prev > lo ? next.prev : next.height;
+      if (at === hi) break; // the block after lo is hi
+      const q = await pAt(at, n);
+      if (q === null) throw new Error(`UNKNOWN_BLOCK at ${at}, a block`);
+      if (q) lo = at;
+      else hi = at;
+      if (!q && at === next.height) break; // the block before it is lo
+    }
+    const d = await mustBlock(hi);
+    if (d.prev !== lo) throw new Error(`D (${hi}): the block before it is ${d.prev}, not ${lo}`);
+    return d;
+  };
+  /** The changes to K at D on one provider: one caused by this transaction, others only, or none. */
+  const changesAt = async (r: Rpc, d: Block, txHash: string): Promise<"ours" | "other" | "empty"> => {
+    const a = await r("EXPERIMENTAL_changes", { changes_type: "single_access_key_changes", keys: [{ account_id: account, public_key: publicKey }], block_id: Number(d.height) });
+    if (!isObj(a) || a.block_hash !== d.hash || !Array.isArray(a.changes) || a.changes.length > CHANGES_MAX) throw new Error("EXPERIMENTAL_changes: not D's list");
+    let ours = false;
+    for (const c of a.changes) {
+      if (!isObj(c) || !isObj(c.cause) || !isObj(c.change) || c.change.account_id !== account || c.change.public_key !== publicKey || (c.type !== "access_key_update" && c.type !== "access_key_deletion")) {
+        throw new Error("EXPERIMENTAL_changes: not a change to K");
+      }
+      if (c.cause.type === "transaction_processing" && c.cause.tx_hash === txHash) ours = true;
+    }
+    return a.changes.length === 0 ? "empty" : ours ? "ours" : "other";
+  };
+  /** A lookup by hash, a node's own view: its receipts and the block its transaction_outcome names, once FINAL. */
+  const readTx = async (r: Rpc, tx: TxRef): Promise<{ at: unknown; receipts: Receipt[] } | null> => {
     try {
       const a = await r("tx", { tx_hash: tx.tx_hash, sender_account_id: account, wait_until: "NONE" });
-      if (isObj(a) && a.final_execution_status === "FINAL" && Array.isArray(a.receipts_outcome)) {
-        const receipts: Receipt[] = [];
-        for (const o of a.receipts_outcome) {
-          const out = isObj(o) && isObj(o.outcome) ? o.outcome : {};
-          const st = isObj(out.status) ? out.status : {};
-          const ok = Object.hasOwn(st, "SuccessValue") || Object.hasOwn(st, "SuccessReceiptId");
-          receipts.push({ executor: typeof out.executor_id === "string" ? out.executor_id : "", ok, failure: ok ? "" : JSON.stringify(st), height: await heightOf(r, isObj(o) ? o.block_hash : undefined) });
-        }
-        return { final: receipts, unknownTx: false };
+      if (!isObj(a) || a.final_execution_status !== "FINAL" || !Array.isArray(a.receipts_outcome)) return null;
+      const receipts: Receipt[] = [];
+      for (const o of a.receipts_outcome) {
+        const out = isObj(o) && isObj(o.outcome) ? o.outcome : {};
+        const st = isObj(out.status) ? out.status : {};
+        const ok = Object.hasOwn(st, "SuccessValue") || Object.hasOwn(st, "SuccessReceiptId");
+        receipts.push({ executor: typeof out.executor_id === "string" ? out.executor_id : "", ok, failure: ok ? "" : JSON.stringify(st), height: await heightOf(r, isObj(o) ? o.block_hash : undefined) });
       }
-      return { final: null, unknownTx: false };
-    } catch (e) {
-      if (e instanceof RpcError && e.cause_name === "UNKNOWN_TRANSACTION") return { final: null, unknownTx: true };
-      return null;
+      return { at: isObj(a.transaction_outcome) ? a.transaction_outcome.block_hash : undefined, receipts };
+    } catch {
+      return null; // UNKNOWN_TRANSACTION, a forgotten one, or an error: nothing read
     }
   };
-  /** The newest final at the first read that found a transaction unknown everywhere past its validity period. */
-  const pastAt = new Map<string, bigint>();
-  /** One read: the finals first, then the transaction on both providers and the archival one. */
-  const readOnce = async (tx: TxRef): Promise<TxOutcome> => {
-    const finals = await Promise.all(rpcs.map(finalOf));
+  const judge = async (tx: TxRef): Promise<TxOutcome> => {
+    const keep = (why: string): TxOutcome => ({ kind: "unknown", tx_hash: tx.tx_hash, why });
+    const finals = await Promise.all(rpcs.map(async (r) => header(await r("block", { finality: "final" })).height));
+    const f = finals[0]! < finals[1]! ? finals[0]! : finals[1]!;
+    await mustBlock(f);
+    const b0 = BigInt(tx.height);
+    if ((await mustBlock(b0)).hash !== tx.block_hash) throw new Error(`b0 (${b0}) answered with another hash than the one signed on`);
+    const n = BigInt(tx.nonce);
+    const p = await pAt(f, n);
+    if (p === null) throw new Error(`no block at F (${f})`);
+    if (p) return f > b0 + validity ? { kind: "dropped", tx_hash: tx.tx_hash, why: "(b): K's nonce is below its own at F, past b0 + the validity period" } : keep("not applied through F");
+    if (f <= b0) throw new Error(`P fails at F (${f}), not past b0 (${b0})`);
+    const stored = store.foundAt(tx.tx_hash);
+    let d: Block;
+    if (stored !== null) {
+      d = await mustBlock(BigInt(stored.height));
+      if (d.hash !== stored.hash) throw new Error(`D (${stored.height}) answered with another hash than the stored one`);
+    } else {
+      d = await findD(b0, f, n);
+      store.setFoundAt(tx.tx_hash, { height: d.height.toString(), hash: d.hash });
+    }
+    if (d.height > f) throw new Error(`D (${d.height}) is above F (${f})`);
+    const [c0, c1] = await Promise.all(rpcs.map((r) => changesAt(r, d, tx.tx_hash)));
+    if (c0 !== c1) throw new Error(`the providers disagree on the changes at D (${c0}, ${c1})`);
+    if (c0 === "empty") return keep("an empty change list at D: a node that does not save state changes, or did not apply D's chunk (F54)");
+    if (c0 === "other") return { kind: "dropped", tx_hash: tx.tx_hash, why: "(a2): K's nonce passed it at D, whose changes do not name it" };
+    // applied at D: its outcome from a lookup on any provider, the archival one included, that names D
     const reads = await Promise.all([...rpcs, archival].map((r) => readTx(r, tx)));
-    const f = reads.find((x) => x?.final);
-    if (f?.final) {
-      pastAt.delete(tx.tx_hash);
-      return { kind: "final", tx_hash: tx.tx_hash, receipts: f.final };
+    if (reads.some((x) => x !== null && x.at !== d.hash)) return keep("a lookup names a block other than D");
+    const found = reads.find((x) => x !== null);
+    return found ? { kind: "final", tx_hash: tx.tx_hash, receipts: found.receipts } : keep("applied at D; its outcome is not final on any provider yet");
+  };
+  /** One round; any error, missing answer or disagreement keeps it. */
+  const readOnce = async (tx: TxRef): Promise<TxOutcome> => {
+    try {
+      return await judge(tx);
+    } catch (e) {
+      return { kind: "unknown", tx_hash: tx.tx_hash, why: `kept: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) };
     }
-    const known = finals.filter((x): x is bigint => x !== null);
-    const newest = known.length === 0 ? null : known.reduce((a, b) => (a > b ? a : b));
-    const past = newest !== null && newest > BigInt(tx.height) + validity;
-    if (!past || !reads.every((x) => x !== null && x.unknownTx)) return { kind: "unknown", tx_hash: tx.tx_hash, why: "not final on any provider" };
-    const first = pastAt.get(tx.tx_hash);
-    if (first === undefined || newest <= first) {
-      if (first === undefined) remember(pastAt, tx.tx_hash, newest);
-      return { kind: "unknown", tx_hash: tx.tx_hash, why: "past its validity period once; read again a block later" };
-    }
-    pastAt.delete(tx.tx_hash);
-    return { kind: "dropped", tx_hash: tx.tx_hash, why: "unknown on every provider past its validity period" };
   };
   const wait = async (tx: TxRef): Promise<TxOutcome> => {
     const until = Date.now() + waitMs;
@@ -887,16 +1061,21 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
       const turn = queue.then(async (): Promise<{ guarded: BindCode } | { tx: TxRef }> => {
         const code = await guard();
         if (code !== null) return { guarded: code };
-        const ak = (await rpcs[0]("query", { request_type: "view_access_key", finality: "final", account_id: account, public_key: publicKey })) as { nonce?: unknown; block_hash?: unknown; block_height?: unknown };
-        const keyNonce = u64(ak.nonce, "relayer nonce");
-        const b0 = u64(ak.block_height, "view_access_key block_height");
-        if (typeof ak.block_hash !== "string") throw new Error("view_access_key: no block_hash");
-        const nonce = (keyNonce > last ? keyNonce : last) + 1n;
-        last = nonce;
+        let c = store.nonceNext(counterKey); // read before the key: the compare-and-set below is on this value
+        const ak = await readKey(rpcs[0], { finality: "final", account_id: account, public_key: publicKey });
+        if (ak.kind !== "key" || ak.permission !== "FullAccess" || ak.block === undefined) throw new Error("relayer: the gas account's key is not a full-access key at final");
+        const b0 = ak.block;
+        let nonce: bigint;
+        for (;;) {
+          nonce = c !== null && c > ak.nonce + 1n ? c : ak.nonce + 1n;
+          if (nonce >= b0.height * NONCE_RANGE) throw new Error(`relayer: nonce ${nonce} at or above b0 (${b0.height}) x 10^6 (F58)`);
+          if (store.nonceCas(counterKey, c, nonce + 1n)) break;
+          c = store.nonceNext(counterKey); // another signer took the counter's value: the next n
+        }
         const receiver = action.kind === "storage_prepay" ? vault : action.receiver;
-        const body = encodeTransaction({ signer: account, publicKey: pub, nonce, receiver, blockHash: base58decode(ak.block_hash), action: encodeAction(action) });
+        const body = encodeTransaction({ signer: account, publicKey: pub, nonce, receiver, blockHash: base58decode(b0.hash), action: encodeAction(action) });
         const hash = createHash("sha256").update(body).digest();
-        const tx: TxRef = { tx_hash: base58(hash), nonce: nonce.toString(), height: b0.toString(), signed_tx: Buffer.concat([body, Buffer.from([0]), edSign(null, hash, priv)]).toString("base64") };
+        const tx: TxRef = { tx_hash: base58(hash), nonce: nonce.toString(), height: b0.height.toString(), block_hash: b0.hash, signed_tx: Buffer.concat([body, Buffer.from([0]), edSign(null, hash, priv)]).toString("base64") };
         before(tx);
         await broadcast(tx.signed_tx);
         return { tx };

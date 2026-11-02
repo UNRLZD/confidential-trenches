@@ -54,7 +54,8 @@ const deps = {
   store,
   // the sandbox node keeps every block, so it stands in for the archival provider too
   // the validity period read live from both providers (EXPERIMENTAL_protocol_config), as the relayer starts
-  relayer: await startRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault),
+  // the relayer key's nonce counter and the blocks D it found live in the same store, so a restart signs the next nonce
+  relayer: await startRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault, store),
   tokenStatus,
   pausedAt,
 };

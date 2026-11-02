@@ -118,7 +118,7 @@ test("a vkey that is not the pinned file is refused at load", () => {
   assert.throws(() => loadWithdrawVkey(changed), /not the pinned/);
 });
 
-test("a vkey with a leading BOM, or not valid UTF-8, is refused at load", () => {
+test("a vkey with a leading BOM, or not valid UTF-8, is refused at load by the sha256 pin, before any decode", () => {
   const bytes = readFileSync(new URL("./withdraw.vkey", import.meta.url));
   assert.throws(() => loadWithdrawVkey(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes])), /not the pinned/);
   const bad = Buffer.from(bytes);

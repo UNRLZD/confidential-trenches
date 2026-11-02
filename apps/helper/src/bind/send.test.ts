@@ -196,7 +196,7 @@ class Chain {
         const code = await guard();
         if (code !== null) return { kind: "guarded", code };
         const hash = base58(createHash("sha256").update(`tx${this.n++}`).digest());
-        before({ tx_hash: hash, nonce: String(this.relayerNonce++), height: this.final.toString(), signed_tx: "c2lnbmVk" });
+        before({ tx_hash: hash, nonce: String(this.relayerNonce++), height: this.final.toString(), block_hash: "11111111111111111111111111111111", signed_tx: "c2lnbmVk" });
         await this.during?.();
         const fate = action.kind === "storage_prepay" ? this.next(this.prepayFates) : this.next(this.fates);
         if (fate === "crash") throw new Error("crash after the durable write");
@@ -1152,13 +1152,17 @@ test("PROBE N4: temps a crash left (any name) never block a start and are swept 
 test("M4: create-if-absent is temp write, fsync, close, link, unlink, fsync of the directory; a replace is temp write, fsync, rename, fsync of the directory", () => {
   const dir = mkdtempSync(join(tmpdir(), "bind-order-"));
   const calls: string[] = [];
-  const name = (p: unknown) => (typeof p === "string" ? (p === dir ? "dir" : p.includes(".tmp-") ? "tmp" : p.slice(dir.length + 1).replace(/^(u|p)-.*/, "$1")) : "fd");
+  const name = (p: unknown) => (typeof p === "string" ? (p === dir ? "dir" : p.includes(".tmp-") ? "tmp" : p.slice(dir.length + 1).replace(/^(u|p|k|d)-.*/, "$1")) : "fd");
+  const all: string[] = [];
   const rec = (fn: string, f: (...a: never[]) => unknown) => (...a: unknown[]) => {
-    calls.push(`${fn} ${name(a[0])}${fn === "linkSync" || fn === "renameSync" ? " " + name(a[1]) : ""}`);
+    const c = `${fn} ${name(a[0])}${fn === "linkSync" || fn === "renameSync" ? " " + name(a[1]) : ""}`;
+    calls.push(c);
+    all.push(c);
     return (f as (...a: unknown[]) => unknown)(...a);
   };
   const fs = Object.fromEntries((["closeSync", "fsyncSync", "linkSync", "openSync", "renameSync", "unlinkSync", "writeSync"] as const).map((k) => [k, rec(k, nodeFs[k] as never)]));
-  const s = createFileStore(dir, { ...nodeFs, ...fs } as StoreFs);
+  const reads = { readFileSync: ((p: string, o: never) => (all.push(`readFileSync ${name(p)}`), nodeFs.readFileSync(p, o))) as typeof nodeFs.readFileSync, readdirSync: ((p: string) => (all.push(`readdirSync ${name(p)}`), nodeFs.readdirSync(p))) as typeof nodeFs.readdirSync };
+  const s = createFileStore(dir, { ...nodeFs, ...fs, ...reads } as StoreFs);
   const u = "ab".repeat(32);
   const want = (end: string[]) => ["openSync tmp", "writeSync fd", "fsyncSync fd", "closeSync fd", ...end, "openSync dir", "fsyncSync fd", "closeSync fd"];
   calls.length = 0;
@@ -1175,7 +1179,17 @@ test("M4: create-if-absent is temp write, fsync, close, link, unlink, fsync of t
   assert.equal(s.bind(5n, u), u);
   assert.deepEqual(calls, want(["linkSync tmp p", "unlinkSync tmp"]));
   assert.equal(s.bind(5n, "cd".repeat(32)), u);
+  calls.length = 0;
+  assert.equal(s.nonceCas("k", null, 2n), true);
+  assert.deepEqual(calls, want(["linkSync tmp k", "unlinkSync tmp"]));
+  calls.length = 0;
+  assert.equal(s.nonceCas("k", 2n, 3n), true);
+  assert.deepEqual(calls, want(["renameSync tmp k"]));
+  s.setFoundAt("1".repeat(32), { height: "7", hash: "h" });
+  assert.deepEqual(s.foundAt("1".repeat(32)), { height: "7", hash: "h" });
+  assert.ok(all.some((c) => c.startsWith("readFileSync")) && all.some((c) => c.startsWith("readdirSync")), "reads are recorded too");
   s.close();
+  assert.deepEqual(all.filter((c) => / lock\b/.test(c)), [], "nothing in the store's own fs calls opens the lock file (only take() does, through node:sqlite)");
 });
 
 // ---- the relayer on fake providers that answer as nearcore does ----
@@ -1414,7 +1428,12 @@ class Node {
   archival = (): Rpc => this.rpc(2);
   /** the gas account's one key: every relayer this node makes signs with it, as a restart does */
   secret = relayerSecret();
-  relayerOn = (rpcs: readonly [Rpc, Rpc], waitMs = 1_000) => createRelayer(rpcs, this.archival(), RELAYER, this.secret, VAULT, this.validity, waitMs);
+  /** the gas account's store (its key's counter, the blocks D found): every relayer this node makes shares it, as a restart does */
+  private rstore?: DepositStore;
+  get relayerStore(): DepositStore {
+    return (this.rstore ??= newStore());
+  }
+  relayerOn = (rpcs: readonly [Rpc, Rpc], waitMs = 1_000) => createRelayer(rpcs, this.archival(), RELAYER, this.secret, VAULT, this.validity, this.relayerStore, waitMs);
   relayer = (waitMs = 1_000) => this.relayerOn(this.rpcs(), waitMs);
   reads(): SendReads {
     return {
@@ -1462,6 +1481,7 @@ test("the fake answers send_tx NONE as nearcore does: NONE for a stale nonce and
   const real = node.rpcs()[0];
   // (a2): the key's nonce passed it at a block whose change names another cause, so it can never land
   assert.equal((await r.send(prepayAction(2n), open, keep(tx))).kind, "dropped");
+  await sleepMs(10); // the node tries it
   const drops = () => node.log.filter((x) => x.dropped !== undefined).map((x) => x.dropped);
   assert.ok(drops().length > 0 && drops().every((x) => x === "InvalidNonce"), String(drops()));
   const before = drops().length;
@@ -1480,8 +1500,8 @@ test("the validity period is read live on both providers; the relayer refuses to
   const [a, b] = node.rpcs();
   const other: Rpc = async (m, p) => (m === "EXPERIMENTAL_protocol_config" ? { transaction_validity_period: 86_400 } : b(m, p));
   await assert.rejects(transactionValidityPeriod([a, other]), /disagree on transaction_validity_period/);
-  await assert.rejects(startRelayer([a, other], node.archival(), RELAYER, relayerSecret(), VAULT), /disagree/);
-  const r = await startRelayer(node.rpcs(), node.archival(), RELAYER, relayerSecret(), VAULT, 50);
+  await assert.rejects(startRelayer([a, other], node.archival(), RELAYER, relayerSecret(), VAULT, node.relayerStore), /disagree/);
+  const r = await startRelayer(node.rpcs(), node.archival(), RELAYER, relayerSecret(), VAULT, node.relayerStore, 50);
   assert.equal((await r.send(prepayAction(1n), open, () => undefined)).kind, "final");
 });
 
@@ -2095,7 +2115,7 @@ test("createRelayer refuses a key whose public half is not its seed's", () => {
   raw[63] = raw[63]! ^ 1;
   assert.throws(() => relayerKey("ed25519:" + base58(raw)), /public half/);
   const node = new Node();
-  assert.throws(() => createRelayer(node.rpcs(), node.archival(), RELAYER, "ed25519:" + base58(raw), VAULT, node.validity), /public half/);
+  assert.throws(() => createRelayer(node.rpcs(), node.archival(), RELAYER, "ed25519:" + base58(raw), VAULT, node.validity, node.relayerStore), /public half/);
 });
 
 test("the relayer's transaction: borsh Transaction V0 with the ed25519 key tag and one Delegate (tag 8) of the bytes as signed", async () => {
