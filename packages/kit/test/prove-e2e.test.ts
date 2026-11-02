@@ -91,6 +91,7 @@ test("node: a pool's own context (card wallet-pool-ladder) proves on the same ci
   // a context not below p is refused before anything is posted to the prover
   const none: string[] = [];
   await assert.rejects(poolProveWithdraw(nodeProver(none), { ...rest, context: VAULT_FIELD_P }), /context: not a field element/);
+  await assert.rejects(poolProveWithdraw(nodeProver(none), { ...rest, withdrawn: 0n, context }), /withdrawn: 0/);
   assert.deepEqual(none, []);
 });
 

@@ -7,10 +7,9 @@
 // - A proof withdraws exactly one rung (withdrawnValue is public), and the fee is paid from it, as fixed-denomination
 //   pools pay their relayers. So every release, from every user, at every gas price, is one of the same few sizes.
 // - The split: from the largest rung down, repeats allowed, it takes a rung while what is left covers it, largest
-//   first. What is left below the smallest rung rides on the first (largest) note, so the notes add up to the amount
-//   exactly and there is one note per rung taken. That note's chunk is still its rung (the remainder is smaller than
-//   any gap between rungs), and the remainder stays behind as that spend's change. An amount below the smallest rung
-//   goes in as one note that no proof draws on until more joins it.
+//   first. Every note is a rung, so a proof withdraws a whole note and leaves a change note of 0. What is left below
+//   the smallest rung is never deposited: it stays in the one-time wallet the move comes from and joins that wallet's
+//   next move (a note below the smallest rung could never be spent by a chunk).
 // - Each note of a move is its own deposit: the move's first note, then that id's second arrivals n = 0, 1, ... (the
 //   store's rule, notes/store.ts), all under the pool's scope.
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
@@ -59,21 +58,19 @@ export function chunkOf(l: Ladder, value: bigint): bigint | null {
   return rungsUpTo(l, value)[0] ?? null;
 }
 
-/** The note values a move of `amount` lands as: largest first, adding up to the amount exactly. */
-export function ladderSplit(l: Ladder, amount: bigint): bigint[] {
+/** A move of `amount` as rungs, largest first, and what is left below the smallest rung (kept back, never deposited). */
+export function ladderSplit(l: Ladder, amount: bigint): { notes: bigint[]; left: bigint } {
   checkLadder(l);
   if (typeof amount !== "bigint" || amount <= 0n || amount >= U128) throw new Error("amount: a u128 above 0");
-  const out: bigint[] = [];
+  const notes: bigint[] = [];
   let left = amount;
   for (const r of rungsUpTo(l, amount)) {
     while (left >= r) {
-      out.push(r);
+      notes.push(r);
       left -= r;
     }
   }
-  if (out.length === 0) return [amount];
-  out[0] = out[0]! + left; // below the smallest rung: rides on the largest note
-  return out;
+  return { notes, left };
 }
 
 /** One note of a move into a pool: its ref, its value and its precommitment. */
@@ -90,15 +87,19 @@ function idOf(first: NoteRef): Extract<NoteRef, { kind: "second" }>["id"] {
 }
 
 /**
- * The notes a move of `amount` into the pool of `scope` lands as: `first` takes the largest value, then the same id's
- * second arrivals n = 0, 1, ... in order. Each note is deposited on its own, the next only once the one before has
- * landed (the store refuses to plan it sooner).
+ * The notes a move of `amount` into the pool of `scope` lands as: `first` takes the largest rung, then the same id's
+ * second arrivals n = 0, 1, ... in order, and `left`, what stays in the one-time wallet for its next move. Each note is
+ * deposited on its own, the next only once the one before has landed (the store refuses to plan it sooner).
  */
-export function poolDepositPlan(seed64: Uint8Array, scope: bigint, ladder: Ladder, first: NoteRef, amount: bigint): PlannedNote[] {
+export function poolDepositPlan(seed64: Uint8Array, scope: bigint, ladder: Ladder, first: NoteRef, amount: bigint): { notes: PlannedNote[]; left: bigint } {
   if (first.kind === "deposit" && first.s !== scope) throw new Error("a deposit note's scope is its s");
   const id = idOf(first);
-  return ladderSplit(ladder, amount).map((value, n) => {
-    const ref: NoteRef = n === 0 ? first : { kind: "second", id, n: n - 1 };
-    return { ref, scope, value, precommitment: noteSecrets(seed64, ref).precommitment };
-  });
+  const { notes, left } = ladderSplit(ladder, amount);
+  return {
+    notes: notes.map((value, n) => {
+      const ref: NoteRef = n === 0 ? first : { kind: "second", id, n: n - 1 };
+      return { ref, scope, value, precommitment: noteSecrets(seed64, ref).precommitment };
+    }),
+    left,
+  };
 }

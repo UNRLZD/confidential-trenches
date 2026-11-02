@@ -8,21 +8,26 @@
 // - bind: the kit's vaultWithdrawRequest, the one the vault recomputes (vaultContextOf over vaultContextInput, the
 //   vault as processor): recipient W, register_deposit read for W on two RPCs, the release's fee recipient, the
 //   relayer's fee (exact on this vault) refused above the device's own fee_max (../withdraw/feemax.ts) or at or above
-//   the chunk, refund note (l, j)'s precommitment, a fresh salt, and deadline_ms = T + 600,000 - r in block time
-//   (../withdraw/request.ts withdrawDeadlineMs). The request it returns is withdraw()'s first argument as is.
+//   the chunk, refund note (l, j)'s precommitment, a fresh salt, and the queue's deadline_ms on the epoch grid. The
+//   request it returns is withdraw()'s first argument as is. The relayer's fee is its fee for the epoch.
 // - now: the newest final block's timestamp_nanosec, the lower of two RPCs, in ms; never the device clock.
-// - remake margin: 120 s (the relayer's check 9 margin, markets.md H3.4), so a ready proof is always one the relayer
-//   still takes, with a proof's time to spare.
+// - Epochs of 60 s and a life of 240 s: the smallest life at or above one epoch, one epoch to make the set again, and
+//   the relayer's 120 s check 9 margin (markets.md H3.4), well inside the device's 10 minute cap on deadline_ms
+//   (../withdraw/request.ts WITHDRAW_DEADLINE_MAX_MS). The vault keeps every root, so an epoch root stays valid.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultScopeOf, vaultWithdrawRequest, type VaultWithdrawal } from "@blindfill/kit";
 import { NEAR_NETWORKS, type NearNetwork } from "../deposit/account.ts";
 import { type FeeRpc, readWithdrawFeeMax } from "../withdraw/feemax.ts";
-import { blockTimeMsOf, WITHDRAW_SEND_MARGIN_MS, withdrawDeadlineMs } from "../withdraw/request.ts";
+import { blockTimeMsOf, WITHDRAW_DEADLINE_MAX_MS, WITHDRAW_SEND_MARGIN_MS } from "../withdraw/request.ts";
 import type { Ladder } from "./ladder.ts";
 import type { Pool, PoolTrees } from "./pool.ts";
 
 /** USDC's ladder: $1 = 10^6 base units, from $2 (owner pick ladder, OD:268). */
 export const USDC_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 2_000_000n });
+/** E and L on the NEAR vault, ms. */
+export const NEAR_EPOCH_MS = 60_000n;
+export const NEAR_LIFE_MS = 2n * NEAR_EPOCH_MS + BigInt(WITHDRAW_SEND_MARGIN_MS);
+if (NEAR_LIFE_MS > BigInt(WITHDRAW_DEADLINE_MAX_MS)) throw new Error("the NEAR life is past the 10 minute cap");
 
 export type NearVaultPoolArgs = {
   vaultId: string;
@@ -33,14 +38,15 @@ export type NearVaultPoolArgs = {
   priceRpcs: readonly [FeeRpc, FeeRpc];
   /** The release's relayer fee recipient, never a helper's answer. */
   feeRecipient: string;
-  /** The relayer's fee for one withdrawal, in USDC base units; refused above the device's fee_max. */
-  relayFee: () => Promise<bigint>;
+  /** The relayer's published fee for one withdrawal in the epoch starting at epochStartMs, in USDC base units, in
+   * coarse steps; refused above the device's fee_max. */
+  relayFee: (epochStartMs: bigint) => Promise<bigint>;
   /** register_deposit for an account on `token`, read on two RPCs (arming/accounts.ts armingRegisterDepositOf). */
   registerDepositOf: (accountId: string, token: string) => Promise<bigint>;
   /** The newest final block's header.timestamp_nanosec, a decimal string: the lower of two RPCs'. */
   blockTimestampNanosec: (signal?: AbortSignal) => Promise<string>;
-  /** The vault's trees and newest roots from the sync (kit vault/sync.ts), on two RPCs. */
-  trees: (signal?: AbortSignal) => Promise<PoolTrees>;
+  /** The vault's trees holding only the leaves that landed before beforeMs, and their roots, from the sync on two RPCs. */
+  trees: (beforeMs: bigint, signal?: AbortSignal) => Promise<PoolTrees>;
 };
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -54,20 +60,23 @@ export function nearVaultPool(a: NearVaultPoolArgs): Pool<VaultWithdrawal> {
     chain: "near",
     scope: vaultScopeOf(keccak_256, vaultId, token),
     ladder: USDC_LADDER,
-    remakeMarginMs: BigInt(WITHDRAW_SEND_MARGIN_MS),
+    epochMs: NEAR_EPOCH_MS,
+    lifeMs: NEAR_LIFE_MS,
+    sendMarginMs: BigInt(WITHDRAW_SEND_MARGIN_MS),
     async now(signal) {
       return BigInt(blockTimeMsOf(await a.blockTimestampNanosec(signal)));
     },
-    trees: (signal) => a.trees(signal),
-    async bind({ chunk, wallet, refundPrecommitment }, signal) {
+    trees: (beforeMs, signal) => a.trees(beforeMs, signal),
+    async bind({ chunk, wallet, refundPrecommitment, epochStartMs, deadlineMs }, signal) {
       if (!(wallet.publicKey instanceof Uint8Array) || wallet.publicKey.length !== 32 || wallet.address !== hex(wallet.publicKey))
         throw new Error("wallet: a NEAR W is the 64-hex id of its ed25519 public key");
       const ns = await a.blockTimestampNanosec(signal);
       const nowMs = blockTimeMsOf(ns);
-      const deadlineMs = withdrawDeadlineMs(ns);
+      if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + NEAR_LIFE_MS || deadlineMs <= BigInt(nowMs) + BigInt(WITHDRAW_SEND_MARGIN_MS))
+        throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       const registerDeposit = await a.registerDepositOf(wallet.address, token);
       if (typeof registerDeposit !== "bigint") throw new Error("registerDepositOf: not a bigint");
-      const relayFee = await a.relayFee();
+      const relayFee = await a.relayFee(epochStartMs);
       if (typeof relayFee !== "bigint" || relayFee < 0n) throw new Error("relayFee: not a bigint, 0 or more");
       if (relayFee >= chunk) throw new Error("relayFee: at or above the chunk");
       const feeMax = await readWithdrawFeeMax({ network: a.network, rpcs: a.rpcs, priceRpcs: a.priceRpcs, registerDeposit });
@@ -80,11 +89,11 @@ export function nearVaultPool(a: NearVaultPoolArgs): Pool<VaultWithdrawal> {
         feeRecipient: a.feeRecipient,
         relayFee,
         refundPrecommitment,
-        deadlineMs,
+        deadlineMs: Number(deadlineMs),
         withdrawn: chunk,
         nowMs,
       });
-      return { context: BigInt(req.context), deadlineMs: BigInt(deadlineMs), feeCap: relayFee, request: req.withdrawal };
+      return { context: BigInt(req.context), feeCap: relayFee, request: req.withdrawal };
     },
   };
 }

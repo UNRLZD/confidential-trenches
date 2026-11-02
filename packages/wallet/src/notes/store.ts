@@ -51,8 +51,10 @@
 //   the relayer and the rest is on chain.
 // - Attempt contexts (card wallet-withdraw-request; wallet.md l.214-217): the move UNSPENT -> HELD takes the attempt's
 //   withdrawal context (a decimal below p) and appends { context, deadlineMs } to the note's contexts in the same
-//   compare-and-set, so the context is stored before its proof starts. No move removes an entry: an earlier attempt
-//   can still land before its own deadline, and the device may read its spend only later. A spends record whose
+//   compare-and-set, so the context is stored before its proof starts. Only the move HELD -> UNSPENT removes an entry,
+//   the freed attempt's own: a HELD proof was never sent (RESERVED is written first), so it can never land. Every
+//   sent attempt's entry stays: it can still land before its own deadline, and the device may read its spend only
+//   later. So a note proved again every epoch keeps a short list. A spends record whose
 //   context is in the list is this device's own (the check itself is the sync and arming cards'). The list stays
 //   small, as each new attempt needs the note freed or expired first. Nothing in it is secret: the context goes on
 //   chain with the proof, and the ops records, which the frame reads, never hold it.
@@ -410,6 +412,12 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       if (fields.deadlineMs !== undefined) throw new Error("deadlineMs is set when the proof starts (HELD)");
       if (fields.context !== undefined) throw new Error("a context is written when the proof starts (HELD)");
       delete next.tab;
+      // the freed attempt was never sent: its context goes (it is the last entry, checkRecord)
+      if (cur.state === "HELD" && to === "UNSPENT") {
+        const kept = (cur.contexts ?? []).slice(0, -1);
+        if (kept.length > 0) next.contexts = kept;
+        else delete next.contexts;
+      }
       if (to !== "RESERVED") {
         delete next.deadlineMs;
         delete next.attempt;

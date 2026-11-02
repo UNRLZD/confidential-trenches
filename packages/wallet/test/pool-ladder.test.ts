@@ -11,21 +11,17 @@ const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const CENTS: Ladder = { one: 100n, min: 200n }; // $1 = 100 cents, from $2: the USDC ladder at cent precision
 const usd = (x: number): bigint => BigInt(Math.round(x * 1_000_000));
 
-// Every split's rules: exact sum, largest first, every note but the first a rung, the first its rung plus a remainder
-// below the smallest rung, and that note's chunk its rung; below the smallest rung, one note.
+// Every split's rules: every note a rung, largest first, the notes plus what is kept back add up to the amount, and
+// what is kept back covers no rung.
 function splitHolds(l: Ladder, amount: bigint): void {
-  const v = ladderSplit(l, amount);
-  assert.equal(v.reduce((a, b) => a + b, 0n), amount, `sum of ${amount}`);
-  if (amount < l.min) return assert.deepEqual(v, [amount], `${amount} below the smallest rung`);
-  const rung = chunkOf(l, v[0]!)!;
-  assert.ok(v[0]! - rung < l.min, `${amount}: the remainder is below the smallest rung`);
-  for (const [k, x] of v.entries()) {
-    if (k > 0) assert.ok(isRung(l, x), `${amount}: note ${k} (${x}) is off the ladder`);
-    if (k > 0) assert.ok(x <= v[k - 1]!, `${amount}: largest first`);
+  const { notes, left } = ladderSplit(l, amount);
+  assert.equal(notes.reduce((a, b) => a + b, 0n) + left, amount, `sum of ${amount}`);
+  for (const [k, x] of notes.entries()) {
+    assert.ok(isRung(l, x), `${amount}: note ${k} (${x}) is off the ladder`);
+    assert.equal(chunkOf(l, x), x, `${amount}: note ${k}'s chunk is the whole note`);
+    if (k > 0) assert.ok(x <= notes[k - 1]!, `${amount}: largest first`);
   }
-  if (v.length > 1) assert.ok(rung >= v[1]!, `${amount}: the first note's chunk is the largest`);
-  // nothing left that one more rung could take: the remainder is below the smallest rung
-  assert.equal(chunkOf(l, v[0]! - rung), null);
+  assert.ok(left >= 0n && left < l.min, `${amount}: what is kept back is below the smallest rung`);
 }
 
 test("ladder: rungs 1-2-5 per power of ten from the smallest, no top; a smallest rung off the ladder is refused", () => {
@@ -46,17 +42,18 @@ test("ladder: the chunk of a note is the largest rung at or below its value", ()
   assert.equal(chunkOf(USDC_LADDER, usd(1.99)), null);
 });
 
-test("ladder: named splits, largest first, the remainder on the largest note", () => {
-  assert.deepEqual(ladderSplit(USDC_LADDER, usd(137.43)), [usd(100.43), usd(20), usd(10), usd(5), usd(2)]);
-  assert.deepEqual(ladderSplit(USDC_LADDER, usd(50)), [usd(50)]);
-  assert.deepEqual(ladderSplit(USDC_LADDER, usd(9)), [usd(5), usd(2), usd(2)]);
-  assert.deepEqual(ladderSplit(USDC_LADDER, usd(9.99)), [usd(5.99), usd(2), usd(2)]);
-  assert.deepEqual(ladderSplit(USDC_LADDER, usd(1.99)), [usd(1.99)]);
-  assert.deepEqual(ladderSplit(USDC_LADDER, usd(1000)), [usd(1000)]);
+test("ladder: named splits, largest first, every note a rung, what is left kept back", () => {
+  const split = (x: number) => { const r = ladderSplit(USDC_LADDER, usd(x)); return [r.notes, r.left]; };
+  assert.deepEqual(split(137.43), [[usd(100), usd(20), usd(10), usd(5), usd(2)], usd(0.43)]);
+  assert.deepEqual(split(50), [[usd(50)], 0n]);
+  assert.deepEqual(split(9), [[usd(5), usd(2), usd(2)], 0n]);
+  assert.deepEqual(split(9.99), [[usd(5), usd(2), usd(2)], usd(0.99)]);
+  assert.deepEqual(split(1.99), [[], usd(1.99)]);
+  assert.deepEqual(split(1000), [[usd(1000)], 0n]);
   for (const bad of [0n, -1n, 1n << 128n]) assert.throws(() => ladderSplit(USDC_LADDER, bad), /amount: a u128 above 0/);
 });
 
-test("ladder: every amount from 1 cent to $2,000 splits exactly, on the ladder", () => {
+test("ladder: every amount from 1 cent to $2,000 splits exactly, no note off the ladder", () => {
   for (let c = 1n; c <= 200_000n; c++) splitHolds(CENTS, c);
 });
 
@@ -79,8 +76,9 @@ test("ladder: random amounts up to 2^128 split exactly, on the ladder, with ever
 
 test("a move into a pool: its first note, then that id's second arrivals, under the pool's scope", () => {
   const s = 123n, s2 = 456n;
-  const plan = poolDepositPlan(SEED, s, USDC_LADDER, { kind: "deposit", s, i: 3 }, usd(137.43));
-  assert.deepEqual(plan.map((n) => n.value), ladderSplit(USDC_LADDER, usd(137.43)));
+  const { notes: plan, left } = poolDepositPlan(SEED, s, USDC_LADDER, { kind: "deposit", s, i: 3 }, usd(137.43));
+  assert.deepEqual(plan.map((n) => n.value), ladderSplit(USDC_LADDER, usd(137.43)).notes);
+  assert.equal(left, usd(0.43), "what is left stays in the one-time wallet");
   assert.deepEqual(plan[0]!.ref, { kind: "deposit", s, i: 3 });
   plan.slice(1).forEach((n, k) => assert.deepEqual(n.ref, { kind: "second", id: { id: "U", s, i: 3 }, n: k }));
   for (const n of plan) {
@@ -88,12 +86,13 @@ test("a move into a pool: its first note, then that id's second arrivals, under 
     assert.equal(n.precommitment, noteSecrets(SEED, n.ref).precommitment);
   }
   // another pool's scope: other notes, the same sizes
-  const other = poolDepositPlan(SEED, s2, USDC_LADDER, { kind: "deposit", s: s2, i: 3 }, usd(137.43));
+  const other = poolDepositPlan(SEED, s2, USDC_LADDER, { kind: "deposit", s: s2, i: 3 }, usd(137.43)).notes;
   assert.deepEqual(other.map((n) => n.value), plan.map((n) => n.value));
   for (const [k, n] of other.entries()) assert.notEqual(n.precommitment, plan[k]!.precommitment);
   // a return of W_{sol, l, j} goes in as R_{sol, l, j}'s notes
-  const ret = poolDepositPlan(SEED, s, USDC_LADDER, { kind: "return", c: "sol", l: 7n, j: 1 }, usd(7));
+  const ret = poolDepositPlan(SEED, s, USDC_LADDER, { kind: "return", c: "sol", l: 7n, j: 1 }, usd(7)).notes;
   assert.deepEqual(ret.map((n) => n.ref), [{ kind: "return", c: "sol", l: 7n, j: 1 }, { kind: "second", id: { id: "R", c: "sol", l: 7n, j: 1 }, n: 0 }]);
   assert.throws(() => poolDepositPlan(SEED, s, USDC_LADDER, { kind: "deposit", s: s2, i: 0 }, usd(5)), /scope is its s/);
   assert.throws(() => poolDepositPlan(SEED, s, USDC_LADDER, { kind: "change", l: 1n, j: 0 }, usd(5)), /starts with a deposit, return or move note/);
+  assert.deepEqual(poolDepositPlan(SEED, s, USDC_LADDER, { kind: "deposit", s, i: 4 }, usd(1.5)), { notes: [], left: usd(1.5) });
 });

@@ -172,7 +172,8 @@ export type PoolWithdrawInputArgs = Omit<VaultWithdrawInputArgs, "withdrawal" | 
 
 /**
  * Withdraw(32)'s inputs for a spend in any pool, against the pool's newest roots, with the pool's context as the 8th
- * public signal. Refuses what vaultWithdrawInput refuses, the vault's withdrawal checks aside, and a context not below p.
+ * public signal. Refuses what vaultWithdrawInput refuses, the vault's withdrawal checks aside but withdrawn 0, and a
+ * context not below p.
  */
 export function poolWithdrawInput(a: PoolWithdrawInputArgs): VaultWithdrawInput {
   const value = field(a.note.value, "note.value");
@@ -184,6 +185,7 @@ export function poolWithdrawInput(a: PoolWithdrawInputArgs): VaultWithdrawInput 
   const withdrawn = field(a.withdrawn, "withdrawn");
   const context = field(a.context, "context");
   if (value >= U128) throw new Error("note.value: 2^128 or more");
+  if (withdrawn === 0n) throw new Error("withdrawn: 0"); // the vault refuses it (vaultWithdrawalProblems)
   if (withdrawn > value) throw new Error("withdrawn: over the note's value");
   if (newNullifier === nullifier) throw new Error("newNullifier: equals the spent note's nullifier");
 
