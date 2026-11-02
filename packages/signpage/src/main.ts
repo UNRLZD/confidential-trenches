@@ -70,7 +70,7 @@ type State =
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335). recovery is S2.1's [draft copy: Recovery code]
 // (09-design-brief.md:1811); backup is 06b ses.17's menu item; next is a draft for S2.5's submit, which has no words yet;
 // cancel is a draft for closing the shell's layer back to the app. new-account and have-one are wallet.md:50's two
-// choices, [draft copy: New account] and [draft copy: I already have one], for the owner's words pass (OD:343, OD:349).
+// choices, [draft copy: New account] and [draft copy: I already have one], both drafts until picked (OD:343, OD:349).
 const WORDS = {
   create: "Create passkey",
   use: "Use passkey",
