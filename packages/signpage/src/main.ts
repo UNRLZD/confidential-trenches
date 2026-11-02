@@ -63,6 +63,7 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
+import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
@@ -115,6 +116,8 @@ else {
   // another tab's seed write or sign out: the page's own state follows, so the open kinds it takes match what the app
   // shows (it reads the same store); the page's store handle hears nothing once a sign out has closed it
   channel.addEventListener("message", (m) => storeMoved(m.data as WalletEvent));
+  // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
+  document.body.append(drawBackdrop(document));
   shell = mountShell(document, {
     state: fs.state,
     watch: fs.watch,
