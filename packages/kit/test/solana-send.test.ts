@@ -1157,6 +1157,109 @@ test("a tx one provider has read landed is not read again there, and one the oth
   assert.ok(out!.txs[1]!.ms! - 3_000 < 1_000, `y was read filled ${out!.txs[1]!.ms! - 3_000} ms after landing`);
 });
 
+// One provider (one URL, one queue) as several sets call it, each set's status reads logged apart.
+const sharedA = (a: FakeProvider, url: string, rtt: number, log: { t: number; sig: string }[]): SolanaRpc => Object.assign(late(a.rpc, rtt, log), { url });
+for (const rps of [1, 2]) {
+  test(`the fill poll reads at providerRps ${rps}, where the dead checks of two stuck sets fill the budget: each keeps reading and a later set is read filled`, async (t) => {
+    t.after(() => mock.timers.reset());
+    const { a, b } = setup();
+    a.height = 500;
+    b.height = 500;
+    const url = `https://keyed-${rps}.example`;
+    const log1: { t: number; sig: string }[] = [];
+    const log2: { t: number; sig: string }[] = [];
+    const log3: { t: number; sig: string }[] = [];
+    const opts = (log: { t: number; sig: string }[], deadlineMs: number) => ({ paths: [path("rpc").path], providers: [sharedA(a, url, 20, log), b.rpc] as const, providerRps: [rps, rps] as const, deadlineMs });
+    const one = sendSolanaSet([tx(170, 5_000), tx(171, 5_000), tx(172, 5_000)], opts(log1, 20_000));
+    const two = sendSolanaSet([tx(173, 5_000), tx(174, 5_000), tx(175, 5_000)], opts(log2, 20_000));
+    await tickFor(5_000);
+    const late1 = tx(176, 5_000);
+    a.set(sigOf(late1), OK);
+    b.set(sigOf(late1), OK);
+    let out: SetOut | undefined;
+    void sendSolanaSet([late1], opts(log3, 15_000)).done.then((r) => { out = r; });
+    await tickFor(16_000);
+    await Promise.all([one.done, two.done]);
+    assert.ok(log1.length >= 3 && log2.length >= 3, `in 20 s at ${rps} a second the stuck sets read ${log1.length} and ${log2.length} times on A`);
+    assert.equal(out?.txs[0]!.state, "filled", `at ${rps} a second the later set was not read filled`);
+    assert.ok(out!.txs[0]!.ms! <= 8_000, `at ${rps} a second the later set was read filled ${out!.txs[0]!.ms} ms after it started`);
+  });
+}
+
+// Each test below is named for the rule it holds (the planted break it catches in brackets).
+test("fill burst [Q5]: a burst read the poll skips (backed off after a 429) is not spent: the whole burst is read after the back-off", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const log: { t: number; sig: string }[] = [];
+  let first = true;
+  const rpcA: SolanaRpc = async (m, p) => {
+    if (m === "getSignatureStatuses" && first) { first = false; throw new Error("HTTP 429 Too Many Requests"); }
+    return a.rpc(m, p);
+  };
+  const box = startSet(Array.from({ length: 9 }, (_, i) => tx(180 + i, 5_000)), [late(rpcA, 0, log), b.rpc], 6_000);
+  await tickFor(6_100, () => box.out !== undefined);
+  // the first read (at 200 ms) is refused: a 1 s back-off; the 7 burst reads left go 200 ms apart after it
+  const after = log.map((x) => x.t).filter((x) => x > 1_200);
+  const burst = after.filter((x) => x <= after[0]! + 7 * 200);
+  assert.ok(burst.length >= 7, `${burst.length} reads in the 1.4 s after the back-off, the burst spent while it was skipped`);
+});
+
+test("fill pool [Q6]: a set with nothing left to read on a provider spends none of its steady pool", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const logX: { t: number; sig: string }[] = [];
+  const logY: { t: number; sig: string }[] = [];
+  const x = tx(190, 5_000);
+  // X: one tx, landed on A only from 3 s (B never sees it), so past its burst X has nothing to read on A
+  const boxX = startSet([x], [sharedA(a, "https://pool-q6.example", 0, logX), b.rpc], 25_000);
+  const boxY = startSet([tx(191, 5_000), tx(192, 5_000), tx(193, 5_000)], [sharedA(a, "https://pool-q6.example", 0, logY), b.rpc], 25_000);
+  await tickFor(3_000);
+  a.set(sigOf(x), OK);
+  await tickFor(23_000, () => boxX.out !== undefined && boxY.out !== undefined);
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  const pool = L.perMethod - 2 * (L.perMethod / 5);
+  const y = logY.filter((r) => r.t >= 12_000 && r.t < 22_000).length;
+  assert.ok(y >= pool - 2, `Y read ${y} times in a window it had the pool of ${pool} to itself`);
+});
+
+test("fill pool [Q7, Q8]: two stuck sets on one provider share one steady pool, so a later set's burst stays free", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const log: { t: number; sig: string }[] = [];
+  const pa = late(a.rpc, 0, log);
+  const one = startSet(Array.from({ length: 9 }, (_, i) => tx(200 + i, 5_000)), [pa, b.rpc], 30_000);
+  await tickFor(300);
+  const two = startSet(Array.from({ length: 9 }, (_, i) => tx(210 + i, 5_000)), [pa, b.rpc], 30_000);
+  await tickFor(31_000, () => one.out !== undefined && two.out !== undefined);
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  const pool = L.perMethod - 2 * (L.perMethod / 5);
+  // past both bursts (their reads out of the window from 12 s), every window holds the one pool
+  const ts = log.map((r) => r.t);
+  for (const w of ts.filter((x) => x >= 12_000 && x <= 20_000)) {
+    const n = ts.filter((y) => y >= w && y < w + L.windowMs).length;
+    assert.ok(n <= pool, `${n} steady reads by two sets in the window from ${w} ms, over the pool of ${pool}`);
+  }
+});
+
+test("fill burst [Q9]: a set's burst is spread over FILL_BURST_MS, not spent at pollMs over its txs", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const log: { t: number; sig: string }[] = [];
+  const box = startSet(Array.from({ length: 9 }, (_, i) => tx(220 + i, 5_000)), [late(a.rpc, 0, log), b.rpc], 4_000);
+  await tickFor(4_100, () => box.out !== undefined);
+  const C = kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod / 5;
+  // a tx that lands a second in is still read inside the burst: its C reads reach 1.4 s and more
+  assert.ok(log[C - 1]!.t >= 1_400, `the burst's last read went at ${log[C - 1]!.t} ms`);
+});
+
 test("30 sets given up while their calls wait their turn leave no turn booked in the provider's queue", async (t) => {
   t.after(() => mock.timers.reset());
   const { a, b } = setup();
