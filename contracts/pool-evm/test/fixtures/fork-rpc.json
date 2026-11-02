@@ -505,6 +505,12 @@
   }
  },
  "robinhood": {
+  "anvil_nodeInfo []": {
+   "error": {
+    "code": -32601,
+    "message": "the method anvil_nodeInfo does not exist/is not available"
+   }
+  },
   "eth_chainId []": {
    "result": "0x1237"
   },
@@ -578,6 +584,9 @@
    "result": "0x0"
   },
   "eth_getBalance [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x63c5bf8\"]": {
+   "result": "0x0"
+  },
+  "eth_getBalance [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x63c5bf8\"]": {
    "result": "0x0"
   },
   "eth_getBlockByNumber [\"0x63c5bf8\",false]": {
@@ -680,6 +689,9 @@
   },
   "eth_getCode [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x63c5bf8\"]": {
    "result": "0xef01008a67b5020ee254ef48e3b6a04927f39baf7e408a"
+  },
+  "eth_getCode [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x63c5bf8\"]": {
+   "result": "0x"
   },
   "eth_getStorageAt [\"0x00000000000000000000000000000000b1f1f001\",\"0x0\",\"0x63c5bf8\"]": {
    "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
@@ -813,6 +825,9 @@
   "eth_getStorageAt [\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc\",\"0x63c5bf8\"]": {
    "result": "0x00000000000000000000000068184c449e1a8f34fa18d289737129fd27b66f8f"
   },
+  "eth_getStorageAt [\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"0x3d76c6985e66b7484bab90b51b1d44f6e45a807dc0aeaaa0ca2d3a6a42e6df46\",\"0x63c5bf8\"]": {
+   "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "eth_getStorageAt [\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"0x4\",\"0x63c5bf8\"]": {
    "result": "0x00000000000000000000000000000000000000000000000001518000699cea00"
   },
@@ -908,6 +923,9 @@
   },
   "eth_getTransactionCount [\"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\",\"0x63c5bf8\"]": {
    "result": "0x75d"
+  },
+  "eth_getTransactionCount [\"0xf62849f9a0b5bf2913b396098f7c7019b51a820a\",\"0x63c5bf8\"]": {
+   "result": "0x0"
   }
  }
 }
