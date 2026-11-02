@@ -55,7 +55,7 @@ test("an upgrade authority set fails", async () => {
 });
 
 test("other code bytes fail, and so do bytes after the code", async () => {
-  fails(await run(mutate(D.programdata, (d) => (d[45 + 1000] ^= 1))), /code sha256 of 76960 bytes [0-9a-f]{64} equals the build's/);
+  fails(await run(mutate(D.programdata, (d) => (d[45 + 1000] ^= 1))), /code sha256 of 77160 bytes [0-9a-f]{64} equals the build's/);
   // the account grown by 3 bytes, the last one not 0: the code a later write could reach
   const extra = structuredClone(A.good);
   for (const a of extra) if (a.method === "getAccountInfo" && a.params[0] === D.programdata) {
