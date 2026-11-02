@@ -17,8 +17,12 @@ export const PROJECT = "confidential-trenches-app";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves APP_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 
-// every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs)
-export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live"];
+// every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs
+// and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
+// fail this deploy)
+export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "signpage-release"];
+export const LIVE_ARGS = { "signpage-release": "--host app" };
+export const liveRun = (k) => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}`;
 
 export function deploy(argv, env = process.env, run = spawnSync) {
   const dryRun = argv.includes("--dry-run");
@@ -41,7 +45,7 @@ export function deploy(argv, env = process.env, run = spawnSync) {
     stdio: "inherit",
   });
   if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map((k) => `scripts/live-checks/${k}.mjs`).join(", ")} next`] };
+  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map(liveRun).join(", ")} next`] };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
