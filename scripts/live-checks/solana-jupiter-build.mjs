@@ -167,6 +167,10 @@ export async function read({ base = BASE, token } = {}) {
       amounts.sell = /^[1-9]\d{0,19}$/.test(String(out)) ? String(out) : "1000000";
     }
     const req = { side: s.side, wallet, token, amount: BigInt(s.side === "buy" ? amounts.buy : amounts.sell), slippageBps: SLIPPAGE_BPS };
+    // one build a second: through the helper, Jupiter served about one a second on 2026-11-02 (five at once: one in
+    // 578 ms, four in about 1.1 s; two runs back to back: a 503 upstream at 06:01:27Z), and this check judges the
+    // build path, not the helper's Jupiter quota
+    if (shapes.length) await new Promise((ok) => setTimeout(ok, 1_100));
     // the kit's own call; this fetch only keeps what each call answered, for --record and the replay
     const calls = [];
     const keep = async (url, init) => {
@@ -184,10 +188,10 @@ export async function read({ base = BASE, token } = {}) {
     try { for (const t of Object.keys(JSON.parse(s.calls.at(-1)?.body ?? "{}").addressesByLookupTableAddress ?? {}).slice(0, 8)) names.add(t); } catch { /* judged later */ }
   }
   const keys = [...names];
-  // public RPCs answer 429 under load: up to 4 tries each, 1, 2 and 4 s apart (a read, never a judgement)
+  // public RPCs answer 429 or time out under load: up to 4 tries each, 1, 2 and 4 s apart (a read, never a judgement)
   const again = (rpc) => Object.assign(async (m, p) => {
     for (let i = 0; ; i++) {
-      try { return await rpc(m, p); } catch (e) { if (i >= 3 || !/HTTP 429/.test(e.message)) throw e; await new Promise((ok) => setTimeout(ok, 1000 * 2 ** i)); }
+      try { return await rpc(m, p); } catch (e) { if (i >= 3 || !/HTTP 429|timeout/i.test(e.message)) throw e; await new Promise((ok) => setTimeout(ok, 1000 * 2 ** i)); }
     }
   }, { url: rpc.url });
   const rpcs = RPCS.map((u) => again(solanaJsonRpc(u)));
