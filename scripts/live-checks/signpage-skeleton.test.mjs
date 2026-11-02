@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/signpage-skeleton.test.mjs: the live check replays recorded answers
 // (signpage-skeleton.answers.json). good: packages/signpage built by deploy.mjs --dry-run and served by the Pages
-// runtime of wrangler 4.151.1 on a Mac (SIGN_HOST answered 522 before any deploy, so no served answer exists
+// runtime of wrangler 4.151.1 (re-recorded on the PC box for card signpage-solana-trade's connect-src; SIGN_HOST answered 522 before any deploy, so no served answer existed
 // yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
 // frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { frameAllowed, judge, read } from "./signpage-skeleton.mjs";
+import { CSP, frameAllowed, judge, read } from "./signpage-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-skeleton.answers.json"), "utf8"));
@@ -51,10 +51,13 @@ test("recorded bad answer: frame-ancestors *: FAIL", async () => {
   assert.ok(r.lines.includes("BAD framed from https://example.com: allowed"), r.lines.join("\n"));
 });
 
-test("recorded bad answer: the live SIGN_HOST before the shell (APP_HOST framed it): FAIL on the frame policy only", () => {
+test("recorded bad answer: the live SIGN_HOST before the shell (APP_HOST framed it): FAIL on the frame policy, and on the connect-src it predates", () => {
   const r = judge(ANSWERS.framed);
   assert.equal(r.ok, false);
+  const site = ANSWERS.framed.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
+  const want = CSP.find(([k]) => k === "connect-src")[1];
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [
+    `BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`,
     `BAD CSP frame-src: none, want "${APP}"`,
     `BAD CSP frame-ancestors: "${APP}", want "'none'"`,
     `BAD framed from ${APP}: allowed`,
