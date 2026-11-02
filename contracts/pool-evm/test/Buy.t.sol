@@ -81,13 +81,13 @@ abstract contract BuyBase is Signing {
     address _pool
   ) internal view returns (bytes32) {
     ProofLib.WithdrawProof memory _p = _proof(_name);
-    return _buyDigest(_b, _p.pubSignals[1], _p.pubSignals[7], _chainId, _pool);
+    return _buyDigest(_b, _p.pubSignals[1], _p.pubSignals[7], _p.pubSignals[2], _chainId, _pool);
   }
 
   /// W's signature that takes `_name`'s proof as a withdraw on this pool and chain
   function _wsig(string memory _name) internal view returns (bytes memory) {
     ProofLib.WithdrawProof memory _p = _proof(_name);
-    return _sign(W_KEY, _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], block.chainid, POOL));
+    return _sign(W_KEY, _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], _p.pubSignals[2], block.chainid, POOL));
   }
 
   /// W's signature of `_b` for `_name`'s note on this pool and chain
@@ -159,10 +159,12 @@ contract BuyTest is BuyBase {
     ProofLib.WithdrawProof memory _p = _proof('local.buy');
     assertEq(vm.parseJsonUint(fx, '.local.signed.message.nullifier'), _p.pubSignals[1], 'the buy proofs nullifier');
     assertEq(vm.parseJsonUint(fx, '.local.signed.message.context'), _p.pubSignals[7], 'and context');
+    assertEq(vm.parseJsonUint(fx, '.local.signed.message.value'), _p.pubSignals[2], 'and value');
     assertEq(_recover(_digest(_b, 'local.buy', 31_337, POOL), _fixtureSig()), W);
     assertEq(vm.parseJsonUint(fx, '.local.signedWithdraw.message.nullifier'), _p.pubSignals[1]);
     assertEq(vm.parseJsonUint(fx, '.local.signedWithdraw.message.context'), _p.pubSignals[7]);
-    assertEq(_recover(_withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], 31_337, POOL), _fixtureWithdrawSig()), W);
+    assertEq(vm.parseJsonUint(fx, '.local.signedWithdraw.message.value'), _p.pubSignals[2]);
+    assertEq(_recover(_withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], _p.pubSignals[2], 31_337, POOL), _fixtureWithdrawSig()), W);
   }
 
   function _recover(bytes32 _d, bytes memory _sig) internal pure returns (address) {
@@ -417,7 +419,7 @@ contract BuyTest is BuyBase {
   /// and the note stays unspent.
   function test_aWithdrawWithNoOrAWrongSignatureIsRefused() public {
     ProofLib.WithdrawProof memory _p = _proof('local.buy');
-    bytes32 _d = _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], block.chainid, POOL);
+    bytes32 _d = _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], _p.pubSignals[2], block.chainid, POOL);
     bytes memory _good = _fixtureWithdrawSig();
     bytes32 _r;
     bytes32 _s;
@@ -458,11 +460,31 @@ contract BuyTest is BuyBase {
     assertEq(RELAYER.balance, 0.02 ether);
   }
 
+  /// W's signature for a chunk of a note, paired with a proof of the same note and request (so the same nullifier and
+  /// context) for a bigger chunk, is refused, as a buy and as a withdraw; the bigger proof lands with its own signature.
+  function test_aSignatureForASmallerChunkOfTheNoteIsRefused() public {
+    ProofLib.WithdrawProof memory _big = _proof('local.big');
+    assertEq(_big.pubSignals[1], _proof('local.buy').pubSignals[1], 'one note, one nullifier');
+    assertEq(_big.pubSignals[7], _proof('local.buy').pubSignals[7], 'one request, one context');
+    assertEq(_big.pubSignals[2], 2 * _proof('local.buy').pubSignals[2], 'twice the value');
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+    _buy('local.big', 0, _b, _signed(_b, 'local.buy'));
+    vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+    _withdrawWith('local.big', 0, _wsig('local.buy'));
+    uint256 _snap = vm.snapshotState();
+    _buy('local.big', 0, _b, _signed(_b, 'local.big'));
+    assertTrue(pool.nullifierHashes(_big.pubSignals[1]));
+    vm.revertToState(_snap);
+    _withdrawWith('local.big', 0, _wsig('local.big'));
+    assertEq(W.balance, _big.pubSignals[2]);
+  }
+
   /*///////////////////////////////////////////////////////////////
                          SHARED CHECKS
   //////////////////////////////////////////////////////////////*/
 
-  /// buy takes withdraw's fee and payee checks: a fee over the cap, and over the backstop's half, are refused.
+  /// buy takes withdraw's fee check: a fee over W's cap is refused.
   function test_buyTakesTheFeeChecks() public {
     _refusesBuy('local.buy', 0.01 ether + 1, _fixtureBuy(), _fixtureSig(), IPrivacyPool.FeeOverCap.selector);
   }
@@ -476,6 +498,167 @@ contract BuyTest is BuyBase {
     uint256 _g = gasleft();
     pool.buy(_w, _p, 0.01 ether, _b, _sig);
     console.log('buy (depth 2, mock adapter) gas:', _g - gasleft());
+  }
+
+  /// A state tree of depth 32 with 2^32 - 1 leaves, so the change commitment's insert hashes all 32 levels
+  function _deepTree() internal {
+    vm.store(POOL, bytes32(uint256(3)), bytes32(uint256(type(uint32).max))); // size
+    vm.store(POOL, bytes32(uint256(4)), bytes32(uint256(32))); // depth
+    for (uint256 _i; _i < 32; ++_i) vm.store(POOL, keccak256(abi.encode(_i, uint256(5))), bytes32(_i + 1)); // sideNodes
+  }
+
+  /// withdraw at depth 2 (the change commitment at index 3: 2 hashes) or 32 (32 hashes), each the test's first call
+  function _gasWithdraw(bool _deep) internal {
+    IPrivacyPool.Withdrawal memory _w = _withdrawal('local.buy');
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    bytes memory _sig = _fixtureWithdrawSig();
+    if (_deep) _deepTree();
+    vm.prank(address(0xBEEF));
+    uint256 _g = gasleft();
+    pool.withdraw(_w, _p, 0.01 ether, _sig);
+    console.log(_deep ? 'withdraw depth 32 gas:' : 'withdraw depth 2 gas:', _g - gasleft());
+    assertEq(pool.currentTreeDepth(), _deep ? 32 : 2);
+  }
+
+  /// buy through the mock adapter at depth 2 or 32
+  function _gasBuy(bool _deep) internal {
+    IPrivacyPool.Withdrawal memory _w = _withdrawal('local.buy');
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    bytes memory _sig = _fixtureSig();
+    if (_deep) _deepTree();
+    vm.prank(address(0xBEEF));
+    uint256 _g = gasleft();
+    pool.buy(_w, _p, 0.01 ether, _b, _sig);
+    console.log(_deep ? 'buy (mock adapter) depth 32 gas:' : 'buy (mock adapter) depth 2 gas:', _g - gasleft());
+    assertEq(pool.currentTreeDepth(), _deep ? 32 : 2);
+  }
+
+  function test_gasWithdrawDepth2() public {
+    _gasWithdraw(false);
+  }
+
+  function test_gasWithdrawDepth32() public {
+    _gasWithdraw(true);
+  }
+
+  function test_gasBuyMockAdapterDepth2() public {
+    _gasBuy(false);
+  }
+
+  function test_gasBuyMockAdapterDepth32() public {
+    _gasBuy(true);
+  }
+
+  /*///////////////////////////////////////////////////////////////
+                    THE OPUS REVIEW'S TESTS (b61f0f5)
+  //////////////////////////////////////////////////////////////*/
+
+  /// The pool's digests equal ethers 6.13.5's (TypedDataEncoder.hash) for the fixture's Buy and Withdraw: a third
+  /// encoder's, not only cast's and the test's own
+  function test_R_digestsEqualEthers() public view {
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    assertEq(
+      _digest(_fixtureBuy(), 'local.buy', 31_337, POOL),
+      0x5e1c4296528ec3262a8694bf1c1e8a283776a21968e41d0be636a71f1fc8f784
+    );
+    assertEq(
+      _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], _p.pubSignals[2], 31_337, POOL),
+      0xdb39366dbb89d418cdf2e3d09d0f568836bd69569aaa1c6b1ba885683c24df85
+    );
+  }
+
+  /// v as a y-parity (0 or 1) or any other value but 27 or 28: ecrecover gives 0, which is never the recipient
+  function test_R_vOtherThan27Or28IsRefused() public {
+    uint8[4] memory _vs = [uint8(0), 1, 29, 255];
+    for (uint256 _i; _i < 4; ++_i) {
+      bytes memory _b = bytes.concat(_fixtureSig());
+      _b[64] = bytes1(_vs[_i]);
+      _refusesBuy('local.buy', 0, _fixtureBuy(), _b, IPrivacyPool.InvalidSignature.selector);
+      bytes memory _w = bytes.concat(_fixtureWithdrawSig());
+      _w[64] = bytes1(_vs[_i]);
+      vm.expectRevert(IPrivacyPool.InvalidSignature.selector);
+      _withdrawWith('local.buy', 0, _w);
+    }
+    _buy('local.buy', 0, _fixtureBuy(), _fixtureSig());
+  }
+
+  /// A 64-byte EIP-2098 compact signature is refused: only 65 bytes
+  function test_R_compactSignatureIsRefused() public {
+    bytes memory _sig = _fixtureSig();
+    bytes memory _c = new bytes(64);
+    for (uint256 _i; _i < 64; ++_i) _c[_i] = _sig[_i];
+    _refusesBuy('local.buy', 0, _fixtureBuy(), _c, IPrivacyPool.InvalidSignature.selector);
+  }
+
+  /// A buy sent with too little gas for its adapter reverts whole: the note stays unspent and nothing is paid
+  function test_R_gasGriefingLandsNothing() public {
+    address _hog = address(0xADA1);
+    vm.etch(_hog, address(new GasHogAdapter()).code);
+    uint256 _poolBefore = POOL.balance;
+    IPrivacyPool.Withdrawal memory _w = _withdrawal('local.buy');
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    _b.adapter = _hog;
+    bytes memory _sig = _signed(_b, 'local.buy');
+    for (uint256 _g = 500_000; _g <= 3_000_000; _g += 500_000) {
+      vm.prank(address(0xBEEF));
+      try pool.buy{gas: _g}(_w, _p, 0.01 ether, _b, _sig) {
+        revert('a buy whose adapter ran out of gas landed');
+      } catch {}
+      assertFalse(pool.nullifierHashes(_p.pubSignals[1]), 'the note is not spent');
+      assertEq(POOL.balance, _poolBefore, 'the pool paid nothing');
+      assertEq(RELAYER.balance, 0, 'no fee');
+    }
+  }
+
+  /// The fee recipient, paid first in a buy, tries to withdraw W's other note in the same call: refused
+  function test_R_feeRecipientCannotReenterBuy() public {
+    deployCodeTo('Buy.t.sol:FeeReenter', RELAYER);
+    ProofLib.WithdrawProof memory _p2 = _proof('local.buy2');
+    FeeReenter(payable(RELAYER)).set(
+      POOL, abi.encodeCall(pool.withdraw, (_withdrawal('local.buy2'), _p2, 0, _wsig('local.buy2')))
+    );
+    _buy('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig());
+    assertTrue(FeeReenter(payable(RELAYER)).tried());
+    assertEq(bytes4(FeeReenter(payable(RELAYER)).err()), IState.Reentrancy.selector);
+    assertFalse(pool.nullifierHashes(_p2.pubSignals[1]), 'buy2 not spent');
+  }
+
+  /// Anyone who sees W's signed buy can land it with any fee from 0 to the cap: the fee still goes only to the bound
+  /// fee recipient, and W still gets at least minOut (NOTICE change 6)
+  function test_R_aThirdPartyLandsWsBuyWithItsOwnFee() public {
+    vm.prank(address(0xA77AC4));
+    pool.buy(_withdrawal('local.buy'), _proof('local.buy'), 0, _fixtureBuy(), _fixtureSig());
+    assertEq(RELAYER.balance, 0);
+    assertEq(address(0xA77AC4).balance, 0);
+    assertGe(token.balanceOf(W), _fixtureBuy().minOut);
+  }
+}
+
+/// An adapter that burns every unit of gas it is given
+contract GasHogAdapter is IBuyAdapter {
+  function buy(address, address, uint256, bytes calldata) external payable {
+    while (true) {}
+  }
+}
+
+/// A fee recipient that, when paid, makes a call set in advance and keeps its error
+contract FeeReenter {
+  address internal target;
+  bytes internal call;
+  bytes public err;
+  bool public tried;
+
+  function set(address _t, bytes memory _c) external {
+    (target, call) = (_t, _c);
+  }
+
+  receive() external payable {
+    if (target != address(0)) {
+      tried = true;
+      (, err) = target.call(call);
+    }
   }
 }
 

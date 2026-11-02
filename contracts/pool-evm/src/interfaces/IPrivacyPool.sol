@@ -202,8 +202,8 @@ interface IPrivacyPool is IState {
    * @param _w The `Withdrawal` struct; its data is abi.encode(RelayData)
    * @param _p The `WithdrawProof` struct containing the withdrawal proof signals
    * @param _fee The fee paid to the request's fee recipient, at most its fee cap, out of withdrawnValue
-   * @param _signature W's EIP-712 signature of Withdraw(uint256 nullifier,uint256 context), the proof's nullifier and
-   *        context, under the domain {name "Blindfill", version "1", chainId, verifyingContract: this pool}: r, s, v
+   * @param _signature W's EIP-712 signature of Withdraw(uint256 nullifier,uint256 context,uint256 value), the proof's
+   *        nullifier, context and withdrawnValue, under the domain {name "Blindfill", version "1", chainId, verifyingContract: this pool}: r, s, v
    */
   function withdraw(Withdrawal memory _w, ProofLib.WithdrawProof memory _p, uint256 _fee, bytes memory _signature) external;
 
@@ -221,8 +221,8 @@ interface IPrivacyPoolSimple is IPrivacyPool {
   /**
    * @notice A buy W signs: the chunk less the fee goes to `adapter`, which swaps it for `token` sent to W
    * @dev W signs it as EIP-712 typed data, Buy(address adapter,bytes data,uint256 minOut,address token,uint256
-   *      nullifier,uint256 context), with the proof's nullifier and context, under the domain {name "Blindfill",
-   *      version "1", chainId, verifyingContract: this pool}
+   *      nullifier,uint256 context,uint256 value), with the proof's nullifier, context and withdrawnValue, under the
+   *      domain {name "Blindfill", version "1", chainId, verifyingContract: this pool}
    * @param adapter The swap adapter: a contract with no owner and no storage
    * @param data The adapter's route
    * @param minOut The least W's balance of `token` must rise by; never 0
@@ -285,7 +285,7 @@ interface IPrivacyPoolSimple is IPrivacyPool {
    * @param _p The withdraw proof
    * @param _fee The fee paid to the request's fee recipient, at most its fee cap, out of withdrawnValue
    * @param _buy The buy W signed
-   * @param _signature W's EIP-712 signature of the buy and the proof's nullifier and context: r, s, v (65 bytes)
+   * @param _signature W's EIP-712 signature of the buy and the proof's nullifier, context and value: r, s, v (65 bytes)
    */
   function buy(
     Withdrawal memory _w,

@@ -21,8 +21,8 @@ interface IQuoterV2 {
 }
 
 /// The buy through Uniswap v3 on a fork of a chain at a pinned block, with the chain's own Poseidon, SwapRouter02,
-/// WETH and pool. The fork's state is test/fixtures/fork-cache/<chain>-<block>.json, Foundry's RPC cache of these
-/// tests' reads, which CI puts in place so the job reads no RPC (contracts/pool-evm/NOTICE).
+/// WETH and pool. The fork reads test/fork-rpc.mjs's replay of test/fixtures/fork-rpc.json, the chains' recorded
+/// answers to these tests' reads, so the tests read no RPC (contracts/pool-evm/NOTICE).
 abstract contract BuyForkBase is BuyBase {
   UniswapV3Adapter internal adapter;
 
@@ -131,7 +131,7 @@ contract BuyForkBaseTest is BuyForkBase {
 /// (0x52e65B17fB6E5BA00Ed806f37Afcd2DaA50271Ca, from the v3 factory 0x1f7d7550B1b028f7571E69A784071F0205FD2EfA)
 contract BuyForkRobinhoodTest is BuyForkBase {
   function _chain() internal pure override returns (string memory, string memory, uint256) {
-    return ('robinhood', 'robinhood', 104566000);
+    return ('robinhood', 'robinhood', 104_619_000);
   }
 
   function _route() internal pure override returns (address, address, address, address, uint24) {

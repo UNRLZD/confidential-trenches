@@ -35,9 +35,9 @@ import {IPrivacyPoolSimple} from 'interfaces/IPrivacyPool.sol';
 contract PrivacyPoolSimple is PrivacyPool, IPrivacyPoolSimple {
   using ProofLib for ProofLib.WithdrawProof;
 
-  /// @notice The type W signs to take a proof as a buy: the Buy, the note's nullifier and the proof's context
+  /// @notice The type W signs to take a proof as a buy: the Buy, the note's nullifier, the proof's context and value
   bytes32 internal constant BUY_TYPEHASH = keccak256(
-    'Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context)'
+    'Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)'
   );
 
   // @notice Initializes the state addresses
@@ -80,7 +80,7 @@ contract PrivacyPoolSimple is PrivacyPool, IPrivacyPoolSimple {
   /**
    * @notice The EIP-712 digest W signs to take `_proof` as `_buy`, on this pool and this chain
    * @param _buy The buy
-   * @param _proof The withdraw proof: its nullifier and context are signed
+   * @param _proof The withdraw proof: its nullifier, context and value are signed
    * @return The digest
    */
   function _buyDigest(Buy memory _buy, ProofLib.WithdrawProof memory _proof) internal view returns (bytes32) {
@@ -93,7 +93,8 @@ contract PrivacyPoolSimple is PrivacyPool, IPrivacyPoolSimple {
           _buy.minOut,
           _buy.token,
           _proof.existingNullifierHash(),
-          _proof.context()
+          _proof.context(),
+          _proof.withdrawnValue()
         )
       )
     );

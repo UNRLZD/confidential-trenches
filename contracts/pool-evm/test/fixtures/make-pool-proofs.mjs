@@ -99,7 +99,8 @@ async function prove(circuit, name, input) {
 }
 
 /** A withdraw proof spending note `n` (0-based) for `withdrawn`, against the trees of the first `size` deposits. */
-async function spend(name, n, withdrawn, size, feeCap, trailing) {
+// `reqName` names the request (its refund precommitment and salt): two spends with one request share one context
+async function spend(name, n, withdrawn, size, feeCap, trailing, reqName = name) {
   const state = new VaultTree(notes.slice(0, size).map((x) => x.commitment));
   const labels = new VaultTree(notes.slice(0, size).map((x) => x.label));
   const request = {
@@ -107,8 +108,8 @@ async function spend(name, n, withdrawn, size, feeCap, trailing) {
     feeRecipient: RELAYER,
     feeCap,
     deadlineMs: DEADLINE_MS,
-    refundPrecommitment: testField(`${name}/refund`),
-    salt: hexOf(keccak_256(new TextEncoder().encode("pool-evm/salt/" + name))).slice(0, 32),
+    refundPrecommitment: testField(`${reqName}/refund`),
+    salt: hexOf(keccak_256(new TextEncoder().encode("pool-evm/salt/" + reqName))).slice(0, 32),
     trailing,
   };
   const preimage = contextPreimageHex(request);
@@ -195,6 +196,9 @@ if (process.argv[2] === "buy") {
     trailing: await spend("trailing", 0, 4n * 10n ** 17n, 3, cap, word(1n)),
     // the same note as buy with another fee cap: W's signature for one proof must not take the other
     swap: await spend("swap", 0, 4n * 10n ** 17n, 3, 2n * cap),
+    // the same note and request as buy (so the same context) for twice the value: W's signature for one chunk must
+    // not take the other
+    big: await spend("big", 0, 8n * 10n ** 17n, 3, cap, undefined, "buy"),
   };
   // W signs one buy, and one withdraw, of `buy`'s proof on this pool and chain, as the device does
   // (eth_signTypedData_v4)
@@ -205,6 +209,7 @@ if (process.argv[2] === "buy") {
     token: "0x0000000000000000000000000000000000070c1e",
     nullifier: local.buy.proof.pubSignals[1],
     context: local.buy.proof.pubSignals[7],
+    value: local.buy.proof.pubSignals[2],
   };
   const buyFields = [
     { name: "adapter", type: "address" },
@@ -213,12 +218,18 @@ if (process.argv[2] === "buy") {
     { name: "token", type: "address" },
     { name: "nullifier", type: "uint256" },
     { name: "context", type: "uint256" },
+    { name: "value", type: "uint256" },
   ];
   local.signed = { message, signature: castSign("Buy", buyFields, message) };
-  const wMessage = { nullifier: local.buy.proof.pubSignals[1], context: local.buy.proof.pubSignals[7] };
+  const wMessage = {
+    nullifier: local.buy.proof.pubSignals[1],
+    context: local.buy.proof.pubSignals[7],
+    value: local.buy.proof.pubSignals[2],
+  };
   const wFields = [
     { name: "nullifier", type: "uint256" },
     { name: "context", type: "uint256" },
+    { name: "value", type: "uint256" },
   ];
   local.signedWithdraw = { message: wMessage, signature: castSign("Withdraw", wFields, wMessage) };
   onChain(8453n);
@@ -229,7 +240,7 @@ if (process.argv[2] === "buy") {
     notes: [
       "Real proofs for contracts/pool-evm's buy tests. Test notes only, never money.",
       "Made by contracts/pool-evm/test/fixtures/make-pool-proofs.mjs buy with snarkjs 0.7.5 groth16.fullProve and packages/kit/zk; snarkjs groth16.verify passes each.",
-      "W is the Hardhat mnemonic's account 0, a published test key. local: chain 31337, the same three deposits as pool-proofs.json; buy spends note 1, buy2 note 2, trailing note 1 with one word after RelayData, swap note 1 with twice buy's fee cap. signed and signedWithdraw: W's EIP-712 signatures (cast wallet sign --data) of one Buy and one Withdraw of buy's nullifier and context on this pool and chain. base: chain 8453, the same secrets under Base's scope; buy spends note 1. robinhood: the same on chain 4663.",
+      "W is the Hardhat mnemonic's account 0, a published test key. local: chain 31337, the same three deposits as pool-proofs.json; buy spends note 1, buy2 note 2, trailing note 1 with one word after RelayData, swap note 1 with twice buy's fee cap, big note 1 with buy's request (the same context) for 0.8 ETH. signed and signedWithdraw: W's EIP-712 signatures (cast wallet sign --data) of one Buy and one Withdraw of buy's nullifier, context and value on this pool and chain. base: chain 8453, the same secrets under Base's scope; buy spends note 1. robinhood: the same on chain 4663.",
     ],
     local,
     base,

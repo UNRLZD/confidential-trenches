@@ -28,8 +28,8 @@ https://defi.sucks
 //   withdraw proof always works, and ragequit would only add a public exit that links a deposit to its exit;
 // - the spend checks are one internal function, _spendChecked, for each method that spends a note, and a relayed
 //   release's checks one more, _release, for withdraw and buy; the request is exactly RelayData's 192 bytes;
-// - W signs every release (EIP-712: a Withdraw or a Buy, with the proof's nullifier and context), so only W picks how
-//   a proof is used.
+// - W signs every release (EIP-712: a Withdraw or a Buy, with the proof's nullifier, context and value), so only W
+//   picks how a proof is used.
 
 import {PoseidonT4} from 'poseidon-solidity/PoseidonT4.sol';
 
@@ -59,8 +59,8 @@ abstract contract PrivacyPool is State, IPrivacyPool {
     keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)');
   bytes32 internal constant NAME_HASH = keccak256('Blindfill');
   bytes32 internal constant VERSION_HASH = keccak256('1');
-  /// @notice The type W signs to take a proof as a withdraw: the note's nullifier and the proof's context
-  bytes32 internal constant WITHDRAW_TYPEHASH = keccak256('Withdraw(uint256 nullifier,uint256 context)');
+  /// @notice The type W signs to take a proof as a withdraw: the note's nullifier, the proof's context and its value
+  bytes32 internal constant WITHDRAW_TYPEHASH = keccak256('Withdraw(uint256 nullifier,uint256 context,uint256 value)');
   /// @notice Half the secp256k1 group order: a signature's s is at most this (EIP-2), so it has one form
   uint256 internal constant HALF_N = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
 
@@ -117,7 +117,9 @@ abstract contract PrivacyPool is State, IPrivacyPool {
   ) external nonReentrant {
     RelayData memory _data = _relayData(_withdrawal.data);
     bytes32 _digest = _typedDigest(
-      keccak256(abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context()))
+      keccak256(
+        abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())
+      )
     );
     uint256 _withdrawn = _release(_withdrawal, _proof, _fee, _data, _digest, _signature);
 
@@ -157,8 +159,8 @@ abstract contract PrivacyPool is State, IPrivacyPool {
    * @param _proof The withdraw proof
    * @param _fee The fee the submitter picks
    * @param _data The request, _relayData(_withdrawal.data)
-   * @param _digest The EIP-712 digest of the release W picked (a Withdraw or a Buy), with this proof's nullifier and
-   *        context
+   * @param _digest The EIP-712 digest of the release W picked (a Withdraw or a Buy), with this proof's nullifier,
+   *        context and value
    * @param _signature W's signature of `_digest`
    * @return _withdrawn The proof's withdrawnValue; the fee is at most half of it
    */

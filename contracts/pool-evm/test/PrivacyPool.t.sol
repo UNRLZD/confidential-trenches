@@ -91,7 +91,7 @@ contract PoolTest is Signing {
 
   /// The signature of `_key` that takes `_p` as a withdraw on this pool and chain
   function _wsig(uint256 _key, ProofLib.WithdrawProof memory _p) internal view returns (bytes memory) {
-    return _sign(_key, _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], block.chainid, address(pool)));
+    return _sign(_key, _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], _p.pubSignals[2], block.chainid, address(pool)));
   }
 
   /// W's signature that takes `_p` as a withdraw

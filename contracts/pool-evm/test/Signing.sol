@@ -25,10 +25,13 @@ abstract contract Signing is Deploy {
   function _withdrawDigest(
     uint256 _nullifier,
     uint256 _context,
+    uint256 _value,
     uint256 _chainId,
     address _pool
   ) internal pure returns (bytes32) {
-    bytes32 _struct = keccak256(abi.encode(keccak256('Withdraw(uint256 nullifier,uint256 context)'), _nullifier, _context));
+    bytes32 _struct = keccak256(
+      abi.encode(keccak256('Withdraw(uint256 nullifier,uint256 context,uint256 value)'), _nullifier, _context, _value)
+    );
     return keccak256(abi.encodePacked(hex'1901', _domain(_chainId, _pool), _struct));
   }
 
@@ -36,18 +39,22 @@ abstract contract Signing is Deploy {
     IPrivacyPoolSimple.Buy memory _b,
     uint256 _nullifier,
     uint256 _context,
+    uint256 _value,
     uint256 _chainId,
     address _pool
   ) internal pure returns (bytes32) {
     bytes32 _struct = keccak256(
       abi.encode(
-        keccak256('Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context)'),
+        keccak256(
+          'Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)'
+        ),
         _b.adapter,
         keccak256(_b.data),
         _b.minOut,
         _b.token,
         _nullifier,
-        _context
+        _context,
+        _value
       )
     );
     return keccak256(abi.encodePacked(hex'1901', _domain(_chainId, _pool), _struct));

@@ -59,29 +59,51 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      one transaction, and W, who holds no gas, authorizes it with an EIP-712 signature. It takes the same request and
      proof as withdraw (one ready proof serves either) and the same checks (_release: both payees, the fee against
      the cap, W's signature, _spendChecked, the backstop). W signs Buy(address adapter,bytes data,uint256 minOut,
-     address token,uint256 nullifier,uint256 context), with the proof's nullifier and context. The fee goes to the
-     fee recipient, the rest of the chunk to the adapter, and W's balance of the token must rise by at least minOut
-     (never 0), else the whole call reverts. The reentrancy guard covers it. Adapters are separate contracts with no
-     owner and no storage; src/adapters/UniswapV3Adapter.sol is SwapRouter02's exactInput with the native value (the
-     router wraps it), the tokens out to W.
+     address token,uint256 nullifier,uint256 context,uint256 value), with the proof's nullifier, context and
+     withdrawnValue. The fee goes to the fee recipient, the rest of the chunk to the adapter, and W's balance of the
+     token must rise by at least minOut (never 0), else the whole call reverts. The reentrancy guard covers it.
+     Adapters are separate contracts with no owner and no storage; src/adapters/UniswapV3Adapter.sol is SwapRouter02's
+     exactInput with the native value (the router wraps it), the tokens out to W. A v3 pool may fill only part of an
+     exact input (it stops at its price limit), and the router then keeps the rest, as ETH or as a middle token of
+     the path, where anyone takes it with refundETH or sweepToken. So the adapter reverts unless the router's ETH and
+     its balance of every middle token of the path are what they were before the swap: a partial fill reverts the
+     whole buy and the note stays unspent (test/BuyV3.t.sol, on the router's and a v3 pool's code read from Base).
  12. withdraw and buy both refuse a request that is not exactly abi.encode(RelayData), 192 bytes: abi.decode
      accepts trailing bytes, so a request made with more bytes is never read as RelayData (this closes the open item
      pool-evm-core left).
  13. W signs every release, withdraw included, as the Solana pool does (W signs every release there): withdraw takes
-     W's EIP-712 signature of Withdraw(uint256 nullifier,uint256 context), and buy of its Buy. Both are under the
+     W's EIP-712 signature of Withdraw(uint256 nullifier,uint256 context,uint256 value), and buy of its Buy. Both
+     carry the proof's nullifier, context and withdrawnValue, and are under the
      domain {name "Blindfill", version "1", chainId, verifyingContract: the pool}, 65 bytes with s in the lower half
      (EIP-2), and the signer must be the request's recipient, checked in _release before any spend or payment. In the
      source the relayer alone picks what a proof does; here one ready proof still serves either method, and W's
      signature at the tap picks which, so whoever sees a buy (a broken-in helper, the sequencer, anyone) cannot land
-     it as a withdraw, and a signature for one proof of a note never takes another proof of it (the context is
-     signed). The cost: one ecrecover a withdraw (withdraw gas 430,593 to 435,436 at depth 2).
+     it as a withdraw, and a signature for one proof of a note never takes another proof of it (the context and
+     the value are signed, so a signature for a small chunk never takes a bigger proof of the same note and
+     request). The cost: one ecrecover a withdraw (withdraw gas 430,593 to 435,540 at depth 2, forge 1.7.1,
+     test_gas).
+
+Gas, forge 1.7.1 (CI's), the kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH. The change
+commitment's insert hashes one level per level of the state tree, about 19,158 gas each, so a release at depth d
+costs G(d) = base + 19,158 x d (depth 2: the insert at index 3; depth 32: at index 2^32 - 1, all 32 levels):
+
+  call                                   depth 2      depth 32     base (d = 0)
+  withdraw                               462,200    1,036,924        423,884
+  buy, mock adapter                      537,178    1,111,920        498,862
+  buy, SwapRouter02, one hop             620,228    1,194,972        581,912
+
+(test/Buy.t.sol test_gasWithdrawDepth*, test_gasBuyMockAdapterDepth*; test/BuyV3.t.sol test_gasRealRouterOneHop*.)
+The Base and Robinhood fork buys (test/BuyFork.t.sol, one hop at depth 2) measure 579,159 and 606,131 on forge
+1.7.1.
 
 Spends are seen through two events: Withdrawn (withdraw) and Bought (buy), each with the spent nullifier and the
 new commitment. A reader of the pool's notes (card notes-per-pool-evm) reads both.
 
 The fork tests (test/BuyFork.t.sol, Base and Robinhood Chain at pinned blocks) run through test/fork-rpc.mjs, which
 answers forge from test/fixtures/fork-rpc.json: public chain data recorded once from mainnet.base.org and
-rpc.mainnet.chain.robinhood.com.
+rpc.mainnet.chain.robinhood.com. rpc.mainnet.chain.robinhood.com keeps only a few hours of past state, so adding a
+read for Robinhood means pinning a recent block and recording all of its answers again, on forge 1.7.1 and 1.8.6.
+test/mutants.mjs counts a read the replay has no answer for as an error, never as a kill.
 
 Third-party code:
 
