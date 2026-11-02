@@ -178,9 +178,11 @@ test(
   async (t) => {
     const { chromium } = (await import("playwright")) as typeof import("playwright");
     const { build } = (await import("rolldown")) as typeof import("rolldown");
-    const { buildProverWorker, PROVER_WORKER_FILE } = (await import(String(new URL("../src/prover/build.mjs", import.meta.url)))) as {
+    const { buildProverThread, buildProverWorker, PROVER_THREAD_FILE, PROVER_WORKER_FILE } = (await import(String(new URL("../src/prover/build.mjs", import.meta.url)))) as {
       buildProverWorker(out: string): { file: string; bytes: number; sha256: string };
+      buildProverThread(out: string): { file: string; bytes: number; sha256: string };
       PROVER_WORKER_FILE: string;
+      PROVER_THREAD_FILE: string;
     };
     const headers = siteHeaders();
     const dir = mkdtempSync(join(tmpdir(), "kit-prove-e2e-"));
@@ -193,6 +195,7 @@ test(
       ["/", { type: "text/html", body: Buffer.from(html) }],
       ["/page.js", { type: "text/javascript", body: pageJs }],
       [`/${PROVER_WORKER_FILE}`, { type: "text/javascript", body: readFileSync(worker.file) }],
+      [`/${PROVER_THREAD_FILE}`, { type: "text/javascript", body: readFileSync(buildProverThread(dir).file) }],
     ]);
     for (const [name, pin] of Object.entries(ZK_SETUP_FILES)) {
       const ext = name.slice(name.lastIndexOf(".") + 1);
@@ -211,6 +214,7 @@ test(
       for (const [k, v] of headers) res.setHeader(k, v);
       if (!f) return void res.writeHead(404).end();
       if (path === `/${PROVER_WORKER_FILE}`) res.setHeader("Content-Security-Policy", [siteCsp, WORKER_CSP]);
+      if (path === `/${PROVER_THREAD_FILE}`) res.setHeader("Content-Security-Policy", [siteCsp, "default-src 'none'; script-src 'wasm-unsafe-eval'"]);
       if (!path.startsWith("/assets/zk/")) return void res.writeHead(200, { "Content-Type": f.type, "Content-Length": f.body.length, "Cache-Control": "no-store" }).end(f.body);
       let body = f.body;
       if (path === zkeyPath && badZkeyOnce) {

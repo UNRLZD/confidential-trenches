@@ -22,13 +22,14 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build } from "rolldown";
 import * as snarkjs from "snarkjs";
-import { buildProverWorker, PROVER_WORKER_FILE } from "../../src/prover/build.mjs";
+import { buildProverThread, buildProverWorker, PROVER_THREAD_FILE, PROVER_WORKER_FILE } from "../../src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../src/zk/setup-files.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const KIT = join(HERE, "..", "..");
 const HEADERS_FILE = join(KIT, "..", "signpage", "public", "_headers");
 const WORKER_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'"; // W:880
+const THREAD_CSP = "default-src 'none'; script-src 'wasm-unsafe-eval'"; // the thread file's own (card signpage-prover-threads)
 
 /** The header lines of _headers' one /* rule. */
 function siteHeaders() {
@@ -62,6 +63,7 @@ async function site() {
     ["/", { type: "text/html", body: Buffer.from(html) }],
     ["/page.js", { type: "text/javascript", body: pageJs }],
     [`/${PROVER_WORKER_FILE}`, { type: "text/javascript", body: readFileSync(worker.file) }],
+    [`/${PROVER_THREAD_FILE}`, { type: "text/javascript", body: readFileSync(buildProverThread(dir).file) }],
   ]);
   for (const [name, pin] of Object.entries(ZK_SETUP_FILES)) {
     const ext = name.slice(name.lastIndexOf(".") + 1);
@@ -85,6 +87,10 @@ function serve(files, headers, { flipZkey = false, workerCsp = [WORKER_CSP] } = 
     if (path === `/${PROVER_WORKER_FILE}`) {
       const site = headers.find(([k]) => k === "Content-Security-Policy")[1];
       res.setHeader("Content-Security-Policy", [site, ...workerCsp]);
+    }
+    if (path === `/${PROVER_THREAD_FILE}`) {
+      const site = headers.find(([k]) => k === "Content-Security-Policy")[1];
+      res.setHeader("Content-Security-Policy", [site, THREAD_CSP]);
     }
     res.writeHead(200, { "Content-Type": f.type, "Content-Length": body.length, "Cache-Control": "no-store" }).end(body);
   });
@@ -138,6 +144,7 @@ try {
   console.log(JSON.stringify({ case: "good", loadMs: good.loadMs, proveMs: good.result?.proveMs, proveWallMs: good.proveWallMs, verify: verified, posts: good.posts, violations: good.violations, plainStringWorker: good.plainStringWorker, workerURLIsTrusted: good.workerURLIsTrusted, secondPolicySameName: good.secondPolicySameName, otherPolicy: good.otherPolicy, error: good.loadError ?? good.proveError }));
   check("good: snarkjs groth16.verify accepts the worker's withdraw proof", () => assert.equal(verified, true));
   check("good: public signals are the fixed input's", () => assert.deepEqual(good.result.publicSignals, expected));
+  check("good: proved on min(hardwareConcurrency - 1, 4) threads (card signpage-prover-threads)", () => assert.ok(good.result.threads > 1, String(good.result.threads)));
   check("good: wasm and zkey moved by transfer, nothing left on the page", () => {
     const load = good.posts.find((p) => p.cmd === "load");
     assert.deepEqual(load, { cmd: "load", transferred: 2, bytesLeftHere: [0, 0] });

@@ -2,9 +2,14 @@
 //   1. a licence line;
 //   2. snarkjs 0.7.5's browser build (build/snarkjs.min.js of the npm package the lockfile pins), byte for byte, refused
 //      unless its size and sha256 are SNARKJS_BUILD's (vault.md 2.14's 710,896 B);
-//   3. worker.js, with the setup files' pins (ZK_SETUP_FILES, zk/setup-files.ts) put in for its PINS.
+//   3. worker.js, with the setup files' pins (ZK_SETUP_FILES, zk/setup-files.ts) put in for its PINS and the thread
+//      file's pin for its THREAD.
+// It also writes prover-thread.js, the one file the worker starts its threads from (card signpage-prover-threads):
+// snarkjs.min.js starts each thread from a blob: (or data:) URL of its own thread code, which SIGN_HOST's CSP refuses,
+// so that code ships as a same-origin file instead: a licence header, then the thread code byte for byte as
+// snarkjs.min.js holds it (both copies in the bundle equal, refused unless its size and sha256 are SNARKJS_THREAD's).
 // The page creates the worker from this file only through the Trusted Types policy `prover-worker` (client.ts).
-//   node packages/kit/src/prover/build.mjs <out dir>     prints the file's path, size, sha256 and sha384
+//   node packages/kit/src/prover/build.mjs <out dir>     prints each file's path, size, sha256 and sha384
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -13,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { ZK_SETUP_FILES } from "../zk/setup-files.ts";
 
 export const PROVER_WORKER_FILE = "prover-worker.js";
+export const PROVER_THREAD_FILE = "prover-thread.js";
 
 /** snarkjs's browser build as npm ships snarkjs@0.7.5 (read 2026-10-26, proofs/g1-phone-prover/pins/snarkjs.txt). */
 export const SNARKJS_BUILD = Object.freeze({
@@ -33,8 +39,27 @@ export const HEADER = Object.freeze([
   "/licenses/GPL-3.0.txt on this site and https://www.gnu.org/licenses/gpl-3.0.txt.",
 ]);
 
+/**
+ * The thread code inside snarkjs 0.7.5's snarkjs.min.js: ffjavascript's `(function thread(self) {...})(self)`, the text
+ * it turns into a blob: or data: URL for each thread worker. The bundle holds two copies (two ffjavascript builds), equal.
+ */
+export const SNARKJS_THREAD = Object.freeze({
+  bytes: 3673,
+  sha256: "81680ca6dc84c04ad6497107eb6b1faaa17c3114d5d14a26d63942d5d822b295",
+});
+
+export const THREAD_HEADER = Object.freeze([
+  "SPDX-License-Identifier: GPL-3.0-or-later",
+  `Blindfill prover thread: the thread code snarkjs ${SNARKJS_BUILD.version}'s build/snarkjs.min.js starts each of its threads`,
+  "from (ffjavascript's), byte for byte after these lines. The prover worker starts its threads from this file, never from",
+  `a blob: or data: URL. snarkjs: Copyright 2018 0KIMS association, GPL-3.0-or-later, source https://github.com/iden3/snarkjs/tree/v${SNARKJS_BUILD.version}.`,
+  "This file is free software under the GNU GPL version 3 or later, WITHOUT ANY WARRANTY; the licence text is at",
+  "/licenses/GPL-3.0.txt on this site and https://www.gnu.org/licenses/gpl-3.0.txt.",
+]);
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PLACEHOLDER = "/*@PINS@*/ null";
+const THREAD_PLACEHOLDER = "/*@THREAD@*/ null";
 
 /** The snarkjs.min.js of the kit's installed snarkjs. */
 export function snarkjsBuildPath() {
@@ -44,32 +69,81 @@ export function snarkjsBuildPath() {
 
 const sha = (alg, b) => createHash(alg).update(b).digest(alg === "sha384" ? "base64" : "hex");
 
-/** The worker file's bytes; throws when snarkjs.min.js is not the pinned build. */
-export function proverWorkerSource({ snarkjsPath = snarkjsBuildPath() } = {}) {
+/** snarkjs.min.js's bytes; throws when it is not the pinned build. */
+function pinnedSnarkjs(snarkjsPath) {
   const sj = readFileSync(snarkjsPath);
   if (sj.length !== SNARKJS_BUILD.bytes) throw new Error(`snarkjs.min.js is ${sj.length} B, pinned ${SNARKJS_BUILD.bytes} B`);
   const got = sha("sha256", sj);
   if (got !== SNARKJS_BUILD.sha256) throw new Error(`snarkjs.min.js sha256 ${got}, pinned ${SNARKJS_BUILD.sha256}`);
+  return sj;
+}
 
+const THREAD_OPEN = "='(function thread(self) {";
+const THREAD_CLOSE = "})(self)';";
+
+/**
+ * The thread code in `sj` (snarkjs.min.js's text): each `const <name>='(function thread(self) {...})(self)';` literal,
+ * read as the one JS string it is. Throws unless there is at least one, all are equal, and it is SNARKJS_THREAD.
+ */
+export function threadCode(sj) {
+  const text = sj.toString("latin1");
+  const found = [];
+  for (let i = text.indexOf(THREAD_OPEN); i !== -1; i = text.indexOf(THREAD_OPEN, i + 1)) {
+    const end = text.indexOf(THREAD_CLOSE, i);
+    if (end === -1) throw new Error("snarkjs.min.js: a thread literal does not end");
+    const lit = text.slice(i + 2, end + THREAD_CLOSE.length - 2); // without the quotes
+    // one single-quoted literal: no bare quote inside, and only the escapes \n, \\ and \' (read as such below)
+    if (/(^|[^\\])'/.test(lit.replace(/\\\\/g, "")) || /\\[^n'\\]/.test(lit)) throw new Error("snarkjs.min.js: a thread literal holds an escape this build does not read");
+    found.push(lit.replace(/\\(.)/g, (_, c) => (c === "n" ? "\n" : c)));
+  }
+  if (!found.length) throw new Error("snarkjs.min.js holds no thread code");
+  if (found.some((f) => f !== found[0])) throw new Error("snarkjs.min.js holds two different thread codes");
+  const code = Buffer.from(found[0], "latin1");
+  if (code.length !== SNARKJS_THREAD.bytes) throw new Error(`thread code is ${code.length} B, pinned ${SNARKJS_THREAD.bytes} B`);
+  const got = sha("sha256", code);
+  if (got !== SNARKJS_THREAD.sha256) throw new Error(`thread code sha256 ${got}, pinned ${SNARKJS_THREAD.sha256}`);
+  return code;
+}
+
+/** prover-thread.js's bytes: the licence header, then snarkjs's thread code byte for byte. */
+export function proverThreadSource({ snarkjsPath = snarkjsBuildPath() } = {}) {
+  const head = THREAD_HEADER.map((l) => `// ${l}\n`).join("");
+  return Buffer.concat([Buffer.from(head), threadCode(pinnedSnarkjs(snarkjsPath))]);
+}
+
+/** The worker file's bytes; throws when snarkjs.min.js is not the pinned build. */
+export function proverWorkerSource({ snarkjsPath = snarkjsBuildPath() } = {}) {
+  const sj = pinnedSnarkjs(snarkjsPath);
+  const thread = proverThreadSource({ snarkjsPath });
   const body = readFileSync(join(HERE, "worker.js"), "utf8");
   if (body.split(PLACEHOLDER).length !== 2) throw new Error("worker.js must hold the pins placeholder exactly once");
+  if (body.split(THREAD_PLACEHOLDER).length !== 2) throw new Error("worker.js must hold the thread placeholder exactly once");
   const pins = Object.fromEntries(Object.entries(ZK_SETUP_FILES).map(([name, p]) => [name, { bytes: p.bytes, sha256: p.sha256 }]));
+  const threadPin = { path: `/${PROVER_THREAD_FILE}`, bytes: thread.length, sha256: sha("sha256", thread) };
   const head = HEADER.map((l) => `// ${l}\n`).join("");
   return Buffer.concat([
     Buffer.from(head),
     sj,
     Buffer.from("\n;\n"),
-    Buffer.from(body.replace(PLACEHOLDER, () => JSON.stringify(pins))),
+    Buffer.from(body.replace(PLACEHOLDER, () => JSON.stringify(pins)).replace(THREAD_PLACEHOLDER, () => JSON.stringify(threadPin))),
   ]);
 }
 
-/** Writes <out>/prover-worker.js and returns its path, size, sha256 (hex) and sha384 (base64, as SRI writes it). */
-export function buildProverWorker(out, opts) {
-  const src = proverWorkerSource(opts);
+const written = (out, name, src) => {
   mkdirSync(out, { recursive: true });
-  const file = join(out, PROVER_WORKER_FILE);
+  const file = join(out, name);
   writeFileSync(file, src);
   return { file, bytes: src.length, sha256: sha("sha256", src), sha384: sha("sha384", src) };
+};
+
+/** Writes <out>/prover-worker.js and returns its path, size, sha256 (hex) and sha384 (base64, as SRI writes it). */
+export function buildProverWorker(out, opts) {
+  return written(out, PROVER_WORKER_FILE, proverWorkerSource(opts));
+}
+
+/** Writes <out>/prover-thread.js and returns its path, size, sha256 and sha384. */
+export function buildProverThread(out, opts) {
+  return written(out, PROVER_THREAD_FILE, proverThreadSource(opts));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -78,4 +152,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(2);
   }
   console.log(JSON.stringify(buildProverWorker(resolve(process.argv[2]))));
+  console.log(JSON.stringify(buildProverThread(resolve(process.argv[2]))));
 }

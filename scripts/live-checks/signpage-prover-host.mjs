@@ -174,7 +174,7 @@ export async function judge(rec, want = expected()) {
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm", ".txt": "text/plain; charset=utf-8" };
 
 /** Pages' reading of a build folder: its files under its own _headers (every rule that matches, joined), 404 for none. */
-async function siteServer(root) {
+export async function siteServer(root) {
   const { parseHeadersFile } = await import("../../apps/terminal/scripts/check-deploy.ts");
   const { headersFor } = await import("../../apps/terminal/test/harness/server.mjs");
   const parsed = parseHeadersFile(readFileSync(path.join(root, "_headers"), "utf8"));
@@ -322,7 +322,7 @@ async function readPage(serve) {
 }
 
 /** A fresh deploy build that passed the deploy gate (deploy.mjs --dry-run keeps it); the caller removes it. */
-function gateBuild() {
+export function gateBuild() {
   const r = spawnSync(process.execPath, [path.join(REPO, "packages/signpage/scripts/deploy.mjs"), "--dry-run"], { encoding: "utf8" });
   const dir = /gate ok on (\S+);/.exec(r.stdout ?? "")?.[1];
   if (r.status !== 0 || !dir) throw new Error(`deploy.mjs --dry-run: exit ${r.status}: ${(r.stderr || r.stdout || "").trim()}`);
