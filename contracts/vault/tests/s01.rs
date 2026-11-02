@@ -12,9 +12,9 @@
 //!   refused with `ActorNoPermission` (NC `actions.rs` l.776-813), and afterwards the keys are still `[]`, the code
 //!   hash and the balance unchanged;
 //! - the wasm's imports hold none of 2.8's banned actions; its promise imports equal 2.8's seven less NOT_YET_PROMISES
-//!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (withdraw's payouts and on_payout have landed;
-//!   ragequit and settle have not, and nothing calls a plain NEAR Transfer before settle; the cards that land them
-//!   empty both sets, and this equality fails until they do); its outgoing method names `storage_deposit`,
+//!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (withdraw's payouts, on_payout and settle, with
+//!   its plain NEAR Transfer, have landed; ragequit has not, and the card that lands it empties NOT_YET_EXPORTS, and
+//!   this equality fails until it does); its outgoing method names `storage_deposit`,
 //!   `ft_transfer` and `on_payout` are in its bytes while none of the token's other mutating methods is.
 #![cfg(feature = "sandbox")]
 
@@ -72,11 +72,11 @@ const EXPORTS: [&str; 17] = [
     "totals",
     "contract_source_metadata",
 ];
-/// What the build does not hold yet, by name: ragequit and settle (2.5.3, 2.5.5) have not landed, and settle is the
-/// only caller of a plain NEAR Transfer (src/promise.rs `transfer_near`). Each set is compared for equality, so a build
-/// that gains or loses any one name fails here until the set is edited with it.
-const NOT_YET_PROMISES: [&str; 1] = ["promise_batch_action_transfer"];
-const NOT_YET_EXPORTS: [&str; 2] = ["ragequit", "settle"];
+/// What the build does not hold yet, by name: ragequit (2.5.3) has not landed. settle (2.5.5) has, and with it the
+/// plain NEAR Transfer (src/promise.rs `transfer_near`), so the build holds all seven promise imports. Each set is
+/// compared for equality, so a build that gains or loses any one name fails here until the set is edited with it.
+const NOT_YET_PROMISES: [&str; 0] = [];
+const NOT_YET_EXPORTS: [&str; 1] = ["ragequit"];
 /// The vault's outgoing calls (2.5): to the token and to itself. A presence check only (other strings could meet it);
 /// src/promise.rs's and withdraw.rs's unit tests read the exact calls a payout makes.
 const OUTGOING: [&str; 3] = ["storage_deposit", "ft_transfer", "on_payout"];
