@@ -31,7 +31,7 @@ export const MUTANTS = [
   ["root index in the tree", "src/state.rs", "if page_entries(program_id, page, tree, page_no)? <= slot {", "if false {", "an_unknown_root_is_refused"],
   ["mark address", "src/state.rs", "    if addr != *mark.key {\n        return Err(PoolError::WrongAccount.into());", "    if false {\n        return Err(PoolError::WrongAccount.into());", "a_wrong_spent_mark_is_refused"],
   ["minimum deposit", "src/deposit.rs", "if value < MIN_DEPOSIT {", "if false {", "deposit_refusals"],
-  ["precommitment unused", "src/deposit.rs", "state::put_mark(program_id, depositor, pre_mark, system, PRE_SEED, &precommitment, PoolError::PrecommitmentAlreadyUsed)?;", "let _ = (pre_mark, PRE_SEED);", "deposit_refusals"],
+  ["precommitment unused", "src/deposit.rs", "state::put_mark_of(program_id, depositor, pre_mark, system, PRE_SEED, &precommitment, PRE_MARK_LEN, PoolError::PrecommitmentAlreadyUsed)?;", "let _ = (PRE_SEED, PRE_MARK_LEN);", "deposit_refusals"],
   ["withdrawn not 0", "src/release.rs", "if r.withdrawn == 0 {", "if false {", "a_zero_withdrawal_and_a_fee_over_the_backstop_are_refused"],
   ["fee backstop", "src/release.rs", "if !fee_within_backstop(r.relay_fee, r.withdrawn) {", "if false {", "a_zero_withdrawal_and_a_fee_over_the_backstop_are_refused"],
   ["a new page at its address", "src/state.rs", "        if addr != *page.key {\n            return Err(PoolError::WrongAccount.into());", "        if false {\n            return Err(PoolError::WrongAccount.into());", "inserts_cross_the_page_boundary_in_both_trees"],
@@ -40,6 +40,9 @@ export const MUTANTS = [
   ["funded address topped up", "src/state.rs", "        if rent > have {\n            transfer(payer, target, system, rent - have)?;", "        if false {\n            transfer(payer, target, system, rent - have)?;", "a_funded_pool_or_page_address_blocks_nothing"],
   ["spent counted", "src/release.rs", "pool.spent = pool.spent.checked_add(r.withdrawn as u128).ok_or(PoolError::Overflow)?;", "let _ = PoolError::Overflow;", "a_release_counts_what_it_spends"],
   ["init once", "src/state.rs", "    if target.owner == program_id {\n        return Err(exists.into());", "    if false {\n        return Err(exists.into());", "init_twice_is_refused"],
+  // M353: the precommitment mark's record
+  ["mark records the new nonce", "src/deposit.rs", "d[8..16].copy_from_slice(&pool.nonce.to_le_bytes());", "d[8..16].copy_from_slice(&(pool.nonce - 1).to_le_bytes());", "each_deposit_records_its_value_and_nonce_in_its_mark"],
+  ["mark records the value", "src/deposit.rs", "d[0..8].copy_from_slice(&value.to_le_bytes());", "d[0..8].copy_from_slice(&0u64.to_le_bytes());", "each_deposit_records_its_value_and_nonce_in_its_mark"],
   // tag 3 (src/buy.rs, and its tip in src/release.rs's shared settle)
   ["tip cap", "src/release.rs", "if tip > r.tip_cap {", "if false {", "a_tip_over_the_tip_cap_is_refused"],
   ["fee and tip within the chunk", "src/release.rs", "let to_recipient = r.withdrawn.checked_sub(r.relay_fee).and_then(|v| v.checked_sub(tip)).ok_or(PoolError::InvalidWithdrawalAmount)?;", "let to_recipient = r.withdrawn.wrapping_sub(r.relay_fee).wrapping_sub(tip);", "a_fee_and_tip_over_the_chunk_is_refused"],

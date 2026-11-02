@@ -28,6 +28,11 @@ solana-transaction = "=4.3.0"
 serde_json = "1"
 # tag 3 tests compress the fixture proofs with the alt_bn128 `_be` forms (the version litesvm's lock already holds)
 solana-bn254 = "=3.2.1"
+# the deposit-record tests rebuild each mark's label and commitment: keccak256 and circomlib's Poseidon (the versions
+# litesvm's lock already holds; light-poseidon is what the runtime's sol_poseidon runs on the host)
+sha3 = "=0.10.9"
+light-poseidon = "=0.4.0"
+ark-bn254 = "=0.5.0"
 sha2 = "0.10"
 
 [workspace]
