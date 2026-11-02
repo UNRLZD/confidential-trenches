@@ -413,7 +413,8 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
   // - anchor: its finalized bank's slot and block height (one getLatestBlockhash answer, one bank).
   // - validMin: per blockhash, the lowest slot of a bank that read it valid at processed.
   // - invalidAt: per blockhash, the slot of the bank that read it as no longer valid at processed, counted only after
-  //   a valid read from a bank at or below that slot: valid, then expired. A first-ever false is no answer.
+  //   a valid read from a bank at or below that slot: valid, then expired. A false with no valid read before it is no
+  //   answer.
   // - histNone: per signature, the slot of the bank of the latest searchTransactionHistory: true read that had none.
   const landed = [new Map<string, StatusRead>(), new Map<string, StatusRead>()] as const;
   const anchor: [{ slot: number; height: number } | null, { slot: number; height: number } | null] = [null, null];
