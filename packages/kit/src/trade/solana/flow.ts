@@ -365,8 +365,9 @@ async function signed(deps: SolanaTradeDeps, wallet: string, a: { wire: Uint8Arr
   let sig: Uint8Array;
   if (deps.dry) {
     // Dry: no key is used. A placeholder fills the slot; every simulation runs with sigVerify off.
-    sig = new Uint8Array(64);
-    globalThis.crypto.getRandomValues(sig);
+    const placeholder = new Uint8Array(64);
+    globalThis.crypto.getRandomValues(placeholder);
+    sig = placeholder;
   } else {
     if (!deps.sign) throw new Error("no signer");
     sig = await deps.sign(wallet, a.message);
@@ -379,7 +380,7 @@ async function signed(deps: SolanaTradeDeps, wallet: string, a: { wire: Uint8Arr
 
 /** The teardown never throws into the trade: the sell has already run; a read or send that fails leaves the accounts
  * open (their rent stays the wallet's) and is recorded. */
-async function teardown(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: SolanaTradeDeps, tokenProgram: string): Promise<SolanaLegRecord["teardown"]> {
+async function teardown(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: SolanaTradeDeps, tokenProgram: string): Promise<NonNullable<SolanaLegRecord["teardown"]>> {
   try {
     return await teardownOnce(req, rec, deps, tokenProgram);
   } catch (e) {
@@ -387,7 +388,7 @@ async function teardown(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: Sol
     return { verdict: { ok: false, plan: null, results: [{ id: "READ", ok: false, detail }] }, frames: 0, refused: detail };
   }
 }
-async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: SolanaTradeDeps, tokenProgram: string): Promise<SolanaLegRecord["teardown"]> {
+async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps: SolanaTradeDeps, tokenProgram: string): Promise<NonNullable<SolanaLegRecord["teardown"]>> {
   const w = rec.wallet;
   const addresses = solanaTeardownAddresses(w, [{ mint: req.token, program: tokenProgram }]);
   const [ra, rb] = await both((r) => readAccounts(r, [w, ...addresses], "confirmed"), deps.providers);
@@ -478,7 +479,7 @@ export async function runSolanaTrade(req: SolanaTradeRequest, deps: SolanaTradeD
   const tokenProgram = (mint[0] as Acc).owner;
   if (deps.dry) {
     const d = await dryRunSolanaSet(set, sendOpts);
-    prepared.forEach((p, i) => { p.rec.dry = d.txs[i]; });
+    prepared.forEach((p, i) => { const x = d.txs[i]; if (x) p.rec.dry = x; });
     // Dry: nothing landed, so the teardown is planned and simulated on today's accounts, after each sell-all.
     if (req.side === "sell") await Promise.all(prepared.map(async (p) => { if (p.rec.sellsAll) p.rec.teardown = await teardown(req, p.rec, deps, tokenProgram); }));
     return record;
