@@ -24,6 +24,7 @@ import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
 import { solanaTokenFromEnv } from "../src/server.ts";
 import { solanaPoolSendersFromEnv } from "../src/pool/solana.ts";
+import { evmPoolSendersFromEnv } from "../src/pool/evm.ts";
 import { releaseOf } from "../src/health.ts";
 
 const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,6 +68,7 @@ export const ENV_READERS = {
   solanaTokenFromEnv: (env) => solanaTokenFromEnv(env, noProxy, noLists),
   releaseOf,
   solanaPoolSendersFromEnv,
+  evmPoolSendersFromEnv,
 };
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */
@@ -132,7 +134,7 @@ test("every environment name the helper's code reads when it runs is passed by c
   const without = passedNames(read("deploy/compose.yaml").replace(/^ {6}WITHDRAW_RELAYER_KEYS_TESTNET:.*\n/m, ""), read("Dockerfile"));
   assert.deepEqual([...atRun].filter((n) => !without.has(n)), ["WITHDRAW_RELAYER_KEYS_TESTNET"]);
   // the pool senders' names (pool/solana.ts), read when nothing is set: a compose without one is caught
-  const pool = ["POOL_SOLANA_PROGRAM_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_DEVNET", "POOL_SOLANA_FEE_DEVNET", "POOL_SOLANA_RPCS_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_MAINNET"];
+  const pool = ["POOL_SOLANA_PROGRAM_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_DEVNET", "POOL_SOLANA_FEE_DEVNET", "POOL_SOLANA_RPCS_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_MAINNET", "POOL_EVM_SENDER_KEY_BASE", "POOL_EVM_RPCS_BASE_SEPOLIA"];
   assert.ok(pool.every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
   for (const n of pool) {
     const missing = passedNames(read("deploy/compose.yaml").replace(new RegExp(`^ {6}${n}:.*\\n`, "m"), ""), read("Dockerfile"));
