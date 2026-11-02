@@ -25,9 +25,10 @@
 //     once more after those reads; and U's USDC is back to what that call was signed from. Until then its USDC may
 //     still be on its way to the vault, which would refuse a second call on P as a failed send (R3 strikes U after
 //     three). The tx hash comes from the relayer's tx_hash answer, or from sending the same signed bytes again, once
-//     per nonce (the specified relayer answers bad_nonce to them, markets H4.3 check 3; sender_struck there stops as
-//     R3); a hash the device cannot verify on both RPCs, or none, means keep reading and never sign (the money stays
-//     in U). These reads only hold the device back; the deposit itself is confirmed only by the pages.
+//     per nonce (the relayer answers 200 {tx_hash} of the transaction that carried those exact bytes, before check 3;
+//     sender_struck there stops as R3); a hash the device cannot verify on both RPCs, or none, means keep reading
+//     and never sign (the money stays in U). These reads only hold the device back; the deposit itself is confirmed
+//     only by the pages.
 //   - prepay_open, R2 (W:459-460): wait until the pages hold U's previous note's P, then send the same signed bytes
 //     while their window is ahead, else as nothing landed. resign_needed, R4 (W:461): sign again at the same nonce
 //     with a new window. sender_struck, R3 (W:462-467): stop; nothing more is signed for U this session, and the
@@ -465,7 +466,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       calls = n.calls ?? [];
       return n;
     };
-    // The nonces whose dead bytes this bind sent again for a tx hash: once each (the specified relayer answers bad_nonce).
+    // The nonces whose dead bytes this bind sent again for a tx hash: once each (the relayer answers 200 {tx_hash} of their carrier).
     const resent = new Set<bigint>();
     type Step = BindOutcome | { call: SignedDepositDelegate; send: boolean };
 
