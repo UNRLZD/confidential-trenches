@@ -6,7 +6,7 @@
 // - Query: inputMint, outputMint, amount = a_k, slippageBps, computeUnitPricePercentile=veryHigh, maxAccounts=40,
 //   taker = W_k. When the cap finds no route (Jupiter answers 400 "No routes found"), one retry runs without
 //   maxAccounts (P4S run 3, Fail 3); any other answer is never retried here.
-// - Blockhash: the device's own getLatestBlockhash at `finalized`, never the build's blockhashWithMetadata (CO,
+// - Blockhash: the device's own getLatestBlockhash at `finalized`, never the build's blockhashWithMetadata (the
 //   solana-set-send review), so the lastValidBlockHeight the send judges expiry by is one the device read itself.
 // - Lookup tables: the build names them; their contents come only from the device's own reads (S2), passed in.
 // - Frame (T2.1, 06c S-1 and S-2): 0 SetComputeUnitLimit (the route cap S8 applies: a one-step pump.fun curve route
