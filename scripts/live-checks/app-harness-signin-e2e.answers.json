@@ -1,0 +1,135 @@
+{
+ "note": "Every record is a real run of this check, 2026-11-02. good: the card's builds, the ones release-3 lists (APP_HOST the terminal's vite build of 2bcbbc5, its 15 files equal to release-3 by sha256; SIGN_HOST packages/signpage index.html and public/app.js), each served at / on 127.0.0.1, before the deploy. bad: the live APP_HOST and SIGN_HOST before the deploy, with no boot frame and no backdrop. badSign: the card's APP_HOST build beside the live SIGN_HOST, half deployed: it fails on the backdrop alone.",
+ "good": {
+  "key": "app-harness-signin-e2e",
+  "at": "2026-11-02T12:24:41.252Z",
+  "app": {
+   "url": "http://127.0.0.1:57063",
+   "page": {
+    "status": 200,
+    "stylesheets": 1,
+    "href": "/assets/style-BcTfhng9.css",
+    "integrity": "sha384-kK2gluVhoYPbqrTNRESN6g+gdhYynodYIgBX0wP5TFzLwHaFOPpFGVxxUtQyEWo7",
+    "markers": {
+     "<div id=\"boot\" aria-hidden=\"true\" hidden>": 1,
+     "class=\"boot-panel\"": 1
+    }
+   },
+   "css": {
+    "status": 200,
+    "bytes": 26748,
+    "sha384": "sha384-kK2gluVhoYPbqrTNRESN6g+gdhYynodYIgBX0wP5TFzLwHaFOPpFGVxxUtQyEWo7",
+    "markers": {
+     "#root:not(:empty)~#boot{display:none}": 1,
+     ".boot-panel{": 1
+    }
+   }
+  },
+  "sign": {
+   "url": "http://127.0.0.1:57062",
+   "index": {
+    "status": 200,
+    "scripts": 1,
+    "src": "/app.js",
+    "integrity": "sha384-TRgaMt8+VvrJ++o8LqhkyoAizYznvIycKiiuFlZ+wpCHsnx5eNqoke3f3gthZUuc"
+   },
+   "app": {
+    "status": 200,
+    "bytes": 169668,
+    "sha384": "sha384-TRgaMt8+VvrJ++o8LqhkyoAizYznvIycKiiuFlZ+wpCHsnx5eNqoke3f3gthZUuc",
+    "markers": {
+     "`backdrop`": 1,
+     "`rgb(9,9,9)`": 1
+    }
+   }
+  }
+ },
+ "bad": {
+  "key": "app-harness-signin-e2e",
+  "at": "2026-11-02T12:24:41.324Z",
+  "app": {
+   "url": "https://confidential.unrealized.trade",
+   "page": {
+    "status": 200,
+    "stylesheets": 1,
+    "href": "/assets/style-CKpy_LF0.css",
+    "integrity": "sha384-cNh1rtvHui0/D1cSo+UQMmR44BbVeyuA2unLCrFbpLayK5ZTB41ijsVI+ngu6F9V",
+    "markers": {
+     "<div id=\"boot\" aria-hidden=\"true\" hidden>": 0,
+     "class=\"boot-panel\"": 0
+    }
+   },
+   "css": {
+    "status": 200,
+    "bytes": 25917,
+    "sha384": "sha384-cNh1rtvHui0/D1cSo+UQMmR44BbVeyuA2unLCrFbpLayK5ZTB41ijsVI+ngu6F9V",
+    "markers": {
+     "#root:not(:empty)~#boot{display:none}": 0,
+     ".boot-panel{": 0
+    }
+   }
+  },
+  "sign": {
+   "url": "https://sign.confidential.unrealized.trade",
+   "index": {
+    "status": 200,
+    "scripts": 1,
+    "src": "/app.js",
+    "integrity": "sha384-K1hB+bV42bfopJhCz4Klx9XH0wE+E1Gh+ilXKf+j+erUfxQD7lIAiwaAGA3k/DCT"
+   },
+   "app": {
+    "status": 200,
+    "bytes": 168416,
+    "sha384": "sha384-K1hB+bV42bfopJhCz4Klx9XH0wE+E1Gh+ilXKf+j+erUfxQD7lIAiwaAGA3k/DCT",
+    "markers": {
+     "`backdrop`": 0,
+     "`rgb(9,9,9)`": 0
+    }
+   }
+  }
+ },
+ "badSign": {
+  "key": "app-harness-signin-e2e",
+  "at": "2026-11-02T12:24:43.898Z",
+  "app": {
+   "url": "http://127.0.0.1:57063",
+   "page": {
+    "status": 200,
+    "stylesheets": 1,
+    "href": "/assets/style-BcTfhng9.css",
+    "integrity": "sha384-kK2gluVhoYPbqrTNRESN6g+gdhYynodYIgBX0wP5TFzLwHaFOPpFGVxxUtQyEWo7",
+    "markers": {
+     "<div id=\"boot\" aria-hidden=\"true\" hidden>": 1,
+     "class=\"boot-panel\"": 1
+    }
+   },
+   "css": {
+    "status": 200,
+    "bytes": 26748,
+    "sha384": "sha384-kK2gluVhoYPbqrTNRESN6g+gdhYynodYIgBX0wP5TFzLwHaFOPpFGVxxUtQyEWo7",
+    "markers": {
+     "#root:not(:empty)~#boot{display:none}": 1,
+     ".boot-panel{": 1
+    }
+   }
+  },
+  "sign": {
+   "url": "https://sign.confidential.unrealized.trade",
+   "index": {
+    "status": 200,
+    "scripts": 1,
+    "src": "/app.js",
+    "integrity": "sha384-K1hB+bV42bfopJhCz4Klx9XH0wE+E1Gh+ilXKf+j+erUfxQD7lIAiwaAGA3k/DCT"
+   },
+   "app": {
+    "status": 200,
+    "bytes": 168416,
+    "sha384": "sha384-K1hB+bV42bfopJhCz4Klx9XH0wE+E1Gh+ilXKf+j+erUfxQD7lIAiwaAGA3k/DCT",
+    "markers": {
+     "`backdrop`": 0,
+     "`rgb(9,9,9)`": 0
+    }
+   }
+  }
+ }
+}
