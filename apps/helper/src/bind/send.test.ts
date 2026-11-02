@@ -2007,14 +2007,17 @@ test("a stored D the providers now answer with another hash (both, alike) keeps 
   assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "D found and stored; lookups behind");
   const d = Number(node.appliedAt(tx[0]!.tx_hash)!);
   const fork = base58(createHash("sha256").update("another fork").digest());
-  const swapped = node.rpcs().map((x) => (async (m: string, p: unknown) => {
+  const swap = (x: Rpc): Rpc => async (m, p) => {
     const a = await x(m, p);
     const at = (p as { block_id?: unknown }).block_id;
     if (m === "block" && at === d) return { header: { ...(a as { header: object }).header, hash: fork } };
     if (m === "EXPERIMENTAL_changes" && at === d) return { ...(a as object), block_hash: fork };
+    if (m === "tx") return { ...(a as object), transaction_outcome: { block_hash: fork } }; // every answer agrees on the swapped D
     return a;
-  }) as Rpc) as [Rpc, Rpc];
-  assert.equal((await node.relayerOn(swapped, 50).resolve(tx[0]!, noResend)).kind, "unknown");
+  };
+  const [s0, s1] = node.rpcs().map(swap);
+  const swapped = createRelayer([s0!, s1!], swap(node.archival()), RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50);
+  assert.equal((await swapped.resolve(tx[0]!, noResend)).kind, "unknown");
   assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
 });
 
