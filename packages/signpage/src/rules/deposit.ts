@@ -252,7 +252,7 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
   const [r0, r1] = reads;
   if (r0.nonce !== r1.nonce) refuse("nonce");
   if (d.nonce !== r0.nonce + 1n) refuse("nonce");
-  if (ctx.unlandedNonce !== undefined && ctx.unlandedNonce > r0.nonce + 1n) refuse("nonce");
+  if (ctx.unlandedNonce !== undefined && (typeof ctx.unlandedNonce !== "bigint" || ctx.unlandedNonce > r0.nonce + 1n)) refuse("nonce");
 
   // The height bound: the lower of the two heights + Wd, never further.
   const lower = r0.height < r1.height ? r0.height : r1.height;

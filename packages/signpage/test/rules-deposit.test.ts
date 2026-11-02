@@ -401,7 +401,8 @@ test("the nonce is always the read nonce + 1; an unlanded call above it is refus
   refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE }), uctx({ unlandedNonce: NONCE })));
   refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE - 1n }), uctx({ unlandedNonce: NONCE - 1n })));
   refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE + 3n }), uctx({ unlandedNonce: NONCE + 2n })));
-  // an unlanded call at N > read + 1: neither read + 1 nor N signs
+  // an unlanded call at N > read + 1: neither read + 1 nor N signs (N = read + 2 included)
+  refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE + 1n }), uctx({ unlandedNonce: NONCE + 2n })));
   refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE + 1n }), uctx({ unlandedNonce: NONCE + 5n })));
   refused("nonce", () => checkDepositCall(ugood({ nonce: NONCE + 5n }), uctx({ unlandedNonce: NONCE + 5n })));
   // an unlanded call at or below the read nonce has had its nonce used: the new call is the read nonce + 1
@@ -409,6 +410,12 @@ test("the nonce is always the read nonce + 1; an unlanded call above it is refus
   // nearcore's range (nonce < height x 1,000,000) is never reached: the nonce is the read's + 1
   const big = HEIGHT * 1_000_000n + 7n;
   refused("nonce", () => checkDepositCall(ugood({ nonce: big }), uctx({ unlandedNonce: big })));
+});
+
+test("an unlanded nonce that is not a bigint is refused, never ignored", () => {
+  for (const bad of ["abc", null, Number.NaN, {}, Number(NONCE + 1n), `${NONCE + 1n}`])
+    refused("nonce", () => checkDepositCall(ugood(), uctx({ unlandedNonce: bad as unknown as bigint })));
+  assert.equal(checkDepositCall(ugood(), uctx({ unlandedNonce: NONCE + 1n })).nonce, NONCE + 1n);
 });
 
 test("an amount above HELPER_BIND_DEPOSIT_CAP is refused; the cap itself signs", () => {
