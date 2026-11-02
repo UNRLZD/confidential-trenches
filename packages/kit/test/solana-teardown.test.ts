@@ -208,3 +208,31 @@ test("what stays: an account holding tokens, a frozen one, a volume account owed
   const v = checkSolanaTeardown([], WALLET, { accounts: { [feeAddr]: [feeAccount(0n, 0n), feeAccount(0n, 1n)] }, wallet: [0n, 0n], simulations: [] });
   assert.deepEqual(v.results.map((r) => [r.id, r.ok]), [["READ", false]]);
 });
+
+test("many accounts: S-4 splits into frames of at most 1,232 bytes, every account closed once across them", () => {
+  const accounts: Record<string, readonly [SolanaHeldRead, SolanaHeldRead]> = {};
+  for (let i = 0; i < 40; i++) {
+    const mint = base58.encode(Uint8Array.from({ length: 32 }, (_, j) => (i * 7 + j * 13 + 1) % 256));
+    const d = new Uint8Array(165);
+    d.set(base58.decode(mint), 0);
+    d.set(base58.decode(WALLET), 32);
+    d[108] = 1;
+    const a = { owner: SOLANA_TOKEN_PROGRAM, lamports: 2_039_280n, data: d };
+    accounts[solanaAta(WALLET, mint, SOLANA_TOKEN_PROGRAM)] = [a, a];
+  }
+  const plan = solanaTeardownPlan(WALLET, accounts);
+  assert.equal(plan.close.length, 40);
+  const frames = buildSolanaTeardown(WALLET, plan, CHAIN);
+  assert.ok(frames.length > 1);
+  for (const f of frames) assert.ok(f.size <= 1232, `${f.size} bytes`);
+  // Every frame's simulation: the accounts it closes gone, the wallet up by their rent less the fee.
+  const sims = frames.map((f) => {
+    const msg = Buffer.from(f.message);
+    const closes = plan.close.filter((h) => msg.includes(Buffer.from(base58.decode(h.address))));
+    const s = { err: null, wallet: closes.reduce((n, h) => n + h.lamports, 0n) - 5_000n, accounts: Object.fromEntries(closes.map((h) => [h.address, null])) };
+    return [s, s] as const;
+  });
+  assert.deepEqual(failed(checkSolanaTeardown(frames.map((f) => f.wire), WALLET, { accounts, wallet: [0n, 0n], simulations: sims })), []);
+  const dropped = checkSolanaTeardown(frames.slice(1).map((f) => f.wire), WALLET, { accounts, wallet: [0n, 0n], simulations: sims.slice(1) });
+  assert.equal(dropped.ok, false);
+});
