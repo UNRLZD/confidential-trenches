@@ -64,7 +64,7 @@ const chainOf = (build: SolanaJupiterBuild) => ({
 const goodBuild = (i: number) => parseSolanaJupiterBuild(JSON.parse(G.shapes[i]!.body));
 const FRAME = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S13"];
 const verdict = (wire: Uint8Array, req: SolanaBuildRequest, tables: readonly string[]) =>
-  checkSolanaQuote(wire, { ...req, spendable: req.amount, minOut: 1n }, {
+  checkSolanaQuote(wire, { ...req, spendable: req.amount, minOut: 1n, otherWallets: [] }, {
     tables: Object.fromEntries(tables.map((t) => [t, [read(G.reads.accounts[t]![0]), read(G.reads.accounts[t]![1])] as const])),
     mint: [read(G.reads.accounts[G.mint]![0]), read(G.reads.accounts[G.mint]![1])],
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
@@ -352,7 +352,7 @@ const assembleRun = (r: Run, side: "buy" | "sell", build = parseSolanaJupiterBui
   const req: SolanaBuildRequest = { side, wallet: r.wallet, token: r.mint, amount: BigInt(r.amount), slippageBps: 1000 };
   const tables = tablesOf(r.accounts, build.tables);
   const tx = assembleSolanaSwap(req, build, { blockhash: r.blockhash.blockhash, lastValidBlockHeight: r.blockhash.lastValidBlockHeight, tables, tokenProgram: r.accounts[r.mint]![0]!.owner }, { pick: () => 0 });
-  const v = checkSolanaQuote(tx.wire, { ...req, spendable: req.amount, minOut: 1n }, {
+  const v = checkSolanaQuote(tx.wire, { ...req, spendable: req.amount, minOut: 1n, otherWallets: [] }, {
     tables: Object.fromEntries(build.tables.map((t) => [t, [read(r.accounts[t]![0]), read(r.accounts[t]![1])] as const])),
     mint: [read(r.accounts[r.mint]![0]), read(r.accounts[r.mint]![1])],
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },

@@ -9,8 +9,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
 import {
+  SOLANA_PUMP_AMM_PROGRAM,
+  SolanaWalletLinks,
   checkSolanaQuote,
   solanaPumpVolumeAccumulator,
+  solanaVolumeAccumulator,
   type SolanaAccountRead,
   type SolanaQuoteCheckId,
   type SolanaQuoteReads,
@@ -91,6 +94,8 @@ const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 // The buy's numbers: E from the G1 device's own pool read (live results[0].pool.expectedOut 51111993061), s = 950 bps
 // (the slippage in the signed route), so minOut_k = floor(E × 9050 / 10000) = 46256353720; S12's tolerance is the kit's
 // SOLANA_SIM_TOL_BPS = 200. The simulation is the landed tx's own balances (meta), the same on both providers.
+// Another wallet of the same user, which the good trades never name.
+const OTHER = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + 3) & 0xff));
 const buyToken = 55_991_176_135n; // the landed buy's token in (meta.postTokenBalances of the wallet's account)
 function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQuoteReads } {
   const sim: SolanaSimulation = {
@@ -99,11 +104,11 @@ function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQu
     tokenAccount: { pre: 0n, post: buyToken },
     tokenAccountLamports: { pre: 0n, post: 1_513_840n }, // the landed buy: ECDKZF… 0 -> 1,513,840 (meta)
     pumpVolumeAccumulator: { pre: 0n, post: 1_346_200n },
-    otherWallets: [{ pre: 9_874_873n, post: 9_874_873n }],
+    pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
   };
   return {
     m: msgOf(BUY),
-    req: { side: "buy", wallet: W, token: F.mint, amount: 9_874_873n, spendable: BigInt(BUY.meta.preBalances[0] as number), minOut: 46_256_353_720n },
+    req: { side: "buy", wallet: W, token: F.mint, amount: 9_874_873n, spendable: BigInt(BUY.meta.preBalances[0] as number), minOut: 46_256_353_720n, otherWallets: [OTHER] },
     reads: {
       tables: Object.fromEntries(Object.entries(F.tables).map(([k, [a, b]]) => [k, [read(a), read(b)] as const])),
       mint: [read(F.mintReads[0]), read(F.mintReads[1])],
@@ -131,12 +136,12 @@ function sellCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQ
     tokenAccount: { pre: buyToken, post: 0n },
     tokenAccountLamports: { pre: 1_513_840n, post: 1_513_840n },
     pumpVolumeAccumulator: { pre: 1_346_200n, post: 1_346_200n },
-    otherWallets: [],
+    pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
   };
   const b = buyCase();
   return {
     m,
-    req: { side: "sell", wallet: W, token: F.mint, amount: buyToken, spendable: buyToken, minOut: 8_738_870n },
+    req: { side: "sell", wallet: W, token: F.mint, amount: buyToken, spendable: buyToken, minOut: 8_738_870n, otherWallets: [] },
     reads: { ...b.reads, simulations: [sim, structuredClone(sim)], reference: { expectedOut: 9_656_210n, slippageBps: 950 } },
   };
 }
@@ -159,6 +164,126 @@ test("the real buy passes every check", () => {
   const v = checkSolanaQuote(Uint8Array.from(Buffer.from(BUY.tx, "base64")), buyCase().req, buyCase().reads);
   assert.equal(v.ok, true, v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | "));
   assert.equal(v.results.length, 13);
+});
+
+test("the trade's map of the user's wallets: the real buy passes with it, and it holds every account S11 looks for", () => {
+  const links = new SolanaWalletLinks([W, OTHER]);
+  const v = checkSolanaQuote(Uint8Array.from(Buffer.from(BUY.tx, "base64")), { ...buyCase().req, links }, buyCase().reads);
+  assert.equal(v.ok, true, v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | "));
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const sva = solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM);
+  for (const k of [OTHER, solanaVolumeAccumulator(OTHER, PUMP), sva, solanaAta(sva, WSOL, TOKEN), solanaAta(OTHER, WSOL, TOKEN), solanaAta(OTHER, WSOL, T22), solanaAta(OTHER, F.mint, TOKEN), solanaAta(OTHER, F.mint, T22)]) assert.equal(links.ownerOf(k), OTHER, k);
+  // before any tx's keys: the wallet, its volume accounts, its cashback account and its WSOL accounts (a tx can name a
+  // WSOL account without the WSOL mint, as a close or a sync does)
+  const fresh = new SolanaWalletLinks([OTHER]);
+  for (const k of [OTHER, solanaVolumeAccumulator(OTHER, PUMP), sva, solanaAta(sva, WSOL, TOKEN), solanaAta(OTHER, WSOL, TOKEN), solanaAta(OTHER, WSOL, T22)]) assert.equal(fresh.ownerOf(k), OTHER, k);
+  const any = allKeys(buyCase().m).at(-1) as string;
+  assert.equal(links.ownerOf(solanaAta(OTHER, any, TOKEN)), OTHER, "grown by the check with the tx's own keys");
+  assert.equal(links.ownerOf(solanaAta(W, F.mint, TOKEN)), W);
+});
+
+test("one long-lived map: it grows only by new wallets and new keys, a wallet joins once its accounts are all derived, and grows run in turn", async () => {
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const k1 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 11 + 5) & 0xff));
+  const W2 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 13 + 1) & 0xff));
+  // a wallet joins only once its last account is derived: a check between two slices does not trust the map with it
+  const part = new SolanaWalletLinks();
+  part.add([k1, OTHER, W2, W]);
+  const growing = part.grow([OTHER], [], 0);
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(part.holds([OTHER]), false, "half derived, not held");
+  await growing;
+  assert.equal(part.holds([OTHER]), true);
+  const m = new SolanaWalletLinks();
+  const first = m.grow([OTHER], [k1], 0);
+  const second = m.grow([W2], [], 0);
+  assert.equal(m.holds([OTHER]), false, "nothing is derived before the grow runs");
+  await second;
+  assert.equal(m.holds([OTHER, W2]), true, "an awaited grow means every earlier one is done");
+  await first;
+  for (const w of [OTHER, W2]) for (const k of [WSOL, k1]) for (const prog of [TOKEN, T22]) assert.equal(m.ownerOf(solanaAta(w, k, prog)), w, `${w} ${k}`);
+  // a later trade: the same wallets and keys cost nothing; a new key reaches every wallet in the map
+  let t = performance.now();
+  await m.grow([OTHER, W2], [k1, WSOL]);
+  m.add([k1, WSOL]);
+  assert.ok(performance.now() - t < 20, "nothing derived again");
+  const k2 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 17 + 9) & 0xff));
+  t = performance.now();
+  await m.grow([], [k2]);
+  assert.equal(m.ownerOf(solanaAta(W2, k2, T22)), W2);
+  // S11 trusts it only while it holds every other wallet
+  const c = buyCase();
+  (c.req as { links?: SolanaWalletLinks }).links = m;
+  assert.equal(run(c).ok, true);
+  assert.equal(m.holds([W]), false, "S11 grows a given map by the tx's keys only, never by a wallet");
+  assert.equal(m.ownerOf(solanaAta(OTHER, allKeys(c.m).at(-1) as string, TOKEN)), OTHER, "and by the tx's keys");
+});
+
+test("grows in flight, seeded interleavings: a wallet the map holds always has its accounts and every finished key's, and S11's add() right after a holds() leaves nothing missing", async () => {
+  // grow() at slice 0 yields after every derivation; addWallets(), add() and S11's pattern run between the slices
+  let seed = 0x5eed_1234;
+  const rand = (): number => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4_294_967_296; };
+  const keyOf = (): string => base58.encode(Uint8Array.from({ length: 32 }, () => Math.floor(rand() * 256)));
+  const pick = <T>(a: readonly T[]): T => a[Math.floor(rand() * a.length)] as T;
+  const WS = Array.from({ length: 8 }, keyOf);
+  const KS = Array.from({ length: 10 }, keyOf);
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const missing: string[] = [];
+  const owns = (m: SolanaWalletLinks, o: string, k: string) => m.ownerOf(solanaAta(o, k, TOKEN)) === o && m.ownerOf(solanaAta(o, k, T22)) === o;
+  for (let round = 0; round < 30; round++) {
+    const m = new SolanaWalletLinks();
+    const done = new Set<string>([WSOL]);
+    const grows: Promise<void>[] = [];
+    for (let step = 0; step < 30; step++) {
+      const r = rand();
+      if (r < 0.35) {
+        const ws = Array.from({ length: 1 + Math.floor(rand() * 3) }, () => pick(WS));
+        const ks = Array.from({ length: Math.floor(rand() * 4) }, () => pick(KS));
+        grows.push(m.grow(ws, ks, 0).then(() => { for (const k of ks) done.add(k); }));
+      } else if (r < 0.45) {
+        m.addWallets([pick(WS)]);
+      } else if (r < 0.65) {
+        const others = [...m.wallets].filter(() => rand() < 0.6);
+        if (m.holds(others)) {
+          const ks = Array.from({ length: 1 + Math.floor(rand() * 3) }, () => pick(KS));
+          m.add(ks);
+          for (const k of ks) done.add(k);
+          for (const o of others) for (const k of ks) if (!owns(m, o, k)) missing.push(`round ${round} S11: ${o.slice(0, 4)} ${k.slice(0, 4)}`);
+        }
+      } else {
+        for (const o of m.wallets) {
+          const sva = solanaVolumeAccumulator(o, SOLANA_PUMP_AMM_PROGRAM);
+          for (const x of [o, solanaVolumeAccumulator(o, PUMP), sva, solanaAta(sva, WSOL, TOKEN)]) if (m.ownerOf(x) !== o) missing.push(`round ${round}: ${o.slice(0, 4)}'s base account`);
+          for (const k of done) if (!owns(m, o, k)) missing.push(`round ${round} held: ${o.slice(0, 4)} ${k.slice(0, 4)}`);
+        }
+      }
+      const turns = Math.floor(rand() * 4);
+      for (let i = 0; i < turns; i++) await new Promise((res) => setTimeout(res, 0));
+    }
+    await Promise.all(grows);
+    for (const o of m.wallets) for (const k of done) if (!owns(m, o, k)) missing.push(`round ${round} end: ${o.slice(0, 4)} ${k.slice(0, 4)}`);
+  }
+  assert.deepEqual(missing.slice(0, 5), []);
+});
+
+test("a mint another wallet holds that the tx never names: S11 refuses its token account once the caller names the mint", () => {
+  const M = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 19 + 2) & 0xff));
+  const named = () => { const c = buyCase(); addKey(c.m, solanaAta(OTHER, M, TOKEN)); return c; };
+  assert.equal(run(named()).ok, true, "without the held mint the map cannot know the account");
+  for (const links of [undefined, new SolanaWalletLinks([W, OTHER])]) {
+    const c = named();
+    (c.req as { heldMints?: readonly string[] }).heldMints = [M];
+    if (links) (c.req as { links?: SolanaWalletLinks }).links = links;
+    refusedBy("S11", run(c));
+  }
+  for (const m of ["not a key", "11111111", base58.encode(new Uint8Array(31).fill(3))]) {
+    const bad = buyCase();
+    (bad.req as { heldMints?: unknown }).heldMints = [m];
+    const v = run(bad);
+    refusedBy("S11", v);
+    assert.match(v.results.find((r) => r.id === "S11")!.detail, /held mints must be addresses/, m);
+  }
 });
 
 test("the paper's sell shape passes every check", () => {
@@ -235,8 +360,29 @@ const CASES: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uin
   ["S11 no simulation on provider B", "S11", (c) => { (c.reads as { simulations: unknown }).simulations = [c.reads.simulations[0], null]; }],
   ["S11 native out 1 lamport over the bound", "S11", (c) => { const s = c.reads.simulations[0] as SolanaSimulation; s.walletLamports.post -= 1n + (s.walletLamports.pre - s.walletLamports.post - (9_874_873n + 13_001n + 15_000n + 1_513_840n + 1_346_200n)); }],
   ["S11 token in below minOut", "S11", (c) => { (c.reads.simulations[1] as SolanaSimulation).tokenAccount.post = 46_256_353_719n; }],
-  ["S11 another wallet of this user changes", "S11", (c) => { ((c.reads.simulations[0] as SolanaSimulation).otherWallets[0] as { post: bigint }).post -= 1n; }],
+  // One wallet a request: no other wallet of the user, nor its accounts for this trade, in the tx at all, in any role.
+  ["S11 the tx names another wallet of the user, read-only", "S11", (c) => { addKey(c.m, OTHER); }],
+  ["S11 the tx names another wallet of the user, writable", "S11", (c) => { const k = c.m.staticKeys[c.m.requiredSignatures] as string; assert.ok(c.m.requiredSignatures < c.m.staticKeys.length - c.m.readonlyUnsigned); (c.req as { otherWallets: readonly string[] }).otherWallets = [k]; }],
+  ["S11 the tx names another wallet of the user through a lookup table", "S11", (c) => { const k = allKeys(c.m)[c.m.staticKeys.length] as string; assert.ok(!c.m.staticKeys.includes(k)); (c.req as { otherWallets: readonly string[] }).otherWallets = [k]; }],
+  ["S11 the tx names another wallet's token account (Token-2022)", "S11", (c) => { addKey(c.m, solanaAta(OTHER, F.mint, T22)); }],
+  ["S11 the tx names another wallet's token account (Token)", "S11", (c) => { addKey(c.m, solanaAta(OTHER, F.mint, TOKEN)); }],
+  ["S11 the tx names another wallet's WSOL account", "S11", (c) => { addKey(c.m, solanaAta(OTHER, "So11111111111111111111111111111111111111112", TOKEN)); }],
+  ["S11 the tx names another wallet's pump volume account", "S11", (c) => { addKey(c.m, solanaVolumeAccumulator(OTHER, PUMP)); }],
+  ["S11 the tx names another wallet's PumpSwap volume account", "S11", (c) => { addKey(c.m, solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM)); }],
+  // PumpSwap adds this on a cashback coin (pump-swap-sdk 2.2.0 offlinePumpAmm.ts, buy 797-808, sell 1055-1070).
+  ["S11 the tx names another wallet's PumpSwap cashback account (the WSOL account of its PumpSwap volume account)", "S11", (c) => { addKey(c.m, solanaAta(solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM), "So11111111111111111111111111111111111111112", TOKEN)); }],
+  // Another wallet's associated token account for any mint the tx names: here a pool key named statically, and one
+  // named only through the lookup table, under each token program.
+  ["S11 the tx names another wallet's token account for another key of the tx (Token)", "S11", (c) => { const k = c.m.staticKeys[c.m.staticKeys.length - 1] as string; assert.ok(k !== F.mint); addKey(c.m, solanaAta(OTHER, k, TOKEN)); }],
+  ["S11 the tx names another wallet's token account for a lookup-table key (Token-2022)", "S11", (c) => { const k = allKeys(c.m)[c.m.staticKeys.length] as string; assert.ok(!c.m.staticKeys.includes(k)); addKey(c.m, solanaAta(OTHER, k, T22)); }],
+  ["S11 a map without the other wallet in it is not used: S11 builds its own", "S11", (c) => { (c.req as { links?: SolanaWalletLinks }).links = new SolanaWalletLinks([W]); addKey(c.m, OTHER); }],
+  ["S11 the wallet in its own list of other wallets", "S11", (c) => { (c.req as { otherWallets: readonly string[] }).otherWallets = [W]; }],
+  ["S11 no list of the user's other wallets", "S11", (c) => { (c.req as { otherWallets: unknown }).otherWallets = undefined; }],
   ["S11 the pump volume account takes more than its rent", "S11", (c) => { (c.reads.simulations[0] as SolanaSimulation).pumpVolumeAccumulator.post = 1_346_201n; }],
+  ["S11 the PumpSwap volume account takes more than its rent", "S11", (c) => { const s = c.reads.simulations[0] as SolanaSimulation; s.pumpSwapVolumeAccumulator.post = 1_346_201n; s.walletLamports.post -= 1_346_201n; }],
+  ["S11 the PumpSwap volume account drained (delta < 0)", "S11", (c) => { for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.pumpSwapVolumeAccumulator = { pre: 1_346_200n, post: 0n }; x.walletLamports.post += 1_346_200n; } }],
+  ["S12 minOut below E_k less s, with E(a_k) above E_k", "S12", (c) => { (c.reads as { reference: unknown }).reference = { expectedOut: 51_111_993_061n, minOutBase: 51_111_993_061n, slippageBps: 900 }; }],
+  ["S12 E_k above E(a_k)", "S12", (c) => { (c.reads as { reference: unknown }).reference = { expectedOut: 51_111_993_061n, minOutBase: 51_111_993_062n, slippageBps: 950 }; }],
   ["S12 no reference pool", "S12", (c) => { (c.reads as { reference: unknown }).reference = null; }],
   ["S12 simulated out below E less 200 bps", "S12", (c) => { (c.reads.reference as { expectedOut: bigint }).expectedOut = (buyToken * 10_000n) / 9_800n + 2n; }],
   ["S12 minOut below E less s", "S12", (c) => { c.req.minOut = 46_256_353_719n; setU64(jupData(c.m), 16, 51_111_993_061n); }],
@@ -472,6 +618,33 @@ for (const [name, id, mutate] of R2) {
     refusedBy(id, run(c, bytes ?? undefined));
   });
 }
+
+test("accepted: a first PumpSwap buy from a fresh wallet that creates its PumpSwap volume account (rent 1,346,200)", () => {
+  const c = buyCase();
+  for (const s of c.reads.simulations) {
+    const x = s as SolanaSimulation;
+    x.pumpSwapVolumeAccumulator = { pre: 0n, post: 1_346_200n };
+    x.walletLamports.post -= 1_346_200n;
+  }
+  const v = run(c);
+  assert.ok(v.ok, JSON.stringify(v.results.filter((r) => !r.ok)));
+});
+
+test("accepted: S12 holds the simulated out to E(a_k) and minOut to E_k = floor(E(A) a_k / A) below it", () => {
+  const c = buyCase();
+  // E(a_k) above E_k, as a set's smaller leg prices on a convex curve; minOut_k stays on E_k's floor.
+  (c.reads as { reference: unknown }).reference = { expectedOut: 51_111_993_061n, minOutBase: 50_000_000_000n, slippageBps: 950 };
+  c.req.minOut = (50_000_000_000n * 9_050n) / 10_000n;
+  setU64(jupData(c.m), 16, (c.req.minOut * 10_000n + 9_049n) / 9_050n);
+  const v = run(c);
+  assert.ok(v.ok, JSON.stringify(v.results.filter((r) => !r.ok)));
+});
+
+test("refused: S11 a sell that funds the PumpSwap volume account", () => {
+  const c = sellCase();
+  for (const s of c.reads.simulations) (s as SolanaSimulation).pumpSwapVolumeAccumulator = { pre: 0n, post: 1_346_200n };
+  refusedBy("S11", run(c));
+});
 
 test("refused: S11 a sell that funds the pump volume account", () => {
   const c = sellCase();

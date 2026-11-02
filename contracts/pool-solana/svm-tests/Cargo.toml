@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# The pool program's LiteSVM tests: they load the program built by cargo-build-sbf (POOL_SO, default
+# ../target/deploy/blindfill_pool_solana.so) and replay real withdraw proofs made for the pool (../fixtures/). Its own
+# workspace and lockfile, apart from the program's.
+[package]
+name = "pool-solana-svm-tests"
+version = "0.1.0"
+edition = "2021"
+# agave 4.3 (litesvm 0.17.0's runtime) needs rustc 1.97.1
+rust-version = "1.97.1"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+# litesvm 0.17.0 runs agave 4.3's program runtime, the major mainnet runs and one that loads what cargo-build-sbf 4.4.0
+# builds (litesvm 0.8.2's agave 3.0 refused it). Cargo.lock starts from litesvm's own at its v0.17.0 tag, and the type
+# crates are the versions that lock names, so the tests' types are litesvm's.
+litesvm = "=0.17.0"
+solana-account = "=4.7.0"
+solana-address = { version = "=2.7.0", features = ["curve25519", "decode"] }
+solana-clock = "=3.2.1"
+solana-instruction = "=3.5.1"
+solana-keypair = "=3.1.2"
+solana-message = "=4.6.0"
+solana-signer = "=3.0.1"
+solana-transaction = "=4.3.0"
+serde_json = "1"
+sha2 = "0.10"
+
+[workspace]

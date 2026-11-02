@@ -1,0 +1,663 @@
+{
+ "dry": true,
+ "helper": "https://api.confidential.unrealized.trade",
+ "providers": [
+  "https://solana-rpc.publicnode.com",
+  "https://api.confidential.unrealized.trade/v1/rpc/solana"
+ ],
+ "slippageBps": 500,
+ "runs": [
+  {
+   "at": "2026-11-02T10:41:55.438Z",
+   "buyLamports": "10000000",
+   "mint": "7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump",
+   "buyersWithoutPumpSwapVolumeAccount": [
+    "6MkqQcHN2oWGPDzA5dz8bnsGKvjHtWPd1tunZqgLLWMa"
+   ],
+   "buy": {
+    "oneWallet": {
+     "requests": 53,
+     "naming": 21,
+     "maxWallets": 1
+    },
+    "waits": [],
+    "ms": 3043,
+    "reference": "197051241554",
+    "blockhash": {
+     "blockhash": "FQ5du1nmodKCvWuZX6AhMTNXtHr28bZjZ5MEp3nytyP4",
+     "lastValidBlockHeight": 442486764,
+     "slot": 464465460
+    },
+    "legs": [
+     {
+      "wallet": "6MkqQcHN2oWGPDzA5dz8bnsGKvjHtWPd1tunZqgLLWMa",
+      "amount": "10000000",
+      "expectedOut": "65683747184",
+      "legExpectedOut": "65702386564",
+      "minOut": "62399559824",
+      "quoteMs": 1821,
+      "buildMs": 1020,
+      "buildCalls": 1,
+      "size": 803,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "4JFFdyYeow2eMmiDwPJFMhqFBabjHn4jhnVhAbwLCj1c1B5hZ38WsCTtHZTbH312Ls3EFuStbDecrxaEEy8JYfuX",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 83184
+        },
+        {
+         "err": null,
+         "units": 83184
+        }
+       ]
+      }
+     },
+     {
+      "wallet": "78omi7BpCLQG6KoRhfxuPetreK835hp9BYCqxFoPm8bb",
+      "amount": "10000000",
+      "expectedOut": "65683747184",
+      "legExpectedOut": "65702386564",
+      "minOut": "62399559824",
+      "quoteMs": 1826,
+      "buildMs": 1019,
+      "buildCalls": 1,
+      "size": 803,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "5DJaPW4EKNybyq3sgs1rhT66FLMZhNU8HsBvpWqRevuVYcCDAiydzV7vxMVZC2oHyEWm9WZ84MRXPu5B7w4ofUwQ",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 95115
+        },
+        {
+         "err": null,
+         "units": 95115
+        }
+       ]
+      }
+     },
+     {
+      "wallet": "AszYE4kHT8aNvoNT2qYSKkJxF3HM7hwNarm9gneEUzW3",
+      "amount": "10000000",
+      "expectedOut": "65683747184",
+      "legExpectedOut": "65702386564",
+      "minOut": "62399559824",
+      "quoteMs": 1868,
+      "buildMs": 1018,
+      "buildCalls": 1,
+      "size": 803,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "51weJeSNmvQEvzLwGvXNANupET6rm6iigjfajJHHJsmtSBwt4jt4qpCwTLDDwpM4NNGs7pCCJM2WD1gFbozhVBAK",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 87615
+        },
+        {
+         "err": null,
+         "units": 87615
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "sell": {
+    "oneWallet": {
+     "requests": 65,
+     "naming": 29,
+     "maxWallets": 1
+    },
+    "waits": [
+     {
+      "at": "B",
+      "method": "getMinimumBalanceForRentExemption",
+      "ms": 300
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 300
+     },
+     {
+      "at": "B",
+      "method": "getMinimumBalanceForRentExemption",
+      "ms": 600
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 600
+     },
+     {
+      "at": "B",
+      "method": "getMinimumBalanceForRentExemption",
+      "ms": 1200
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 1200
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 2400
+     },
+     {
+      "at": "B",
+      "method": "getMinimumBalanceForRentExemption",
+      "ms": 2400
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 4800
+     },
+     {
+      "at": "B",
+      "method": "getMinimumBalanceForRentExemption",
+      "ms": 4800
+     }
+    ],
+    "ms": 14661,
+    "reference": "11617156255",
+    "blockhash": {
+     "blockhash": "Cv2xLsPy1gAsrb5FFYgjFLDZj2hL5Qa5V8E9KRCABUJk",
+     "lastValidBlockHeight": 442486777,
+     "slot": 464465473
+    },
+    "legs": [
+     {
+      "wallet": "5gjgcgdZ49QcYatiCTDNFVCSHTtcxcAcTKihUfSxQMg1",
+      "amount": "32529539051367",
+      "expectedOut": "4011529995",
+      "legExpectedOut": "4511025559",
+      "minOut": "3810953495",
+      "refused": "build upstream: upstream: HTTP 400 500: {\"error\":\"Missing token program for 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoaj"
+     },
+     {
+      "wallet": "7puGGEKSmELgzTq3GXBxLkGbnZhDPUPjg8xfRcKyRFRi",
+      "amount": "31623276442068",
+      "expectedOut": "3899770045",
+      "legExpectedOut": "4393388273",
+      "minOut": "3704781542",
+      "quoteMs": 12248,
+      "buildMs": 253,
+      "buildCalls": 1,
+      "size": 770,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "sSegDVKFN56UzJdPDgXFiRMwqqP2ue9LhNYHk5m7y6VFnfbfuSQfRXpSrDmWWTaE3YDQLmuyqc3qJ9dFdDsV1fZ",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 90673
+        },
+        {
+         "err": null,
+         "units": 90673
+        }
+       ]
+      },
+      "teardown": {
+       "frames": 1,
+       "ok": true,
+       "plan": {
+        "close": [
+         {
+          "kind": "volume",
+          "address": "3eNGEtyot5R95guYtxACS5nPwkVEusfQAaRgvs2sYMEf",
+          "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+          "lamports": "1346200"
+         },
+         {
+          "kind": "volume",
+          "address": "8DG669kFJYHQygNWzsLJXZrPS6b1PD1P8fTUxc9icXHG",
+          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+          "lamports": "1346200"
+         }
+        ],
+        "keep": [
+         {
+          "address": "BEbwq7cgXST618i1tA5KZvxwbTnmatEe51MDtkHkb6K1",
+          "why": "holds 31623276442068 of 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump"
+         }
+        ]
+       },
+       "dry": [
+        {
+         "signature": "5AnAEoH1J5p5TVXxaKt5gfQizNXP7cgVRzPfo7DPdQ8gjKMvcUqcjA6nbVv9KBRPS99Q4SeUTzpEenT8NvK2ErqB",
+         "state": "simulated",
+         "simulations": [
+          {
+           "err": null,
+           "units": 22291
+          },
+          {
+           "err": null,
+           "units": 22291
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "wallet": "23Emex2TAi2B8dyAdpUY3UR6DVuipvxtGozNqtksBhGp",
+      "amount": "30050827139983",
+      "expectedOut": "3705856214",
+      "legExpectedOut": "4188250146",
+      "minOut": "3520563403",
+      "quoteMs": 12835,
+      "buildMs": 261,
+      "buildCalls": 1,
+      "size": 770,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "62MAJRaDrXEuUYQXRCp7LYtrZNTdjG5Q8rTHCh2CUdhh6yFYs1KpYruffPGEAoERAfjQAS3aGcnWjjNFrZsaVAqk",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 78673
+        },
+        {
+         "err": null,
+         "units": 78673
+        }
+       ]
+      },
+      "teardown": {
+       "frames": 1,
+       "ok": true,
+       "plan": {
+        "close": [
+         {
+          "kind": "volume",
+          "address": "875KUSHUuTZKhwdjrphVi7MkTBD3xCLds1EEmv37P716",
+          "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+          "lamports": "1346200"
+         },
+         {
+          "kind": "volume",
+          "address": "hP55mygU5NFx2Z4hYfUCBEWUyXieJmLaoBmS1SjxBod",
+          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+          "lamports": "1346200"
+         }
+        ],
+        "keep": [
+         {
+          "address": "CzDaHrkzcvkWLaepte5NjgMDUxNJB7ZdSVZjxny3yqVq",
+          "why": "holds 30050827139983 of 7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump"
+         }
+        ]
+       },
+       "dry": [
+        {
+         "signature": "5Yoh65c97UWAzEU2RfBMsRXg3iqDZwdJ3diLSW1kjwHQc7iotaMj5FvcGwTemExp4U7jWGEihBeUezeuCqFNmDH7",
+         "state": "simulated",
+         "simulations": [
+          {
+           "err": null,
+           "units": 20791
+          },
+          {
+           "err": null,
+           "units": 20791
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-02T10:40:30.460Z",
+   "buyLamports": "10000000",
+   "mint": "EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump",
+   "buyersWithoutPumpSwapVolumeAccount": [
+    "6MkqQcHN2oWGPDzA5dz8bnsGKvjHtWPd1tunZqgLLWMa"
+   ],
+   "buy": {
+    "oneWallet": {
+     "requests": 23,
+     "naming": 7,
+     "maxWallets": 1
+    },
+    "waits": [],
+    "ms": 3022,
+    "reference": "534370622558",
+    "blockhash": {
+     "blockhash": "DXiMLT2VHgLjLQRtXB2TiifKoHjDkMrcvymLFwfpYBSg",
+     "lastValidBlockHeight": 442486363,
+     "slot": 464465059
+    },
+    "legs": [
+     {
+      "wallet": "6MkqQcHN2oWGPDzA5dz8bnsGKvjHtWPd1tunZqgLLWMa",
+      "amount": "10000000",
+      "expectedOut": "534370622558",
+      "legExpectedOut": "534370622558",
+      "minOut": "507652091430",
+      "quoteMs": 1760,
+      "buildMs": 947,
+      "buildCalls": 1,
+      "size": 709,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "5D34s6qZdvgFnfZPeABuBh77ADxvdHop1fmMTU3KPyQz47NYdrSoZd8tMUvjprz9nvDCbgni2DAnxPVMtL6gCpZx",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 99111
+        },
+        {
+         "err": null,
+         "units": 99111
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "sell": {
+    "oneWallet": {
+     "requests": 83,
+     "naming": 39,
+     "maxWallets": 1
+    },
+    "waits": [
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 300
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 300
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 300
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 600
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 600
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 600
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 1200
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 1200
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 1200
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 2400
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 2400
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 2400
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 4800
+     },
+     {
+      "at": "B",
+      "method": "getLatestBlockhash",
+      "ms": 4800
+     },
+     {
+      "at": "B",
+      "method": "simulateTransaction",
+      "ms": 4800
+     }
+    ],
+    "ms": 15179,
+    "reference": "138396082",
+    "blockhash": {
+     "blockhash": "Ct5jvQp2NSByKcQCyQxXwQUbMUsTxjEwt6Z3KpVdSWjs",
+     "lastValidBlockHeight": 442486373,
+     "slot": 464465069
+    },
+    "legs": [
+     {
+      "wallet": "1X54HEuQ5Kee2fgV9GXqUQawN5M4zbihqaYFJ5sURTe",
+      "amount": "6219499996279",
+      "expectedOut": "112574652",
+      "legExpectedOut": "112737588",
+      "minOut": "106945919",
+      "quoteMs": 1100,
+      "buildMs": 248,
+      "buildCalls": 1,
+      "size": 677,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "4vthhNJz6BkYxnXWAYwc6exBKGmt62LGuWvhZaTT2sA2ugkzgoBgc6XiVwZ23FCjPaBmA2NdLGsmLLBD8Ftxid1c",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 72912
+        },
+        {
+         "err": null,
+         "units": 72912
+        }
+       ]
+      },
+      "teardown": {
+       "frames": 1,
+       "ok": true,
+       "plan": {
+        "close": [
+         {
+          "kind": "volume",
+          "address": "E8ELKXQuWK528TsLxg4zTPFWYR4SDTSNnMkEBWJAuCJi",
+          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+          "lamports": "1844400"
+         }
+        ],
+        "keep": [
+         {
+          "address": "7CPC3wiaGP5UcseuepFWPARXcXYnkmtXePpzV54QwXJj",
+          "why": "holds 6219499996279 of EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump"
+         }
+        ]
+       },
+       "dry": [
+        {
+         "signature": "4bi3VwvGi2e4u3xRLoomFg5QUni54m3vGt7jwBBecabDaraEw78KYhGZt6W9dMAA6MXCuG7UkxiHeEY6UDayfTv1",
+         "state": "simulated",
+         "simulations": [
+          {
+           "err": null,
+           "units": 13393
+          },
+          {
+           "err": null,
+           "units": 13393
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "wallet": "BwVmXZidThqgG6JpV5XbkdyfMwcU3koiezQpmC3WFQvF",
+      "amount": "882423808221",
+      "expectedOut": "15972112",
+      "legExpectedOut": "16082311",
+      "minOut": "15173506",
+      "quoteMs": 1752,
+      "buildMs": 958,
+      "buildCalls": 1,
+      "size": 677,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "4YzghE6ES7bFPwGDZ7C3QJfKJYQD3KsaMjjVwGuB2x6imnBfp12Xn2dxBn4pxcZmkvVPhZAoPNzvd7QiUeN6VJJv",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 74412
+        },
+        {
+         "err": null,
+         "units": 74412
+        }
+       ]
+      },
+      "teardown": {
+       "frames": 1,
+       "ok": true,
+       "plan": {
+        "close": [
+         {
+          "kind": "volume",
+          "address": "FcqMJJaXjBQUXJok4ABPxrDJ9cannFqKt55jrpwsHAC",
+          "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+          "lamports": "1346200"
+         }
+        ],
+        "keep": [
+         {
+          "address": "Gp1Ky2k8nHiEz44EDvXsPoeWyWJPaF5JfLMz9QqDg7xM",
+          "why": "holds 882423808221 of EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump"
+         }
+        ]
+       },
+       "dry": [
+        {
+         "signature": "5tbFZHPAeZFKJpEXY8Ntah7z8UDy1Bgxoyxwwz3ECUMtSFKMw5ToLKbjaMQbM78Ztoa3aNzkL2dQd6DWEU5aCSqV",
+         "state": "simulated",
+         "simulations": [
+          {
+           "err": null,
+           "units": 11893
+          },
+          {
+           "err": null,
+           "units": 11893
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "wallet": "9UnZnrFJ1CXCmCorgGU9NvYkX5np1h4v4ympx3Nrdw3v",
+      "amount": "544152912662",
+      "expectedOut": "9849316",
+      "legExpectedOut": "9920694",
+      "minOut": "9356850",
+      "quoteMs": 1746,
+      "buildMs": 937,
+      "buildCalls": 1,
+      "size": 677,
+      "checks": "S1 ok, S2 ok, S3 ok, S4 ok, S5 ok, S6 ok, S7 ok, S8 ok, S9 ok, S10 ok, S11 ok, S12 ok, S13 ok",
+      "dry": {
+       "signature": "2xXVeambnx8B8oLCe24tsvK2aFcAwBk2es45Jn4SjXs59ALoDPcazBRjsPhooch9YSUNb5DfR6ysYwodp4khsRza",
+       "state": "simulated",
+       "simulations": [
+        {
+         "err": null,
+         "units": 62338
+        },
+        {
+         "err": null,
+         "units": 62338
+        }
+       ]
+      },
+      "teardown": {
+       "frames": 1,
+       "ok": true,
+       "plan": {
+        "close": [
+         {
+          "kind": "token",
+          "address": "FVee2JCpMd9k17iP1LLCSP28wwLt5N172pULCqUo8qQi",
+          "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "mint": "So11111111111111111111111111111111111111112",
+          "native": true,
+          "harvest": false,
+          "lamports": "28772578629"
+         }
+        ],
+        "keep": [
+         {
+          "address": "77uB66hdvftFovQeXsvef9Cz6n77v7fNWAF5gmGJVyhv",
+          "why": "holds 544152912662 of EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump"
+         },
+         {
+          "address": "2rfa7uChVnziSY72UQZRXr2nRCqDhBPatTPmvPZ1AyoT",
+          "why": "cashback 21178820 unclaimed"
+         }
+        ]
+       },
+       "dry": [
+        {
+         "signature": "4mzb7PHAiBdgd1HdQ7uw5o3R6C6ti5Z46EbP9QpvQT8zbJ6fqQScJCVETwn5KBCiUG4eMZHLYWXGjen5ChtBqFwC",
+         "state": "simulated",
+         "simulations": [
+          {
+           "err": null,
+           "units": 268
+          },
+          {
+           "err": null,
+           "units": 268
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

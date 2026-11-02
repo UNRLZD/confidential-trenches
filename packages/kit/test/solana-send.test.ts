@@ -23,6 +23,12 @@ import {
 } from "../src/index.ts";
 import * as kit from "../src/index.ts";
 
+// The queue times calls on performance.now(), which mock.timers does not move: here it follows Date, so the tests that
+// tick a mocked clock drive the queue too. The clock-step test reads the real one.
+let realPerf = false;
+const perfNow = performance.now.bind(performance);
+mock.method(performance, "now", () => (realPerf ? perfNow() : Date.now()));
+
 // ---- a signed-looking v0 tx: 1 signature slot, a message with one signer and the system program (test only)
 function tx(seed: number, lvbh = 1_000, firstIxData: number[] = []): SolanaSignedTx {
   const sig = new Uint8Array(64).fill(seed);
@@ -375,6 +381,36 @@ test("the set is refused before any send: unsigned, duplicate, too large, bad la
   // R5: a durable-nonce tx (first instruction System AdvanceNonceAccount, u32 LE 4) has no lastValidBlockHeight
   assert.throws(() => sendSolanaSet([tx(78, 500, [4, 0, 0, 0])], opts), /durable nonce/);
   for (const p of paths) assert.equal(p.calls.length, 0, "nothing was sent");
+});
+
+test("an RPC path's sends are in that URL's queue: 40 sendTransaction in any 10 s on a keyless one, the rest wait", async () => {
+  let fetched = 0;
+  const fakeFetch = (_url: string, init: RequestInit) => {
+    fetched++;
+    const body = JSON.parse(String(init.body)) as { id: string; params: [string] };
+    const sig = base58.encode(base64.decode(body.params[0]).subarray(1, 65));
+    return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: sig }), { headers: { "content-type": "application/json" } }));
+  };
+  const rpcPath = solanaSendPaths({ rpcUrl: "https://send-queue.example", fetch: fakeFetch }).find((p) => p.name === "rpc")!;
+  const b64 = base64.encode(tx(82).wire);
+  for (let i = 0; i < 45; i++) void rpcPath.send(b64).catch(() => null);
+  assert.equal(fetched, kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod, "the first 40 start at once, the other 5 wait for the window");
+  // the queue is the URL's: another set of paths to the same URL waits behind the same 40
+  void solanaSendPaths({ rpcUrl: "https://send-queue.example", fetch: fakeFetch }).find((p) => p.name === "rpc")!.send(b64).catch(() => null);
+  assert.equal(fetched, kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod);
+});
+
+test("one queue a provider: a call that started late moves the next one back, so the limit holds on the times calls went out", async () => {
+  const at: number[] = [];
+  const rpc: SolanaRpc = async () => { at.push(Date.now()); return null; };
+  const paced = kit.solanaPacedRpc(rpc, { windowMs: 300, total: 1, perMethod: 1 });
+  const calls = [paced("getSlot", []), paced("getSlot", []), paced("getSlot", [])];
+  // the page is busy past the second call's time: it starts late, at about 500 ms
+  const until = Date.now() + 500;
+  while (Date.now() < until) { /* busy */ }
+  await Promise.all(calls);
+  const gaps = at.slice(1).map((x, i) => x - at[i]!);
+  assert.ok(gaps.every((g) => g > 300), `gaps ${gaps.join(",")} ms`);
 });
 
 test("the default paths: the paper's three keyless URLs and the helper's /v1/rpc/solana, one fetch each, same bytes, in one tick", async () => {
@@ -813,3 +849,559 @@ test("Low: a pacer leaves the map once its last set is done and its interval has
     assert.equal(count!(), before, `after set ${n}, its pacer is gone`);
   }
 });
+
+// ---- one signature a status request (the wallet paper's request table, row 8: one address per request; each
+// signature names its fee payer, one of the user's wallets), spread over the poll, within the provider's rate
+const statusCalls = (p: FakeProvider) => p.calls.map((c, k) => ({ ...c, k })).filter((c) => c.method === "getSignatureStatuses");
+
+test("every status read carries one signature, on both providers, for the fill poll and the history read", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b, opts } = setup();
+  const set = [tx(91), tx(92), tx(93)];
+  a.height = 2_000; // past every tx's lastValidBlockHeight, so the dead check reads the history too
+  b.height = 2_000;
+  const h = sendSolanaSet(set, { ...opts, deadlineMs: 6_000 });
+  await advance(6_000);
+  await h.done;
+  for (const p of [a, b]) {
+    const calls = statusCalls(p);
+    assert.ok(calls.some((c) => (c.params[1] as { searchTransactionHistory?: boolean }).searchTransactionHistory === true), "a history read ran");
+    assert.ok(calls.length >= 6, `${calls.length} status reads`);
+    for (const c of calls) assert.equal((c.params[0] as string[]).length, 1, "one signature a request");
+    for (const s of set) assert.ok(calls.some((c) => (c.params[0] as string[])[0] === sigOf(s)), "every tx is read");
+  }
+});
+
+test("the fill poll is spread over the interval: one tx a call, in turn, never two calls in the same tick", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: number[] = [];
+  const rpc: SolanaRpc = async (m, p) => { if (m === "getSignatureStatuses") at.push(Date.now()); return a.rpc(m, p); };
+  const set = [tx(94), tx(95), tx(96)];
+  // a fast keyed provider (100 a second), so the spread is pollMs / 3, not the rate's gap
+  const h = sendSolanaSet(set, { paths: [path("rpc").path], providers: [rpc, b.rpc], pollMs: 300, rebroadcastMs: 60_000, deadlineMs: 3_000, providerRps: [100, 100] });
+  for (let ms = 0; ms < 3_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await h.done;
+  assert.ok(at.length >= 20, `${at.length} reads`);
+  const gaps = at.slice(1).map((x, i) => x - at[i]!);
+  assert.ok(gaps.every((g) => g >= 90), `gaps ${gaps.join(",")}`);
+  const sigs = statusCalls(a).map((c) => (c.params[0] as string[])[0]);
+  assert.deepEqual(sigs.slice(0, 6), [...set, ...set].map(sigOf), "in turn");
+});
+
+test("a keyless provider stays within its published limit: 100 calls in any 10 s, 40 of one method", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: { t: number; m: string }[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); };
+  a.height = 2_000;
+  const set = [tx(97), tx(98), tx(99), tx(100), tx(101)];
+  const h = sendSolanaSet(set, { paths: [path("rpc").path], providers: [rpc, b.rpc], deadlineMs: 25_000 });
+  for (let ms = 0; ms < 25_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await h.done;
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  assert.ok(at.filter((c) => c.m === "getSignatureStatuses").length > L.perMethod, `${at.length} calls`);
+  for (const x of at) {
+    const win = at.filter((y) => y.t >= x.t && y.t < x.t + L.windowMs);
+    assert.ok(win.length <= L.total, `${win.length} calls in the 10 s from ${x.t} ms`);
+    assert.ok(win.filter((y) => y.m === x.m).length <= L.perMethod, `${x.m} over its limit from ${x.t} ms`);
+  }
+});
+
+const perSecond = (at: readonly number[]): number => Math.max(0, ...at.map((x) => at.filter((y) => y >= x && y < x + 1_000).length));
+
+test("one queue a provider: two sets in flight on it stay within its rate together", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: number[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push(Date.now()); return a.rpc(m, p); };
+  a.height = 2_000;
+  const opts = { paths: [path("rpc").path], providers: [rpc, b.rpc] as const, deadlineMs: 5_000, providerRps: [5, 5] as const };
+  const h1 = sendSolanaSet([tx(110), tx(111), tx(112)], opts);
+  const h2 = sendSolanaSet([tx(113), tx(114), tx(115)], opts);
+  for (let ms = 0; ms < 5_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([h1.done, h2.done]);
+  assert.ok(at.length >= 20, `${at.length} calls`);
+  assert.ok(perSecond(at) <= 5, `${perSecond(at)} calls in one second`);
+});
+
+test("one queue a provider: another caller's reads through solanaPacedRpc and a set share it, first come first served", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: { t: number; m: string }[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); };
+  a.height = 2_000;
+  const paced = kit.solanaPacedRpc(rpc, kit.solanaRpsLimit(5));
+  assert.equal(kit.solanaPacedRpc(paced, kit.solanaRpsLimit(5)).length, paced.length);
+  const reads = Array.from({ length: 10 }, () => paced("getMinimumBalanceForRentExemption", [165]).catch(() => null));
+  const h = sendSolanaSet([tx(116), tx(117)], { paths: [path("rpc").path], providers: [paced, b.rpc], deadlineMs: 5_000, providerRps: [5, 5] });
+  for (let ms = 0; ms < 5_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([h.done, ...reads]);
+  const ts = at.map((c) => c.t);
+  assert.ok(perSecond(ts) <= 5, `${perSecond(ts)} calls in one second`);
+  // the ten reads asked first go first, two seconds of the rate; the set's calls queue behind them
+  assert.deepEqual(at.slice(0, 10).map((c) => c.m), Array(10).fill("getMinimumBalanceForRentExemption"));
+  assert.ok(at.length > 12);
+});
+
+test("one queue a provider, first in first out per method: while the status budget is spent, another method's call goes at once", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const at: { t: number; m: string }[] = [];
+  const rpc = Object.assign(async (m: string) => { at.push({ t: Date.now(), m }); return null; }, { url: "https://fifo.example" }) as SolanaRpc;
+  const paced = kit.solanaPacedRpc(rpc);
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  const statuses = Array.from({ length: L.perMethod + 1 }, () => paced("getSignatureStatuses", [["x"]]));
+  const read = paced("getMultipleAccounts", [["y"]]);
+  await flush();
+  assert.equal(at.filter((c) => c.m === "getSignatureStatuses").length, L.perMethod, "the status budget is spent, its next call waits for the window");
+  assert.deepEqual(at.filter((c) => c.m === "getMultipleAccounts").map((c) => c.t), [0], "the other method starts at once");
+  for (let ms = 0; ms <= L.windowMs + 10; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([...statuses, read]);
+  assert.equal(at.length, L.perMethod + 2);
+});
+
+test("a set unlanded and not yet expired for 25 s on a keyless provider: alone, the fill poll reads its burst and then the steady pool, leaves a later set's burst unread and books no later turn, so no other read on the provider waits", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  a.height = 500; // under the txs' lastValidBlockHeight: undecided, no history read
+  const at: { t: number; m: string }[] = [];
+  const rpc = Object.assign(async (m: string, p: readonly unknown[]) => { at.push({ t: Date.now(), m }); return m === "getMultipleAccounts" ? { context: { slot: 1 }, value: [null] } : a.rpc(m, p); }, { url: "https://undecided.example" }) as SolanaRpc;
+  const paced = kit.solanaPacedRpc(rpc);
+  const h = sendSolanaSet([tx(130), tx(131), tx(132)], { paths: [path("rpc").path], providers: [rpc, b.rpc], deadlineMs: 25_000 });
+  // another caller reads the same provider once a second all along: each starts in the tick it asks
+  const waited: number[] = [];
+  for (let ms = 0; ms < 25_000; ms += 10) {
+    if (ms % 1_000 === 500) { const t0 = Date.now(); void paced("getMultipleAccounts", [["z"]]).then(() => waited.push(Date.now() - t0)); }
+    mock.timers.tick(10);
+    await flush();
+  }
+  await h.done;
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  assert.ok(waited.length >= 24 && waited.every((w) => w <= 10), `other reads waited ${waited.join(",")} ms`);
+  const st = at.filter((c) => c.m === "getSignatureStatuses").map((c) => c.t);
+  const first = st.filter((x) => x < L.windowMs).length;
+  assert.ok(first >= L.perMethod - 2 * (L.perMethod / 5), `alone, ${first} reads in the first window: the steady pool (24 of 40) goes on after the burst`);
+  for (const x of st) assert.ok(st.filter((y) => y >= x && y < x + L.windowMs).length <= L.perMethod - L.perMethod / 5, `a later set's burst (8 of 40) read from ${x} ms`);
+  for (const x of at) {
+    const win = at.filter((y) => y.t >= x.t && y.t < x.t + L.windowMs);
+    assert.ok(win.length <= L.total && win.filter((y) => y.m === x.m).length <= L.perMethod, `over the limit from ${x.t} ms`);
+  }
+});
+
+test("while another caller's status read waits on the provider, it goes at the first turn the limit allows: the fill poll never takes it", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  a.height = 500;
+  const at: { t: number; who: string }[] = [];
+  const rpc = Object.assign(async (m: string, p: readonly unknown[]) => { if (m === "getSignatureStatuses") at.push({ t: Date.now(), who: (p[0] as string[])[0] === "other" ? "other" : "set" }); return m === "getSignatureStatuses" && (p[0] as string[])[0] === "other" ? { context: { slot: 1 }, value: [null] } : a.rpc(m, p); }, { url: "https://other-waits.example" }) as SolanaRpc;
+  const paced = kit.solanaPacedRpc(rpc);
+  const h = sendSolanaSet([tx(140), tx(141), tx(142)], { paths: [path("rpc").path], providers: [rpc, b.rpc], deadlineMs: 16_000 });
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  let other: Promise<unknown> | null = null;
+  for (let ms = 0; ms < 16_000; ms += 10) {
+    if (ms === 6_000) other = paced("getSignatureStatuses", [["other"]]);
+    mock.timers.tick(10);
+    await flush();
+  }
+  await h.done;
+  await other;
+  const set = at.filter((c) => c.who === "set").map((c) => c.t);
+  const first = set[0]!;
+  const went = at.find((c) => c.who === "other")!.t;
+  assert.ok(went <= first + L.windowMs + 20, `the other caller's read went at ${went} ms, the first turn is ${first + L.windowMs + 1} ms`);
+  assert.equal(set.filter((x) => x > 6_000 && x < went).length, 0, "no fill read took its turn");
+});
+
+test("one URL, several limits: a providerRps 4 set beside a keyless wrapper and the RPC send path on the same URL stays at 4 a second", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const U = "https://one-url-many-limits.example";
+  const a = provider();
+  const b = provider();
+  a.height = 2_000;
+  const at: { t: number; m: string }[] = [];
+  const rpcA = Object.assign(async (m: string, p: readonly unknown[]) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); }, { url: U }) as SolanaRpc;
+  // another object for the same URL, as another caller holds it
+  const other = Object.assign(async (m: string, p: readonly unknown[]) => { at.push({ t: Date.now(), m }); return a.rpc(m, p); }, { url: U }) as SolanaRpc;
+  const fakeFetch = (_url: string, init: RequestInit) => {
+    at.push({ t: Date.now(), m: "sendTransaction" });
+    const body = JSON.parse(String(init.body)) as { id: string; params: [string] };
+    const sig = base58.encode(base64.decode(body.params[0]).subarray(1, 65));
+    return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: sig }), { headers: { "content-type": "application/json" } }));
+  };
+  // the keyless wrapper is made first, so the keyless limit is named on the URL before the set names 4 a second
+  const wrapped = kit.solanaPacedRpc(other);
+  const rpcPath = solanaSendPaths({ rpcUrl: U, fetch: fakeFetch }).find((p) => p.name === "rpc")!;
+  const h = sendSolanaSet([tx(133), tx(134)], { paths: [rpcPath], providers: [rpcA, b.rpc], deadlineMs: 6_000, providerRps: [4, undefined] });
+  const reads = Array.from({ length: 12 }, () => wrapped("getMinimumBalanceForRentExemption", [165]).catch(() => null));
+  for (let ms = 0; ms < 6_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  await Promise.all([h.done, ...reads]);
+  const ts = at.map((c) => c.t);
+  assert.ok(at.some((c) => c.m === "sendTransaction") && at.filter((c) => c.m === "getMinimumBalanceForRentExemption").length === 12, "every caller ran");
+  assert.ok(perSecond(ts) <= 4, `${perSecond(ts)} calls in one second on the URL`);
+});
+
+test("the dry run through a direct caller's bare providers is paced: 1 a second simulates a set of 3 one a second", async (t) => {
+  t.after(() => mock.timers.reset());
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  const a = provider();
+  const b = provider();
+  const at: number[] = [];
+  const rpc: SolanaRpc = async (m, p) => { at.push(Date.now()); return a.rpc(m, p); };
+  const d = dryRunSolanaSet([tx(135), tx(136), tx(137)], { paths: [path("rpc").path], providers: [rpc, b.rpc], providerRps: [1, 1] });
+  for (let ms = 0; ms < 4_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  const r = await d;
+  assert.equal(r.txs.length, 3);
+  assert.equal(at.length, 3);
+  assert.ok(perSecond(at) <= 1, `${perSecond(at)} simulations in one second`);
+});
+
+// The fill poll at round trips of 0, 20, 50 and 120 ms on keyless providers (mock time): the reads a set makes are
+// counted, not timed, so a fast provider never spends the budget early and goes quiet.
+const FILL_RTTS = [0, 20, 50, 120];
+const late = (f: SolanaRpc, rtt: number, log: { t: number; sig: string }[]): SolanaRpc => (async (m: string, p: readonly unknown[]) => {
+  if (m === "getSignatureStatuses" && (p[1] as { searchTransactionHistory?: boolean } | undefined)?.searchTransactionHistory !== true) log.push({ t: Date.now(), sig: (p[0] as string[])[0]! });
+  await new Promise((r) => setTimeout(r, rtt));
+  return f(m, p);
+}) as SolanaRpc;
+const tickFor = async (ms: number, until?: () => boolean) => { for (let t = 0; t < ms && !until?.(); t += 10) { mock.timers.tick(10); await flush(); } };
+type SetOut = Awaited<ReturnType<typeof sendSolanaSet>["done"]>;
+const startSet = (set: SolanaSignedTx[], providers: readonly [SolanaRpc, SolanaRpc], deadlineMs: number) => {
+  const box: { out?: SetOut } = {};
+  void sendSolanaSet(set, { paths: [path("rpc").path], providers, deadlineMs }).done.then((r) => { box.out = r; });
+  return box;
+};
+// A lone open tx of an n-tx set is read again at least every n x max(pollMs / n, W / (B - 2C)), B - 2C = 24 keyless.
+const revisitMs = (n: number) => n * Math.max(SOLANA_STATUS_POLL_MS / n, kit.SOLANA_KEYLESS_RPC_LIMIT.windowMs / (kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod - 2 * (kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod / 5)));
+const mostInWindow = (ts: number[], w: number) => Math.max(0, ...ts.map((x) => ts.filter((y) => y >= x && y < x + w).length));
+
+for (const rtt of FILL_RTTS) {
+  test(`fill poll at ${rtt} ms a call: a stuck set of 9 has every tx read again within its revisit plus the round trip, and spends at most the budget less one burst in any window`, async (t) => {
+    t.after(() => mock.timers.reset());
+    const { a, b } = setup();
+    a.height = 500; // under the txs' lastValidBlockHeight: undecided, no history read
+    b.height = 500;
+    const logA: { t: number; sig: string }[] = [];
+    const logB: { t: number; sig: string }[] = [];
+    const set = Array.from({ length: 9 }, (_, i) => tx(230 + i, 5_000));
+    const box = startSet(set, [late(a.rpc, rtt, logA), late(b.rpc, rtt, logB)], 25_000);
+    await tickFor(26_000, () => box.out !== undefined);
+    const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+    for (const [name, log] of [["A", logA], ["B", logB]] as const) {
+      for (const s of set) {
+        const at = [0, ...log.filter((x) => x.sig === sigOf(s)).map((x) => x.t), 25_000];
+        const gap = Math.max(...at.slice(1).map((x, k) => x - at[k]!));
+        // + one 10 ms tick a read of the round: mock time fires each timer on the tick after it is due
+        assert.ok(gap <= revisitMs(9) + rtt + 9 * 10, `${name}: a tx unread for ${gap} ms (revisit ${revisitMs(9)} ms + ${rtt} ms)`);
+      }
+      const most = mostInWindow(log.map((x) => x.t), L.windowMs);
+      assert.ok(most <= L.perMethod - L.perMethod / 5, `${name}: ${most} status reads in one window, into a later set's burst`);
+    }
+  });
+
+  test(`fill poll at ${rtt} ms a call: a 3-tx set started at 3 s or 6 s beside a stuck set of 9, and two at once, are read filled within 1 s of landing`, async (t) => {
+    t.after(() => mock.timers.reset());
+    for (const [start, quicks] of [[3_000, 1], [6_000, 1], [3_000, 2]] as const) {
+      mock.timers.reset();
+      const { a, b } = setup();
+      a.height = 500;
+      b.height = 500;
+      const logA: { t: number; sig: string }[] = [];
+      const logB: { t: number; sig: string }[] = [];
+      const pa = late(a.rpc, rtt, logA), pb = late(b.rpc, rtt, logB);
+      const stuck = startSet(Array.from({ length: 9 }, (_, i) => tx(240 + i, 5_000)), [pa, pb], start + 6_000);
+      await tickFor(start);
+      const sets = Array.from({ length: quicks }, (_, k) => Array.from({ length: 3 }, (_, i) => tx(250 + 3 * k + i, 5_000)));
+      const boxes = sets.map((q) => startSet(q, [pa, pb], 20_000));
+      await tickFor(800);
+      for (const q of sets) for (const s of q) { a.set(sigOf(s), OK); b.set(sigOf(s), OK); }
+      await tickFor(5_000, () => boxes.every((x) => x.out !== undefined));
+      for (const [k, x] of boxes.entries()) {
+        assert.ok(x.out, `started at ${start} ms, quick set ${k} never ended`);
+        const last = Math.max(...x.out.txs.map((o) => o.ms!)) - 800; // ms counts from the set's start
+        assert.equal(x.out.txs.filter((o) => o.state === "filled").length, 3);
+        assert.ok(last < 1_000, `started at ${start} ms (${quicks} at once), quick set ${k}: last read filled ${last} ms after landing`);
+      }
+      await tickFor(7_000, () => stuck.out !== undefined);
+    }
+  });
+}
+
+test("a tx one provider has read landed is not read again there, and one the other never sees land holds no other tx back", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  const [x, y] = [tx(210, 5_000), tx(211, 5_000)];
+  a.set(sigOf(x), OK); // B never sees x land
+  let out: Awaited<ReturnType<typeof sendSolanaSet>["done"]> | undefined;
+  void sendSolanaSet([x, y], { paths: [path("rpc").path], providers: [a.rpc, b.rpc], deadlineMs: 30_000 }).done.then((r) => { out = r; });
+  for (let ms = 0; ms < 3_000; ms += 10) { mock.timers.tick(10); await flush(); }
+  a.set(sigOf(y), OK);
+  b.set(sigOf(y), OK);
+  for (let ms = 0; ms < 30_000 && !out; ms += 100) { mock.timers.tick(100); await flush(); }
+  const reads = (p: FakeProvider, s: SolanaSignedTx) => p.calls.filter((c) => c.method === "getSignatureStatuses" && (c.params[1] as { searchTransactionHistory?: boolean } | undefined)?.searchTransactionHistory !== true && (c.params[0] as string[]).includes(sigOf(s))).length;
+  assert.equal(reads(a, x), 1, `A read x ${reads(a, x)} times, after reading it landed the first time`);
+  assert.deepEqual(out!.txs.map((s) => s.state), ["unknown", "filled"]);
+  assert.ok(out!.txs[1]!.ms! - 3_000 < 1_000, `y was read filled ${out!.txs[1]!.ms! - 3_000} ms after landing`);
+});
+
+// One provider (one URL, one queue) as several sets call it, each set's status reads logged apart.
+const sharedA = (a: FakeProvider, url: string, rtt: number, log: { t: number; sig: string }[]): SolanaRpc => Object.assign(late(a.rpc, rtt, log), { url });
+for (const rps of [1, 2]) {
+  test(`the fill poll reads at providerRps ${rps}, where the dead checks of two stuck sets fill the budget: each keeps reading and a later set is read filled`, async (t) => {
+    t.after(() => mock.timers.reset());
+    const { a, b } = setup();
+    a.height = 500;
+    b.height = 500;
+    const url = `https://keyed-${rps}.example`;
+    const log1: { t: number; sig: string }[] = [];
+    const log2: { t: number; sig: string }[] = [];
+    const log3: { t: number; sig: string }[] = [];
+    const opts = (log: { t: number; sig: string }[], deadlineMs: number) => ({ paths: [path("rpc").path], providers: [sharedA(a, url, 20, log), b.rpc] as const, providerRps: [rps, rps] as const, deadlineMs });
+    const one = sendSolanaSet([tx(170, 5_000), tx(171, 5_000), tx(172, 5_000)], opts(log1, 20_000));
+    const two = sendSolanaSet([tx(173, 5_000), tx(174, 5_000), tx(175, 5_000)], opts(log2, 20_000));
+    await tickFor(5_000);
+    const late1 = tx(176, 5_000);
+    a.set(sigOf(late1), OK);
+    b.set(sigOf(late1), OK);
+    let out: SetOut | undefined;
+    void sendSolanaSet([late1], opts(log3, 15_000)).done.then((r) => { out = r; });
+    await tickFor(16_000);
+    await Promise.all([one.done, two.done]);
+    assert.ok(log1.length >= 3 && log2.length >= 3, `in 20 s at ${rps} a second the stuck sets read ${log1.length} and ${log2.length} times on A`);
+    assert.equal(out?.txs[0]!.state, "filled", `at ${rps} a second the later set was not read filled`);
+    assert.ok(out!.txs[0]!.ms! <= 8_000, `at ${rps} a second the later set was read filled ${out!.txs[0]!.ms} ms after it started`);
+  });
+}
+
+// Each test below is named for the rule it holds (the planted break it catches in brackets).
+test("fill burst [Q5]: a burst read the poll skips (backed off after a 429) is not spent: the whole burst is read after the back-off", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const log: { t: number; sig: string }[] = [];
+  let first = true;
+  const rpcA: SolanaRpc = async (m, p) => {
+    if (m === "getSignatureStatuses" && first) { first = false; throw new Error("HTTP 429 Too Many Requests"); }
+    return a.rpc(m, p);
+  };
+  const box = startSet(Array.from({ length: 9 }, (_, i) => tx(180 + i, 5_000)), [late(rpcA, 0, log), b.rpc], 6_000);
+  await tickFor(6_100, () => box.out !== undefined);
+  // the first read (at 200 ms) is refused: a 1 s back-off; the 7 burst reads left go 200 ms apart after it
+  const after = log.map((x) => x.t).filter((x) => x > 1_200);
+  const burst = after.filter((x) => x <= after[0]! + 7 * 200);
+  assert.ok(burst.length >= 7, `${burst.length} reads in the 1.4 s after the back-off, the burst spent while it was skipped`);
+});
+
+test("fill pool [Q6]: a set with nothing left to read on a provider spends none of its steady pool", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const logX: { t: number; sig: string }[] = [];
+  const logY: { t: number; sig: string }[] = [];
+  const x = tx(190, 5_000);
+  // X: one tx, landed on A only from 3 s (B never sees it), so past its burst X has nothing to read on A
+  const boxX = startSet([x], [sharedA(a, "https://pool-q6.example", 0, logX), b.rpc], 25_000);
+  const boxY = startSet([tx(191, 5_000), tx(192, 5_000), tx(193, 5_000)], [sharedA(a, "https://pool-q6.example", 0, logY), b.rpc], 25_000);
+  await tickFor(3_000);
+  a.set(sigOf(x), OK);
+  await tickFor(23_000, () => boxX.out !== undefined && boxY.out !== undefined);
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  const pool = L.perMethod - 2 * (L.perMethod / 5);
+  const y = logY.filter((r) => r.t >= 12_000 && r.t < 22_000).length;
+  assert.ok(y >= pool - 2, `Y read ${y} times in a window it had the pool of ${pool} to itself`);
+});
+
+test("fill pool [Q7, Q8]: two stuck sets on one provider share one steady pool, so a later set's burst stays free", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const log: { t: number; sig: string }[] = [];
+  const pa = late(a.rpc, 0, log);
+  const one = startSet(Array.from({ length: 9 }, (_, i) => tx(200 + i, 5_000)), [pa, b.rpc], 30_000);
+  await tickFor(300);
+  const two = startSet(Array.from({ length: 9 }, (_, i) => tx(210 + i, 5_000)), [pa, b.rpc], 30_000);
+  await tickFor(31_000, () => one.out !== undefined && two.out !== undefined);
+  const L = kit.SOLANA_KEYLESS_RPC_LIMIT;
+  const pool = L.perMethod - 2 * (L.perMethod / 5);
+  // past both bursts (their reads out of the window from 12 s), every window holds the one pool
+  const ts = log.map((r) => r.t);
+  for (const w of ts.filter((x) => x >= 12_000 && x <= 20_000)) {
+    const n = ts.filter((y) => y >= w && y < w + L.windowMs).length;
+    assert.ok(n <= pool, `${n} steady reads by two sets in the window from ${w} ms, over the pool of ${pool}`);
+  }
+});
+
+test("fill burst [Q9]: a set's burst is spread over FILL_BURST_MS, not spent at pollMs over its txs", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const log: { t: number; sig: string }[] = [];
+  const box = startSet(Array.from({ length: 9 }, (_, i) => tx(220 + i, 5_000)), [late(a.rpc, 0, log), b.rpc], 4_000);
+  await tickFor(4_100, () => box.out !== undefined);
+  const C = kit.SOLANA_KEYLESS_RPC_LIMIT.perMethod / 5;
+  // a tx that lands a second in is still read inside the burst: its C reads reach 1.4 s and more
+  assert.ok(log[C - 1]!.t >= 1_400, `the burst's last read went at ${log[C - 1]!.t} ms`);
+});
+
+// rtt 0: the set is in its steady reads when the budget is busy; rtt 3 s (one read in flight): still in its burst
+for (const rtt of [0, 3_000]) test(`fill poll [lastFast]: at ${rtt} ms a call, while another caller keeps the status budget busy past the first window and the set still reads in every window, the poll books no turn`, async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const reads: number[] = []; // the set's status reads on A
+  let waiting = 0; // the other caller's status reads asked and not yet gone out
+  const rpcA = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getSignatureStatuses" && (p[0] as string[])[0] === "other") { waiting--; return { context: { slot: 2_000 }, value: [null] }; }
+    if (m === "getSignatureStatuses") { reads.push(Date.now()); await new Promise((r) => setTimeout(r, rtt)); }
+    return a.rpc(m, p);
+  }, { url: `https://busy-${rtt}.example` }) as SolanaRpc;
+  const other = kit.solanaPacedRpc(rpcA);
+  const h = sendSolanaSet([tx(260, 5_000), tx(261, 5_000), tx(262, 5_000)], { paths: [path("rpc").path], providers: [rpcA, b.rpc], deadlineMs: 30_000 });
+  let busyMs = 0;
+  let fillBooked = 0;
+  for (let ms = 0; ms < 30_000; ms += 10) {
+    // from 12 s, past the first window, more status reads every 3 s than the window has room for: some wait
+    if (ms >= 12_000 && ms % 3_000 === 0) for (let k = 0; k < 20; k++) { waiting++; void other("getSignatureStatuses", [["other"], { searchTransactionHistory: false }]); }
+    mock.timers.tick(10);
+    await flush();
+    if (waiting > 0) busyMs += 10;
+    fillBooked = Math.max(fillBooked, kit.solanaRpcQueueSize(rpcA, "getSignatureStatuses").booked - waiting);
+  }
+  await h.done;
+  const gap = Math.max(...reads.slice(1).map((x, i) => x - reads[i]!));
+  assert.ok(busyMs >= kit.SOLANA_KEYLESS_RPC_LIMIT.windowMs, `the other caller's reads waited ${busyMs} ms in all, under one window`);
+  assert.ok(gap < kit.SOLANA_KEYLESS_RPC_LIMIT.windowMs, `the set read nothing for ${gap} ms`);
+  assert.equal(fillBooked, 0, "the fill poll booked a turn while it read in every window");
+});
+
+test("a set stopped while its dead check waits on one blockhash's isBlockhashValid asks no other and leaves no turn booked [Q3]", async (t) => {
+  t.after(() => mock.timers.reset());
+  setup();
+  // a set of 2 on two blockhashes; isBlockhashValid answers in 800 ms; the dead check every 300 ms; stopped at 500 ms
+  const tx2 = (seed: number, bh: number): SolanaSignedTx => {
+    const msg = [0x80, 1, 0, 1, 2, ...new Uint8Array(32).fill(seed + 1), ...new Uint8Array(32), ...new Uint8Array(32).fill(bh), 1, 1, 1, 0, 0, 0];
+    return { wire: Uint8Array.from([1, ...new Uint8Array(64).fill(seed), ...msg]), lastValidBlockHeight: 5_000 };
+  };
+  const asked: string[] = [];
+  const slowValid = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => {
+    asked.push(m);
+    if (m === "getLatestBlockhash") return { context: { slot: 1_000 }, value: { blockhash: base58.encode(new Uint8Array(32).fill(9)), lastValidBlockHeight: 150 } };
+    if (m === "isBlockhashValid") { await new Promise((r) => setTimeout(r, 800)); return { context: { slot: 2_000 }, value: true }; }
+    if (m === "getSignatureStatuses") return { context: { slot: 2_000 }, value: (p[0] as string[]).map(() => null) };
+    throw new Error(`unexpected ${m}`);
+  }, { url }) as SolanaRpc;
+  const pa = slowValid("https://q3-a.example"), pb = slowValid("https://q3-b.example");
+  const h = sendSolanaSet([tx2(31, 7), tx2(32, 8)], { paths: [path("rpc").path], providers: [pa, pb], rebroadcastMs: 300, deadlineMs: 60_000 });
+  await tickFor(500); // each provider's dead check is in its first isBlockhashValid
+  assert.equal(asked.filter((m) => m === "isBlockhashValid").length, 2);
+  h.stop();
+  await h.done;
+  await tickFor(2_000);
+  assert.equal(asked.filter((m) => m === "isBlockhashValid").length, 2, "the dead check asked the second blockhash after the set ended");
+  assert.deepEqual([kit.solanaRpcQueueSize(pa).booked, kit.solanaRpcQueueSize(pb).booked], [0, 0], "turns booked after the set ended");
+});
+
+test("30 sets given up while their calls wait their turn leave no turn booked in the provider's queue", async (t) => {
+  t.after(() => mock.timers.reset());
+  const { a, b } = setup();
+  a.height = 500;
+  b.height = 500;
+  const rpcA = Object.assign(async (m: string, p: readonly unknown[]) => a.rpc(m, p), { url: "https://given-up.example" }) as SolanaRpc;
+  const hs = Array.from({ length: 30 }, (_, i) => sendSolanaSet([tx(100 + i, 5_000)], { paths: [path("rpc").path], providers: [rpcA, b.rpc], providerRps: [1, 1], deadlineMs: 60_000 }));
+  await tickFor(SOLANA_REBROADCAST_MS + 50); // every set's dead check asks for its turn on the 1-a-second provider
+  const size = (kit as { solanaRpcQueueSize?: typeof kit.solanaRpcQueueSize }).solanaRpcQueueSize;
+  if (size) assert.ok(size(rpcA).booked > 0, "no call was waiting its turn");
+  for (const h of hs) h.stop();
+  await Promise.all(hs.map((h) => h.done));
+  // a fresh call waits at most the 1 s since the last call that went out, never behind the turns given up on
+  const t0 = Date.now();
+  let went = -1;
+  void kit.solanaPacedRpc(rpcA, kit.solanaRpsLimit(1))("getLatestBlockhash", [{ commitment: "finalized" }]).then(() => { went = Date.now() - t0; });
+  await tickFor(40_000, () => went >= 0);
+  assert.ok(went >= 0 && went <= 1_000, `a fresh call waited ${went} ms behind turns given up on`);
+  assert.equal(kit.solanaRpcQueueSize(rpcA).booked, 0, "turns of calls given up on stay booked");
+});
+
+test("the fill poll's back-off runs on the monotonic clock: a wall clock set back an hour does not hold the reads back", async (t) => {
+  realPerf = true;
+  t.after(() => { realPerf = false; mock.timers.reset(); });
+  mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const a = provider();
+  const b = provider();
+  a.height = 500;
+  b.height = 500;
+  let first = true;
+  const reads: number[] = [];
+  const rpcA: SolanaRpc = async (m, p) => {
+    if (m === "getSignatureStatuses") {
+      reads.push(perfNow());
+      if (first) { first = false; throw new Error("HTTP 429 Too Many Requests"); }
+    }
+    return a.rpc(m, p);
+  };
+  const h = sendSolanaSet([tx(160, 5_000)], { paths: [path("rpc").path], providers: [rpcA, b.rpc], deadlineMs: 3_000 });
+  await new Promise((r) => setTimeout(r, 600)); // the first read, refused with a 429: a 1 s back-off
+  assert.equal(reads.length, 1);
+  mock.timers.setTime(Date.now() - 3_600_000); // the wall clock goes back an hour
+  await h.done;
+  assert.ok(reads.length >= 2, `${reads.length} status read(s) on A in 3 s after a 1 s back-off`);
+});
+
+test("pollMs of 0, below 0 or not a number is refused before any send", () => {
+  const p = path("rpc");
+  for (const pollMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => sendSolanaSet([tx(190)], { paths: [p.path], providers: [provider().rpc, provider().rpc], pollMs }), /pollMs/);
+  }
+  assert.equal(p.calls.length, 0);
+});
+
+test("the queue's clock is monotonic: a step of the wall clock never lets a window's calls look older and one more through", async (t) => {
+  realPerf = true;
+  t.after(() => { realPerf = false; mock.timers.reset(); });
+  mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const at: number[] = [];
+  const rpc: SolanaRpc = async () => { at.push(perfNow()); return null; };
+  const paced = kit.solanaPacedRpc(rpc, { windowMs: 400, total: 2, perMethod: 2 });
+  const first = [paced("getSlot", []), paced("getSlot", [])];
+  await Promise.all(first);
+  mock.timers.setTime(Date.now() + 3_600_000); // the wall clock jumps an hour ahead
+  await paced("getSlot", []);
+  assert.equal(at.length, 3);
+  assert.ok(at[2]! - at[0]! >= 400, `the third call went ${(at[2]! - at[0]!).toFixed(0)} ms after the first, inside the 400 ms window`);
+});
+
+test("a pause between the queue letting a call go and the call going out never lets a window hold one call too many", async (t) => {
+  realPerf = true;
+  t.after(() => { realPerf = false; });
+  const at: number[] = [];
+  let first = true;
+  // The first call reaches the provider 8 ms after the queue let it go (a GC or a slow tick in between).
+  const rpc: SolanaRpc = async () => {
+    if (first) { first = false; const until = perfNow() + 8; while (perfNow() < until); }
+    at.push(perfNow());
+    return null;
+  };
+  const paced = kit.solanaPacedRpc(rpc, { windowMs: 200, total: 2, perMethod: 2 });
+  await Promise.all([paced("getSlot", []), paced("getSlot", []), paced("getSlot", [])]);
+  assert.equal(at.length, 3);
+  assert.ok(at[2]! - at[0]! >= 200, `the third call reached the provider ${(at[2]! - at[0]!).toFixed(1)} ms after the first, inside the 200 ms window`);
+});
+

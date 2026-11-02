@@ -109,7 +109,103 @@ export type SolanaQuoteRequest = {
   amount: bigint; // a_k: lamports on a buy, the token's base units on a sell
   spendable: bigint; // W_k's spendable lamports on a buy, its token balance on a sell
   minOut: bigint; // minOut_k (§1.3): token base units on a buy, lamports on a sell
+  // Every other Solana wallet of this user (all of them, not only the set's): S11 refuses a tx that names any of them or
+  // its accounts for this trade, in any role, since even a read-only key links two of the user's wallets on chain.
+  otherWallets: readonly string[];
+  // The trade's SolanaWalletLinks, built while the build and reads are in flight; S11 uses it only when it holds every
+  // wallet in otherWallets, and otherwise builds its own.
+  links?: SolanaWalletLinks;
+  // Mints the user's wallets hold, when the caller names them: S11 also refuses the associated token account of any
+  // other wallet for these, though the tx names no such mint.
+  heldMints?: readonly string[];
 };
+
+// The accounts of the user's wallets a tx could name, by address, kept across trades or built for one, and grown by new
+// wallets and each leg's keys:
+// each wallet, its pump and PumpSwap volume accounts, the PumpSwap cashback account (the WSOL account of its PumpSwap
+// volume account, which PumpSwap adds on a cashback coin: pump-swap-sdk 2.2.0 offlinePumpAmm.ts, buy 797-808, sell
+// 1055-1070), and its associated token account, under Token and Token-2022, for WSOL, the token, and every key any of
+// the trade's txs names. Creator vaults are not in it: no wallet of the user can create a coin yet.
+export class SolanaWalletLinks {
+  readonly #wallets = new Set<string>();
+  readonly #owner = new Map<string, string>();
+  // Keys whose associated token accounts are derived for every wallet in #wallets.
+  readonly #added = new Set<string>();
+  // grow() calls run one after another, so two never derive the same key, and one awaited grow means every earlier one
+  // is done.
+  #chain: Promise<void> = Promise.resolve();
+  constructor(wallets: Iterable<string> = []) {
+    this.addWallets(wallets);
+    this.add([SOLANA_SOL_MINT]);
+  }
+  /** The wallets whose accounts are all in the map: a wallet joins only once its every account is derived. */
+  get wallets(): ReadonlySet<string> {
+    return this.#wallets;
+  }
+  /** True when every one of these wallets is in the map. */
+  holds(wallets: Iterable<string>): boolean {
+    for (const w of wallets) if (!this.#wallets.has(w)) return false;
+    return true;
+  }
+  #set(k: string, w: string): void {
+    if (!this.#owner.has(k)) this.#owner.set(k, w);
+  }
+  // Generators of the work, one derivation a step, so add() runs them whole and grow() in slices. Each marks its wallet
+  // or key done only after its last pair. Sets iterate live: a key added while a wallet is derived is reached by it, and
+  // a wallet that joins while a key is derived is reached by that key.
+  *#walletWork(w: string): Generator<void> {
+    if (this.#wallets.has(w)) return;
+    const sva = solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM);
+    for (const k of [w, solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), sva, solanaAta(sva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)]) this.#set(k, w);
+    yield;
+    for (const k of this.#added) {
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_PROGRAM), w);
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_2022_PROGRAM), w);
+      yield;
+    }
+    this.#wallets.add(w);
+  }
+  *#keyWork(k: string): Generator<void> {
+    if (this.#added.has(k)) return;
+    for (const w of this.#wallets) {
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_PROGRAM), w);
+      this.#set(solanaAta(w, k, SOLANA_TOKEN_2022_PROGRAM), w);
+      yield;
+    }
+    this.#added.add(k);
+  }
+  /** Each new wallet's accounts, and its associated token accounts for every key already in the map. */
+  addWallets(wallets: Iterable<string>): void {
+    for (const w of wallets) for (const _ of this.#walletWork(w));
+  }
+  /** Each wallet's associated token accounts for these keys, once per key. Every key counts, a program's too: the
+   * rule is about what a tx names, and an address derived from another wallet links the two whatever it holds. */
+  add(keys: Iterable<string>): void {
+    for (const k of keys) for (const _ of this.#keyWork(k));
+  }
+  /** addWallets then add, in slices of about `sliceMs` that yield to the event loop, so the work overlaps the reads
+   * and the build in flight. */
+  grow(wallets: Iterable<string>, keys: Iterable<string>, sliceMs = 4): Promise<void> {
+    const work = [...[...wallets].map((w) => () => this.#walletWork(w)), ...[...keys].map((k) => () => this.#keyWork(k))];
+    const run = async (): Promise<void> => {
+      let t = performance.now();
+      for (const job of work) {
+        for (const _ of job()) {
+          if (performance.now() - t < sliceMs) continue;
+          await new Promise<void>((r) => setTimeout(r, 0));
+          t = performance.now();
+        }
+      }
+    };
+    const done = this.#chain.then(run);
+    this.#chain = done.catch(() => undefined);
+    return done;
+  }
+  /** The wallet whose account this is, if any. */
+  ownerOf(key: string): string | undefined {
+    return this.#owner.get(key);
+  }
+}
 export type SolanaAccountRead = { owner: string; data: Uint8Array };
 // One provider's simulation of the whole tx at `confirmed` with sigVerify off, as the device read it.
 export type SolanaSimulation = {
@@ -118,17 +214,20 @@ export type SolanaSimulation = {
   tokenAccount: { pre: bigint; post: bigint }; // W_k's account of the token: the output on a buy, the input on a sell
   tokenAccountLamports: { pre: bigint; post: bigint }; // the same account's lamports: 0 before means the tx creates it
   pumpVolumeAccumulator: { pre: bigint; post: bigint }; // W_k's own pump PDA, which a pump buy may fund
-  otherWallets: { pre: bigint; post: bigint }[]; // every other wallet of this user, lamports
+  pumpSwapVolumeAccumulator: { pre: bigint; post: bigint }; // W_k's own PumpSwap PDA, which a PumpSwap buy may fund
 };
 export type SolanaQuoteReads = {
   tables: Readonly<Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]>>; // provider A, B
   mint: readonly [SolanaAccountRead | null, SolanaAccountRead | null];
-  // Rent-exempt minimums for the sizes in play (the output token account, the pump volume account), read on provider A
-  // and B. Rent is fixed cluster state, so S11 refuses unless both providers give the same value.
+  // Rent-exempt minimums for the sizes in play (the output token account, a volume account: pump's and PumpSwap's are
+  // both 137 bytes), read on provider A and B. Rent is fixed cluster state, so S11 refuses unless both providers give the
+  // same value.
   rent: { tokenAccount: readonly [bigint, bigint]; pumpVolumeAccumulator: readonly [bigint, bigint] };
   simulations: readonly [SolanaSimulation | null, SolanaSimulation | null];
-  // E for this wallet's exact input from the reference pool (S12), its tolerance and the user's slippage s.
-  reference: { expectedOut: bigint; slippageBps: number } | null;
+  // S12's reference, from the device's own pool read (markets paper S12, T1.3): expectedOut = E(a_k), this wallet's exact
+  // input priced on the reference pool, the bar for the simulated out; minOutBase = E_k = floor(E(A) × a_k / A), the
+  // base of minOut_k's floor in a standard-size set (E(a_k) itself when absent); and the user's slippage s.
+  reference: { expectedOut: bigint; minOutBase?: bigint; slippageBps: number } | null;
 };
 export type SolanaQuoteCheckId = "S1" | "S2" | "S3" | "S4" | "S5" | "S6" | "S7" | "S8" | "S9" | "S10" | "S11" | "S12" | "S13" | "DECODE";
 export type SolanaQuoteResult = { id: SolanaQuoteCheckId; ok: boolean; detail: string };
@@ -162,6 +261,7 @@ type Ctx = {
   req: SolanaQuoteRequest;
   reads: SolanaQuoteReads;
   tx: SolanaTransaction;
+  keys: readonly string[]; // every account the tx names: its static keys and its lookup tables' indexes, resolved
   ixs: Ix[];
   tokenProgram: string | null;
   route: Route | null;
@@ -169,6 +269,14 @@ type Ctx = {
   jupAt: number;
 };
 
+const isAddress = (v: unknown): v is string => {
+  if (typeof v !== "string" || v.length < 32 || v.length > 44) return false;
+  try {
+    return base58.decode(v).length === 32;
+  } catch {
+    return false;
+  }
+};
 const pass = (id: SolanaQuoteCheckId, detail: string): SolanaQuoteResult => ({ id, ok: true, detail });
 const fail = (id: SolanaQuoteCheckId, detail: string): SolanaQuoteResult => ({ id, ok: false, detail });
 const u16 = (d: Uint8Array, o: number): number => new DataView(d.buffer, d.byteOffset, d.byteLength).getUint16(o, true);
@@ -470,6 +578,13 @@ function s8(c: Ctx): SolanaQuoteResult {
 // S8's compute cap for a Jupiter route_v2 instruction's data, which the build (trade/solana/build.ts) also sets as the
 // limit, so the two never differ: a one-step pump.fun curve route gets the pump cap of its step, every other route,
 // and any data that is not route_v2, the general one.
+/** The route's signed amounts (route_v2 or shared_accounts_route_v2, by the layouts above), or null for any other data. */
+export function solanaRouteAmounts(routeData: Uint8Array): { inAmount: bigint; quotedOut: bigint; slippageBps: number } | null {
+  const d = routeData;
+  if (d.length >= 34 && eqBytes(d.subarray(0, 8), Uint8Array.from(ROUTE_V2))) return { inAmount: u64(d, 8), quotedOut: u64(d, 16), slippageBps: u16(d, 24) };
+  if (d.length >= 35 && eqBytes(d.subarray(0, 8), Uint8Array.from(SHARED_ROUTE_V2))) return { inAmount: u64(d, 9), quotedOut: u64(d, 17), slippageBps: u16(d, 25) };
+  return null;
+}
 export function solanaRouteCuCap(routeData: Uint8Array): number {
   if (routeData.length < 34 || !eqBytes(routeData.subarray(0, 8), Uint8Array.from(ROUTE_V2))) return SOLANA_CU_LIMIT.other;
   const step = u32(routeData, 30) === 1 ? routeData[34] : undefined;
@@ -513,10 +628,27 @@ function s10(c: Ctx): SolanaQuoteResult {
 
 // S11: the simulation on both providers. A buy's native out stays within a_k + fees + tips + what the simulation shows
 // W_k's output account gaining, up to its rent (anyone can create or pre-fund that address, so the rent is never assumed)
-// + the wallet's own pump volume account, if the route funds it, up to its rent; and its token in reaches minOut_k.
-// A sell's token out is exactly a_k and its native in, before fees and tips, reaches minOut_k. No other wallet of this
-// user changes.
+// + each of the wallet's own volume accounts (pump's and PumpSwap's), if the route funds it, each up to its rent; and its
+// token in reaches minOut_k. A sell's token out is exactly a_k, its native in, before fees and tips, reaches minOut_k,
+// and it funds neither volume account. No other wallet of this user is touched, read statically: the tx names none of
+// the user's other wallets, nor any of their accounts in SolanaWalletLinks (the volume accounts, the PumpSwap cashback
+// account, the associated token account for any mint the tx names), in any role, statically or through a lookup table.
+// So no simulation ever needs another wallet in its request.
 function s11(c: Ctx): SolanaQuoteResult {
+  const others = c.req.otherWallets;
+  if (!Array.isArray(others)) return fail("S11", "no list of the user's other wallets");
+  const given = c.req.links;
+  const held = c.req.heldMints ?? [];
+  if (!Array.isArray(held) || !held.every(isAddress)) return fail("S11", "the held mints must be addresses");
+  const links = given instanceof SolanaWalletLinks && given.holds(others) ? given : new SolanaWalletLinks(others);
+  links.add([c.req.token, ...held, ...c.keys]);
+  const otherSet = new Set(others);
+  const linked: string[] = [];
+  for (const k of new Set(c.keys)) {
+    const o = links.ownerOf(k);
+    if (o !== undefined && otherSet.has(o)) linked.push(k === o ? `another wallet of this user ${o}` : `${o}'s account ${k}`);
+  }
+  if (linked.length) return fail("S11", `the tx names ${linked.join("; ")}`);
   const b = budget(c);
   if (typeof b === "string") return fail("S11", b);
   const fees = SOLANA_LAMPORTS_PER_SIGNATURE * BigInt(c.tx.signatures) + (b.price * BigInt(b.limit) + 999_999n) / 1_000_000n;
@@ -533,20 +665,22 @@ function s11(c: Ctx): SolanaQuoteResult {
     const tokenDelta = sim.tokenAccount.post - sim.tokenAccount.pre;
     const pva = sim.pumpVolumeAccumulator.post - sim.pumpVolumeAccumulator.pre;
     if (pva < 0n || pva > rentPa) wrong.push(`provider ${at}: the pump volume account moves by ${pva}`);
-    if (sim.otherWallets.some((x) => x.pre !== x.post)) wrong.push(`provider ${at}: another wallet of this user changes`);
+    const sva = sim.pumpSwapVolumeAccumulator.post - sim.pumpSwapVolumeAccumulator.pre;
+    if (sva < 0n || sva > rentPa) wrong.push(`provider ${at}: the PumpSwap volume account moves by ${sva}`);
     if (c.req.side === "buy") {
       const tal = sim.tokenAccountLamports;
       // What the output account gains, clamped to [0, its rent]: a new account's rent, or the rest of it when someone
       // pre-funded the address (the ATA program then charges W_k only the shortfall); a funded existing account adds 0.
       const gain = tal.post - tal.pre;
       const newAccount = gain < 0n ? 0n : gain < rentTa ? gain : rentTa;
-      const bound = c.req.amount + fees + tips + (newAccount > 0n ? newAccount : 0n) + (pva > 0n ? pva : 0n);
+      const bound = c.req.amount + fees + tips + (newAccount > 0n ? newAccount : 0n) + (pva > 0n ? pva : 0n) + (sva > 0n ? sva : 0n);
       if (nativeOut > bound) wrong.push(`provider ${at}: native out ${nativeOut} > ${bound}`);
       if (tokenDelta < c.req.minOut) wrong.push(`provider ${at}: token in ${tokenDelta} < minOut ${c.req.minOut}`);
     } else {
       if (-tokenDelta !== c.req.amount) wrong.push(`provider ${at}: token out ${-tokenDelta} != ${c.req.amount}`);
       if (-nativeOut + fees + tips < c.req.minOut) wrong.push(`provider ${at}: native in ${-nativeOut + fees + tips} < minOut ${c.req.minOut}`);
       if (pva !== 0n) wrong.push(`provider ${at}: a sell funds the pump volume account`);
+      if (sva !== 0n) wrong.push(`provider ${at}: a sell funds the PumpSwap volume account`);
     }
   }
   return wrong.length ? fail("S11", wrong.join("; ")) : pass("S11", `both simulations clean and within bounds (fees ${fees}, tips ${tips})`);
@@ -564,23 +698,25 @@ function simulatedOut(c: Ctx): bigint | null {
   return (outs as bigint[]).reduce((m, x) => (x < m ? x : m));
 }
 
-// S12: against the token's reference pool on chain: simulated out ≥ E × (1 − SOLANA_SIM_TOL_BPS / 10,000), the bar
-// rounded up (toward refusal), and minOut_k ≥ floor(E × (1 − s)). No reference, no signature.
+// S12: against the token's reference pool on chain: simulated out ≥ E(a_k) × (1 − SOLANA_SIM_TOL_BPS / 10,000), the bar
+// rounded up (toward refusal), with E(a_k) from the same read as E(A); and minOut_k ≥ floor(E_k × (1 − s)), E_k =
+// floor(E(A) × a_k / A) (minOutBase), so the set's floors stay T1.3's. No reference, no signature.
 function s12(c: Ctx): SolanaQuoteResult {
   const ref = c.reads.reference;
   if (!ref) return fail("S12", "no on-chain reference pool");
   const { expectedOut: e, slippageBps } = ref;
+  const base = ref.minOutBase ?? e;
   const tolBps = SOLANA_SIM_TOL_BPS;
-  if (e <= 0n || !Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
-    return fail("S12", `reference out of range: E ${e}, s ${slippageBps}`);
+  if (e <= 0n || base <= 0n || base > e || !Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
+    return fail("S12", `reference out of range: E ${e}, E_k ${base}, s ${slippageBps}`);
   }
   const out = simulatedOut(c);
   if (out === null) return fail("S12", "no clean simulation to compare");
   const barOut = (e * BigInt(10_000 - tolBps) + 9_999n) / 10_000n;
-  const barMin = (e * BigInt(10_000 - slippageBps)) / 10_000n;
+  const barMin = (base * BigInt(10_000 - slippageBps)) / 10_000n;
   const wrong: string[] = [];
   if (out < barOut) wrong.push(`simulated out ${out} < E ${e} less ${tolBps} bps (${barOut})`);
-  if (c.req.minOut < barMin) wrong.push(`minOut ${c.req.minOut} < E ${e} less ${slippageBps} bps (${barMin})`);
+  if (c.req.minOut < barMin) wrong.push(`minOut ${c.req.minOut} < E_k ${base} less ${slippageBps} bps (${barMin})`);
   return wrong.length ? fail("S12", wrong.join("; ")) : pass("S12", `simulated out ${out}, minOut ${c.req.minOut}, E ${e}`);
 }
 
@@ -616,7 +752,7 @@ export function checkSolanaQuote(txBytes: Uint8Array, req: SolanaQuoteRequest, r
         routeError = (err as Error).message;
       }
     }
-    c = { req, reads, tx, ixs, tokenProgram, route, routeError, jupAt: jup.length === 1 ? ixs.indexOf(jup[0] as Ix) : -1 };
+    c = { req, reads, tx, keys: keys.map((k) => k.key), ixs, tokenProgram, route, routeError, jupAt: jup.length === 1 ? ixs.indexOf(jup[0] as Ix) : -1 };
   } catch (err) {
     return { ok: false, results: [fail("DECODE", `cannot decode the transaction: ${(err as Error).message}`)] };
   }

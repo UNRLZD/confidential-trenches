@@ -1,0 +1,39 @@
+Blindfill pool on Solana
+Copyright 2026 the Confidential Trenches contributors
+Licensed under the Apache License, Version 2.0 (LICENSE at the repository root).
+
+This program is a Solana port of the Blindfill vault (contracts/vault), itself a NEAR port of Privacy Pools v1 core
+(github.com/0xbow-io/privacy-pools-core, tag v1.3.0), Copyright 2025 0XBOW LTD, licensed under the Apache License,
+Version 2.0. Its deposit and withdrawal logic, constants, scope, label and context follow Privacy Pools' contracts
+(State.sol, PrivacyPool.sol, Entrypoint.sol) as the vault ports them; each ported file names its source. Privacy Pools
+ships no NOTICE file at that tag. The changes from the vault are listed in src/lib.rs.
+
+src/verifier.rs makes the Groth16 check in the shape of groth16-solana 0.2.0's `verify` (github.com/Lightprotocol/
+groth16-solana, src/groth16.rs; Light Protocol), licensed under the Apache License, Version 2.0; no code is copied.
+The program calls Solana's sol_poseidon (light-poseidon's circom parameters) and alt_bn128 functions through the
+solana-poseidon and solana-bn254 crates, licensed under the Apache License, Version 2.0.
+
+src/tree.rs ports zk-kit's LeanIMT insert (@zk-kit/lean-imt.sol 2.0.0, InternalLeanIMT.sol `_insert`; Privacy &
+Scaling Explorations, Ethereum Foundation), whose licence follows:
+
+    MIT License
+
+    Copyright (c) 2024 Ethereum Foundation
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
