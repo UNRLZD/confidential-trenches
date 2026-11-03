@@ -1,6 +1,6 @@
 {
  "good": {
-  "note": "packages/signpage on card/signpage-solana-trade (connect-src adds the Solana trade's provider A and the kit's three device-direct send paths), built by deploy.mjs --dry-run and served by wrangler 4.151.1 pages dev on the PC box, read 2026-11-02T10:42Z",
+  "note": "packages/signpage on card/signpage-solana-trade (connect-src adds the Solana trade's provider A and the kit's three device-direct send paths), built by deploy.mjs --dry-run and served by wrangler 4.151.1 pages dev on a Linux build machine, read 2026-11-02T10:42Z",
   "url": "http://127.0.0.1:8791/",
   "status": 200,
   "headers": {

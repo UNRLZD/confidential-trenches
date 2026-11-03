@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/signpage-skeleton.test.mjs: the live check replays recorded answers
 // (signpage-skeleton.answers.json). good: packages/signpage built by deploy.mjs --dry-run and served by the Pages
-// runtime of wrangler 4.151.1 (re-recorded on the PC box for card signpage-solana-trade's connect-src; SIGN_HOST answered 522 before any deploy, so no served answer existed
+// runtime of wrangler 4.151.1 (re-recorded on a Linux build machine for card signpage-solana-trade's connect-src; SIGN_HOST answered 522 before any deploy, so no served answer existed
 // yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
 // frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
