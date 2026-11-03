@@ -28,10 +28,11 @@ function W({ id }: { id: WordId }) {
 const TFS = ["1m", "5m", "15m", "1H", "4H", "1D"] as const;
 const QUICK = [10, 25, 50, 100] as const;
 
-const Sk = ({ w, h }: { w: number | string; h: number }) => <span className="tkp-sk" style={{ width: w, height: h }} />;
 /** A skeleton the height of the value it stands for: one line of that value's own font, so the strip keeps its height
  *  when the read lands (BAR-10 CLS). */
 const SkLine = ({ cls, w }: { cls: string; w: number }) => <span className={`${cls} tkp-sk`} style={{ width: w }} aria-hidden="true">{"\u00a0"}</span>;
+/** The identity line's skeleton: the filled line holds a mono age and address, so its height is the mono face's line. */
+const SkMeta = ({ w }: { w: number }) => <span className="tkp-meta tkp-sk" style={{ width: w }} aria-hidden="true"><span className="tkp-num">{"\u00a0"}</span></span>;
 
 /** The curve's value and, only on a curve, its bar (R5 U.about tk-curve). */
 function CurveValue({ c }: { c: Curve }) {
@@ -60,7 +61,7 @@ function CurveTile({ v, phone }: { v: TokenView | null; phone?: boolean }) {
   return (
     <div className={phone ? "tkp-mtile" : "tkp-tile"} data-k="curve">
       <span className="tkp-lbl"><W id="curve" /></span>
-      {v === null ? (phone ? <Sk w={64} h={15} /> : <SkLine cls="tkp-val" w={64} />) : <CurveValue c={v.curve} />}
+      {v === null ? <SkLine cls="tkp-val" w={64} /> : <CurveValue c={v.curve} />}
     </div>
   );
 }
@@ -93,7 +94,7 @@ function Desktop({ v }: { v: TokenView | null }) {
             {v ? <Avatar symbol={v.symbol} size={54} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
             <div className="tkp-idtext">
               <div className="tkp-symrow">
-                {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <Sk w={120} h={22} />}
+                {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={120} />}
               </div>
               {v ? (
                 <div className="tkp-meta">
@@ -104,7 +105,7 @@ function Desktop({ v }: { v: TokenView | null }) {
                   <span className="tkp-num tkp-ca" title={v.token}>{v.token}</span>
                 </div>
               ) : (
-                <Sk w={220} h={13} />
+                <SkMeta w={220} />
               )}
             </div>
           </div>
@@ -134,10 +135,10 @@ function Phone({ v }: { v: TokenView | null }) {
       <div className="tkp-hero">
         <div className="tkp-symrow">
           {v ? <Avatar symbol={v.symbol} size={32} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 32, height: 32 }} />}
-          {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <Sk w={100} h={20} />}
+          {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={100} />}
         </div>
         <div className="tkp-pricerow">
-          {v ? <span className="tkp-price">{v.price}</span> : <Sk w={160} h={30} />}
+          {v ? <span className="tkp-price">{v.price}</span> : <SkLine cls="tkp-price" w={160} />}
           {v && <span className="tkp-chg" data-dir={v.chg.dir}>{v.chg.text}</span>}
           {v && <span className="tkp-h24"><W id="h24" /></span>}
         </div>
@@ -150,7 +151,7 @@ function Phone({ v }: { v: TokenView | null }) {
             <span className="tkp-num tkp-ca" title={v.token}>{v.token}</span>
           </div>
         ) : (
-          <Sk w={240} h={13} />
+          <SkMeta w={240} />
         )}
       </div>
       <Chart loading={v === null} phone />
@@ -161,7 +162,7 @@ function Phone({ v }: { v: TokenView | null }) {
           ) : (
             <div key={k} className="tkp-mtile" data-k={k}>
               <span className="tkp-lbl"><W id={k} /></span>
-              {v ? <span className="tkp-val">{v[k]}</span> : <Sk w={70} h={16} />}
+              {v ? <span className="tkp-val">{v[k]}</span> : <SkLine cls="tkp-val" w={70} />}
             </div>
           ),
         )}

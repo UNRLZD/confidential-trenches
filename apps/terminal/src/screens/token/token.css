@@ -28,7 +28,9 @@
 .tkp-desk { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 8px; padding: 0 8px 8px; }
 .tkp-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
 .tkp-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 6px 4px 2px; flex-wrap: wrap; }
-.tkp-ident { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; min-width: 0; }
+/* the identity takes what the strip leaves, from a basis that does not depend on the read (a skeleton and a name of any
+   length wrap the header alike), so the strip starts where it will stay (CLS 0) */
+.tkp-ident { display: flex; align-items: center; gap: 12px; flex: 1 1 560px; min-width: 0; }
 .tkp-idtext { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .tkp-symrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tkp-sym { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -37,9 +39,9 @@
 .tkp-sep { color: var(--border-active); }
 .tkp-meta > .tkp-name { flex: 0 1 auto; max-width: 60%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tkp-meta > .tkp-ca { flex: 0 100000 auto; min-width: 48px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
-.tkp-strip { flex: 1; min-width: min(100%, 260px); display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.tkp-strip { flex: none; margin-left: auto; max-width: 100%; display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .tkp-mc { flex: none; margin-left: auto; padding: 8px 14px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.tkp-mcval { font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
+.tkp-mcval { min-width: 120px; text-align: center; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
 .tkp-tile { flex: none; min-width: 96px; padding: 8px 14px; border-radius: 10px; background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .tkp-tile[data-k="curve"] { min-width: 120px; }
 .tkp-chart { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; overflow: hidden; }
