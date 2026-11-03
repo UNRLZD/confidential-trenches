@@ -55,10 +55,14 @@ const PYTH_FEED = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b
 const PRICE_UPDATE_DISC = "22f123639d7ef4cd";
 const TOKEN_PROGRAMS = ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"];
 
-export const COLD_SIGS = 50;
+/** A first read's signatures (the bars before them are the history source's), and the transactions read at once. */
+export const COLD_SIGS = 30;
+const TX_PARALLEL = 5;
 export const SIG_PAGE = 100;
 export const REFILL_MAX = 1_000;
 export const SETTLE_SLOTS = 150;
+/** A first read answers after its walk, or after this with what it holds by then. */
+export const COLD_WAIT_MS = 3_000;
 export const SILENT_MS = 30_000;
 export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
@@ -75,9 +79,11 @@ const RECONNECT_MS = [500, 1_000, 2_000, 5_000];
 
 /** A transaction's logs as the stream sends them. */
 export type Note = { sig: string; slot: number; err: boolean; logs: unknown };
-/** The stream: subscribe and unsubscribe mints, and tell the reader of each note, each drop and each return. */
+/** The stream: subscribe and unsubscribe mints, and tell the reader of each note, each drop and each return. `watch`
+ *  resolves once the subscription is in force (a walk of signatures after it then misses nothing); `up` comes only
+ *  when every watched mint's subscription is in force again after a drop. */
 export type Source = {
-  watch(mint: string): void;
+  watch(mint: string): Promise<void>;
   unwatch(mint: string): void;
   close(): void;
 };
@@ -92,6 +98,8 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
   const subOf = new Map<number, string>(); // subscription id -> mint
   const pending = new Map<number, string>(); // request id -> mint
   const subId = new Map<string, number>();
+  const waiting = new Map<string, { resolve: () => void; reject: (e: Error) => void }[]>();
+  let upSent = false;
   let ws: WsLike | null = null;
   let live = false;
   let closed = false;
@@ -114,6 +122,8 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
     subOf.clear();
     subId.clear();
     pending.clear();
+    for (const [m, ws_] of waiting) for (const w of ws_) w.reject(new Error(`stream dropped before ${m} was subscribed`));
+    waiting.clear();
     try {
       w.close();
     } catch {
@@ -128,10 +138,14 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
     ws = w;
     w.onopen = () => {
       live = true;
+      upSent = false;
       tries = 0;
       lastMsg = now();
       for (const m of mints) subscribe(m);
-      on.up();
+      if (pending.size === 0) {
+        upSent = true;
+        on.up();
+      }
     };
     w.onmessage = (msg) => {
       lastMsg = now();
@@ -148,6 +162,15 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
         if (typeof j.result === "number" && mints.has(m)) {
           subOf.set(j.result, m);
           subId.set(m, j.result);
+          for (const w of waiting.get(m) ?? []) w.resolve();
+          waiting.delete(m);
+        } else if (mints.has(m)) {
+          drop(); // a refused subscription: reconnect and ask again, the gap walked after
+          return;
+        }
+        if (!upSent && pending.size === 0) {
+          upSent = true;
+          on.up();
         }
         return;
       }
@@ -169,13 +192,18 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
   silence.unref?.();
   return {
     watch(m) {
-      if (mints.has(m)) return;
-      mints.add(m);
-      if (ws === null) connect();
-      else subscribe(m);
+      if (subId.has(m)) return Promise.resolve();
+      const p = new Promise<void>((resolve, reject) => waiting.set(m, [...(waiting.get(m) ?? []), { resolve, reject }]));
+      if (!mints.has(m)) {
+        mints.add(m);
+        if (ws === null) connect();
+        else subscribe(m);
+      }
+      return p;
     },
     unwatch(m) {
       mints.delete(m);
+      waiting.delete(m);
       const s = subId.get(m);
       if (s !== undefined && ws !== null && live) ws.send(JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "logsUnsubscribe", params: [s] }));
       subId.delete(m);
@@ -216,6 +244,8 @@ type Entry = {
   covered: number;
   state: "cold" | "live" | "refilling";
   buffered: Note[];
+  /** Transactions being read (signature to slot). */
+  inflight: Map<string, number>;
   touched: number;
   readAt: number | null;
 };
@@ -235,7 +265,7 @@ export function createSolanaTrades(deps: {
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? TRADES_RPCS;
   const entries = new Map<string, Entry>();
-  const pools = new Map<string, { base: string; quote: string } | null>();
+  const pools = new Map<string, Promise<{ base: string; quote: string } | null>>();
   const traders = new Map<string, string>(); // signature -> the trade's user, kept after the trade settles
   let seq = 0;
   let solUsd: { slot: number; v: bigint } | null = null;
@@ -278,13 +308,15 @@ export function createSolanaTrades(deps: {
     for (const e of entries.values()) e.refs.set(a.slot, v);
   }
 
-  async function poolOf(pool: string): Promise<{ base: string; quote: string } | null> {
-    if (pools.has(pool)) return pools.get(pool)!;
-    const a = await account(pool);
-    const m = a !== null && a.owner === PUMP_AMM ? poolMints(a.data) : null;
+  /** A PumpSwap pool's mints, read once (a burst of trades on one pool shares the read; a failed read is not kept). */
+  function poolOf(pool: string): Promise<{ base: string; quote: string } | null> {
+    const kept = pools.get(pool);
+    if (kept !== undefined) return kept;
+    const read = account(pool).then((a) => (a !== null && a.owner === PUMP_AMM ? poolMints(a.data) : null));
     if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
-    pools.set(pool, m);
-    return m;
+    pools.set(pool, read);
+    read.catch(() => pools.delete(pool));
+    return read;
   }
 
   /** The trades of one transaction for `mint`, with the token named and the quote checked; PumpSwap pools read. */
@@ -310,10 +342,11 @@ export function createSolanaTrades(deps: {
     return forMint(mint, fromInner(r));
   }
 
-  function hold(e: Entry, sig: string, slot: number, trades: RawTrade[]): void {
+  /** Holds a transaction's trades, its place `order` (taken when it arrived, before any read it waited on). */
+  function hold(e: Entry, sig: string, slot: number, order: number, trades: RawTrade[]): void {
     if (e.held.has(sig) || (e.book !== null && slot <= e.book.settledTo)) return;
     if (e.held.size >= HELD_MAX) return;
-    e.held.set(sig, { slot, seq: ++seq, t: trades });
+    e.held.set(sig, { slot, seq: order, t: trades });
     if (trades[0] !== undefined) {
       if (traders.size >= HELD_MAX) traders.delete(traders.keys().next().value!);
       traders.set(sig, trades[0].user);
@@ -344,9 +377,17 @@ export function createSolanaTrades(deps: {
       i = 0;
     }
     events.sort((a, b) => a.block - b.block || a.index - b.index);
+    // a ref with no trade before the next ref is superseded: dropped, so a quiet token's refs stay one
+    for (let k = events.length - 2; k >= 0; k--) {
+      if (events[k]!.kind === "ref" && events[k + 1]!.kind === "ref") {
+        e.refs.delete(events[k]!.block);
+        events.splice(k, 1);
+      }
+    }
     // strictly increasing (block, index): a transaction with more than 8 trades of the token keeps its first 8
     const ordered = events.filter((ev, k) => k === 0 || ev.block !== events[k - 1]!.block || ev.index !== events[k - 1]!.index);
-    const settle = e.state === "live" ? Math.max(e.book.settledTo, e.covered - SETTLE_SLOTS) : e.book.settledTo;
+    const reading = Math.min(Infinity, ...e.inflight.values()) - 1;
+    const settle = e.state === "live" ? Math.max(e.book.settledTo, Math.min(e.covered - SETTLE_SLOTS, reading)) : e.book.settledTo;
     e.book.ingest(from, ordered, settle);
     // what is settled lives in the book now (a settled ref is the book's price in force)
     for (const [sig, h] of e.held) if (h.slot <= e.book.settledTo) e.held.delete(sig);
@@ -370,18 +411,22 @@ export function createSolanaTrades(deps: {
       before = sigs[sigs.length - 1]!.signature;
     }
     sigs.reverse();
-    for (const s of sigs) {
-      if (s.err !== null && s.err !== undefined) continue;
-      if (e.held.has(s.signature)) continue;
-      const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
-      if (r === null) continue;
-      const meta = (r.meta ?? {}) as Record<string, unknown>;
-      const f = fromLogs(meta.logMessages);
-      const trades = await forMint(e.mint, f.truncated ? fromInner(r) : f.trades);
-      hold(e, s.signature, s.slot, trades);
-      e.covered = Math.max(e.covered, s.slot);
+    // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time
+    const todo = sigs.filter((s) => (s.err === null || s.err === undefined) && !e.held.has(s.signature)).map((s) => ({ ...s, order: ++seq }));
+    for (let k = 0; k < todo.length; k += TX_PARALLEL) {
+      await Promise.all(
+        todo.slice(k, k + TX_PARALLEL).map(async (s) => {
+          const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
+          if (r === null) return;
+          const meta = (r.meta ?? {}) as Record<string, unknown>;
+          const f = fromLogs(meta.logMessages);
+          hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated ? fromInner(r) : f.trades));
+        }),
+      );
     }
-    if (sigs.length > 0) e.lastSig = sigs[sigs.length - 1]!.signature;
+    for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
+    // a cold walk runs while the stream's trades already arrive: the newest signature held is then the stream's
+    if (sigs.length > 0 && (until !== null || e.lastSig === null)) e.lastSig = sigs[sigs.length - 1]!.signature;
   }
 
   async function refill(e: Entry): Promise<void> {
@@ -398,15 +443,24 @@ export function createSolanaTrades(deps: {
   }
 
   async function onNote(e: Entry, n: Note): Promise<void> {
-    if (e.state !== "live") {
+    // after a drop the stream's trades wait for the gap's walk; during a first (cold) walk they are held at once, the
+    // walk's being older, and nothing settles until the walk is done
+    if (e.state === "refilling") {
       if (e.buffered.length < HELD_MAX) e.buffered.push(n);
       return;
     }
-    e.covered = Math.max(e.covered, n.slot);
     e.lastSig = n.sig;
-    if (n.err) return;
+    if (n.err) {
+      e.covered = Math.max(e.covered, n.slot);
+      return;
+    }
+    const order = ++seq;
+    // nothing settles at or after a transaction still being read (a PumpSwap pool, a cut log)
+    e.inflight.set(n.sig, n.slot);
     const trades = await txTrades(e.mint, n.sig, n.logs).catch(() => null);
-    if (trades !== null) hold(e, n.sig, n.slot, trades);
+    e.inflight.delete(n.sig);
+    if (trades !== null) hold(e, n.sig, n.slot, order, trades);
+    e.covered = Math.max(e.covered, n.slot);
     fold(e);
   }
 
@@ -416,7 +470,7 @@ export function createSolanaTrades(deps: {
       if (e !== undefined) void onNote(e, n);
     },
     down() {
-      for (const e of entries.values()) if (e.state === "live") e.state = "refilling";
+      for (const e of entries.values()) e.state = "refilling"; // a cold walk's gap is walked again from its newest held
     },
     up() {
       for (const e of entries.values()) if (e.state === "refilling") void refill(e);
@@ -443,48 +497,68 @@ export function createSolanaTrades(deps: {
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
 
+  /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */
+  async function first(mint: string): Promise<Entry | DataAnswer> {
+    if (!(await deps.listed(mint))) return NOT_FOUND;
+    if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5 };
+    let decimals: number;
+    try {
+      const a = await account(mint);
+      if (a === null || !TOKEN_PROGRAMS.includes(a.owner as string) || a.data.length < 82 || a.data[45] !== 1) return NOT_FOUND;
+      decimals = a.data[44]!;
+      if (solUsd === null) await readRef();
+    } catch {
+      return UPSTREAM;
+    }
+    const e: Entry = { mint, decimals, quoteMint: null, book: null, held: new Map(), refs: new Map(), lastSig: null, covered: 0, state: "cold", buffered: [], inflight: new Map(), touched: now(), readAt: null };
+    if (solUsd !== null) e.refs.set(0, solUsd.v); // the price in force for the cold read's trades
+    entries.set(mint, e);
+    try {
+      // the walk starts only once the stream sends this mint's trades, so nothing falls between them
+      await Promise.race([source.watch(mint), new Promise((_, no) => setTimeout(() => no(new Error("subscribe timeout")), TIMEOUT_MS).unref?.())]);
+    } catch {
+      entries.delete(mint);
+      source.unwatch(mint);
+      return UPSTREAM;
+    }
+    // the tape is served from the moment the stream holds the token; the walk's older trades join as they are read
+    e.readAt = now();
+    const cold = (async () => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await walk(e, null);
+          break;
+        } catch {
+          if (attempt === 2 || !entries.has(mint)) break; // the stream's trades still serve; the cold window stays short
+          await new Promise((r) => setTimeout(r, 1_000));
+        }
+      }
+      if (e.state === "cold") e.state = "live";
+      fold(e);
+    })();
+    await Promise.race([cold, new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
+    return e;
+  }
+
+  const opening = new Map<string, Promise<Entry | DataAnswer>>();
   async function open(mint: string): Promise<Entry | DataAnswer> {
     let e = entries.get(mint);
     if (e === undefined) {
-      if (!(await deps.listed(mint))) return NOT_FOUND;
-      if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5 };
-      let decimals: number;
-      try {
-        const a = await account(mint);
-        if (a === null || !TOKEN_PROGRAMS.includes(a.owner as string) || a.data.length < 82 || a.data[45] !== 1) return NOT_FOUND;
-        decimals = a.data[44]!;
-        if (solUsd === null) await readRef();
-      } catch {
-        return UPSTREAM;
+      let p = opening.get(mint);
+      if (p === undefined) {
+        p = first(mint).finally(() => opening.delete(mint));
+        opening.set(mint, p);
       }
-      e = entries.get(mint);
-      if (e === undefined) {
-        e = { mint, decimals, quoteMint: null, book: null, held: new Map(), refs: new Map(), lastSig: null, covered: 0, state: "cold", buffered: [], touched: now(), readAt: null };
-        if (solUsd !== null) e.refs.set(0, solUsd.v); // the price in force for the cold read's trades
-        entries.set(mint, e);
-        source.watch(mint);
-        try {
-          await walk(e, null);
-        } catch {
-          entries.delete(mint);
-          source.unwatch(mint);
-          return UPSTREAM;
-        }
-        const notes = e.buffered;
-        e.buffered = [];
-        e.state = "live";
-        for (const n of notes) await onNote(e, n);
-        fold(e);
-        e.readAt = now();
-      }
+      const got = await p;
+      if (!("mint" in got)) return got;
+      e = got;
     }
     e.touched = now();
     if (timer === null && deps.tickMs !== 0) {
       timer = setInterval(tick, deps.tickMs ?? 1_000);
       timer.unref?.();
     }
-    if (e.readAt === null) return UPSTREAM;
-    if (now() - e.readAt > STALE_MS) return UPSTREAM;
+    if (e.readAt === null || now() - e.readAt > STALE_MS) return UPSTREAM;
     return e;
   }
 
