@@ -144,6 +144,12 @@ test('a pull request that adds its own ignore lines for its own secret fails', (
   })));
 });
 
+test("a pull request that adds its own ignore line for a secret only its history holds fails", () => {
+  fails(scan(checkout({
+    pr: [{ 'leak.txt': leak() }, (s) => ({ 'leak.txt': null, '.gitleaksignore': `${s.pr[0]}:leak.txt:${RULE}:1\n` })],
+  })));
+});
+
 test('a pull request that adds its own allowlist to .gitleaks.toml for its own secret fails', () => {
   fails(scan(checkout({
     pr: [{ 'leak.txt': leak(), '.gitleaks.toml': `${RULES}\n[[allowlists]]\ndescription = "planted"\npaths = ['''^leak\\.txt$''']\n` }],
