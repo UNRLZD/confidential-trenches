@@ -503,12 +503,19 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const guard = {};
       steps.open = await settled(page);
       guard.open = await settled(tab2);
+      // Each press goes to the tab in front, as a user's does: Chrome refuses a passkey ceremony to a page whose tab is
+      // not focused (NotAllowedError, "the page does not have focus") and throttles a hidden tab's frames, and the tab
+      // made last is the one in front. Playwright's bundled headless shell let a tab behind run it; Google Chrome does not.
+      await page.bringToFront();
       steps.create = await click(page, "create");
       guard.ivBefore = steps.create.seedIv;
+      // in front, so a ceremony it ran would be the page's doing, never the browser's refusal
+      await tab2.bringToFront();
       guard.after = await click(tab2, "create");
       guard.ivAfter = guard.after.seedIv;
       guard.credentials = (await creds2()).length;
       record.prf.guard = guard;
+      await page.bringToFront();
       await page.reload();
       steps.reload = await settled(page);
       // within 500 ms of Sign out drawn on the shown page (a reload), a press does nothing: the pointer moved onto it and
@@ -612,6 +619,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         return { framed: m?.dataset.framed ?? null, state: m?.dataset.signin ?? null, buttons: document.querySelectorAll("button").length, actions: document.querySelectorAll("[data-action]").length };
       }).catch(() => ({}));
       await parent.close();
+      await page.bringToFront();
       record.prf.credentials = await creds();
       const out = await page.evaluate(async (input) => {
         const c = await navigator.credentials.get({
