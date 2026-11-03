@@ -186,3 +186,63 @@ test("a default sender gives up on a hung region at about JITO_TIMEOUT_MS (2 s):
   assert.ok(ms >= 1_900 && ms < 2_600, `gave up after ${Math.round(ms)} ms`);
   assert.equal(JITO_TIMEOUT_MS, 2_000);
 });
+
+// The review's G5, G6 and G7 (fold 5): the pacing rules of M374 (2) a late timer can reach. G5: the wait is re-read
+// after it, or two sends waiting out one region's interval after a stall go together. A, then B, C and D booked 200 ms
+// apart; the loop stalls past all three bookings: B goes at the stall's end, C and D both wait for B's interval.
+test("G5: two sends waiting out one region's interval after a stall never go together", async () => {
+  const at: number[] = [];
+  const fetchFn = async () => (at.push(performance.now()), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG })));
+  const j = jitoSender({ fetch: fetchFn, regions: [SOLANA_JITO_BLOCK_ENGINES[0]!], intervalMs: 200 });
+  const sends = [0, 1, 2, 3].map(() => j.send("AA==", SIG)); // A now, then B, C, D booked at 200, 400 and 600 ms
+  const stall = performance.now() + 700;
+  while (performance.now() < stall);
+  const r = await Promise.all(sends);
+  assert.ok(r.every((x) => x.kind === "ok"));
+  assert.equal(at.length, 4);
+  const sorted = [...at].sort((x, y) => x - y);
+  for (let k = 1; k < sorted.length; k++) assert.ok(sorted[k]! - sorted[k - 1]! >= 199, `sends ${k - 1} and ${k} went ${(sorted[k]! - sorted[k - 1]!).toFixed(1)} ms apart`);
+});
+
+const okFetch = () => {
+  const at: number[] = [];
+  return { at, fetch: async () => (at.push(performance.now()), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG }))) };
+};
+const R0 = SOLANA_JITO_BLOCK_ENGINES[0]!;
+
+// G6 (F2g): a rebroadcast never takes a second a first send booked and has not yet used, even when that send's timer
+// is late (here the loop stalls past it): the booking, not the last actual send, is what holds the rebroadcast back.
+test("G6: a rebroadcast is refused while a booked first send is overdue", async () => {
+  const e = okFetch();
+  const j = jitoSender({ fetch: e.fetch, regions: [R0], intervalMs: 200 });
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "ok"); // the region's second, now
+  const a = j.send("AA==", SIG); // books the next second, 200 ms on, and sleeps
+  const stall = performance.now() + 250;
+  while (performance.now() < stall); // its timer is overdue
+  const r = j.rebroadcast(R0, "AA==", SIG); // in the same turn, before the late timer runs
+  assert.equal((await r).kind, "busy", "the rebroadcast took the booked second");
+  assert.equal((await a).kind, "ok");
+});
+
+// G7 (F2c): a first send that goes late marks its region without pulling down a later booking, so a rebroadcast cannot
+// take the next booked second either.
+test("G7: a late first send leaves the next booking in place", async () => {
+  const e = okFetch();
+  const j = jitoSender({ fetch: e.fetch, regions: [R0], intervalMs: 200 });
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "ok"); // t0
+  const a = j.send("AA==", SIG); // booked t0 + 200
+  const b = j.send("AA==", SIG); // booked t0 + 400
+  const stall = performance.now() + 250;
+  while (performance.now() < stall); // a goes about 50 ms late
+  await new Promise((r) => setTimeout(r, 0)); // a's overdue timer runs first: it marked and sent
+  assert.equal(e.at.length, 2);
+  const late = e.at[1]!;
+  const probe = await new Promise<string>((ok) =>
+    setTimeout(() => {
+      while (performance.now() < late + 205); // past a's interval, before b went
+      void j.rebroadcast(R0, "AA==", SIG).then((x) => ok(x.kind));
+    }, Math.max(0, late + 190 - performance.now())),
+  );
+  assert.equal(probe, "busy", "the rebroadcast took b's booked second");
+  assert.ok((await Promise.all([a, b])).every((x) => x.kind === "ok"));
+});
