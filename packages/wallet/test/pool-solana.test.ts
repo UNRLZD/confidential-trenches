@@ -220,7 +220,7 @@ test("bind: the program's context over W, the pinned fee payer, the epoch fee as
 });
 
 test("the epoch fee is the device's own: the kit's cost rounded up to the step plus two steps, 1,300,000 at mainnet rent; any other helper answer is refused", async () => {
-  assert.deepEqual(solanaEpochFee({ lamportsPerByte: 5_080n, factor: 1n }), { cost: 1_066_640n, fee: 1_300_000n }); // M355 (3)
+  assert.deepEqual(solanaEpochFee({ lamportsPerByte: 5_080n, factor: 1n }), { cost: 1_086_960n, fee: 1_300_000n }); // M355 (3), M376: the 12-byte spent mark
   assert.equal(SOL_LIFE_MS, 240_000n, "L = 2E + the kit's 90 s send margin + 30 s (M356 (1))");
   const ok = await poolWith(pair(nowChain(), nowChain())).bind(args());
   assert.equal(ok.feeCap, 1_300_000n);
@@ -376,10 +376,12 @@ test("the fixtures' precommitment marks decode to each deposit's value and the n
 
 // Restore from the words alone: the all-zero test seed's notes in the fixture pool (test values, never money).
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
-/** A spent mark as the program will write it (M355 (3), card pool-sol-deploy): withdrawnValue u64 LE, 8 bytes. */
-const spentData = (withdrawn: bigint): Uint8Array => {
-  const b = new Uint8Array(8);
+/** A spent mark as the program writes it (M355 (3), M376): withdrawnValue u64 LE, then the release's number u32 LE
+ * (the count of releases before it), 12 bytes. */
+const spentData = (withdrawn: bigint, number: number): Uint8Array => {
+  const b = new Uint8Array(12);
   new DataView(b.buffer).setBigUint64(0, withdrawn, true);
+  new DataView(b.buffer).setUint32(8, number, true);
   return b;
 };
 const markData = (value: bigint, nonce: bigint): Uint8Array => {
@@ -410,12 +412,12 @@ function restorePool() {
   deposit(P({ kind: "deposit", s: SCOPE, i: 9 }), 10_000_000n);
   deposit(P({ kind: "second", id: { id: "U", s: SCOPE, i: 0 }, n: 0 }), 20_000_000n);
   // deposit 0 is released whole: its spent mark, its change note of 0 into the state tree
-  marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(50_000_000n));
+  marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(50_000_000n, 0));
   state.push({ leaf: noteCommitment(0n, l0, P({ kind: "change", l: l0, j: 0 })), t: (t += 1n) });
   // the sell's proceeds came back to the pool as W_{sol, l0, 0}'s return note
   deposit(P({ kind: "return", c: "sol", l: l0, j: 0 }), 5_000_000n);
   // someone else's spent mark
-  marks.set(solanaMarkOf(PROGRAM, "spent", 12345n), spentData(20_000_000n));
+  marks.set(solanaMarkOf(PROGRAM, "spent", 12345n), spentData(20_000_000n, 1));
   const chain: Chain = { accounts: new Map([...pages(0, entries(state)), ...pages(1, entries(labels))]), slot: 700, time: () => t + 5n, marks };
   return { chain, l0, P };
 }
@@ -445,15 +447,15 @@ test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its
   const other = edit((m) => m.set(key, markData(10_000_000n, 4n)));
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, other), gap: 4 }), /bytes differ/);
   const spentKey = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
-  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(edit((m) => m.set(spentKey, spentData(40_000_000n))), chain), gap: 4 }), /bytes differ/);
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(edit((m) => m.set(spentKey, spentData(40_000_000n, 0))), chain), gap: 4 }), /bytes differ/);
   // a spent mark that withdrew more than the note held, or nothing
-  for (const w of [50_000_001n, 0n]) await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(...[edit((m) => m.set(spentKey, spentData(w)))].flatMap((c) => [c, c]) as [Chain, Chain]), gap: 4 }), /its spent mark withdrew/);
+  for (const w of [50_000_001n, 0n]) await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(...[edit((m) => m.set(spentKey, spentData(w, 0)))].flatMap((c) => [c, c]) as [Chain, Chain]), gap: 4 }), /its spent mark withdrew/);
   // a mark of a size the program never writes
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain).map((r) => Object.assign(async (m: string, p: readonly unknown[]) => {
     const a = (await r(m, p)) as { value?: { account: { data: [string, string] } }[] };
     if (m === "getProgramAccounts" && a.value!.length > 0) a.value![0]!.account.data = [base64.encode(new Uint8Array(3)), "base64"];
     return a;
-  }, { url: r.url })) as [SolanaRpc, SolanaRpc], gap: 4 }), /not (8|16) bytes/);
+  }, { url: r.url })) as [SolanaRpc, SolanaRpc], gap: 4 }), /not (12|16) bytes/);
   // both RPCs: the nonce of another deposit (its label is not this note's), another value (not in the state tree)
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(other, other), gap: 4 }), /commitment is not in the state tree/);
   // a mark of value 0 or nonce 0, which the program never writes (R11)
@@ -510,7 +512,7 @@ test("RV6: a spent note's move note and its V, A and R second arrivals come back
     return label;
   };
   const l0 = deposit(Pf({ kind: "deposit", s: SCOPE, i: 0 }), 50_000_000n);
-  marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(50_000_000n));
+  marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(50_000_000n, 0));
   state.push({ leaf: noteCommitment(0n, l0, Pf({ kind: "change", l: l0, j: 0 })), t: (t += 1n) });
   deposit(Pf({ kind: "move", l: l0, j: 0 }), 10_000_000n);
   deposit(Pf({ kind: "second", id: { id: "V", l: l0, j: 0 }, n: 0 }), 10_000_000n);
@@ -537,8 +539,8 @@ test("R5: a partial release, then its change spent: the change index runs 0 then
   ]);
   const marks = new Map<string, Uint8Array>([
     [solanaMarkOf(PROGRAM, "pre", Pf(dep)), markData(50_000_000n, 1n)],
-    [solanaMarkOf(PROGRAM, "spent", nh(dep)), spentData(20_000_000n)],
-    [solanaMarkOf(PROGRAM, "spent", nh(c0)), spentData(30_000_000n)],
+    [solanaMarkOf(PROGRAM, "spent", nh(dep)), spentData(20_000_000n, 0)],
+    [solanaMarkOf(PROGRAM, "spent", nh(c0)), spentData(30_000_000n, 1)],
   ]);
   const chain: Chain = { accounts: new Map([...pages(0, state), ...pages(1, entries([{ leaf: label, t: 1_800_000_000n }]))]), slot: 700, time: () => 1_800_000_100n, marks };
   const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 });

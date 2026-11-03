@@ -82,7 +82,11 @@ test("the whole Solana restore lists the W of every spent note: change, move, V 
   };
   // a release as the queue makes it: the spent mark, and change note (l, jOf(ref)) of what is left
   const release = (ref: NoteRef, l: bigint, value: bigint, withdrawn: bigint): void => {
-    marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, ref).nullifierHash), u64s(withdrawn));
+    // the spent mark (M376): withdrawnValue u64 LE, then the release's number u32 LE, the state tree's size less the
+    // label tree's before its change note goes in
+    const number = new Uint8Array(4);
+    new DataView(number.buffer).setUint32(0, state.length - labels.length, true);
+    marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, ref).nullifierHash), Uint8Array.of(...u64s(withdrawn), ...number));
     state.push({ leaf: noteCommitment(value - withdrawn, l, P({ kind: "change", l, j: jOf(ref) })), t: (t += 1n) });
   };
   const dep: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };

@@ -4,7 +4,7 @@
 // out/mutant/, the source is restored, and the named test runs against the mutant (must FAIL) and against the real
 // program in out/ (must PASS). Exit 0 only when every mutant is caught.
 //   cd contracts/pool-solana && cargo-build-sbf --sbf-out-dir out && (cd svm-tests/evil-venue && cargo-build-sbf --sbf-out-dir ../../out) \
-//     && node scripts/mutants.mjs
+//     && node scripts/mutants.mjs [name ...]
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -45,8 +45,15 @@ export const MUTANTS = [
   ["mark records the new nonce", "src/deposit.rs", "d[8..16].copy_from_slice(&pool.nonce.to_le_bytes());", "d[8..16].copy_from_slice(&(pool.nonce - 1).to_le_bytes());", "each_deposit_records_its_value_and_nonce_in_its_mark"],
   ["mark records the value", "src/deposit.rs", "d[0..8].copy_from_slice(&value.to_le_bytes());", "d[0..8].copy_from_slice(&0u64.to_le_bytes());", "each_deposit_records_its_value_and_nonce_in_its_mark"],
   // M355 (3): the spent mark's record, for tag 2 and tag 3 (both settle through src/release.rs)
-  ["spent mark records withdrawn", "src/release.rs", "spent_mark.try_borrow_mut_data()?[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());", "let _ = spent_mark.try_borrow_mut_data()?;", "each_release_records_its_withdrawn_value_in_its_spent_mark"],
-  ["spent mark records not 0", "src/release.rs", "spent_mark.try_borrow_mut_data()?[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());", "spent_mark.try_borrow_mut_data()?[0..8].copy_from_slice(&0u64.to_le_bytes());", "each_release_records_its_withdrawn_value_in_its_spent_mark"],
+  ["spent mark records withdrawn", "src/release.rs", "m[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());", "let _ = &r.withdrawn;", "each_release_records_its_withdrawn_value_in_its_spent_mark"],
+  ["spent mark records not 0", "src/release.rs", "m[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());", "m[0..8].copy_from_slice(&0u64.to_le_bytes());", "each_release_records_its_withdrawn_value_in_its_spent_mark"],
+  // M376: the release's number in the spent mark
+  ["spent mark records the number", "src/release.rs", "m[8..12].copy_from_slice(&number.to_le_bytes());", "let _ = number;", "each_release_records_its_withdrawn_value_in_its_spent_mark"],
+  ["number off by one", "src/release.rs", "let number = pool.state.size.checked_sub(pool.label.size).ok_or(PoolError::InvalidPoolState)?;", "let number = pool.state.size.checked_sub(pool.label.size).ok_or(PoolError::InvalidPoolState)? + 1;", "release_numbers_run_0_1_2_across_interleaved_deposits"],
+  ["number: label and state swapped", "src/release.rs", "let number = pool.state.size.checked_sub(pool.label.size).ok_or(PoolError::InvalidPoolState)?;", "let number = pool.label.size.checked_sub(pool.state.size).ok_or(PoolError::InvalidPoolState)?;", "release_numbers_run_0_1_2_across_interleaved_deposits"],
+  ["number: the state size alone", "src/release.rs", "let number = pool.state.size.checked_sub(pool.label.size).ok_or(PoolError::InvalidPoolState)?;", "let number = pool.state.size.checked_sub(0).ok_or(PoolError::InvalidPoolState)?;", "release_numbers_run_0_1_2_across_interleaved_deposits"],
+  ["number never wraps below 0", "src/release.rs", "pool.state.size.checked_sub(pool.label.size).ok_or(PoolError::InvalidPoolState)?", "pool.state.size.wrapping_sub(pool.label.size)", "a_release_number_that_would_wrap_is_refused"],
+  ["number fits u32", "src/release.rs", "let number = u32::try_from(number).map_err(|_| ProgramError::from(PoolError::Overflow))?;", "let number = number as u32;", "a_release_number_that_would_wrap_is_refused"],
   // tag 3 (src/buy.rs, and its tip in src/release.rs's shared settle)
   ["tip cap", "src/release.rs", "if tip > r.tip_cap {", "if false {", "a_tip_over_the_tip_cap_is_refused"],
   ["fee and tip within the chunk", "src/release.rs", "let to_recipient = r.withdrawn.checked_sub(r.relay_fee).and_then(|v| v.checked_sub(tip)).ok_or(PoolError::InvalidWithdrawalAmount)?;", "let to_recipient = r.withdrawn.wrapping_sub(r.relay_fee).wrapping_sub(tip);", "a_fee_and_tip_over_the_chunk_is_refused"],
@@ -89,8 +96,12 @@ function swap(edits) {
   return () => saved.forEach(([p, src]) => writeFileSync(p, src));
 }
 
+// node scripts/mutants.mjs [name ...]: only the mutants named (all when none is)
+const only = process.argv.slice(2);
+for (const n of only) if (!MUTANTS.some((m) => m[0] === n)) throw new Error(`no mutant named ${n}`);
+const run = only.length ? MUTANTS.filter((m) => only.includes(m[0])) : MUTANTS;
 let caught = 0;
-for (const [name, file, from, to, testName, extra] of MUTANTS) {
+for (const [name, file, from, to, testName, extra] of run) {
   const restore = swap([[file, from, to], ...(extra ? [extra] : [])]);
   try {
     execFileSync("cargo-build-sbf", ["--sbf-out-dir", "out/mutant"], { cwd: here, stdio: "ignore" });
@@ -104,5 +115,5 @@ for (const [name, file, from, to, testName, extra] of MUTANTS) {
   if (red && green) caught++;
   console.log(`${red && green ? "CAUGHT" : "MISSED"} ${name}: ${testName} ${red ? "fails" : "PASSES"} without it, ${green ? "passes" : "FAILS"} with it`);
 }
-console.log(`${caught}/${MUTANTS.length} mutants caught`);
-process.exit(caught === MUTANTS.length ? 0 : 1);
+console.log(`${caught}/${run.length} mutants caught`);
+process.exit(caught === run.length ? 0 : 1);
