@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPoolFlow } = await import("../src/pool-testnet.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
@@ -57,4 +57,18 @@ test("a pool buy on the pinned devnet pool reaches the flow; another chain, no f
   // the mainnet table: nothing pinned
   assert.deepEqual(poolKinds({ ...testnetPoolDeps(flow), pinned: (c) => c === "solana" && SOL_POOLS.mainnet !== undefined })["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
   assert.equal(asks.length, 1);
+});
+
+test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs the deposit kind; every other op is refused", async () => {
+  let opened = 0;
+  // a store that fails to open: the run ends at once, with no RPC read
+  const flow = testnetPoolFlow({ store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) });
+  const k = poolKinds(testnetPoolDeps(flow));
+  const d = k["pool.deposit"]({ chain: "solana", amount: "0.01" }, ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
+  assert.equal(d.running, true);
+  await d.after;
+  assert.deepEqual(d.answer(), { error: "failed" });
+  assert.equal(opened, 1);
+  assert.deepEqual(k["pool.buy"](buy("solana"), ctx), { error: "not_allowed" }, "a pool buy waits for its card");
+  assert.deepEqual(k["pool.deposit"]({ chain: "base", amount: "0.01" }, ctx), { error: "not_allowed" });
 });
