@@ -144,6 +144,7 @@ export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program
   if (only !== undefined && only !== "spent") throw new Error("only: spent or nothing");
   // one stop for every call below: the caller's signal, or the first throw on either RPC or size, so no read goes on
   // past the refusal (review S2)
+  signal?.throwIfAborted(); // a signal aborted already never fires its event
   const stop = new AbortController();
   const onAbort = (): void => stop.abort(signal!.reason);
   signal?.addEventListener("abort", onAbort, { once: true });

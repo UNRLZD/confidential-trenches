@@ -2040,6 +2040,10 @@ test("sol-marks-scale fold 1 S2: a throw on one RPC, or the caller's abort, stop
   await assert.rejects(solanaMarks([watch("https://a.example"), watch("https://b.example")], PROGRAM, ctl.signal, undefined, async () => ctl.abort()), { name: "AbortError" });
   await turns();
   assert.equal(afterAbort, 0);
+  // a signal aborted before the read: no call at all
+  await assert.rejects(solanaMarks([watch("https://a.example"), watch("https://b.example")], PROGRAM, ctl.signal, undefined, rvInstant), { name: "AbortError" });
+  await turns();
+  assert.equal(afterAbort, 0);
 });
 
 test("sol-marks-scale fold 1 S2: a stopped RPC whose bucket is full when read again reads on from the bucket past it", async () => {

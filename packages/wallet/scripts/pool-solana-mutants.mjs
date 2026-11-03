@@ -100,6 +100,7 @@ const M = [
   [R, "    stop.abort(e);\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
   [R, "  signal?.addEventListener(\"abort\", onAbort, { once: true });\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
   [R, "lagWait, stop.signal))", "lagWait))", T, "sol-marks-scale fold 1 S2: a throw"],
+  [R, "  signal?.throwIfAborted(); // a signal aborted already never fires its event\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
   [R, "a.lagWait, \"spent\");", "a.lagWait);", T, "sol-marks-scale fold 1 S4"],
   [R, "(only === \"spent\" ? [0] : [0, 1])", "[0, 1]", T, "sol-marks-scale fold 1 S4"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
