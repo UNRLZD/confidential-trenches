@@ -35,6 +35,7 @@ export const PADS: Readonly<Record<string, Pad>> = {
   virtuals: { name: "Virtuals", logo: at("virtuals.png"), src: "https://app.virtuals.io/apple-touch-icon.png" },
   pons: { name: "Pons", logo: at("pons.png"), src: "https://ponsfamily.com/favicon.png" },
   bags: { name: "Bags", logo: at("bags.png"), src: BAGS },
+  torch: { name: "Torch", logo: at("torch.png"), src: "https://torchpad.fun/brand/TorchMark-400.png (the site's apple-touch-icon)" },
 };
 
 /** Pads the factory table names whose own brand files could not be found or cited: they draw no badge until they can. */

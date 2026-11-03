@@ -14,12 +14,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** The ids the lists served on 3 Nov: a read at 12:30Z, the card's, and this card's read at 12:43Z (Raydium). */
 const SOLANA = ["pump.fun", "stonkfun", "raydium-launchlab", "Raydium", "met-dbc", "letsbonk.fun", "metadao", "jup-studio", "bags.fun", "grainpad"];
-/** The factory table's pads (apps/helper/src/data/evm/lists.ts FACTORIES, card market-data-evm-lists at 8d6e279). */
-const EVM = ["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags"];
+/** The factory table's pads (apps/helper/src/data/evm/lists.ts FACTORIES, card market-data-evm-lists at 8d6e279; torch from card pad-torch-robinhood). */
+const EVM = ["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags", "torch"];
 const NAMES: Record<string, string> = {
   "pump.fun": "pump.fun", stonkfun: "StonkFun", "raydium-launchlab": "LaunchLab", Raydium: "Raydium", "met-dbc": "Meteora", "letsbonk.fun": "bonk.fun",
   metadao: "MetaDAO", "jup-studio": "Jupiter Studio", "bags.fun": "Bags", grainpad: "grainpad", zora: "Zora", clanker: "Clanker", doppler: "Doppler",
-  flaunch: "Flaunch", virtuals: "Virtuals", pons: "Pons", bags: "Bags",
+  flaunch: "Flaunch", virtuals: "Virtuals", pons: "Pons", bags: "Bags", torch: "Torch",
 };
 
 /** A logo the table names: a file in src/screens/market/logos, a real PNG of 64 px or less or an SVG with no script. */
