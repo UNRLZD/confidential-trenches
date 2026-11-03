@@ -32,7 +32,7 @@ export function Shell({ client, screen: S = Screen }: { client: SignpageClient; 
             <PhoneHeader />
             <Routes>
               {ROUTES.map((r) => (
-                <Route key={r.id} path={r.path} element={<S id={r.id} />} />
+                <Route key={r.path} path={r.path} element={<S id={r.id} />} />
               ))}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

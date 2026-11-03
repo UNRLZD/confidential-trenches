@@ -46,7 +46,6 @@ export const CHAINS: Readonly<Record<string, ChainMark>> = {
   solana: { name: "Solana", logo: at("solana.svg"), src: "https://github.com/solana-foundation/solana-com/blob/4a3bcdb476ce73f4e2a2f92c4856d7c1fc728727/apps/web/public/src/img/branding/solanaLogoMark.svg", inset: 0.2 },
   base: { name: "Base", logo: at("base.svg"), src: "https://github.com/base/brand-kit/blob/eba9e730be34f8c9ae7f9a21f32cc6aafebe2ad1/logo/TheSquare/Digital/Base_square_blue.svg", inset: 0.2 },
   robinhood: ROBINHOOD,
-  "eip155:4663": ROBINHOOD,
   near: { name: "NEAR", logo: at("near.png"), src: "https://near.org/apple-touch-icon.png", inset: 0 },
 };
 

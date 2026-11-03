@@ -22,6 +22,11 @@
 /* the desktop row (TokenRow) */
 .dsc-row { display: grid; grid-template-columns: 68px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 16px; border-bottom: 1px solid var(--border-row); }
 .dsc-row:hover { background: var(--bg-row-hover); }
+/* the row is a link (card app-token-route): the whole row is the target; R5's TokenRow (.dd-row: colour inherited, no
+   underline, the hover fill eased) and its focus ring (.dt-btn:focus-visible, 2 px blue inside the box) */
+.dsc-row, .dsc-prow { color: inherit; text-decoration: none; }
+.dsc-row { transition: background-color 150ms ease; }
+.dsc-row:focus-visible, .dsc-prow:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .dsc-ringw { position: relative; width: 68px; height: 68px; }
 .dsc-ring { position: relative; display: block; flex: none; }
 .dsc-ring svg { position: absolute; inset: 0; }
@@ -67,6 +72,8 @@
 .dsc-tab[aria-selected="true"] { background: var(--text-1); border-color: var(--text-1); color: var(--bg-page); }
 .dsc-tab[aria-selected="true"] .dsc-count { color: #6e6e6e; }
 .dsc-prow { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border-row); }
+/* R5 .md-row:has(.md-main:active): the pressed row on the phone */
+.dsc-prow:active { background: #111; }
 .dsc-pinfo { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .dsc-pinfo .dsc-sym { font-size: 16px; }
 .dsc-pmeta { display: flex; align-items: center; gap: 10px; min-width: 0; font: 12px var(--font-num); color: var(--text-2); white-space: nowrap; overflow: hidden; }
