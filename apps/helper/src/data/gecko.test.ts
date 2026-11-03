@@ -1,9 +1,9 @@
 // node --test apps/helper/src/data/gecko.test.ts: GeckoTerminal's one budget: at most GT_LIMIT_PER_MIN calls in any
 // 60 s across every lane; the lists lane yields to the token page (PAGE_RESERVE kept free, none while a page called in
-// the last YIELD_MS unless urgent, and urgent still leaves one); a 429 pausing every lane.
+// the last YIELD_MS, except urgent reads within the lists' own LIST_FLOOR); a 429 pausing every lane.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, YIELD_MS } from "./gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, YIELD_MS } from "./gecko.ts";
 
 test("the measured keyless limit: 5 calls a minute from one address (the published 10 met 429s)", () => assert.equal(GT_LIMIT_PER_MIN, 5));
 
@@ -18,7 +18,7 @@ test("pages may take the whole minute; the window slides", () => {
   assert.equal(b.take("pages"), true, "a minute after, the first calls have left the window");
 });
 
-test("lists yield: they leave PAGE_RESERVE free, take nothing while a page called in the last YIELD_MS, and an urgent read still leaves one", () => {
+test("lists yield: they leave PAGE_RESERVE free and take nothing while a page called in the last YIELD_MS, except urgent reads within their own LIST_FLOOR", () => {
   let now = 0;
   const b = geckoBudget(() => now);
   for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE; i++) assert.equal(b.take("lists"), true);
@@ -27,10 +27,10 @@ test("lists yield: they leave PAGE_RESERVE free, take nothing while a page calle
   for (let i = 0; i < PAGE_RESERVE; i++) assert.equal(b.take("pages"), true, "and a page finds it");
   now = 60_000; // the lists' calls have left; the pages' (10 s later) are still in the window
   assert.equal(b.take("lists"), false, "a page called within YIELD_MS: lists wait");
-  assert.equal(b.take("lists", true), true, "an urgent list read goes");
-  assert.equal(b.take("pages"), true, "four of the five in the window now");
-  assert.equal(b.take("lists", true), false, "urgent leaves one call for a page");
-  assert.equal(b.take("pages"), true);
+  for (let i = 0; i < LIST_FLOOR; i++) assert.equal(b.take("lists", true), true, "an urgent list read goes, within the floor");
+  assert.equal(b.take("lists", true), false, "past the floor an urgent read yields too");
+  assert.equal(b.take("pages"), true, "the minute's last call is a page's");
+  assert.equal(b.take("pages"), false);
   now = YIELD_MS * 2 + 1;
   assert.equal(b.take("lists"), true, "no page in the last YIELD_MS: lists go again");
 });

@@ -41,7 +41,8 @@ export const GT_READS = {
 } as const;
 /** A list is read again once its last read is this old, when the lists lane yields a call. */
 export const LIST_MS = 60_000;
-/** A list this old is read even while pages are being opened (still leaving a page one call), so it never reaches STALE_MS. */
+/** A list this old, or never read, is read even while pages are being opened (still leaving a page one call), so it
+ *  never reaches STALE_MS and a helper started while token pages are open still serves its lists. */
 export const LIST_URGENT_MS = 240_000;
 /** The snapshot is rebuilt on the Solana lists' cadence (D-S2's 12 s): makers not settled yet are read again. */
 export const TICK_MS = 12_000;
@@ -624,7 +625,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     // the stalest list first (a missing one before any), one call at a time while the lists lane yields one
     const age = (k: ListKey) => (reads[k] === undefined ? Infinity : now() - reads[k]!.at);
     for (const k of LIST_KEYS.filter((x) => age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
-      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS && age(k) !== Infinity);
+      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS);
       if (r === null) break;
       reads[k] = r;
     }
