@@ -2,6 +2,7 @@
 // Removes each of the pool's checks, one at a time, in a copy of contracts/pool-evm, and runs the test named for it:
 // each named test passes on the pool as it is and fails on every mutant. Exits 1 when a named test passes on its
 // mutant, fails on the pool as it is, or a mutant's text is not found exactly once. Needs forge and cast (Foundry).
+// forge runs through test/fork-rpc.mjs, so the fork tests replay their recorded RPC answers.
 //   node contracts/pool-evm/test/mutants.mjs
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +15,9 @@ const PP = "src/PrivacyPool.sol";
 const ST = "src/State.sol";
 const SIMPLE = "src/PrivacyPoolSimple.sol";
 const VERIFIER = "src/verifiers/WithdrawalVerifier.sol";
+const ADAPTER = "src/adapters/UniswapV3Adapter.sol";
+const V4 = "src/adapters/UniswapV4Adapter.sol";
+const SELL = "src/SellDelegate.sol";
 // lib/forge-std's submodule commit (v1.9.7), fetched into the copy when the checkout has no submodule files
 const FORGE_STD = "77041d2ce690e692d6e03cc812b57d1ddaa4d505";
 
@@ -72,6 +76,143 @@ export const MUTANTS = [
   [PP, "  /// @inheritdoc IPrivacyPool\n  function deposit(", "  function depositors(uint256) external pure returns (address) {\n    return address(0);\n  }\n\n  /// @inheritdoc IPrivacyPool\n  function deposit(", "test_ragequitIsAbsent"],
   ["src/poseidon/PoseidonT3.sol", "function hash(uint256[2] memory _inputs) internal pure returns (uint256) {", "function hash(uint256[2] memory _inputs) public pure returns (uint256) {", "test_noDelegatecallCallcodeSelfdestructOrCreate"],
   [ST, "  /// @inheritdoc IState\n  uint256 public nonce;", "  /// @inheritdoc IState\n  uint256 public nonce;\n  address internal admin;", "layout"],
+  // the buy (card pool-evm-buy): the request's length, W's signature and each field it binds, what W gets
+  [PP, "if (_encoded.length != 192) revert InvalidRelayData();", "", "test_trailingRelayDataIsRefused"],
+  [PP, "if (_signature.length != 65) revert InvalidSignature();", "", "test_aSignatureWithATrailingByteIsRefused"],
+  [PP, "if (uint256(_s) > HALF_N) revert InvalidSignature();", "", "test_aHighSSignatureIsRefused"],
+  // W signs every release: the check, then each field of each signed type and of the domain
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aWrongSignerIsRefused"],
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aBuysSignatureIsRefusedAsAWithdraw"],
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aWithdrawWithNoOrAWrongSignatureIsRefused"],
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aSignatureForAnotherProofOfTheNoteIsRefused"],
+  [SIMPLE, "          _buy.adapter,\n", "          address(0),\n", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "keccak256(_buy.data),", "bytes32(0),", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "          _buy.minOut,\n", "          uint256(0),\n", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "          _buy.token,\n", "          address(0),\n", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "          _proof.existingNullifierHash(),\n", "          uint256(0),\n", "test_aSignatureForAnotherNoteIsRefused"],
+  [SIMPLE, "          _proof.context(),\n", "          uint256(0),\n", "test_aSignatureForAnotherProofOfTheNoteIsRefused"],
+  [SIMPLE, "          _proof.withdrawnValue()\n", "          uint256(0)\n", "test_aSignatureForASmallerChunkOfTheNoteIsRefused"],
+  [SIMPLE, "uint256 nullifier,uint256 context,uint256 value)'", "uint256 nullifier,uint256 context)'", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, uint256(0), _proof.context(), _proof.withdrawnValue())", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), uint256(0), _proof.withdrawnValue())", "test_aSignatureForAnotherProofOfTheNoteIsRefused"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), uint256(0))", "test_aSignatureForASmallerChunkOfTheNoteIsRefused"],
+  [PP, "keccak256('Withdraw(uint256 nullifier,uint256 context,uint256 value)')", "keccak256('Withdraw(uint256 nullifier,uint256 context)')", "test_oneProofServesWithdrawOrBuy"],
+  [PP, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, uint256(31337), address(this))", "test_anotherChainsSignatureIsRefused"],
+  [PP, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, block.chainid, address(uint160(0xb1f1f001)))", "test_anotherPoolsSignatureIsRefused"],
+  [PP, "NAME_HASH = keccak256('Blindfill');", "NAME_HASH = keccak256('Blindfill pool');", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "abi.encodePacked(hex'1901', _domain, _struct)", "abi.encodePacked(_domain, _struct)", "test_oneProofServesWithdrawOrBuy"],
+  [SIMPLE, "if (_buy.minOut == 0) revert InvalidMinOut();", "", "test_aZeroMinOutIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "", "test_minOutNotMetIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "", "test_anAdapterThatSendsElsewhereIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "", "test_aRouteToAnotherTokenFails"],
+  [SIMPLE, "uint256 _before = IERC20Balance(_buy.token).balanceOf(_data.recipient);", "uint256 _before = 0;", "test_tokensWAlreadyHoldsDoNotCount"],
+  [SIMPLE, "{value: _withdrawn - _fee}", "{value: _withdrawn}", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "    if (_fee != 0) _push(_data.feeRecipient, _fee);\n", "", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "if (_fee != 0) _push(_data.feeRecipient, _fee);", "_push(_data.feeRecipient, _fee);", "test_aBuyWithFeeZeroSendsTheWholeChunk"],
+  [SIMPLE, "(_buy.token, _data.recipient, _buy.minOut, _buy.data)", "(_buy.token, _data.recipient, 0, _buy.data)", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "(_buy.token, _data.recipient, _buy.minOut, _buy.data)", "(_buy.token, msg.sender, _buy.minOut, _buy.data)", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "bytes memory _signature\n  ) external nonReentrant {", "bytes memory _signature\n  ) external {", "test_anAdapterCannotReenter"],
+  [PP, "_withdrawn = _spendChecked(_withdrawal, _proof, _data.deadlineMs);", "_withdrawn = _proof.withdrawnValue();", "test_aReplayedSignatureIsRefused"],
+  [ADAPTER, "recipient: recipient,", "recipient: msg.sender,", "test_aBuyLandsAndWHoldsAtLeastMinOut"],
+  [ADAPTER, "amountIn: msg.value,", "amountIn: msg.value / 2,", "test_aBuyLandsAndWHoldsAtLeastMinOut"],
+  [ADAPTER, "amountOutMinimum: minOut", "amountOutMinimum: 0", "test_aMinOutOverTheQuoteFails"],
+  // a partial fill: the router's ETH, each middle token's balance at the router, and the hop count that finds them
+  [ADAPTER, "if (address(ROUTER).balance != _eth) revert PartialFill();", "", "test_aPartialFillRevertsTheBuy"],
+  [ADAPTER, "!= _mid[_i]) {", "!= _mid[_i] && false) {", "test_aPartialSecondHopRevertsTheBuy"],
+  [ADAPTER, "uint256 _hops = (data.length - 20) / 23;", "uint256 _hops = (data.length - 20) / 24;", "test_aPartialSecondHopRevertsTheBuy"],
+  // the Uniswap v4 adapter (card evm-adapters): only the PoolManager calls back, every hop takes its whole amount, a
+  // hop gives something and the route at least minOut, a route is not empty and starts from ETH or WETH, what it binds
+  [V4, "if (msg.sender != address(POOL_MANAGER)) revert NotPoolManager();", "", "test_v4OnlyThePoolManagerCallsBack"],
+  [V4, "if (_paid != -int256(_amount)) revert PartialFill();", "", "test_v4APartialFillRevertsTheBuy"],
+  [V4, "if (_paid != -int256(_amount)) revert PartialFill();", "", "test_v4APartialSecondHopRevertsTheBuy"],
+  [V4, "if (_got <= 0) revert TooLittleReceived();", "", "test_v4AHookThatTakesMoreThanTheOutputFails"],
+  [V4, "if (_amount < _minOut) revert TooLittleReceived();", "", "test_v4AMinOutOverTheQuoteFails"],
+  [V4, "if (_amount < _minOut) revert TooLittleReceived();", "", "test_v4AHookThatTakesMoreThanTheQuoteFails"],
+  [V4, "if (_path.length == 0) revert InvalidRoute();", "", "test_v4AnEmptyRouteIsRefused"],
+  [V4, "if (_currencyIn != address(0) && _currencyIn != address(WETH)) revert InvalidRoute();", "", "test_v4ARouteFromAnotherCurrencyIsRefused"],
+  [V4, "POOL_MANAGER.take(_currency, _recipient, _amount);", "POOL_MANAGER.take(_currency, msg.sender, _amount);", "test_v4OneHopLands"],
+  [V4, "amountSpecified: -int256(_amount),", "amountSpecified: -int256(_amount / 2),", "test_v4TwoHopLands"],
+  [V4, "WETH.deposit{value: _in}();", "", "test_v4FromWethLands"],
+  // the Opus review's mutants (b61f0f5): EIP-712 strings and encoding, signature parsing, the request's length, what
+  // W gets, the fee cap, v, and the fee recipient's reentry
+  [PP, "keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')", "keccak256('EIP712Domain(string name,uint256 chainId,address verifyingContract)')", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "VERSION_HASH = keccak256('1');", "VERSION_HASH = keccak256('2');", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [SIMPLE, "'Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)'", "'Buy(address token,bytes data,uint256 minOut,address adapter,uint256 nullifier,uint256 context,uint256 value)'", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "keccak256(_buy.data),", "keccak256(abi.encode(_buy.data)),", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.newCommitmentHash(), _proof.context(), _proof.withdrawnValue())", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [PP, "_v := byte(0, mload(add(_signature, 0x60)))", "_v := 27", "test_signaturesWithVOf27And28BothLand"],
+  [PP, "_r := mload(add(_signature, 0x20))\n      _s := mload(add(_signature, 0x40))", "_s := mload(add(_signature, 0x20))\n      _r := mload(add(_signature, 0x40))", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "_release(_withdrawal, _proof, _fee, _data, _buyDigest(_buy, _proof), _signature)", "_release(_withdrawal, _proof, _fee, _data, _typedDigest(keccak256(abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue()))), _signature)", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [PP, "if (_encoded.length != 192) revert InvalidRelayData();", "if (_encoded.length < 192) revert InvalidRelayData();", "test_trailingRelayDataIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "if (_out + 1 < _buy.minOut) revert MinOutNotMet();", "test_minOutNotMetIsRefused"],
+  [SIMPLE, "{value: _withdrawn - _fee}", "{value: _withdrawn - _fee - 1}", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "if (_buy.minOut == 0) revert InvalidMinOut();", "if (_buy.minOut == 0 && _fee != 0) revert InvalidMinOut();", "test_aZeroMinOutIsRefused"],
+  [PP, "if (_fee > _data.feeCap) revert FeeOverCap();", "if (_fee >= _data.feeCap) revert FeeOverCap();", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "return ecrecover(_digest, _v, _r, _s);", "return ecrecover(_digest, _v < 27 ? _v + 27 : _v, _r, _s);", "test_R_vOtherThan27Or28IsRefused"],
+  [SIMPLE, "bytes memory _signature\n  ) external nonReentrant {", "bytes memory _signature\n  ) external {", "test_R_feeRecipientCannotReenterBuy"],
+  // the sell delegate (card pool-evm-sell): each check of a sell, W's signature and each field it binds, the nonce at
+  // its ERC-7201 slot, the approval, the unwrap, minOut, the fee and the deposit
+  [SELL, "if (_guard()) revert Reentrancy();", "", "test_aTargetCannotReenter"],
+  [SELL, "    _setGuard(true);\n", "", "test_aTargetCannotReenter"],
+  [SELL, "    _setGuard(false);\n", "", "test_twoSellsInOneTransactionBothLand"],
+  // the Opus review of c2a8da2 (test/HostileSell.t.sol): the guard back at transient slot 0, and the cap paid in
+  // place of the fee the sender named
+  [SELL, "SELL_GUARD = 0x440bd9ccab75449a1500e3c92e1ea82c77befa0047a75538597e7e92c1806400;", "SELL_GUARD = 0x0000000000000000000000000000000000000000000000000000000000000000;", "test_R_aModuleGuardAtSlot0DoesNotCollide"],
+  [SELL, "msg.sender.call{value: _fee}('')", "msg.sender.call{value: _sell.feeCap}('')", "test_R_theSenderGetsTheFeeItNamesNotTheCap"],
+  [SELL, "if (block.timestamp > _sell.deadline) revert DeadlineExpired();", "", "test_anExpiredDeadlineIsRefused"],
+  [SELL, "if (block.timestamp > _sell.deadline)", "if (block.timestamp >= _sell.deadline)", "test_anExpiredDeadlineIsRefused"],
+  [SELL, "if (_fee > _sell.feeCap) revert FeeOverCap();", "", "test_aSellFeeOverTheCapIsRefused"],
+  [SELL, "if (_fee > _sell.feeCap)", "if (_fee >= _sell.feeCap)", "test_aSellFeeOverTheCapIsRefused"],
+  [SELL, "if (_sell.minOut == 0) revert InvalidMinOut();", "", "test_aSellZeroMinOutIsRefused"],
+  [SELL, "if (_signer(_sellDigest(_sell), _signature) != address(this)) revert InvalidSignature();", "", "test_aSellWrongSignerIsRefused"],
+  [SELL, "if (_signer(_sellDigest(_sell), _signature) != address(this)) revert InvalidSignature();", "", "test_changedCalldataIsRefused"],
+  [SELL, "if (_signer(_sellDigest(_sell), _signature) != address(this)) revert InvalidSignature();", "", "test_aThirdPartyCallingTheDelegateMovesNothing"],
+  [SELL, "if (_sell.nonce != $.nonce) revert InvalidNonce();", "", "test_aReplayedNonceIsRefused"],
+  [SELL, "if (_sell.nonce != $.nonce) revert InvalidNonce();", "", "test_noncesRunInTurn"],
+  [SELL, "    $.nonce = _sell.nonce + 1;\n", "", "test_aReplayedNonceIsRefused"],
+  [SELL, "$.nonce = _sell.nonce + 1;", "$.nonce = _sell.nonce + 2;", "test_noncesRunInTurn"],
+  [SELL, "SELL_STORAGE = 0xd19ce3d034be62269d1d8903d496806b7944251c1f2a9fe8014ceeba63edbd00;", "SELL_STORAGE = 0xd19ce3d034be62269d1d8903d496806b7944251c1f2a9fe8014ceeba63edbd01;", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "_approve(_sell.token, _sell.target, _sell.amount);", "_approve(_sell.token, _sell.target, type(uint256).max);", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "if (IERC20Sell(_sell.token).allowance(address(this), _sell.target) != 0) revert LeftoverApproval();", "", "test_aLeftoverApprovalIsRefused"],
+  [SELL, "if (IERC20Sell(_sell.token).allowance(address(this), _sell.target) != 0) revert LeftoverApproval();", "", "test_aForkLeftoverApprovalFails"],
+  [SELL, "if (!_ok || (_ret.length != 0 && !abi.decode(_ret, (bool)))) revert ApproveFailed();", "", "test_aTokenThatRefusesTheApprovalIsRefused"],
+  [SELL, "(_ret.length != 0 && !abi.decode(_ret, (bool)))", "!abi.decode(_ret, (bool))", "test_aTokenWhoseApproveReturnsNothingSells"],
+  [SELL, "    if (!_ok) {\n      assembly", "    if (false) {\n      assembly", "test_aTargetsRevertIsPassedOn"],
+  [SELL, "uint256 _eth = address(this).balance;", "uint256 _eth = 0;", "test_whatWAlreadyHoldsDoesNotCount"],
+  [SELL, "uint256 _weth = WETH.balanceOf(address(this));", "uint256 _weth = 0;", "test_whatWAlreadyHoldsDoesNotCount"],
+  [SELL, "if (_wethGained != 0) WETH.withdraw(_wethGained);", "", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "  receive() external payable {}\n", "", "test_aSellPaidInEtherLands"],
+  [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_aShortOutputIsRefused"],
+  [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_aShortOutputInEtherIsRefused"],
+  [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_aForkShortOutputFails"],
+  [SELL, "if (_gained < _sell.minOut)", "if (_gained + 1 < _sell.minOut)", "test_aShortOutputIsRefused"],
+  [SELL, "if (!_sent) revert FailedToSendNativeAsset();", "", "test_aSenderThatRefusesEtherRevertsTheSell"],
+  [SELL, "    if (_fee != 0) {\n", "    if (true) {\n", "test_aSenderThatRefusesEtherRevertsTheSell"],
+  [SELL, "msg.sender.call{value: _fee}('')", "block.coinbase.call{value: _fee}('')", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "deposit{value: _gained - _fee}(_gained - _fee, _sell.precommitment)", "deposit{value: _gained}(_gained, _sell.precommitment)", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "(_gained - _fee, _sell.precommitment)", "(_gained - _fee, uint256(1))", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "if (_signature.length != 65) revert InvalidSignature();", "", "test_aSellSignatureWithATrailingByteIsRefused"],
+  [SELL, "if (uint256(_s) > HALF_N) revert InvalidSignature();", "", "test_aSellHighSSignatureIsRefused"],
+  [SELL, "uint8 _v = uint8(_signature[64]);", "uint8 _v = 27;", "test_sellSignaturesWithVOf27And28BothLand"],
+  [SELL, "bytes32 _r = bytes32(_signature[0:32]);\n    bytes32 _s = bytes32(_signature[32:64]);", "bytes32 _s = bytes32(_signature[0:32]);\n    bytes32 _r = bytes32(_signature[32:64]);", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "return ecrecover(_digest, _v, _r, _s);", "return ecrecover(_digest, _v < 27 ? _v + 27 : _v, _r, _s);", "test_aVOtherThan27Or28IsRefused"],
+  [SELL, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, uint256(8453), address(this))", "test_anotherChainsSellSignatureIsRefused"],
+  [SELL, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, block.chainid, address(0))", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "NAME_HASH = keccak256('Blindfill');", "NAME_HASH = keccak256('Blindfill sell');", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "VERSION_HASH = keccak256('1');", "VERSION_HASH = keccak256('2');", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')", "keccak256('EIP712Domain(string name,uint256 chainId,address verifyingContract)')", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "'Sell(address token,uint256 amount,", "'Sell(uint256 amount,address token,", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "abi.encodePacked(hex'1901', _domain, _struct)", "abi.encodePacked(_domain, _struct)", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "        _sell.token,\n", "        address(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.amount,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.target,\n", "        address(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        keccak256(_sell.data),\n", "        bytes32(0),\n", "test_changedCalldataIsRefused"],
+  [SELL, "        _sell.minOut,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.pool,\n", "        address(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.precommitment,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.feeCap,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.deadline,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.nonce\n      )", "        uint256(0)\n      )", "test_eachChangedFieldIsRefused"],
 ];
 
 // keccak256 of the withdrawal verifier's deployed code as `dir` builds it
@@ -80,7 +221,7 @@ function verifierHash(dir) {
   return execFileSync("cast", ["keccak", code.trim()], { encoding: "utf8", stdio: "pipe" }).trim();
 }
 
-// "pass" or "fail" of one named test; throws unless forge ran exactly that one test (forge matches --mt against
+// "pass", "fail" or "error (...)" of one named test; throws unless forge ran exactly that one test (forge matches --mt against
 // `name()`, and a pattern that matches nothing exits 0)
 function run(dir, test) {
   if (test === "layout") {
@@ -93,13 +234,18 @@ function run(dir, test) {
   }
   let out;
   try {
-    out = execFileSync("forge", ["test", "--mt", `^${test}\\(`], { cwd: dir, encoding: "utf8", stdio: "pipe" });
+    out = execFileSync("node", ["test/fork-rpc.mjs", "--", "forge", "test", "--no-storage-caching", "--mt", `^${test}\\(`], { cwd: dir, encoding: "utf8", stdio: "pipe" });
   } catch (e) {
     out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
   }
-  const ran = out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? [];
+  // a read the fork replay has no answer for makes a fork test fail for the wrong reason: an error, never a kill.
+  // forge 1.8.6's two probes (anvil_nodeInfo, eth_getAccountInfo) are answered by its own fallback and do not count
+  const misses = [...new Set((out.match(/fork-rpc: not recorded[^\n]*/g) ?? []).filter((m) => !/anvil_nodeInfo|eth_getAccountInfo/.test(m)))];
+  if (misses.length > 0) return `error (the replay has no answer: ${misses.join("; ").slice(0, 300)})`;
+  // PASS or FAIL of each test of that name (two contracts may share it, each failing for its own reason)
+  const ran = (out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? []).map((r) => r.slice(1, 5));
   // forge prints a failing test twice, in the run and in the summary
-  if (ran.length >= 1 && ran.every((r) => r === ran[0])) return ran[0].startsWith("[PASS") ? "pass" : "fail";
+  if (ran.length >= 1 && ran.every((r) => r === ran[0])) return ran[0] === "PASS" ? "pass" : "fail";
   throw new Error(`forge ran ${ran.length} tests named ${test}:\n${out.slice(-2000)}`);
 }
 
@@ -117,8 +263,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       git("checkout", "-q", FORGE_STD);
     }
     for (const t of new Set(MUTANTS.map((m) => m[3]))) {
-      if (run(dir, t) !== "pass") {
-        console.log(`FAIL ${t} fails on the pool as it is`);
+      const r = run(dir, t);
+      if (r !== "pass") {
+        console.log(`FAIL ${t} is ${r} on the pool as it is`);
         bad++;
       }
     }
@@ -143,7 +290,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       for (const x of new Set(MUTANTS.map((m) => m[0]))) {
         if (readFileSync(path.join(dir, x), "utf8") !== readFileSync(path.join(ROOT, x), "utf8")) throw new Error(`mutant ${i + 1} left ${x} changed`);
       }
-      console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1} ${file}: ${find.trim().split("\n")[0].slice(0, 70)} -> ${t} ${r === "fail" ? "fails" : "PASSES"}`);
+      console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1} ${file}: ${find.trim().split("\n")[0].slice(0, 70)} -> ${t} ${r === "fail" ? "fails" : r === "pass" ? "PASSES" : r}`);
       if (r !== "fail") bad++;
     });
   } finally {

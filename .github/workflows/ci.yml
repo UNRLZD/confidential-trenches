@@ -201,6 +201,10 @@ jobs:
         run: KIT_PROVER_E2E=1 node --test packages/kit/test/prove-e2e.test.ts
       - name: the vault's scripts' own tests
         run: pnpm run test:vault-scripts
+      # the Solana pool's deploy script: its cleanup never strands a lamport on the run key, and every committed
+      # deployment record's commitment is Poseidon(value, label, precommitment)
+      - name: the Solana pool's deploy script's own tests
+        run: node --test contracts/pool-solana/scripts/deploy.test.mjs
       # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins
       # one. rustup is on the ubuntu-24.04 image (actions/runner-images Ubuntu2404-Readme.md, read 2026-10-31 19:32Z).
       - name: the vault's own tests, without the sandbox suite
@@ -211,7 +215,9 @@ jobs:
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
       # version its tests were first run with, released 2026-05-08) through foundry-toolchain v1.9.1 (908c540, read
       # 2026-11-02 20:12Z), solc 0.8.28 as its foundry.toml pins. The forge tests run the kit's real proofs through the
-      # verifiers the pool deploys; layout.test.mjs reads the pool's storage and ABI from the compiler.
+      # verifiers the pool deploys; layout.test.mjs reads the pool's storage and ABI from the compiler. The buy's fork
+      # tests (Base and Robinhood at pinned blocks) read only test/fork-rpc.mjs, which answers from the recorded
+      # test/fixtures/fork-rpc.json, so the job reads no public RPC.
       - name: the EVM pool's forge-std
         run: git submodule update --init contracts/pool-evm/lib/forge-std
       - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
@@ -219,7 +225,7 @@ jobs:
           version: v1.7.1
       - name: the EVM pool's tests
         run: |
-          forge test --root contracts/pool-evm
+          node contracts/pool-evm/test/fork-rpc.mjs -- forge test --root contracts/pool-evm --no-storage-caching
           node --test contracts/pool-evm/test/*.test.mjs
 
   # The vault's near-sandbox suite (contracts/vault/tests/harness/run.sh: the vault, the mock token and the harness's

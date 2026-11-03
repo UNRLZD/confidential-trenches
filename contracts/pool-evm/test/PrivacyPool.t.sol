@@ -12,11 +12,11 @@ import {WithdrawalVerifier} from '../src/verifiers/WithdrawalVerifier.sol';
 import {IPrivacyPool, IPrivacyPoolSimple} from 'interfaces/IPrivacyPool.sol';
 import {IState} from 'interfaces/IState.sol';
 
-import {Deploy} from './Deploy.sol';
+import {Signing} from './Signing.sol';
 
 /// The pool with the kit's real proofs (test/fixtures/pool-proofs.json, made with packages/kit/zk) through the
 /// verifiers the pool deploys, and Poseidon at its CREATE2 address, put there by the same proxy and bytes as on chain.
-contract PoolTest is Deploy {
+contract PoolTest is Signing {
   uint256 internal constant P = 21_888_242_871_839_275_222_246_405_745_257_275_088_548_364_400_416_034_343_698_204_186_575_808_495_617;
   // block time in the tests: 2030-03-17, below every request's deadline (2,000,000,000,000 ms)
   uint256 internal constant NOW = 1_900_000_000;
@@ -26,6 +26,7 @@ contract PoolTest is Deploy {
   address internal POOL;
   address internal DEPOSITOR;
   address internal W;
+  uint256 internal W_KEY;
   address internal RELAYER;
 
   function setUp() public {
@@ -36,6 +37,8 @@ contract PoolTest is Deploy {
     DEPOSITOR = vm.parseJsonAddress(fx, '.depositor');
     W = vm.parseJsonAddress(fx, '.relayed.request.recipient');
     RELAYER = vm.parseJsonAddress(fx, '.relayed.request.feeRecipient');
+    W_KEY = vm.deriveKey(MNEMONIC, 0);
+    assertEq(vm.addr(W_KEY), W, 'W is the test key the proofs name');
     assertEq(block.chainid, vm.parseJsonUint(fx, '.chainId'));
     deployCodeTo('PrivacyPoolSimple.sol:PrivacyPoolSimple', abi.encode(address(_wv)), POOL);
     pool = PrivacyPoolSimple(POOL);
@@ -86,14 +89,34 @@ contract PoolTest is Deploy {
     for (uint256 _i; _i < 8; ++_i) _p.pubSignals[_i] = _s[_i];
   }
 
-  /// Submits `_name`'s proof from an address that is neither payee, with `_fee`.
+  /// The signature of `_key` that takes `_p` as a withdraw on this pool and chain
+  function _wsig(uint256 _key, ProofLib.WithdrawProof memory _p) internal view returns (bytes memory) {
+    return _sign(_key, _withdrawDigest(_p.pubSignals[1], _p.pubSignals[7], _p.pubSignals[2], block.chainid, address(pool)));
+  }
+
+  /// W's signature that takes `_p` as a withdraw
+  function _wsig(ProofLib.WithdrawProof memory _p) internal view returns (bytes memory) {
+    return _wsig(W_KEY, _p);
+  }
+
+  /// Submits `_name`'s proof, signed by W, from an address that is neither payee, with `_fee`.
   function _relay(
     IPrivacyPool.RelayData memory _r,
     ProofLib.WithdrawProof memory _p,
     uint256 _fee
   ) internal {
+    _relayAs(W_KEY, _r, _p, _fee);
+  }
+
+  function _relayAs(
+    uint256 _key,
+    IPrivacyPool.RelayData memory _r,
+    ProofLib.WithdrawProof memory _p,
+    uint256 _fee
+  ) internal {
+    bytes memory _sig = _wsig(_key, _p);
     vm.prank(address(0xBEEF));
-    pool.withdraw(_withdrawal(_r), _p, _fee);
+    pool.withdraw(_withdrawal(_r), _p, _fee, _sig);
   }
 
   function _refusesRelay(
@@ -378,11 +401,14 @@ contract PoolTest is Deploy {
     _relay(_r, _p, 0);
   }
 
+  /// Another recipient, who signs the release itself: the context refuses it.
   function test_anotherRecipientIsRefused() public {
     _depositAll();
     IPrivacyPool.RelayData memory _r = _request('relayed');
-    _r.recipient = address(0xBAD);
-    _refusesRelay(_r, _withdrawProof('relayed'), 0, IPrivacyPool.ContextMismatch.selector);
+    uint256 _other = vm.deriveKey(MNEMONIC, 1);
+    _r.recipient = vm.addr(_other);
+    vm.expectRevert(IPrivacyPool.ContextMismatch.selector);
+    _relayAs(_other, _r, _withdrawProof('relayed'), 0);
   }
 
   function test_everyOtherRequestFieldIsRefused() public {
@@ -404,9 +430,10 @@ contract PoolTest is Deploy {
     IPrivacyPool.Withdrawal memory _w = _withdrawal(_request('relayed'));
     _w.processooor = address(0xBEEF);
     ProofLib.WithdrawProof memory _p = _withdrawProof('relayed');
+    bytes memory _sig = _wsig(_p);
     vm.prank(address(0xBEEF));
     vm.expectRevert(IPrivacyPool.InvalidProcessooor.selector);
-    pool.withdraw(_w, _p, 0);
+    pool.withdraw(_w, _p, 0, _sig);
   }
 
   function test_aSignalAtOrAbovePIsRefused() public {
@@ -478,7 +505,8 @@ contract PoolTest is Deploy {
   //////////////////////////////////////////////////////////////*/
 
   function _withdrawCall(string memory _name) internal view returns (bytes memory) {
-    return abi.encodeCall(pool.withdraw, (_withdrawal(_request(_name)), _withdrawProof(_name), 0));
+    ProofLib.WithdrawProof memory _p = _withdrawProof(_name);
+    return abi.encodeCall(pool.withdraw, (_withdrawal(_request(_name)), _p, 0, _wsig(_p)));
   }
 
   /// Puts a Reenter at `_at` that makes `_call` with `_value` when paid.
@@ -599,9 +627,10 @@ contract PoolTest is Deploy {
     console.log('deposit (third, depth 2) gas:', _g - gasleft());
     IPrivacyPool.Withdrawal memory _w = _withdrawal(_request('relayed'));
     ProofLib.WithdrawProof memory _p = _withdrawProof('relayed');
+    bytes memory _sig = _wsig(_p);
     vm.prank(address(0xBEEF));
     _g = gasleft();
-    pool.withdraw(_w, _p, 0.01 ether);
+    pool.withdraw(_w, _p, 0.01 ether, _sig);
     console.log('relayed withdraw (depth 2) gas:', _g - gasleft());
   }
 

@@ -291,7 +291,8 @@ function compact(n: number): number[] {
  * a table is loaded from the first table that holds it (that table's writable then readonly indexes, in first-use
  * order); static keys are writable signers (the payer first), readonly signers, writable non-signers, readonly
  * non-signers; loaded keys follow, every table's writable entries, then every table's readonly. Only `signers` may
- * sign (the wallet alone for a swap; the fee payer and W for a pool release, src/trade/solana/pool-buy.ts).
+ * sign (the wallet alone for a swap; the fee payer and W for a pool release, src/trade/solana/pool-buy.ts). A Jito tip
+ * account (SOLANA_JITO_TIP_ACCOUNTS) always stays static, even when a table holds it.
  */
 export function solanaCompileV0(
   payer: string,
@@ -315,7 +316,9 @@ export function solanaCompileV0(
   for (const { address, table } of tables) {
     const l = { address, writable: [] as number[], readonly: [] as number[], wKeys: [] as string[], rKeys: [] as string[] };
     for (const [k, m] of [...meta]) {
-      if (m.signer || m.invoked) continue;
+      // a Jito tip account is never loaded, whatever a table holds: "When tipping make sure to not use Address Lookup
+      // Tables for the tip accounts" (docs.jito.wtf/lowlatencytxnsend, read 2026-11-03), so a block engine counts the tip (M362 (4))
+      if (m.signer || m.invoked || SOLANA_JITO_TIP_ACCOUNTS.includes(k)) continue;
       const i = table.addresses.indexOf(k);
       if (i < 0 || i > 255) continue;
       if (m.writable) { l.writable.push(i); l.wKeys.push(k); } else { l.readonly.push(i); l.rKeys.push(k); }

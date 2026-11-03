@@ -10,6 +10,11 @@
 // groth16.fullProve with the pinned packages/kit/zk files, then checked with snarkjs groth16.verify.
 //
 // Run from the repo root after `pnpm install`: node contracts/pool-evm/test/fixtures/make-pool-proofs.mjs
+// With `buy` it writes buy-proofs.json instead: the buy's proofs on chain 31337, Base (8453) and Robinhood (4663), and
+// W's EIP-712 signatures of one Buy and one Withdraw, made by Foundry's `cast wallet sign --data` (alloy's EIP-712), so
+// the pool's digests are checked against an encoder that is not the pool's own. W is the Hardhat mnemonic's account 0
+// ("test test ... junk", a published test key) in both files.
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -27,10 +32,13 @@ const { VaultTree } = await import(pathToFileURL(join(kit, "src/vault/inputs.ts"
 
 const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const POOL = "0x00000000000000000000000000000000b1f1f001";
-const CHAIN_ID = 31337n;
+let CHAIN_ID = 31337n;
 const NATIVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"; // Constants.NATIVE_ASSET
 const DEPOSITOR = "0x000000000000000000000000000000000000d0d0";
-const W = "0x0000000000000000000000000000000000000a11";
+// W signs every release (EIP-712), so W is a published test key's address: the Hardhat mnemonic's account 0, never
+// money
+const MNEMONIC = "test test test test test test test test test test test junk";
+const W = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const RELAYER = "0x000000000000000000000000000000000000fee1";
 const VALUES = [10n ** 18n, 5n * 10n ** 17n, 2n * 10n ** 18n];
 // 2033-05-18T03:33:20Z in ms; the tests warp below it, then past it
@@ -44,7 +52,7 @@ const fieldOf = (hex) => BigInt("0x" + hexOf(keccak_256(bytesOf(hex)))) % P;
 const testField = (tag) => BigInt("0x" + hexOf(keccak_256(new TextEncoder().encode("pool-evm/" + tag)))) % P;
 
 // SCOPE = keccak256(abi.encodePacked(address(this), block.chainid, asset)) mod p (State.sol)
-const scope = fieldOf(POOL.slice(2) + word(CHAIN_ID) + NATIVE.slice(2));
+let scope;
 // label = keccak256(abi.encodePacked(SCOPE, ++nonce)) mod p (PrivacyPool.sol deposit)
 const labelOf = (nonce) => fieldOf(word(scope) + word(BigInt(nonce)));
 
@@ -56,17 +64,24 @@ function relayDataHex(r) {
 // abi.encode(Withdrawal{processooor, data}, SCOPE): the tuple's offset, SCOPE, then the tuple (its address, its bytes'
 // offset, their length and the bytes)
 function contextPreimageHex(r) {
-  const data = relayDataHex(r);
+  const data = relayDataHex(r) + (r.trailing ?? "");
   return word(0x40n) + word(scope) + addr(POOL) + word(0x40n) + word(BigInt(data.length / 2)) + data;
 }
 
-const notes = VALUES.map((value, i) => {
+// The pool's notes on chain `chainId`: the same secrets, its own scope, so its own labels and commitments
+let notes;
+function onChain(chainId) {
+  CHAIN_ID = chainId;
+  scope = fieldOf(POOL.slice(2) + word(CHAIN_ID) + NATIVE.slice(2));
+  notes = VALUES.map((value, i) => {
   const label = labelOf(i + 1);
   const nullifier = testField(`note${i + 1}/nullifier`);
   const secret = testField(`note${i + 1}/secret`);
   const precommitment = poseidon2([nullifier, secret]);
   return { value, label, nullifier, secret, precommitment, commitment: poseidon3([value, label, precommitment]) };
-});
+  });
+}
+onChain(31337n);
 
 const zk = (f) => join(kit, "zk", f);
 const vkeys = { withdraw: JSON.parse(readFileSync(zk("withdraw.vkey"), "utf8")) };
@@ -84,7 +99,8 @@ async function prove(circuit, name, input) {
 }
 
 /** A withdraw proof spending note `n` (0-based) for `withdrawn`, against the trees of the first `size` deposits. */
-async function spend(name, n, withdrawn, size, feeCap) {
+// `reqName` names the request (its refund precommitment and salt): two spends with one request share one context
+async function spend(name, n, withdrawn, size, feeCap, trailing, reqName = name) {
   const state = new VaultTree(notes.slice(0, size).map((x) => x.commitment));
   const labels = new VaultTree(notes.slice(0, size).map((x) => x.label));
   const request = {
@@ -92,8 +108,9 @@ async function spend(name, n, withdrawn, size, feeCap) {
     feeRecipient: RELAYER,
     feeCap,
     deadlineMs: DEADLINE_MS,
-    refundPrecommitment: testField(`${name}/refund`),
-    salt: hexOf(keccak_256(new TextEncoder().encode("pool-evm/salt/" + name))).slice(0, 32),
+    refundPrecommitment: testField(`${reqName}/refund`),
+    salt: hexOf(keccak_256(new TextEncoder().encode("pool-evm/salt/" + reqName))).slice(0, 32),
+    trailing,
   };
   const preimage = contextPreimageHex(request);
   const context = fieldOf(preimage);
@@ -130,11 +147,107 @@ async function spend(name, n, withdrawn, size, feeCap) {
       deadlineMs: String(request.deadlineMs),
       refundPrecommitment: String(request.refundPrecommitment),
       salt: "0x" + request.salt,
+      ...(trailing ? { trailing: "0x" + trailing } : {}),
     },
     contextPreimage: "0x" + preimage,
     context: String(context),
     proof,
   };
+}
+
+// The set of one chain's deposits, as the tests read it
+const deposits = () => ({
+  pool: POOL,
+  chainId: String(CHAIN_ID),
+  depositor: DEPOSITOR,
+  scope: String(scope),
+  values: VALUES.map(String),
+  precommitments: notes.map((x) => String(x.precommitment)),
+  labels: notes.map((x) => String(x.label)),
+  commitments: notes.map((x) => String(x.commitment)),
+});
+
+// W's EIP-712 signature of `message` as `primaryType` (with its `fields`), on POOL and CHAIN_ID, as the device makes it
+function castSign(primaryType, fields, message) {
+  const typed = {
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      [primaryType]: fields,
+    },
+    primaryType,
+    domain: { name: "Blindfill", version: "1", chainId: Number(CHAIN_ID), verifyingContract: POOL },
+    message,
+  };
+  return execFileSync("cast", ["wallet", "sign", "--mnemonic", MNEMONIC, "--data", JSON.stringify(typed)], { encoding: "utf8" }).trim();
+}
+
+if (process.argv[2] === "buy") {
+  const cap = 10n ** 16n;
+  const local = {
+    ...deposits(),
+    buy: await spend("buy", 0, 4n * 10n ** 17n, 3, cap),
+    buy2: await spend("buy2", 1, 2n * 10n ** 17n, 3, cap),
+    // RelayData then one more word: abi.decode reads it as RelayData, so the pool must refuse it by its length
+    trailing: await spend("trailing", 0, 4n * 10n ** 17n, 3, cap, word(1n)),
+    // the same note as buy with another fee cap: W's signature for one proof must not take the other
+    swap: await spend("swap", 0, 4n * 10n ** 17n, 3, 2n * cap),
+    // the same note and request as buy (so the same context) for twice the value: W's signature for one chunk must
+    // not take the other
+    big: await spend("big", 0, 8n * 10n ** 17n, 3, cap, undefined, "buy"),
+  };
+  // W signs one buy, and one withdraw, of `buy`'s proof on this pool and chain, as the device does
+  // (eth_signTypedData_v4)
+  const message = {
+    adapter: "0x000000000000000000000000000000000000ada1",
+    data: "0x" + hexOf(new TextEncoder().encode("route")),
+    minOut: "1000",
+    token: "0x0000000000000000000000000000000000070c1e",
+    nullifier: local.buy.proof.pubSignals[1],
+    context: local.buy.proof.pubSignals[7],
+    value: local.buy.proof.pubSignals[2],
+  };
+  const buyFields = [
+    { name: "adapter", type: "address" },
+    { name: "data", type: "bytes" },
+    { name: "minOut", type: "uint256" },
+    { name: "token", type: "address" },
+    { name: "nullifier", type: "uint256" },
+    { name: "context", type: "uint256" },
+    { name: "value", type: "uint256" },
+  ];
+  local.signed = { message, signature: castSign("Buy", buyFields, message) };
+  const wMessage = {
+    nullifier: local.buy.proof.pubSignals[1],
+    context: local.buy.proof.pubSignals[7],
+    value: local.buy.proof.pubSignals[2],
+  };
+  const wFields = [
+    { name: "nullifier", type: "uint256" },
+    { name: "context", type: "uint256" },
+    { name: "value", type: "uint256" },
+  ];
+  local.signedWithdraw = { message: wMessage, signature: castSign("Withdraw", wFields, wMessage) };
+  onChain(8453n);
+  const base = { ...deposits(), buy: await spend("base_buy", 0, 4n * 10n ** 17n, 3, cap) };
+  onChain(4663n);
+  const robinhood = { ...deposits(), buy: await spend("robinhood_buy", 0, 4n * 10n ** 17n, 3, cap) };
+  writeFileSync(join(here, "buy-proofs.json"), JSON.stringify({
+    notes: [
+      "Real proofs for contracts/pool-evm's buy tests. Test notes only, never money.",
+      "Made by contracts/pool-evm/test/fixtures/make-pool-proofs.mjs buy with snarkjs 0.7.5 groth16.fullProve and packages/kit/zk; snarkjs groth16.verify passes each.",
+      "W is the Hardhat mnemonic's account 0, a published test key. local: chain 31337, the same three deposits as pool-proofs.json; buy spends note 1, buy2 note 2, trailing note 1 with one word after RelayData, swap note 1 with twice buy's fee cap, big note 1 with buy's request (the same context) for 0.8 ETH. signed and signedWithdraw: W's EIP-712 signatures (cast wallet sign --data) of one Buy and one Withdraw of buy's nullifier, context and value on this pool and chain. base: chain 8453, the same secrets under Base's scope; buy spends note 1. robinhood: the same on chain 4663.",
+    ],
+    local,
+    base,
+    robinhood,
+  }, null, 2) + "\n");
+  console.error("wrote buy-proofs.json");
+  process.exit(0);
 }
 
 const out = {

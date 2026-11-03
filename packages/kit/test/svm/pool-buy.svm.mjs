@@ -110,7 +110,8 @@ const AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 const FEES = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
 // The Jito tip (lamports the pool pays out of the chunk, at most the proof's tip cap); POOL_BUY_TIP=0 builds without one.
 const TIP = BigInt(process.env.POOL_BUY_TIP ?? "10000");
-const req0 = { wallet: W.address, feePayer: FEE_PAYER.address, token: mint, spend: SPEND, minOut, tip: TIP, cuPrice: 100_000n };
+// the cluster: mainnet's copies, so mainnet's rule (a tip of at least Jito's minimum) unless POOL_BUY_TIP=0 builds without one
+const req0 = { wallet: W.address, feePayer: FEE_PAYER.address, token: mint, spend: SPEND, minOut, tip: TIP, cuPrice: 100_000n, cluster: TIP > 0n ? "mainnet" : "devnet" };
 const tableAccounts = kit.solanaPoolBuyTableAccounts(cfg, venue, kit.solanaPoolPages(PROGRAM, 7, 6));
 // every account of the instructions, to copy from mainnet (the pool's and W's own are made in LiteSVM)
 const ixsProbe = kit.solanaPoolBuyInstructions(cfg, release, venue, req0, 6, rent, TIP > 0n ? kit.SOLANA_JITO_TIP_ACCOUNTS[0] : null);
