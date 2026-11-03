@@ -11,6 +11,7 @@ import {
   type EvmPoolProofBinding,
   type EvmRoute,
 } from "./buy-unpinned.ts";
+import { EvmQuoteError, evmIsDeviceQuote, type EvmPoolBuyQuote } from "../../checks/evm/quote.ts";
 
 export {
   EVM_POOL_MAX_HOOK_DATA,
@@ -39,4 +40,12 @@ export function evmPoolBuild(chain: EvmPoolChain, adapter: string, route: EvmRou
  *  evmPoolSignBuyUnpinned). */
 export function evmPoolSignBuy(secretKey: Uint8Array, chain: EvmPoolChain, pool: string, built: EvmPoolBuy, proof: EvmPoolProofBinding): Uint8Array {
   return pinnedSignBuy(evmPoolVenues(), secretKey, chain, pool, built, proof);
+}
+
+/** The buy a device quote holds (checks/evm/quote.ts evmPoolBuyQuote): its chain, route, token and minOut, through
+ *  `adapter`, the chain's pinned adapter for the route's venue. Only a quote evmPoolBuyQuote returned is built, so W
+ *  signs a buy only at a minOut from the device's own reads (card evm-pool-buy-quote). */
+export function evmPoolBuildQuoted(adapter: string, quote: EvmPoolBuyQuote): EvmPoolBuy {
+  if (!evmIsDeviceQuote(quote)) throw new EvmQuoteError("bad_request", "a buy is built only from a quote evmPoolBuyQuote returned");
+  return pinnedBuild(evmPoolVenues(), quote.chain, adapter, quote.route, quote.minOut, quote.token);
 }

@@ -6,6 +6,7 @@ export * from "./zk/setup-files.ts";
 export * from "./checks/solana/index.ts";
 export * from "./vault/shapes.ts";
 export * from "./checks/oneclick.ts";
+export * from "./checks/evm/quote.ts";
 export * from "./signpage/client.ts";
 export * from "./vault/messages.ts";
 export * from "./prover/prove.ts";

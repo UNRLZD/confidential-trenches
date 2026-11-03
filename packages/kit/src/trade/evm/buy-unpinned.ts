@@ -40,6 +40,12 @@ export type EvmPoolVenue = {
   readonly pool?: string;
   readonly adapters?: Readonly<{ v3?: string; v4?: string }>;
   readonly sellDelegate?: string;
+  /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
+   *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
+  readonly quoters?: Readonly<{ v3?: string; v4?: string }>;
+  /** A route starts from the native asset whenever a native v4 pool exists (the chain's WETH is behind an upgradeable
+   *  proxy). */
+  readonly nativeFirst?: boolean;
 };
 
 /** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
@@ -61,6 +67,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Uniswap v3 SwapRouter02 (test/SellFork.t.sol, BuyFork.t.sol); eth_getCode on mainnet.base.org and
       // base-rpc.publicnode.com: the same 24,498 bytes, codehash 0x38bd640f…124e4 (2026-11-03)
       routers: Object.freeze(["0x2626664c2603336E57B271c5C0b26F421741e481"]),
+      // Uniswap's QuoterV2 and V4Quoter (contracts/pool-evm/test/BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on
+      // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
+      // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
+      quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
     }),
     robinhood: bare({
       chainId: 4663,
@@ -69,6 +79,11 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Uniswap v3 SwapRouter02 (test/SellFork.t.sol, BuyFork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com
       // and robinhood.drpc.org: the same 24,498 bytes, codehash 0x6f36c378…b25dc (2026-11-03)
       routers: Object.freeze(["0xCaf681a66D020601342297493863E78C959E5cb2"]),
+      // Uniswap's QuoterV2 and V4Quoter (BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com
+      // and robinhood.drpc.org, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak 0x3db0868d…96a28, and
+      // 6,118 bytes, keccak 0xd707b1da…868f6
+      quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
+      nativeFirst: true,
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
