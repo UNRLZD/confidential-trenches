@@ -183,7 +183,7 @@ test("Q3 a partial-fill quote refuses", async () => {
   const q = await quote("base-ok", ranOut, ranOut);
   assert.ok(q.reference !== null && q.reference.amountOut < 10n ** 30n, "a standard pool whose output does not grow is not the reference");
   // nor a v3 pool whose quote at twice the amount reverts (a v3 pool has no hook to revert it)
-  const v3ranOut = plant((r) => (r.venue === "v3" && r.to.length === 1 && r.fees[0] === 100 ? (r.amount === request("base-ok").amountIn ? out(10n ** 30n) : REVERT) : undefined));
+  const v3ranOut = plant((r) => (r.venue === "v3" && r.to.length === 1 && r.fees[0] === 10000 && !same(r, "base-ok") ? (r.amount === request("base-ok").amountIn ? out(10n ** 30n) : REVERT) : undefined));
   const q3 = await quote("base-ok", v3ranOut, v3ranOut);
   assert.ok(q3.reference !== null && q3.reference.amountOut < 10n ** 30n, "a v3 pool that cannot fill twice the amount is not the reference");
 });
@@ -285,7 +285,7 @@ test("Q7 only a quote the device made builds a buy, and only within 30 s, and W 
   assert.ok(Object.isFrozen(q) && Object.isFrozen(q.route) && Object.isFrozen(q.block));
   // W signs no buy built another way: here the pinned builder W's own build would call, on a testnet it pins
   const venues = evmPoolVenues();
-  const other = pinnedBuild(venues, "base-sepolia", venues["base-sepolia"].adapters!.v4!, q.route, 1n, q.token);
+  const other = pinnedBuild(venues, "base-sepolia", venues["base-sepolia"].adapters![q.route.venue === "uniswap-v3" ? "v3" : "v4"]!, q.route, 1n, q.token);
   const proof = { nullifier: 1n, context: 2n, value: 3n };
   assert.throws(() => evmPoolSignBuy(new Uint8Array(32).fill(1), "base-sepolia", venues["base-sepolia"].pool!, other, proof), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_built");
   // the kit exports no builder that takes its caller's minOut

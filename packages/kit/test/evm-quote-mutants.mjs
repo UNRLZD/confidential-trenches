@@ -56,6 +56,18 @@ export const MUTANTS = [
   [QUOTE, "for (const h of v.hookedPools) {", "for (const h of [] as typeof v.hookedPools) {", R, "R9 "],
   [QUOTE, 'const from = h.from === "native" ? NATIVE : v.weth;', "const from = NATIVE;", R, "R9 "],
   [QUOTE, 'if (reference === null) return refuse("no_reference", "no standard pool and no pinned launchpad pool answers for the token");', "if (reference === null) return refuse(\"no_quote\", \"\");", R, "R4 "],
+  // the union (review of 9a8265b, N1): the device's scan, the caller's list and the PoolManager's state of each
+  [QUOTE, "for (const k of keys.slice(0, EVM_QUOTE_MAX_FOUND)) {", "for (const k of [] as EvmPoolKey[]) {", R, "N1a "],
+  [QUOTE, "const keys = [...scanned, ...hints].filter(", "const keys = [...hints].filter(", R, "N1a "],
+  [QUOTE, "const hints = (Array.isArray(req.pools) ?", "const hints = (false ?", R, "N1b "],
+  [QUOTE, "const from = cached === undefined || cached.to < floor ? floor : cached.to + 1;", "const from = floor;", R, "N1a "],
+  [QUOTE, "if (!Array.isArray(r) || r.length > SCAN_MAX_LOGS) return refuse(", "if (false) return refuse(", R, "N1a "],
+  [QUOTE, "if (p !== null && (p & ((1n << 160n) - 1n)) !== 0n && l !== null && (l & ((1n << 128n) - 1n)) !== 0n && fills(f)) {", "if (fills(f)) {", R, "N1d "],
+  [QUOTE, "(p & ((1n << 160n) - 1n)) !== 0n &&", "", R, "N1d "],
+  [QUOTE, "(l & ((1n << 128n) - 1n)) !== 0n &&", "", R, "N1d "],
+  [QUOTE, "const POOLS_SLOT = 6n;", "const POOLS_SLOT = 7n;", R, "N1b "],
+  [QUOTE, "const unpinned = k.hooks !== NATIVE && !pinned.has(k.hooks);", "const unpinned = false;", R, "N1e "],
+  [QUOTE, "if (unpinned) noop[k.hooks] = { code: EVM_NOOP_HOOK_CODE };", "", R, "N1e "],
   // the hook's take, and minOut from the route the hook runs in
   [QUOTE, "const take = h === null ? null : h > q ? h - q : 0n;", "const take = h === null ? null : h - q;", Q, "Q4 "],
   [QUOTE, "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / h)", "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / q)", Q, "Q4 "],
@@ -66,7 +78,8 @@ export const MUTANTS = [
   // native first
   [QUOTE, "  if (nativeExists && wethStart) return refuse(", "  if (false) return refuse(", Q, "Q6 "],
   [QUOTE, 'nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true', "nativeFirst: false", Q, "Q6 "],
-  [QUOTE, "const pool = nativeExists ? filled.filter((c) => startsNative(c.route)) : filled;", "const pool = filled;", Q, "Q6 "],
+  [QUOTE, "bestOf(filled.filter((c) => startsNative(c.route))));", "bestOf(filled));", Q, "Q6 "],
+  [QUOTE, "  const reference = bestOf(filled);", "  const reference = bestOf(filled.filter((c) => !nativeExists || startsNative(c.route)));", R, "N1f "],
   [QUOTE, "|| firstHop.some((c) => fills(c)))", ")", R, "R7 "],
   [
     QUOTE,

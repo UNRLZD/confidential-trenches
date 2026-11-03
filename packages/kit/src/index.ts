@@ -10,12 +10,14 @@ export * from "./checks/oneclick.ts";
 export {
   EVM_NOOP_HOOK_CODE,
   EVM_QUOTE_MAX_AGE_MS,
+  EVM_QUOTE_MAX_HINTS,
   evmIsDeviceQuote,
   evmPoolBuyQuote,
   EvmQuoteError,
   type EvmHookTake,
   type EvmPoolBuyQuote,
   type EvmPoolBuyQuoteRequest,
+  type EvmPoolKey,
   type EvmQuoteErrorCode,
 } from "./checks/evm/quote.ts";
 export * from "./signpage/client.ts";

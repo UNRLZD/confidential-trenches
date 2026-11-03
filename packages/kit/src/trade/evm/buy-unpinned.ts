@@ -52,6 +52,11 @@ export type EvmPoolVenue = {
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
   readonly hookedPools?: readonly EvmHookedPool[];
+  /** Uniswap v4's PoolManager (the V4Quoter's poolManager()), whose state the device reads for each pool it found, and
+   *  the provider it scans for the PoolManager's Initialize logs: `span` blocks a request, `depth` blocks back, at most
+   *  `parallel` requests at once. */
+  readonly poolManager?: string;
+  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number }>;
 };
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
 
@@ -90,6 +95,11 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
         bare({ pad: "doppler", from: "weth" as const, fee: 0x800000, tickSpacing: 10, hooks: "0xbb7784a4d481184283ed89619a3e3ed143e1adc0" }),
         bare({ pad: "flaunch", from: "native" as const, fee: 0, tickSpacing: 60, hooks: "0x588c683ecc450f8b2aadb13d7f63792b840425dc" }),
       ]),
+      // V4Quoter.poolManager() on both providers (2026-11-03 19:36Z). base-rpc.publicnode.com serves eth_getLogs over
+      // 50,000 blocks a request and about 1M blocks back (3M back: "Archive requests require a personal token");
+      // mainnet.base.org only about 100 (read 19:37Z)
+      poolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
+      scan: bare({ url: "https://base-rpc.publicnode.com", span: 50_000, depth: 1_000_000, parallel: 20 }),
     }),
     robinhood: bare({
       chainId: 4663,
@@ -104,13 +114,24 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
       providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
-      maxLag: 100, // 0.1 s blocks: 10 s
+      // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
+      // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
+      maxLag: 100,
       // as Base's (read 2026-11-03 18:49Z on rpc.mainnet.chain.robinhood.com; code the same on both providers): Clanker v4
       // 16,405 0883056c; Doppler 25,533 c41a9110
       hookedPools: Object.freeze([
         bare({ pad: "clanker", from: "weth" as const, fee: 0x800000, tickSpacing: 200, hooks: "0x48b8f6ad3a1b4aa477314c9a23035b8f84dde8cc" }),
         bare({ pad: "doppler", from: "weth" as const, fee: 0x800000, tickSpacing: 8, hooks: "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544" }),
+        // Doppler's second shape: 65 Initialize events in blocks 104,310,445-105,310,444, paired with WETH in 33 (e.g.
+        // tx 0xb30325e2…363df7)
+        bare({ pad: "doppler", from: "weth" as const, fee: 0x800000, tickSpacing: 200, hooks: "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544" }),
       ]),
+      // V4Quoter.poolManager() on both providers (2026-11-03 19:36Z). rpc.mainnet.chain.robinhood.com serves eth_getLogs
+      // over 10,000,000 blocks a request but at most 10,000 logs ("logs matched by query exceeds limit of 10000" over
+      // 10M blocks; robinhood.drpc.org: 10,000 blocks on its free plan), so 1M-block spans
+      poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+      // (it answers 429 to 4 at once, 2026-11-03 20:27Z)
+      scan: bare({ url: "https://rpc.mainnet.chain.robinhood.com", span: 1_000_000, depth: 10_000_000, parallel: 2 }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
