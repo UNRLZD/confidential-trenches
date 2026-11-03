@@ -11,13 +11,19 @@
 //   past the higher of the marks' slots (./solana.ts solanaTreeSync leaves), so every deposit and release a mark
 //   records has its leaves in them. The device derives its own marks' addresses and looks them up
 //   here; a read per mark (a note's own address) would tell the RPC which notes are one user's, so none is made.
-// - A mark that lands while the pages are read (card sol-restore-race, review N1): after the pages, the marks are read
-//   again on each RPC at or past the highest slot that RPC answered its pages at (minContextSlot, and the answer's own
-//   slot checked), and merged into the first read by the same union rule. A spend or deposit whose leaves are in the
-//   pages has its mark in that read. When a new mark is one the walk looked up, the pages are read again past the new
-//   marks and the walk is redone; a new mark the walk never looked up (another user's, or past the walk's gap) changes
-//   nothing the walk found, so a busy pool never forces a round. After SOL_RESTORE_ROUNDS walks whose looked-up marks
-//   still grew, the restore stops with a refusal, never a loop without end.
+// - A mark that lands while the pages are read (card sol-restore-race, review N1): straight after the pages, before any
+//   walk, the marks are read again on each RPC at or past the highest slot that RPC answered its pages at
+//   (minContextSlot, and the answer's own slot checked), and merged into the first read by the same union rule. A spend
+//   or deposit whose leaves are in the pages has its mark in that read.
+// - Rounds by a public rule first: while a read gives a mark the read before did not, the pages are read again past the
+//   merged marks, then the marks; the walk runs once, when two reads in a row give the same union. Which marks are new
+//   never changes these reads, so an RPC cannot tell whether a mark that landed during the restore is the user's.
+// - Only after SOL_RESTORE_QUIET_ROUNDS such rounds in a row with new marks (a pool busy for the whole time, each round
+//   a pages read and a marks read, about a second or two) does the restore walk and stop at the first read whose new
+//   marks the walk never looked up: they change nothing it found. By then the RPC sees one of every mark of that busy
+//   window, not one mark. 8 rounds: a pool with a landing every few seconds settles in two or three rounds, and only a
+//   pool busy at every read for 10 to 20 s reaches the fallback. While the walk's own looked-up marks still grow, it
+//   walks again, SOL_RESTORE_ROUNDS times at most, then stops with a refusal, never a loop without end.
 // - A deposit from its mark: label = keccak256(scope ‖ nonce) mod p, which must be the label tree's leaf nonce - 1, and
 //   commitment = Poseidon(value, label, precommitment), which must be a leaf of the state tree; else the restore stops.
 // - The walk: deposit indices lane by lane until RESTORE_GAP misses in a row (../notes/restore.ts walkLane), each
@@ -34,7 +40,7 @@ import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
-import { checkSolanaRpcs, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
+import { checkSolanaRpcs, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
 
 const U32 = 0xffffffff;
 const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
@@ -67,7 +73,7 @@ export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program
   if (minSlots !== undefined && !(Array.isArray(minSlots) && minSlots.length === 2 && minSlots.every((x) => Number.isSafeInteger(x) && x >= 0))) throw new Error("minSlots: two slots");
   const read = async (rpc: SolanaRpc, k: number, size: number): Promise<{ marks: Map<string, string>; slot: number }> => {
     const min = minSlots?.[k] ?? 0;
-    const a = (await rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters: [{ dataSize: size }] }])) as { context?: { slot?: unknown }; value?: unknown };
+    const a = (await solanaLagRetry(() => rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters: [{ dataSize: size }] }]))) as { context?: { slot?: unknown }; value?: unknown };
     const slot = a?.context?.slot;
     if (!Number.isSafeInteger(slot) || (slot as number) < 0 || !Array.isArray(a.value)) throw new Error(`rpc ${k}: getProgramAccounts: not a list with its context`);
     if ((slot as number) < min) throw new Error(`rpc ${k}: getProgramAccounts: answered at slot ${slot as number}, below ${min}`);
@@ -200,8 +206,10 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
   return { notes, spends };
 }
 
-/** Walks whose looked-up marks may still grow before the restore refuses: each extra one needs a spend or deposit of
- * the user's own to land during the read before it. */
+/** Rounds that only read (pages, then marks) while the pool keeps growing, before the walk's own marks decide (header). */
+export const SOL_RESTORE_QUIET_ROUNDS = 8;
+/** Walks past the quiet rounds whose looked-up marks may still grow before the restore refuses: each extra one needs a
+ * spend or deposit of the user's own to land during the read before it. */
 export const SOL_RESTORE_ROUNDS = 4;
 
 /** Two reads of the marks as one: the union, a key both hold with different values refused, the higher slot. */
@@ -232,25 +240,33 @@ class Looked<V> extends Map<string, V> {
     this.asked.add(key);
     return super.get(key);
   }
+  override has(key: string): boolean {
+    this.asked.add(key);
+    return super.has(key);
+  }
 }
 
 /**
- * Restore of the Solana pool from the 12 words: the marks, then the pages, on two RPCs; then solanaRestore; then the marks
- * again past each RPC's pages, and again the pages and the walk while a mark the walk looked up is new (bounded).
+ * Restore of the Solana pool from the 12 words, on two RPCs: the marks, then rounds of the pages and the marks again past
+ * them until two marks reads agree (bounded, header), then solanaRestore once on the last marks and pages.
  */
 export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number }) {
   const sync = solanaTreeSync(a.rpcs, a.program);
   const scope = solanaPoolOf(a.program).scope;
   let marks = await solanaMarks(a.rpcs, a.program, a.signal);
-  for (let round = 1; ; round++) {
+  for (let round = 1, walks = 0; ; round++) {
     const leaves = await sync.leaves(marks.slot, a.signal);
+    const again = solanaMarksUnion(marks, await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots));
+    const fresh = [...again.spent.keys(), ...again.pre.keys()].filter((key) => !marks.spent.has(key) && !marks.pre.has(key));
+    if (fresh.length > 0 && round <= SOL_RESTORE_QUIET_ROUNDS) {
+      marks = again;
+      continue;
+    }
     const asked = new Set<string>();
     const seen: SolanaMarks = { spent: new Looked(marks.spent, asked), pre: new Looked(marks.pre, asked), slot: marks.slot };
     const out = solanaRestore({ seed64: a.seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks: seen, ...(a.gap === undefined ? {} : { gap: a.gap }) });
-    const again = solanaMarksUnion(marks, await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots));
-    const grew = [...again.spent.keys(), ...again.pre.keys()].some((key) => asked.has(key) && !marks.spent.has(key) && !marks.pre.has(key));
-    if (!grew) return out;
-    if (round >= SOL_RESTORE_ROUNDS) throw new Error(`restore: the user's own marks still grew after ${SOL_RESTORE_ROUNDS} reads; try again`);
+    if (!fresh.some((key) => asked.has(key))) return out;
+    if (++walks >= SOL_RESTORE_ROUNDS) throw new Error(`restore: the user's own marks still grew after ${SOL_RESTORE_ROUNDS} reads; try again`);
     marks = again;
   }
 }
@@ -267,7 +283,9 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * (l, j)) is a leaf both RPCs agree on is the change written UNSPENT through the store's add(child, parent), which moves
  * the note to SPENT, so the queue never offers it again. No spent mark: nothing is written ("unspent"). A spent mark
  * whose change is not in the state tree: a refusal, nothing written. A change another tab wrote first, with this leaf,
- * is taken.
+ * is taken. The marks and the pages are read whether or not the mark is there, so the reads look the same either way.
+ * The sender treats "unspent" as: the note stays RESERVED and the settle is tried again later (the marks are read at
+ * finalized, so a spend that just landed shows up a few seconds on), until the store's deadline rule frees it.
  */
 export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal }): Promise<SolanaSettled> {
   if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
@@ -275,9 +293,9 @@ export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStor
   const note = await a.notes.get(a.noteId);
   if (note === undefined || note.leaf === undefined || note.scope !== scope) throw new Error(`note ${a.noteId}: not a landed note of this pool`);
   const marks = await solanaMarks(a.rpcs, a.program, a.signal);
+  const leaves = await solanaTreeSync(a.rpcs, a.program).leaves(marks.slot, a.signal);
   const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash));
   if (withdrawn === undefined) return { kind: "unspent" };
-  const leaves = await solanaTreeSync(a.rpcs, a.program).leaves(marks.slot, a.signal);
   const leafAt = new Map<bigint, number>();
   leaves.state.forEach((c, k) => {
     if (leafAt.has(c)) throw new Error(`state leaf ${k} repeats`);
