@@ -7,6 +7,9 @@
 # The prover runs here (card signpage-prover-host): its worker gets its own policy too (wallet.md W:880), which Pages
 # joins to the /* rule's with a comma, so the worker runs under both at once; the setup files at
 # /assets/zk/<sha256>.<ext> never change under one name, so they are cached for good (vault.md 2.14).
+# The worker proves on its own threads (card signpage-prover-threads), each started from /prover-thread.js, snarkjs's own
+# thread code as one pinned same-origin file, never from a data: or blob: URL, which worker-src 'self' refuses. The
+# thread file gets its own policy too, joined to the /* rule's: it runs wasm and loads, fetches and starts nothing.
 /*
   Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker
   Integrity-Policy: blocked-destinations=(script)
@@ -19,5 +22,7 @@
   Permissions-Policy: accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()
 /prover-worker.js
   Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'
+/prover-thread.js
+  Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'
 /assets/zk/*
   Cache-Control: public, max-age=31536000, immutable

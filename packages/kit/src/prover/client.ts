@@ -6,7 +6,7 @@
 // always asking the server (cache "no-cache": SIGN_HOST caches the files immutable, so a file that once came back wrong
 // under its pinned name would otherwise be read from the browser's cache at every retry; a right one costs a 304), and
 // moves the bytes to the worker by transfer, so no copy stays here; the worker checks every file's size and sha256
-// before snarkjs sees it (worker.js) and proves single thread.
+// before snarkjs sees it (worker.js), and proves on its threads (worker.js, card signpage-prover-threads).
 import { ZK_SETUP_FILES } from "../zk/setup-files.ts";
 import type { VaultSnarkjsProof } from "../vault/shapes.ts";
 

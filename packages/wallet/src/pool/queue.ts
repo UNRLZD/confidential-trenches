@@ -2,7 +2,7 @@
 // signature (card wallet-pool-ladder; architecture v2, M349; the lite paper §3 "Buy"; the held note, wallet.md §2.3
 // l.385-391 at research 6d3a34c; the proof pool, wallet.md W:732-746 and WU-11).
 //
-// - The ready set: up to proofPoolSize UNSPENT notes of the pool's scope, landed, each covering a rung, largest chunk
+// - The ready set: up to readySetSize UNSPENT notes of the pool's scope, landed, each covering a rung, largest chunk
 //   first. A note's chunk is the largest rung at or below its value (./ladder.ts chunkOf); the proof withdraws exactly
 //   that. One proof per note, so taps in a row draw on several notes (the ladder's job).
 // - Epochs (./pool.ts): each pass works in the pool's current epoch. Every proof proves against the epoch root
@@ -30,9 +30,12 @@
 //   note; a free whose write fails is tried again at the next pass. A page that dies leaves HELD notes the store frees
 //   on its next open (the dead tab's lock).
 // - Only while the app is in front: a pass in the background does nothing, so a hidden page spends no battery.
-// - Side by side: min(hardwareConcurrency - 1, 3) provers at a time, at least 1 (wallet.md W:732-746: a bigger pool
-//   runs out of phone memory). A note's proof depends only on the note, its pool and the epoch, so a pool of one and
-//   a pool of three make the same proofs.
+// - One prover at a time: the device's one thread budget, min(hardwareConcurrency - 1, 4), goes to that prover's own
+//   threads (the kit's prover worker, card signpage-prover-threads), never to more provers side by side. Below 3 cores
+//   the prover runs single thread and the pool is still one. Same speed as a pool of three single-thread provers at
+//   about a third of the memory (WebKit, 3 proofs: one threaded prover about 0.45 to 0.6 GB against 1.28 to 1.44 GB
+//   for a pool of three; an iPhone page is ended near 1.5 GB). A note's proof depends only on the note, its pool and
+//   the epoch, so the pool's size never changes a proof.
 // - The seed is copied, and the copy zeroed on close(). Nothing here logs.
 import { poolProveWithdraw, type VaultProver } from "@blindfill/kit";
 import { changeIndex, freshWallet } from "../derive/index.ts";
@@ -41,10 +44,15 @@ import type { NoteRecord, NoteStore } from "../notes/store.ts";
 import { checkLadder, chunkOf } from "./ladder.ts";
 import { checkBinding, checkPool, NEWEST_GRACE_MS, TAKE_SLACK_MS, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
-/** Provers side by side: min(hardwareConcurrency - 1, 3), at least 1. */
-export function proofPoolSize(hardwareConcurrency: number | undefined): number {
+/** Proofs kept ready: min(hardwareConcurrency - 1, 3), at least 1, all made by the one prover in turn. */
+export function readySetSize(hardwareConcurrency: number | undefined): number {
   const h = typeof hardwareConcurrency === "number" && Number.isInteger(hardwareConcurrency) ? hardwareConcurrency : 1;
   return Math.max(1, Math.min(h - 1, 3));
+}
+
+/** Provers side by side: one, whatever hardwareConcurrency is; the thread budget goes to that prover's threads. */
+export function proofPoolSize(_hardwareConcurrency: number | undefined): number {
+  return 1;
 }
 
 export type ProofQueueArgs<R> = {
@@ -103,6 +111,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   const { notes, pool } = a;
   const inFront = a.inFront ?? notHidden;
   const provers = a.provers.slice(0, proofPoolSize(a.hardwareConcurrency));
+  const readySize = readySetSize(a.hardwareConcurrency);
   const ready = new Map<string, ReadyProof<R>>();
   const inFlight = new Map<string, { dropped: boolean }>();
   const order = new Map<string, bigint>(); // a note's leaf index, for ready()'s leaf order
@@ -219,7 +228,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       if (n === undefined || n.state !== "HELD" || n.attempt !== r.attempt) ready.delete(r.noteId);
       else if (r.epochStartMs < start) again.push(n);
     }
-    const want = provers.length - ready.size + again.length;
+    const want = readySize - ready.size + again.length;
     if (want <= 0) return out;
     const open = all
       .filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null)
