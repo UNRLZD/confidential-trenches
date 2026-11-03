@@ -1,6 +1,7 @@
 // The device's EVM pool buy (src/trade/evm/buy.ts, card evm-pool-buy-tx) against the pool's own fixtures:
 // contracts/pool-evm/test/fixtures/kit-routes.json (the fork tests' routes, which BuyFork.t.sol and BuyV4Fork.t.sol
-// check against their own) and buy-proofs.json (W's EIP-712 Buy signed by cast, which Buy.t.sol checks the pool takes).
+// check against their own), buy-proofs.json (W's EIP-712 Buy signed by cast, which Buy.t.sol checks the pool takes)
+// and evm-pool-buy-own-vectors.json (built buys on Base and Robinhood signed by cast, from the evm-pool-buy-tx review).
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
@@ -15,7 +16,6 @@ import {
   EVM_POOL_VENUES,
   EvmPoolBuyError,
   evmPoolBuild,
-  evmPoolBuyDigest,
   evmPoolRouteData,
   evmPoolSignBuy,
   type EvmPoolChain,
@@ -26,6 +26,7 @@ import {
 const fixture = (f: string) => JSON.parse(readFileSync(new URL(`../../../contracts/pool-evm/test/fixtures/${f}`, import.meta.url), "utf8"));
 const ROUTES = fixture("kit-routes.json");
 const PROOFS = fixture("buy-proofs.json");
+const OWN = JSON.parse(readFileSync(new URL("./evm-pool-buy-own-vectors.json", import.meta.url), "utf8"));
 const hex = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
 const code = (f: () => unknown): string => {
   try {
@@ -134,17 +135,23 @@ test("a route of the wrong shape is refused", () => {
   bad("base", { venue: "sushiswap" } as unknown as EvmRoute);
 });
 
-test("the buy takes minOut above 0 and an adapter address", () => {
+const A1 = "0x000000000000000000000000000000000000ada1";
+
+test("the buy takes minOut above 0, an adapter address and the user's token", () => {
   const r = v4(ZERO, hop(USDC));
-  assert.equal(code(() => evmPoolBuild("base", "0x000000000000000000000000000000000000ada1", r, 0n)), "bad_amount");
-  assert.equal(code(() => evmPoolBuild("base", "0x000000000000000000000000000000000000ada1", r, 1n << 256n)), "bad_amount");
-  assert.equal(code(() => evmPoolBuild("base", ZERO, r, 1n)), "bad_route");
-  const b = evmPoolBuild("base", "0x000000000000000000000000000000000000ada1", r, 5n);
-  assert.deepEqual(b, { adapter: "0x000000000000000000000000000000000000ada1", data: ROUTES.base.v4OneHop.data.toLowerCase(), minOut: 5n, token: USDC });
+  assert.equal(code(() => evmPoolBuild("base", A1, r, 0n, USDC)), "bad_amount");
+  assert.equal(code(() => evmPoolBuild("base", A1, r, 1n << 256n, USDC)), "bad_amount");
+  assert.equal(code(() => evmPoolBuild("base", ZERO, r, 1n, USDC)), "bad_route");
+  assert.equal(code(() => evmPoolBuild("base", A1, r, 1n, ZERO)), "bad_route");
+  assert.equal(code(() => evmPoolBuild("base", A1, r, 1n, "0x1234")), "bad_route");
+  assert.equal(code(() => evmPoolBuild("base", A1, r, 1n, X)), "token_mismatch");
+  const b = evmPoolBuild("base", A1, r, 5n, USDC.toLowerCase());
+  assert.deepEqual({ ...b }, { chain: "base", adapter: A1, data: ROUTES.base.v4OneHop.data.toLowerCase(), minOut: 5n, token: USDC.toLowerCase() });
+  assert.ok(Object.isFrozen(b));
 });
 
-// W: the Hardhat mnemonic's account 0 (m/44'/60'/0'/0/0), a published test key, as buy-proofs.json signs with it;
-// BIP-39 seed and BIP-32 steps written out here, so no key sits in the tree
+// W: the Hardhat mnemonic's account 0 (m/44'/60'/0'/0/0), a published test key, as buy-proofs.json and cast sign with
+// it; BIP-39 seed and BIP-32 steps written out here, so no key sits in the tree
 const N = secp256k1.Point.CURVE().n;
 function hardhatAccount0(): Uint8Array {
   const seed = pbkdf2(sha512, new TextEncoder().encode("test test test test test test test test test test test junk"), new TextEncoder().encode("mnemonic"), { c: 2048, dkLen: 64 });
@@ -165,60 +172,83 @@ function hardhatAccount0(): Uint8Array {
 }
 const W_KEY = hardhatAccount0();
 const W = PROOFS.local.buy.request.recipient as string;
-const CHAIN = Number(PROOFS.local.chainId);
-const ACCOUNT_1 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"; // the Hardhat mnemonic's account 1, not W
+const POOL = PROOFS.local.pool as string;
+const m = PROOFS.local.signed.message;
+const PROOF = { nullifier: BigInt(m.nullifier), context: BigInt(m.context), value: BigInt(m.value) };
 
-test("W's Buy signature equals the pool's own vector byte for byte, and binds what the pool checks", () => {
-  const m = PROOFS.local.signed.message;
-  const buy = { adapter: m.adapter, data: m.data, minOut: BigInt(m.minOut), token: m.token };
-  const proof = { nullifier: BigInt(m.nullifier), context: BigInt(m.context), value: BigInt(m.value) };
-  const digest = evmPoolBuyDigest(CHAIN, PROOFS.local.pool, buy, proof);
-  const sig = evmPoolSignBuy(W_KEY, W, digest);
-  assert.equal(sig.length, 65);
-  assert.equal(hex(sig), PROOFS.local.signed.signature);
-  // the vector's message is the buy proof's own nullifier, context and value (Buy.t.sol checks the same)
-  assert.equal(m.context, PROOFS.local.buy.context);
-  // each signed field moves the digest: chain, pool, adapter, data, minOut, token, nullifier, context, value
-  const other = [
-    evmPoolBuyDigest(8453, PROOFS.local.pool, buy, proof),
-    evmPoolBuyDigest(CHAIN, "0x00000000000000000000000000000000b1f1f002", buy, proof),
-    evmPoolBuyDigest(CHAIN, PROOFS.local.pool, { ...buy, adapter: "0x000000000000000000000000000000000000ada2" }, proof),
-    evmPoolBuyDigest(CHAIN, PROOFS.local.pool, { ...buy, data: "0x726f757466" }, proof),
-    evmPoolBuyDigest(CHAIN, PROOFS.local.pool, { ...buy, minOut: buy.minOut + 1n }, proof),
-    evmPoolBuyDigest(CHAIN, PROOFS.local.pool, { ...buy, token: "0x0000000000000000000000000000000000070c1f" }, proof),
-    evmPoolBuyDigest(CHAIN, PROOFS.local.pool, buy, { ...proof, nullifier: proof.nullifier + 1n }),
-    evmPoolBuyDigest(CHAIN, PROOFS.local.pool, buy, { ...proof, context: proof.context + 1n }),
-    evmPoolBuyDigest(CHAIN, PROOFS.local.pool, buy, { ...proof, value: proof.value + 1n }),
-  ].map(hex);
-  assert.equal(new Set([hex(digest), ...other]).size, 10);
+// The test's own EIP-712 Buy digest, written apart from the kit: it is what the pool's vector (buy-proofs.json, which
+// Buy.t.sol checks the pool takes) recovers to W over, so the kit's signatures are checked against the pool's digest
+const utf8 = (s: string) => new TextEncoder().encode(s);
+const w256 = (v: bigint | number | string) => Buffer.from(BigInt(v).toString(16).padStart(64, "0"), "hex");
+function poolDigest(chainId: number, pool: string, adapter: string, data: string, minOut: bigint | string, token: string, n: bigint | string, c: bigint | string, v: bigint | string) {
+  const domain = keccak_256(Buffer.concat([keccak_256(utf8("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")), keccak_256(utf8("Blindfill")), keccak_256(utf8("1")), w256(chainId), w256(pool)]));
+  const type = keccak_256(utf8("Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)"));
+  const struct = keccak_256(Buffer.concat([type, w256(adapter), keccak_256(Buffer.from(data.slice(2), "hex")), w256(minOut), w256(token), w256(n), w256(c), w256(v)]));
+  return keccak_256(Buffer.concat([Uint8Array.of(0x19, 0x01), domain, struct]));
+}
+const recovers = (sig: Uint8Array, d: Uint8Array) =>
+  hex(keccak_256(secp256k1.Signature.fromBytes(sig.slice(0, 64), "compact").addRecoveryBit(sig[64]! - 27).recoverPublicKey(d).toBytes(false).slice(1)).slice(12));
+
+test("W's Buy signature equals cast's EIP-712 signature byte for byte, on Base and Robinhood", () => {
+  // the pool's own vector recovers to W over the test's digest (so poolDigest is the pool's)
+  const ps = Buffer.from(PROOFS.local.signed.signature.slice(2), "hex");
+  assert.equal(recovers(ps, poolDigest(Number(PROOFS.local.chainId), POOL, m.adapter, m.data, m.minOut, m.token, m.nullifier, m.context, m.value)), W.toLowerCase());
+  // evm-pool-buy-own-vectors.json: built buys cast signed (cast wallet sign --data, the typed data Buy under
+  // {Blindfill, 1, chainId, pool} with `buys` as the token field, the Hardhat mnemonic's index 0)
+  for (const [name, t] of Object.entries(OWN) as [string, any][]) {
+    const r = ROUTES[t.chain][t.route];
+    const route: EvmRoute = r.venue === "uniswap-v3" ? v3(r.tokens, r.fees) : v4(r.currencyIn, ...r.hops);
+    const built = evmPoolBuild(t.chain, t.adapter, route, BigInt(t.minOut), t.buys);
+    assert.equal(built.data, t.data.toLowerCase(), name);
+    assert.equal(EVM_POOL_VENUES[t.chain as EvmPoolChain].chainId, t.chainId, name);
+    const proof = { nullifier: BigInt(t.nullifier), context: BigInt(t.context), value: BigInt(t.value) };
+    assert.equal(hex(evmPoolSignBuy(W_KEY, t.chain, t.pool, built, proof)), t.signature, name);
+  }
 });
 
-test("W's signatures are 65 bytes, s low, v 27 or 28, and recover to W", () => {
+test("W's signatures bind each field the pool checks: chain, pool, adapter, data, minOut, token, nullifier, context, value", () => {
+  const sign = (chain: EvmPoolChain, pool: string, adapter: string, route: EvmRoute, minOut: bigint, token: string, proof = PROOF) =>
+    hex(evmPoolSignBuy(W_KEY, chain, pool, evmPoolBuild(chain, adapter, route, minOut, token), proof));
+  const r = v4(ZERO, hop(X));
+  const sigs = [
+    sign("base", POOL, A1, r, 5n, X),
+    sign("robinhood", POOL, A1, r, 5n, X),
+    sign("base", "0x00000000000000000000000000000000b1f1f002", A1, r, 5n, X),
+    sign("base", POOL, "0x000000000000000000000000000000000000ada2", r, 5n, X),
+    sign("base", POOL, A1, v4(ZERO, hop(X, { fee: 3000 })), 5n, X),
+    sign("base", POOL, A1, r, 6n, X),
+    sign("base", POOL, A1, v4(ZERO, hop(Y)), 5n, Y),
+    sign("base", POOL, A1, r, 5n, X, { ...PROOF, nullifier: PROOF.nullifier + 1n }),
+    sign("base", POOL, A1, r, 5n, X, { ...PROOF, context: PROOF.context + 1n }),
+    sign("base", POOL, A1, r, 5n, X, { ...PROOF, value: PROOF.value + 1n }),
+  ];
+  assert.equal(new Set(sigs).size, 10);
+});
+
+test("W's signatures are 65 bytes, s low, v 27 or 28, and recover to W over the pool's digest", () => {
   const half = N >> 1n;
   const vs = new Set<number>();
-  for (let i = 0; i < 16; i++) {
-    const d = keccak_256(Uint8Array.of(i));
-    const sig = evmPoolSignBuy(W_KEY, W, d);
+  const built = evmPoolBuild("base", A1, v4(ZERO, hop(USDC), hop(X)), 5n, X);
+  for (let i = 0; i < 64; i++) {
+    const proof = { ...PROOF, nullifier: BigInt(i) };
+    const sig = evmPoolSignBuy(W_KEY, "base", POOL, built, proof);
+    assert.equal(sig.length, 65);
     const v = sig[64]!;
     assert.ok(v === 27 || v === 28);
     vs.add(v);
     assert.ok(BigInt(hex(sig.slice(32, 64))) <= half, "s in the lower half");
-    const pub = secp256k1.Signature.fromBytes(sig.slice(0, 64), "compact").addRecoveryBit(v - 27).recoverPublicKey(d).toBytes(false);
-    assert.equal(hex(keccak_256(pub.slice(1)).slice(12)), W.toLowerCase());
+    const d = poolDigest(8453, POOL, A1, built.data, 5n, X, proof.nullifier, proof.context, proof.value);
+    assert.equal(recovers(sig, d), W.toLowerCase());
   }
   assert.deepEqual([...vs].sort(), [27, 28], "both v values seen");
 });
 
-test("only W's own key signs, and only for W", () => {
-  const d = keccak_256(Uint8Array.of(1));
-  assert.equal(code(() => evmPoolSignBuy(W_KEY, ACCOUNT_1, d)), "bad_key");
-  assert.equal(code(() => evmPoolSignBuy(new Uint8Array(32), W, d)), "bad_key");
-  assert.equal(code(() => evmPoolSignBuy(W_KEY.slice(0, 31), W, d)), "bad_key");
-  assert.equal(code(() => evmPoolSignBuy(W_KEY, W, d.slice(0, 31))), "bad_amount");
-  const m = PROOFS.local.signed.message;
-  const buy = { adapter: m.adapter, data: m.data, minOut: BigInt(m.minOut), token: m.token };
-  const proof = { nullifier: BigInt(m.nullifier), context: BigInt(m.context), value: BigInt(m.value) };
-  assert.equal(code(() => evmPoolBuyDigest(CHAIN, PROOFS.local.pool, buy, { ...proof, value: 0n })), "bad_amount");
-  assert.equal(code(() => evmPoolBuyDigest(CHAIN, PROOFS.local.pool, { ...buy, minOut: 0n }, proof)), "bad_amount");
-  assert.equal(code(() => evmPoolBuyDigest(CHAIN, PROOFS.local.pool, { ...buy, data: "0x7" }, proof)), "bad_route");
+test("only a 32-byte key signs, and only proof values in the field with value above 0", () => {
+  const built = evmPoolBuild("base", A1, v4(ZERO, hop(X)), 5n, X);
+  assert.equal(code(() => evmPoolSignBuy(new Uint8Array(32), "base", POOL, built, PROOF)), "bad_key");
+  assert.equal(code(() => evmPoolSignBuy(W_KEY.slice(0, 31), "base", POOL, built, PROOF)), "bad_key");
+  assert.equal(code(() => evmPoolSignBuy(W_KEY, "base", POOL, built, { ...PROOF, value: 0n })), "bad_amount");
+  assert.equal(code(() => evmPoolSignBuy(W_KEY, "base", POOL, built, { ...PROOF, nullifier: -1n })), "bad_amount");
+  assert.equal(code(() => evmPoolSignBuy(W_KEY, "base", POOL, built, { ...PROOF, context: 5 as unknown as bigint })), "bad_amount");
+  assert.equal(code(() => evmPoolSignBuy(W_KEY, "base", POOL, built, null as unknown as typeof PROOF)), "bad_amount");
 });
