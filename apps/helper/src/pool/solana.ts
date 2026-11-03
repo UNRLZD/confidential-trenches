@@ -50,6 +50,7 @@ import {
   solanaJsonRpc,
   readSolanaRent,
   solanaPoolAccount,
+  solanaPoolFee,
   solanaPoolPriorityBudget,
   solanaResolveKeys,
   solanaTableIsActive,
@@ -63,7 +64,8 @@ import {
 import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
 import { oncePerNullifier } from "./once.ts";
-import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, solanaConfiguredFee, type PoolFeeAnswer } from "./fee.ts";
+import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, type PoolFeeAnswer } from "./fee.ts";
+import { POOL_LIFE_MAX_MS } from "./evm.ts";
 
 /** POST /v1/pool/solana/send's body limit: a 1,232-byte transaction in base64 and the JSON around it. */
 export const POOL_SOLANA_BODY_MAX = 4_096;
@@ -131,6 +133,17 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   }
   if (at !== d.length) throw new Error("tag 3 bytes after the last inner instruction");
   return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), innerAccounts, innerPrograms };
+}
+
+/** The relay fee a pool instruction carries, or null when the bytes are not one (checkSolanaPoolTx then names why). */
+function relayFeeOf(wire: Uint8Array): bigint | null {
+  try {
+    const m = solanaDecodeTransaction(wire).message;
+    const pix = m.instructions[m.instructions.length - 1];
+    return pix ? solanaReadPoolIx(pix.data).relayFee : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The priority fee W set, lamports: price (micro-lamports per CU) x limit, rounded up, as the runtime charges it. */
@@ -275,8 +288,8 @@ export type SolanaPoolSenderDeps = {
   memory?: number;
   /** The clock, ms; replaced in tests. */
   now?: () => number;
-  /** The rent, when the caller read it already (tests); else read on both providers at start. */
-  rent?: SolanaRent;
+  /** The Rent sysvar for an epoch; default readSolanaRent on both providers (replaced in tests). */
+  readRent?: (epoch: number) => Promise<SolanaRent>;
 };
 
 export type SolanaPoolSender = {
@@ -284,11 +297,11 @@ export type SolanaPoolSender = {
   readonly program: string;
   readonly pool: string;
   readonly feePayer: string;
-  /** Settles once the Rent sysvar is read on both providers and the fee is the kit's for it; rejects otherwise, and the
-   * helper does not start (server.ts awaits it). */
+  /** Settles once this epoch's rent is read on both providers and the configured fee is the kit's for it; rejects
+   * otherwise, and the helper does not start (server.ts awaits it). */
   readonly ready: Promise<void>;
-  /** GET /v1/pool/fee: the fee for the epoch holding `atMs`; the same for every caller. Throws before `ready`. */
-  fee(atMs: number): PoolFeeAnswer;
+  /** GET /v1/pool/fee: the kit's fee for the epoch holding `atMs`, from the rent read in that epoch; the same for every caller. */
+  fee(atMs: number): Promise<PoolFeeAnswer>;
   /** POST /v1/pool/solana/send for a parsed body. */
   carry(body: unknown): Promise<PoolSendAnswer>;
 };
@@ -314,21 +327,35 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   const { seed, address: feePayer } = feePayerKey(cfg.feePayerSecret);
   const pool = solanaPoolAccount(cfg.program);
   const [a, b] = deps.providers;
-  // M356 (6): the fee and the priority budget from the kit's one definition, for the rent both providers read now
-  let fee: bigint | null = null;
-  let budget = 0n;
-  const take = (rent: SolanaRent) => {
-    fee = solanaConfiguredFee(cfg.fee, rent, `the ${cfg.cluster} pool fee`);
-    budget = solanaPoolPriorityBudget(rent, fee);
+  // M356 (6), N3: the fee and the priority budget from the kit's one definition, for the rent both providers read once
+  // an epoch, as the device does: a Rent sysvar change moves the fee at the next epoch with no restart. Each epoch's
+  // read is kept for a proof's life (a proof made in an earlier epoch carries that epoch's fee); a failed read is
+  // dropped so the next ask reads again. Nothing is read until the first ask (server.ts asks at start).
+  const readRent = deps.readRent ?? (() => readSolanaRent([a, b]));
+  type EpochFee = { fee: bigint; budget: bigint };
+  const epochFees = new Map<number, Promise<EpochFee>>();
+  const known = new Map<number, EpochFee>();
+  const feeOf = (epoch: number): Promise<EpochFee> => {
+    const had = epochFees.get(epoch);
+    if (had) return had;
+    const p = readRent(epoch).then((rent) => {
+      const fee = solanaPoolFee(rent);
+      const f = { fee, budget: solanaPoolPriorityBudget(rent, fee) };
+      known.set(epoch, f);
+      return f;
+    });
+    epochFees.set(epoch, p);
+    p.catch(() => {
+      if (epochFees.get(epoch) === p) epochFees.delete(epoch);
+    });
+    for (const m of [epochFees, known]) for (const k of [...m.keys()]) if (k < epoch - POOL_LIFE_MAX_MS) m.delete(k);
+    return p;
   };
-  if (deps.rent) take(deps.rent);
-  // else read once, on the first ask (server.ts asks at start), so building a sender reads nothing
-  let readyP: Promise<void> | null = deps.rent ? Promise.resolve() : null;
-  const ready = (): Promise<void> => (readyP ??= readSolanaRent([a, b]).then(take));
-  const feeNow = (): bigint => {
-    if (fee === null) throw new Error("the pool fee is not read yet");
-    return fee;
-  };
+  let readyP: Promise<void> | null = null;
+  const ready = (): Promise<void> =>
+    (readyP ??= feeOf(epochStartOf((deps.now ?? Date.now)())).then((f) => {
+      if (!/^[1-9][0-9]{0,18}$/.test(cfg.fee) || BigInt(cfg.fee) !== f.fee) throw new Error(`the ${cfg.cluster} pool fee must be the kit's fee for this rent, ${f.fee} lamports`);
+    }));
   const send = deps.send ?? sendSolanaSet;
   const paths: readonly SolanaSendPath[] =
     deps.paths ??
@@ -356,7 +383,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     get ready() {
       return ready();
     },
-    fee: (atMs) => ({
+    fee: async (atMs) => ({
       chain: "solana",
       cluster: cfg.cluster,
       program: cfg.program,
@@ -364,7 +391,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       fee_payer: feePayer,
       epoch_ms: POOL_EPOCH_MS,
       epoch_start_ms: epochStartOf(atMs),
-      fee: feeNow().toString(),
+      fee: (await feeOf(epochStartOf(atMs))).fee.toString(),
       step: POOL_FEE_STEP.toString(),
     }),
     async carry(body) {
@@ -373,15 +400,18 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (typeof raw !== "string" || raw.length > 1_644 || !B64.test(raw)) return no(400, "bad_shape");
       const wire = new Uint8Array(Buffer.from(raw, "base64"));
       if (Buffer.from(wire).toString("base64") !== raw) return no(400, "bad_shape");
-      if (fee === null) {
-        try {
-          await ready();
-        } catch {
-          return no(503, "upstream");
-        }
-      }
       const at = now();
-      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee: feeNow(), budget, nowMs: at });
+      let current: EpochFee;
+      try {
+        current = await feeOf(epochStartOf(at));
+      } catch {
+        return no(503, "upstream");
+      }
+      // the release's relay fee is this epoch's, or an earlier epoch's still inside a proof's life
+      const relay = relayFeeOf(wire);
+      const match = relay === current.fee ? current : [...known.entries()].find(([k, f]) => k >= at - POOL_LIFE_MAX_MS && f.fee === relay)?.[1];
+      const f = match ?? current;
+      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee: f.fee, budget: f.budget, nowMs: at });
       if (!c.ok) return no(c.status, c.code, c.detail);
       const nf = c.tx.nullifier;
       const failed = failedIn.get(nf);

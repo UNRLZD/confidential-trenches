@@ -131,7 +131,7 @@ function sender(o: { a?: Calls; tablesA?: Record<string, Uint8Array | null>; tab
     {
       providers: [stub(o.a ?? [], o.tablesA), stub([], o.tablesB ?? o.tablesA)],
       now: o.now ?? (() => NOW),
-      rent: MAINNET,
+      readRent: async () => MAINNET,
       send: (set) => {
         o.sent?.push(set[0]!.wire);
         const sig = base58(set[0]!.wire.subarray(1, 65));

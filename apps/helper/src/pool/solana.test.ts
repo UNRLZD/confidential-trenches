@@ -19,7 +19,7 @@ import {
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { solanaPoolFee, solanaPoolPageReserve, solanaPoolPriorityBudget, solanaPoolReleaseCost, solanaRentMin, type SolanaRent } from "@blindfill/kit";
-import { POOL_EPOCH_MS, solanaConfiguredFee } from "./fee.ts";
+import { POOL_EPOCH_MS } from "./fee.ts";
 import { checkSolanaPoolTx, feePayerKey, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
 
 const testKey = (name: string) => {
@@ -191,14 +191,14 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
     { url: `https://stub.invalid/${Math.random()}` },
   );
 }
-function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent } = {}) {
+function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent; readRent?: (epoch: number) => Promise<SolanaRent> } = {}) {
   return solanaPoolSender(
     { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(o.fee ?? FEE) },
     {
       providers: [rpcStub(simErr, calls), rpcStub()],
       ...(o.memory ? { memory: o.memory } : {}),
       now: o.now ?? (() => NOW),
-      rent: o.rent ?? TEST_RENT,
+      readRent: o.readRent ?? (async () => o.rent ?? TEST_RENT),
       send: (set) => {
         sent.push(set[0]!.wire);
         const sig = base58(set[0]!.wire.subarray(1, 65));
@@ -251,20 +251,19 @@ test("every refusal of the checks reaches the route before any read", async () =
   assert.equal(sent.length, 0);
 });
 
-test("the published fee: the kit's for the rent read, the same for every caller in every epoch; any other refuses to start", () => {
+test("the published fee: the kit's for the rent read, the same for every caller in every epoch; any other refuses to start", async () => {
   const s = sender();
-  const a = s.fee(1_800_000_012_345);
+  const a = await s.fee(1_800_000_012_345);
   assert.deepEqual(a, { chain: "solana", cluster: "devnet", program: PROGRAM, pool: POOL, fee_payer: FP.address, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: 1_800_000_000_000, fee: "2000000", step: "100000" });
-  assert.equal(s.fee(1_800_000_060_000).fee, a.fee);
+  assert.equal((await s.fee(1_800_000_060_000)).fee, a.fee);
   // M355 at mainnet rent: cost 1,066,640, fee 1,300,000, page reserve 715, priority budget 232,645
   assert.equal(solanaPoolReleaseCost(MAINNET), 1_066_640n);
   assert.equal(solanaPoolFee(MAINNET), 1_300_000n);
   assert.equal(solanaPoolPageReserve(MAINNET), 715n);
   assert.equal(solanaPoolPriorityBudget(MAINNET, 1_300_000n), 232_645n);
-  assert.equal(solanaConfiguredFee("1300000", MAINNET, "x"), 1_300_000n);
-  for (const off of ["1200000", "1400000", "1299999", "2000000"]) assert.throws(() => solanaConfiguredFee(off, MAINNET, "x"), /the kit's fee for this rent, 1300000/, off);
-  assert.throws(() => solanaConfiguredFee("0", MAINNET, "x"), /whole number/);
-  assert.throws(() => sender(null, [], [], { fee: 1_300_000n }), /the kit's fee/, "a fee off the kit's for the rent stops the sender");
+  await sender(null, [], [], { fee: 1_300_000n, rent: MAINNET }).ready;
+  for (const off of [1_200_000n, 1_400_000n, 1_299_999n, 2_000_000n]) await assert.rejects(sender(null, [], [], { fee: off, rent: MAINNET }).ready, /the kit's fee for this rent, 1300000/, String(off));
+  await assert.rejects(sender(null, [], [], { fee: 1_300_000n }).ready, /the kit's fee for this rent, 2000000/, "a fee off the kit's for the rent read stops the helper");
 });
 
 test("the fee payer's key: 64 bytes whose public half is its seed's", () => {
@@ -282,7 +281,7 @@ test("the LiteSVM-landed tag 3 transaction, as W sent it, is carried, and the he
   const fpSecret = base58(Uint8Array.from([...seedOf(f.fee_payer_seed), ...ed25519.getPublicKey(seedOf(f.fee_payer_seed))]));
   const s = solanaPoolSender(
     { cluster: "devnet", program: f.program, feePayerSecret: fpSecret, fee: f.relay_fee },
-    { providers: [rpcStub(), rpcStub()], rent: TEST_RENT, send: (set) => (sent.push(set[0]!.wire), { signatures: ["x"], done: Promise.resolve({ txs: [] }), stop() {} }) },
+    { providers: [rpcStub(), rpcStub()], readRent: async () => TEST_RENT, send: (set) => (sent.push(set[0]!.wire), { signatures: ["x"], done: Promise.resolve({ txs: [] }), stop() {} }) },
   );
   assert.equal(s.pool, f.pool);
   assert.equal(s.feePayer, f.fee_payer);
@@ -307,7 +306,7 @@ test("GET /v1/pool/fee answers the pool's epoch fee; POST /v1/pool/solana/send c
   try {
     const f = await fetch(`${base}/v1/pool/fee?pool=${POOL}&epoch=1800000060000`);
     assert.equal(f.status, 200);
-    assert.deepEqual(await f.json(), s.fee(1_800_000_060_000));
+    assert.deepEqual(await f.json(), await s.fee(1_800_000_060_000));
     // M356 (3): an epoch off the grid, after now, or older than POOL_LIFE_MAX_MS (600,000) is refused before any read
     for (const q of [`pool=${OTHER.address}`, "", `pool=${POOL}&epoch=1800000000001`, `pool=${POOL}&pool=${POOL}`, `pool=${POOL}&epoch=1800000120000`, `pool=${POOL}&epoch=1799999460000`]) assert.equal((await fetch(`${base}/v1/pool/fee?${q}`)).status, 404, q);
     assert.equal((await fetch(`${base}/v1/pool/fee?pool=${POOL}&epoch=1799999520000`)).status, 200, "ten minutes back is still in the window");
@@ -415,4 +414,29 @@ test("the memory is bounded: past it the oldest nullifier goes, and the chain's 
   assert.equal(sent.length, 3, "the newest is remembered");
   await s.carry(body(build({ nullifier: 2 })));
   assert.equal(sent.length, 4, "the oldest was evicted: carried again, and its simulation is what would refuse a spent one");
+});
+
+test("N3: the rent is read once an epoch, so a rent change between two epochs gives the new fee in the second with no restart", async () => {
+  const reads: number[] = [];
+  let now = NOW;
+  const s = sender(null, [], [], { now: () => now, readRent: async (epoch) => (reads.push(epoch), epoch < NOW + POOL_EPOCH_MS ? TEST_RENT : MAINNET) });
+  await s.ready;
+  assert.equal((await s.fee(now)).fee, "2000000");
+  assert.equal((await s.fee(now + 30_000)).fee, "2000000", "the same epoch reads nothing again");
+  assert.deepEqual(reads, [NOW]);
+  now += POOL_EPOCH_MS;
+  assert.equal((await s.fee(now)).fee, "1300000", "the next epoch's rent gives the kit's fee for it");
+  assert.deepEqual(reads, [NOW, NOW + POOL_EPOCH_MS]);
+  // a release at the new fee is carried, priced against the new budget; one proved in the earlier epoch still is
+  assert.equal(code(await s.carry(body(build({ fee: 1_300_000n, nullifier: 7 })))), "ok");
+  assert.equal(code(await s.carry(body(build({ fee: 2_000_000n, nullifier: 8 })))), "ok");
+  assert.equal(code(await s.carry(body(build({ fee: 1_400_000n, nullifier: 9 })))), "fee_off");
+  const top = (solanaPoolPriorityBudget(MAINNET, 1_300_000n) * 1_000_000n) / 400_000n;
+  assert.equal(code(await s.carry(body(build({ fee: 1_300_000n, nullifier: 10, pre: [cuLimit(400_000), cuPrice(top + 1n)] })))), "fee_below_cost");
+  // a failed read is not kept: the next ask reads again
+  let fail = true;
+  const t = sender(null, [], [], { readRent: async () => { if (fail) throw new Error("down"); return TEST_RENT; } });
+  await assert.rejects(t.fee(NOW));
+  fail = false;
+  assert.equal((await t.fee(NOW)).fee, "2000000");
 });
