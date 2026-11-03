@@ -2055,6 +2055,29 @@ test("sol-marks-scale fold 1 S2: a throw on one RPC, or the caller's abort, stop
   assert.equal(afterAbort, 0);
 });
 
+test("sol-marks-scale fold 1 S2: a throw, the caller's signal: every listener the marks read adds to it is removed, whether the read resolves or is refused", async () => {
+  const { chain } = restorePool();
+  const ctl = new AbortController();
+  const live = new Set<unknown>();
+  let added = 0, removed = 0;
+  const sig = ctl.signal;
+  const add = sig.addEventListener.bind(sig), remove = sig.removeEventListener.bind(sig);
+  Object.assign(sig, {
+    addEventListener: (type: string, f: EventListenerOrEventListenerObject, o?: AddEventListenerOptions) => (added++, live.add(f), add(type, f, o)),
+    removeEventListener: (type: string, f: EventListenerOrEventListenerObject, o?: EventListenerOptions) => (removed++, live.delete(f), remove(type, f, o)),
+  });
+  // a read that resolves
+  const ok = await solanaMarks([rpc(chain, { ...MAINNET, url: "https://a.example" }), rpc(chain, { ...MAINNET, url: "https://b.example" })], PROGRAM, sig);
+  assert.ok(ok.pre.size > 0);
+  // a read that is refused
+  const down: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getProgramAccounts") throw new Error("RPC error -32000: a's node is down");
+    return rpc(chain, MAINNET)(m, p);
+  }, { url: "https://a.example" });
+  await assert.rejects(solanaMarks([down, rpc(chain, { ...MAINNET, url: "https://b.example" })], PROGRAM, sig), /a's node is down/);
+  assert.deepEqual([added, removed, live.size], [2, 2, 0]);
+});
+
 test("sol-marks-scale fold 1 S2: a stopped RPC whose bucket is full when read again reads on from the bucket past it", async () => {
   // a node that answers at slot 700 (300 deposits) unless asked for a later slot; RPC b at 705 (1,100 deposits)
   const at700 = bigPool(300, 10).chain;
