@@ -54,8 +54,8 @@ const M = [
   [R, "a.stateLeaves.forEach((c, k) => {\n    if (leafAt.has(c)) throw", "a.stateLeaves.forEach((c, k) => {\n    if (false) throw", T, "R4"],
   [R, "if (m.value === 0n || m.nonce === 0n || ", "if (", T, "restore refuses"],
   [R, "for (const [key, d] of reads[1]![i].marks) {", "for (const [key, d] of [] as [string, string][]) {", T, "RV5"],
-  [R, "if (base64.decode(d[0]).length !== size) throw", "if (false) throw", T, "restore refuses"],
-  [R, "const slot = Math.max(...reads.flatMap((r) => [r[0].slot, r[1].slot]));", "const slot = Math.min(...reads.flatMap((r) => [r[0].slot, r[1].slot]));", T, "RV7"],
+  [R, "if (bytes.length !== size) throw", "if (false) throw", T, "restore refuses"],
+  [R, "const slot = Math.max(...calls.flat(2).map((c) => c.slot));", "const slot = Math.min(...calls.flat(2).map((c) => c.slot));", T, "RV7"],
   [R, "if (m.value === 0n || m.nonce === 0n || m.nonce > BigInt(a.labelLeaves.length)) throw", "if (false) throw", T, "restore refuses"],
   [R, "if (a.labelLeaves[Number(m.nonce - 1n)] !== label) throw", "if (false) throw", T, "restore refuses"],
   [R, "if (at === undefined) throw", "if (false) throw", T, "restore refuses"],
@@ -70,12 +70,21 @@ const M = [
   // card sol-restore-race, review round 4: the first read's answers kept for the never-closed rule (G7); fold 7: the
   // earlier answer checked against the new one (G4, solana-restore.ts:101), told apart by an equal slot
   [R, "  solanaMarksGaps(calls, first.calls);\n", "", T, "fold 6 \\(G7"],
-  [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold 7 \\(G4"],
+  [R, "          lacks(i, x, j, y);\n", "", T, "fold 7 \\(G4"],
   // fold 8: the merged marks carried into the next round (M7): without them the restore never walks
   [R, "    marks = again;\n", "", T, "N1 race"],
   // fold 10: the release number read from a spent mark, and compared across reads
   [R, " || have.number !== w.number)) throw", ")) throw", T, "fold 10 \\(number"],
   [R, "number: new DataView(d.buffer, d.byteOffset, d.length).getUint32(8, true) }", "number: 0 }", T, "fold 10 \\(number"],
+  // card sol-marks-scale: the marks in buckets of 256 counters, each bucket's answer checked, the never-closed rule per bucket
+  [R, "if (c < BigInt(first) || c >> 8n !== BigInt(b)) throw", "if (c < BigInt(first)) throw", T, "sol-marks-scale: a mark outside the bucket"],
+  [R, "if (c < BigInt(first) || c >> 8n !== BigInt(b)) throw", "if (c >> 8n !== BigInt(b)) throw", T, "restore refuses two RPCs whose marks differ"],
+  [R, "if (wave[w - 1]!.open) return { marks: m, calls };", "return { marks: m, calls };", T, "sol-marks-scale: a pool of 20,000"],
+  [R, "open: keys.size < SOL_MARK_BUCKET - (b === 0 ? first : 0), keys", "open: keys.size < SOL_MARK_BUCKET, keys", T, "sol-marks-scale: a pool of 20,000"],
+  [R, "w = Math.min(2 * w, SOL_MARK_WAVE)", "w = 1", T, "sol-marks-scale: a pool of 20,000"],
+  [R, " || (y.open && y.bucket < x.bucket)", "", T, "sol-marks-scale: a short bucket speaks"],
+  [R, "if (y.slot < x.slot || !(y.bucket === x.bucket || (y.open && y.bucket < x.bucket))) return;", "if (y.slot < x.slot) return;", T, "sol-marks-scale: a pool of 20,000"],
+  [R, "const a = (await solanaLagRetry(() => rpc(\"getProgramAccounts\", [program, { commitment: \"finalized\", encoding: \"base64\", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]), lagWait, signal))", "const a = (await rpc(\"getProgramAccounts\", [program, { commitment: \"finalized\", encoding: \"base64\", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]))", T, "sol-marks-scale: a bucket whose node lags"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];

@@ -8,10 +8,10 @@ import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { SOLANA_ANSWER_MAX_BYTES, VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
+import { SOLANA_ANSWER_MAX_BYTES, VaultTree, solanaJsonRpc, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
+import { SOL_MARK_BUCKET, solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
@@ -68,6 +68,14 @@ function pages(tree: 0 | 1, es: readonly Entry[], edit: (b: Uint8Array, i: numbe
 }
 
 type Chain = { accounts: Map<string, Uint8Array>; slot: number; time: (slot: number) => bigint; marks?: Map<string, Uint8Array> };
+/** The bytes of a getProgramAccounts answer of n marks of `size` bytes, as a real RPC writes it (base64, withContext,
+ * rent-exempt lamports, rentEpoch at u64 max, space); the largest the fake has answered so far. */
+function gpaAnswerBytes(n: number, size: number): number {
+  const one = { account: { data: [base64.encode(new Uint8Array(size)), "base64"], executable: false, lamports: 1_002_240, owner: PROGRAM, rentEpoch: "18446744073709551615", space: size }, pubkey: PROGRAM };
+  const env = { jsonrpc: "2.0", id: 4_294_967_295, result: { context: { apiVersion: "2.2.0", slot: 400_000_000 }, value: [] as unknown[] } };
+  return JSON.stringify(env).length + n * (JSON.stringify(one).length - 2 + 1);
+}
+let gpaBiggest = 0;
 type Over = { perByte?: number; factor?: number; fee?: number; url?: string };
 /** One RPC answering the reads solana.ts makes, from a chain's accounts at its finalized slot. */
 function rpc(c: Chain, o: Over = {}, log: string[] = []): SolanaRpc {
@@ -99,12 +107,25 @@ function rpc(c: Chain, o: Over = {}, log: string[] = []): SolanaRpc {
       case "getFeeForMessage": return { context: ctx, value: o.fee ?? 10_000 };
       case "getProgramAccounts": {
         assert.equal(params[0], PROGRAM);
-        const size = (params[1] as { filters: { dataSize: number }[] }).filters[0]!.dataSize;
-        assert.deepEqual((params[1] as { filters: unknown }).filters, [{ dataSize: size }]); // the whole set, never a note's address
+        const filters = (params[1] as { filters: [{ dataSize: number }, { memcmp: { offset: number; bytes: string } }] }).filters;
+        const size = filters[0].dataSize;
+        // a bucket of the marks of one size: the counter's bytes past its low byte (offset 9), never a note's address
+        assert.ok(size === 12 || size === 16, `dataSize ${size}`);
+        assert.equal(filters.length, 2);
+        assert.deepEqual(Object.keys(filters[1]), ["memcmp"]);
+        assert.equal(filters[1].memcmp.offset, 9);
+        const high = base58.decode(filters[1].memcmp.bytes);
+        assert.equal(high.length, size === 12 ? 3 : 7);
         assert.equal((params[1] as { withContext?: boolean }).withContext, true);
         const min = (params[1] as { minContextSlot?: number }).minContextSlot;
         if (min !== undefined && c.slot < min) throw new Error(`Minimum context slot has not been reached: ${c.slot} < ${min}`);
-        return { context: ctx, value: [...(c.marks ?? new Map())].filter(([, d]) => d.length === size).map(([pubkey, d]) => ({ pubkey, account: { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(d), "base64"] } })) };
+        const answer = { context: ctx, value: [...(c.marks ?? new Map())].filter(([, d]) => d.length === size && high.every((x, i) => d[9 + i] === x)).map(([pubkey, d]) => ({ pubkey, account: { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(d), "base64"] } })) };
+        // an answer past the kit's cap is refused, as its JSON-RPC client does (trade/solana/send.ts), measured in a real
+        // RPC's shape: rent-exempt lamports, rentEpoch at u64 max and space on every account
+        const bytes = gpaAnswerBytes(answer.value.length, size);
+        gpaBiggest = Math.max(gpaBiggest, bytes);
+        if (bytes > SOLANA_ANSWER_MAX_BYTES) throw new Error("answer too large");
+        return answer;
       }
       default: throw new Error(`unexpected ${method}`);
     }
@@ -486,10 +507,10 @@ test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its
   }, { url: r.url })) as [SolanaRpc, SolanaRpc], gap: 4 }), /not (12|16) bytes/);
   // both RPCs: the nonce of another deposit (its label is not this note's), another value (not in the state tree)
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(other, other), gap: 4 }), /commitment is not in the state tree/);
-  // a mark of value 0 or nonce 0, which the program never writes (R11)
-  for (const z of [markData(0n, 3n), markData(10_000_000n, 0n)]) {
+  // a mark of value 0 or nonce 0, which the program never writes (R11); nonce 0 is no deposit's counter, refused at its read
+  for (const [z, re] of [[markData(0n, 3n), /is not a label tree leaf/], [markData(10_000_000n, 0n), /counter 0 is not in bucket 0/]] as const) {
     const c = edit((m) => m.set(key, z));
-    await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(c, c), gap: 4 }), /is not a label tree leaf/);
+    await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(c, c), gap: 4 }), re);
   }
   // one RPC lists a mark twice, or an account of another program (R2, R3)
   const twist = (f: (v: { pubkey: string; account: { owner: string } }[]) => void): [SolanaRpc, SolanaRpc] => pair(chain, chain).map((r) => Object.assign(async (m: string, p: readonly unknown[]) => {
@@ -1470,4 +1491,146 @@ test("fold 10 (number): a spent mark whose release number changes between two re
   // the same mark with its true number on every read restores
   const ok = await outcome(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [slotRpc("https://a.example", (i) => [c0(700), r(702)][i] ?? r(702 + i), pages), slotRpc("https://b.example", bMarks, pages)], gap: 4 }));
   assert.equal(ok, "restored");
+});
+
+// ---------------------------------------------------------------------------------------------- card sol-marks-scale
+// A pool of any size: each mark size is read in buckets of 256 consecutive counters (M376 (1)), so no answer comes near
+// the kit's 1 MiB cap. The pool: nPre deposits and nSpent releases of strangers' (keys and leaves made up, as the walk
+// never reads them), with ours on top: deposit note 0 at the last nonce, released whole as the last release (both in
+// the last bucket of their size), its change note of 0. Roots are not read by a restore, so they are 0.
+function bigPool(nPre: number, nSpent: number, slot = 700): { chain: Chain; P0: bigint; label: bigint } {
+  const key = (tag: number, k: number): string => {
+    const b = new Uint8Array(32);
+    b[0] = tag;
+    new DataView(b.buffer).setUint32(1, k);
+    return base58.encode(b);
+  };
+  const marks = new Map<string, Uint8Array>();
+  const state: Entry[] = [];
+  const labels: Entry[] = [];
+  const t = 1_800_000_000n;
+  for (let k = 1; k < nPre; k++) {
+    marks.set(key(1, k), markData(10_000_000n, BigInt(k)));
+    labels.push({ leaf: BigInt(1_000_000 + k), root: 0n, t });
+    state.push({ leaf: BigInt(2_000_000 + k), root: 0n, t });
+  }
+  for (let k = 0; k < nSpent - 1; k++) {
+    marks.set(key(2, k), spentData(10_000_000n, k));
+    state.push({ leaf: BigInt(3_000_000 + k), root: 0n, t });
+  }
+  const P0 = noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).precommitment;
+  const label = vaultLabelOf(keccak_256, SCOPE, BigInt(nPre));
+  marks.set(solanaMarkOf(PROGRAM, "pre", P0), markData(50_000_000n, BigInt(nPre)));
+  labels.push({ leaf: label, root: 0n, t });
+  state.push({ leaf: noteCommitment(50_000_000n, label, P0), root: 0n, t });
+  marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(50_000_000n, nSpent - 1));
+  state.push({ leaf: noteCommitment(0n, label, noteSecrets(SEED, { kind: "change", l: label, j: 0 }).precommitment), root: 0n, t });
+  return { chain: { accounts: new Map([...pages(0, state), ...pages(1, labels)]), slot, time: () => t + 5n, marks }, P0, label };
+}
+const counted = (c: Chain, url: string, log: string[]): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => rpc(c, MAINNET, log)(m, p), { url });
+/** A restore of bigPool(nPre, nSpent) on two RPCs: its outcome, and the calls of each method on both RPCs together. */
+async function restoreBig(nPre: number, nSpent: number): Promise<{ notes: number; spent: number; gpa: number; gma: number; calls: number }> {
+  const { chain } = bigPool(nPre, nSpent);
+  const log: string[] = [];
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [counted(chain, "https://a.example", log), counted(chain, "https://b.example", log)], gap: 4 });
+  return { notes: r.notes.length, spent: r.notes.filter((n) => n.state === "SPENT").length, gpa: log.filter((m) => m === "getProgramAccounts").length, gma: log.filter((m) => m === "getMultipleAccounts").length, calls: log.length };
+}
+
+test("sol-marks-scale F4a: a pool of 5,000 deposits restores through the kit's own JSON-RPC client and its 1 MiB cap", async () => {
+  const { chain } = bigPool(5_000, 10);
+  // a real RPC's answer shape (rent-exempt lamports, rentEpoch at u64 max, space), so the kit's cap is measured on it
+  const f = async (_url: string, init?: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init!.body)) as { id: string; method: string; params: unknown[] };
+    let result: unknown;
+    try {
+      result = await rpc(chain, MAINNET)(req.method, req.params);
+    } catch (e) {
+      if ((e as Error).message !== "answer too large") throw e;
+      // the fake measured it past the cap: answer it whole anyway, so the kit's client is what refuses it
+      const all = { ...req, params: [req.params[0], { ...(req.params[1] as object), filters: [(req.params[1] as { filters: unknown[] }).filters[0]] }] };
+      result = { context: { slot: chain.slot }, value: [...chain.marks!].filter(([, d]) => d.length === (all.params[1] as { filters: [{ dataSize: number }] }).filters[0].dataSize).map(([pubkey, d]) => ({ pubkey, account: { data: [base64.encode(d), "base64"] } })) };
+    }
+    let text = JSON.stringify({ jsonrpc: "2.0", id: req.id, result });
+    if (req.method === "getProgramAccounts") text = text.replace(/"account":\{/g, `"account":{"executable":false,"lamports":1002240,"owner":"${PROGRAM}","rentEpoch":18446744073709551615,"space":16,`).replace(/"owner":"[^"]+","lamports":1,"executable":false,"rentEpoch":0,/g, "");
+    return new Response(text, { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const rpcs: [SolanaRpc, SolanaRpc] = [solanaJsonRpc("https://a.example", { fetch: f }), solanaJsonRpc("https://b.example", { fetch: f })];
+  const out = await outcome(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs, gap: 4 }));
+  assert.equal(out, "restored");
+});
+
+test("sol-marks-scale: a pool of 20,000 marks restores, and no getProgramAccounts answer comes near the 1 MiB cap", async () => {
+  gpaBiggest = 0;
+  const big20 = await restoreBig(14_000, 6_000);
+  assert.deepEqual([big20.notes, big20.spent], [2, 1], "deposit note 0, spent, and its change note");
+  assert.ok(gpaBiggest > 0 && gpaBiggest <= gpaAnswerBytes(SOL_MARK_BUCKET, 16), `the biggest answer ${gpaBiggest} B is one full bucket at most`);
+  assert.ok(gpaAnswerBytes(SOL_MARK_BUCKET, 16) < SOLANA_ANSWER_MAX_BYTES / 8, "a full bucket is under an eighth of the cap");
+  const big1 = await restoreBig(700, 300);
+  assert.deepEqual([big1.notes, big1.spent], [2, 1]);
+  // two marks reads (the first, then the one after the pages, which gives nothing new), each RPC's buckets in waves of
+  // 1, 2, 4, then 8 until a wave's last bucket is short: 14,000 pre marks fill buckets 0-53 (54 short, the last of the
+  // wave 47-54: 55 calls); 6,000 spent marks fill 0-22 (23 short, the wave 23-30: 31 calls); 700 pre and 300 spent marks:
+  // buckets 0-1 and 0 full, the wave 1-2 last (3 calls each)
+  console.log(`# calls, both RPCs, the whole restore: 1,000 marks ${big1.gpa} getProgramAccounts + ${big1.gma} getMultipleAccounts (${big1.calls} in all); 20,000 marks ${big20.gpa} + ${big20.gma} (${big20.calls}); the biggest marks answer ${gpaBiggest} B`);
+  assert.equal(big20.gpa, 2 * 2 * (55 + 31));
+  assert.equal(big1.gpa, 2 * 2 * (3 + 3));
+});
+
+test("sol-marks-scale: one RPC missing a mark in one bucket, at the same slot, is refused on every device", async () => {
+  const { chain } = bigPool(2_000, 10);
+  // a stranger's deposit at nonce 1,300 (bucket 5), which RPC b lacks at the same slot
+  const missing = [...chain.marks!].find(([, d]) => d.length === 16 && new DataView(d.buffer, d.byteOffset).getBigUint64(8, true) === 1_300n)![0];
+  const short: Chain = { ...chain, marks: new Map([...chain.marks!].filter(([k]) => k !== missing)) };
+  for (const seed64 of [SEED, SEED_OTHER]) {
+    const out = await outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: pair(chain, short), gap: 4 }));
+    assert.equal(out, `refused: mark ${missing}: rpc 0 gives it at slot 700 and rpc 1 lacks it at slot 700; a mark is never closed`);
+  }
+});
+
+test("sol-marks-scale: a bucket whose node lags is read again a slot later, and refused past the budget", async () => {
+  const { chain } = bigPool(2_000, 10);
+  const bucket5 = (p: readonly unknown[]): boolean => {
+    const f = (p[1] as { filters: [{ dataSize: number }, { memcmp: { bytes: string } }] }).filters;
+    return f[0].dataSize === 16 && base58.decode(f[1].memcmp.bytes)[0] === 5;
+  };
+  const lagging = (lags: number, asked: { n: number }): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getProgramAccounts" && bucket5(p) && asked.n++ < lags) throw new Error("RPC error -32016: Minimum context slot has not been reached");
+    return rpc(chain, MAINNET)(m, p);
+  }, { url: "https://b.example" });
+  const instant: SolanaLagWait = async () => {};
+  const twice = { n: 0 };
+  const ok = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [rpc(chain, { ...MAINNET, url: "https://a.example" }), lagging(2, twice)], gap: 4, lagWait: instant });
+  assert.equal(ok.notes.length, 2);
+  assert.equal(twice.n, 2 + 2, "the first read's bucket 5: two lags, then its answer; the second read's at once");
+  const ever = { n: 0 };
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [rpc(chain, { ...MAINNET, url: "https://a.example" }), lagging(Infinity, ever)], gap: 4, lagWait: instant }), /RPC error -32016/);
+  assert.equal(ever.n, SOL_LAG_SLOTS + 1, "the budget's calls of that one bucket");
+});
+
+test("sol-marks-scale: a short bucket speaks for every counter past it at its slot, so a made-up mark in a bucket the other RPC never reads is refused", async () => {
+  // RPC a, honest at slot 700: 300 deposits, buckets 0 (full), 1 (short) and 2 (empty) read, then it stops
+  const { chain } = bigPool(300, 10);
+  // RPC b answers bucket 2 full of made-up marks at slot 701 (a slot past a, so no rule of bucket 2 can see them), so the
+  // device reads b's buckets 3-6; there b gives, at slot 690, a made-up deposit mark at nonce 800
+  const fake = (k: number, nonce: number): [string, Uint8Array] => [solanaMarkOf(PROGRAM, "pre", BigInt(990_000 + k)), markData(10_000_000n, BigInt(nonce))];
+  const full2: Chain = { ...chain, slot: 701, marks: new Map([...chain.marks!, ...Array.from({ length: 256 }, (_, k) => fake(k, 512 + k))]) };
+  const far = fake(999, 800);
+  const late: Chain = { ...chain, slot: 690, marks: new Map([...chain.marks!, far]) };
+  const liar: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m !== "getProgramAccounts") return rpc(chain, MAINNET)(m, p);
+    const b = base58.decode((p[1] as { filters: [unknown, { memcmp: { bytes: string } }] }).filters[1].memcmp.bytes)[0]!;
+    return rpc(b === 2 ? full2 : b >= 3 ? late : chain, MAINNET)(m, p);
+  }, { url: "https://b.example" });
+  await assert.rejects(solanaMarks([rpc(chain, { ...MAINNET, url: "https://a.example" }), liar], PROGRAM), new RegExp(`^Error: mark ${far[0]}: rpc 1 gives it at slot 690 and rpc 0 lacks it at slot 700; a mark is never closed$`));
+});
+
+test("sol-marks-scale: a mark outside the bucket asked for is refused (an RPC that ignores the filter)", async () => {
+  const { chain } = bigPool(300, 10);
+  // RPC b answers every bucket with every mark of the size: bucket 0's answer holds bucket 1's marks
+  const deaf: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m !== "getProgramAccounts") return rpc(chain, MAINNET)(m, p);
+    const size = (p[1] as { filters: [{ dataSize: number }] }).filters[0].dataSize;
+    return { context: { slot: chain.slot }, value: [...chain.marks!].filter(([, d]) => d.length === size).map(([pubkey, d]) => ({ pubkey, account: { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(d), "base64"] } })) };
+  }, { url: "https://b.example" });
+  await assert.rejects(solanaMarks([rpc(chain, { ...MAINNET, url: "https://a.example" }), deaf], PROGRAM), /^Error: rpc 1: mark \S+: counter 2\d\d is not in bucket 0$/);
 });

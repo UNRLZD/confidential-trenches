@@ -5,10 +5,15 @@
 //   (src/state.rs, M353, M355 (3), M376): a spent mark ["spent", nullifierHash] records the release's withdrawnValue
 //   u64 LE then the release's number u32 LE, and a precommitment mark ["pre", precommitment] its deposit, value u64 LE
 //   then the nonce u64 LE its label hashes.
-//   Two getProgramAccounts reads (dataSize 12 and dataSize 16, withContext) on each of two RPCs return every mark of
-//   every user. The marks are the union of the two RPCs' (M355 (4)): two honest RPCs at different finalized slots differ
-//   by the marks between them, and an RPC cannot invent a mark of ours, since a note's nullifier hash and precommitment
-//   stay secret until used; a key both hold with different bytes stops the restore. Then the pages, on both RPCs at or
+//   Each mark's public counter sits at offset 8: a deposit's nonce (1..D, no gap) and a release's number (0..R-1, no
+//   gap). Each RPC reads each mark size in buckets of 256 consecutive counters (card sol-marks-scale, M376 (1)): a
+//   getProgramAccounts call (dataSize, withContext) with a memcmp on the counter's bytes past its low byte, so an answer
+//   holds at most 256 marks (about 63 KiB) at any pool size, far under the kit's 1 MiB answer cap. The buckets go in
+//   waves of 1, 2, 4, then SOL_MARK_WAVE, until a wave's last bucket is short; a short bucket at slot s says no counter
+//   past it exists at s. A bucket names a range of public counters, never a note or a wallet; which buckets are read
+//   depends only on the RPC's own answers. The marks are the union of the two RPCs' (M355 (4)): two honest RPCs at
+//   different finalized slots differ by the marks between them, and an RPC cannot invent a mark of ours, since a note's
+//   nullifier hash and precommitment stay secret until used; a key both hold with different bytes stops the restore. Then the pages, on both RPCs at or
 //   past the higher of the marks' slots (./solana.ts solanaTreeSync leaves), so every deposit and release a mark
 //   records has its leaves in them. The device derives its own marks' addresses and looks them up
 //   here; a read per mark (a note's own address) would tell the RPC which notes are one user's, so none is made.
@@ -74,16 +79,27 @@ export type SolanaDepositMark = { value: bigint; nonce: bigint };
 export type SolanaSpentMark = { withdrawn: bigint; number: number };
 /** Every mark of the pool: each spent mark's address with its record, each precommitment mark's with its record. */
 export type SolanaMarks = { spent: ReadonlyMap<string, SolanaSpentMark>; pre: ReadonlyMap<string, SolanaDepositMark>; slot: number };
-/** One getProgramAccounts answer: the slot it was answered at and the marks' keys it gave. */
-export type SolanaMarkCall = { slot: number; keys: ReadonlySet<string> };
-/** One read of the marks: their union, and each RPC's two answers, [spent, pre]. */
-export type SolanaMarksRead = SolanaMarks & { calls: readonly [readonly [SolanaMarkCall, SolanaMarkCall], readonly [SolanaMarkCall, SolanaMarkCall]] };
+/**
+ * One getProgramAccounts answer: the slot it was answered at, its bucket (counters 256 bucket to 256 bucket + 255) and
+ * the marks' keys it gave. A short answer (open) also says that no counter past its bucket exists at its slot, since
+ * counters run with no gap.
+ */
+export type SolanaMarkCall = { slot: number; bucket: number; open: boolean; keys: ReadonlySet<string> };
+/** One read of the marks: their union, and each RPC's answers, [spent, pre], one per bucket. */
+export type SolanaMarksRead = SolanaMarks & { calls: SolanaMarkCalls };
 
 /** The kit's one definition of the spent mark's length (src/state.rs SPENT_MARK_LEN). */
 export const SOL_SPENT_MARK_LEN = SOLANA_POOL_SPENT_MARK_LEN;
 export const SOL_PRE_MARK_LEN = 16;
+/** Marks per getProgramAccounts call: one byte of the counter (M376 (1)). */
+export const SOL_MARK_BUCKET = 256;
+/** Bucket calls in flight on one RPC at most: the waves go 1, 2, 4, then this. */
+export const SOL_MARK_WAVE = 8;
+/** The counter's offset in a mark, and each size's counter: its width in bytes and its first value. */
+const COUNTER_AT = 8;
+const COUNTER = { [SOL_SPENT_MARK_LEN]: { width: 4, first: 0 }, [SOL_PRE_MARK_LEN]: { width: 8, first: 1 } } as const;
 
-/** Each RPC's answers so far, by size: seen[k][z], RPC k's answers of size z (0 spent, 1 pre). */
+/** Each RPC's answers, by size: calls[k][z], RPC k's answers of size z (0 spent, 1 pre). */
 type SolanaMarkCalls = readonly [readonly [SolanaMarkCall[], SolanaMarkCall[]], readonly [SolanaMarkCall[], SolanaMarkCall[]]];
 const solanaMarkCalls = (): SolanaMarkCalls => [[[], []], [[], []]];
 
@@ -91,51 +107,75 @@ const solanaMarkCalls = (): SolanaMarkCalls => [[[], []], [[], []]];
  * The never-closed rule. A mark is never closed (contracts/pool-solana/src/state.rs:12 "Nothing is ever removed or
  * closed"; the program's one debit is the pool account's, release.rs:272), so a mark one RPC gives at slot s is in every
  * answer of the other RPC at slot s or later. An answer that lacks it is a lie of one of the two, refused whoever's note
- * it would be: the device never judges an RPC's answer by its own notes. next (one read: each RPC's [spent, pre]) is
- * checked against the other RPC's earlier answers in seen, both ways, and against itself, then added to seen.
+ * it would be: the device never judges an RPC's answer by its own notes. Bucket by bucket, each answer with its own
+ * slot: y speaks for x's marks when it is x's bucket, or a short bucket below x's (no counter past it at its slot).
+ * next (one read: each RPC's answers of each size) is checked against the other RPC's earlier answers in seen, both
+ * ways, and against itself, then added to seen.
  */
-function solanaMarksGaps(seen: SolanaMarkCalls, next: readonly [readonly [SolanaMarkCall, SolanaMarkCall], readonly [SolanaMarkCall, SolanaMarkCall]]): void {
+function solanaMarksGaps(seen: SolanaMarkCalls, next: SolanaMarkCalls): void {
   const lacks = (i: number, x: SolanaMarkCall, j: number, y: SolanaMarkCall): void => {
-    if (y.slot < x.slot) return;
+    if (y.slot < x.slot || !(y.bucket === x.bucket || (y.open && y.bucket < x.bucket))) return;
     for (const key of x.keys) if (!y.keys.has(key)) throw new Error(`mark ${key}: rpc ${i} gives it at slot ${x.slot} and rpc ${j} lacks it at slot ${y.slot}; a mark is never closed`);
   };
   for (const z of [0, 1] as const)
     for (const [i, j] of [[0, 1], [1, 0]] as const)
-      for (const y of [...seen[j][z], next[j][z]]) {
-        lacks(i, next[i][z], j, y);
-        lacks(j, y, i, next[i][z]);
-      }
-  next.forEach((cs, k) => cs.forEach((c, z) => seen[k]![z]!.push(c)));
+      for (const x of next[i][z])
+        for (const y of [...seen[j][z], ...next[j][z]]) {
+          lacks(i, x, j, y);
+          lacks(j, y, i, x);
+        }
+  next.forEach((cs, k) => cs.forEach((c, z) => seen[k]![z]!.push(...c)));
 }
 
 /**
- * Every mark of the pool, the union of two RPCs' whole-set reads; a key both hold with different bytes is refused, and
- * a key one RPC gives that the other lacks at an equal or later slot (solanaMarksGaps).
+ * Every mark of the pool, the union of two RPCs' whole-set reads, each in buckets (header); a key both hold with
+ * different bytes is refused, and a key one RPC gives that the other lacks at an equal or later slot (solanaMarksGaps).
  * minSlots: RPC k answers at or past minSlots[k] (minContextSlot), and an answer below it is refused. lagWait: tests only.
  */
 export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal, minSlots?: readonly [number, number], lagWait?: SolanaLagWait): Promise<SolanaMarksRead> {
   checkSolanaRpcs(rpcs);
   if (minSlots !== undefined && !(Array.isArray(minSlots) && minSlots.length === 2 && minSlots.every((x) => Number.isSafeInteger(x) && x >= 0))) throw new Error("minSlots: two slots");
-  const read = async (rpc: SolanaRpc, k: number, size: number): Promise<{ marks: Map<string, string>; slot: number }> => {
+  const read = async (rpc: SolanaRpc, k: number, size: typeof SOL_SPENT_MARK_LEN | typeof SOL_PRE_MARK_LEN): Promise<{ marks: Map<string, string>; calls: SolanaMarkCall[] }> => {
     const min = minSlots?.[k] ?? 0;
-    const a = (await solanaLagRetry(() => rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters: [{ dataSize: size }] }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
-    const slot = a?.context?.slot;
-    if (!Number.isSafeInteger(slot) || (slot as number) < 0 || !Array.isArray(a.value)) throw new Error(`rpc ${k}: getProgramAccounts: not a list with its context`);
-    if ((slot as number) < min) throw new Error(`rpc ${k}: getProgramAccounts: answered at slot ${slot as number}, below ${min}`);
+    const { width, first } = COUNTER[size];
     const m = new Map<string, string>();
-    for (const x of a.value as { pubkey?: unknown; account?: { owner?: unknown; data?: unknown } }[]) {
-      const d = x?.account?.data;
-      if (typeof x?.pubkey !== "string" || x.account?.owner !== program || !Array.isArray(d) || d[1] !== "base64" || typeof d[0] !== "string") throw new Error(`rpc ${k}: getProgramAccounts: not the program's account`);
-      if (m.has(x.pubkey)) throw new Error(`rpc ${k}: getProgramAccounts: an account twice`);
-      if (base64.decode(d[0]).length !== size) throw new Error(`rpc ${k}: mark ${x.pubkey}: not ${size} bytes`);
-      m.set(x.pubkey, d[0]);
+    // one bucket: the counters 256 b to 256 b + 255, the counter's bytes past its low byte equal to b
+    const bucket = async (b: number): Promise<SolanaMarkCall> => {
+      const high = new Uint8Array(width - 1);
+      for (let i = 0, v = b; i < high.length; i++, v = Math.floor(v / 256)) high[i] = v % 256;
+      const filters = [{ dataSize: size }, { memcmp: { offset: COUNTER_AT + 1, bytes: base58.encode(high) } }];
+      const a = (await solanaLagRetry(() => rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
+      const slot = a?.context?.slot;
+      if (!Number.isSafeInteger(slot) || (slot as number) < 0 || !Array.isArray(a.value)) throw new Error(`rpc ${k}: getProgramAccounts: not a list with its context`);
+      if ((slot as number) < min) throw new Error(`rpc ${k}: getProgramAccounts: answered at slot ${slot as number}, below ${min}`);
+      const keys = new Set<string>();
+      for (const x of a.value as { pubkey?: unknown; account?: { owner?: unknown; data?: unknown } }[]) {
+        const d = x?.account?.data;
+        if (typeof x?.pubkey !== "string" || x.account?.owner !== program || !Array.isArray(d) || d[1] !== "base64" || typeof d[0] !== "string") throw new Error(`rpc ${k}: getProgramAccounts: not the program's account`);
+        if (m.has(x.pubkey)) throw new Error(`rpc ${k}: getProgramAccounts: an account twice`);
+        const bytes = base64.decode(d[0]);
+        if (bytes.length !== size) throw new Error(`rpc ${k}: mark ${x.pubkey}: not ${size} bytes`);
+        // the RPC applies the filter: a mark outside the bucket would speak for counters it was never asked about
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+        const c = width === 4 ? BigInt(view.getUint32(COUNTER_AT, true)) : view.getBigUint64(COUNTER_AT, true);
+        if (c < BigInt(first) || c >> 8n !== BigInt(b)) throw new Error(`rpc ${k}: mark ${x.pubkey}: counter ${c} is not in bucket ${b}`);
+        m.set(x.pubkey, d[0]);
+        keys.add(x.pubkey);
+      }
+      return { slot: slot as number, bucket: b, open: keys.size < SOL_MARK_BUCKET - (b === 0 ? first : 0), keys };
+    };
+    const calls: SolanaMarkCall[] = [];
+    for (let b = 0, w = 1; ; b += w, w = Math.min(2 * w, SOL_MARK_WAVE)) {
+      signal?.throwIfAborted();
+      const wave = await Promise.all(Array.from({ length: w }, (_, i) => bucket(b + i)));
+      calls.push(...wave);
+      if (wave[w - 1]!.open) return { marks: m, calls };
     }
-    return { marks: m, slot: slot as number };
   };
   signal?.throwIfAborted();
   const reads = await Promise.all(rpcs.map(async (rpc, k) => [await read(rpc, k, SOL_SPENT_MARK_LEN), await read(rpc, k, SOL_PRE_MARK_LEN)] as const));
   signal?.throwIfAborted();
-  const calls = reads.map((r) => r.map((c) => ({ slot: c.slot, keys: new Set(c.marks.keys()) }))) as unknown as [[SolanaMarkCall, SolanaMarkCall], [SolanaMarkCall, SolanaMarkCall]];
+  const calls: SolanaMarkCalls = [[reads[0]![0].calls, reads[0]![1].calls], [reads[1]![0].calls, reads[1]![1].calls]];
   solanaMarksGaps(solanaMarkCalls(), calls);
   const union = (i: 0 | 1): Map<string, Uint8Array> => {
     const out = new Map<string, string>(reads[0]![i].marks);
@@ -149,7 +189,7 @@ export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program
   const u64 = (d: Uint8Array, at: number): bigint => new DataView(d.buffer, d.byteOffset, d.length).getBigUint64(at, true);
   const spent = new Map([...union(0)].map(([key, d]) => [key, { withdrawn: u64(d, 0), number: new DataView(d.buffer, d.byteOffset, d.length).getUint32(8, true) }] as const));
   const pre = new Map([...union(1)].map(([key, d]) => [key, { value: u64(d, 0), nonce: u64(d, 8) }] as const));
-  const slot = Math.max(...reads.flatMap((r) => [r[0].slot, r[1].slot]));
+  const slot = Math.max(...calls.flat(2).map((c) => c.slot));
   return { spent, pre, slot, calls };
 }
 
