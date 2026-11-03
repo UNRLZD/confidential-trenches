@@ -112,7 +112,7 @@ export function evmAddressOf(key: Uint8Array): string {
 // ---- The epoch fee (M352 (2)) ----
 
 /**
- * The withdraw's gas the fee is priced on: Privacy Pools' withdrawal, 611,391, measured twice by the CO (M349). A
+ * The withdraw's gas the fee is priced on: Privacy Pools' withdrawal, 611,391, measured twice (M349). A
  * constant, never a reading, so every caller and every restart prices an epoch the same.
  */
 export const EVM_WITHDRAW_GAS = 611_391n;
@@ -201,7 +201,7 @@ const qty = (v: unknown): bigint => {
  * The node ran the call and it failed in execution: a JSON-RPC error (the kit's client words it "RPC error <code>:
  * <message>") with code 3 (execution reverted), -32000 (geth: insufficient funds, a fee under the base fee, an invalid
  * opcode) or -32003 (EIP-1474 transaction rejected; anvil 1.8.6 answers an INVALID halt "EVM error InvalidFEOpcode"
- * and insufficient funds with it, read on the box 3 Nov), unless its message names a rate limit. Anything else (a transport error, an HTTP status such as 429, a timeout, another
+ * and insufficient funds with it, read on an anvil fork, 3 Nov), unless its message names a rate limit. Anything else (a transport error, an HTTP status such as 429, a timeout, another
  * code) is the provider's, so it answers 503 upstream and never blames the request.
  */
 const failedInExecution = (e: unknown): boolean => {

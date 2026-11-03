@@ -1,7 +1,7 @@
 // The EVM pool's gas per release, the kit's one definition (M356 (4), M357): G(depth) = base + perLevel x depth, where
 // depth is the pool's tree depth read at the epoch's first block (public, so every device and the helper get the same
 // number). One proof serves either withdraw or buy, so G is the larger method's: buy through the router on one hop.
-// Measured isolated per transaction by card pool-evm-buy (forge, isolate = true; CO 3 Nov): withdraw 494,356 at depth 2
+// Measured isolated per transaction by card pool-evm-buy (forge, isolate = true; 3 Nov): withdraw 494,356 at depth 2
 // and 1,139,880 at depth 32; buy, mock adapter, 570,422 / 1,215,964; buy, router one hop, 686,812 / 1,332,356; 21,518
 // a level. A multi-hop buy costs more (card evm-adapters measures it per adapter); the fee's x 2 and the pending-block
 // simulation before every send cover the rest.
