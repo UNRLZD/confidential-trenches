@@ -122,6 +122,8 @@ export const TICK_MS = 2_000;
 /** A book not read for this long answers 503 rather than a stale chart. */
 export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
+/** Books read at once in a tick. */
+const READ_PARALLEL = 8;
 const POOLS_MAX = 5_000;
 const ANSWER_MAX = 4 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
@@ -622,7 +624,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // an ETH-quoted book is read only once the ETH price is read to the same block, so no swap is priced by an older price
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
     const refOk = !needRef || (await readRef(head.with, head.n));
-    for (const e of books.values()) if (e.pool.quote.kind !== "eth" || refOk) await readBook(e, head.with, head);
+    // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks
+    const due = [...books.values()].filter((e) => e.pool.quote.kind !== "eth" || refOk);
+    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head).catch(() => false)));
   }
   function start(): Promise<void> {
     if (!running) running = tick().catch(() => undefined).finally(() => (running = null));

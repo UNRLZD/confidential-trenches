@@ -285,3 +285,29 @@ test("the routes' arguments: 1s on Base, an unlisted token, a bad address, a lim
   ] as const) assert.equal((await p).status, 404, what);
   s.stop();
 });
+
+test("a tick reads the open tokens at once, not one after another (a dozen books one by one outlast several blocks)", async () => {
+  const chain = fakeChain();
+  let flying = 0;
+  let most = 0;
+  const slow = async (url: string, init: RequestInit): Promise<Response> => {
+    flying++;
+    most = Math.max(most, flying);
+    await new Promise((r) => setTimeout(r, 15));
+    try {
+      return await chain.fetch(url, init);
+    } finally {
+      flying--;
+    }
+  };
+  const s = createSwaps("base", { fetch: slow, now: () => 1_000_000, listed: async () => true, rpcs: URLS, pools: KNOWN, tickMs: 0 });
+  chain.st.head = REC.firstHead + 100;
+  await s.candles(ICNT, "1m", null, 5);
+  await s.candles(VVV, "1m", null, 5);
+  most = 0;
+  chain.st.head = REC.firstHead + 110;
+  await s.tick();
+  s.stop();
+  // each book's read asks two providers at once; two books at once make four
+  assert.ok(most >= 4, `at most ${most} requests in flight`);
+});
