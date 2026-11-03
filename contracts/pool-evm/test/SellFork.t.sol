@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.28;
 
-import {Vm} from 'forge-std/Vm.sol';
+import {Vm, VmSafe} from 'forge-std/Vm.sol';
 import {console} from 'forge-std/console.sol';
 
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
@@ -119,6 +119,59 @@ abstract contract SellForkBase is SellBase {
     assertEq(W.balance, 0, 'W keeps no ether');
     (,, address _weth,,) = _route();
     assertEq(IERC20Balance(_weth).balanceOf(W), 0, 'nor WETH');
+    assertEq(SellDelegate(payable(W)).nonce(), 1);
+  }
+
+  /// The kit's sell (card evm-pool-sell-tx): test/fixtures/kit-sells.json, made by packages/kit/test/make-kit-sells.ts
+  /// with evmPoolBuildSell, evmPoolSignSell and evmPoolSignSellAuthorization from this fork's values. The test's own
+  /// sell equals the kit's field for field and byte for byte, and the helper's one type-4 transaction carries the
+  /// kit's authorization and signature, not the test's: the pool's Deposited log ends it.
+  function test_theKitsSellLands() public {
+    (address _router,,, address _token,) = _route();
+    (string memory _set,) = _chain();
+    string memory _j = vm.readFile('test/fixtures/kit-sells.json');
+    string memory _k = string.concat('.', _set);
+    uint256 _amount = IERC20Balance(_token).balanceOf(W);
+    uint256 _minOut = _quote(_amount) * 99 / 100;
+    SellDelegate.Sell memory _s = _forkSell(_amount, _minOut, _minOut);
+    _s.deadline = block.timestamp + 300;
+    assertEq(vm.parseJsonAddress(_j, string.concat(_k, '.sells')), _s.token);
+    assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.amount'))), _s.amount);
+    assertEq(vm.parseJsonAddress(_j, string.concat(_k, '.target')), _router);
+    assertEq(vm.parseJsonBytes(_j, string.concat(_k, '.data')), _s.data, 'the kit encodes the swap byte for byte');
+    assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.minOut'))), _s.minOut);
+    assertEq(vm.parseJsonAddress(_j, string.concat(_k, '.pool')), _s.pool);
+    assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.precommitment'))), _s.precommitment);
+    assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.feeCap'))), _s.feeCap);
+    assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.deadline'))), _s.deadline);
+    assertEq(vm.parseUint(vm.parseJsonString(_j, string.concat(_k, '.nonce'))), _s.nonce);
+    bytes memory _sig = vm.parseJsonBytes(_j, string.concat(_k, '.signature'));
+    assertEq(_sig, _signed(_s), "the kit's signature is the test's own");
+    string memory _a = string.concat(_k, '.authorization');
+    assertEq(vm.parseJsonUint(_j, string.concat(_a, '.chainId')), block.chainid);
+    assertEq(vm.parseJsonAddress(_j, string.concat(_a, '.delegate')), address(delegate));
+    uint64 _authNonce = uint64(vm.parseUint(vm.parseJsonString(_j, string.concat(_a, '.nonce'))));
+    assertEq(_authNonce, vm.getNonce(W), "the authorization carries W's account nonce");
+    vm.attachDelegation(
+      VmSafe.SignedDelegation({
+        v: uint8(vm.parseJsonUint(_j, string.concat(_a, '.yParity'))),
+        r: vm.parseJsonBytes32(_j, string.concat(_a, '.r')),
+        s: vm.parseJsonBytes32(_j, string.concat(_a, '.s')),
+        nonce: _authNonce,
+        implementation: address(delegate)
+      })
+    );
+    uint256 _poolBefore = address(pool).balance;
+    vm.recordLogs();
+    vm.prank(SENDER);
+    SellDelegate(payable(W)).sell(_s, FEE, _sig);
+    assertEq(W.code, abi.encodePacked(hex'ef0100', address(delegate)), "the kit's authorization delegates W");
+    (, , uint256 _value, uint256 _pre) = _deposited(vm.getRecordedLogs());
+    assertGe(_value, _minOut - FEE, 'the leaf holds at least minOut less the fee');
+    assertEq(_pre, PRE);
+    assertEq(address(pool).balance, _poolBefore + _value);
+    assertEq(SENDER.balance, FEE);
+    assertEq(IERC20Balance(_token).balanceOf(W), 0);
     assertEq(SellDelegate(payable(W)).nonce(), 1);
   }
 

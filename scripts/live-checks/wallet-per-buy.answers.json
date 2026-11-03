@@ -1,0 +1,2651 @@
+{
+ "note": "card wallet-per-buy: good is a live run (scripts/live-checks/wallet-per-buy.mjs --record); each bad is that run with one change: badSlotSplit one Solana round's slots split (helper, W j=0, its last getTokenAccountsByOwner one slot on), badHoldings one RPC's holdings changed (Base public, W j=1, 1 wei), bad429 one answer a 429",
+ "good": {
+  "readAt": "2026-11-03T06:08:00.469Z",
+  "limit": {
+   "windowMs": 3000,
+   "total": 3,
+   "perMethod": 2
+  },
+  "routes": [
+   {
+    "chain": "sol",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "ms": 12309,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "sol",
+    "rpc": "public",
+    "url": "https://api.mainnet-beta.solana.com",
+    "ms": 12257,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "ms": 10559,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "public",
+    "url": "https://base-rpc.publicnode.com",
+    "ms": 10401,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   }
+  ],
+  "calls": [
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 16,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792171
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 50,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 966,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 1299,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 3052,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 3968,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 4301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 6054,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 6970,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 7303,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 9033,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 9056,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 9972,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 10305,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 10596,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 11056,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 11301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 13599,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 14058,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 14642,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 16600,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 17060,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 17746,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792251
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 19602,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 20062,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 20748,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   }
+  ]
+ },
+ "badSlotSplit": {
+  "readAt": "2026-11-03T06:08:00.469Z",
+  "limit": {
+   "windowMs": 3000,
+   "total": 3,
+   "perMethod": 2
+  },
+  "routes": [
+   {
+    "chain": "sol",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "ms": 12309,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "sol",
+    "rpc": "public",
+    "url": "https://api.mainnet-beta.solana.com",
+    "ms": 12257,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "ms": 10559,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "public",
+    "url": "https://base-rpc.publicnode.com",
+    "ms": 10401,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   }
+  ],
+  "calls": [
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 16,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792171
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 50,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 966,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 1299,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 3052,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 3968,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 4301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 6054,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 6970,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 7303,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 9033,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 9056,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 9972,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 10305,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 10596,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 11056,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 11301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792224
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 13599,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 14058,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 14642,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 16600,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 17060,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 17746,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792251
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 19602,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 20062,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 20748,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   }
+  ]
+ },
+ "badHoldings": {
+  "readAt": "2026-11-03T06:08:00.469Z",
+  "limit": {
+   "windowMs": 3000,
+   "total": 3,
+   "perMethod": 2
+  },
+  "routes": [
+   {
+    "chain": "sol",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "ms": 12309,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "sol",
+    "rpc": "public",
+    "url": "https://api.mainnet-beta.solana.com",
+    "ms": 12257,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "ms": 10559,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "public",
+    "url": "https://base-rpc.publicnode.com",
+    "ms": 10401,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "1",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   }
+  ],
+  "calls": [
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 16,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792171
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 50,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 966,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 1299,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 3052,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 3968,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 4301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 6054,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 6970,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 7303,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 9033,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 9056,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 9972,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 10305,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 10596,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 11056,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 11301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 13599,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 14058,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 14642,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 16600,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 17060,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 17746,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792251
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 19602,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 20062,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 20748,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   }
+  ]
+ },
+ "bad429": {
+  "readAt": "2026-11-03T06:08:00.469Z",
+  "limit": {
+   "windowMs": 3000,
+   "total": 3,
+   "perMethod": 2
+  },
+  "routes": [
+   {
+    "chain": "sol",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "ms": 12309,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "sol",
+    "rpc": "public",
+    "url": "https://api.mainnet-beta.solana.com",
+    "ms": 12257,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+      "holdings": {
+       "native": "0",
+       "tokens": {},
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "helper",
+    "url": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "ms": 10559,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   },
+   {
+    "chain": "base",
+    "rpc": "public",
+    "url": "https://base-rpc.publicnode.com",
+    "ms": 10401,
+    "wallets": [
+     {
+      "j": 0,
+      "address": "0x48966D6E92Ec496D9dBB37974d531cDC3a68aE35",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 1,
+      "address": "0x47C3232CCAD267F349230A38764f9D5566096C9d",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 2,
+      "address": "0x247aE9bE1E903873b59fF7157B20a59DaeDa8678",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     },
+     {
+      "j": 3,
+      "address": "0xAa55354BE9fc710021f49F9394e7c42743C1ceE6",
+      "holdings": {
+       "native": "0",
+       "tokens": {
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+         "amount": "0",
+         "frozen": false
+        }
+       },
+       "unreadable": []
+      }
+     }
+    ],
+    "failed": []
+   }
+  ],
+  "calls": [
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 16,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792171
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 28,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792170
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 50,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 966,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 429,
+    "ms": 1299,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xa95fb525a3f2ff281b18b6eab32e24f45ab6fda6fb34dba13787be02470818d4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 3029,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "min": 464792171,
+    "slot": 464792182
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 3052,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 3968,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 4301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x6cccb8f0151f26f1f8583451b475a8c508c02dcb682d1f17e80b8c4f12292a65"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 6031,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792197
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 6054,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 6970,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 7303,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xf54de0861be623afaec15f3471863ac14b8c9d9a0d8005a09c28ca5b16fb513f"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 9033,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 9034,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792210
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 9056,
+    "owner": "latest"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 9972,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/base",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 10305,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x95f5b4ec5c586867470b203601b1bb235ae3092937ed093cfbabe39357d0017d"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 10596,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 11056,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 11301,
+    "owner": "0x48966d6e92ec496d9dbb37974d531cdc3a68ae35",
+    "at": "0x523559fba66a808bd4bd45c318cd5f770283521726a8651c74355632a1a4e0e4"
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.confidential.unrealized.trade/v1/rpc/solana",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12036,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792223
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 12312,
+    "owner": "Gp8kF8pDVWs1Q6iHDMKRQNB8PGaZDoFjg66USCDduTAz",
+    "slot": 464792226
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 13599,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 14058,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 14642,
+    "owner": "0x247ae9be1e903873b59ff7157b20a59daeda8678",
+    "at": "0x733a042ac549652d3df09d8d4dc6bcad2a2abf5ee1d4e236845755e208f7f270"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 15314,
+    "owner": "2EQiqecD5Te8AmVc7UWRKgvsKMX7JCgWRRXk7hU41ybn",
+    "slot": 464792238
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 16600,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 17060,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 17746,
+    "owner": "0x47c3232ccad267f349230a38764f9d5566096c9d",
+    "at": "0xd5f8bf7e9784ce77f66c0e0f47c17e355bce36e441132018979bcb2c755d2003"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792251
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 18316,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "slot": 464792252
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBlockByNumber",
+    "status": 200,
+    "ms": 19602,
+    "owner": "latest"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_getBalance",
+    "status": 200,
+    "ms": 20062,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://base-rpc.publicnode.com",
+    "method": "eth_call",
+    "status": 200,
+    "ms": 20748,
+    "owner": "0xaa55354be9fc710021f49f9394e7c42743c1cee6",
+    "at": "0xb49d61f3887b2d1ab85662b54d2c4f812bb18e18972c882de60221a70d899678"
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 21319,
+    "owner": "H6d5Fu7xHr6BtAM7YgPh388MYhgx16JRVwPBCyFrN4QH",
+    "min": 464792252,
+    "slot": 464792266
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getBalance",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   },
+   {
+    "route": "https://api.mainnet-beta.solana.com",
+    "method": "getTokenAccountsByOwner",
+    "status": 200,
+    "ms": 24321,
+    "owner": "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq",
+    "slot": 464792281
+   }
+  ]
+ }
+}

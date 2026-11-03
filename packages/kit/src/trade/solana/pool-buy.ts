@@ -9,7 +9,8 @@
 // instructions W signed for with W's signer privilege only (never invoke_signed); the venue's program is an account, so
 // it loads from our lookup table. The helper carries only compute budget plus one pool tag 2 or tag 3 instruction
 // (card helper-pool-senders), so there is no other path. Measured in LiteSVM on mainnet copies 2026-11-02 22:50Z: pump
-// 977 B (979 with a tip), 244k CU; PumpSwap 1,134 B (1,136), 294k CU.
+// 977 B (1,010 with a tip, its account a static key, M362 (4)), 244k CU; PumpSwap 1,134 B (1,167), 294k CU. On a
+// cashback coin the builder makes PumpSwap 1,168 B and 1,201 with a tip, the largest (M369; the size table test).
 //
 // The release (tag 2), as contracts/pool-solana/src/release.rs lays it out at f0d85a8:
 // - data, 387 bytes: tag 2 ‖ proof (256) ‖ newCommitmentHash (32) ‖ existingNullifierHash (32) ‖ withdrawnValue u64 ‖
@@ -47,6 +48,7 @@ import {
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_CU_PRICE_MAX,
   SOLANA_JITO_TIP_ACCOUNTS,
+  SOLANA_JITO_TIP_MIN,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
   SOLANA_SOL_MINT,
@@ -253,9 +255,10 @@ export const solanaPoolPages = (program: string, stateSize: number, labelSize: n
 ];
 
 /** The program-wide accounts a pool buy uses: what our lookup table holds (the pool and its pages, the venue's shared
- * accounts and programs, the token programs, wSOL and the Jito tip accounts). */
+ * accounts and programs, the token programs and wSOL). Not the Jito tip accounts: the tip goes as a static key
+ * (solanaCompileV0 never loads one, M362 (4)). */
 export function solanaPoolBuyTableAccounts(cfg: SolanaPoolConfig, venue: SolanaPoolBuyVenue, pages: readonly string[] = []): string[] {
-  const common = [cfg.pool, ...pages, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SOL_MINT, SOLANA_PUMP_FEES_PROGRAM, ...SOLANA_JITO_TIP_ACCOUNTS];
+  const common = [cfg.pool, ...pages, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SOL_MINT, SOLANA_PUMP_FEES_PROGRAM];
   return venue.kind === "pump-curve"
     ? [...common, SOLANA_PUMP_PROGRAM, PUMP_GLOBAL, venue.feeRecipient, solanaEventAuthority(SOLANA_PUMP_PROGRAM), PUMP_GLOBAL_VOLUME, PUMP_FEE_CONFIG, ...venue.buybackFeeRecipients]
     : [
@@ -332,6 +335,20 @@ const createIdempotent = (wallet: string, mint: string, tp: string): SolanaApiIn
   ix(SOLANA_ATA_PROGRAM, [acc(wallet, true, true), acc(solanaAta(wallet, mint, tp), false, true), acc(wallet, false, false), acc(mint, false, false), acc(SOLANA_SYSTEM_PROGRAM, false, false), acc(tp, false, false)], [1]);
 const transfer = (from: string, to: string, lamports: bigint): SolanaApiInstruction =>
   ix(SOLANA_SYSTEM_PROGRAM, [acc(from, true, true), acc(to, false, true)], [...u32le(2), ...u64le(lamports)]);
+
+/**
+ * Every program a pool buy's steps invoke as a tag 3 inner instruction (solanaPoolBuySteps, solanaPoolVenueBuy): the two
+ * venues, the SPL Token program (wSOL's SyncNative and CloseAccount), the ATA program and the system program, and no
+ * other (test/solana-pool-step-programs.test.ts holds the list equal to the builder's steps over both venues and both
+ * token programs). Token-2022 is only an account of the ATA create, never invoked directly: a direct Token-2022 transfer
+ * runs its mint's transfer hook, a program the mint's owner chose, which can fail on chain after the simulation passed
+ * (M362 (1)). The one list the helper carries (M356 (1)): the pool program stays open to any venue and relayer.
+ * Frozen, and made on first use, never at load: the kit's index reaches the signing page's bundle, which keeps any
+ * top-level call (build-app.mjs --check).
+ */
+let stepPrograms: readonly string[] | undefined;
+export const solanaPoolStepPrograms = (): readonly string[] =>
+  (stepPrograms ??= Object.freeze([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SYSTEM_PROGRAM]));
 
 /** What W does with its chunk, in order: its token account, the wrap (PumpSwap), the buy, the unwrap (PumpSwap). */
 export function solanaPoolBuySteps(venue: SolanaPoolBuyVenue, wallet: string, spend: bigint, minOut: bigint): SolanaApiInstruction[] {
@@ -500,6 +517,8 @@ export type SolanaPoolBuyRequest = {
   readonly minOut: bigint; // token base units, the least the buy may give
   readonly tip: bigint; // lamports the pool pays a Jito tip account out of the chunk; 0 for none; at most the proof's tip cap
   readonly cuPrice: bigint; // micro-lamports per CU
+  // the pool's cluster: on mainnet the helper sends a tag 3 to Jito bundle-only, so it tips at least SOLANA_JITO_TIP_MIN
+  readonly cluster: "mainnet" | "devnet";
 };
 export type SolanaPoolBuyChain = {
   readonly blockhash: string; // the device's own read
@@ -530,6 +549,13 @@ const randomIndex = (n: number): number => {
 const TOKEN_ACCOUNT_SIZE = 165;
 export const SOLANA_POOL_VOLUME_ACCOUNT_SIZE = { "pump-curve": 137, pumpswap: 137 } as const;
 
+/** A per-venue constant of `kind`: an own key only, so a kind outside the two venues names none, even when a polluted
+ *  page's Object.prototype has one (the review of evm-pool-sell-tx 8d8675d). */
+function perVenue<T>(table: Readonly<Record<SolanaPoolVenue, T>>, kind: unknown): T {
+  if (typeof kind !== "string" || !Object.hasOwn(table, kind)) throw new Error(`no such venue ${typeof kind === "string" ? kind.slice(0, 40) : typeof kind}`);
+  return table[kind as SolanaPoolVenue];
+}
+
 /**
  * What W's chunk must cover, in lamports, on today's rent (every account counted as made new, which only raises W's
  * balance when one already exists):
@@ -540,7 +566,7 @@ export const SOLANA_POOL_VOLUME_ACCOUNT_SIZE = { "pump-curve": 137, pumpswap: 13
  */
 export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
   const chunk = release.withdrawnValue - release.relayFee - req.tip;
-  const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venue.kind]) +
+  const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + solanaRentMin(rent, perVenue(SOLANA_POOL_VOLUME_ACCOUNT_SIZE, venue.kind)) +
     (venue.kind === "pumpswap" && venue.cashback ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const peak = kept + (venue.kind === "pumpswap" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const left = chunk - kept;
@@ -591,8 +617,8 @@ export const SOLANA_POOL_SEND_MARGIN_MS = 90_000n;
  */
 export function solanaPoolPriorityProblem(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "cuPrice">, rent: SolanaRent): string | null {
   const room = solanaPoolPriorityBudget(rent, release.relayFee);
-  const priority = BigInt(SOLANA_POOL_BUY_CU[venue.kind]) * req.cuPrice;
-  return room < 0n || priority > room * 1_000_000n ? `the priority fee (${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)} and the page reserve ${solanaPoolPageReserve(rent)}` : null;
+  const priority = BigInt(perVenue(SOLANA_POOL_BUY_CU, venue.kind)) * req.cuPrice;
+  return room < 0n || priority > room * 1_000_000n ? `the priority fee (${perVenue(SOLANA_POOL_BUY_CU, venue.kind)} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)} and the page reserve ${solanaPoolPageReserve(rent)}` : null;
 }
 
 function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, rent: SolanaRent): void {
@@ -601,6 +627,9 @@ function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: 
   if (req.wallet === req.feePayer || req.wallet === cfg.pool || req.feePayer === cfg.pool) throw new Error("W, the fee payer and the pool must differ");
   if (venue.mint !== req.token) throw new Error("the venue is not the token's");
   if (!isU64(req.tip) || req.tip > release.tipCap) throw new Error("the tip is over the proof's tip cap");
+  if (req.cluster !== "mainnet" && req.cluster !== "devnet") throw new Error("the cluster must be mainnet or devnet");
+  // M369 (L2): the helper refuses a mainnet tag 3 under Jito's minimum (tip_low), so the device never builds one
+  if (req.cluster === "mainnet" && req.tip < SOLANA_JITO_TIP_MIN) throw new Error(`a mainnet pool buy tips at least ${SOLANA_JITO_TIP_MIN} lamports (Jito's minimum for a bundle)`);
   if (!isU64(req.cuPrice) || req.cuPrice > SOLANA_CU_PRICE_MAX) throw new Error("the CU price is over its cap");
   const f = solanaPoolBuyFunds(release, venue, req, rent);
   if (f.problem) throw new Error(f.problem);
@@ -653,7 +682,7 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   if (steps.some((x) => barred.has(x.program) || x.accounts.some((a) => barred.has(a.key)))) throw new Error("a step names the pool, its accounts or the fee payer");
   const data = solanaEncodePoolTag3({ ...release, proof: solanaCompressPoolProof(release.proof) }, true, req.tip, inner);
   return [
-    ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(SOLANA_POOL_BUY_CU[venue.kind])]),
+    ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(perVenue(SOLANA_POOL_BUY_CU, venue.kind))]),
     ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [3, ...u64le(req.cuPrice)]),
     ix(cfg.program, outer, data),
   ];
@@ -670,7 +699,7 @@ export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRel
   wire[0] = 2;
   wire.set(message, 129);
   if (wire.length > SOLANA_MAX_TX_BYTES) throw new Error(`too_large: ${wire.length} bytes > ${SOLANA_MAX_TX_BYTES}`);
-  return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit: SOLANA_POOL_BUY_CU[venue.kind], instructions };
+  return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit: perVenue(SOLANA_POOL_BUY_CU, venue.kind), instructions };
 }
 
 // ------------------------------------------------------------------------------------------------- the reads
@@ -915,7 +944,7 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   // FEE: the priority fee fits in what the relay fee leaves after the release's cost (the helper's fee_below_cost)
   const fee = solanaPoolPriorityProblem(release, venue, req, reads.rent);
   if (fee) { fail("FEE", fee); return done(); }
-  pass("FEE", `priority ${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} within relay fee ${release.relayFee} less cost ${solanaPoolReleaseCost(reads.rent)}`);
+  pass("FEE", `priority ${perVenue(SOLANA_POOL_BUY_CU, venue.kind)} CU at ${req.cuPrice} within relay fee ${release.relayFee} less cost ${solanaPoolReleaseCost(reads.rent)}`);
   const got = m.instructions.map((x) => ({ program: keys[x.programIndex]?.key ?? "?", accounts: x.accounts.map((i) => keys[i] ?? { key: "?", signer: false, writable: false }), data: x.data }));
   // the tip account the message names (tag 3's ninth account); the rebuild holds it to the baked Jito accounts
   const tipTo = req.tip > 0n ? got[2]?.accounts[8]?.key ?? null : null;
