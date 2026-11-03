@@ -9,7 +9,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { start } from "../server.ts";
 import { createEvmLists, GT_BASE, GT_READS } from "./evm/lists.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR } from "./gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, WINDOW_MS } from "./gecko.ts";
 import { createSolanaToken } from "./solana/token.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -33,7 +33,7 @@ async function world() {
   const doFetch = async (url: string): Promise<Response> => {
     if (!url.startsWith(GT_BASE)) return new Response("down", { status: 503 });
     const t = clock.now;
-    const inWindow = gt.filter((c) => t - c.at < 60_000);
+    const inWindow = gt.filter((c) => t - c.at < WINDOW_MS); // as measured: 5 calls over more than a minute
     const kind = url.includes("/networks/solana/") ? "page" : "lists";
     gt.push({ at: t, kind });
     if (inWindow.length >= 5) return new Response('{"status":{"error_code":429}}', { status: 429, headers: { "retry-after": "0" } });
@@ -71,7 +71,7 @@ test("both EVM chains' lists warmed, then a token page: its candles answer 200, 
   w.clock.now += 1_000;
   const c = await w.candles(MINTS[0]!);
   assert.equal(c.status, 200, `candles: ${c.status} ${c.body}`);
-  assert.equal(w.gt.filter((x) => w.clock.now - x.at < 60_000).length <= 5, true, "GeckoTerminal never asked past its limit");
+  assert.equal(w.gt.filter((x) => w.clock.now - x.at < WINDOW_MS).length <= 5, true, "GeckoTerminal never asked past its limit");
   // a repeat read inside its age calls GeckoTerminal no more
   const n = w.gt.length;
   w.clock.now += 30_000;
@@ -84,12 +84,12 @@ test("five token pages in a minute while the lists keep ticking: the lists take 
   t.after(w.close);
   await w.lists.base.tick();
   await w.lists.robinhood.tick();
-  w.clock.now += 61_000; // the warm-up's calls have left the window
+  w.clock.now += WINDOW_MS + 1_000; // the warm-up's calls have left the window
   const firstPage = w.clock.now;
   let answered = 0;
   for (const [i, mint] of MINTS.entries()) {
     const c = await w.candles(mint);
-    const pagesHeld = w.gt.filter((x) => x.kind === "page" && w.clock.now - x.at < 60_000).length;
+    const pagesHeld = w.gt.filter((x) => x.kind === "page" && w.clock.now - x.at < WINDOW_MS).length;
     if (c.status === 200) answered++;
     else {
       assert.equal(c.status, 429, `page ${i + 1}`);
@@ -121,5 +121,5 @@ test("a helper started while a token page is open still serves its lists: a list
     await w.candles(MINTS[1]!, tfs[(i + 1) % 6]);
   }
   for (const c of ["base", "robinhood"]) assert.equal((await w.listsAnswer(c)).status, 200, `${c} lists after ${(w.clock.now - NOW) / 1000} s`);
-  for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < 60_000).length <= 5, "GeckoTerminal never asked past its limit");
+  for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
 });

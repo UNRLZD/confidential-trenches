@@ -18,7 +18,7 @@ import { heldPerClient, throttleOf, upstreamBudget } from "./limits/limits.ts";
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
@@ -285,6 +285,9 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // Solana token page's candles, and warmed at start
   assert.match(main, /const SERVED_EVM: readonly EvmChain\[\] = \["base", "robinhood"\];/);
   assert.match(main, /const gecko = geckoBudget\(Date\.now\);/);
+  // every outbound connect may try one address for CONNECT_ATTEMPT_MS, past one lost SYN, set before anything starts
+  assert.match(main, /^ {1,}setDefaultAutoSelectFamilyAttemptTimeout\(CONNECT_ATTEMPT_MS\);/m);
+  assert.ok(CONNECT_ATTEMPT_MS > 1_000, "past the 1 s SYN resend");
   assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko\)\]\)\);/);
   assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko\);/);
   assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);

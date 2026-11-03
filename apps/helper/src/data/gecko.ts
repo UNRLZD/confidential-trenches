@@ -11,7 +11,14 @@
 // faq, read 2026-11-03 11:27Z), but read from one address after 70 s with no call, on 2026-11-03 at 14:58:04Z, 14 calls
 // back to back answered 200 five times, then 429 (Retry-After "0") nine times, and still 429 30 s later; the deployed
 // helper budgeting 10 met GeckoTerminal's 429 within minutes (market-data-solana-token live, 14:47Z).
+//
+// The window is WINDOW_MS, longer than the minute: a local helper counting 60 s from each call's take met
+// GeckoTerminal's 429 twice in 8 minutes (2026-11-03 15:38:14Z with 3 calls in the 60 s before it and 6 in the 63 s,
+// 15:44:35Z with 4 and 7 in the 75 s), since GeckoTerminal counts from each call's arrival and over more than 60 s;
+// a 429 pauses every lane for a minute, so the margin costs less than the 429 it avoids.
 export const GT_LIMIT_PER_MIN = 5;
+/** The span GT_LIMIT_PER_MIN calls are counted over. */
+export const WINDOW_MS = 75_000;
 /** Calls a page may always find free: a token page's first open reads the token's top pool and one candles range. */
 export const PAGE_RESERVE = 2;
 /** A page call this recent makes the lists lane wait (unless its read is urgent). */
@@ -29,12 +36,21 @@ export type GeckoBudget = {
   retryAt(lane: string): number;
 };
 
-/** A budget of at most `perMin` calls in any 60 s, the "lists" lane yielding to every other. */
+/** GeckoTerminal answered 429: pause every lane for its Retry-After (at most 300 s), or WINDOW_MS when it names none or
+ *  "0" (as it did at 14:58Z, still refusing 30 s later); returns the pause's end, the wait a page names. */
+export function throttledUntil(b: GeckoBudget, retryAfter: string | null, nowMs: number): number {
+  const ra = Number(retryAfter);
+  const until = nowMs + (retryAfter !== null && Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : WINDOW_MS);
+  b.pause(until);
+  return until;
+}
+
+/** A budget of at most `perMin` calls in any WINDOW_MS, the "lists" lane yielding to every other. */
 export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
   const calls: { at: number; lane: string }[] = [];
   let pausedUntil = 0;
   const prune = (t: number) => {
-    while (calls.length > 0 && t - calls[0]!.at >= 60_000) calls.shift();
+    while (calls.length > 0 && t - calls[0]!.at >= WINDOW_MS) calls.shift();
   };
   return {
     take(lane, urgent = false) {
@@ -55,7 +71,7 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       const t = now();
       prune(t);
       let at = Math.max(t, pausedUntil);
-      if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + 60_000);
+      if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + WINDOW_MS);
       return at;
     },
   };

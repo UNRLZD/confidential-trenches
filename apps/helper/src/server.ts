@@ -21,6 +21,7 @@
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { createSolanaLists } from "./data/solana/lists.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
@@ -476,7 +477,14 @@ export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, wa
   return server;
 }
 
+/** How long each outbound connect may try one address before the next (node's default is 250 ms): long enough for one
+ *  lost SYN (resent at 1 s), so a slow connect is not turned into a 503. Seen 2026-11-03 15:25Z: GeckoTerminal's IPv4
+ *  connect past 250 ms, its IPv6 unreachable, the fetch failed at 506 ms (ETIMEDOUT 104.18.0.233; EHOSTUNREACH
+ *  2606:4700::6812:1e9) and the token page's candles answered 503 in 5 of 24 reads. */
+export const CONNECT_ATTEMPT_MS = 2_000;
+
 if (import.meta.main) {
+  setDefaultAutoSelectFamilyAttemptTimeout(CONNECT_ATTEMPT_MS); // every start path (the image's CMD runs this file)
   const commit = process.env.HELPER_COMMIT ?? "";
   const port = Number(process.env.PORT ?? 8080);
   if (!SHA.test(commit)) {

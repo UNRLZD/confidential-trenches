@@ -20,7 +20,7 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, dec, pumpCurveAddress, pumpCurveBps, toRow, type Row } from "./lists.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -486,10 +486,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     if (!gt.take("pages")) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()));
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
-      const ra = Number(r.headers.get("retry-after"));
-      const until = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
-      gt.pause(until);
-      throw new Throttled(secondsUntil(until, now()));
+      throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()));
     }
     if (r.status === 404) return null;
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) throw new Upstream();

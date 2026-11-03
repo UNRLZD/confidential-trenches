@@ -7,6 +7,7 @@
 // untagged and not named unsettled (the deployed a0f19f5's Paper): FAIL; `unsettled` missing, naming a tagged token or
 // over half the tokens: FAIL.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -25,6 +26,7 @@ const blockReads = (a) => {
   const byNumber = new Map();
   const latest = [];
   for (const r of a.rpc) {
+    if (r.request === undefined) continue; // recorded by its sha256: not a block read
     const reqs = Array.isArray(r.request) ? r.request : [r.request];
     const ans = Array.isArray(r.answer) ? r.answer : [r.answer];
     for (const q of reqs) {
@@ -56,7 +58,8 @@ const replay = (a, chain = "base") => {
     assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
     return new Response(a.answer.body, { status: a.answer.status, headers: a.answer.headers });
   }
-  const same = (r) => r.url === url && JSON.stringify(r.request) === init.body;
+  const sha = createHash("sha256").update(init.body).digest("hex");
+  const same = (r) => r.url === url && (r.request === undefined ? r.request_sha256 === sha : JSON.stringify(r.request) === init.body);
   const i = a.rpc.findIndex((r, k) => !used.has(k) && same(r));
   const hit = i >= 0 ? (used.add(i), a.rpc[i]) : a.rpc.findLast(same);
   assert.ok(hit, `unrecorded RPC request to ${url}`);

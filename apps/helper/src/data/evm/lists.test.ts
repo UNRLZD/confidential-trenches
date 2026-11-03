@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
-import { geckoBudget } from "../gecko.ts";
+import { geckoBudget, WINDOW_MS } from "../gecko.ts";
 import {
   blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, LIST_MS, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, SETTLE_MS, STALE_MS, toRows,
 } from "./lists.ts";
@@ -262,7 +262,7 @@ test("the lists: tagged rows, the tokens not read yet named in unsettled, the li
   assert.ok(s0.unsettled.length > 0, "after one tick some makers are not read yet");
   for (const t of s0.unsettled) assert.ok(rows0.some((x) => x.token === t), "unsettled names listed tokens");
   for (const x of rows0) if (s0.unsettled.includes(x.token)) assert.equal(x.launchpad, null, "a token not read yet carries no tag");
-  now += LIST_MS; // the window clears for the lists read below
+  now += WINDOW_MS; // the window clears for the lists read below
   const l = createEvmLists("base", gecko, { fetch: r.fetch, now: () => now });
   for (let i = 0; i < 6; i++) await l.tick(); // makers are read MAKER_PER_TICK tokens a tick
   const a = await l.get();
@@ -276,7 +276,7 @@ test("the lists: tagged rows, the tokens not read yet named in unsettled, the li
   assert.ok(tagged.length >= 5, `the recorded lists' launchpad tokens are tagged: ${tagged.length}`);
   for (const t of tagged) assert.equal(MAKERS.cases.find((c) => c.address === t.token)?.pad, t.launchpad, `${t.symbol}`);
   assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 6, "each list once per LIST_MS (the first and this one)");
-  now += LIST_MS;
+  now += WINDOW_MS;
   await l.tick();
   assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 9);
   assert.equal(gecko.take("lists"), false, "the lists leave PAGE_RESERVE free");

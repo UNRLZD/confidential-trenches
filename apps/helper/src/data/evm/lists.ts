@@ -21,7 +21,7 @@
 // and token word match the table exactly.
 import { gzipSync } from "node:zlib";
 import { dec, LIST_MAX, ROW_FIELDS, text, type ListsAnswer, type Row } from "../solana/lists.ts";
-import type { GeckoBudget } from "../gecko.ts";
+import { throttledUntil, type GeckoBudget } from "../gecko.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
@@ -588,8 +588,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
-        const ra = Number(r.headers.get("retry-after"));
-        gecko.pause(now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000));
+        throttledUntil(gecko, r.headers.get("retry-after"), now());
         await r.body?.cancel();
         return null;
       }
