@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -116,8 +117,7 @@ async function open(browser, w, f, { tap = false, clock = "fixed" } = {}) {
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     const boxes = {};
@@ -214,4 +214,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} shots, BAR-05, BAR-11 and the calls`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots (${STATES.length} states x 390/1440), BAR-10 per shot, BAR-05/AS-03, BAR-11 and the calls${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+console.log(`PASS ${n} shots (${STATES.length} states x 390/1440), BAR-10 per shot, BAR-05/AS-03, BAR-11 and the calls${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

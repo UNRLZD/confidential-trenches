@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HELPER = "https://api.confidential.unrealized.trade";
 
@@ -117,8 +118,7 @@ async function openAt(browser, route, w, s, calls) {
 
 const dir = await build();
 const route = await harnessRoute(dir, "signed");
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 let n = 0;
 try {
   for (const w of WIDTHS) {
@@ -208,4 +208,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} states`);
   process.exit(1);
 }
-console.log(`PASS ${n} states (${STATES.length} at 390 and 1440) from the built app at the token route inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+console.log(`PASS ${n} states (${STATES.length} at 390 and 1440) from the built app at the token route inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
