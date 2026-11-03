@@ -837,3 +837,37 @@ test("X16 the wait between retries ends at once when the read is aborted (the re
   await assert.rejects(p, /stopped/);
   assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
 });
+
+// ---- fold 3: the re-check's cases ----
+
+test("R1 a reorg on both RPCs of the newest agreed block (100) replacing its pool log: a retry, then the new chain's root", async () => {
+  const c = C3();
+  c.events.push({ block: 100, kind: "dep", leaf: 1234n, label: 4321n });
+  const r = reorgAt(c, 99, () => c.events.splice(c.events.length - 1, 1, { block: 100, kind: "dep", leaf: 5678n, label: 8765n }));
+  const waits: number[] = [];
+  const t = await evmTreeSync({ rpcs: pair(c, c, { logs: r }, { logs: r }), pin: PIN, sleep: async (ms) => void (waits.push(ms), (c.head = 101)) }).trees(after(100));
+  assert.deepEqual(waits.slice(0, 1), [2000]);
+  assert.equal(t.stateRoot, new VaultTree(c.events.map((e) => e.leaf)).root);
+  assert.equal(t.stateTree.size, 5);
+});
+
+// a provider's cap on the logs one call returns, in the words recorded live (the team's data run, 2 Nov)
+for (const text of ["query exceeds max results 20000, retry with the range 52898562-52899295", "logs matched by query exceeds limit of 10000"]) {
+  test(`F8 a cap on the logs one call returns ("${text.slice(0, 40)}...") shrinks the page`, async () => {
+    const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }, { block: 30, kind: "wd", leaf: 998n }]);
+    // the provider refuses any page holding more than 2 of the pool's logs
+    const dense = { getLogs: ({ from, to }: { from: number; to: number }) => { if (c.events.filter((e) => e.block >= from && e.block <= to).length > 2) throw new Error(`RPC error -32005: ${text}`); } };
+    const t = await evmTreeSync({ rpcs: pair(c, c, dense, {}), pin: PIN, sleep: async () => {} }).trees(after(35));
+    assert.equal(t.stateTree.size, 5);
+  });
+}
+
+test("R2 the pool's now() retries a moment's fork at the newest height like every other agreed read", async () => {
+  const c = C3();
+  let calls = 0;
+  const fork = { hashOf: (n: number) => (n === 100 && calls++ < 2 ? h32("other 100") : c.hashOf(n)) };
+  const waits: number[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c, {}, fork), relayFee: async () => answer(), epochFee: () => 0n, sleep: async (ms) => void waits.push(ms) });
+  assert.equal(await p.now(), (T0 + 200n) * 1000n);
+  assert.deepEqual(waits, [2000]);
+});

@@ -283,10 +283,13 @@ const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such bl
 // extends beyond current head block: requested 53811322, head 53811277"; base-sepolia-rpc.publicnode.com and
 // robinhood-sepolia-rpc.publicnode.com "-32701: exceed maximum block range: 50000", and past the head "-32602: block
 // range extends beyond current head block: ..." and "-32000: invalid block range params"; rpc.testnet.chain.robinhood.com
-// answered every range (no cap). Other providers' wording, as their docs give it: "limited to a 10,000 range"
-// (thousands separators), "query returned more than 10000 results", "Log response size exceeded".
+// answered every range (no cap). A cap on the number of logs one call returns is a cap too, recorded live in the
+// team's data run of 2 Nov (a busy token's Transfer logs): Base "query exceeds max results 20000, retry with the range
+// ..." and Robinhood "logs matched by query exceeds limit of 10000". Other providers' wording, as their docs give it:
+// "limited to a 10,000 range" (thousands separators), "query returned more than 10000 results", "Log response size
+// exceeded".
 /** A provider's cap on one eth_getLogs page: only this shrinks the page. */
-const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max(imum)? block range|max(imum)? block range (is|of)? ?[\d,]+|range (is )?too (large|wide)|returned more than [\d,]+ results|more than [\d,]+ (results|logs)|response size (exceeded|is larger)|too many (results|logs|blocks)/i;
+const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max(imum)? block range|max(imum)? block range (is|of)? ?[\d,]+|range (is )?too (large|wide)|exceeds max(imum)? results [\d,]+|exceeds (the )?limit of [\d,]+|returned more than [\d,]+ results|more than [\d,]+ (results|logs)|response size (exceeded|is larger)|too many (results|logs|blocks)/i;
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
 const HEAD_LAG = /beyond (the )?current head|invalid block range params|after last accepted block|is ahead of (the )?(head|latest)/i;
 // Read live on 3 Nov 05:35Z, eth_call at a block 20,000 blocks back by hash: rpc.testnet.chain.robinhood.com and
@@ -724,7 +727,8 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
     epochMs: EVM_EPOCH_MS,
     lifeMs: EVM_LIFE_MS,
     sendMarginMs: EVM_SEND_MARGIN_MS,
-    now: (signal) => evmNow(a.rpcs, signal),
+    // an agreed read: a moment's fork at the newest height is a retry here, as in every other agreed read
+    now: (signal) => retryLag(() => evmNow(a.rpcs, signal), sleep, signal),
     trees: (beforeMs, signal, opts) => sync.trees(beforeMs, signal, opts),
     async bind({ chunk, wallet, refundPrecommitment, epochStartMs, deadlineMs }, signal) {
       if (!(wallet?.publicKey instanceof Uint8Array) || typeof wallet.address !== "string" || wallet.address !== evmAddress(wallet.publicKey))
