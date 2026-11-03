@@ -567,6 +567,71 @@ function readValid(answer: unknown): { slot: number; valid: boolean } | null {
   return { slot: a.context.slot, valid: a.value };
 }
 
+/** One provider's reads for 06c A4: a landed status, its finalized bank (slot and height), the slot of the bank that
+ * read the blockhash no longer valid at processed, and the slot of the bank of a searchTransactionHistory: true read
+ * that had no status for the signature. */
+export type SolanaDeadReads = {
+  landed: boolean;
+  anchor: { slot: number; height: number } | null;
+  invalidAt: number | undefined;
+  histNone: number | undefined;
+};
+
+/**
+ * 06c A4 on one provider, the one rule the send loop (deadOn) and a later session's re-read (readSolanaTxEnd) decide
+ * by: never landed there; its finalized bank's height past the tx's lastValidBlockHeight; the blockhash read no longer
+ * valid at processed; and a history read with no status from a bank at or past both the anchor's slot and that
+ * validity read's slot (a node that has not replayed the landing block cannot answer it). A tx is dead only when both
+ * providers say so.
+ */
+export function solanaDeadOn(r: SolanaDeadReads, lastValidBlockHeight: number): boolean {
+  if (!isSlot(lastValidBlockHeight) || r.landed || r.anchor === null || r.invalidAt === undefined || r.histNone === undefined) return false;
+  return r.anchor.height > lastValidBlockHeight && r.histNone >= r.anchor.slot && r.histNone >= r.invalidAt;
+}
+
+/**
+ * How a tx signed in an earlier session ended (a reload or a closed tab: its send loop is gone), read on both
+ * providers, each in A4's order: its finalized bank, then the blockhash at processed, then the status with
+ * searchTransactionHistory: true. filled or failed when both read it landed so; expired when solanaDeadOn holds on
+ * both; unknown otherwise (one provider's word, an error or a lagging node decides nothing). The send loop also wants
+ * a valid read of the blockhash before an invalid one counts, against a hash too fresh for a bank to hold; here the
+ * invalid read counts only from a bank at or past that provider's finalized anchor, whose height is past the hash's
+ * lastValidBlockHeight, so that bank comes after the hash and its no is the hash's age, not a bank that never held
+ * it; and the signer records the higher lastValidBlockHeight of the two providers' reads (readSolanaBlockhashBoth),
+ * so one provider cannot lower it.
+ */
+export async function readSolanaTxEnd(
+  providers: readonly [SolanaRpc, SolanaRpc],
+  tx: { signature: string; blockhash: string; lastValidBlockHeight: number },
+  callTimeoutMs = SOLANA_CALL_TIMEOUT_MS,
+): Promise<"filled" | "failed" | "expired" | "unknown"> {
+  const one = async (rpc: SolanaRpc): Promise<{ read: StatusRead | null; dead: boolean }> => {
+    try {
+      const call = (method: string, params: readonly unknown[]) => withTimeout(Promise.resolve().then(() => rpc(method, params)), callTimeoutMs);
+      const anchor = readAnchor(await call("getLatestBlockhash", [{ commitment: "finalized" }]));
+      const v = readValid(await call("isBlockhashValid", [tx.blockhash, { commitment: "processed" }]));
+      const st = readStatuses(await call("getSignatureStatuses", [[tx.signature], { searchTransactionHistory: true }]), 1);
+      if (!st) return { read: null, dead: false };
+      const read = st.reads[0]!;
+      const reads: SolanaDeadReads = {
+        landed: read.kind === "ok" || read.kind === "err",
+        anchor,
+        // an invalid read counts only from a bank at or past this provider's finalized anchor: a bank behind it may
+        // predate the blockhash, and with a lowered lastValidBlockHeight the height says nothing
+        invalidAt: v && !v.valid && anchor !== null && v.slot >= anchor.slot ? v.slot : undefined,
+        histNone: read.kind === "none" ? st.slot : undefined,
+      };
+      return { read, dead: solanaDeadOn(reads, tx.lastValidBlockHeight) };
+    } catch {
+      return { read: null, dead: false };
+    }
+  };
+  const [a, b] = await Promise.all(providers.map(one));
+  if (a!.read?.kind === "ok" && b!.read?.kind === "ok") return "filled";
+  if (a!.read?.kind === "err" && b!.read?.kind === "err") return "failed";
+  return a!.dead && b!.dead ? "expired" : "unknown";
+}
+
 /**
  * Sends a signed set on every path and reads its fills on two providers. Throws before any send when the set fails
  * its own checks; after that it never throws, and `done` resolves with one outcome per tx, in set order.
@@ -693,9 +758,7 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
 
   function deadOn(p: 0 | 1, i: number): boolean {
     const t = txs[i]!;
-    if (landed[p].has(t.signature) || !pastOn(p, i)) return false;
-    const seen = histNone[p].get(t.signature);
-    return seen !== undefined && seen >= anchor[p]!.slot && seen >= invalidAt[p].get(t.blockhash)!;
+    return solanaDeadOn({ landed: landed[p].has(t.signature), anchor: anchor[p], invalidAt: invalidAt[p].get(t.blockhash), histNone: histNone[p].get(t.signature) }, t.lvbh);
   }
 
   function decide(): void {

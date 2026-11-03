@@ -21,7 +21,7 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 // every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs
 // and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
 // fail this deploy)
-export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-no-test-token", "app-launchpad-badges", "app-token-route", "app-trade-box-mount", "app-harness-signin-e2e", "app-verify-mount", "signpage-release"];
+export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-no-test-token", "app-launchpad-badges", "app-token-route", "app-trade-box-mount", "app-token-chart", "app-harness-signin-e2e", "app-verify-mount", "app-no-blank-pages", "signpage-release"];
 export const LIVE_ARGS = { "app-in-shell": "--engines chromium,firefox,webkit", "app-harness-signin-e2e": "--host app", "signpage-release": "--host app" };
 // app-verify-mount reads the network the build names: a testnet build's _headers carries the testnet pair (build/network.mjs)
 export const networkOfBuild = (dir) => (readFileSync(join(dir, "_headers"), "utf8").includes(TESTNET_RPCS) ? "testnet" : "mainnet");

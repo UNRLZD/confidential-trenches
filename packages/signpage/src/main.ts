@@ -72,6 +72,14 @@ import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pag
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
+import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
+import { poolKinds } from "./pool-kinds.ts";
+import { testnetPoolDeps } from "./pool-testnet.ts";
+import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
+import type { PoolChain } from "./rules/pool.ts";
+import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
+import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
+import { solanaHelperRpc, solanaJsonRpc } from "../../kit/src/trade/solana/send.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
@@ -123,7 +131,11 @@ else {
   channel.addEventListener("message", (m) => notesMoved(m.data as WalletEvent));
   // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
   document.body.append(drawBackdrop(document));
+  // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
+  const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });
   shell = mountShell(document, {
+    // reload waits for a running trade; sign out does too, in every tab (the trade holds the seed lock shared)
+    settle: () => trades.idle(),
     // the private balance per chain's pool, from this page's own notes (src/pools.ts); the frame's state has none
     state: () => fs.state().then((s) => withPools(s, pageNotes, PAGE_POOLS)),
     watch: fs.watch,
@@ -137,9 +149,26 @@ else {
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
+      buy: trades,
+      // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
+      // network pins (mainnet: none yet, every one refused not_allowed, no read made; the testnet build: the devnet
+      // pool, src/pool-testnet.ts); a sell's decimals read on two providers
+      ...poolKinds(
+        POOL_TESTNET
+          ? testnetPoolDeps()
+          : {
+              pinned: poolPinned,
+              rpcs: (chain) => (chain === "solana" ? [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] : null),
+            },
+      ),
     },
   });
   shell.layer.append(root);
+}
+
+// Whether this page's network (mainnet) pins the chain's pool: the wallet's own tables, empty until the pools deploy.
+function poolPinned(chain: PoolChain): boolean {
+  return chain === "solana" ? SOL_POOLS.mainnet !== undefined : EVM_POOLS[chain] !== undefined;
 }
 
 // The account's open kinds (src/pages/open.ts): refused unless the page's state takes them; else the answer goes first,
@@ -381,6 +410,17 @@ const open = async (): Promise<WalletStore> =>
   }));
 
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
+// The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed
+// here and the seed64 by the signer when the trade ends.
+async function openSeed64(): Promise<Uint8Array> {
+  const s = await readSeedSettled();
+  if (!s) throw new Error("no seed is stored");
+  try {
+    return wordsToSeed64(entropyToWords(s.entropy));
+  } finally {
+    s.entropy.fill(0);
+  }
+}
 // The store moved (another tab signed in, saved or signed out) since `moved` was last read: a read that spans a move
 // may hold a seed that is no longer stored, so it is read again; a store that keeps moving reads as no seed.
 let moved = 0;

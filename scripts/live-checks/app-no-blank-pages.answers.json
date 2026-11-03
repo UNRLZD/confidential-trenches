@@ -1,0 +1,334 @@
+{
+ "good": {
+  "check": "app-no-blank-pages",
+  "at": "2026-11-03T20:53:22.204Z",
+  "source": "harness, terminal build apps/terminal/dist, signed out",
+  "browser": "156.0.8078.80",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/",
+    "header": "S1.1",
+    "links": [
+     {
+      "href": "/",
+      "main": {
+       "path": "/",
+       "route": "token",
+       "text": 256,
+       "panel": false,
+       "token": "ready",
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/discover",
+      "main": {
+       "path": "/discover",
+       "route": "discover",
+       "text": 44,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/portfolio",
+      "main": {
+       "path": "/portfolio",
+       "route": "portfolio",
+       "text": 7,
+       "panel": false,
+       "token": null,
+       "signedOut": true
+      },
+      "sheet": "S2.1"
+     },
+     {
+      "href": "/profile",
+      "main": {
+       "path": "/profile",
+       "route": "profile",
+       "text": 7,
+       "panel": false,
+       "token": null,
+       "signedOut": true
+      },
+      "sheet": "S2.1"
+     }
+    ],
+    "direct": {
+     "path": "/verify",
+     "route": "verify",
+     "text": 256,
+     "panel": true,
+     "token": "ready",
+     "signedOut": false
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/",
+    "header": "S1.1",
+    "links": [
+     {
+      "href": "/",
+      "main": {
+       "path": "/",
+       "route": "token",
+       "text": 526,
+       "panel": false,
+       "token": "ready",
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/discover",
+      "main": {
+       "path": "/discover",
+       "route": "discover",
+       "text": 1596,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/portfolio",
+      "main": {
+       "path": "/portfolio",
+       "route": "portfolio",
+       "text": 7,
+       "panel": false,
+       "token": null,
+       "signedOut": true
+      },
+      "sheet": "S2.1"
+     },
+     {
+      "href": "/terms",
+      "main": {
+       "path": "/terms",
+       "route": "terms",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/privacy",
+      "main": {
+       "path": "/privacy",
+       "route": "privacy",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/verify",
+      "main": {
+       "path": "/verify",
+       "route": "verify",
+       "text": 526,
+       "panel": true,
+       "token": "ready",
+       "signedOut": false
+      },
+      "sheet": null
+     }
+    ],
+    "direct": {
+     "path": "/verify",
+     "route": "verify",
+     "text": 526,
+     "panel": true,
+     "token": "ready",
+     "signedOut": false
+    }
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-no-blank-pages",
+  "at": "2026-11-03T20:47:40.571Z",
+  "source": "live https://confidential.unrealized.trade",
+  "browser": "156.0.8078.80",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/",
+    "header": "S1.1",
+    "links": [
+     {
+      "href": "/",
+      "main": {
+       "path": "/",
+       "route": "token",
+       "text": 223,
+       "panel": false,
+       "token": "ready",
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/discover",
+      "main": {
+       "path": "/discover",
+       "route": "discover",
+       "text": 44,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/portfolio",
+      "main": {
+       "path": "/portfolio",
+       "route": "portfolio",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/profile",
+      "main": {
+       "path": "/profile",
+       "route": "profile",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     }
+    ],
+    "direct": {
+     "path": "/verify",
+     "route": "verify",
+     "text": 0,
+     "panel": true,
+     "token": null,
+     "signedOut": false
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "top": "https://sign.confidential.unrealized.trade/",
+    "header": "S1.1",
+    "links": [
+     {
+      "href": "/",
+      "main": {
+       "path": "/",
+       "route": "token",
+       "text": 88,
+       "panel": false,
+       "token": "loading",
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/discover",
+      "main": {
+       "path": "/discover",
+       "route": "discover",
+       "text": 44,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/portfolio",
+      "main": {
+       "path": "/portfolio",
+       "route": "portfolio",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/orders",
+      "main": {
+       "path": "/orders",
+       "route": "orders",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/terms",
+      "main": {
+       "path": "/terms",
+       "route": "terms",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/privacy",
+      "main": {
+       "path": "/privacy",
+       "route": "privacy",
+       "text": 0,
+       "panel": false,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     },
+     {
+      "href": "/verify",
+      "main": {
+       "path": "/verify",
+       "route": "verify",
+       "text": 0,
+       "panel": true,
+       "token": null,
+       "signedOut": false
+      },
+      "sheet": null
+     }
+    ],
+    "direct": {
+     "path": "/verify",
+     "route": "verify",
+     "text": 0,
+     "panel": true,
+     "token": null,
+     "signedOut": false
+    }
+   }
+  ]
+ }
+}

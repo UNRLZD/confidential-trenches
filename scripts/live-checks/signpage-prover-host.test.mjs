@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/signpage-prover-host.test.mjs: the live check replays recorded answers
 // (signpage-prover-host.answers.json). good: the harness run on a fresh `deploy.mjs --dry-run` build of this branch
-// (SIGN_HOST does not serve the prover before this card's deploy), in Playwright's Chromium: PASS. bad: the same build
+// (SIGN_HOST does not serve the prover before this card's deploy), in the installed Google Chrome (scripts/browsers.mjs): PASS. bad: the same build
 // with one byte of withdraw.zkey changed: its sha256 is not the pin and the worker refuses it at load, so nothing is
 // proved: FAIL. The other bad answers are the good one with one fault planted each: FAIL.
 import assert from "node:assert/strict";
