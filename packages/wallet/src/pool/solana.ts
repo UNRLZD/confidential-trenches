@@ -41,7 +41,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { readSolanaRent, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
+import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import type { Ladder } from "./ladder.ts";
 import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
@@ -66,8 +66,17 @@ const PAGE_ENTRY = 72;
 const PAGE_DISC = new TextEncoder().encode("bfpage01");
 const TREE_STATE = 0;
 const TREE_LABEL = 1;
-/** Accounts per getMultipleAccounts (the RPC's limit is 100). */
-const BATCH = 50;
+/** One full page account's bytes. */
+const PAGE_BYTES = PAGE_HEADER + SOL_PAGE_ENTRIES * PAGE_ENTRY;
+/** The JSON around one account in a getMultipleAccounts answer, at most: its field names, owner, lamports, rentEpoch and
+ * space take under 200 bytes with every number at u64 width (pool-solana.test.ts builds that answer). */
+const ACCOUNT_JSON_MAX = 256;
+/** Page accounts per getMultipleAccounts, half for each tree: the even number whose full answer (each page in base64, 4
+ * bytes for 3, with its JSON) stays under 4/5 of the kit's SOLANA_ANSWER_MAX_BYTES, which its client refuses past
+ * (trade/solana/send.ts); the fifth left is the margin for the answer's envelope. 8 today, about 770 KiB a full call; the
+ * RPC's own limit is 100 accounts. */
+export const SOL_PAGES_A_CALL = 2 * Math.floor((SOLANA_ANSWER_MAX_BYTES * 4) / 5 / (4 * Math.ceil(PAGE_BYTES / 3) + ACCOUNT_JSON_MAX) / 2);
+const BATCH = SOL_PAGES_A_CALL;
 const U64 = (1n << 64n) - 1n;
 
 const enc = new TextEncoder();
@@ -237,24 +246,52 @@ function decodePage(raw: unknown, program: string, tree: number, pageNo: number,
 
 type Commitment = "finalized" | "confirmed";
 
+/** A read whose RPC answers -32016 (its node has not reached minContextSlot) is tried again, a slot apart, until the
+ * node reaches it: an honest RPC's finalized slot can trail the other's by a few slots (mainnet-beta vs publicnode, 30
+ * pairs on 3 Nov: mostly 0 to 2 apart, once 4), and a load-balanced provider can route one call to a node behind the
+ * one before. The budget is in slots, not tries: SOL_LAG_SLOTS waits of SOL_LAG_WAIT_MS (about a slot) each, 32 slots
+ * (Solana's finality depth, about 13 s), so a node a whole finality depth behind still answers. Never a wait after the
+ * last call; an abort during a wait stops the read with no further call. Any other error, or a -32016 past the budget,
+ * is thrown as it came (the kit's JSON-RPC client throws "RPC error <code>: <message>", trade/solana/send.ts). */
+export const SOL_LAG_SLOTS = 32;
+export const SOL_LAG_WAIT_MS = 400;
+/** The wait between two calls of a lagging read; tests pass one that returns at once. */
+export type SolanaLagWait = (ms: number) => Promise<void>;
+const slotWait: SolanaLagWait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const LAGGING = /RPC error -32016\b/;
+export async function solanaLagRetry<T>(f: () => Promise<T>, wait: SolanaLagWait = slotWait, signal?: AbortSignal): Promise<T> {
+  for (let slots = 0; ; slots++) {
+    try {
+      return await f();
+    } catch (e) {
+      if (slots >= SOL_LAG_SLOTS || !(e instanceof Error) || !LAGGING.test(e.message)) throw e;
+    }
+    await wait(SOL_LAG_WAIT_MS);
+    signal?.throwIfAborted();
+  }
+}
+
 /**
  * One RPC's read of both trees from page `from[tree]` on: every entry of each page, in insert order, until a page is
- * missing or short, and the lowest slot it read at. The pages before `from` are the sync's, read and agreed before.
+ * missing or short, and the lowest and highest slots it read at. The pages before `from` are the sync's, read and
+ * agreed before.
  * minContextSlot: the RPC must answer from that slot or a later one (an RPC behind it refuses, never serves older pages).
  */
-async function readPages(rpc: SolanaRpc, program: string, from: readonly [number, number], commitment: Commitment, minContextSlot: number, signal?: AbortSignal): Promise<{ pages: [Entry[], Entry[]]; slot: number }> {
+async function readPages(rpc: SolanaRpc, program: string, from: readonly [number, number], commitment: Commitment, minContextSlot: number, signal?: AbortSignal, lagWait?: SolanaLagWait): Promise<{ pages: [Entry[], Entry[]]; slot: number; top: number }> {
   const pages: [Entry[], Entry[]] = [[], []];
   const open = [true, true];
   let slot = Number.MAX_SAFE_INTEGER;
+  let top = 0;
   for (let step = 0; open[0] || open[1]; step += BATCH / 2) {
     signal?.throwIfAborted();
     const want: { tree: 0 | 1; pageNo: number }[] = [];
     for (const tree of [TREE_STATE, TREE_LABEL] as const) if (open[tree]) for (let k = 0; k < BATCH / 2; k++) want.push({ tree, pageNo: from[tree] + step + k });
     const cfg = { commitment, encoding: "base64", ...(minContextSlot > 0 ? { minContextSlot } : {}) };
-    const a = (await rpc("getMultipleAccounts", [want.map((w) => solanaPageOf(program, w.tree, w.pageNo)), cfg])) as { context?: { slot?: unknown }; value?: unknown };
+    const a = (await solanaLagRetry(() => rpc("getMultipleAccounts", [want.map((w) => solanaPageOf(program, w.tree, w.pageNo)), cfg]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
     const at = int(a?.context?.slot, "getMultipleAccounts context slot");
     if (at < minContextSlot) throw new Error(`getMultipleAccounts: answered at slot ${at}, below ${minContextSlot}`);
     slot = Math.min(slot, at);
+    top = Math.max(top, at);
     const got = a?.value;
     if (!Array.isArray(got) || got.length !== want.length) throw new Error("getMultipleAccounts: not one answer per page");
     want.forEach((w, i) => {
@@ -266,7 +303,7 @@ async function readPages(rpc: SolanaRpc, program: string, from: readonly [number
       if (page.length < SOL_PAGE_ENTRIES) open[w.tree] = false;
     });
   }
-  return { pages, slot };
+  return { pages, slot, top };
 }
 
 /** What a trees() call may ask beyond the cut: the newest root of a deposit's own note, read at confirmed (M355 (5)). */
@@ -282,20 +319,23 @@ export type SolanaTreesOpts = { newest?: boolean };
  */
 export type SolanaTreeSync = {
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: SolanaTreesOpts): Promise<PoolTrees>;
-  /** Every leaf of both trees both RPCs agree on, each RPC read at or past minContextSlot (a restore's marks' slot). */
-  leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[] }>;
+  /**
+   * Every leaf of both trees both RPCs agree on, each RPC read at or past minContextSlot (a restore's marks' slot), and
+   * the highest slot each RPC answered this call's pages at: every leaf it gave is in its chain at that slot.
+   */
+  leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number] }>;
 };
 
-export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: string): SolanaTreeSync {
+export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, lagWait?: SolanaLagWait): SolanaTreeSync {
   checkSolanaRpcs(rpcs);
   const held: [Entry[], Entry[]] = [[], []];
   const lastSlot = [0, 0];
   // beforeMs null: no cut, no reached check, every agreed entry
-  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<Entry[][]> {
+  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<{ lists: Entry[][]; tops: [number, number] }> {
     const base = [held[0], held[1]] as const;
     const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
     const reads = await both(rpcs, async (rpc, k) => {
-      const r = await readPages(rpc, program, from, commitment, Math.max(minSlot, lastSlot[k]!), signal);
+      const r = await readPages(rpc, program, from, commitment, Math.max(minSlot, lastSlot[k]!), signal, lagWait);
       // every leaf under the cut is in only once the block read at is at or past beforeMs: a later block's time is too
       if (beforeMs !== null) {
         const { ms } = await blockTime(rpc, r.slot);
@@ -334,12 +374,12 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
       for (const tree of [TREE_STATE, TREE_LABEL]) if (next[tree]!.length > held[tree]!.length) held[tree] = next[tree]!;
       reads.forEach((r, k) => (lastSlot[k] = Math.max(lastSlot[k]!, r.slot)));
     }
-    return beforeMs === null ? next : cuts;
+    return { lists: beforeMs === null ? next : cuts, tops: [reads[0]!.top, reads[1]!.top] };
   }
   return {
     async trees(beforeMs, signal, opts) {
       if (typeof beforeMs !== "bigint" || beforeMs <= 0n) throw new Error("beforeMs: a bigint above 0");
-      const out = (await run(beforeMs, opts?.newest === true ? "confirmed" : "finalized", 0, signal)).map((cut, tree) => {
+      const out = (await run(beforeMs, opts?.newest === true ? "confirmed" : "finalized", 0, signal)).lists.map((cut, tree) => {
         const t = new VaultTree(cut.map((e) => e.leaf));
         if (t.root !== cut[cut.length - 1]!.root) throw new Error(`tree ${tree}: the root built from the leaves is not the page's root at leaf ${cut.length - 1}`);
         return { tree: t, root: t.root };
@@ -348,8 +388,8 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     },
     async leaves(minContextSlot, signal) {
       if (!Number.isSafeInteger(minContextSlot) || minContextSlot < 0) throw new Error("minContextSlot: a slot");
-      const [state, label] = await run(null, "finalized", minContextSlot, signal);
-      return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf) };
+      const { lists: [state, label], tops } = await run(null, "finalized", minContextSlot, signal);
+      return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf), slots: tops };
     },
   };
 }
