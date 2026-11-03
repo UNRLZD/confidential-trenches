@@ -10,7 +10,9 @@ import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
-import { evmPoolVenues, EvmPoolBuyError, evmPoolBuild, evmPoolRouteData, evmPoolSignBuy, type EvmPoolChain, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
+import { evmPoolVenues, EvmPoolBuyError, evmPoolRouteData, type EvmPoolChain, type EvmPoolVenue, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
+// the checks through the unpinned builder and signer; the pinned ones (M370) at the end, with a pinned list of the test's
+import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy, pinnedBuild, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
 
 const CAST = JSON.parse(readFileSync(new URL("./evm-pool-buy-hostile.cast.json", import.meta.url), "utf8"));
 const PROOFS = JSON.parse(readFileSync(new URL("../../../contracts/pool-evm/test/fixtures/buy-proofs.json", import.meta.url), "utf8"));
@@ -134,7 +136,7 @@ test("F2 no input of W's signer takes a digest: an EIP-7702 delegation of W to t
   // the kit's public entry exports no digest maker and no signer but the one
   assert.equal("evmPoolBuyDigest" in kit, false);
   // evmPoolGas (trade/evm/pool-fee.ts) takes only a tree depth and gives the gas of one release: no key and no digest
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolGas", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolVenues"]);
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolBuildSell", "evmPoolGas", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
 });
 
 test("F2b W signs only the buy object the builder returned: a copy, an edit or a hand-made buy is refused", () => {
@@ -267,4 +269,98 @@ test("R8 a list is an array, bounded before it is copied", () => {
   });
   assert.equal(code(() => evmPoolRouteData("base", { venue: "uniswap-v4", currencyIn: ZERO, hops: huge })), "bad_route");
   assert.equal(reads, 0, "no item of an over-long list is read");
+});
+
+// ------------------------------------------------------------------ M370: the pinned adapters and pool
+
+const A_V3 = "0x000000000000000000000000000000000000ad03";
+const A_V4 = "0x000000000000000000000000000000000000ad04";
+const pin = (v: EvmPoolVenue, o: Partial<EvmPoolVenue>): EvmPoolVenue => Object.freeze({ ...v, ...o });
+const PINNED = Object.freeze({
+  base: pin(B, { pool: POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }) }),
+  robinhood: pin(R, { pool: POOL, adapters: Object.freeze({ v3: A_V3 }) }),
+});
+
+test("M370 today no pool or adapter is pinned: the kit's evmPoolBuild and evmPoolSignBuy refuse not_deployed", () => {
+  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
+    const v = evmPoolVenues()[chain];
+    assert.equal(v.pool, undefined);
+    assert.equal(v.adapters, undefined);
+    assert.equal(code(() => kit.evmPoolBuild(chain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
+    assert.equal(code(() => kit.evmPoolBuild(chain, ADAPTER, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
+    const built = evmPoolBuild(chain, ADAPTER, v4(ZERO, hop(X)), 1n, X);
+    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, chain, POOL, built, PROOF)), "not_deployed", chain);
+  }
+});
+
+test("M370 a pinned build takes only the chain's adapter for the route's venue", () => {
+  assert.equal(code(() => pinnedBuild(PINNED, "base", ADAPTER, v4(ZERO, hop(X)), 1n, X)), "not_pinned");
+  assert.equal(code(() => pinnedBuild(PINNED, "base", A_V3, v4(ZERO, hop(X)), 1n, X)), "not_pinned"); // v3's adapter, a v4 route
+  assert.equal(code(() => pinnedBuild(PINNED, "base", A_V4, v3([B.weth, X]), 1n, X)), "not_pinned");
+  assert.equal(code(() => pinnedBuild(PINNED, "robinhood", A_V4, v4(ZERO, hop(X)), 1n, X)), "not_deployed"); // no v4 pin
+  assert.equal(code(() => pinnedBuild(PINNED, "ethereum" as EvmPoolChain, A_V4, v4(ZERO, hop(X)), 1n, X)), "bad_route");
+  assert.equal(code(() => pinnedBuild(PINNED, "base", A_V4.toUpperCase().replace("0X", "0x"), v4(ZERO, hop(X)), 1n, X)), "built");
+  assert.equal(code(() => pinnedBuild(PINNED, "base", A_V3, v3([B.weth, X]), 1n, X)), "built");
+  assert.equal(code(() => pinnedBuild(PINNED, "robinhood", A_V3, v3([R.weth, X]), 1n, X)), "built");
+  // the route is read once here too
+  let reads = 0;
+  const route = { get venue() { return reads++ === 0 ? "uniswap-v4" : "uniswap-v3"; }, currencyIn: ZERO, hops: [hop(X)] } as unknown as EvmRoute;
+  assert.equal(code(() => pinnedBuild(PINNED, "base", A_V4, route, 1n, X)), "built");
+  assert.equal(reads, 1);
+});
+
+test("M370 a pinned signature goes only to the chain's pool, of a buy through a pinned adapter", () => {
+  const built = pinnedBuild(PINNED, "base", A_V4, v4(ZERO, hop(X)), 1n, X);
+  assert.equal(code(() => pinnedSignBuy(PINNED, W_KEY, "base", "0x00000000000000000000000000000000b1f1f002", built, PROOF)), "not_pinned");
+  const unpinned = evmPoolBuild("base", ADAPTER, v4(ZERO, hop(X)), 1n, X);
+  assert.equal(code(() => pinnedSignBuy(PINNED, W_KEY, "base", POOL, unpinned, PROOF)), "not_pinned");
+  assert.equal(code(() => pinnedSignBuy(PINNED, W_KEY, "base", POOL, { ...built }, PROOF)), "not_built");
+  const noPool = Object.freeze({ ...PINNED, base: pin(B, { adapters: PINNED.base.adapters! }) });
+  assert.equal(code(() => pinnedSignBuy(noPool, W_KEY, "base", POOL, built, PROOF)), "not_deployed");
+  const noAdapters = Object.freeze({ ...PINNED, base: pin(B, { pool: POOL }) });
+  assert.equal(code(() => pinnedSignBuy(noAdapters, W_KEY, "base", POOL, built, PROOF)), "not_pinned");
+  assert.equal(hex(pinnedSignBuy(PINNED, W_KEY, "base", POOL.toLowerCase(), built, PROOF)), hex(evmPoolSignBuy(W_KEY, "base", POOL, built, PROOF)));
+  const v3built = pinnedBuild(PINNED, "base", A_V3, v3([B.weth, X]), 1n, X);
+  assert.equal(code(() => pinnedSignBuy(PINNED, W_KEY, "base", POOL, v3built, PROOF)), "built");
+});
+
+// ------------------------------------------------------------------ the review of 8d8675d: a polluted Object.prototype
+
+const BAD_PIN = "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD2";
+function polluted(f: () => void): void {
+  const P = Object.prototype as Record<string, unknown>;
+  const fill: Record<string, unknown> = { pool: BAD_PIN, sellDelegate: BAD_PIN, adapters: { v3: BAD_PIN, v4: BAD_PIN }, v3: BAD_PIN, v4: BAD_PIN };
+  try {
+    for (const k of Object.keys(fill)) P[k] = fill[k];
+    f();
+  } finally {
+    for (const k of Object.keys(fill)) delete P[k];
+  }
+}
+
+test("M370 a polluted Object.prototype names no adapter and no pool: every buy builder and signer still refuses not_deployed", () => {
+  assert.equal(Object.getPrototypeOf(evmPoolVenues()), null, "the venue list has no prototype");
+  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) assert.equal(Object.getPrototypeOf(evmPoolVenues()[chain]), null, chain);
+  const noPins = Object.freeze({ base: pin(B, {}), robinhood: pin(R, {}) }); // an ordinary list
+  const noV4 = Object.freeze({ ...PINNED, robinhood: pin(R, { pool: POOL, adapters: { v3: A_V3 } }) }); // ordinary adapters
+  polluted(() => {
+    for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
+      const v = evmPoolVenues()[chain];
+      assert.equal(code(() => kit.evmPoolBuild(chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => kit.evmPoolBuild(chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
+      const built = evmPoolBuild(chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X);
+      assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, chain, BAD_PIN, built, PROOF)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuild(noPins, chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuild(noPins, chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => pinnedSignBuy(noPins, W_KEY, chain, BAD_PIN, built, PROOF)), "not_deployed", chain);
+    }
+    // filled pins: Robinhood has no v4 adapter (M365), and a polluted v4 does not give it one; nor v3 a chain without it
+    assert.equal(code(() => pinnedBuild(noV4, "robinhood", BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed");
+    const noV3 = Object.freeze({ ...PINNED, base: pin(B, { pool: POOL, adapters: { v4: A_V4 } }) });
+    assert.equal(code(() => pinnedBuild(noV3, "base", BAD_PIN, v3([B.weth, X]), 1n, X)), "not_deployed");
+    const v3built = pinnedBuild(noV4, "robinhood", A_V3, v3([R.weth, X]), 1n, X);
+    assert.equal(code(() => pinnedSignBuy(noV4, W_KEY, "robinhood", POOL, v3built, PROOF)), "built");
+    assert.equal(code(() => pinnedSignBuy(noV4, W_KEY, "robinhood", POOL, evmPoolBuild("robinhood", BAD_PIN, v4(ZERO, hop(X)), 1n, X), PROOF)), "not_pinned");
+  });
+  assert.equal(({} as Record<string, unknown>).v4, undefined, "the prototype is emptied again");
 });
