@@ -235,6 +235,17 @@ abstract contract BuyV4ForkBase is BuyBase {
     _lands(_weth, _wethHop(), 'buy, v4 from WETH, depth 2');
   }
 
+  /// The kit builds this test's routes byte for byte (test/fixtures/kit-routes.json, packages/kit/test/evm-pool-buy.test.ts)
+  function test_theKitBuildsTheseRoutes() public view {
+    string memory _k = vm.readFile('test/fixtures/kit-routes.json');
+    (, string memory _set,) = _chain();
+    (,,, address _weth) = _v4();
+    string memory _at = string.concat('.', _set);
+    assertEq(vm.parseJsonBytes(_k, string.concat(_at, '.v4OneHop.data')), _route(address(0), _oneHop()));
+    assertEq(vm.parseJsonBytes(_k, string.concat(_at, '.v4TwoHop.data')), _route(address(0), _twoHop()));
+    assertEq(vm.parseJsonBytes(_k, string.concat(_at, '.v4FromWeth.data')), _route(_weth, _wethHop()));
+  }
+
   /// A minOut above what the route gives: the adapter refuses before paying anything out
   function test_v4AMinOutOverTheQuoteFails() public {
     uint256 _quoted = _quote(address(0), _oneHop(), 0.4 ether - FEE);
