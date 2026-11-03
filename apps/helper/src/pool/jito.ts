@@ -3,29 +3,47 @@
 // for every failure that lands. Sent bundle-only, a failing tag 3 never lands, so it costs nothing:
 //   "For cost efficiency, you can enable revert protection by setting the query parameter bundleOnly=true. With this
 //   setting, the transaction is sent exclusively as a single transaction bundle." (docs.jito.wtf/lowlatencytxnsend,
-//   read 2026-11-03 02:20Z; "Jito enforces a minimum tip of 1000 lamports for bundles", the same page.)
-// One send tries the regional block engines in turn, starting one further on each time so sends spread over them
-// ("1 request per second per IP per region", the same page); a 429 or a transport failure goes to the next region, any
-// other answer ends the try. Keyless: no x-jito-auth header.
+//   read 2026-11-03 02:20Z; "Jito enforces a minimum tip of 1000 lamports for bundles", the same page: the kit's
+//   SOLANA_JITO_TIP_MIN.) Keyless: no x-jito-auth header.
+//
+// Capacity (M369 (M1)): the keyless limit is "1 request per second per IP per region" (the same page), so the regions
+// are one shared resource of the helper's address. Each region has one pacer, shared by every carry: one request a
+// second. A carry's first send books the region whose next second comes first and waits for it, ahead of every
+// rebroadcast (a rebroadcast goes only into a second nobody booked, and never waits); a 429, a 5xx or a transport
+// failure goes on to the next region. A rebroadcast goes only to the region that took the carry's first send and never
+// walks the regions. So rebroadcasts, however many carries are in flight, never keep a first send out of a region for
+// more than the second already started there.
 
-/** The mainnet block engines (docs.jito.wtf/lowlatencytxnsend, read 2026-11-03 02:20Z), each bundle-only. */
+import { SOLANA_KEYLESS_PATH_INTERVAL_MS } from "@blindfill/kit";
+
+/**
+ * The mainnet block engines, each bundle-only: the eight regional ones of docs.jito.wtf/lowlatencytxnsend (read
+ * 2026-11-03 04:36Z). Not the global mainnet.block-engine.jito.wtf: it is DNS for one of these (it resolved to
+ * singapore's 202.8.11.169 and .170 on two resolvers, 2026-11-03 04:36Z), so it shares that region's limit.
+ */
 export const SOLANA_JITO_BLOCK_ENGINES: readonly string[] = Object.freeze(
-  ["mainnet", "amsterdam.mainnet", "dublin.mainnet", "frankfurt.mainnet", "london.mainnet", "ny.mainnet", "slc.mainnet", "singapore.mainnet", "tokyo.mainnet"].map(
-    (h) => `https://${h}.block-engine.jito.wtf/api/v1/transactions?bundleOnly=true`,
+  ["amsterdam", "dublin", "frankfurt", "london", "ny", "slc", "singapore", "tokyo"].map(
+    (h) => `https://${h}.mainnet.block-engine.jito.wtf/api/v1/transactions?bundleOnly=true`,
   ),
 );
-/** The least tip a bundle carries ("Jito enforces a minimum tip of 1000 lamports for bundles"). */
-export const SOLANA_JITO_TIP_MIN = 1_000n;
 /** How long one region gets before its try counts as a transport failure [design: a block engine answers in well under 1 s]. */
 export const JITO_TIMEOUT_MS = 2_000;
+/** The longest a first send waits for a region's second [design: past it every region is booked, so the answer is busy
+ * rather than a wait that eats the release's send margin]. */
+export const JITO_QUEUE_MAX_MS = 2_000;
 const ANSWER_MAX = 16_384;
 
-/** One whole try: accepted by a region, every region busy or refusing, or every region failing on transport. */
+/** One whole first send: accepted by a region, every region busy or refusing, or every region failing on transport. */
 export type JitoSend = { kind: "ok"; region: string } | { kind: "busy" | "refused"; detail: string } | { kind: "transport"; detail: string };
-export type JitoSender = { send(base64Tx: string, signature: string): Promise<JitoSend> };
+/** One rebroadcast: sent and accepted, or not sent (its region's second is taken), or the region's answer. */
+export type JitoTry = { kind: "ok" | "busy" | "transport" | "refused"; detail: string };
+export type JitoSender = {
+  /** A carry's first send. */
+  send(base64Tx: string, signature: string): Promise<JitoSend>;
+  /** A rebroadcast to `region` (the one that took the first send) only, only in a second nobody booked. */
+  rebroadcast(region: string, base64Tx: string, signature: string): Promise<JitoTry>;
+};
 export type JitoFetch = (url: string, init: RequestInit) => Promise<Response>;
-
-type One = { kind: "ok" | "busy" | "transport" | "refused"; detail: string };
 
 async function bounded(r: Response): Promise<string> {
   if (!r.body) return "";
@@ -45,13 +63,21 @@ async function bounded(r: Response): Promise<string> {
   return Buffer.concat(parts).toString("utf8");
 }
 
-export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetch; timeoutMs?: number } = {}): JitoSender {
+export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetch; timeoutMs?: number; intervalMs?: number; queueMaxMs?: number } = {}): JitoSender {
   const regions = opts.regions ?? SOLANA_JITO_BLOCK_ENGINES;
   if (regions.length === 0) throw new Error("no block engine");
   const doFetch = opts.fetch ?? ((u: string, i: RequestInit) => fetch(u, i));
   const timeoutMs = opts.timeoutMs ?? JITO_TIMEOUT_MS;
+  const interval = opts.intervalMs ?? SOLANA_KEYLESS_PATH_INTERVAL_MS;
+  const queueMax = opts.queueMaxMs ?? JITO_QUEUE_MAX_MS;
+  const clock = () => performance.now(); // monotonic: a wall clock set back never books a second twice
+  /** Per region: when its next second starts (no request before it). */
+  const free = regions.map(() => -Infinity);
   let next = 0;
-  async function one(url: string, b64: string, signature: string): Promise<One> {
+
+  // M369 (L1): only a thrown fetch, a timeout or an oversized answer is transport; every HTTP answer is the region's
+  // word: 429, 5xx or a rate-limit error is busy (the next region), anything else not the signature is refused.
+  async function one(url: string, b64: string, signature: string): Promise<JitoTry> {
     let r: Response;
     let text: string;
     try {
@@ -66,8 +92,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     } catch (e) {
       return { kind: "transport", detail: String((e as Error)?.message ?? e).slice(0, 120) };
     }
-    if (r.status === 429) return { kind: "busy", detail: "HTTP 429" };
-    if (r.status >= 500) return { kind: "transport", detail: `HTTP ${r.status}` };
+    if (r.status === 429 || r.status >= 500) return { kind: "busy", detail: `HTTP ${r.status}` };
     let j: unknown;
     try {
       j = JSON.parse(text);
@@ -83,21 +108,46 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     if (o.result !== signature) return { kind: "refused", detail: "the answer is not this transaction's signature" };
     return { kind: "ok", detail: "" };
   }
+
   return {
     async send(b64, signature) {
       const start = next;
       next = (next + 1) % regions.length;
+      const tried = new Set<number>();
       let transportOnly = true;
       let last = "";
-      for (let i = 0; i < regions.length; i++) {
-        const url = regions[(start + i) % regions.length]!;
-        const t = await one(url, b64, signature);
-        if (t.kind === "ok") return { kind: "ok", region: url };
+      while (tried.size < regions.length) {
+        // the untried region whose next second comes first; a tie goes in turn from this send's start
+        let at = -1;
+        for (let k = 0; k < regions.length; k++) {
+          const i = (start + k) % regions.length;
+          if (!tried.has(i) && (at < 0 || free[i]! < free[at]!)) at = i;
+        }
+        tried.add(at);
+        const now = clock();
+        const go = Math.max(now, free[at]!);
+        if (go - now > queueMax) {
+          transportOnly = false;
+          last = "every region's next second is booked";
+          break;
+        }
+        free[at] = go + interval; // booked: a rebroadcast cannot take this second
+        if (go > now) await new Promise((r) => setTimeout(r, go - now));
+        const t = await one(regions[at]!, b64, signature);
+        if (t.kind === "ok") return { kind: "ok", region: regions[at]! };
         if (t.kind === "refused") return { kind: "refused", detail: t.detail };
         if (t.kind === "busy") transportOnly = false;
         last = t.detail;
       }
       return transportOnly ? { kind: "transport", detail: last } : { kind: "busy", detail: last };
+    },
+    async rebroadcast(region, b64, signature) {
+      const i = regions.indexOf(region);
+      if (i < 0) return { kind: "refused", detail: "not a block engine" };
+      const now = clock();
+      if (free[i]! > now) return { kind: "busy", detail: "the region's second is taken" };
+      free[i] = now + interval;
+      return one(region, b64, signature);
     },
   };
 }

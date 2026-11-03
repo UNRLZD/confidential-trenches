@@ -10,6 +10,7 @@ import { base58 } from "@scure/base";
 import {
   HELPER_V1_PATHS,
   SOLANA_JITO_TIP_ACCOUNTS,
+  SOLANA_JITO_TIP_MIN,
   SOLANA_POOL_QUOTE_MAX_AGE_SLOTS,
   SOLANA_POOL_RELEASE_LEN,
   SOLANA_POOL_VOLUME_ACCOUNT_SIZE,
@@ -133,7 +134,7 @@ test("tag 3: CU limit, CU price and one instruction into the pool; tag, flags, c
     assert.equal(t.data[270], first.accounts.length);
     assert.deepEqual(Array.from(t.data.subarray(271, 271 + first.accounts.length), (i) => t.accounts[i]!.key), first.accounts.map((a) => a.key));
     // without a tip there is no tip account and the tip is 0
-    const none = solanaPoolBuyInstructions(cfg, release, venue, { ...req, tip: 0n }, 6, rent, null)[2]!;
+    const none = solanaPoolBuyInstructions(cfg, release, venue, { ...req, tip: 0n, cluster: "devnet" }, 6, rent, null)[2]!;
     assert.equal(none.accounts.length, t.accounts.length - 1);
     assert.ok(!SOLANA_JITO_TIP_ACCOUNTS.includes(none.accounts[8]!.key));
     assert.throws(() => solanaPoolBuyInstructions(cfg, release, venue, req, 6, rent, FEE_PAYER), /not a Jito tip account/);
@@ -261,20 +262,42 @@ test("a chunk too small to land is refused: W's token account, the volume accoun
   }
 });
 
-test("size table: tag 3 with the compressed proof, pump and PumpSwap, with and without a tip", async () => {
+test("size table: tag 3 with the compressed proof, pump and PumpSwap, with and without a tip, cashback on and off", async () => {
   const rows: string[] = [];
   const sizes: Record<string, number> = {};
   for (const v of ["pump", "pumpswap"] as const) {
     const { venue, req, chain } = await setup(v);
-    for (const tip of [0n, TIP]) {
-      const b = buildSolanaPoolBuy(cfg, release, venue, { ...req, tip }, chain, { pick: () => 0 }).size;
-      sizes[`${v} ${tip > 0n ? "tip" : "none"}`] = b;
-      rows.push(`size tag3 ${v.padEnd(8)} compressed tip ${tip > 0n ? "yes" : "no "} ${b} B`);
-    }
+    for (const cashback of [false, true])
+      for (const tip of [0n, TIP]) {
+        const ven = { ...venue, cashback } as SolanaPoolBuyVenue;
+        const b = buildSolanaPoolBuy(cfg, release, ven, { ...req, tip, cluster: tip > 0n ? "mainnet" : "devnet" }, chain, { pick: () => 0 }).size;
+        sizes[`${v}${cashback ? " cashback" : ""} ${tip > 0n ? "tip" : "none"}`] = b;
+        rows.push(`size tag3 ${v.padEnd(8)} cashback ${cashback ? "yes" : "no "} compressed tip ${tip > 0n ? "yes" : "no "} ${b} B`);
+      }
   }
   console.log(rows.join("\n"));
-  // with a tip, the tip account is a static key (32 B) instead of a table index (1 B): M362 (4)
-  assert.deepEqual(sizes, { "pump none": 977, "pump tip": 1010, "pumpswap none": 1134, "pumpswap tip": 1167 });
+  // with a tip, the tip account is a static key (32 B) instead of a table index (1 B): M362 (4); the largest, PumpSwap on
+  // a cashback coin with a tip, is 1,201 B against 1,232 (M369 (L2))
+  assert.deepEqual(sizes, {
+    "pump none": 977, "pump tip": 1010, "pump cashback none": 977, "pump cashback tip": 1010,
+    "pumpswap none": 1134, "pumpswap tip": 1167, "pumpswap cashback none": 1168, "pumpswap cashback tip": 1201,
+  });
+});
+
+test("M369 (L2): a mainnet pool buy tips at least Jito's minimum; devnet may tip nothing; the check refuses the same", async () => {
+  assert.equal(SOLANA_JITO_TIP_MIN, 1_000n);
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue, req, chain } = await setup(v);
+    for (const tip of [0n, 1n, SOLANA_JITO_TIP_MIN - 1n])
+      assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, tip, cluster: "mainnet" }, chain, { pick: () => 0 }), /tips at least 1000 lamports/, `${v} tip ${tip}`);
+    assert.ok(buildSolanaPoolBuy(cfg, release, venue, { ...req, tip: SOLANA_JITO_TIP_MIN, cluster: "mainnet" }, chain, { pick: () => 0 }).size > 0);
+    assert.ok(buildSolanaPoolBuy(cfg, release, venue, { ...req, tip: 0n, cluster: "devnet" }, chain, { pick: () => 0 }).size > 0);
+    assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, { ...req, cluster: "testnet" as "devnet" }, chain), /cluster must be mainnet or devnet/);
+    // the device's own check rebuilds through the same rule: a mainnet request under the minimum is refused there too
+    const built = buildSolanaPoolBuy(cfg, release, venue, { ...req, tip: 0n, cluster: "devnet" }, chain, { pick: () => 0 });
+    assert.throws(() => solanaPoolBuyInstructions(cfg, release, venue, { ...req, tip: 0n, cluster: "mainnet" }, 6, chain.rent, null), /tips at least 1000 lamports/);
+    assert.ok(built.size > 0);
+  }
 });
 
 test("M362 (4): a table holding every Jito tip account still compiles the tip account as a static key, both venues", async () => {

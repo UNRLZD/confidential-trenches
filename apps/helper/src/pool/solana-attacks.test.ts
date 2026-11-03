@@ -23,12 +23,13 @@ import {
   type SolanaApiInstruction,
   type SolanaPoolRelease,
   type SolanaRpc,
+  type SolanaSendPath,
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { POOL_EPOCH_MS } from "./fee.ts";
 import { solanaPoolPriorityBudget, type SolanaRent } from "@blindfill/kit";
 import { checkSolanaPoolTx, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
-import { jitoSender, SOLANA_JITO_BLOCK_ENGINES } from "./jito.ts";
+import { jitoSender, SOLANA_JITO_BLOCK_ENGINES, type JitoFetch } from "./jito.ts";
 
 const key = (n: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/attack/${n}`).digest());
@@ -309,18 +310,24 @@ function blockEngine(plan: (host: string, n: number) => Engine) {
 const REGIONS = SOLANA_JITO_BLOCK_ENGINES;
 /** A mainnet sender on a fake block engine; the kit's send is faked as the chain: a bundle-only send that would fail
  * never lands (expired), a plain one that fails lands as a paid failure. */
-function mainnet(o: { engine: ReturnType<typeof blockEngine>; a?: Calls; now?: () => number; paths?: string[][]; end?: "failed" | "filled" }) {
+type Sent = { sig: string; wire: Uint8Array; paths: readonly SolanaSendPath[] };
+type Done = Promise<{ txs: { signature: string; state: "filled" | "failed" | "expired" | "unknown"; sends: [] }[] }>;
+/** A mainnet sender on a fake block engine; the kit's send is faked as the chain: a bundle-only send that would fail
+ * never lands (expired), a plain one that fails lands as a paid failure. `done`, when set, decides each send instead.
+ * The block engine's pacer runs at `intervalMs` (0 unless a test is about the pacing). */
+function mainnet(o: { engine: ReturnType<typeof blockEngine> | { fetchFn: JitoFetch }; a?: Calls; now?: () => number; paths?: string[][]; end?: "failed" | "filled"; done?: (s: Sent) => Done; intervalMs?: number }) {
   return solanaPoolSender(
     { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
     {
       providers: [stub(o.a ?? []), stub([])],
       now: o.now ?? (() => NOW),
       readRent: async () => MAINNET,
-      jito: jitoSender({ fetch: o.engine.fetchFn, timeoutMs: 1_000 }),
+      jito: jitoSender({ fetch: o.engine.fetchFn, timeoutMs: 1_000, intervalMs: o.intervalMs ?? 0 }),
       send: (set, opts) => {
         const names = opts.paths.map((p) => p.name);
         o.paths?.push(names);
         const sig = base58(set[0]!.wire.subarray(1, 65));
+        if (o.done) return { signatures: [sig], done: o.done({ sig, wire: set[0]!.wire, paths: opts.paths }) as never, stop() {} };
         const end = (o.end ?? "failed") === "filled" ? "filled" : names.includes("jito") ? "expired" : "failed";
         return { signatures: [sig], done: Promise.resolve({ txs: [{ signature: sig, state: end as "filled", sends: [] }] }), stop() {} };
       },
@@ -358,7 +365,7 @@ test("M362 (4): on mainnet a tag 3 tips at least 1,000 lamports to a Jito tip ac
 test("M362 (4): a mainnet tag 3 goes bundle-only to a block engine and is rebroadcast only there", async () => {
   const engine = blockEngine(() => "ok");
   const paths: string[][] = [];
-  const a = await mainnet({ engine, paths }).carry(body(tipped()));
+  const a = await mainnet({ engine, paths, end: "filled" }).carry(body(tipped()));
   assert.equal(code(a), "ok");
   assert.equal(engine.seen.length, 1);
   const u = new URL(engine.seen[0]!.url);
@@ -367,31 +374,39 @@ test("M362 (4): a mainnet tag 3 goes bundle-only to a block engine and is rebroa
   assert.equal(engine.seen[0]!.body.method, "sendTransaction");
   assert.equal(engine.seen[0]!.body.params[1].encoding, "base64");
   assert.deepEqual(paths, [["jito"]]);
-  assert.ok(REGIONS.every((r) => new URL(r).searchParams.get("bundleOnly") === "true" && new URL(r).host.endsWith(".block-engine.jito.wtf")));
-  assert.equal(REGIONS.length, 9);
+  assert.ok(REGIONS.every((r) => new URL(r).searchParams.get("bundleOnly") === "true" && new URL(r).host.endsWith(".mainnet.block-engine.jito.wtf")));
+  assert.equal(REGIONS.length, 8);
 });
 
 test("M362 (4): a 429 from one region goes to the next; sends start at the next region each time", async () => {
-  const engine = blockEngine((host) => (host.startsWith("mainnet.") ? "429" : "ok"));
-  const s = mainnet({ engine });
+  const engine = blockEngine((host) => (host.startsWith("amsterdam.") ? "429" : "ok"));
+  const s = mainnet({ engine, end: "filled" });
   assert.equal(code(await s.carry(body(tipped()))), "ok");
-  assert.deepEqual(engine.seen.map((x) => x.host.split(".")[0]), ["mainnet", "amsterdam"]);
+  assert.deepEqual(engine.seen.map((x) => x.host.split(".")[0]), ["amsterdam", "dublin"]);
   assert.equal(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(77) } })))), "ok");
-  assert.deepEqual(engine.seen.slice(2).map((x) => x.host.split(".")[0]), ["amsterdam"], "the next send starts one region further on");
+  // the next send starts one region further on, at the first region no send has used yet (its second comes first)
+  assert.deepEqual(engine.seen.slice(2).map((x) => x.host.split(".")[0]), ["frankfurt"], "the next send starts further on");
   assert.equal(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(78) } })))), "ok");
-  assert.deepEqual(engine.seen.slice(3).map((x) => x.host.split(".")[0]), ["dublin"]);
-  const rate = blockEngine((host) => (host.startsWith("mainnet.") ? "rate_error" : "ok"));
-  assert.equal(code(await mainnet({ engine: rate }).carry(body(tipped()))), "ok");
+  assert.deepEqual(engine.seen.slice(3).map((x) => x.host.split(".")[0]), ["london"]);
+  const rate = blockEngine((host) => (host.startsWith("amsterdam.") ? "rate_error" : "ok"));
+  assert.equal(code(await mainnet({ engine: rate, end: "filled" }).carry(body(tipped()))), "ok");
   assert.equal(rate.seen.length, 2, "a JSON-RPC rate-limit answer counts as busy too");
 });
 
 test("M362 (4): the plain send only when every region fails on transport; busy or refused everywhere sends nothing (503)", async () => {
-  for (const fail of ["throw", "503"] as const) {
-    const engine = blockEngine(() => fail);
-    const paths: string[][] = [];
-    assert.equal(code(await mainnet({ engine, paths }).carry(body(tipped()))), "ok", fail);
-    assert.equal(engine.seen.length, 9);
-    assert.deepEqual(paths, [["rpc0", "rpc1"]], `${fail}: the plain send`);
+  const engine = blockEngine(() => "throw");
+  const paths: string[][] = [];
+  assert.equal(code(await mainnet({ engine, paths, end: "filled" }).carry(body(tipped()))), "ok");
+  assert.equal(engine.seen.length, 8);
+  assert.deepEqual(paths, [["rpc0", "rpc1"]], "the plain send");
+  // M369 (L1): a 5xx from every region is busy, not transport: 503 and nothing plain
+  for (const status of ["503"] as const) {
+    const e5 = blockEngine(() => status);
+    const p5: string[][] = [];
+    const a5 = await mainnet({ engine: e5, paths: p5, end: "filled" }).carry(body(tipped()));
+    assert.deepEqual([a5.status, code(a5)], [503, "upstream"], "a 5xx everywhere");
+    assert.equal(e5.seen.length, 8, "every region asked");
+    assert.deepEqual(p5, [], "nothing plain");
   }
   const mixed = blockEngine((host) => (host.startsWith("tokyo.") ? "429" : "throw"));
   const p1: string[][] = [];
@@ -405,7 +420,7 @@ test("M362 (4): the plain send only when every region fails on transport; busy o
   assert.equal(refused.seen.length, 1, "a refusal ends the try");
   assert.deepEqual(p2, []);
   // and a 503 frees the nullifier: the next carry tries again
-  const s = mainnet({ engine: blockEngine((_, n) => (n === 0 ? "rpc_error" : "ok")) });
+  const s = mainnet({ engine: blockEngine((_, n) => (n === 0 ? "rpc_error" : "ok")), end: "filled" });
   assert.equal(code(await s.carry(body(tipped()))), "upstream");
   assert.equal(code(await s.carry(body(tipped()))), "ok");
 });
@@ -427,11 +442,194 @@ test("R2-D1 rerun (M362 (4)): ten notes, sixty epochs on mainnet: bundle-only, s
   const top = (budget * 1_000_000n) / 1_400_000n;
   const notes = Array.from({ length: 10 }, (_, i) => tipped({ pre: [cuLimit(1_400_000), cuPrice(top)], r: { existingNullifierHash: f32(100 + i), deadlineMs: BigInt(NOW + 3_700_000) } }));
   for (let e = 0; e < 60; e++) {
-    for (const n of notes) assert.equal(code(await s.carry(body(n))), "ok");
+    for (const n of notes) assert.equal(code(await s.carry(body(n))), "not_landed", "never landed: no fill, so no signature (M369 (H1))");
     await new Promise((r) => setImmediate(r));
     now += POOL_EPOCH_MS;
   }
   assert.equal(paths.length, 600, "each carry sent (a send that never lands frees its note)");
   const plain = paths.filter((p) => !p.includes("jito")).length;
   assert.equal(plain, 0, "no plain send, so no paid failure: the fee payer's drain is 0");
+});
+
+// ------------------------------------------------------------------------------------------------ M369
+const deferred = () => {
+  let resolve!: (v: Awaited<Done>) => void;
+  const p = new Promise<Awaited<Done>>((r) => (resolve = r));
+  return { p, resolve };
+};
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const pending = async (p: Promise<unknown>, ms = 50) => (await Promise.race([p.then(() => "settled"), sleep(ms).then(() => "pending")])) === "pending";
+function base58decode64(s: string): Uint8Array {
+  let n = 0n;
+  for (const c of s) n = n * 58n + BigInt(B58.indexOf(c));
+  const out = new Uint8Array(64);
+  for (let i = 63; i >= 0; i--, n >>= 8n) out[i] = Number(n & 0xffn);
+  return out;
+}
+
+// The review's R3-H1 rebuilt the fully signed tag 3 from the caller's own bytes and the 200 answer's signature, and could
+// then send it plainly, outside the bundle, as a failure the fee payer pays. Inverted: no answer names that signature
+// while the bundle is undecided, and only a fill answers it.
+test("M369 (H1), R3-H1 inverted: no answer carries the fee payer's signature while the bundle is undecided; only a fill does", async () => {
+  for (const end of ["expired", "unknown", "failed", "no answer"] as const) {
+    const engine = blockEngine(() => "ok");
+    const d = deferred();
+    let sent: Sent | undefined;
+    const s = mainnet({ engine, done: (x) => ((sent = x), end === "no answer" ? d.p.then(() => Promise.reject(new Error("no answer"))) : d.p) });
+    const w = tipped();
+    const first = s.carry(body(w), "c");
+    await sleep(20);
+    assert.ok(sent, `${end}: sent bundle-only`);
+    const sig = sent!.sig;
+    assert.ok(await pending(first), `${end}: no answer before the send is decided`);
+    const repeat = s.carry(body(w), "c");
+    assert.ok(await pending(repeat), `${end}: a repeat waits for the same answer`);
+    d.resolve({ txs: [{ signature: sig, state: end === "no answer" ? "unknown" : end, sends: [] }] });
+    for (const a of [await first, await repeat]) {
+      assert.equal(code(a), "not_landed", end);
+      assert.equal(a.status, end === "failed" ? 422 : 503, end);
+      assert.ok(!JSON.stringify(a.body).includes(sig), `${end}: the answer never names the fee payer's signature`);
+    }
+    const again = await s.carry(body(w), "c");
+    if (end === "expired") {
+      assert.equal(engine.seen.length, 2, "expired: never landed, so the note is free and is sent again");
+    } else if (end === "failed") {
+      assert.equal(code(again), "failed_this_epoch");
+      assert.equal(engine.seen.length, 1);
+    } else {
+      assert.deepEqual([again.status, code(again)], [503, "not_landed"], `${end}: held to the deadline, unsent`);
+      assert.equal(engine.seen.length, 1);
+    }
+    assert.ok(!JSON.stringify(again.body).includes(sig));
+  }
+  // a fill: 200 with the signature, once decided, and it is the transaction the block engine took, now on chain
+  const engine = blockEngine(() => "ok");
+  const d = deferred();
+  let sent: Sent | undefined;
+  const s = mainnet({ engine, done: (x) => ((sent = x), d.p) });
+  const w = tipped({ pre: [cuLimit(1_400_000), cuPrice(166_175n)] });
+  const p = s.carry(body(w), "c");
+  await sleep(20);
+  assert.ok(await pending(p), "filled: no answer before the fill");
+  d.resolve({ txs: [{ signature: sent!.sig, state: "filled", sends: [] }] });
+  const a = await p;
+  assert.equal(code(a), "ok");
+  const sig = (a.body as { signature: string }).signature;
+  assert.equal(sig, sent!.sig);
+  const rebuilt = Uint8Array.from(w);
+  rebuilt.set(base58decode64(sig), 1);
+  assert.deepEqual(Buffer.from(rebuilt), Buffer.from(engine.seen[0]!.body.params[0], "base64"));
+  assert.ok(ed25519.verify(rebuilt.subarray(1, 65), rebuilt.subarray(129), ed25519.getPublicKey(FP.seed)));
+  // the plain send after every region failed on transport is decided the same way
+  const t = blockEngine(() => "throw");
+  const dt = deferred();
+  let st: Sent | undefined;
+  const plain = mainnet({ engine: t, done: (x) => ((st = x), dt.p) });
+  const q = plain.carry(body(tipped()), "c");
+  await sleep(20);
+  assert.ok(await pending(q), "plain fallback: no answer before the decision");
+  dt.resolve({ txs: [{ signature: st!.sig, state: "expired", sends: [] }] });
+  assert.ok(!JSON.stringify((await q).body).includes(st!.sig));
+});
+
+test("M369 (M1): a client has at most two mainnet tag 3 carries waiting for their fill; the third is refused unsent (in_flight)", async () => {
+  const engine = blockEngine(() => "ok");
+  const ds: { sig: string; d: ReturnType<typeof deferred> }[] = [];
+  const s = mainnet({ engine, done: (x) => { const d = deferred(); ds.push({ sig: x.sig, d }); return d.p; } });
+  const n = (i: number) => tipped({ r: { existingNullifierHash: f32(200 + i) } });
+  const fill = (k: number) => ds[k]!.d.resolve({ txs: [{ signature: ds[k]!.sig, state: "filled", sends: [] }] });
+  const a = s.carry(body(n(1)), "x");
+  const b = s.carry(body(n(2)), "x");
+  await sleep(20);
+  const c = await s.carry(body(n(3)), "x");
+  assert.deepEqual([c.status, code(c)], [429, "in_flight"]);
+  assert.equal(engine.seen.length, 2, "the third sent nothing");
+  assert.ok(await pending(s.carry(body(n(1)), "x")), "a repeat of a carry in flight is no new carry: it waits for the first answer");
+  const y = s.carry(body(n(4)), "y");
+  await sleep(20);
+  assert.equal(engine.seen.length, 3, "another client goes on");
+  fill(0);
+  assert.equal(code(await a), "ok");
+  const x5 = s.carry(body(n(5)), "x");
+  await sleep(20);
+  assert.equal(engine.seen.length, 4, "a fill frees the client's place");
+  fill(1);
+  fill(2);
+  fill(3);
+  for (const p of [b, y, x5]) assert.equal(code(await p), "ok");
+  // a mainnet tag 2 and a devnet carry answer at once, so the cap is not theirs
+  const t2 = mainnet({ engine: blockEngine(() => "ok"), end: "filled" });
+  for (let i = 0; i < 4; i++) assert.equal(code(await t2.carry(body(wire({ r: { existingNullifierHash: f32(220 + i) } })), "x")), "ok");
+});
+
+test("M369 (M1): a rebroadcast goes to the region that took the first send only, through its one shared pacer, and rejects when it is not sent (J14)", async () => {
+  let refuse = false;
+  const engine = blockEngine(() => (refuse ? "rpc_error" : "ok"));
+  let path: SolanaSendPath | undefined;
+  let b64 = "";
+  const s = mainnet({ engine, intervalMs: 50, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })) });
+  const a = await s.carry(body(tipped()));
+  assert.equal(code(a), "ok");
+  const sig = (a.body as { signature: string }).signature;
+  assert.equal(path!.name, "jito");
+  assert.equal(path!.paceKey, engine.seen[0]!.url, "the kit paces it per region, shared by every carry rebroadcasting there");
+  await assert.rejects(path!.send(b64), /block engine busy/, "the first send's second: not sent, and the kit's record says so");
+  assert.equal(engine.seen.length, 1);
+  await sleep(60);
+  assert.equal(await path!.send(b64), sig);
+  await sleep(60);
+  refuse = true;
+  await assert.rejects(path!.send(b64), /block engine refused/);
+  assert.equal(new Set(engine.seen.map((x) => x.url)).size, 1, "never another region");
+});
+
+// The review's capacity run, on the helper: the keyless limit is one request a second per region from the helper's
+// address, refused requests counted too. Sixteen carries from eight clients (two each, the most M1 lets them) wait for
+// a fill that never comes and rebroadcast once a second, as the kit would; an honest client's carry comes every 700 ms.
+// Real time, about 6 s.
+test("M369 (M1): sixteen carries rebroadcasting never keep an honest first send out of a region for over 1 s", async () => {
+  const times = new Map<string, number[]>();
+  let refused = 0;
+  const fetchFn: JitoFetch = async (url, init) => {
+    const host = new URL(url).host;
+    const now = performance.now();
+    const seen = (times.get(host) ?? []).filter((t) => now - t < 990);
+    seen.push(now);
+    times.set(host, seen);
+    if (seen.length > 1) return (refused++, new Response("", { status: 429 }));
+    const w = Buffer.from(JSON.parse(String(init.body)).params[0], "base64");
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: base58(w.subarray(1, 65)) }));
+  };
+  const honest = new Set<string>();
+  const loops: ReturnType<typeof setInterval>[] = [];
+  const s = mainnet({
+    engine: { fetchFn },
+    intervalMs: 1_000,
+    done: (x) => {
+      if (honest.has(Buffer.from(x.wire.subarray(65, 129)).toString("hex"))) return Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] });
+      const b64 = Buffer.from(x.wire).toString("base64");
+      loops.push(setInterval(() => void Promise.resolve().then(() => x.paths[0]!.send(b64)).catch(() => {}), 1_000));
+      return new Promise(() => {});
+    },
+  });
+  try {
+    for (let i = 0; i < 16; i++) void s.carry(body(tipped({ r: { existingNullifierHash: f32(1 + i) } })), `attacker${i % 8}`);
+    await sleep(1_200);
+    const ms: number[] = [];
+    const codes: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const w = tipped({ r: { existingNullifierHash: f32(150 + i) } });
+      honest.add(Buffer.from(w.subarray(65, 129)).toString("hex"));
+      const t0 = performance.now();
+      codes.push(code(await s.carry(body(w), "honest")));
+      ms.push(performance.now() - t0);
+      await sleep(700);
+    }
+    const sorted = [...ms].sort((x, y) => x - y);
+    console.log(`honest first sends with 16 carries rebroadcasting: ${codes.join(",")}; ms p50 ${Math.round(sorted[3]!)} max ${Math.round(sorted[6]!)}; 429s ${refused}`);
+    assert.deepEqual(codes, Array(7).fill("ok"));
+    assert.ok(sorted[6]! < 1_100, `the slowest honest first send took ${Math.round(sorted[6]!)} ms`);
+  } finally {
+    for (const l of loops) clearInterval(l);
+  }
 });

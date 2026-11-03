@@ -10,6 +10,7 @@ import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
 import { PARTS, releaseOf } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import type { BindSender } from "./bind/env.ts";
+import type { SolanaPoolSender } from "./pool/solana.ts";
 import { BIND_BODY_MAX, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
 import { FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
@@ -413,6 +414,25 @@ test("POST /v1/bind is not tied to the request: a client that closes at 1 s does
   }
 });
 
+// M369 (M1): the pool's per-client hold (two mainnet tag 3 carries in flight) needs the caller's address: the route
+// hands the pool clientOf(req), the last X-Forwarded-For hop Caddy writes, as the rate limit reads it.
+test("M369 (M1): POST /v1/pool/solana/send hands the pool the caller's address", async () => {
+  const seen: [unknown, string | undefined][] = [];
+  const POOL = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+  const pool = { carry: async (body: unknown, client?: string) => (seen.push([body, client]), { status: 200, body: { signature: "s" } }) } as unknown as SolanaPoolSender;
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new Map([[POOL, pool]]));
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  const to = (helper.address() as AddressInfo).port;
+  try {
+    const a = await call("POST", "/v1/pool/solana/send", { ...JSON_H, "x-forwarded-for": "198.51.100.1, 203.0.113.7" }, JSON.stringify({ pool: POOL, tx: "AA==" }), to);
+    assert.equal(a.status, 200);
+    assert.deepEqual(seen, [[{ pool: POOL, tx: "AA==" }, "203.0.113.7"]]);
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
 // M362 (3): the helper's own main, as the host runs it, with one devnet Solana pool whose two RPCs are local stubs.
 // A failed rent read takes down only that pool (503 upstream) and the rest answers; a configured fee that is not the
 // kit's for the rent read makes the process exit 2. Test keys only: sha256 of a label.
@@ -426,7 +446,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
   const seed = new Uint8Array(createHash("sha256").update("helper-pool-senders/server/FP").digest());
   const feePayer = base58(Uint8Array.from([...seed, ...ed25519.getPublicKey(seed)]));
   const program = base58(ed25519.getPublicKey(new Uint8Array(createHash("sha256").update("helper-pool-senders/server/PROGRAM").digest())));
-  const RENT = "2BMAAAAAAAAAAAAAAADwPzI="; // the Rent sysvar devnet and mainnet answer (5,080 a byte, factor 2): fee 1,300,000
+  const RENT = "2BMAAAAAAAAAAAAAAADwPzI="; // the Rent sysvar devnet and mainnet answer (5,080 a byte, factor 1.0): fee 1,300,000
   let up = false;
   const rpc = () =>
     createServer((req, res) => {

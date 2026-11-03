@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
 import { solanaDecodeTransaction, solanaPoolPriorityBudget } from "../../packages/kit/src/index.ts";
-import { b58decode, b58encode, judge, kitFee, plant, PLANTS, read, RENT_RPCS } from "./helper-pool-senders.mjs";
+import { b58decode, b58encode, judge, kitFee, MAINNET_PLANTS, plant, PLANTS, plantsFor, read, RENT_RPCS } from "./helper-pool-senders.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-pool-senders.answers.json"), "utf8"));
@@ -70,12 +70,22 @@ test("plant() builds what the helper's checks read: each plant gets its own code
   assert.equal(kit.budget, budget);
   const cfg = { program: f.program, pool: f.pool, feePayer: f.fee_payer, budget };
   const nowMs = 1_800_000_000_000;
+  // M369 (M2): every plant as a devnet helper (no Jito) and as a mainnet one (Jito on) checks it
+  for (const jito of [false, true]) {
+    const at = (wire) => {
+      const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee, budget, nowMs, jito });
+      return c.ok ? "ok" : c.code;
+    };
+    for (const [asked, code] of plantsFor(jito ? "mainnet" : "devnet")) assert.equal(at(asked === "fee_off" ? plant({ ...cfg, relayFee: fee + 100_000n, nowMs }) : plant({ ...cfg, relayFee: fee, kind: asked, nowMs })), code, `${asked}, Jito ${jito ? "on" : "off"}`);
+    assert.equal(at(plant({ ...cfg, relayFee: fee, nowMs })), "ok", `the good tag 2, Jito ${jito ? "on" : "off"}`);
+    assert.equal(at(plant({ ...cfg, relayFee: fee, kind: "tip_low", nowMs })), jito ? "tip_low" : "ok", "tip_low: refused only where a bundle is sent, so it is planted only on mainnet");
+  }
+  assert.deepEqual(plantsFor("mainnet"), [...PLANTS, ...MAINNET_PLANTS]);
+  assert.deepEqual(plantsFor("devnet"), PLANTS);
   const at = (wire) => {
     const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee, budget, nowMs });
     return c.ok ? "ok" : c.code;
   };
-  for (const [asked, code] of PLANTS) assert.equal(at(asked === "fee_off" ? plant({ ...cfg, relayFee: fee + 100_000n, nowMs }) : plant({ ...cfg, relayFee: fee, kind: asked, nowMs })), code, asked);
-  assert.equal(at(plant({ ...cfg, relayFee: fee, nowMs })), "ok");
   assert.equal(b58encode(b58decode(f.pool)), f.pool);
   // M362 (4): fee_below_cost's priority is exactly the budget plus one lamport, so a helper whose budget lost even the
   // page reserve (budget + 715) would carry it and fail the check; at the budget itself the helper carries it
@@ -109,4 +119,44 @@ test("read() asks the fee twice and plants two transactions for the pool (replay
   assert.deepEqual(asked, ["GET /v1/pool/fee", "GET /v1/pool/fee", ...RENT_RPCS[cluster].map((u) => `rent ${u}`), ...PLANTS.map(() => "POST /v1/pool/solana/send")]);
   assert.deepEqual(run.reads.map((x) => x.asked), ["fee", "fee", ...PLANTS.map(([a]) => a)]);
   assert.equal(run.rent.length, 2);
+});
+
+// M369 (M2): a mainnet helper, made from the good run (the same rent on mainnet's two RPCs, the cluster mainnet, and the
+// mainnet plant tip_low refused): PASS; without the tip_low read, or with it carried: FAIL. And read() plants it there.
+const mainnetRun = () => {
+  const g = A.good;
+  const urls = RENT_RPCS.mainnet;
+  return {
+    ...g,
+    rent: g.rent.map((x, i) => ({ ...x, url: urls[i] })),
+    reads: [
+      ...g.reads.map((x) => (x.asked === "fee" ? body(x, (b) => ({ ...b, cluster: "mainnet" })) : x)),
+      { ...g.reads.find((x) => x.asked === "inner_program"), asked: "tip_low", body: '{"error":{"code":"tip_low"}}' },
+    ],
+  };
+};
+test("M369 (M2): a mainnet helper refusing every plant and tip_low: PASS; tip_low missing or carried: FAIL", () => {
+  const m = mainnetRun();
+  const r = judge(m);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(judge({ ...m, reads: m.reads.filter((x) => x.asked !== "tip_low") }).ok, false);
+  assert.equal(judge(edit(m, "tip_low", (x) => ({ ...x, status: 200, body: '{"signature":"x"}' }))).ok, false);
+  // a mainnet answer for a plant other than its own code (the bug M369 (M2) found: tip_low for every tag 3): FAIL
+  assert.equal(judge(edit(m, "inner_program", (x) => ({ ...x, body: '{"error":{"code":"tip_low"}}' }))).ok, false);
+});
+
+test("M369 (M2): read() plants tip_low on a mainnet pool (replayed helper)", async () => {
+  const m = mainnetRun();
+  const asked = [];
+  const fetchFn = async (url, init) => {
+    const u = new URL(url);
+    const rent = m.rent.find((x) => x.url === url);
+    asked.push(rent ? "rent" : `${init.method ?? "GET"} ${u.pathname}`);
+    if (rent) return new Response(rent.body, { status: rent.status });
+    const r = u.pathname === "/v1/pool/fee" ? m.reads[0] : m.reads.find((x) => x.asked === "changed");
+    return new Response(r.body, { status: r.status, headers: r.headers });
+  };
+  const run = await read("http://h.invalid", m.pool, fetchFn);
+  assert.deepEqual(run.reads.map((x) => x.asked), ["fee", "fee", ...plantsFor("mainnet").map(([a]) => a)]);
+  assert.ok(run.reads.some((x) => x.asked === "tip_low"));
 });

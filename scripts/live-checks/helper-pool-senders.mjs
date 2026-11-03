@@ -12,21 +12,25 @@
 //     (solanaPoolPriorityBudget at the rent read below: 1,000,000 CU at budget + 1 micro-lamports a CU);
 //   - "no_cu_limit": the release with a compute unit price and no compute unit limit;
 //   - "inner_program": a tag 3 whose inner instruction invokes a program off the kit's list;
-//   - "deadline_near": the release with a deadline one second away (under now plus 90 s).
+//   - "deadline_near": the release with a deadline one second away (under now plus 90 s);
+//   - "tip_low", on a mainnet pool only: a tag 3 tipping one lamport under Jito's minimum (the kit's SOLANA_JITO_TIP_MIN).
+// Every tag 3 plant tips the minimum to a Jito tip account named statically, as a mainnet helper asks (M369 (M2)), so
+// each gets its own code from a mainnet helper as from a devnet one. A devnet helper asks no tip, so tip_low is planted
+// only where it is refused on the bytes.
 // Each is refused before any read or send (apps/helper/src/pool/solana.ts checks them on the bytes alone), so the check
 // never moves money. It also reads the Rent sysvar on two public RPCs of the fee answer's cluster (RENT_RPCS). It passes
 // only when:
 //   - the fee answers 200 with exactly the kit's 9 fields, the pool and program asked, a fee_payer address, a 60 s
 //     epoch with its start on the grid, and for both callers exactly the kit's solanaPoolFee for the rent both RPCs read
 //     (M362 (2): every device refuses any other fee, so a helper publishing another one breaks every release);
-//   - every planted transaction answers 422 with its own code (PLANTS);
+//   - every planted transaction answers 422 with its own code (plantsFor: PLANTS, and tip_low on mainnet);
 //   - every answer carries a full-sha X-Helper-Commit, and APP_HOST is echoed only to the read that sent it.
 //   node scripts/live-checks/helper-pool-senders.mjs --pool <address> [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
 
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
@@ -49,6 +53,10 @@ export const PLANTS = [
   ["inner_program", "inner_program"],
   ["deadline_near", "deadline_near"],
 ];
+/** The plants a mainnet pool gets on top (a devnet helper sends no bundle, so it asks no tip). */
+export const MAINNET_PLANTS = [["tip_low", "tip_low"]];
+/** Each planted transaction a pool of `cluster` must refuse, with its code. */
+export const plantsFor = (cluster) => (cluster === "mainnet" ? [...PLANTS, ...MAINNET_PLANTS] : PLANTS);
 const STEP = 100_000n;
 const SHA = /^[0-9a-f]{40}$/;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -107,7 +115,7 @@ export function judge(run) {
     values.push(b?.fee);
   }
   say(values.length === 2 && values[0] === values[1], `the same fee for both callers: ${show(values)}`);
-  for (const [asked, code] of PLANTS) {
+  for (const [asked, code] of plantsFor(cluster)) {
     const r = run.reads.find((x) => x.asked === asked);
     say(r?.status === 422 && json(r.body)?.error?.code === code, `planted ${asked}: POST /v1/pool/solana/send answers ${r?.status} ${r?.body?.slice(0, 100)} (want 422 ${code})`);
   }
@@ -170,17 +178,19 @@ const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
  * instruction names account 2), "fee_payer_account" (the fee payer as the spent mark too), "fee_below_cost" (a priority
  * fee of `budget` + 1 lamports: 1,000,000 CU at budget + 1 micro-lamports a CU), "no_cu_limit" (a compute unit price
  * and no limit), "inner_program" (tag 3, its inner instruction invokes a throwaway program), "deadline_near" (a
- * deadline 1 s away); "ok" plants none.
+ * deadline 1 s away), "tip_low" (tag 3 tipping SOLANA_JITO_TIP_MIN - 1); "ok" plants none. A tag 3 tips
+ * SOLANA_JITO_TIP_MIN to the first Jito tip account, a static key (M369 (M2)).
  */
 export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "ok", nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey }) {
   const wPub = createPublicKey(w).export({ format: "der", type: "spki" }).subarray(-32);
   const other = () => createPublicKey(generateKeyPairSync("ed25519").privateKey).export({ format: "der", type: "spki" }).subarray(-32);
-  const [mark, page, tip, root, label, foreign] = [other(), other(), other(), other(), other(), other()];
+  const [mark, page, root, label, foreign] = [other(), other(), other(), other(), other()];
+  const tip = b58decode(SOLANA_JITO_TIP_ACCOUNTS[0]);
   const system = Buffer.alloc(32);
-  // static keys: writable signers (0 fee payer, 1 W); writable (2 pool, 3 mark, 4 page, 5 tip); readonly (6 root,
+  // static keys: writable signers (0 fee payer, 1 W); writable (2 pool, 3 mark, 4 page, 5 a Jito tip account); readonly (6 root,
   // 7 label, 8 system, 9 program, 10 compute budget, 11 a throwaway program)
   const keys = [b58decode(feePayer), wPub, b58decode(pool), mark, page, tip, root, label, system, b58decode(program), b58decode(COMPUTE_BUDGET), foreign];
-  const tag3 = kind === "fee_payer_named" || kind === "inner_program";
+  const tag3 = kind === "fee_payer_named" || kind === "inner_program" || kind === "tip_low";
   const deadline = BigInt(nowMs) + (kind === "deadline_near" ? 1_000n : 270_000n);
   const fields = Buffer.concat([
     Buffer.alloc(31), Buffer.from([1]), // newCommitmentHash
@@ -196,7 +206,7 @@ export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "
   const transfer = Buffer.concat([u32(2), u64(1_000n)]);
   const innerAccounts = kind === "fee_payer_named" ? [2, 8] : [1, 8];
   const data = tag3
-    ? Buffer.concat([Buffer.from([3, 0]), Buffer.alloc(256, 7), fields, u64(0n), Buffer.from([1, 9, innerAccounts.length, ...innerAccounts, transfer.length, 0]), transfer])
+    ? Buffer.concat([Buffer.from([3, 0]), Buffer.alloc(256, 7), fields, u64(kind === "tip_low" ? SOLANA_JITO_TIP_MIN - 1n : SOLANA_JITO_TIP_MIN), Buffer.from([1, 9, innerAccounts.length, ...innerAccounts, transfer.length, 0]), transfer])
     : Buffer.concat([Buffer.from([2]), Buffer.alloc(256, 7), fields]);
   const ix = (programIndex, accs, d) => Buffer.from([programIndex, ...compact(accs.length), ...accs, ...compact(d.length), ...d]);
   if (kind === "fee_below_cost" && budget <= 0n) throw new Error("fee_below_cost needs the budget");
@@ -251,7 +261,7 @@ export async function read(base, pool, fetchFn = fetch) {
     const cfg = { program: f.program, pool, feePayer: f.fee_payer, budget: kit.budget };
     const post = (asked, wire) =>
       get(asked, true, `${base}/v1/pool/solana/send`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool, tx: wire.toString("base64") }) });
-    for (const [asked] of PLANTS) await post(asked, asked === "fee_off" ? plant({ ...cfg, relayFee: BigInt(f.fee) + STEP }) : plant({ ...cfg, relayFee: BigInt(f.fee), kind: asked }));
+    for (const [asked] of plantsFor(f.cluster)) await post(asked, asked === "fee_off" ? plant({ ...cfg, relayFee: BigInt(f.fee) + STEP }) : plant({ ...cfg, relayFee: BigInt(f.fee), kind: asked }));
   }
   return { pool, rent, reads };
 }

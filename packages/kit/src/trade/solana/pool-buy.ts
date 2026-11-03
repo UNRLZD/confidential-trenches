@@ -9,7 +9,8 @@
 // instructions W signed for with W's signer privilege only (never invoke_signed); the venue's program is an account, so
 // it loads from our lookup table. The helper carries only compute budget plus one pool tag 2 or tag 3 instruction
 // (card helper-pool-senders), so there is no other path. Measured in LiteSVM on mainnet copies 2026-11-02 22:50Z: pump
-// 977 B (1,010 with a tip, its account a static key, M362 (4)), 244k CU; PumpSwap 1,134 B (1,167), 294k CU.
+// 977 B (1,010 with a tip, its account a static key, M362 (4)), 244k CU; PumpSwap 1,134 B (1,167), 294k CU. On a
+// cashback coin the builder makes PumpSwap 1,168 B and 1,201 with a tip, the largest (M369; the size table test).
 //
 // The release (tag 2), as contracts/pool-solana/src/release.rs lays it out at f0d85a8:
 // - data, 387 bytes: tag 2 ‖ proof (256) ‖ newCommitmentHash (32) ‖ existingNullifierHash (32) ‖ withdrawnValue u64 ‖
@@ -47,6 +48,7 @@ import {
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_CU_PRICE_MAX,
   SOLANA_JITO_TIP_ACCOUNTS,
+  SOLANA_JITO_TIP_MIN,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
   SOLANA_SOL_MINT,
@@ -515,6 +517,8 @@ export type SolanaPoolBuyRequest = {
   readonly minOut: bigint; // token base units, the least the buy may give
   readonly tip: bigint; // lamports the pool pays a Jito tip account out of the chunk; 0 for none; at most the proof's tip cap
   readonly cuPrice: bigint; // micro-lamports per CU
+  // the pool's cluster: on mainnet the helper sends a tag 3 to Jito bundle-only, so it tips at least SOLANA_JITO_TIP_MIN
+  readonly cluster: "mainnet" | "devnet";
 };
 export type SolanaPoolBuyChain = {
   readonly blockhash: string; // the device's own read
@@ -616,6 +620,9 @@ function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: 
   if (req.wallet === req.feePayer || req.wallet === cfg.pool || req.feePayer === cfg.pool) throw new Error("W, the fee payer and the pool must differ");
   if (venue.mint !== req.token) throw new Error("the venue is not the token's");
   if (!isU64(req.tip) || req.tip > release.tipCap) throw new Error("the tip is over the proof's tip cap");
+  if (req.cluster !== "mainnet" && req.cluster !== "devnet") throw new Error("the cluster must be mainnet or devnet");
+  // M369 (L2): the helper refuses a mainnet tag 3 under Jito's minimum (tip_low), so the device never builds one
+  if (req.cluster === "mainnet" && req.tip < SOLANA_JITO_TIP_MIN) throw new Error(`a mainnet pool buy tips at least ${SOLANA_JITO_TIP_MIN} lamports (Jito's minimum for a bundle)`);
   if (!isU64(req.cuPrice) || req.cuPrice > SOLANA_CU_PRICE_MAX) throw new Error("the CU price is over its cap");
   const f = solanaPoolBuyFunds(release, venue, req, rent);
   if (f.problem) throw new Error(f.problem);

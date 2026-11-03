@@ -244,7 +244,7 @@ export function handler(
             const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
             const pool = typeof name === "string" ? pools.get(name) : undefined;
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
-            const a = await pool.carry(body);
+            const a = await pool.carry(body, clientOf(req));
             return { status: a.status, body: JSON.stringify(a.body) };
           })
           .then(reply)

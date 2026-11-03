@@ -33,7 +33,7 @@ test("the list equals the programs the builder's steps invoke, over both venues 
 
 test("every built tag 3's inner programs, read back by index, are on the list", async () => {
   for (const { name, venue, req } of await venues()) {
-    const t = solanaPoolBuyInstructions(cfg, release, venue, { ...req, tip: 0n }, 6, rent, null)[2]!;
+    const t = solanaPoolBuyInstructions(cfg, release, venue, { ...req, tip: 0n, cluster: "devnet" }, 6, rent, null)[2]!;
     assert.equal(t.accounts[2]!.key, FEE_PAYER);
     let at = 2 + 128 + 130 + 8;
     const count = t.data[at++]!;
