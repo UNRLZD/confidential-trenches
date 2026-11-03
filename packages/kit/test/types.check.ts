@@ -7,7 +7,7 @@ import type { OPEN_KINDS, ORDER_RECORD_FIELDS, ORDER_VARIANTS_MAX } from "../src
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
 
-// the params and results name exactly the seventeen kinds, and every open kind takes a return key
+// the params and results name exactly the twenty-one kinds, and every open kind takes a return key
 export type ParamsCoverKinds = Assert<Same<keyof SignpageParams, SignpageKind>>;
 export type ResultsCoverKinds = Assert<Same<keyof SignpageResults, SignpageKind>>;
 export type OpenKindsTakeReturnKey = Assert<SignpageParams[(typeof OPEN_KINDS)[number]] extends { return_key: ReturnKey } ? true : false>;

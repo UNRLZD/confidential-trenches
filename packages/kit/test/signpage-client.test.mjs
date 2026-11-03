@@ -1,5 +1,5 @@
 // The signing-page client's unit tests (APU-02, APU-03, app.md:1327-1328; the client half of AX-05, AX-06; BAR-09):
-// a fake window, document and iframe, Node's fake clock. Every kind of the seventeen has its fixture (a kind with no
+// a fake window, document and iframe, Node's fake clock. Every kind of the twenty-one has its fixture (a kind with no
 // fixture fails the suite, matching "a kind with no row is refused", W:894). Every dropped message is checked for "no
 // state change": the snapshot is the same object and the request it targets is still open.
 //   node --test test/signpage-client.test.mjs
@@ -455,8 +455,8 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// ------------------------------------------------------------------------------------------------ the seventeen kinds
-test("every kind of the seventeen has a fixture, and only the seventeen do", () => {
+// ---------------------------------------------------------------------------------------------- the twenty-one kinds
+test("every kind of the twenty-one has a fixture, and only the twenty-one do", () => {
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -501,7 +501,29 @@ for (const kind of SIGNPAGE_KINDS) {
   });
 }
 
-test("a kind not in the seventeen cannot be built", () => {
+test("the pool kinds (card signpage-pool-kinds): each builds from its own fields on a pool chain only; NEAR, another chain, a field it does not take, an amount that is not a decimal, a slippage over 10,000, a missing field and an address from the app cannot be built", () => {
+  const T = "0xF111111111111111111111111111111111111111";
+  for (const [kind, good] of [
+    ["pool.deposit", { chain: "solana", amount: "1.5" }],
+    ["pool.buy", { chain: "base", token: T, amount: "0.01", slippage_bps: 300 }],
+    ["pool.sell", { chain: "robinhood", token: T, amount: "2", slippage_bps: 0 }],
+    ["pool.withdraw", { return_key: "withdraw", chain: "solana" }],
+  ]) {
+    assert.deepEqual(C.signpageBuildRequest(kind, good, "id"), { ...good, v: 1, id: "id", type: kind }, kind);
+    const bad = [
+      { ...good, chain: "near" },
+      { ...good, chain: "ethereum" },
+      { ...good, extra: "x" },
+      ...(kind === "pool.withdraw"
+        ? [{ ...good, address: "0xattacker" }, { ...good, to: "0xattacker" }, { chain: "solana" }]
+        : [{ ...good, amount: "1e5" }, { ...good, amount: "-1" }, { ...good, amount: 5 }, { chain: good.chain }]),
+      ...(kind === "pool.buy" || kind === "pool.sell" ? [{ ...good, slippage_bps: 10_001 }, { ...good, slippage_bps: 1.5 }, { ...good, token: 7 }] : []),
+    ];
+    for (const b of bad) assert.throws(() => C.signpageBuildRequest(kind, b, "id"), TypeError, `${kind} ${JSON.stringify(b)}`);
+  }
+});
+
+test("a kind not in the twenty-one cannot be built", () => {
   for (const k of ["sign", "eth_sendTransaction", "ready", "", "__proto__"]) {
     assert.throws(() => C.signpageBuildRequest(k, {}, "id"), TypeError, k);
   }
@@ -834,6 +856,8 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
     "deposit.quote": 15_000, "deposit.confirm": 15_000, arm: 5_000, buy: 10_000, hop: 10_000, "orders.set": 15_000,
     "orders.cancel": 15_000, return: 15_000, "withdraw.open": 5_000, "signin.open": 5_000, "backup.open": 5_000,
     "export.open": 5_000, signout: 5_000, restore: null, state: 5_000, nav: 5_000, reload: 5_000,
+    // the pool kinds (card signpage-pool-kinds): a trade's time, the withdraw screen an open's
+    "pool.deposit": 10_000, "pool.buy": 10_000, "pool.sell": 10_000, "pool.withdraw": 5_000,
   });
 });
 
