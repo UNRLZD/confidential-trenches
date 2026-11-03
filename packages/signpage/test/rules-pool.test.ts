@@ -197,7 +197,7 @@ test("Solana deposit: the pinned pool's tag 1 from W of the request's amount and
   assert.throws(() => signSolana(SOL_SECRET, w.slice()), refusedAs("unchecked"));
   w[w.length - 1] ^= 1;
   assert.throws(() => signSolana(SOL_SECRET, w), refusedAs("unchecked"));
-  assert.deepEqual(drawPool(d), [["Chain", "Solana"], ["Amount", "2"], ["Fee cap", "0"], ["Pool", POOL]]);
+  assert.deepEqual(drawPool(d), [["Chain", "Solana"], ["Amount", "2"], ["Max fee", "0"], ["Pool", POOL]]);
 });
 
 test("Solana deposit: another program, pool, depositor, amount, precommitment, page, blockhash, an extra instruction or a kind is refused", () => {
@@ -245,7 +245,7 @@ test("Solana withdraw: the device's release to W through the pinned pool, then o
   const d = checkSolanaWithdraw(wdWire([cuLimit, relIx(), send()]), wdAsk, solCtx(), release, TO, SOL_READS);
   assert.deepEqual(d, { chain: "solana", op: "pool.withdraw", token: null, amount: release.withdrawnValue - release.relayFee, feeCap: release.relayFeeCap, pool: POOL, to: TO, decimals: 9, back: null });
   // the page shows where the money lands, under the withdraw form's own label
-  assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Amount", "To", "Fee cap", "Pool"]);
+  assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Amount", "To", "Max fee", "Pool"]);
   assert.deepEqual(drawPool(d)[2], ["To", TO]);
   assert.throws(() => checkSolanaWithdraw(wdWire([relIx()]), wdAsk, solCtx(), release, TO, SOL_READS), refusedAs("instructions"), "the send is the withdraw");
 });
@@ -317,11 +317,11 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   const RESERVE = 5_000n;
   const d = checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE);
   assert.deepEqual([d.op, d.token, d.amount, d.pool, d.to, d.back, d.decimals], ["pool.sell", venue.mint, amount, POOL, POOL, floor - RESERVE, 6]);
-  assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Token", "Amount", "To", "Amount", "Fee cap", "Pool"]);
+  assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Token", "Amount", "To", "To private balance", "Max fee", "Pool"]);
   assert.deepEqual(drawPool(d)[2], ["Amount", "5"]);
-  assert.deepEqual(drawPool(d)[4], ["Amount", String(Number(floor - RESERVE) / 1e9)]);
+  assert.deepEqual(drawPool(d)[4], ["To private balance", String(Number(floor - RESERVE) / 1e9)]);
   // an amount under 1 keeps its leading zeros: 5,000,000 lamports is 0.005 SOL
-  assert.deepEqual(drawPool({ ...d, back: 5_000_000n })[4], ["Amount", "0.005"]);
+  assert.deepEqual(drawPool({ ...d, back: 5_000_000n })[4], ["To private balance", "0.005"]);
   // the reserve is the device's own fee money for W, never more than its fixed cap: the cap passes, one lamport more is refused
   assert.equal(SOLANA_POOL_SELL_RESERVE_MAX, 2_810_000n);
   assert.ok(floor > SOLANA_POOL_SELL_RESERVE_MAX + 1n, "the fixture's min out is above the cap");

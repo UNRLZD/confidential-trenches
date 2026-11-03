@@ -41,7 +41,8 @@
 //   changed after, or a proof checked as one op signed as another is refused "unchecked").
 //
 // Every other op, chain or instruction is refused. Draws are what the page shows before the press: chain, token,
-// amount, fee cap and the pool, as the pins name it (drawPool; its words are drafts until the owner picks them).
+// amount, fee cap and the pool, as the pins name it (drawPool; its words are drafts until the owner picks them, but the
+// two picked 3 Nov 20:26Z: "To private balance" and "Max fee").
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -665,15 +666,16 @@ export function poolUnits(amount: bigint, decimals: number): string {
   return frac ? `${amount / base}.${frac}` : `${amount / base}`;
 }
 
-/** The page's lines for a checked payload, label then value, each amount in the decimals the check bound: drafts until
- *  the owner picks the words. A withdraw and a sell show where the money lands ("To", the withdraw form's label). */
+/** The page's lines for a checked payload, label then value, each amount in the decimals the check bound. A withdraw and
+ *  a sell show where the money lands ("To", the withdraw form's label). Picked by the owner (3 Nov 20:26Z): a sell's
+ *  second amount "To private balance" and "Max fee"; the other words are drafts until the owner picks them. */
 export function drawPool(d: PoolDraw): [string, string][] {
   const asset = POOL_ASSET_DECIMALS_OF[d.chain];
   const lines: [string, string][] = [["Chain", d.chain === "solana" ? "Solana" : d.chain === "base" ? "Base" : "Robinhood"]];
   if (d.token !== null) lines.push(["Token", d.token]);
   lines.push(["Amount", poolUnits(d.amount, d.decimals)]);
   if (d.op === "pool.withdraw" || d.op === "pool.sell") lines.push(["To", d.to]);
-  if (d.back !== null) lines.push(["Amount", poolUnits(d.back, asset)]);
-  lines.push(["Fee cap", poolUnits(d.feeCap, asset)], ["Pool", d.pool]);
+  if (d.back !== null) lines.push(["To private balance", poolUnits(d.back, asset)]); // owner 3 Nov 20:26Z
+  lines.push(["Max fee", poolUnits(d.feeCap, asset)], ["Pool", d.pool]); // "Max fee": owner 3 Nov 20:26Z; "Pool": draft
   return lines;
 }

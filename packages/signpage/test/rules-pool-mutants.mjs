@@ -141,7 +141,7 @@ export const MUTANTS = [
   ['if (!Number.isSafeInteger(venue.chainId) || venue.chainId <= 0) return refuse("chain");', "", EWD],
   // the draw: where the money lands, and what goes into the pool on a sell
   ['if (d.op === "pool.withdraw" || d.op === "pool.sell") lines.push(["To", d.to]);', "", WDOK],
-  ['if (d.back !== null) lines.push(["Amount", poolUnits(d.back, asset)]);', "", SELL],
+  ['if (d.back !== null) lines.push(["To private balance", poolUnits(d.back, asset)]);', "", SELL],
   ['const frac = (amount % base).toString().padStart(decimals, "0").replace(/0+$/, "");', 'const frac = (amount % base).toString().replace(/0+$/, "");', SELL],
 ];
 
