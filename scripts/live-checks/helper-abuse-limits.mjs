@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // Live check of card helper-abuse-limits: the helper throttles one client with a wait a browser can read, and the wait
-// it names is true, on two limits. With Origin APP_HOST on every request it sends, one request after another until the
-// first 429, two bursts:
-//   - pool: GET /v1/pool/fee for a pool no helper carries, at most BURST_MAX (the pool routes allow 30 a client in a
-//     10 s window, so 61 inside one 10 s span must meet one);
-//   - api: GET /v1/health, at most API_BURST_MAX (every route without its own limit allows 120 a client in a 10 s
-//     window: the 121st inside one window meets one, and 241 must meet one across a window's turn).
+// it names is true, on two limits. With Origin APP_HOST on every request it sends, in parallel batches of one window's
+// limit and one (all of a batch in flight at once, so the batch lands inside one window whatever the round trip: one
+// request after another at 250 ms a round trip is 40 a window and never meets the api's 120), until the first 429:
+//   - pool: GET /v1/pool/fee for a pool no helper carries, batches of POOL_BATCH, at most BURST_MAX (the pool routes
+//     allow 30 a client in a 10 s window: the 31st inside one window meets one);
+//   - api: GET /v1/health, batches of API_BATCH, at most API_BURST_MAX (every route without its own limit allows 120 a
+//     client in a 10 s window: the 121st inside one window meets one).
+// A second batch is sent only when the first met no 429 (a window turning while the first batch was in flight).
 // Each burst passes only when:
-//   - every answer before the 429 is neither a 429 nor a 5xx (the unknown pool's own 404, health's 200);
+//   - every answer that is not a 429 is not a 5xx (the unknown pool's own 404, health's 200);
 //   - the 429 has a Retry-After of whole seconds, 1 to 60; Access-Control-Allow-Origin exactly APP_HOST;
 //     Access-Control-Expose-Headers naming Retry-After (else a browser cannot read the wait); Vary: Origin; no
 //     Access-Control-Allow-Credentials; and a body that is exactly { error: { code: "rate_limited" } };
@@ -25,10 +27,14 @@ export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 /** A pool no helper carries (the system program's address): the route answers 404 after the limit, reading nothing. */
 export const PROBE = "/v1/pool/fee?pool=11111111111111111111111111111111";
-/** Two windows' worth and one: inside one 10 s span this many must meet a 429. */
+/** The pool routes' limit (POOL_RATE_MAX, 30 a window) and one: one batch in flight at once. */
+export const POOL_BATCH = 31;
+/** Two windows' worth and one: two batches, the second only when the first met no 429. */
 export const BURST_MAX = 61;
 /** The health route, under the limit every route without its own shares (API_RATE_MAX, 120 a window). */
 export const HEALTH = "/v1/health";
+/** API_RATE_MAX and one: one batch in flight at once. */
+export const API_BATCH = 121;
 /** Two windows' worth and one, as for the pool. */
 export const API_BURST_MAX = 241;
 
@@ -41,14 +47,19 @@ async function one(base, fetchFn, path) {
   return { status: r.status, headers, body: await r.text() };
 }
 
-/** One burst, its 429 and the read after its wait: { statuses, throttle, after }. */
-async function burst(base, fetchFn, sleep, path, max) {
+/** One burst in parallel batches, its first 429 and the read after its wait: { statuses, throttle, after }; statuses
+ *  in the order the requests were sent. */
+async function burst(base, fetchFn, sleep, path, max, batch) {
   const statuses = [];
   let throttle = null;
-  for (let i = 0; i < max && throttle === null; i++) {
-    const r = await one(base, fetchFn, path);
-    statuses.push(r.status);
-    if (r.status === 429) throttle = r;
+  for (let sent = 0; sent < max && throttle === null; ) {
+    const n = Math.min(batch, max - sent);
+    const got = await Promise.all(Array.from({ length: n }, () => one(base, fetchFn, path)));
+    sent += n;
+    for (const r of got) {
+      statuses.push(r.status);
+      if (r.status === 429 && throttle === null) throttle = r;
+    }
   }
   let after = null;
   const wait = Number(throttle?.headers["retry-after"]);
@@ -61,8 +72,8 @@ async function burst(base, fetchFn, sleep, path, max) {
 
 /** Both bursts: { base, pool, api }. */
 export async function read(base = BASE, fetchFn = fetch, sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))) {
-  const pool = await burst(base, fetchFn, sleep, PROBE, BURST_MAX);
-  const api = await burst(base, fetchFn, sleep, HEALTH, API_BURST_MAX);
+  const pool = await burst(base, fetchFn, sleep, PROBE, BURST_MAX, POOL_BATCH);
+  const api = await burst(base, fetchFn, sleep, HEALTH, API_BURST_MAX, API_BATCH);
   return { base, pool, api };
 }
 
@@ -77,8 +88,8 @@ export function judge({ pool, api }) {
 function judgeBurst(b, max, say) {
   if (b === undefined || b === null) return say(false, "not read");
   const { statuses, throttle, after } = b;
-  const before = throttle === null ? statuses : statuses.slice(0, -1);
-  say(before.every((s) => s !== 429 && s < 500), `before the first 429: ${before.length} answers, none 429 or 5xx (${[...new Set(before)].join(", ") || "none"})`);
+  const others = statuses.filter((s) => s !== 429);
+  say(others.every((s) => s < 500), `the answers that are not 429: ${others.length}, none 5xx (${[...new Set(others)].join(", ") || "none"})`);
   say(throttle !== null, `a 429 within ${max} requests (${statuses.length} sent)`);
   if (throttle !== null) {
     const h = throttle.headers;
