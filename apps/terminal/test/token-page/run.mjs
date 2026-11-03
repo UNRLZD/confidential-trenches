@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
+import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
@@ -144,6 +145,37 @@ try {
         check(bars === (s.curve ? 1 : 0), `${tag}: ${bars} curve bars`);
         const field = (await f.locator(`${box} [data-k="curve"] .tkp-val`).textContent())?.trim();
         check(s.curve ? /^\d+%$/.test(field ?? "") : field === "—", `${tag}: the curve field reads ${field}`);
+        // the origin badges: the fixture's pad (or none) bottom-right, its chain top-right, loaded, named, not cut
+        const drawnRow = await f.evaluate(async (box) => {
+          await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
+          const root = document.querySelector(box);
+          const av = root?.querySelector(".tok-avw");
+          if (!av) return null;
+          // cut: outside the nearest box that clips its content, or the viewport
+          let c = null;
+          for (let p = av.parentElement; p && !c; p = p.parentElement) if (getComputedStyle(p).overflow !== "visible") c = p.getBoundingClientRect();
+          c ??= { top: 0, left: 0, bottom: innerHeight, right: innerWidth };
+          const g = (sel, at) => {
+            const e = av.querySelector(sel);
+            if (!e) return null;
+            const i = e.querySelector("img");
+            const r = e.getBoundingClientRect();
+            return { id: e.getAttribute(at), title: e.getAttribute("title"), loaded: !!i && i.complete && i.naturalWidth > 0, out: r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5 || r.left < c.left - 0.5 || r.right > c.right + 0.5 || r.width < 9.5 };
+          };
+          const pad = g(".tok-pb", "data-pad");
+          const chain = g(".tok-cb", "data-chain");
+          const clipped = [pad?.out && "launchpad badge cut by its box", chain?.out && "chain badge cut by its box"].filter(Boolean);
+          const texts = [...root.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.getClientRects().length && !e.closest(".tok-av")).map((e) => e.textContent.trim()).filter(Boolean);
+          const strip = (b) => (b ? { id: b.id, title: b.title, loaded: b.loaded } : null);
+          return { pad: strip(pad), chain: strip(chain), texts, clipped };
+        }, box);
+        check(drawnRow !== null, `${tag}: no avatar with badges`);
+        if (drawnRow) {
+          // the launchpad and chain of the row the helper answered (live(): the route reads Solana only)
+          const row = live(s.top);
+          const faults = rowFaults({ ...drawnRow, served: { launchpad: row.launchpad, chain: row.chain } });
+          check(faults.length === 0, `${tag}: badges: ${faults.join("; ")}`);
+        }
         if (phone) {
           const g = await f.evaluate(() => {
             window.scrollTo(0, document.documentElement.scrollHeight);

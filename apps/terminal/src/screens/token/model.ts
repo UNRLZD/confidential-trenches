@@ -35,6 +35,7 @@ export interface TokenView {
   age: string;
   chg: { text: string; dir: Dir };
   launchpad: string | null;
+  chain: string;
   curve: Curve;
 }
 
@@ -52,6 +53,7 @@ export function tokenView(r: MarketRow, nowMs: number): TokenView {
     age: age(r.created_s, nowMs),
     chg: change24(r.chg_24h_bps),
     launchpad: r.launchpad ?? null,
+    chain: r.chain,
     curve: curve(r),
   };
 }
