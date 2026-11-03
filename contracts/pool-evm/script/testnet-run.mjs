@@ -201,7 +201,11 @@ export async function main(args, io = {}) {
     return { chain: "evm", network: chain, pool, fee_recipient: relayer, epoch_ms: Number(EVM_EPOCH_MS), epoch_start_ms: Number(epochStartMs), block: `0x${block.number.toString(16)}`, fee: fee.toString(), step: FEE_STEP.toString() };
   };
   const device = evmPool({ pin, rpcs, relayFee, epochFee });
-  const sync = evmTreeSync({ rpcs, pin });
+  // The device's one sync is evmPool's own (its trees and bind's depthAt share one cache); the relayer's is the
+  // relaySync above. A cold sync reads every block from the pool's deploy block: on sepolia.base.org, whose eth_getLogs
+  // takes 200 blocks a call (read 4 Nov 22:00Z), that is one call per ~156 blocks at ~0.36 s, ~12 min for the 305,000
+  // blocks since the deploy. Both are read while the run waits for its funding (warm, below), never between a release's
+  // epoch and its bind, where the deadline would pass.
   const prover = nodeProver();
 
   // every transaction signed, in order; the record lists those that landed
@@ -259,14 +263,16 @@ export async function main(args, io = {}) {
     const t = await blockTime(block);
     for (;;) {
       const now = await evmNow(rpcs);
-      if (now > t * 1000n) return { now, trees: await sync.trees(now) };
+      if (now > t * 1000n) return device.trees(now);
       await sleep(2000);
     }
   };
 
   /** One release of `withdrawn` from `note` to W_{evm, l, jOf(ref)}: a buy through `v`, or a withdraw (v null). */
   const release = async (note, withdrawn, v) => {
-    const { now, trees } = await treesAfter(note.block);
+    const trees = await treesAfter(note.block);
+    // the epoch from the pool's time after the trees: bind refuses a deadline within the send margin of now
+    const now = await evmNow(rpcs);
     const l = note.label, j = jOf(note.ref);
     const W = freshWallet(seed64, "evm", l, j);
     try {
@@ -378,11 +384,18 @@ export async function main(args, io = {}) {
   };
 
   let done = false, funded = false, restored = null;
+  // both syncs read the pool from its deploy block while the run waits for its funding (a pool with no leaf yet
+  // refuses trees after the read, which is kept)
+  const t0 = Date.now();
+  const warm = Promise.all([relaySync.events(), evmNow(rpcs).then((n) => device.trees(n)).catch((e) => (/no leaf before/.test(e.message) ? null : Promise.reject(e)))]);
+  warm.catch(() => {});
   try {
     console.log(`run: waiting for ${need} wei (${eth(need)}) at ${relayer} on ${chain}`);
     while ((go(), BigInt(await call("eth_getBalance", [relayer, "latest"]))) < need) await sleep(5000);
     funded = true;
     console.log("run: funded");
+    await warm;
+    console.log(`run: both syncs hold the pool from block ${fromBlock} (${Math.round((Date.now() - t0) / 1000)} s after the start)`);
 
     // 3. the deposit: the deposit note (deposit, scope, 0)
     const dref = { kind: "deposit", s: scope, i: 0 };
