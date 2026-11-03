@@ -10,14 +10,17 @@
 // restart.
 import type { IncomingMessage } from "node:http";
 import { isIPv6 } from "node:net";
+import { WINDOW_MS } from "../data/gecko.ts";
 import { resetMs } from "../proxy/proxy.ts";
 
 /** The window every limit counts in [design: 10 s, the pool routes' window since M356 (3)]. */
 export const LIMIT_WINDOW_MS = 10_000;
 /** The most clients one limit remembers in one window; past it the oldest goes [design: memory bound under a flood]. */
 export const LIMIT_CLIENTS = 50_000;
-/** The longest wait the helper ever names: an upstream's own reset is held to it [design: one minute, as before]. */
-export const RETRY_AFTER_MAX_S = 60;
+/** The longest wait the helper ever names, an upstream's own reset held to it: GeckoTerminal's WINDOW_MS (75 s), the
+ *  longest true wait one of the helper's own budgets can have, so a wait is never named shorter than it is (a shorter one
+ *  only has the app retry into a second 429). */
+export const RETRY_AFTER_MAX_S = WINDOW_MS / 1000;
 
 /** The client's address as the proxy forwarded it (the last X-Forwarded-For entry), else the socket's peer; an IPv6
  * address is keyed by its /64, the block one subscriber is given (RFC 6177), so one subscriber cannot rotate through

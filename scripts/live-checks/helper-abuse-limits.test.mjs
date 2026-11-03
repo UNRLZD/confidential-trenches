@@ -3,11 +3,13 @@
 // the same way, whose pool 429 wait a browser cannot read and whose health route is never limited: FAIL. Each other bad
 // answer plants one fault in one burst of the good one (pool: no Retry-After, upstream text in the body, no 429 in 61,
 // still 429 after the wait, a 503 in the burst; api: no 429 in 241, the wait not exposed, a 503, the burst missing): FAIL.
+// The good answer with its pool wait set to RETRY_AFTER_MAX_S (75, the longest true wait): PASS; to 76, 0 or 1000: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { RETRY_AFTER_MAX_S } from "../../apps/helper/src/limits/limits.ts";
 import { API_BATCH, API_BURST_MAX, BURST_MAX, HEALTH, judge, POOL_BATCH, PROBE, read } from "./helper-abuse-limits.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -112,4 +114,15 @@ test("recorded good_deployed (the deployed helper at 3bf53c0, about 250 ms a rou
   const r = replay(A.good_deployed);
   const v = judge(await read("https://api.confidential.unrealized.trade", r.fetchFn, r.sleep));
   assert.equal(v.ok, true, v.lines.join("\n"));
+});
+
+test("the Retry-After range: 1 to RETRY_AFTER_MAX_S (75, GeckoTerminal's window, the longest true wait) passes; 76, 0 and 1000 fail", () => {
+  const line = (wait) => {
+    const a = structuredClone(A.good);
+    a.pool.throttle.headers["retry-after"] = wait;
+    return judge(a).lines.find((l) => l.includes("pool: Retry-After") || l.includes(`Retry-After "${wait}"`) || l.includes(`Retry-After ${wait}`));
+  };
+  assert.equal(RETRY_AFTER_MAX_S, 75);
+  for (const w of ["1", "60", "75"]) assert.ok(line(w)?.startsWith("ok "), `${w}: ${line(w)}`);
+  for (const w of ["76", "0", "1000"]) assert.ok(line(w)?.startsWith("BAD"), `${w}: ${line(w)}`);
 });

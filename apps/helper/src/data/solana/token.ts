@@ -20,7 +20,7 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, dec, pumpCurveAddress, pumpCurveBps, toRow, type Row } from "./lists.ts";
-import { geckoBudget, type GeckoBudget } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -37,8 +37,9 @@ export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
 export const CANDLES_FRESH_MS = 60_000;
 export const POOL_FRESH_MS = 600_000;
-/** L-05: GeckoTerminal's public API, about 10 calls a minute; the server shares one budget with the EVM lists (../gecko.ts). */
-export const GT_PER_MIN = 10;
+/** L-05: GeckoTerminal's public API, as measured (../gecko.ts GT_LIMIT_PER_MIN); the server shares one budget with the
+ *  EVM lists, which yield to the token page. */
+export const GT_PER_MIN = GT_LIMIT_PER_MIN;
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. One search at most every
  *  JUP_GAP_MS: with the lists' 3 calls per 12 s that is at most 30 a minute, half the keyed free bucket (L-01: 1 RPS,
@@ -478,17 +479,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   });
 
   // GeckoTerminal: at most GT_PER_MIN calls a minute, shared by every token, in the "pages" lane of the server's one
-  // budget (../gecko.ts) when it passes one; a 429 pauses it. A refused call is a throttle naming the wait to the
-  // budget's next free call or the pause's end (card helper-abuse-limits)
-  const gt = deps.gecko ?? geckoBudget(now, {}, GT_PER_MIN);
+  // budget (../gecko.ts) when it passes one, where the lists yield to it; a 429 pauses it. A refused call is a throttle
+  // naming the wait to the budget's next free call or the pause's end (card helper-abuse-limits)
+  const gt = deps.gecko ?? geckoBudget(now, GT_PER_MIN);
   async function gecko(path: string): Promise<unknown> {
     if (!gt.take("pages")) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()));
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
-      const ra = Number(r.headers.get("retry-after"));
-      const until = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
-      gt.pause(until);
-      throw new Throttled(secondsUntil(until, now()));
+      throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()));
     }
     if (r.status === 404) return null;
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) throw new Upstream();

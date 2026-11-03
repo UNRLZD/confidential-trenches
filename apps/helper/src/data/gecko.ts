@@ -1,44 +1,77 @@
-// GeckoTerminal's keyless API allows 10 calls a minute per caller ("from 10 calls/min to 250 calls/min" on a paid
-// plan, apiguide.geckoterminal.com/faq, read 2026-11-03 11:27Z). The helper has one address, so every part that reads
-// GeckoTerminal (the Solana token page's candles, src/data/solana/token.ts, and the EVM lists, src/data/evm/lists.ts)
-// takes its calls from one budget: at most PER_MIN in any 60 s, split into lanes with fixed caps so one part can never
-// spend another's calls, and a 429 pauses every lane.
-export const GT_LIMIT_PER_MIN = 10;
+// GeckoTerminal's keyless API: the helper has one address, so every part that reads GeckoTerminal (the Solana token
+// page's candles, src/data/solana/token.ts, and the EVM lists, src/data/evm/lists.ts) takes its calls from one budget
+// of GT_LIMIT_PER_MIN in any 60 s. The token page goes first: the "lists" lane yields, taking a call only while
+// PAGE_RESERVE calls stay free for a page, and none while a page has called in the last YIELD_MS, unless its read is
+// urgent (never read, or about to go stale: src/data/evm/lists.ts LIST_URGENT_MS): the lists always keep LIST_FLOOR
+// calls of the minute for those, so pages opened back to back never leave Discover's lists empty or stale, and pages
+// always keep the other perMin - LIST_FLOOR. A 429 pauses
+// every lane, since GeckoTerminal answers our address, not a lane.
+//
+// The limit is measured, not the published one: GeckoTerminal's FAQ says 10 calls a minute (apiguide.geckoterminal.com/
+// faq, read 2026-11-03 11:27Z), but read from one address after 70 s with no call, on 2026-11-03 at 14:58:04Z, 14 calls
+// back to back answered 200 five times, then 429 (Retry-After "0") nine times, and still 429 30 s later; the deployed
+// helper budgeting 10 met GeckoTerminal's 429 within minutes (market-data-solana-token live, 14:47Z).
+//
+// The window is WINDOW_MS, longer than the minute: a local helper counting 60 s from each call's take met
+// GeckoTerminal's 429 twice in 8 minutes (2026-11-03 15:38:14Z with 3 calls in the 60 s before it and 6 in the 63 s,
+// 15:44:35Z with 4 and 7 in the 75 s), since GeckoTerminal counts from each call's arrival and over more than 60 s;
+// a 429 pauses every lane for a minute, so the margin costs less than the 429 it avoids.
+export const GT_LIMIT_PER_MIN = 5;
+/** The span GT_LIMIT_PER_MIN calls are counted over. */
+export const WINDOW_MS = 75_000;
+/** Calls a page may always find free: a token page's first open reads the token's top pool and one candles range. */
+export const PAGE_RESERVE = 2;
+/** A page call this recent makes the lists lane wait (unless its read is urgent). */
+export const YIELD_MS = 60_000;
+/** Calls in the minute the lists may always take for an urgent read (6 lists, each read within LIST_URGENT_MS). */
+export const LIST_FLOOR = 2;
 
 export type GeckoBudget = {
-  /** One call now in `lane`, or false when the lane's cap, the minute's total or a 429 pause says no. */
-  take(lane: string): boolean;
+  /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. */
+  take(lane: string, urgent?: boolean): boolean;
   /** A 429: no lane calls until `untilMs`. */
   pause(untilMs: number): void;
-  /** When `lane` can next take a call (now when it can now): the pause's end, or the minute's or the lane's oldest call
-   *  leaving the window; what a refused caller names as its wait. */
+  /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
+   *  the window; what a refused page names as its wait. */
   retryAt(lane: string): number;
 };
 
-/** A budget of at most `perMin` calls in any 60 s, with each lane held to its cap (a lane not named has `perMin`). */
-export function geckoBudget(now: () => number, caps: Readonly<Record<string, number>> = {}, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
+/** GeckoTerminal answered 429: pause every lane for its Retry-After (at most 300 s), or WINDOW_MS when it names none or
+ *  "0" (as it did at 14:58Z, still refusing 30 s later); returns the pause's end, the wait a page names. */
+export function throttledUntil(b: GeckoBudget, retryAfter: string | null, nowMs: number): number {
+  const ra = Number(retryAfter);
+  const until = nowMs + (retryAfter !== null && Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : WINDOW_MS);
+  b.pause(until);
+  return until;
+}
+
+/** A budget of at most `perMin` calls in any WINDOW_MS, the "lists" lane yielding to every other. */
+export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
   const calls: { at: number; lane: string }[] = [];
   let pausedUntil = 0;
+  const prune = (t: number) => {
+    while (calls.length > 0 && t - calls[0]!.at >= WINDOW_MS) calls.shift();
+  };
   return {
-    take(lane) {
+    take(lane, urgent = false) {
       const t = now();
-      while (calls.length > 0 && t - calls[0]!.at >= 60_000) calls.shift();
+      prune(t);
       if (t < pausedUntil || calls.length >= perMin) return false;
-      if (calls.filter((c) => c.lane === lane).length >= (caps[lane] ?? perMin)) return false;
+      if (lane === "lists") {
+        const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
+        if (!floor && (calls.length >= perMin - PAGE_RESERVE || calls.some((c) => c.lane !== "lists" && t - c.at < YIELD_MS))) return false;
+      }
       calls.push({ at: t, lane });
       return true;
     },
     pause(untilMs) {
       pausedUntil = Math.max(pausedUntil, untilMs);
     },
-    retryAt(lane) {
+    retryAt() {
       const t = now();
-      while (calls.length > 0 && t - calls[0]!.at >= 60_000) calls.shift();
-      const own = calls.filter((c) => c.lane === lane);
-      const cap = caps[lane] ?? perMin;
+      prune(t);
       let at = Math.max(t, pausedUntil);
-      if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + 60_000);
-      if (own.length >= cap) at = Math.max(at, own[own.length - cap]!.at + 60_000);
+      if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + WINDOW_MS);
       return at;
     },
   };

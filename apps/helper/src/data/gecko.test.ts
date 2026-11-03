@@ -1,51 +1,84 @@
-// node --test apps/helper/src/data/gecko.test.ts: GeckoTerminal's one budget: at most 10 calls in any 60 s across every
-// lane, each lane held to its cap, a 429 pausing every lane.
+// node --test apps/helper/src/data/gecko.test.ts: GeckoTerminal's one budget: at most GT_LIMIT_PER_MIN calls in any
+// 60 s across every lane; the lists lane yields to the token page (PAGE_RESERVE kept free, none while a page called in
+// the last YIELD_MS, except urgent reads within the lists' own LIST_FLOOR); a 429 pausing every lane.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { geckoBudget, GT_LIMIT_PER_MIN } from "./gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_RESERVE, throttledUntil, WINDOW_MS } from "./gecko.ts";
 
-test("the published keyless limit: 10 calls a minute", () => assert.equal(GT_LIMIT_PER_MIN, 10));
+test("the measured keyless limit: 5 calls a minute from one address (the published 10 met 429s)", () => assert.equal(GT_LIMIT_PER_MIN, 5));
 
-test("lanes share the minute's 10 calls and each keeps to its cap; the window slides", () => {
+test("pages may take the whole minute; the window slides", () => {
   let now = 0;
-  const b = geckoBudget(() => now, { lists: 3, pages: 7 });
-  for (let i = 0; i < 3; i++) assert.equal(b.take("lists"), true);
-  assert.equal(b.take("lists"), false, "the lists lane's cap");
-  for (let i = 0; i < 7; i++) assert.equal(b.take("pages"), true);
-  assert.equal(b.take("pages"), false, "the pages lane's cap and the minute's total");
-  now = 59_999;
-  assert.equal(b.take("lists"), false);
-  now = 60_000;
-  assert.equal(b.take("lists"), true, "a minute after, the first calls have left the window");
+  const b = geckoBudget(() => now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(b.take("pages"), true);
+  assert.equal(b.take("pages"), false, "the minute's total");
+  now = WINDOW_MS - 1;
+  assert.equal(b.take("pages"), false);
+  now = WINDOW_MS;
+  assert.equal(b.take("pages"), true, "WINDOW_MS after, the first calls have left the window");
 });
 
-test("with no caps a lane may take all 10; an 11th call is refused", () => {
-  const b = geckoBudget(() => 0);
-  for (let i = 0; i < 10; i++) assert.equal(b.take("pages"), true);
-  assert.equal(b.take("lists"), false);
+test("lists yield: they leave PAGE_RESERVE free and take nothing while a page called in the last YIELD_MS, except urgent reads within their own LIST_FLOOR", () => {
+  let now = 0;
+  const b = geckoBudget(() => now);
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE; i++) assert.equal(b.take("lists"), true);
+  assert.equal(b.take("lists"), false, "PAGE_RESERVE stays free");
+  now = 20_000;
+  for (let i = 0; i < PAGE_RESERVE; i++) assert.equal(b.take("pages"), true, "and a page finds it");
+  now = WINDOW_MS; // the lists' calls have left; the pages' (20 s later) are still in the window, and within YIELD_MS
+  assert.equal(b.take("lists"), false, "a page called within YIELD_MS: lists wait");
+  for (let i = 0; i < LIST_FLOOR; i++) assert.equal(b.take("lists", true), true, "an urgent list read goes, within the floor");
+  assert.equal(b.take("lists", true), false, "past the floor an urgent read yields too");
+  assert.equal(b.take("pages"), true, "the minute's last call is a page's");
+  assert.equal(b.take("pages"), false);
+  now = WINDOW_MS * 2;
+  assert.equal(b.take("lists"), true, "no page in the last YIELD_MS: lists go again");
 });
 
 test("a 429 pauses every lane until its time", () => {
   let now = 0;
-  const b = geckoBudget(() => now, { lists: 3, pages: 7 });
+  const b = geckoBudget(() => now);
   b.pause(30_000);
-  assert.equal(b.take("lists"), false);
+  assert.equal(b.take("lists", true), false);
   assert.equal(b.take("pages"), false);
   now = 30_000;
   assert.equal(b.take("pages"), true);
 });
 
-test("retryAt: now when a call can be taken; else the pause's end, or when the minute's or the lane's oldest call leaves the window", () => {
+test("retryAt: now when a page call can be taken; else the pause's end or when the minute's oldest call leaves the window", () => {
   let t = 1_000_000;
-  const b = geckoBudget(() => t, { lists: 2 }, 3);
-  assert.equal(b.retryAt("lists"), t);
-  b.take("lists");
-  t += 10_000;
-  b.take("lists");
-  assert.equal(b.retryAt("lists"), 1_000_000 + 60_000, "the lane's cap: its oldest call's minute");
+  const b = geckoBudget(() => t, 3);
+  assert.equal(b.retryAt("pages"), t);
   b.take("pages");
-  assert.equal(b.retryAt("pages"), 1_000_000 + 60_000, "the minute's total: the oldest call's minute");
+  t += 10_000;
+  b.take("pages");
+  b.take("pages");
+  assert.equal(b.retryAt("pages"), 1_000_000 + WINDOW_MS, "the window's oldest call");
   b.pause(t + 120_000);
-  assert.equal(b.retryAt("pages"), t + 120_000, "a pause past both");
+  assert.equal(b.retryAt("pages"), t + 120_000, "a pause past it");
 });
 
+test("the log's shape: 3 calls, 2 more 58 s later, then one at 63 s is refused here, where GeckoTerminal answered 429 (15:37:11Z, 15:38:09Z, 15:38:14Z: 3 calls in the 60 s before it)", () => {
+  let now = 0;
+  const b = geckoBudget(() => now);
+  for (let i = 0; i < 3; i++) assert.equal(b.take("lists", true) || b.take("pages"), true);
+  now = 58_000;
+  for (let i = 0; i < 2; i++) assert.equal(b.take("pages"), true);
+  now = 63_000;
+  assert.equal(b.take("pages"), false, "5 calls in the last 75 s: GeckoTerminal's 429, so not sent");
+  assert.equal(b.retryAt("pages"), WINDOW_MS, "the wait named is exact: when the first call leaves the window");
+  now = WINDOW_MS;
+  assert.equal(b.take("pages"), true);
+});
+
+test("GeckoTerminal's 429: its Retry-After when it names one (at most 300 s), else WINDOW_MS, for every lane", () => {
+  for (const [ra, ms] of [["30", 30_000], ["0", WINDOW_MS], [null, WINDOW_MS], ["soon", WINDOW_MS], ["9999", 300_000]] as const) {
+    let now = 1_000;
+    const b = geckoBudget(() => now);
+    assert.equal(throttledUntil(b, ra, now), 1_000 + ms, String(ra));
+    now = 1_000 + ms - 1;
+    assert.deepEqual([b.take("pages"), b.take("lists", true)], [false, false], String(ra));
+    now = 1_000 + ms;
+    assert.equal(b.take("pages"), true, String(ra));
+  }
+});
