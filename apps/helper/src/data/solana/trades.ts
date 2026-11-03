@@ -580,6 +580,8 @@ export function createSolanaTrades(deps: {
     async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       const mint = address(token);
       if (mint === null || !(TFS as readonly string[]).includes(tf) || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
+      // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
+      if (!entries.has(mint) && deps.history !== undefined && !(await deps.listed(mint))) return deps.history(mint, tf, to, limit);
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const own: Candle[] = e.book === null ? [] : e.book.candles(tf as Tf, to, limit);

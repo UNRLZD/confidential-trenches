@@ -64,6 +64,34 @@ test("recorded bad answer: the deployed helper before this card, 404 on all thre
   for (const k of Object.keys(READS)) assert.ok(bad(r).includes(`BAD GET ${READS[k](MINT)} answers 404`), bad(r).join("\n"));
 });
 
+test("candles from the helper's own bars: \"chain\" or \"chain,geckoterminal\", with own_from_s on one of its bars, PASS; another source or own_from_s off our bars FAILs", async () => {
+  const ours = (src, own) => edit("candles", (c) => {
+    c.src = src;
+    if (own) {
+      const as = c.as_of_ms;
+      delete c.as_of_ms;
+      c.own_from_s = c.candles.at(-1)[0];
+      c.as_of_ms = as;
+    }
+  }, { "x-helper-source": src });
+  for (const [src, own] of [["chain,geckoterminal", true], ["chain", true], ["chain,geckoterminal", false]]) {
+    const r = await run(ours(src, own));
+    assert.equal(r.ok, true, `${src} ${own}\n${bad(r).join("\n")}`);
+  }
+  const cases = [
+    [edit("candles", null, { "x-helper-source": "binance" }), 'BAD candles X-Helper-Source: "binance"'],
+    [edit("candles", (c) => (c.src = "chain,binance"), { "x-helper-source": "chain" }), "BAD candles: exactly the frozen fields in their wire forms: tf"],
+    [edit("candles", (c) => { const as = c.as_of_ms; delete c.as_of_ms; c.own_from_s = c.candles.at(-1)[0]; c.as_of_ms = as; }), "BAD candles: exactly the frozen fields in their wire forms: own_from_s"],
+    [edit("candles", (c) => { c.src = "chain"; const as = c.as_of_ms; delete c.as_of_ms; c.own_from_s = c.candles.at(-1)[0] + 1; c.as_of_ms = as; }, { "x-helper-source": "chain" }), "BAD candles: exactly the frozen fields in their wire forms: own_from_s"],
+  ];
+  for (const [rec, line] of cases) {
+    const r = await run(rec);
+    assert.equal(r.ok, false, line);
+    assert.equal(bad(r).length, 1, `${line}\n${bad(r).join("\n")}`);
+    assert.ok(bad(r)[0].startsWith(line), `${line}\n${bad(r)[0]}`);
+  }
+});
+
 test("made from the good answer: each fault FAILs on its own line", async () => {
   const cases = [
     [edit("token", (p) => delete p.risk.tax), "BAD token: exactly the frozen fields in their wire forms: risk keys"],

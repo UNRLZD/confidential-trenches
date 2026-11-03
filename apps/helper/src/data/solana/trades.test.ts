@@ -233,3 +233,25 @@ test("a PumpSwap trade counts for the pool's base mint only, the pool read once 
   assert.deepEqual(JSON.parse((await t.trades(OTHER, 50)).body).trades, []);
   assert.deepEqual(reads, ["MywAbX7A1q79NAaBdSqdsk2Ari1dCBgFmdCR6PFBp1j"]);
 });
+
+test("candles of a mint the lists do not hold are the history source's own answer, as before the stream (no 404)", async () => {
+  const OTHER = "So11111111111111111111111111111111111111112";
+  const asked: [string, string, number | null, number][] = [];
+  const hist = { status: 200, body: JSON.stringify({ tf: "1h", candles: [[TS - (TS % 3600), "1", "1", "1", "1", "5"]], src: "geckoterminal", as_of_ms: TS * 1000 }), src: "geckoterminal", asOfMs: TS * 1000 };
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async (m, tf, to, limit) => (asked.push([m, tf, to, limit]), hist),
+    tickMs: 0,
+  });
+  const a = await t.candles(OTHER, "1h", null, 24);
+  assert.equal(a.status, 200);
+  assert.equal(a.src, "geckoterminal");
+  assert.equal(a.body, hist.body);
+  assert.deepEqual(asked, [[OTHER, "1h", null, 24]]);
+  // its trade tape is still ours only: not listed, not read
+  assert.equal((await t.trades(OTHER, 50)).status, 404);
+});
