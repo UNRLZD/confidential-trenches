@@ -10,8 +10,9 @@
 //   has run out of a pool's liquidity, which both quoters report as if the fill were complete (partial_fill; read
 //   2026-11-03 on Base: V4Quoter quoted 1e27 wei of ETH into the ETH/USDC 0.05% pool as 284,167 USDC);
 // - the standard pools for the pair, the device's own choice: v3 WETH to the token at each standard fee tier and v4
-//   native to the token at each standard fee and tick spacing with no hook. The best one that fills completely is the
-//   reference R, and a route quoted below it is refused (below_reference, M366 (4)): a helper cannot steer a buy into a
+//   native to the token at each standard fee and tick spacing with no hook; and for a two-hop route through a listed
+//   middle token, every standard pool of each leg on the route's venue (16 two-hop routes). The best one that fills
+//   completely is the reference R, and a route quoted below it is refused (below_reference, M366 (4)): a helper cannot steer a buy into a
 //   pool it seeded or a hook that keeps the difference;
 // - for a route with a hooked v4 hop, the same route with each hook's code replaced by a hook that does nothing
 //   (eth_call's state override): the hookless output H. The hook's take H - Q is shown as a fee before the buy,
@@ -307,6 +308,25 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, rpcs: readonl
   const candidate = (r: EvmRoute) => candidates.push({ route: r, at: at(r, amountIn), twice: at(r, 2n * amountIn) });
   if (v.v3 !== undefined) for (const fee of V3_FEES) candidate(v3Direct(v.weth, token, fee));
   if (v.v4 !== undefined) for (const key of V4_KEYS) candidate(v4Direct(NATIVE, token, key));
+  // a two-hop route: its middle (a listed one, the builder's check) to the token, every standard leg pair
+  const middle = route.venue === "uniswap-v3" ? (route.tokens.length === 3 ? route.tokens[1]! : null) : route.hops.length === 2 ? route.hops[0]!.currency : null;
+  if (middle !== null && route.venue === "uniswap-v3" && v.v3 !== undefined) {
+    for (const f1 of V3_FEES) for (const f2 of V3_FEES) candidate({ venue: "uniswap-v3", tokens: [v.weth, middle, token], fees: [f1, f2] });
+  }
+  if (middle !== null && route.venue === "uniswap-v4" && v.v4 !== undefined) {
+    for (const k1 of V4_KEYS) {
+      for (const k2 of V4_KEYS) {
+        candidate({
+          venue: "uniswap-v4",
+          currencyIn: NATIVE,
+          hops: [
+            { currency: middle, fee: k1[0], tickSpacing: k1[1], hooks: NATIVE, hookData: "0x" },
+            { currency: token, fee: k2[0], tickSpacing: k2[1], hooks: NATIVE, hookData: "0x" },
+          ],
+        });
+      }
+    }
+  }
   const wethStart = !startsNative(route);
   const firstOut = route.venue === "uniswap-v3" ? route.tokens[1]! : route.hops[0]!.currency;
   const firstHop: { at: number; twice: number }[] = [];

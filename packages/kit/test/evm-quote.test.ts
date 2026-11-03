@@ -267,3 +267,30 @@ test("Q10 a quote too small for a minimum above 0 refuses", async () => {
   const one = both(read(0, (x) => withOut(x, 1n)), read(1, (x) => withOut(x, 2n)));
   await refused(quote("base-hook", one, one), "no_quote");
 });
+
+test("Q11 a two-hop route through the listed middle is held to every standard two-hop route and the direct pools", async () => {
+  // recorded: native to USDC to cbBTC through v4 quotes below the v3 WETH/cbBTC 0.05% pool
+  assert.equal(F["base-two-hop"]!.outcome.code, "below_reference");
+  await refused(quote("base-two-hop"), "below_reference");
+  // a standard two-hop route (the first of the 16: v4 (100, 1) then (100, 1)) planted as the best, on both providers
+  const twoHop = both(read(18, () => withOut({ ok: true, data: W(0n) + W(0n) }, 10n ** 12n)), read(19, () => withOut({ ok: true, data: W(0n) + W(0n) }, 2n * 10n ** 12n)));
+  await assert.rejects(quote("base-two-hop", twoHop, twoHop), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference");
+    const r = e.reference?.route;
+    assert.ok(r?.venue === "uniswap-v4" && r.hops.length === 2 && r.hops[0]!.fee === 100 && r.hops[1]!.fee === 100, JSON.stringify(r));
+    return true;
+  });
+});
+
+test("Q12 a v3 two-hop route through the listed middle is held to every standard v3 two-hop route", async () => {
+  // recorded: WETH to USDC to cbBTC through v3 0.05% then 0.05%, held to 8 direct pools and 16 v3 two-hop routes
+  assert.equal(F["base-two-hop-v3"]!.outcome.code, "below_reference");
+  await refused(quote("base-two-hop-v3"), "below_reference");
+  const twoHop = both(read(18, () => withOut({ ok: true, data: W(0n) + W(0n) }, 10n ** 12n)), read(19, () => withOut({ ok: true, data: W(0n) + W(0n) }, 2n * 10n ** 12n)));
+  await assert.rejects(quote("base-two-hop-v3", twoHop, twoHop), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference");
+    const r = e.reference?.route;
+    assert.ok(r?.venue === "uniswap-v3" && r.tokens.length === 3 && r.fees[0] === 100 && r.fees[1] === 100, JSON.stringify(r));
+    return true;
+  });
+});

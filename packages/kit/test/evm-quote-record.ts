@@ -14,6 +14,7 @@ const PROVIDERS = {
 const ZERO = "0x0000000000000000000000000000000000000000";
 const BASE_WETH = "0x4200000000000000000000000000000000000006";
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const CBBTC = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"; // a v4 two-hop through USDC (contracts/pool-evm/test/BuyV4Fork.t.sol)
 const RH_WETH = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
 const USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
 // A Base token whose only pool found is a hooked native v4 pool (PoolManager Initialize log at block 53,4xx,xxx, read
@@ -29,6 +30,14 @@ const v4 = (currencyIn: string, currency: string, fee: number, tickSpacing: numb
   currencyIn,
   hops: [{ currency, fee, tickSpacing, hooks, hookData: "0x" }],
 });
+const v4two = (mid: string, f1: number, t1: number, to: string, f2: number, t2: number) => ({
+  venue: "uniswap-v4" as const,
+  currencyIn: ZERO,
+  hops: [
+    { currency: mid, fee: f1, tickSpacing: t1, hooks: ZERO, hookData: "0x" },
+    { currency: to, fee: f2, tickSpacing: t2, hooks: ZERO, hookData: "0x" },
+  ],
+});
 const v3 = (tokens: string[], fees: number[]) => ({ venue: "uniswap-v3" as const, tokens, fees });
 
 // [name, request, the outcome the recording must show]
@@ -36,6 +45,8 @@ export const CASES: [string, EvmPoolBuyQuoteRequest, string][] = [
   ["base-ok", { chain: "base", token: USDC, amountIn: 10n ** 16n, slippageBps: 100, route: v3([BASE_WETH, USDC], [100]) }, "ok"],
   ["base-below", { chain: "base", token: USDC, amountIn: 10n ** 16n, slippageBps: 100, route: v3([BASE_WETH, USDC], [10000]) }, "below_reference"],
   ["base-partial-v4", { chain: "base", token: THIN, amountIn: 10n ** 20n, slippageBps: 100, route: v4(ZERO, THIN, 3000, 60) }, "partial_fill"],
+  ["base-two-hop", { chain: "base", token: CBBTC, amountIn: 10n ** 16n, slippageBps: 100, route: v4two(USDC, 500, 10, CBBTC, 500, 10) }, "below_reference"],
+  ["base-two-hop-v3", { chain: "base", token: CBBTC, amountIn: 10n ** 16n, slippageBps: 100, route: v3([BASE_WETH, USDC, CBBTC], [500, 500]) }, "below_reference"],
   ["base-hook", { chain: "base", token: HOOKED_COIN, amountIn: 10n ** 15n, slippageBps: 300, route: v4(ZERO, HOOKED_COIN, 0, 60, HOOK) }, "ok"],
   ["robinhood-ok", { chain: "robinhood", token: USDG, amountIn: 10n ** 15n, slippageBps: 100, route: v4(ZERO, USDG, 100, 1) }, "ok"],
   ["robinhood-weth-v4", { chain: "robinhood", token: USDG, amountIn: 10n ** 15n, slippageBps: 100, route: v4(RH_WETH, USDG, 500, 10) }, "native_first"],
@@ -63,7 +74,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const speed = process.argv.indexOf("--speed");
   if (speed > 0) {
     const n = Number(process.argv[speed + 1] ?? 5);
-    for (const [name, req] of CASES.filter(([n]) => n === "base-ok" || n === "robinhood-ok" || n === "base-hook")) {
+    for (const [name, req] of CASES.filter(([n]) => n === "base-ok" || n === "robinhood-ok" || n === "base-hook" || n === "base-two-hop")) {
       const rpcs = PROVIDERS[req.chain as "base" | "robinhood"].map((u) => evmJsonRpc(u)) as unknown as [EvmRpc, EvmRpc];
       const ms: number[] = [];
       for (let i = 0; i < n; i++) {

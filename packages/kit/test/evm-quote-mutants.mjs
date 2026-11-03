@@ -42,6 +42,9 @@ export const MUTANTS = [
   [QUOTE, "if (reference !== null && q < reference.amountOut) {", "if (reference !== null && q <= reference.amountOut) {", AGREE],
   [QUOTE, "(m === null || c.amountOut > m.amountOut ? c : m)", "(m === null || c.amountOut < m.amountOut ? c : m)", BELOW],
   [QUOTE, "if (v.v4 !== undefined) for (const key of V4_KEYS) candidate(v4Direct(NATIVE, token, key));", "", BELOW],
+  [QUOTE, 'if (middle !== null && route.venue === "uniswap-v4" && v.v4 !== undefined) {', "if (false) {", "Q11 "],
+  [QUOTE, 'if (middle !== null && route.venue === "uniswap-v3" && v.v3 !== undefined) {', "if (false) {", "Q12 "],
+  [QUOTE, "const middle = route.venue === \"uniswap-v3\" ? (route.tokens.length === 3 ? route.tokens[1]! : null)", "const middle = route.venue === \"uniswap-v3\" ? (route.tokens.length === 4 ? route.tokens[1]! : null)", "Q12 "],
   // the hook's take, and minOut from the route the hook runs in
   [QUOTE, "const take = h === null ? null : h > q ? h - q : 0n;", "const take = h === null ? null : h - q;", HOOK],
   [QUOTE, "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / h)", "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / q)", HOOK],
