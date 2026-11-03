@@ -173,8 +173,9 @@ export function evmPoolBuild(chain: EvmPoolChain, adapter: string, route: EvmRou
   return { adapter, data: toHex(data), minOut, token };
 }
 
-const DOMAIN_TYPEHASH = keccak_256(new TextEncoder().encode("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
-const BUY_TYPEHASH = keccak_256(
+// Made on use, never at load: the kit's index reaches the signing page's bundle, which keeps any top-level call
+const DOMAIN_TYPEHASH = () => keccak_256(new TextEncoder().encode("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
+const BUY_TYPEHASH = () => keccak_256(
   new TextEncoder().encode("Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)"),
 );
 const FIELD_P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
@@ -193,11 +194,11 @@ export function evmPoolBuyDigest(chainId: number, pool: string, buy: EvmPoolBuy,
   if (proof.value === 0n) return refuse("bad_amount", "value is above 0");
   if (typeof buy.minOut !== "bigint" || buy.minOut <= 0n || buy.minOut >= 1n << 256n) return refuse("bad_amount", "minOut is a uint256 above 0");
   if (typeof buy.data !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(buy.data)) return refuse("bad_route", "data is 0x hex");
-  const domain = keccak_256(concat(DOMAIN_TYPEHASH, keccak_256(new TextEncoder().encode("Blindfill")), keccak_256(new TextEncoder().encode("1")), word(BigInt(chainId)), addressWord(pool)));
+  const domain = keccak_256(concat(DOMAIN_TYPEHASH(), keccak_256(new TextEncoder().encode("Blindfill")), keccak_256(new TextEncoder().encode("1")), word(BigInt(chainId)), addressWord(pool)));
   const data = new Uint8Array((buy.data.length - 2) / 2);
   for (let i = 0; i < data.length; i++) data[i] = parseInt(buy.data.slice(2 + 2 * i, 4 + 2 * i), 16);
   const struct = keccak_256(
-    concat(BUY_TYPEHASH, addressWord(buy.adapter), keccak_256(data), word(buy.minOut), addressWord(buy.token), word(proof.nullifier), word(proof.context), word(proof.value)),
+    concat(BUY_TYPEHASH(), addressWord(buy.adapter), keccak_256(data), word(buy.minOut), addressWord(buy.token), word(proof.nullifier), word(proof.context), word(proof.value)),
   );
   return keccak_256(concat(Uint8Array.of(0x19, 0x01), domain, struct));
 }
