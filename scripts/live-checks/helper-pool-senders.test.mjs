@@ -9,7 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
-import { solanaPoolPriorityBudget, solanaPoolReleaseCost } from "@blindfill/kit";
+import { solanaPoolPriorityBudget, solanaPoolReleaseCost } from "../../packages/kit/src/index.ts";
 import { b58decode, b58encode, COST_MIN, judge, plant, PLANTS, read } from "./helper-pool-senders.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
