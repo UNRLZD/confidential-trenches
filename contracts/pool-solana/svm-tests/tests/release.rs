@@ -1792,7 +1792,7 @@ const ANSWER_MAX_BYTES: usize = 1024 * 1024;
 /// Zero-filled accounts the stranger makes at each size.
 const STRANGER_PER_SIZE: usize = 5_000;
 
-fn b64(d: &[u8]) -> String {
+fn base64_of(d: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::new();
     for c in d.chunks(3) {
@@ -1820,7 +1820,7 @@ fn program_accounts(env: &Env, size: usize, offset: usize, bytes: &[u8]) -> (Vec
         }
         text.push_str(&format!(
             r#"{{"account":{{"data":["{}","base64"],"executable":false,"lamports":{},"owner":"{}","rentEpoch":18446744073709551615,"space":{}}},"pubkey":"{}"}}"#,
-            b64(d), a.lamports(), env.program, d.len(), k
+            base64_of(d), a.lamports(), env.program, d.len(), k
         ));
         rows.push((*k, d.to_vec()));
     }
