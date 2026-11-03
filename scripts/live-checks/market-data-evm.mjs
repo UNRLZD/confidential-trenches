@@ -9,13 +9,16 @@
 //     equals trending_1h;
 //   - every row holds exactly the terminal's ROW_FIELDS (apps/terminal/src/screens/discover/fields.ts) in their wire
 //     forms, chain <chain>, token a lowercase 0x address, launchpad null or one of the chain's table pads;
-//   - the maker, re-read on chain: for up to SAMPLE tagged rows and SAMPLE untagged rows (each list's first), the
+//   - `unsettled` (the tokens whose maker the helper has not read yet) is a list of listed tokens, each row of them
+//     untagged, and at most half the listed tokens;
+//   - the maker, re-read on chain: for up to SAMPLE tagged rows and SAMPLE untagged settled rows (each list's first), the
 //     table's creation events over the row's pool block, read here on the chain's providers (MAKER_RPCS: two that
 //     answer and agree), name the same pad as the row, or none for an untagged row. A row the read does not settle is
 //     said, not failed; a sample with tagged rows and none of them settled is a FAIL, since then nothing was re-read.
 //   node scripts/live-checks/market-data-evm.mjs [--base <url>] [--chain base] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read (the helper's answer and every RPC answer).
 import "../net-window.mjs";
+import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { ROW_FIELDS, ROW_REQUIRED } from "../../apps/terminal/src/screens/discover/fields.ts";
 import { FACTORIES, readMakers } from "../../apps/helper/src/data/evm/lists.ts";
@@ -59,10 +62,12 @@ export function rowFault(chain, r) {
 }
 
 /** The rows whose maker the check re-reads: up to SAMPLE tagged and SAMPLE untagged, each token once. */
-export function sample(lists) {
+/** Up to SAMPLE tagged rows and SAMPLE untagged rows whose maker the helper has read (not in `unsettled`). */
+export function sample(lists, unsettled = []) {
   const seen = new Set();
   const all = LISTS.flatMap((k) => (Array.isArray(lists[k]) ? lists[k] : [])).filter((r) => r && ADDR.test(r.token) && Number.isSafeInteger(r.created_s) && !seen.has(r.token) && seen.add(r.token));
-  return [...all.filter((r) => typeof r.launchpad === "string").slice(0, SAMPLE), ...all.filter((r) => r.launchpad === null).slice(0, SAMPLE)];
+  const open = new Set(Array.isArray(unsettled) ? unsettled : []);
+  return [...all.filter((r) => typeof r.launchpad === "string").slice(0, SAMPLE), ...all.filter((r) => r.launchpad === null && !open.has(r.token)).slice(0, SAMPLE)];
 }
 
 /** The check of one chain's read: { status, headers, body, readAt } and the makers re-read for its sample. */
@@ -100,7 +105,11 @@ export function judge(chain, r, makers) {
   say(Array.isArray(lists.new) && lists.new.length > 0, `new holds rows: ${lists.new?.length ?? 0}`);
   say(Array.isArray(lists.trending_1h) && lists.trending_1h.length > 0, `trending_1h holds rows: ${lists.trending_1h?.length ?? 0}`);
   say(Array.isArray(lists.trending) && JSON.stringify(lists.trending) === JSON.stringify(lists.trending_1h), "trending equals trending_1h");
-  const rows = sample(lists);
+  const listed = new Map(LISTS.flatMap((k) => (Array.isArray(lists[k]) ? lists[k] : [])).filter((r) => r && typeof r.token === "string").map((r) => [r.token, r]));
+  const open = s?.unsettled;
+  const openOk = Array.isArray(open) && open.every((t) => typeof t === "string" && listed.has(t) && listed.get(t).launchpad === null) && new Set(open).size === open.length;
+  say(openOk && open.length * 2 <= listed.size, `unsettled: ${Array.isArray(open) ? `${open.length} of ${listed.size} listed tokens, each listed and untagged, at most half` : show(open)}`);
+  const rows = sample(lists, openOk ? open : []);
   let tagged = 0;
   let taggedRead = 0;
   for (const row of rows) {
@@ -117,9 +126,44 @@ export function judge(chain, r, makers) {
   return { ok: lines.every((l) => !l.startsWith("BAD")), lines };
 }
 
+/** One RPC answer as recorded: only what readMakers reads of it for `token` (a block's number and time; of the logs,
+ *  those naming the token in a topic or data word, each its emitter, topics, data and removed flag; whether code is
+ *  there), so a re-record stays a few hundred KB, not MBs, in git history. */
+export function kept(request, answer, token) {
+  const word = typeof token === "string" ? token.toLowerCase().replace(/^0x/, "").padStart(64, "0") : null;
+  const names = (l) => word === null || (Array.isArray(l.topics) && l.topics.some((t) => String(t).toLowerCase() === `0x${word}`)) || (typeof l.data === "string" && (l.data.toLowerCase().slice(2).match(/.{64}/g) ?? []).includes(word));
+  const reqs = Array.isArray(request) ? request : [request];
+  const one = (a) => {
+    const q = reqs.find((x) => x?.id === a?.id);
+    if (a === null || typeof a !== "object" || !("result" in a) || q === undefined) return a;
+    const r = a.result;
+    if (q.method === "eth_getBlockByNumber" && r && typeof r === "object") return { ...a, result: { number: r.number, timestamp: r.timestamp } };
+    if (q.method === "eth_getLogs" && Array.isArray(r)) return { ...a, result: r.filter((l) => !(l && typeof l === "object") || names(l)).map((l) => (l && typeof l === "object" ? { address: l.address, topics: l.topics, data: l.data, ...(l.removed === undefined ? {} : { removed: l.removed }) } : l)) };
+    if (q.method === "eth_getCode" && typeof r === "string" && /^0x([0-9a-f]{2})*$/i.test(r)) return { ...a, result: r.slice(0, 4) };
+    return a;
+  };
+  return Array.isArray(answer) ? answer.map(one) : one(answer);
+}
+
+/** A record as JSON with one line a field and a line per RPC read, so a re-record diffs by read. */
+export const recordText = (o) =>
+  `{\n${Object.entries(o)
+    .map(([k, v]) => ` ${JSON.stringify(k)}: {\n${Object.entries(v).map(([kk, vv]) => (kk === "rpc" && Array.isArray(vv) ? `  "rpc": [${vv.map((r) => `\n   ${JSON.stringify(r)}`).join(",")}\n  ]` : `  ${JSON.stringify(kk)}: ${JSON.stringify(vv)}`)).join(",\n")}\n }`)
+    .join(",\n")}\n}\n`;
+
+/** One RPC request as recorded: a block read whole (a replay answers any read of that block from it), any other by the
+ *  sha256 of its body, which a replay matches the same request against. */
+export function keptRequest(body) {
+  const request = JSON.parse(body);
+  const reqs = Array.isArray(request) ? request : [request];
+  return reqs.every((q) => q?.method === "eth_getBlockByNumber") ? { request } : { request_sha256: createHash("sha256").update(body).digest("hex") };
+}
+
 /** The pad the helper's own maker read (readMakers: two providers that answer and agree) names for each sampled row,
- *  re-read now from here; a row is absent when it did not settle. `log` gets every RPC request and answer. */
+ *  re-read now from here; a row is absent when it did not settle. `log` gets every RPC request and what of its answer
+ *  the read uses (kept). */
 export async function rereadMakers(chain, rows, fetchFn = fetch, log = [], nowMs = Date.now()) {
+  let token;
   const logged = async (url, init) => {
     const r = await fetchFn(url, init);
     const text = await r.text();
@@ -129,12 +173,16 @@ export async function rereadMakers(chain, rows, fetchFn = fetch, log = [], nowMs
     } catch {
       answer = text.slice(0, 200);
     }
-    log.push({ url, request: JSON.parse(init.body), status: r.status, answer });
+    const request = JSON.parse(init.body);
+    log.push({ url, ...keptRequest(init.body), status: r.status, answer: kept(request, answer, token) });
     return new Response(text, { status: r.status, headers: { "content-type": "application/json" } });
   };
   // one row at a time, so each row's reads are its own whatever else the sample holds
   const out = new Map();
-  for (const r of rows) for (const [t, pad] of await readMakers(chain, logged, [{ token: r.token, createdS: r.created_s }], nowMs)) out.set(t, pad);
+  for (const r of rows) {
+    token = r.token;
+    for (const [t, pad] of await readMakers(chain, logged, [{ token: r.token, createdS: r.created_s }], nowMs)) out.set(t, pad);
+  }
   return out;
 }
 
@@ -151,14 +199,14 @@ export async function read(chain, base = BASE, fetchFn = fetch) {
 /** Read and judge one chain: the helper's answer, then the sample's makers on chain. */
 export async function check(chain, base = BASE, fetchFn = fetch, nowMs = Date.now()) {
   const answer = await read(chain, base, fetchFn);
-  let lists = {};
+  let body = {};
   try {
-    lists = JSON.parse(answer.body)?.lists ?? {};
+    body = JSON.parse(answer.body) ?? {};
   } catch {
-    lists = {};
+    body = {};
   }
   const rpc = [];
-  const makers = await rereadMakers(chain, sample(lists), fetchFn, rpc, nowMs);
+  const makers = await rereadMakers(chain, sample(body.lists ?? {}, body.unsettled), fetchFn, rpc, nowMs);
   return { answer, rpc, ...judge(chain, answer, makers) };
 }
 
@@ -184,7 +232,7 @@ if (import.meta.main) {
         console.log(`${chain}: speed: ${n} reads, p50 ${pct(ms, 50)} ms, p95 ${pct(ms, 95)} ms, max ${Math.max(...ms)} ms (first read ${r.answer.ms} ms)`);
       }
     }
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(record, null, 1)}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), recordText(record));
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${base})`);
     process.exit(ok ? 0 : 1);
   } catch (e) {

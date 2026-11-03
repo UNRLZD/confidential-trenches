@@ -82,7 +82,7 @@ test("upstreamBudget: hold(key) stops every caller's draw on that key until the 
   c.jump(500);
   assert.equal(b.take("solana", "x"), 0, "at the reset, draws go ahead");
   b.hold("solana", c.at() + 3_600_000);
-  assert.equal(b.heldFor("solana"), RETRY_AFTER_MAX_S, "a provider's hour is held to a minute");
+  assert.equal(b.heldFor("solana"), RETRY_AFTER_MAX_S, "a provider's hour is held to RETRY_AFTER_MAX_S");
   c.jump(RETRY_AFTER_MAX_S * 1000);
   assert.equal(b.heldFor("solana"), 0);
 });

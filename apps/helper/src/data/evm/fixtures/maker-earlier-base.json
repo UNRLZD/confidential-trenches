@@ -1,5 +1,6 @@
 {
  "recorded_at": "2026-11-03T12:11:32.853Z",
+ "paper_recorded_at": "2026-11-03T14:59:39.256Z",
  "note": "every RPC call the maker read made; eth_getCode results cut to their first byte (only whether code is there is read)",
  "cases": [
   {
@@ -22,6 +23,13 @@
    "created_s": 1711396783,
    "pad": null,
    "note": "Aerodrome's token: no launchpad"
+  },
+  {
+   "symbol": "Paper",
+   "address": "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+   "created_s": 1793716619,
+   "pad": "clanker",
+   "note": "a Clanker v4 token (made 2026-10-28, block 53193814, tx 0x201729188f18e2ed5bcd03982c1fbcbdc910d8c4c6f618c3527335a50fdb06a5) in GeckoTerminal's Base lists for its Aerodrome pool made 2026-11-03 14:36:59Z; the deployed helper served it untagged (market-data-evm live, 14:5xZ)"
   }
  ],
  "calls": [
@@ -2924,6 +2932,946 @@
      ],
      "fromBlock": "0x30d626",
      "toBlock": "0x30d626"
+    }
+   ],
+   "result": []
+  },
+  {
+   "url": "https://base-rpc.publicnode.com",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x777777751622c0d3258f214f9df38e35bf45baf3",
+      "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
+      "0x2a787b2362021cc3eea3c24c4748a6cd5b687382",
+      "0x375c15db32d28cecdcab5c03ab889bf15cbd2c5e",
+      "0x732560fa1d1a76350b1a500155ba978031b53833",
+      "0x9b84fce5dcd9a38d2d01d5d72373f6b6b067c3e1",
+      "0x250c9fb2b411b48273f69879007803790a6aea47",
+      "0x660eaaedebc968f8f3694354fa8ec0b4c5ba8d12",
+      "0x588c683ecc450f8b2aadb13d7f63792b840425dc",
+      "0xf66dea7b3e897cd44a5a231c61b6b4423d613259"
+     ],
+     "topics": [
+      [
+       "0x2de436107c2096e039c98bbcc3c5a2560583738ce15c234557eecb4d3221aa81",
+       "0x3d1462491f7fa8396808c230d95c3fa60fd09ef59506d0b9bd1cf072d2a03f56",
+       "0x74b670d628e152daa36ca95dda7cb0002d6ea7a37b55afe4593db7abd1515781",
+       "0xfb9e81c36dd4134d4eb5055e20d3238cb29a63daef0dd0f8b0f131da85891959",
+       "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67",
+       "0x6b04d68ca5c822b9c981d731c83ecb1356b96c8596c7659d397d234856a4537b",
+       "0x8df367d10c042c43a79f6842addf298c4b250b4cb2145cae311c9ba110ff8e17",
+       "0x0e9d60e5c5597233717659e7b39411e0a61e7177252521b9c6f515f75f6fef01",
+       "0xcd465acec733178787a0c3bc8cd8f6eae657c45b61c6a3e15d13c176c9c536ad",
+       "0x68ff1cfcdcf76864161555fc0de1878d8f83ec6949bf351df74d8a4a1a2679ab",
+       "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be94088bf5",
+       "0x714aa39317ad9a7a7a99db52b44490da5d068a0b2710fffb1a1282ad3cadae1f",
+       "0x381d54fa425631e6266af114239150fae1d5db67bb65b4fa9ecc65013107e07e"
+      ]
+     ],
+     "fromBlock": "0x32fca53",
+     "toBlock": "0x32fca54"
+    }
+   ],
+   "result": []
+  },
+  {
+   "url": "https://base-rpc.publicnode.com",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x71b8efc8bcad65a5d9386d07f2dff57ab4eaf533",
+      "0xc169a24010fd4d47ca7be4b4c7863b76520442a3"
+     ],
+     "topics": [
+      [
+       "0xf9d151d23a5253296eb20ab40959cf48828ea2732d337416716e302ed83ca658"
+      ]
+     ],
+     "fromBlock": "0x32fca53",
+     "toBlock": "0x32fca54"
+    }
+   ],
+   "result": []
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x777777751622c0d3258f214f9df38e35bf45baf3",
+      "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
+      "0x2a787b2362021cc3eea3c24c4748a6cd5b687382",
+      "0x375c15db32d28cecdcab5c03ab889bf15cbd2c5e",
+      "0x732560fa1d1a76350b1a500155ba978031b53833",
+      "0x9b84fce5dcd9a38d2d01d5d72373f6b6b067c3e1",
+      "0x250c9fb2b411b48273f69879007803790a6aea47",
+      "0x660eaaedebc968f8f3694354fa8ec0b4c5ba8d12",
+      "0x588c683ecc450f8b2aadb13d7f63792b840425dc",
+      "0xf66dea7b3e897cd44a5a231c61b6b4423d613259"
+     ],
+     "topics": [
+      [
+       "0x2de436107c2096e039c98bbcc3c5a2560583738ce15c234557eecb4d3221aa81",
+       "0x3d1462491f7fa8396808c230d95c3fa60fd09ef59506d0b9bd1cf072d2a03f56",
+       "0x74b670d628e152daa36ca95dda7cb0002d6ea7a37b55afe4593db7abd1515781",
+       "0xfb9e81c36dd4134d4eb5055e20d3238cb29a63daef0dd0f8b0f131da85891959",
+       "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67",
+       "0x6b04d68ca5c822b9c981d731c83ecb1356b96c8596c7659d397d234856a4537b",
+       "0x8df367d10c042c43a79f6842addf298c4b250b4cb2145cae311c9ba110ff8e17",
+       "0x0e9d60e5c5597233717659e7b39411e0a61e7177252521b9c6f515f75f6fef01",
+       "0xcd465acec733178787a0c3bc8cd8f6eae657c45b61c6a3e15d13c176c9c536ad",
+       "0x68ff1cfcdcf76864161555fc0de1878d8f83ec6949bf351df74d8a4a1a2679ab",
+       "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be94088bf5",
+       "0x714aa39317ad9a7a7a99db52b44490da5d068a0b2710fffb1a1282ad3cadae1f",
+       "0x381d54fa425631e6266af114239150fae1d5db67bb65b4fa9ecc65013107e07e"
+      ]
+     ],
+     "fromBlock": "0x32fca53",
+     "toBlock": "0x32fca54"
+    }
+   ],
+   "result": []
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x71b8efc8bcad65a5d9386d07f2dff57ab4eaf533",
+      "0xc169a24010fd4d47ca7be4b4c7863b76520442a3"
+     ],
+     "topics": [
+      [
+       "0xf9d151d23a5253296eb20ab40959cf48828ea2732d337416716e302ed83ca658"
+      ]
+     ],
+     "fromBlock": "0x32fca53",
+     "toBlock": "0x32fca54"
+    }
+   ],
+   "result": []
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32fca52"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32fca52"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x4a29aa"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x945354"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0xde7cff"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x128a6a9"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x172d053"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x1bcf9fe"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x20723a8"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x2514d52"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x29b76fd"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x2e5a0a7"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x2ec5e9f"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x2f31c97"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x2f9da8f"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x3009888"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x3075680"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x30e1478"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x314d270"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x31b9069"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x3224e61"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x3290c59"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x329a941"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32a4629"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32ae311"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32b7ff9"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32c1ce1"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32cb9c9"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32d56b1"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32df399"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32e9081"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32f2d69"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32b8e3c"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32b9c80"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32baac3"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bb907"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bc74b"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bd58e"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32be3d2"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bf216"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32c0059"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32c0e9d"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac0f"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bad5b"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32baea7"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32baff3"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bb13f"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bb28b"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bb3d7"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bb523"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bb66f"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bb7bb"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac2d"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac4b"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac69"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac87"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32baca5"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bacc4"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bace2"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bad00"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bad1e"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bad3c"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac4d"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac50"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac53"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac55"
+   ],
+   "result": "0x"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac58"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac5b"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac5e"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac60"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac63"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac66"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac56"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getCode",
+   "params": [
+    "0x2fd3f789fe25984295c8fa032be2485c5c7e4276",
+    "0x32bac57"
+   ],
+   "result": "0x60"
+  },
+  {
+   "url": "https://base-rpc.publicnode.com",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x777777751622c0d3258f214f9df38e35bf45baf3",
+      "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
+      "0x2a787b2362021cc3eea3c24c4748a6cd5b687382",
+      "0x375c15db32d28cecdcab5c03ab889bf15cbd2c5e",
+      "0x732560fa1d1a76350b1a500155ba978031b53833",
+      "0x9b84fce5dcd9a38d2d01d5d72373f6b6b067c3e1",
+      "0x250c9fb2b411b48273f69879007803790a6aea47",
+      "0x660eaaedebc968f8f3694354fa8ec0b4c5ba8d12",
+      "0x588c683ecc450f8b2aadb13d7f63792b840425dc",
+      "0xf66dea7b3e897cd44a5a231c61b6b4423d613259"
+     ],
+     "topics": [
+      [
+       "0x2de436107c2096e039c98bbcc3c5a2560583738ce15c234557eecb4d3221aa81",
+       "0x3d1462491f7fa8396808c230d95c3fa60fd09ef59506d0b9bd1cf072d2a03f56",
+       "0x74b670d628e152daa36ca95dda7cb0002d6ea7a37b55afe4593db7abd1515781",
+       "0xfb9e81c36dd4134d4eb5055e20d3238cb29a63daef0dd0f8b0f131da85891959",
+       "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67",
+       "0x6b04d68ca5c822b9c981d731c83ecb1356b96c8596c7659d397d234856a4537b",
+       "0x8df367d10c042c43a79f6842addf298c4b250b4cb2145cae311c9ba110ff8e17",
+       "0x0e9d60e5c5597233717659e7b39411e0a61e7177252521b9c6f515f75f6fef01",
+       "0xcd465acec733178787a0c3bc8cd8f6eae657c45b61c6a3e15d13c176c9c536ad",
+       "0x68ff1cfcdcf76864161555fc0de1878d8f83ec6949bf351df74d8a4a1a2679ab",
+       "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be94088bf5",
+       "0x714aa39317ad9a7a7a99db52b44490da5d068a0b2710fffb1a1282ad3cadae1f",
+       "0x381d54fa425631e6266af114239150fae1d5db67bb65b4fa9ecc65013107e07e"
+      ]
+     ],
+     "fromBlock": "0x32bac56",
+     "toBlock": "0x32bac56"
+    }
+   ],
+   "result": [
+    {
+     "address": "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
+     "topics": [
+      "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67",
+      "0x0000000000000000000000002fd3f789fe25984295c8fa032be2485c5c7e4276",
+      "0x000000000000000000000000a83b4fca82265ae81f6254c9e410a13418f25f92"
+     ],
+     "data": "0x000000000000000000000000a83b4fca82265ae81f6254c9e410a13418f25f9200000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000002e000000000000000000000000000000000000000000000000000000000000003c0fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8f8c8000000000000000000000000b429d62f8f3bffb98cdb9569533ea23bf0ba28cc85ad2839314cc6861ed38455569cb7ccc633a3f6b0fa5ae4f24ef7eb58f718950000000000000000000000004200000000000000000000000000000000000006000000000000000000000000ffa37784d619f228d8b379d287a4d7282e500762000000000000000000000000ebb25bb797d82cb78e1bc70406b13233c085441300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000006468747470733a2f2f636c616e6b6572776f726c642e6d7970696e6174612e636c6f75642f697066732f6261666b72656965357369786f786f656535613575646e716970777363713362757834613333706c7877333537716d7865376b7767686b776b627900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a50617065727472616465000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005506170657200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a17b226465736372697074696f6e223a227472616465207769746820757020746f203130303078206c6576657261676520616e64203020736c6970706167652c206f6e207468652066697273742066616972206c61756e636865642066756c6c79206f6e636861696e2070657270657475616c2065786368616e6765222c22736f6369616c4d6564696155726c73223a5b5d2c22617564697455726c73223a5b5d7d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001d7b22696e74657266616365223a22626173652d6465706c6f796572227d0000000000000000000000000000000000000000000000000000000000000000000000",
+     "blockHash": "0x5c79a7985df05fb08a7a040974922e57926cccf976730d7789df4befa33b6691",
+     "blockNumber": "0x32bac56",
+     "blockTimestamp": "0x6ae1b58f",
+     "transactionHash": "0x201729188f18e2ed5bcd03982c1fbcbdc910d8c4c6f618c3527335a50fdb06a5",
+     "transactionIndex": "0x83",
+     "logIndex": "0x1fe",
+     "removed": false
+    }
+   ]
+  },
+  {
+   "url": "https://base-rpc.publicnode.com",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x71b8efc8bcad65a5d9386d07f2dff57ab4eaf533",
+      "0xc169a24010fd4d47ca7be4b4c7863b76520442a3"
+     ],
+     "topics": [
+      [
+       "0xf9d151d23a5253296eb20ab40959cf48828ea2732d337416716e302ed83ca658"
+      ]
+     ],
+     "fromBlock": "0x32bac56",
+     "toBlock": "0x32bac56"
+    }
+   ],
+   "result": []
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x777777751622c0d3258f214f9df38e35bf45baf3",
+      "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
+      "0x2a787b2362021cc3eea3c24c4748a6cd5b687382",
+      "0x375c15db32d28cecdcab5c03ab889bf15cbd2c5e",
+      "0x732560fa1d1a76350b1a500155ba978031b53833",
+      "0x9b84fce5dcd9a38d2d01d5d72373f6b6b067c3e1",
+      "0x250c9fb2b411b48273f69879007803790a6aea47",
+      "0x660eaaedebc968f8f3694354fa8ec0b4c5ba8d12",
+      "0x588c683ecc450f8b2aadb13d7f63792b840425dc",
+      "0xf66dea7b3e897cd44a5a231c61b6b4423d613259"
+     ],
+     "topics": [
+      [
+       "0x2de436107c2096e039c98bbcc3c5a2560583738ce15c234557eecb4d3221aa81",
+       "0x3d1462491f7fa8396808c230d95c3fa60fd09ef59506d0b9bd1cf072d2a03f56",
+       "0x74b670d628e152daa36ca95dda7cb0002d6ea7a37b55afe4593db7abd1515781",
+       "0xfb9e81c36dd4134d4eb5055e20d3238cb29a63daef0dd0f8b0f131da85891959",
+       "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67",
+       "0x6b04d68ca5c822b9c981d731c83ecb1356b96c8596c7659d397d234856a4537b",
+       "0x8df367d10c042c43a79f6842addf298c4b250b4cb2145cae311c9ba110ff8e17",
+       "0x0e9d60e5c5597233717659e7b39411e0a61e7177252521b9c6f515f75f6fef01",
+       "0xcd465acec733178787a0c3bc8cd8f6eae657c45b61c6a3e15d13c176c9c536ad",
+       "0x68ff1cfcdcf76864161555fc0de1878d8f83ec6949bf351df74d8a4a1a2679ab",
+       "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be94088bf5",
+       "0x714aa39317ad9a7a7a99db52b44490da5d068a0b2710fffb1a1282ad3cadae1f",
+       "0x381d54fa425631e6266af114239150fae1d5db67bb65b4fa9ecc65013107e07e"
+      ]
+     ],
+     "fromBlock": "0x32bac56",
+     "toBlock": "0x32bac56"
+    }
+   ],
+   "result": [
+    {
+     "address": "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
+     "topics": [
+      "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67",
+      "0x0000000000000000000000002fd3f789fe25984295c8fa032be2485c5c7e4276",
+      "0x000000000000000000000000a83b4fca82265ae81f6254c9e410a13418f25f92"
+     ],
+     "data": "0x000000000000000000000000a83b4fca82265ae81f6254c9e410a13418f25f9200000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000002e000000000000000000000000000000000000000000000000000000000000003c0fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8f8c8000000000000000000000000b429d62f8f3bffb98cdb9569533ea23bf0ba28cc85ad2839314cc6861ed38455569cb7ccc633a3f6b0fa5ae4f24ef7eb58f718950000000000000000000000004200000000000000000000000000000000000006000000000000000000000000ffa37784d619f228d8b379d287a4d7282e500762000000000000000000000000ebb25bb797d82cb78e1bc70406b13233c085441300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000006468747470733a2f2f636c616e6b6572776f726c642e6d7970696e6174612e636c6f75642f697066732f6261666b72656965357369786f786f656535613575646e716970777363713362757834613333706c7877333537716d7865376b7767686b776b627900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a50617065727472616465000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005506170657200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a17b226465736372697074696f6e223a227472616465207769746820757020746f203130303078206c6576657261676520616e64203020736c6970706167652c206f6e207468652066697273742066616972206c61756e636865642066756c6c79206f6e636861696e2070657270657475616c2065786368616e6765222c22736f6369616c4d6564696155726c73223a5b5d2c22617564697455726c73223a5b5d7d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001d7b22696e74657266616365223a22626173652d6465706c6f796572227d0000000000000000000000000000000000000000000000000000000000000000000000",
+     "blockHash": "0x5c79a7985df05fb08a7a040974922e57926cccf976730d7789df4befa33b6691",
+     "blockNumber": "0x32bac56",
+     "blockTimestamp": "0x6ae1b58f",
+     "transactionHash": "0x201729188f18e2ed5bcd03982c1fbcbdc910d8c4c6f618c3527335a50fdb06a5",
+     "transactionIndex": "0x83",
+     "logIndex": "0x1fe",
+     "removed": false
+    }
+   ]
+  },
+  {
+   "url": "https://base-mainnet.public.blastapi.io",
+   "method": "eth_getLogs",
+   "params": [
+    {
+     "address": [
+      "0x71b8efc8bcad65a5d9386d07f2dff57ab4eaf533",
+      "0xc169a24010fd4d47ca7be4b4c7863b76520442a3"
+     ],
+     "topics": [
+      [
+       "0xf9d151d23a5253296eb20ab40959cf48828ea2732d337416716e302ed83ca658"
+      ]
+     ],
+     "fromBlock": "0x32bac56",
+     "toBlock": "0x32bac56"
     }
    ],
    "result": []
