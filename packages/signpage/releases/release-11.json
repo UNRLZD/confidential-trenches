@@ -1,7 +1,7 @@
 {
  "release": "release-11",
- "commit": "5129ef7a6a053effd575c1858db674de5df6b1ac",
- "tree": "c7c04e78bfe66f8720a08bfc07d4bd8e36cd464e",
+ "commit": "c7360dfdae4b62a372349f380e061e7ea450c6a2",
+ "tree": "9cd640c1265ead0f3d9754b7bacc2fdbb14e56a1",
  "hosts": {
   "SIGN_HOST": {
    "origin": "https://sign.confidential.unrealized.trade",
@@ -268,8 +268,8 @@
     {
      "path": "/",
      "bytes": 3919,
-     "sha256": "a7492fad470da6bce0d420b09339920c7fa972c51435c3635ae12ba42134d2f0",
-     "sha384": "sha384-QG+2atEy37t9HUutCPldhtIp8NoGjNnhsL3DCQEOXOQXuMLrX5uAnNxMusM5N8Y1",
+     "sha256": "79d55dd8ebb523da173f7e947eb12259340ab723ceec03580bc871f48412c55d",
+     "sha384": "sha384-ITWpYQgOOglsY4T3bKQPyzQMinxWubuhQOEaEQNr0DzlqIH8tu45JeJoSKK7kyH2",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
       "integrity-policy": "blocked-destinations=(script)",
@@ -506,10 +506,10 @@
      }
     },
     {
-     "path": "/assets/index-Clspvjlp.js",
-     "bytes": 455866,
-     "sha256": "f06922b2656099cb1d814989043e77c8524b89433f0aee9b35bbff2f5860e986",
-     "sha384": "sha384-zoadu4TKySd5vDDHRcNCnD6IfhwwWmEB/dxtlUdfhPu8wyLXAywrxWxFovxq+kK+",
+     "path": "/assets/index-D3qjIRFz.js",
+     "bytes": 456046,
+     "sha256": "1f0326b1db8fca184a842af61c396c8a0763ccbf352538f6ad49adb07ab4a82e",
+     "sha384": "sha384-3j7AAPycwrMsq96QERKa6CjfhMew7TWSouoOTbwbbRxndg0wKtT1b3aQ5cObH4fc",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
       "integrity-policy": "blocked-destinations=(script)",
@@ -734,6 +734,22 @@
      "bytes": 38984,
      "sha256": "662ee1e844198d5a25c9510ffa1d44ae97af66b486d52a2798030f9fdc5f8bee",
      "sha384": "sha384-c8ZeDrYYOWRmt/oeJX9F8GLP46uyVQ44ucAjJxdstX7FjkgDUHAKol4FPYxuMcVP",
+     "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+      "integrity-policy": "blocked-destinations=(script)",
+      "strict-transport-security": "max-age=63072000; includeSubDomains",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()"
+     }
+    },
+    {
+     "path": "/assets/torch-BQZ5SLLj.png",
+     "bytes": 2666,
+     "sha256": "6315480b4693fdaa795e6c5403e0f31bc440c8858530df37b51decab94985963",
+     "sha384": "sha384-l7xuzJT2PBcMtc3FKdaxJ8I/GqjNx8mFZrq+1xEOq5ggaYw45B34dOKtZtJzLFu1",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
       "integrity-policy": "blocked-destinations=(script)",
