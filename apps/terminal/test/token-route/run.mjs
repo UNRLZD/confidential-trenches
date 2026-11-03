@@ -202,12 +202,27 @@ try {
           const np = await popup;
           check(!!np, `${tag} ${how}-click: no new tab`);
           if (np) {
-            // Google Chrome opens a control or middle click as a background tab and throttles a hidden tab (CI run 41672680026:
-            // the tab sat at APP_HOST, its move to the shell never ran). A user who opens a tab looks at it, so the tab is
-            // brought to the front before its frame is judged; what it must show is unchanged.
-            await np.bringToFront();
+            // What a click opens: a new tab whose address is the row's own link. Chrome makes that tab itself, and Playwright
+            // cannot route the tab's first request (it is made before Playwright can attach to the tab), so the live APP_HOST
+            // answers it (CI run 41676339679: the tab sat at APP_HOST with the deployed build's page, whose script the
+            // local build's hash refuses, so the app never started and nothing moved to the shell). The tab's page is then
+            // loaded again at the address it opened at, now through the harness, exactly as the deep link below is.
+            await np.waitForURL(`${APP_HOST}/**`, { timeout: 8_000 }).catch(() => {});
+            const opened = np.url();
+            const seen = [];
+            np.on("request", (r) => seen.push(`req ${r.method()} ${r.url().slice(0, 120)}`));
+            np.on("response", (r) => seen.push(`res ${r.status()} ${r.url().slice(0, 120)}`));
+            np.on("console", (m) => m.type() === "error" && seen.push(`console error ${m.text().slice(0, 160)}`));
+            np.on("pageerror", (e) => seen.push(`pageerror ${String(e).slice(0, 160)}`));
+            check(opened === `${APP_HOST}/token/solana/${mint}`, `${tag} ${how}-click: the new tab opened at ${opened}, the row's link is /token/solana/${mint}`);
+            await np.bringToFront(); // a user who opens a tab looks at it
+            await np.goto(opened, { waitUntil: "load" });
             const nf = await appFrame(np);
             check(!!nf, `${tag} ${how}-click: the new tab has no terminal frame (top at ${np.url()})`);
+            if (!nf) {
+              const st = await np.evaluate(() => ({ vis: document.visibilityState, focus: document.hasFocus(), ready: document.readyState, root: document.getElementById("root")?.childElementCount ?? null })).catch((e) => String(e).slice(0, 80));
+              console.log(`DIAG ${tag} ${how}-click: new tab at ${np.url()}, ${JSON.stringify(st)}; ${seen.length} events:\n  ${seen.slice(0, 40).join("\n  ")}`);
+            }
             if (nf) {
               check(await settle(np, nf, "ready"), `${tag} ${how}-click: the new tab drew no token`);
               const t = await readToken(nf);
