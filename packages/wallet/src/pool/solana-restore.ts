@@ -1,16 +1,19 @@
 // Restore of the Solana pool's notes from the 12 words (card notes-per-pool-sol; ../notes/restore.ts is the NEAR
 // vault's, whose walk and follow rules this keeps).
 //
-// - No request names a note or a wallet of the user's. The program's marks are its only accounts of 12 and 16 bytes
+// - No request names a note or a wallet of the user's. The program's marks are its only accounts of 13 and 17 bytes
 //   (src/state.rs, M353, M355 (3), M376): a spent mark ["spent", nullifierHash] records the release's withdrawnValue
 //   u64 LE then the release's number u32 LE, and a precommitment mark ["pre", precommitment] its deposit, value u64 LE
-//   then the nonce u64 LE its label hashes.
+//   then the nonce u64 LE its label hashes; each ends with the program's tag byte (MARK_TAG, 1).
 //   Each mark's public counter sits at offset 8: a deposit's nonce (1..D, no gap) and a release's number (0..R-1, no
 //   gap). Each RPC reads each mark size in buckets of 256 consecutive counters (card sol-marks-scale, M376 (1)): a
-//   getProgramAccounts call (dataSize, withContext) with a memcmp on the counter's bytes past its low byte. A counter is
-//   one mark's on both RPCs (a second key for it is refused), so an answer holds at most 256 marks (about 63 KiB) at any
-//   pool size, far under the kit's 1 MiB answer cap. A record whose first 8 bytes are 0 is no mark the program wrote and
-//   is passed over: anyone can make a zeroed account of a mark's size that the program owns. Both RPCs read a size
+//   getProgramAccounts call (dataSize, withContext) with a memcmp from offset 9 on the counter's bytes past its low byte
+//   and then the tag (card pool-sol-mark-tag). A counter is one mark's on both RPCs (a second key for it is refused), so
+//   an answer holds at most 256 marks (about 63 KiB) at any pool size, far under the kit's 1 MiB answer cap. Anyone can
+//   make a zero-filled account of a mark's size that the program owns (the system program's CreateAccount or Assign
+//   takes any owner, and only the owner writes its data): its byte where the tag goes is 0, so it matches no bucket
+//   however many a stranger makes, and none can push an answer past the cap. A record an RPC gives anyway whose first 8
+//   bytes are 0 is passed over; any other record without the tag is refused. Both RPCs read a size
 //   together in waves of 1, 2, 4, then SOL_MARK_WAVE buckets, the never-closed rule run after every wave, until the last
 //   bucket of each one's wave is short; a short bucket at slot s says no counter past it exists at s. An RPC that has
 //   stopped while the other reads on reads its lowest bucket not full again, at or past the other's highest slot, so an
@@ -95,7 +98,10 @@ export type SolanaMarksRead = SolanaMarks & { calls: SolanaMarkCalls };
 
 /** The kit's one definition of the spent mark's length (src/state.rs SPENT_MARK_LEN). */
 export const SOL_SPENT_MARK_LEN = SOLANA_POOL_SPENT_MARK_LEN;
-export const SOL_PRE_MARK_LEN = 16;
+export const SOL_PRE_MARK_LEN = 17;
+/** Every mark's last byte, right after its counter (src/state.rs MARK_TAG): inside each bucket's memcmp, so a stranger's
+ * zero-filled account matches no bucket. */
+export const SOL_MARK_TAG = 1;
 /** Marks per getProgramAccounts call: one byte of the counter (M376 (1)). */
 export const SOL_MARK_BUCKET = 256;
 /** Bucket calls in flight on one RPC at most: the waves go 1, 2, 4, then this. */
@@ -158,12 +164,13 @@ export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program
     // a counter is one mark's, on both RPCs (review S3): a bucket holds 256 marks at most, and a made-up mark in a bucket
     // the other RPC answered full meets that counter's own mark
     const byCounter = new Map<bigint, string>();
-    // one bucket: the counters 256 b to 256 b + 255, the counter's bytes past its low byte equal to b
+    // one bucket: the counters 256 b to 256 b + 255, the counter's bytes past its low byte equal to b, then the tag
     const bucket = async (k: 0 | 1, b: number, min: number): Promise<SolanaMarkCall> => {
       const rpc = rpcs[k];
       const m = marks[k][z];
-      const high = new Uint8Array(width - 1);
-      for (let i = 0, v = b; i < high.length; i++, v = Math.floor(v / 256)) high[i] = v % 256;
+      const high = new Uint8Array(width);
+      for (let i = 0, v = b; i < width - 1; i++, v = Math.floor(v / 256)) high[i] = v % 256;
+      high[width - 1] = SOL_MARK_TAG;
       const filters = [{ dataSize: size }, { memcmp: { offset: COUNTER_AT + 1, bytes: base58.encode(high) } }];
       const a = (await solanaLagRetry(() => rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]), lagWait, stop.signal)) as { context?: { slot?: unknown }; value?: unknown };
       const slot = a?.context?.slot;
@@ -179,8 +186,11 @@ export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program
         // review S1: a record whose first 8 bytes are 0 is no mark the program wrote (a deposit's value is at least
         // MIN_DEPOSIT, contracts/pool-solana/src/deposit.rs:76; a release's withdrawn is never 0, release.rs:218). Anyone
         // can make a zeroed account of a mark's size that the program owns (the system program's CreateAccount or Assign
-        // takes any owner, and only the owner writes its data), so it is passed over before the counter and never counted.
+        // takes any owner, and only the owner writes its data); the tag in the memcmp keeps it out of every answer, and
+        // one an RPC gives anyway is passed over before the counter and never counted.
         if (bytes.subarray(0, 8).every((v) => v === 0)) continue;
+        // the RPC applies the filter: a record without the program's tag is no mark
+        if (bytes[size - 1] !== SOL_MARK_TAG) throw new Error(`rpc ${k}: mark ${x.pubkey}: not the program's tag`);
         const have = m.get(x.pubkey);
         if (have !== undefined && have !== d[0]) throw new Error(`rpc ${k}: mark ${x.pubkey}: two answers differ`);
         // the RPC applies the filter: a mark outside the bucket would speak for counters it was never asked about

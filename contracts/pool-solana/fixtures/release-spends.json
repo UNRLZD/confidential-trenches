@@ -21,42 +21,42 @@
       "precommitment": "10cadc33e28d47539961bb43588117773d411ab0ee431354f64d2d90375af3f2",
       "label": "0e035739b1143fd38f4f7486271d7d627a4b9208fba049f0c44ed23d9410b087",
       "commitment": "2872525c7e9bd014ced6a92d0d755d00e8902f5791cfa2aac7d4b2966e5e988c",
-      "mark": "002d3101000000000100000000000000"
+      "mark": "002d310100000000010000000000000001"
     },
     {
       "value": "50000000",
       "precommitment": "2caac5de0d53d6d04678c89a63bf2d4775ba673af2b78fd88e0dfd210940cb00",
       "label": "05ba62050faf904e5f501de1788482c264fc0c9495d723facc26f825a83e9f12",
       "commitment": "03372b44431c55e06ad930eefec307e8f0647b000d94e930c386fb3ae7bf608e",
-      "mark": "80f0fa02000000000200000000000000"
+      "mark": "80f0fa0200000000020000000000000001"
     },
     {
       "value": "100000000",
       "precommitment": "184444f56a849281bc097f43950125dfaa963ad0a6b8ac1adf17d4a5902b705a",
       "label": "151a8d8e7060d869df6d0cfa2b6f718df1e40a7966c84445ba00d999ceacc8bb",
       "commitment": "02c4750bc274e228d846e57d456dbc51f65bf81cf7948399753073d5f93fade6",
-      "mark": "00e1f505000000000300000000000000"
+      "mark": "00e1f50500000000030000000000000001"
     },
     {
       "value": "30000000",
       "precommitment": "2633e1887d5539896a57f27217b4fa491e601a174417c3eb3d76f4317c5cda61",
       "label": "09aa09a2d53b8fe74dc357ea3a58abc9c10dd6ca6b317695bbafc1ae00e9c602",
       "commitment": "15356a642add86944a3d1d4b777479cd6562423871237e04793938aac1cea4f2",
-      "mark": "80c3c901000000000400000000000000"
+      "mark": "80c3c90100000000040000000000000001"
     },
     {
       "value": "70000000",
       "precommitment": "0c8c36d292de23f15cb08c11768f0c86cf0cb918f01c0fc208be0ff3e7f12e3d",
       "label": "0e8906e51c076a52734f358e2d5e133b8be4907631f32235d9149588d64f16e7",
       "commitment": "2e1b75aa23c71ec0bd786ac4f31b58237cc87e5afccb9a5325173a96edd23125",
-      "mark": "801d2c04000000000500000000000000"
+      "mark": "801d2c0400000000050000000000000001"
     },
     {
       "value": "40000000",
       "precommitment": "01559bdfa0a3dcc37bdb1d832571c3bebfe3ada01bb9a795e84969bab04e1a7f",
       "label": "289fd322b0478dd8ccd7ab583183f8d693ae9d579788108b9a1391028987f1e7",
       "commitment": "2515595d7406f6aad1dedec62e3b43ccaef128d21ddf744847ac77e51bdc3867",
-      "mark": "005a6202000000000600000000000000"
+      "mark": "005a620200000000060000000000000001"
     }
   ],
   "state_roots": [
@@ -112,7 +112,7 @@
       "new_commitment": "015d3d043d018ceec3aa3a5caad6dc2760dbb07db28635d9a635540beeaf1e73",
       "nullifier_hash": "08cc779c72c66ce0f5028a7a1160ff287862db60b1ca09c88b42765850bec691",
       "withdrawn": "15000000",
-      "spent_mark": "c0e1e4000000000000000000",
+      "spent_mark": "c0e1e400000000000000000001",
       "state_root_index": 5,
       "state_depth": 3,
       "label_root_index": 5,
@@ -136,7 +136,7 @@
       "new_commitment": "2c9ad50d4e1e0c92e7314c72c3d0b904d6781d2ba69afe02b7b0c377a90d1ae4",
       "nullifier_hash": "17accb126716d501cb6a10238700ed50172701ad90edbb5fa54e5577071a4ba5",
       "withdrawn": "30000000",
-      "spent_mark": "80c3c9010000000001000000",
+      "spent_mark": "80c3c901000000000100000001",
       "state_root_index": 3,
       "state_depth": 2,
       "label_root_index": 3,
@@ -160,7 +160,7 @@
       "new_commitment": "1fb1dff3d2e09c096e5d6eea1743f2642296753572beebaaea9fdb212bb0360e",
       "nullifier_hash": "08cc779c72c66ce0f5028a7a1160ff287862db60b1ca09c88b42765850bec691",
       "withdrawn": "10000000",
-      "spent_mark": "809698000000000000000000",
+      "spent_mark": "80969800000000000000000001",
       "state_root_index": 5,
       "state_depth": 3,
       "label_root_index": 5,
@@ -184,7 +184,7 @@
       "new_commitment": "1d75f138aa654f55fc491a01ec8092b0c560282ad92c7f2cdc9361d18efb1f71",
       "nullifier_hash": "1710bf8c5e65412427a533dd9148e20698f8f53758030398b2e5b1362d1b8e81",
       "withdrawn": "10000000",
-      "spent_mark": "809698000000000000000000",
+      "spent_mark": "80969800000000000000000001",
       "state_root_index": 5,
       "state_depth": 3,
       "label_root_index": 5,
@@ -208,7 +208,7 @@
       "new_commitment": "2b03a894da36ca5c25c4c3532ad976588c554be6a6e9c1b4a553644aa1ac98c6",
       "nullifier_hash": "0b51a592534be201efbfc6f6b80b5d2d60c740bf52c9e8a4d028f41ea7ff20b0",
       "withdrawn": "25000000",
-      "spent_mark": "40787d010000000002000000",
+      "spent_mark": "40787d01000000000200000001",
       "state_root_index": 5,
       "state_depth": 3,
       "label_root_index": 5,
