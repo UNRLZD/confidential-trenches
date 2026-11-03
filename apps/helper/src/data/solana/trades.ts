@@ -18,9 +18,11 @@
 //
 // Gaps. A token's coverage is continuous from its first read: a cold read of its newest COLD_SIGS signatures (each
 // transaction read once), then the stream. When the stream drops (a close, an error, no message for SILENT_MS), every
-// token goes to `refilling`: after the stream is back and subscribed again, its signatures since the last one held
-// are walked (`until`, pages of SIG_PAGE, at most REFILL_MAX) and each transaction read; only then do the stream's
-// buffered trades join and the tape move again. A transaction is held once (by signature), whichever way it came.
+// token goes to `refilling` and keeps the last signature held before the drop: after the stream is back and subscribed
+// again, its signatures since that one are walked (`until`, pages of SIG_PAGE, at most REFILL_MAX) and each transaction
+// read. The stream's trades reach the tape at once all the while (the tape never waits on a request: the public RPC
+// takes seconds a call from a data centre); the gap's trades join in chain order as they are read, and nothing settles
+// until the walk is done. A transaction is held once (by signature), whichever way it came.
 //
 // Order and settling. A trade's place is (slot, the order it was first seen: the stream's order, or the signature
 // list's within a refill), its time the event's own clock. Events are folded into the book's aggregates only
@@ -246,7 +248,10 @@ type Entry = {
   /** The newest slot held with no gap before it. */
   covered: number;
   state: "cold" | "live" | "refilling";
-  buffered: Note[];
+  /** In `refilling`: the last signature held before the stream dropped (the gap's walk starts after it). */
+  gapFrom: string | null;
+  /** The gap's walk in flight, one per token. */
+  refilling: Promise<void> | null;
   /** Transactions being read (signature to slot). */
   inflight: Map<string, number>;
   touched: number;
@@ -262,6 +267,8 @@ export function createSolanaTrades(deps: {
   source?: (on: SourceEvents) => Source;
   /** Bars before our first, GeckoTerminal's (token.ts candles), or none. */
   history?: (mint: string, tf: string, to: number | null, limit: number) => Promise<DataAnswer>;
+  /** One line per stream drop and return (the host's log), so a deploy's tape can be read back. */
+  log?: (line: string) => void;
   tickMs?: number;
 }) {
   const now = deps.now ?? Date.now;
@@ -432,30 +439,26 @@ export function createSolanaTrades(deps: {
       );
     }
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
-    // a cold walk runs while the stream's trades already arrive: the newest signature held is then the stream's
-    if (sigs.length > 0 && (until !== null || e.lastSig === null)) e.lastSig = sigs[sigs.length - 1]!.signature;
+    // a walk runs while the stream's trades already arrive: the newest signature held is then the stream's
+    if (sigs.length > 0 && e.lastSig === until) e.lastSig = sigs[sigs.length - 1]!.signature;
   }
 
-  async function refill(e: Entry): Promise<void> {
-    try {
-      await walk(e, e.lastSig);
-      const notes = e.buffered;
-      e.buffered = [];
-      e.state = "live";
-      for (const n of notes) await onNote(e, n);
-      fold(e);
-    } catch {
-      setTimeout(() => void refill(e), 2_000).unref?.();
-    }
+  /** The gap's walk after a drop, one at a time per token, again every 2 s until it is read. */
+  function refill(e: Entry): void {
+    if (e.refilling !== null) return;
+    e.refilling = walk(e, e.gapFrom)
+      .then(() => {
+        e.state = "live";
+        e.gapFrom = null;
+        fold(e);
+      })
+      .catch(() => void setTimeout(() => entries.get(e.mint) === e && e.state === "refilling" && refill(e), 2_000).unref?.())
+      .finally(() => (e.refilling = null));
   }
 
   async function onNote(e: Entry, n: Note): Promise<void> {
-    // after a drop the stream's trades wait for the gap's walk; during a first (cold) walk they are held at once, the
-    // walk's being older, and nothing settles until the walk is done
-    if (e.state === "refilling") {
-      if (e.buffered.length < HELD_MAX) e.buffered.push(n);
-      return;
-    }
+    // the stream's trades are held at once in every state: during a walk (cold or a gap's) the walk's are older, and
+    // nothing settles until it is done
     e.lastSig = n.sig;
     if (n.err) {
       e.covered = Math.max(e.covered, n.slot);
@@ -477,10 +480,16 @@ export function createSolanaTrades(deps: {
       if (e !== undefined) void onNote(e, n).catch(() => undefined);
     },
     down() {
-      for (const e of entries.values()) e.state = "refilling"; // a cold walk's gap is walked again from its newest held
+      deps.log?.(`solana stream: down, ${entries.size} tokens to walk again`);
+      // a cold walk's gap is walked again from its newest held; a second drop keeps the first gap's start
+      for (const e of entries.values()) {
+        if (e.state !== "refilling") e.gapFrom = e.lastSig;
+        e.state = "refilling";
+      }
     },
     up() {
-      for (const e of entries.values()) if (e.state === "refilling") void refill(e);
+      deps.log?.(`solana stream: up, ${entries.size} tokens`);
+      for (const e of entries.values()) if (e.state === "refilling") refill(e);
     },
   });
 
@@ -517,7 +526,7 @@ export function createSolanaTrades(deps: {
     } catch {
       return UPSTREAM;
     }
-    const e: Entry = { mint, decimals, quoteMint: null, book: null, held: new Map(), refs: new Map(), lastSig: null, covered: 0, state: "cold", buffered: [], inflight: new Map(), touched: now(), readAt: null };
+    const e: Entry = { mint, decimals, quoteMint: null, book: null, held: new Map(), refs: new Map(), lastSig: null, covered: 0, state: "cold", gapFrom: null, refilling: null, inflight: new Map(), touched: now(), readAt: null };
     if (solUsd !== null) e.refs.set(0, solUsd.v); // the price in force for the cold read's trades
     entries.set(mint, e);
     try {
@@ -580,6 +589,8 @@ export function createSolanaTrades(deps: {
     async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       const mint = address(token);
       if (mint === null || !(TFS as readonly string[]).includes(tf) || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
+      // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
+      if (!entries.has(mint) && deps.history !== undefined && !(await deps.listed(mint))) return deps.history(mint, tf, to, limit);
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const own: Candle[] = e.book === null ? [] : e.book.candles(tf as Tf, to, limit);

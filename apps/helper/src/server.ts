@@ -518,6 +518,7 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     wsUrl: ws === undefined || ws === "" ? undefined : ws,
     rpcs: url === undefined || url === "" ? TRADES_RPCS : [url, ...TRADES_RPCS],
     history: (mint, tf, to, limit) => token.candles(mint, tf, to, limit),
+    log: (line) => console.log(`helper: ${line}`),
     listed: async (mint) => {
       const a = await lists.get();
       if (a.status !== 200 || a.asOfMs === undefined) return false;

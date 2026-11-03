@@ -356,3 +356,30 @@ test("a tick that outlasts the period is followed at once by the next, never a s
   const ticks = st.heads / 2; // each tick reads two providers' heads
   assert.ok(ticks >= 4, `${ticks} ticks in 1.5 s`);
 });
+
+test("a listed token whose pool our reads do not find answers 200 empty from our own reads (src chain), never 404; an unlisted one stays 404", async () => {
+  const chain = fakeChain();
+  const NOPOOL = `0x${"34".repeat(20)}`;
+  // the chain holds no transfer of the token in the window, so no address is a pool of it
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const calls = JSON.parse(String(init.body)) as { id: number; method: string; params: { address?: string }[] }[];
+    if (calls.every((c) => c.method === "eth_getLogs" && c.params[0]?.address === NOPOOL)) return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: [] }))), { status: 200 });
+    return chain.fetch(url, init);
+  };
+  const s = createSwaps("base", { fetch, now: () => 1_000_000, listed: async (t) => t === NOPOOL, rpcs: URLS, pools: new Map(), tickMs: 0 });
+  chain.st.head = REC.firstHead + 100;
+  const c = await s.candles(NOPOOL, "1m", null, 10);
+  const t = await s.trades(NOPOOL, 10);
+  // a second ask is served from the kept "no pool" the same way
+  const again = await s.trades(NOPOOL, 10);
+  const off = await s.candles(`0x${"56".repeat(20)}`, "1m", null, 10);
+  s.stop();
+  assert.equal(c.status, 200, c.body);
+  assert.deepEqual(JSON.parse(c.body), { tf: "1m", candles: [], src: "chain", as_of_ms: 1_000_000 });
+  assert.equal((c as { src?: string }).src, "chain");
+  assert.equal((c as { asOfMs?: number }).asOfMs, 1_000_000);
+  assert.equal(t.status, 200, t.body);
+  assert.deepEqual(JSON.parse(t.body), { trades: [], src: "chain", as_of_ms: 1_000_000 });
+  assert.equal(again.status, 200, again.body);
+  assert.equal(off.status, 404);
+});
