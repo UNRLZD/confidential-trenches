@@ -174,12 +174,14 @@ test("the websocket source: up only once every subscription is in force; a close
       return f;
     },
   });
-  const ack = (f: Fake, i: number, sub: number) => f.onmessage!({ data: JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(f.sent[i]!).id, result: sub }) });
+  const subs = (f: Fake) => f.sent.filter((x) => JSON.parse(x).method === "logsSubscribe");
+  const ack = (f: Fake, i: number, sub: number) => f.onmessage!({ data: JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(subs(f)[i]!).id, result: sub }) });
   let watched = false;
   const w = src.watch("MintA111111111111111111111111111111111111111").then(() => (watched = true));
   sockets[0]!.onopen!();
-  assert.equal(JSON.parse(sockets[0]!.sent[0]!).params[0].mentions[0], "MintA111111111111111111111111111111111111111");
-  assert.equal(JSON.parse(sockets[0]!.sent[0]!).params[1].commitment, "confirmed");
+  assert.equal(JSON.parse(sockets[0]!.sent[0]!).method, "slotSubscribe"); // the heartbeat
+  assert.equal(JSON.parse(subs(sockets[0]!)[0]!).params[0].mentions[0], "MintA111111111111111111111111111111111111111");
+  assert.equal(JSON.parse(subs(sockets[0]!)[0]!).params[1].commitment, "confirmed");
   await settle();
   assert.equal(watched, false);
   assert.deepEqual(events, []);

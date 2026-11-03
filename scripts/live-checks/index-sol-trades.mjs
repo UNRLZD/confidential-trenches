@@ -17,12 +17,13 @@
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { fromLogs, PUMP_AMM } from "../../apps/helper/src/data/solana/decode.ts";
+import { fromLogs, poolMints, PUMP_AMM } from "../../apps/helper/src/data/solana/decode.ts";
 
 const KEY = "index-sol-trades";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 export const WS = "wss://api.mainnet-beta.solana.com";
+const RPC = "https://api.mainnet-beta.solana.com";
 export const FRESH_MS = 2_000;
 const OPEN = 8;
 const POLL_MS = 200;
@@ -120,18 +121,16 @@ async function get(base, path, fetchFn) {
   return { atMs: t0, answeredMs: Date.now(), status: r.status, headers: Object.fromEntries(r.headers), body };
 }
 
-/** One live run against `base`. */
-export async function read(base = BASE, fetchFn = fetch, ws = WS) {
-  const lists = await get(base, LISTS_PATH, fetchFn);
-  if (lists.status !== 200) throw new Error(`lists answered ${lists.status}`);
-  const rows = Object.values(JSON.parse(lists.body).lists ?? {}).flat();
-  const tokens = [...new Set(rows.map((r) => r.token).filter((t) => typeof t === "string"))].slice(0, OPEN);
-  // open each on the helper (a 404 there is the run's answer for that token), and watch each on the chain
-  const first = {};
-  for (const t of tokens) first[t] = await get(base, TRADES_PATH(t), fetchFn);
-  const open = tokens.filter((t) => first[t].status === 200);
-  if (open.length === 0) return { base, coin: tokens[0] ?? null, fresh: null, polls: tokens.length ? [first[tokens[0]]] : [], candles: null };
-  const fresh = await new Promise((resolve, reject) => {
+/** A PumpSwap pool's base mint, read on the public RPC (the pool account its program owns), or null. */
+async function poolBase(pool) {
+  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [pool, { encoding: "base64" }] }), signal: AbortSignal.timeout(10_000) });
+  const v = (await r.json()).result?.value;
+  return v?.owner === PUMP_AMM ? poolMints(Buffer.from(v.data[0], "base64"))?.base ?? null : null;
+}
+
+/** The first trade of `open` tokens the public websocket sends, decoded from its venue's event. */
+function watchOnce(open, ws) {
+  return new Promise((resolve, reject) => {
     const s = new WebSocket(ws);
     const subs = new Map();
     const timer = setTimeout(() => (s.close(), reject(new Error(`no trade of ${open.length} tokens in ${WAIT_MS} ms`))), WAIT_MS);
@@ -143,15 +142,45 @@ export async function read(base = BASE, fetchFn = fetch, ws = WS) {
       const coin = subs.get(j.params.subscription);
       const v = j.params.result.value;
       if (coin === undefined || v.err !== null) return;
-      // a curve trade names its mint; a PumpSwap trade of a watched token is that token's (the stream is per mint)
-      const t = fromLogs(v.logs).trades.find((x) => x.mint === coin || x.venue === "pumpswap");
-      if (t === undefined) return;
-      clearTimeout(timer);
-      s.close();
-      resolve({ coin, sig: v.signature, heldAtMs: Date.now(), side: t.side, ts: t.ts, user: t.user, venue: t.venue === "pumpswap" ? PUMP_AMM : "pump" });
+      const heldAtMs = Date.now();
+      const done = (t) => {
+        clearTimeout(timer);
+        s.close();
+        resolve({ coin, sig: v.signature, heldAtMs, side: t.side, ts: t.ts, user: t.user });
+      };
+      // a curve trade names its mint; a PumpSwap trade is the token's only when its pool's base mint is the token (a
+      // route through several pools mentions the token in a transaction that also trades others)
+      const trades = fromLogs(v.logs).trades;
+      const curve = trades.find((x) => x.mint === coin);
+      if (curve !== undefined) return done(curve);
+      for (const x of trades.filter((x) => x.venue === "pumpswap")) {
+        void poolBase(x.pool).then((base) => base === coin && done(x)).catch(() => undefined);
+      }
     };
     s.onerror = () => (clearTimeout(timer), reject(new Error("websocket error")));
   });
+}
+
+/** One live run against `base`. */
+export async function read(base = BASE, fetchFn = fetch, ws = WS) {
+  const lists = await get(base, LISTS_PATH, fetchFn);
+  if (lists.status !== 200) throw new Error(`lists answered ${lists.status}`);
+  const rows = Object.values(JSON.parse(lists.body).lists ?? {}).flat();
+  const tokens = [...new Set(rows.map((r) => r.token).filter((t) => typeof t === "string"))].slice(0, OPEN);
+  // open each on the helper (a 404 there is the run's answer for that token), and watch each on the chain
+  const first = {};
+  for (const t of tokens) first[t] = await get(base, TRADES_PATH(t), fetchFn);
+  const open = tokens.filter((t) => first[t].status === 200);
+  if (open.length === 0) return { base, coin: tokens[0] ?? null, fresh: null, polls: tokens.length ? [first[tokens[0]]] : [], candles: null };
+  // the public websocket refuses a connection now and then: three tries
+  let fresh;
+  for (let attempt = 1; fresh === undefined; attempt++) {
+    try {
+      fresh = await watchOnce(open, ws);
+    } catch (e) {
+      if (attempt === 3 || !/websocket error/.test(e.message)) throw e;
+    }
+  }
   const polls = [];
   while (Date.now() - fresh.heldAtMs < FRESH_MS + 3_000) {
     const p = await get(base, TRADES_PATH(fresh.coin), fetchFn);

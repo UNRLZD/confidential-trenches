@@ -141,6 +141,9 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
       upSent = false;
       tries = 0;
       lastMsg = now();
+      // the slot stream is the heartbeat (a slot every ~400 ms): a quiet token's subscription sends nothing, so silence
+      // on this connection means the connection, not the market
+      w.send(JSON.stringify({ jsonrpc: "2.0", id: 0, method: "slotSubscribe" }));
       for (const m of mints) subscribe(m);
       if (pending.size === 0) {
         upSent = true;
@@ -300,11 +303,11 @@ export function createSolanaTrades(deps: {
   }
 
   async function readRef(): Promise<void> {
+    refAt = now(); // one try every REF_MS, answered or not
     const a = await account(PYTH_SOL_USD);
     const v = a === null ? null : pythSolUsd(a.owner, a.data, Math.floor(now() / 1000));
     if (a === null || v === null) return;
     solUsd = { slot: a.slot, v };
-    refAt = now();
     for (const e of entries.values()) e.refs.set(a.slot, v);
   }
 
