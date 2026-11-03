@@ -101,18 +101,18 @@ const solCtx = (o: Partial<PoolContext> = {}): PoolContext & { precommitment: bi
 const acc = (k: string, signer: boolean, writable: boolean) => ({ key: k, signer, writable });
 const cuLimit = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, 0x40, 0x0d, 0x03, 0) };
 type Ixx = { program: string; accounts: { key: string; signer: boolean; writable: boolean }[]; data: Uint8Array };
-const depositIx = (o: { program?: string; pool?: string; from?: string; value?: bigint; pre?: bigint; state?: number; label?: number } = {}): Ixx => {
+const depositIx = (o: { program?: string; pool?: string; from?: string; fromSigns?: boolean; value?: bigint; pre?: bigint; state?: number; label?: number; mark?: string; system?: string } = {}): Ixx => {
   const program = o.program ?? PROGRAM;
   const pre = preBytes(o.pre ?? PRE);
   return {
     program,
     accounts: [
       acc(o.pool ?? POOL, false, true),
-      acc(o.from ?? SOL_W, true, true),
+      acc(o.from ?? SOL_W, o.fromSigns ?? true, true),
       acc(solanaPoolPage(PROGRAM, 0, o.state ?? 6), false, true),
       acc(solanaPoolPage(PROGRAM, 1, o.label ?? 4), false, true),
-      acc(solanaProgramAddress([enc("pre"), pre], PROGRAM), false, true),
-      acc(SOLANA_SYSTEM_PROGRAM, false, false),
+      acc(o.mark ?? solanaProgramAddress([enc("pre"), pre], PROGRAM), false, true),
+      acc(o.system ?? SOLANA_SYSTEM_PROGRAM, false, false),
     ],
     data: Uint8Array.from([1, ...u64(o.value ?? 2_000_000_000n), ...pre]),
   };
@@ -142,6 +142,9 @@ test("Solana deposit: another program, pool, depositor, amount, precommitment, p
     [ok([cuLimit, depositIx({ program: key(43) })]), "program"],
     [ok([cuLimit, depositIx({ pool: key(44) })]), "pool"],
     [ok([cuLimit, depositIx({ from: other })], { payer: other }), "signers"],
+    [ok([cuLimit, depositIx({ from: other, fromSigns: false })]), "depositor"],
+    [ok([cuLimit, depositIx({ mark: key(45) })]), "precommitment_mark"],
+    [ok([cuLimit, depositIx({ system: key(46) })]), "system"],
     [ok([cuLimit, depositIx({ value: 2_000_000_001n })]), "amount"],
     [ok([cuLimit, depositIx({ pre: PRE + 1n })]), "precommitment"],
     [ok([cuLimit, depositIx({ state: 2_000 })]), "state_page"],
@@ -189,6 +192,8 @@ test("Solana withdraw: another pool program, release, recipient, fee payer, a fe
     [wdWire([relIx(), send(key(78))]), solCtx(), "transfer_to"],
     [wdWire([relIx(), send(TO, release.withdrawnValue)]), solCtx(), "transfer_amount"],
     [wdWire([relIx(), send(), send()]), solCtx(), "instructions"],
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 0 ? { ...x, key: key(48) } : x)) }]), solCtx(), "release_accounts"],
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 6 ? { ...x, key: solanaPoolPage(PROGRAM, 0, 2_000) } : x)) }]), solCtx(), "release_accounts"],
   ] as const) {
     assert.throws(() => checkSolanaWithdraw(w, wdAsk, ctx, release, TO, SOL_READS), refusedAs(rule), rule);
   }
@@ -216,6 +221,8 @@ test("Solana buy: the kit's tag 3 on the pinned pool for W, the request's token 
   ] as const) {
     assert.throws(() => checkSolanaBuy(built.wire, a as PoolAsk, c as PoolContext, fxRelease, venue, r, reads), refusedAs(rule), rule);
   }
+  // a release whose fee is over its own cap (the kit's encoder refuses one; the check holds it before the kit runs)
+  assert.throws(() => checkSolanaBuy(built.wire, ask, ctx, { ...fxRelease, relayFee: fxRelease.relayFeeCap + 1n }, venue, req, reads), refusedAs("fee_over_cap"));
   // bytes the kit did not build: one byte of the message changed
   const bent = Uint8Array.from(built.wire);
   bent[bent.length - 1] ^= 1;
