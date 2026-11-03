@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { geckoBudget } from "../gecko.ts";
 import {
-  blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, LIST_MS, LISTS_PER_MIN, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, SETTLE_MS, STALE_MS, toRows,
+  blockAt, blockRange, createEvmLists, SECOND_SPAN, FACTORIES, GT_BASE, GT_READS, LIST_MS, LISTS_PER_MIN, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, SETTLE_MS, STALE_MS, toRows,
 } from "./lists.ts";
 
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
@@ -242,4 +242,28 @@ test("the lists: tagged rows, the GeckoTerminal lane at LISTS_PER_MIN, the read 
   assert.equal((await down.get()).status, 200);
   now = t0 + STALE_MS + 1;
   assert.equal((await down.get()).status, 503);
+});
+
+test("a chain with no fixed clock (Robinhood): the block range is found by reading block times, first block at the second and SECOND_SPAN after; a provider that refuses falls to the next; a time past the head is none", async () => {
+  const HEAD = 105_000_000;
+  const time = (n: number) => 1_700_000_000 + Math.floor(n / 4); // 4 blocks a second
+  let reads = 0;
+  const chain = (refuse: string[] = []) => async (url: string, init: RequestInit): Promise<Response> => {
+    if (refuse.includes(url)) return new Response("{}", { status: 429 });
+    const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: [string, boolean] }[];
+    assert.ok(reqs.length <= (BATCH_MAX[url] ?? 10));
+    reads += reqs.length;
+    return new Response(JSON.stringify(reqs.map((r) => {
+      assert.equal(r.method, "eth_getBlockByNumber");
+      const n = r.params[0] === "latest" ? HEAD : parseInt(r.params[0], 16);
+      return { jsonrpc: "2.0", id: r.id, result: { number: `0x${n.toString(16)}`, timestamp: `0x${time(n).toString(16)}` } };
+    })), { status: 200 });
+  };
+  const s = time(93_296_272);
+  const first = 93_296_272 - (93_296_272 % 4);
+  assert.deepEqual(await blockRange("robinhood", s, chain()), [first, first + SECOND_SPAN]);
+  assert.ok(reads <= 140, `reads ${reads}`);
+  assert.deepEqual(await blockRange("robinhood", s, chain([MAKER_RPCS.robinhood[1]])), [first, first + SECOND_SPAN], "the second provider refuses: the first answers");
+  assert.equal(await blockRange("robinhood", time(HEAD) + 5, chain()), null, "after the head");
+  assert.equal(await blockRange("robinhood", s, chain([...MAKER_RPCS.robinhood])), null, "every provider refuses");
 });
