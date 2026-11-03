@@ -24,7 +24,10 @@
 //!
 //! 4. `u_names_another_depositor_{mock,usdc}` (VT-S02 "depositor honoured"): U's message names D, another account; the
 //!    deposits row and the `deposited` event name D, never the sender U.
-//! 5. `through_intents_ft_withdraw_{mock,usdc}` (VT-S02's second path, accepted and never the kit's): S's tokens inside
+//! 5. `vt_s03_deposit_refusals_{mock,usdc}` (VT-S03, V:1130): a deposit on a used precommitment, an amount below
+//!    `MIN_DEPOSIT`, a prepay on a used precommitment, a stranger's deposit on the victim's precommitment first, and U's
+//!    USDC moved out before the relayer sends U's call; see the function.
+//! 6. `through_intents_ft_withdraw_{mock,usdc}` (VT-S02's second path, accepted and never the kit's): S's tokens inside
 //!    intents.near at DF go out by S's signed `ft_withdraw` with the deposit message, carried in `execute_intents` by
 //!    the relayer; the vault's `ft_on_transfer` sees `sender_id` = intents.near and lands the deposit for the
 //!    message's depositor D.
@@ -396,6 +399,120 @@ async fn no_prepay_is_refused(kind: TokenKind) -> R<()> {
     i1(&h, &m).await?;
     println!("NoPrepay: refused, U's {HELD} back, {:.3} Tgas in ft_on_transfer", r.gas_burnt as f64 / 1e12);
     println!("{}", h.gas_table());
+    Ok(())
+}
+
+// ---- VT-S03's deposit refusals that reach the vault (V:1130), on the kit's path, on both tokens ----
+
+/// U's call with `msg` and `amount` reaches the vault and is refused with `want`: the receipt logs nothing, the token's
+/// resolve gives U the whole amount back, and no balance and no state byte changes; I1 holds.
+async fn refused_at_vault(h: &Harness, m: &Model, relayer: &Account, u: &Account, amount: u128, msg: &str, want: &str) -> R<()> {
+    let before = (h.token_balance(u.id()).await?, h.token_balance(&h.vault).await?, vault_state(h).await?);
+    let o = u_call(h, relayer, u, amount, msg).await?;
+    let r = kits_path(h, &o, relayer, u)?;
+    let f = r.failure().ok_or_else(|| format!("want {want}, the deposit landed: {}", r.line()))?;
+    assert!(f.contains(want), "want {want}, got {f}");
+    assert_eq!(r.logs, Vec::<String>::new(), "{want}: the refused deposit's receipt logged events");
+    assert!(o.calls_exactly(&h.token, "ft_resolve_transfer", 1)?[0].ok(), "{want}: the resolve failed");
+    assert!(o.status.ok(), "{want}: the transaction failed: {:?}", o.status);
+    let after = (h.token_balance(u.id()).await?, h.token_balance(&h.vault).await?, vault_state(h).await?);
+    assert_eq!(after, before, "{want}: a balance or a state byte changed on the refusal");
+    i1(h, m).await?;
+    println!("{want}: refused, U's {amount} back, ft_on_transfer {:.3} Tgas", r.gas_burnt as f64 / 1e12);
+    Ok(())
+}
+
+/// U's call on `p`, already prepaid, lands as the model's next deposit (case 1's reads, without a prepay).
+async fn lands_prepaid(h: &Harness, m: &mut Model, relayer: &Account, u: &Account, p: Bytes32, amount: u128) -> R<()> {
+    let o = u_call(h, relayer, u, amount, &message(&p, u.id())).await?;
+    o.expect_all_ok("a deposit on its prepay")?;
+    let r = kits_path(h, &o, relayer, u)?;
+    expect_landed(h, m, r, u.id(), p, amount).await?;
+    i1(h, m).await
+}
+
+#[tokio::test]
+async fn vt_s03_deposit_refusals_mock() -> R<()> {
+    vt_s03_deposit_refusals(TokenKind::Mock).await
+}
+
+#[tokio::test]
+async fn vt_s03_deposit_refusals_usdc() -> R<()> {
+    vt_s03_deposit_refusals(TokenKind::Usdc).await
+}
+
+/// 1. a deposit on a used precommitment (row 3, `PrecommitmentAlreadyUsed`, never `NoPrepay`);
+/// 2. an amount below `MIN_DEPOSIT` (row 4), then the same P's prepay still takes the 1 USDC deposit;
+/// 3. a prepay on a used precommitment, refused at `storage_prepay` with nothing written;
+/// 4. a stranger's own deposit on the victim's prepaid P lands first; the victim's call on P is then refused
+///    (`PrecommitmentAlreadyUsed`) with its whole amount back;
+/// 5. U's USDC moved out by U before the relayer sends U's call: the call fails whole at the token, the vault is never
+///    called, and P's prepay stays: U's next call on P lands with no new prepay.
+async fn vt_s03_deposit_refusals(kind: TokenKind) -> R<()> {
+    let (h, relayer) = setup(kind).await?;
+    let mut m = Model::new(&h.vault);
+
+    // 1. a used precommitment
+    let u1 = new_u(&h).await?;
+    let used = precommitment("s03 used");
+    lands(&h, &mut m, &relayer, &u1, used, 1_000_000).await?;
+    let u2 = new_u(&h).await?;
+    refused_at_vault(&h, &m, &relayer, &u2, 1_000_000, &message(&used, u2.id()), "PrecommitmentAlreadyUsed").await?;
+
+    // 2. below MIN_DEPOSIT, then the same prepay takes the minimum
+    let p = precommitment("s03 minimum");
+    prepay(&h, &relayer, &p, gross(m.nonce + 1)).await?;
+    let min = blindfill_vault::constants::MIN_DEPOSIT;
+    refused_at_vault(&h, &m, &relayer, &u2, min - 1, &message(&p, u2.id()), "MinimumDepositAmount").await?;
+    lands_prepaid(&h, &mut m, &relayer, &u2, p, min).await?;
+    println!("below MIN_DEPOSIT refused; the same prepay then took {min}");
+
+    // 3. a prepay on a used precommitment
+    let stranger = h.account("stranger", 50).await?;
+    let (state, used_bytes) = (vault_state(&h).await?, storage_usage(&h).await?);
+    let deposit = NearToken::from_yoctonear(gross(m.nonce + 1) as u128 * YOCTO_PER_BYTE);
+    let o = h.call_outcome(&stranger, &h.vault, "storage_prepay", json!({"precommitment": dec(&used)}), deposit, PREPAY_GAS).await?;
+    let r = o.calls_exactly(&h.vault, "storage_prepay", 1)?[0];
+    let f = r.failure().ok_or_else(|| format!("a prepay on a used precommitment landed: {}", r.line()))?;
+    assert!(f.contains("PrecommitmentAlreadyUsed"), "want PrecommitmentAlreadyUsed, got {f}");
+    assert!(r.logs.is_empty(), "the refused prepay logged {:?}", r.logs);
+    assert_eq!((vault_state(&h).await?, storage_usage(&h).await?), (state, used_bytes), "the refused prepay wrote");
+    println!("a prepay on a used precommitment: refused at storage_prepay, {:.3} Tgas", r.gas_burnt as f64 / 1e12);
+
+    // 4. a stranger's deposit on the victim's prepaid P lands first; the victim's call is refused, its amount back
+    let victim = new_u(&h).await?;
+    let pv = precommitment("s03 victim");
+    prepay(&h, &relayer, &pv, gross(m.nonce + 1)).await?;
+    h.mint(stranger.id(), 1_000_000).await?;
+    let o = h
+        .call(&stranger, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": "1000000", "msg": message(&pv, stranger.id())}), NearToken::from_yoctonear(1), GAS)
+        .await?;
+    let r = o.calls_exactly(&h.vault, "ft_on_transfer", 1)?[0];
+    expect_landed(&h, &mut m, r, stranger.id(), pv, 1_000_000).await?;
+    i1(&h, &m).await?;
+    refused_at_vault(&h, &m, &relayer, &victim, HELD, &message(&pv, victim.id()), "PrecommitmentAlreadyUsed").await?;
+    println!("a stranger's deposit on the victim's P first: the victim's call refused, its {HELD} back");
+
+    // 5. U's USDC moved out before the relayer sends U's call
+    let u5 = new_u(&h).await?;
+    let p5 = precommitment("s03 emptied");
+    prepay(&h, &relayer, &p5, gross(m.nonce + 1)).await?;
+    let sink = h.account("sink", 5).await?;
+    let _ = h.storage_deposit(&h.root, sink.id()).await?;
+    let _ = h.call(&u5, &h.token, "ft_transfer", json!({"receiver_id": sink.id(), "amount": HELD.to_string()}), NearToken::from_yoctonear(1), Gas::from_tgas(30)).await?;
+    assert_eq!(h.token_balance(u5.id()).await?, 0, "U still holds tokens");
+    let before = (h.token_balance(&h.vault).await?, vault_state(&h).await?);
+    let o = u_call(&h, &relayer, &u5, 1_000_000, &message(&p5, u5.id())).await?;
+    let call = o.calls_exactly(&h.token, "ft_transfer_call", 1)?[0];
+    assert!(call.failure().is_some(), "U's call with no USDC did not fail at the token: {}", call.line());
+    assert!(!o.receipts.iter().any(|r| r.executor == h.vault.as_str()), "the vault was called: {:#?}", o.receipts.iter().map(Receipt::line).collect::<Vec<_>>());
+    assert_eq!((h.token_balance(&h.vault).await?, vault_state(&h).await?), before, "the failed call changed the vault");
+    assert_eq!(h.token_balance(u5.id()).await?, 0);
+    i1(&h, &m).await?;
+    println!("U emptied before the send: the call failed at the token ({}), the vault untouched", call.failure().unwrap_or_default());
+    h.mint(u5.id(), 1_000_000).await?;
+    lands_prepaid(&h, &mut m, &relayer, &u5, p5, 1_000_000).await?;
+    println!("P's prepay stayed: U's next call on it landed with no new prepay\n{}", h.gas_table());
     Ok(())
 }
 

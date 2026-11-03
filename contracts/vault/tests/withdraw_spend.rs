@@ -267,6 +267,23 @@ async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused(kind: TokenKind) 
     assert_eq!(h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64(), Some(leaves + 1), "the stranger's deposit wrote no leaf");
     assert_eq!(h.token_balance(&h.vault).await? - held, 1_000_000, "the vault did not keep the stranger's deposit");
     println!("a refund precommitment equal to a stranger's pending deposit precommitment: the withdrawal landed, then the stranger's deposit landed");
+    // and the withdrawal's refund is not lost to that deposit: its row holds P, refund_pending, and settle writes the
+    // refund note on P (settle reads no precommitment set, src/settle.rs)
+    let n = signal("old_root", 1);
+    let r = spend_row(&h, &n).await?;
+    assert_eq!((r["refund_precommitment"].as_str(), r["status"].as_str()), (Some(pending.as_str()), Some("refund_pending")), "{r}");
+    let refund = r["refund_value"].as_str().ok_or("refund_value")?.to_string();
+    assert_eq!(refund, r["withdrawn"].as_str().ok_or("withdrawn")?, "both parts bounce: the whole withdrawal comes back, {r}");
+    let size = h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64().ok_or("state_tree size")?;
+    let o = h.call_outcome(&stranger, &h.vault, "settle", json!({"nullifier_hash": n}), NearToken::from_yoctonear(0), Gas::from_tgas(100)).await?;
+    o.expect_all_ok("settle old_root")?;
+    let r = spend_row(&h, &n).await?;
+    assert_eq!(
+        (r["refund_precommitment"].as_str(), r["status"].as_str(), r["refund_value"].as_str(), r["refund_leaf_index"].as_u64()),
+        (Some(pending.as_str()), Some("settled"), Some(refund.as_str()), Some(size)),
+        "{r}"
+    );
+    println!("settle old_root: the refund note of {refund} on P is leaf {size}, after the stranger's deposit on P");
     // and the unchanged same_call lands after its refusals
     let o = withdraw(&h, &relayer, args("same_call", None)).await?;
     landed(&h, &o)?.map_err(|f| format!("same_call: {f}"))?;
