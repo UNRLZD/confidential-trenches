@@ -65,6 +65,9 @@ export const WORDS = {
   soldOf: draft("sold", "09-design-brief S8.35 [draft copy: 2/3 sold]"),
   partFilled: draft("Part filled", "app.md CH-045 (set partly filled); drawn when the kit gives no count"),
   partSold: draft("Part sold", "09-design-brief S8.35, drawn when the kit gives no count"),
+  // the pool's proof (card trade-box-pool, plan v2 A2): a terse label from state.pools, nothing drawn when none
+  proofReady: draft("Proof ready", "card trade-box-pool (plan v2 A2): the chain's pool has a proof ready to buy"),
+  proofMaking: draft("Making proof", "card trade-box-pool (plan v2 A2): notes landed, their first proof still being made"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

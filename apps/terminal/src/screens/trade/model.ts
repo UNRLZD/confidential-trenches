@@ -12,7 +12,7 @@
 // `endView` as Failed (with the reason for the kit's code when the app has words for it) or Not landed, each with
 // Retry, or part filled, with the button back to its ready label (`showsRetry`); a trade still Sending or Landing past 5 s is Slow (S8.11), which never ends it. The sell side
 // (src/screens/positions/) runs the same machine.
-import type { ErrorCode, Stage } from "@blindfill/kit";
+import type { Chain, ErrorCode, SignpageState, Stage } from "@blindfill/kit";
 
 /** USD cents. */
 export type Cents = bigint;
@@ -195,4 +195,28 @@ export function endView(p: Phase): EndView | null {
   if (p.stage === "not_landed") return { k: "notLanded", reason: null };
   if (p.stage === "part_filled") return { k: "partial", reason: null };
   return { k: "failed", reason: (p.code && REASONS[p.code]) || null };
+}
+
+// ------------------------------------------------------------------------------------------------ the pool's proof
+
+/** Whether the chain's pool has a proof ready to buy, one being made, or none (card trade-box-pool, plan v2 A2). */
+export type ProofStatus = "ready" | "making" | "none";
+
+/** A plain decimal string above zero: "0.2", "12"; "0", "0.000" and anything else are not. */
+const positive = (s: string): boolean | null => (/^\d+(?:\.\d+)?$/.test(s) ? /[1-9]/.test(s) : null);
+
+/**
+ * Read only from the signing page's `state.pools` (messages.ts): `ready` is the chunks with a proof ready, absent while
+ * no proof queue runs and never "0" in its place. Ready when it is above zero; making when the pool holds money and the
+ * queue runs with none done yet; none otherwise, a total that is not a plain decimal included, so the box never draws a
+ * label its data does not hold.
+ */
+export function proofStatus(pools: SignpageState["pools"], chain: Chain): ProofStatus {
+  const p = pools?.find((x) => x.chain === chain);
+  if (!p || p.ready === undefined) return "none";
+  const bal = positive(p.balance);
+  const ready = positive(p.ready);
+  if (bal === null || ready === null) return "none";
+  if (ready) return "ready";
+  return bal ? "making" : "none";
 }
