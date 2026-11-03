@@ -1,6 +1,6 @@
 // node packages/wallet/scripts/pool-solana-mutants.mjs (card notes-per-pool-sol): plants one mutant at a time in the card's source, runs the named test, expects it to fail, puts the source back.
 import { readFileSync, writeFileSync } from "node:fs";
-import { runTests } from "./mutant-run.mjs";
+import { runMutant, runTests } from "./mutant-run.mjs";
 import { fileURLToPath } from "node:url";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/solana.ts`, R = `${W}/src/pool/solana-restore.ts`;
@@ -67,9 +67,10 @@ const M = [
   [R, "    seconds({ id: \"A\", l, j });\n", "", T, "RV6"],
   [R, "      seconds({ id: \"R\", c, l, j });\n", "", T, "RV6"],
   [R, "    w.secretKey.fill(0);\n", "", "test/pool-zeroing.test.ts", "solanaRestore zeroes"],
-  // card sol-restore-race, review round 4: the first read's answers kept for the never-closed rule (G7); G4 is equivalent
+  // card sol-restore-race, review round 4: the first read's answers kept for the never-closed rule (G7); fold 7: the
+  // earlier answer checked against the new one (G4, solana-restore.ts:101), told apart by an equal slot
   [R, "  solanaMarksGaps(calls, first.calls);\n", "", T, "fold 6 \\(G7"],
-  [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold", "equivalent: within one read line 96 checks both ways (the loop runs i both ways); an earlier answer of rpc j is at or below every slot read since (each read is at or past the merged marks' slot), so line 95 fires only at an equal slot, where the mark is new to the union, the restore reads again, and j's next read must hold it or line 96 refuses: the walked set and every device's outcome are unchanged"],
+  [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold 7 \\(G4"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];
@@ -84,23 +85,26 @@ for (const file of new Set(M.map((m) => m[3]))) {
   console.log(`unmutated ${file}: ${Date.now() - t0} ms, cap ${cap.get(file)} ms`);
 }
 let ok = 0;
-const hung = [], equivalent = [];
+const hung = [], cancelled = [], equivalent = [];
 for (const [f, find, repl, file, pat, why] of M) {
   // an equivalent mutant (no test can tell it apart: its reason given) is listed, never run or counted
   if (why !== undefined) { equivalent.push(`[${pat}] ${find.slice(0, 70)}: ${why}`); continue; }
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
   writeFileSync(f, src.replace(find, repl));
-  const r = runTests([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: cap.get(file) });
+  const r = runMutant([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: cap.get(file) });
   writeFileSync(f, src);
-  // HUNG: past the cap, killed by the runner; listed apart, never a kill
-  if (r.hung) { hung.push(`[${pat}] ${f.split("/").pop()}: ${find.slice(0, 70)}`); continue; }
-  const killed = r.status !== 0 && r.fail > 0;
-  if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${r.pass} fail ${r.fail}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
+  // HUNG: past the cap, killed by the runner; CANCELLED: only tests stopped at their own timeout, on two runs; both listed
+  // apart, never a kill
+  const at = `[${pat}] ${f.split("/").pop()}: ${find.slice(0, 70)}`;
+  if (r.verdict === "hung") { hung.push(at); continue; }
+  if (r.verdict === "cancelled") { cancelled.push(at); continue; }
+  if (r.verdict === "killed") ok++;
+  console.log(`${r.verdict === "killed" ? "KILLED" : "SURVIVED"} [${pat}] pass ${r.pass} fail ${r.fail} runs ${r.runs}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
 }
 for (const h of hung) console.log(`HUNG ${h}`);
+for (const c of cancelled) console.log(`CANCELLED ${c}`);
 for (const e of equivalent) console.log(`EQUIVALENT ${e}`);
 const runs = M.length - equivalent.length;
-console.log(`${ok}/${runs - hung.length} killed; ${hung.length} hung (not counted); ${equivalent.length} equivalent`);
+console.log(`${ok}/${runs - hung.length - cancelled.length} killed; ${hung.length} hung, ${cancelled.length} cancelled only (not counted); ${equivalent.length} equivalent`);
 if (ok !== runs) process.exitCode = 1;

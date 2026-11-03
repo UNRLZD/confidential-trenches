@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 // @ts-expect-error: a plain .mjs script, no types
-import { runTests } from "../scripts/mutant-run.mjs";
+import { runMutant, runTests } from "../scripts/mutant-run.mjs";
 
 const alive = (pid: number): boolean => {
   try {
@@ -34,15 +34,28 @@ test("a run that hangs is killed at its timeout, the process that spins with it"
   }
 });
 
-test("a test cancelled at its own timeout counts as failed, never a survivor (fold 6: M7 read SURVIVED on fail 0, cancelled 1)", { timeout: 30_000 }, () => {
+// a planted test file per case, run as a mutant: its verdict and how many runs it took
+function verdictOf(body: string): { verdict: string; runs: number; fail: number; cancelled: number } {
   const dir = mkdtempSync(path.join(tmpdir(), "mutant-run-"));
   try {
-    writeFileSync(path.join(dir, "slow.test.mjs"), `import { test } from "node:test";\ntest("yields forever", { timeout: 200 }, async () => {\n  for (;;) await new Promise((ok) => setImmediate(ok));\n});\n`);
-    const r = runTests(["slow.test.mjs"], { cwd: dir, timeoutMs: 20_000 }) as { hung: boolean; status: number; fail: number };
-    assert.equal(r.hung, false);
-    assert.notEqual(r.status, 0);
-    assert.equal(r.fail, 1);
+    writeFileSync(path.join(dir, "case.test.mjs"), `import { existsSync, writeFileSync } from "node:fs";\nimport { test } from "node:test";\nconst first = !existsSync(${JSON.stringify(path.join(dir, "ran"))});\nwriteFileSync(${JSON.stringify(path.join(dir, "ran"))}, "");\n${body}\n`);
+    return runMutant(["case.test.mjs"], { cwd: dir, timeoutMs: 20_000 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+const pick = (r: { verdict: string; runs: number; fail: number; cancelled: number }) => ({ verdict: r.verdict, runs: r.runs, fail: r.fail, cancelled: r.cancelled });
+const spin = "for (;;) await new Promise((ok) => setImmediate(ok));";
+
+test("a mutant whose only failures are tests cancelled at their own timeout is run once more, then listed apart, never a kill (fold 7)", { timeout: 60_000 }, () => {
+  // cancelled on both runs: listed apart
+  assert.deepEqual(pick(verdictOf(`test("yields forever", { timeout: 200 }, async () => { ${spin} });`)), { verdict: "cancelled", runs: 2, fail: 0, cancelled: 1 });
+  // slow under load once, then on time: a correct mutant survives
+  assert.deepEqual(pick(verdictOf(`test("slow once", { timeout: 200 }, async () => { if (first) ${spin} });`)), { verdict: "survived", runs: 2, fail: 0, cancelled: 0 });
+  // cancelled once, then a real failure: killed
+  assert.deepEqual(pick(verdictOf(`test("fails on the second run", { timeout: 200 }, async () => { if (first) ${spin} throw new Error("told apart"); });`)), { verdict: "killed", runs: 2, fail: 1, cancelled: 0 });
+  // a real failure: killed at once
+  assert.deepEqual(pick(verdictOf(`test("fails", () => { throw new Error("told apart"); });`)), { verdict: "killed", runs: 1, fail: 1, cancelled: 0 });
+  // a pass: survived at once
+  assert.deepEqual(pick(verdictOf(`test("passes", () => {});`)), { verdict: "survived", runs: 1, fail: 0, cancelled: 0 });
 });
