@@ -601,3 +601,17 @@ test("rent read on two providers that disagree is refused; a deactivated table i
   assert.equal(cb.peak - plain.peak, solanaRentMin(rent, 165));
   assert.equal(plain.left - cb.left, solanaRentMin(rent, 165));
 });
+
+test("a venue kind outside the two venues names no compute limit or account size, even when a polluted Object.prototype has one", async () => {
+  const { venue, req, chain } = await setup("pump");
+  const bad = { ...venue, kind: "evil" } as unknown as SolanaPoolBuyVenue;
+  const P = Object.prototype as Record<string, unknown>;
+  try {
+    P.evil = 1_400_000;
+    assert.throws(() => buildSolanaPoolBuy(cfg, release, bad, req, chain), /no such venue evil/);
+    assert.throws(() => solanaPoolBuyFunds(release, bad, req, rent), /no such venue evil/);
+  } finally {
+    delete P.evil;
+  }
+  assert.ok(buildSolanaPoolBuy(cfg, release, venue, req, chain).size <= 1232);
+});
