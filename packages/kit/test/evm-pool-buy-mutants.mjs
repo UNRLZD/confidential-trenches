@@ -128,6 +128,10 @@ export const MUTANTS = [
   ["routers: Object.freeze([]),", 'routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),', SELLPIN],
   ['    "base-sepolia": bare({', '    "base-sepolia": ({', PINS],
   ['adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"', 'adapters: ({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"', PINS],
+  // the testnet WETH and middles (the review of c473b3d, F2)
+  ['chainId: 84532,\n      weth: "0x4200000000000000000000000000000000000006",\n      middles: Object.freeze([]),', 'chainId: 84532,\n      weth: "0x4200000000000000000000000000000000000006",\n      middles: Object.freeze(["0x036CbD53842c5426634e7929541eC2318f3dCF7e"]),', PINS],
+  ['weth: "0x7943e237c7f95da44e0301572d358911207852fa",', 'weth: "0x7943e237c7f95da44e0301572d358911207852fb",', PINS],
+  ['middles: Object.freeze([]),\n      // no Uniswap v3 on Robinhood testnet', 'middles: Object.freeze(["0x036CbD53842c5426634e7929541eC2318f3dCF7e"]),\n      // no Uniswap v3 on Robinhood testnet', PINS],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`

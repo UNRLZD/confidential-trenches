@@ -23,6 +23,9 @@ const code = (f: () => unknown): string => {
 const record = (chain: string) =>
   JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
 
+// pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
+const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string } }> };
+
 const NOW = 1_800_000_000;
 mock.timers.enable({ apis: ["Date"], now: NOW * 1000 });
 const W_KEY = new Uint8Array(32).fill(7);
@@ -42,12 +45,14 @@ const TESTNETS = [
   { chain: "robinhood-testnet", chainId: 46630, routers: [] },
 ] as const;
 
-test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 adapters, sell delegate; the mainnets have none", () => {
+test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 adapters, sell delegate, with its WETH and no middle; the mainnets have none", () => {
   for (const { chain, chainId, routers } of TESTNETS) {
     const v = evmPoolVenues()[chain as EvmPoolChain];
     const r = record(chain);
     assert.equal(v.chainId, chainId, chain);
     assert.deepEqual(v.routers.map(lower), routers, chain);
+    assert.equal(lower(v.weth), lower(DEPLOY.CHAINS[chain]!.weth.address), chain);
+    assert.deepEqual(v.middles, [], chain); // no middle: a route is WETH and the token only
     assert.equal(lower(v.pool), lower(r.PrivacyPoolSimple!.address), chain);
     assert.equal(lower(v.adapters?.v4), lower(r.UniswapV4Adapter!.address), chain);
     assert.equal(lower(v.adapters?.v3), lower(r.UniswapV3Adapter?.address), chain); // none on Robinhood testnet (M365)

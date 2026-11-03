@@ -4,18 +4,22 @@
 // that has a deployment record (pool-evm-deploy.<chain>.json):
 //   - the pins are the record's: the pool is PrivacyPoolSimple, the v3 and v4 adapters UniswapV3Adapter and
 //     UniswapV4Adapter (a record without one, a venue without that pin), the sell delegate SellDelegate;
-//   - the chain's WETH and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the v3 router, or none);
+//   - the chain's WETH and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the v3 router, or none), and no
+//     middle is listed;
 //   - on the chain's two RPCs of two operators (the money gate's), each answering the chain's id: at the newest block
 //     both have (the lower of their two eth_blockNumber answers, so no archive read is needed), each pin's code is the
 //     same on both and is the build's (pool-evm-deploy.build.json: the same length and, with the immutables' bytes
-//     zeroed, the same keccak256); WETH's and each router's code hash is the one CHAINS pins.
+//     zeroed, the same keccak256), and its immutables hold exactly the words pool-evm-deploy's getters must return
+//     (gettersOf: the pool's verifier, asset and scope, the adapters' PoolManager, router and WETH, the delegate's WETH);
+//     the record's verifier is the build's; the PoolManager's, WETH's and each router's code hash is the one CHAINS
+//     pins, and where WETH is a proxy (Robinhood testnet), its implementation slot and that implementation's code hash.
 //   node scripts/live-checks/evm-venues-pin.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>, for the test's replay (evm-venues-pin.answers.json).
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { BUILD, CHAINS, deploymentFile, keccak, operatorProblems, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, EIP1967, deploymentFile, gettersOf, keccak, operatorProblems, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-venues-pin";
 const lower = (a) => (typeof a === "string" ? a.toLowerCase() : a);
@@ -52,6 +56,7 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
   say(lower(venue.weth) === lower(c.weth.address), `WETH ${venue.weth} is pool-evm-deploy's ${c.weth.address}`);
   const routers = c.router ? [lower(c.router.address)] : [];
   say(JSON.stringify(venue.routers.map(lower)) === JSON.stringify(routers), `the routers ${JSON.stringify(venue.routers)} are pool-evm-deploy's ${JSON.stringify(routers)}`);
+  say(venue.middles.length === 0, `no middle is listed: ${JSON.stringify(venue.middles)}`);
   for (const p of operatorProblems(rpcs, { chain })) say(false, p);
   // the RPCs: the chain's id, then the newest block both have
   const two = rpcs.slice(0, 2);
@@ -72,17 +77,28 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
     for (const u of two) out.push(await rpc(fetchFn, u, "eth_getCode", [addr, block], sleep));
     return out;
   };
+  const getters = gettersOf(d);
   try {
-    for (const [role, pin, name] of want) {
+    for (const [role, pin, name] of [...want, ["verifier", d.contracts?.WithdrawalVerifier?.address ?? "0x", "WithdrawalVerifier"]]) {
       const [a, b] = await codeAt(pin);
       const build = BUILD.contracts[name];
       const r = runtimeOf(a, build.immutables);
       say(a === b && a !== "0x", `the ${role} ${pin}: the same code on both RPCs at block ${BigInt(block)} (${(a.length - 2) / 2} bytes)`);
       say(r.length === build.length && r.masked === build.masked, `the ${role} ${pin} is the build's ${name}: length ${r.length}, keccak256 with the immutables zeroed ${r.masked}`);
+      const held = r.words.map((w) => (w.length === 1 ? w[0] : `${w.length} words`)).sort();
+      const must = getters[name].map(([, w]) => w).sort();
+      say(JSON.stringify(held) === JSON.stringify(must), `the ${role} ${pin}: ${name}'s immutables hold ${held.join(", ") || "none"}, each one word, the ones its getters must return`);
     }
-    for (const [what, addr, hash] of [["WETH", c.weth.address, c.weth.codehash], ...(c.router ? [["the router", c.router.address, c.router.codehash]] : [])]) {
+    const deps = [["the PoolManager", c.poolManager], ["WETH", c.weth], ...(c.router ? [["the router", c.router]] : []), ...(c.weth.implementation ? [["WETH's implementation", c.weth.implementation]] : [])];
+    for (const [what, { address: addr, codehash: hash }] of deps) {
       const [a, b] = await codeAt(addr);
-      say(a === b && keccak(a) === hash, `${what} ${addr}: code hash ${keccak(a)} on both RPCs at block ${BigInt(block)} is the pinned ${hash}`);
+      say(a === b && a !== "0x" && keccak(a) === hash, `${what} ${addr}: code hash ${keccak(a)} on both RPCs at block ${BigInt(block)} is the pinned ${hash}`);
+    }
+    if (c.weth.implementation) {
+      const slot = [];
+      for (const u of two) slot.push(await rpc(fetchFn, u, "eth_getStorageAt", [c.weth.address, EIP1967.implementation, block], sleep));
+      const want = "0x" + "0".repeat(24) + lower(c.weth.implementation.address).slice(2);
+      say(slot.every((x) => lower(x) === want), `WETH's implementation slot holds the pinned ${c.weth.implementation.address} on both RPCs at block ${BigInt(block)}: ${slot.join(", ")}`);
     }
   } catch (e) {
     say(false, `read: ${String(e.message).split("\n")[0]}`);
