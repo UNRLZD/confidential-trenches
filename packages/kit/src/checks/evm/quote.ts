@@ -344,12 +344,14 @@ const v4Direct = (from: string, to: string, [fee, tickSpacing]: readonly [number
 const startsNative = (r: EvmRoute) => r.venue === "uniswap-v4" && lower(r.currencyIn) === NATIVE;
 
 /** The device's quote of `req.route` on the chain's two pinned providers, with every check above; throws EvmQuoteError
- *  (or the builder's EvmPoolBuyError for a route it refuses). `opts.fetch` replaces the global fetch (tests). */
-export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, opts: { fetch?: typeof fetch } = {}): Promise<EvmPoolBuyQuote> {
+ *  (or the builder's EvmPoolBuyError for a route it refuses). It takes no provider and no fetch from its caller: a quote
+ *  this returns is one evmPoolBuildQuoted builds from, so its answers come only from the pinned URLs (review of 9a8265b,
+ *  N2). Tests run evmPoolBuyQuoteWith, which the index does not export. */
+export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   const p = venue(req.chain).providers;
   if (p === undefined) return refuse("no_quoter", `${req.chain} has no pinned providers`);
-  return evmPoolBuyQuoteWith(req, evmProviders(p, opts.fetch ?? fetch), Date.now());
+  return evmPoolBuyQuoteWith(req, evmProviders(p, fetch), Date.now());
 }
 
 /** Two providers from two https URLs on different hosts. */

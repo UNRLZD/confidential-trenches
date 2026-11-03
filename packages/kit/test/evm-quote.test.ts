@@ -310,7 +310,7 @@ test("Q8 a bad request refuses before any read", async () => {
   }
   await refused(evmPoolBuyQuoteWith(r, [none, none], now), "bad_request");
   await refused(evmPoolBuyQuoteWith({ ...r, chain: "base-sepolia" }, [none, other], now), "no_quoter");
-  await refused(kit.evmPoolBuyQuote({ ...r, chain: "base-sepolia" }, { fetch: async () => assert.fail("no read") }), "no_quoter");
+  await refused(kit.evmPoolBuyQuote({ ...r, chain: "base-sepolia" }), "no_quoter");
   // two providers on one host, or not https, are refused
   assert.throws(() => evmProviders(["https://a.example.org/x", "https://A.example.org/y"], fetch), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
   assert.throws(() => evmProviders(["http://a.example.org", "https://b.example.org"], fetch), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");

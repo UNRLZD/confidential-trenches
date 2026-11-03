@@ -1,10 +1,11 @@
 // The review's attacks on the device's EVM buy quote (src/checks/evm/quote.ts; card evm-pool-buy-quote, review of
 // b17d1fc and cefe7a0), on a modelled chain: a provider decodes each aggregate3 call and answers each quote from a
 // price model, so a planted chain state needs no recorded answer. R1-R4 and R1b are the review's; R5-R10 hold the
-// block agreement, the first-hop native rule, the v3 doubled read, the pinned launchpad pools and a lagging node. Each test states what the device must do.
-import { test } from "node:test";
+// block agreement, the first-hop native rule, the v3 doubled read, the pinned launchpad pools and a lagging node. N2 is
+// the review of 9a8265b's. Each test states what the device must do.
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
-import { EvmQuoteError, type EvmRoute } from "../src/index.ts";
+import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmRoute } from "../src/index.ts";
 import { evmPoolBuyQuoteWith, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 
 const W = (v: bigint) => v.toString(16).padStart(64, "0");
@@ -205,4 +206,35 @@ test("R10 a provider whose node is one block behind is asked once more, and refu
   const ok = await buy(v3direct, provider(head("0xfe", OLD), flat), lagging(1));
   assert.equal(ok.accepted, true, String((ok as { code?: string }).code));
   assert.deepEqual(await buy(v3direct, provider(head("0xfe", OLD), flat), lagging(1000)), { accepted: false, code: "rpc_error" });
+});
+
+test("N2 a caller's fetch makes no device quote: the public entry reads only the pinned providers", async () => {
+  // a fetch that answers both pinned URLs itself, with a fresh head and a route the caller priced
+  const rpc = provider({ number: "0x100", hash: NEW, timestamp: "0x" + Math.floor(Date.now() / 1000).toString(16) }, (p) =>
+    p.hops === 1 && p.from === NATIVE && p.fees[0] === 500 && p.hooks[0] === NATIVE ? (p.amount === AMOUNT ? 7n : 14n) : null,
+  );
+  let forgedCalls = 0;
+  const forged = (async (_url: string, init: { body: string }) => {
+    forgedCalls++;
+    const calls = JSON.parse(init.body) as { id: number; method: string; params: unknown[] }[];
+    const answers = await rpc(calls.map((c) => ({ method: c.method, params: c.params })));
+    return { text: async () => JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))) };
+  }) as unknown as typeof fetch;
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 500, tickSpacing: 10, hooks: NATIVE, hookData: "0x" }] };
+  // the network is off in this test: the pinned providers do not answer
+  const net = mock.method(globalThis, "fetch", async () => {
+    throw new Error("offline");
+  });
+  let q: unknown;
+  try {
+    q = await (evmPoolBuyQuote as (r: unknown, o: unknown) => Promise<unknown>)({ chain: "base", token: TOKEN, amountIn: AMOUNT, slippageBps: 100, route }, { fetch: forged });
+  } catch (e) {
+    q = e;
+  } finally {
+    net.mock.restore();
+  }
+  assert.equal(forgedCalls, 0, "the caller's fetch is never called");
+  assert.equal(evmIsDeviceQuote(q), false, "answers the caller wrote make no device quote");
+  assert.ok(q instanceof EvmQuoteError && q.code === "rpc_error", String(q));
+  assert.equal(evmPoolBuyQuote.length, 1);
 });
