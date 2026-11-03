@@ -68,7 +68,10 @@
 //   is this file's; that card makes both kit constants (the full M356 (4) EVM fee and the send margin, which the helper
 //   imports too), and this file then imports them and drops EvmEpochFeeRule.
 // - Two RPCs are two providers: the kit's solanaSameProvider (one function, or one URL) refuses one passed twice.
-// Nothing here holds a secret, and no read names a note or a wallet of the user's: only the pool's own logs and views.
+// - A restore (./evm-restore.ts) reads the same agreed events (events()), then each W's Transfer logs (evmTokensSentTo)
+//   through the same pager and the same two-RPC compare (evmAgreedLogs): one rule for every log the device reads.
+// Nothing here holds a secret, and no read names a note of the user's: only the pool's own logs and views. The one read
+// that names a wallet is evmTokensSentTo, one W a call, for the restore.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
@@ -324,8 +327,29 @@ const VIEWS = {
   labelRootTimes: selector("labelRootTimes(uint256)"),
 };
 
-/** One leaf event, as both RPCs gave it. `bytes` is every field the device reads, for the byte-for-byte compare. */
-type Ev = { block: bigint; blockHash: string; logIndex: bigint; state: bigint; label: bigint | null; bytes: string };
+/** Where a log is, and `bytes`: every field the device reads, for the byte-for-byte compare of two RPCs' lists. */
+export type EvmLogRow = { block: bigint; blockHash: string; logIndex: bigint; bytes: string };
+/**
+ * One of the pool's leaf events, as both RPCs gave it: its state leaf (Deposited's _commitment, Withdrawn's and Bought's
+ * _newCommitment) and Deposited's label, then the fields a restore reads (./evm-restore.ts): a deposit's _value and
+ * _precommitmentHash; a release's W (topic 1, _recipient), _value (withdrawnValue) and _spentNullifier, and a buy's
+ * _token. Every one of them is in `bytes`.
+ */
+export type EvmPoolEvent = EvmLogRow & {
+  kind: "deposit" | "withdraw" | "buy";
+  state: bigint;
+  label: bigint | null;
+  value: bigint;
+  /** Deposited's _precommitmentHash; null on a release */
+  precommitment: bigint | null;
+  /** a release's _spentNullifier; null on a deposit */
+  nullifier: bigint | null;
+  /** a release's W, lowercase; null on a deposit */
+  recipient: string | null;
+  /** Bought's _token, lowercase; null otherwise */
+  token: string | null;
+};
+type Ev = EvmPoolEvent;
 
 function decodeLog(raw: unknown, pool: string, from: bigint, to: bigint, what: string): Ev {
   const l = raw as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown; blockHash?: unknown; logIndex?: unknown; transactionHash?: unknown; transactionIndex?: unknown; removed?: unknown };
@@ -347,22 +371,41 @@ function decodeLog(raw: unknown, pool: string, from: bigint, to: bigint, what: s
   if (BigInt(t1) >> 160n !== 0n) throw new Error(`${what}: the indexed address is not an address`);
   if (typeof l.data !== "string" || !new RegExp(`^0x[0-9a-f]{${64 * words}}$`).test(l.data)) throw new Error(`${what}: not ${words} data words`);
   const w = (i: number): bigint => BigInt(`0x${(l.data as string).slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
-  // Deposited: _commitment, _label, ...; Withdrawn and Bought: _feeRecipient, _value, _fee, _spentNullifier, _newCommitment, ...
-  const state = t0 === TOPIC_DEPOSITED ? w(0) : w(4);
-  const label = t0 === TOPIC_DEPOSITED ? w(1) : null;
+  // Deposited: _commitment, _label, _value, _precommitmentHash; Withdrawn and Bought: _feeRecipient, _value, _fee,
+  // _spentNullifier, _newCommitment, then Bought's _token, _out
+  const dep = t0 === TOPIC_DEPOSITED;
+  const state = dep ? w(0) : w(4);
+  const label = dep ? w(1) : null;
   for (const v of [state, label]) if (v !== null && (v === 0n || v >= VAULT_FIELD_P)) throw new Error(`${what}: a leaf is not a field element above 0`);
+  const addrWord = (v: bigint, name: string): string => {
+    if (v >> 160n !== 0n) throw new Error(`${what}: ${name} is not an address`);
+    return `0x${v.toString(16).padStart(40, "0")}`;
+  };
   const bytes = [tag(block), blockHash, tag(logIndex), tx, tag(txIndex), pool, t0, t1, l.data].join(" ");
-  return { block, blockHash, logIndex, state, label, bytes };
+  return {
+    block, blockHash, logIndex, bytes, state, label,
+    kind: dep ? "deposit" : t0 === TOPIC_WITHDRAWN ? "withdraw" : "buy",
+    value: dep ? w(2) : w(1),
+    precommitment: dep ? w(3) : null,
+    nullifier: dep ? null : w(3),
+    recipient: dep ? null : addrWord(BigInt(t1), "the recipient"),
+    token: t0 === TOPIC_BOUGHT ? addrWord(w(5), "the token") : null,
+  };
 }
 
+/** An eth_getLogs filter, less its block range: the address (absent: any) and the topics. */
+export type EvmLogFilter = { address?: string; topics: readonly (string | readonly string[] | null)[] };
+/** A log's decoder: refuses a log the filter would not give or a field not in its shape. */
+export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to: bigint, what: string) => E;
+
 /**
- * One RPC's pool logs over from..to, in pages that end at or below `to`. Only a provider's range cap (RANGE_CAP)
- * halves its page; after a full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest
- * size refused in this read, so a cap lifted or a page shrunk long ago comes back. A page past the provider's head
- * (HEAD_LAG) is a lag.
+ * One RPC's logs of a filter over from..to, in pages that end at or below `to`. Only a provider's cap (RANGE_CAP: on a
+ * call's block range or on its number of results) halves its page; after a full page reads, the page doubles again, up
+ * to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read, so a cap lifted or a page shrunk long ago
+ * comes back. A page past the provider's head (HEAD_LAG) is a lag.
  */
-async function readLogs(rpc: EvmRpc, k: number, pool: string, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal): Promise<Ev[]> {
-  const out: Ev[] = [];
+async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal): Promise<E[]> {
+  const out: E[] = [];
   let refused: bigint | null = null;
   for (let at = from; at <= to; ) {
     signal?.throwIfAborted();
@@ -370,7 +413,7 @@ async function readLogs(rpc: EvmRpc, k: number, pool: string, from: bigint, to: 
     const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
     try {
-      got = await rpc("eth_getLogs", [{ address: pool, topics: [[TOPIC_DEPOSITED, TOPIC_WITHDRAWN, TOPIC_BOUGHT]], fromBlock: tag(at), toBlock: tag(end) }]);
+      got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }]);
     } catch (e) {
       const m = String((e as Error)?.message ?? e);
       if (RANGE_CAP.test(m) && end > at) {
@@ -382,7 +425,7 @@ async function readLogs(rpc: EvmRpc, k: number, pool: string, from: bigint, to: 
       throw e;
     }
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
-    out.push(...got.map((g, i) => decodeLog(g, pool, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
+    out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
     if (end - at + 1n === size && size * 2n <= EVM_LOG_PAGE_BLOCKS && (refused === null || size * 2n < refused)) page[k] = size * 2n;
     at = end + 1n;
   }
@@ -393,14 +436,107 @@ async function readLogs(rpc: EvmRpc, k: number, pool: string, from: bigint, to: 
   return out;
 }
 
+/** The two anchors of one read: the finalized one and the newest agreed one (evmAgreedBlock at each tag). */
+export type EvmAnchors = { fin: EvmBlock; anchor: EvmBlock };
+
+/**
+ * One filter's logs over from..anchor on both RPCs (each paging on its own `page`), the same on both, byte for byte.
+ * A log in the finalized anchor's block must carry its hash. A log in the newest anchor's block naming another hash, or
+ * the two lists differing, is refused unless the newest anchor's height holds another hash now (a reorg under the
+ * read: a retry). One list a strict prefix of the other, every log it lacks past the finalized anchor, is one RPC's log
+ * index a moment behind its headers: a retry. Whose logs they are never matters: any other difference is refused,
+ * for every device alike. `at0` numbers the logs in the refusal (the pool's leaves held before `from`).
+ */
+export async function evmAgreedLogs<E extends EvmLogRow>(rpcs: Rpcs, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, { fin, anchor }: EvmAnchors, page: bigint[], at0: number, signal?: AbortSignal): Promise<E[]> {
+  const refuse = async (why: string): Promise<never> => {
+    const now = await both(rpcs, (rpc, k) => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), signal);
+    if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
+    throw new Error(why);
+  };
+  const [x, y] = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, filter, decode, from, anchor.number, page, sig), signal);
+  for (const e of [...x, ...y]) {
+    if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
+    if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
+  }
+  const i = x.findIndex((e, j) => e.bytes !== y[j]?.bytes);
+  const at = i >= 0 ? i : x.length < y.length ? x.length : -1;
+  if (at >= 0) {
+    const [short, long] = x.length < y.length ? [x, y] : [y, x];
+    if (at === short.length && long.slice(at).every((e) => e.block > fin.number)) lag(`rpc ${short === x ? 0 : 1}'s logs past block ${fin.number} are behind the other's`);
+    await refuse(`the two RPCs differ at log ${at0 + at} (blocks ${from}..${anchor.number})`);
+  }
+  return x;
+}
+
+/** ERC-20's Transfer(address indexed from, address indexed to, uint256 value) (EIP-20): its topic. ERC-721's Transfer
+ * has the same signature and topic, with the token id indexed as a fourth topic. */
+export const EVM_TRANSFER_TOPIC = topicOf("Transfer(address,address,uint256)");
+/** One Transfer log to a W: the token's contract (the log's address, lowercase). */
+export type EvmTransferLog = EvmLogRow & { token: string };
+
+/** A Transfer log to `w` (topic 2), as the filter asks: any contract, Transfer's topic, three or four topics. */
+function decodeTransfer(raw: unknown, w: string, from: bigint, to: bigint, what: string): EvmTransferLog {
+  const l = raw as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown; blockHash?: unknown; logIndex?: unknown; transactionHash?: unknown; transactionIndex?: unknown; removed?: unknown };
+  if (typeof l !== "object" || l === null) throw new Error(`${what}: not a log`);
+  addr20(l.address, `${what}: the token`);
+  const token = lower(l.address as string);
+  if (l.removed !== undefined && l.removed !== false) throw new Error(`${what}: a removed log`);
+  const block = qty(l.blockNumber, `${what} blockNumber`);
+  if (block < from || block > to) throw new Error(`${what}: block ${block} is outside ${from}..${to}`);
+  const blockHash = hash32(l.blockHash, `${what} blockHash`);
+  const logIndex = qty(l.logIndex, `${what} logIndex`);
+  const tx = hash32(l.transactionHash, `${what} transactionHash`);
+  const txIndex = qty(l.transactionIndex, `${what} transactionIndex`);
+  const topics = l.topics;
+  if (!Array.isArray(topics) || (topics.length !== 3 && topics.length !== 4)) throw new Error(`${what}: not a Transfer's three or four topics`);
+  topics.forEach((t, i) => hash32(t, `${what} topic ${i}`));
+  if (topics[0] !== EVM_TRANSFER_TOPIC) throw new Error(`${what}: not a Transfer`);
+  if (topics[2] !== `0x${w.slice(2).padStart(64, "0")}`) throw new Error(`${what}: not a Transfer to the W asked`);
+  if (typeof l.data !== "string" || !/^0x([0-9a-f]{2})*$/.test(l.data)) throw new Error(`${what}: data not hex bytes`);
+  const bytes = [tag(block), blockHash, tag(logIndex), tx, tag(txIndex), token, ...topics, l.data].join(" ");
+  return { block, blockHash, logIndex, bytes, token };
+}
+
+/**
+ * Every token a W was sent from block `from` up to the newest anchor: the contracts of the Transfer logs to W
+ * (eth_getLogs, topic 2 = W, no address), read on both RPCs, paged under each provider's caps (one `page` pair, kept
+ * across Ws), the same on both byte for byte (evmAgreedLogs). Each call names this one W and nothing else of the
+ * user's. A token bought outside any list is found: the read names no token. Lowercase, sorted.
+ */
+export async function evmTokensSentTo(rpcs: readonly [EvmRpc, EvmRpc], w: string, from: bigint, anchors: EvmAnchors, page: bigint[], signal?: AbortSignal): Promise<string[]> {
+  checkEvmRpcs(rpcs);
+  addr20(w, "W");
+  const to = lower(w);
+  if (typeof from !== "bigint" || from < 0n) throw new Error("from: a block number");
+  const logs = from > anchors.anchor.number ? [] : await evmAgreedLogs(rpcs, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchors, page, 0, signal);
+  return [...new Set(logs.map((l) => l.token))].sort();
+}
+
+/**
+ * Two RPCs that read on the pool's chain at the restore's anchor: eth_chainId must be `chainId` on both (another chain
+ * is refused), and the anchor's height must hold the anchor's hash on both (another hash, or none yet, is a lag: a
+ * retry). Run before a W's Transfer reads, so no Transfer log of another chain or another fork is ever taken.
+ */
+export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: bigint, anchor: EvmBlock, signal?: AbortSignal): Promise<void> {
+  checkEvmRpcs(rpcs);
+  const ids = await both(rpcs, async (rpc, k) => qty(await rpc("eth_chainId", []), `rpc ${k} eth_chainId`), signal);
+  if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);
+  const bs = await both(rpcs, (rpc, k) => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), signal);
+  if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(`an RPC does not hold block ${anchor.number} as ${anchor.hash}`);
+}
+
 /** What a trees() call may ask beyond the cut: a deposit's own note's newest root, read like every other read. */
 export type EvmTreesOpts = { newest?: boolean };
 
 /** The sync's read at one anchor: every leaf event both RPCs agree on up to it, checked against the pool's views. */
-type Round = { anchor: EvmBlock; events: Ev[] };
+type Round = EvmAnchors & { events: Ev[] };
 
 export type EvmTreeSync = {
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: EvmTreesOpts): Promise<PoolTrees>;
+  /** Every leaf event of the pool up to the newest agreed block, the same on both RPCs and making the pool's trees at
+   * that block (its views), with the round's two anchors: the whole set a restore reads (./evm-restore.ts). With
+   * `once`, one round and its lag thrown, for a caller that retries itself (one retry budget, never one in another). */
+  events(signal?: AbortSignal, once?: boolean): Promise<Round>;
   /** The state tree's depth after every leaf in blocks up to `block` (the pool's currentTreeDepth at that block). With
    * `hash`, `block` must still be that block on both RPCs after the round (the round's chain), else a lag; then the
    * caller retries (it re-reads the block), not depthAt. */
@@ -423,7 +559,7 @@ const wait = (ms: number, signal?: AbortSignal): Promise<void> =>
   });
 
 /** f, again after EVM_LAG_WAIT_MS while it throws EvmLagError, at most EVM_LAG_TRIES times in all. */
-async function retryLag<T>(f: () => Promise<T>, sleep: (ms: number, signal?: AbortSignal) => Promise<void>, signal?: AbortSignal): Promise<T> {
+export async function evmRetryLag<T>(f: () => Promise<T>, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, signal?: AbortSignal): Promise<T> {
   for (let n = 1; ; n++) {
     try {
       return await f();
@@ -478,6 +614,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   let heldTo = a.pin.fromBlock - 1n;
   let checked = false;
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
+  const poolFilter: EvmLogFilter = { address: pool, topics: [[TOPIC_DEPOSITED, TOPIC_WITHDRAWN, TOPIC_BOUGHT]] };
+  const poolDecode: EvmLogDecode<Ev> = (raw, from, to, what) => decodeLog(raw, pool, from, to, what);
   const times = new Map<string, bigint>();
   let turn: Promise<unknown> = Promise.resolve();
   const serial = <T>(f: () => Promise<T>): Promise<T> => {
@@ -538,26 +676,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
       throw new Error(why);
     };
-    let fresh: Ev[] = [];
-    if (anchor.number > heldTo) {
-      const [x, y] = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, pool, heldTo + 1n, anchor.number, page, sig), signal);
-      // a log in the finalized anchor's block names that block's hash, or it is refused; one in the newest anchor's
-      // block that names another hash is a reorg or a lie, told apart by refuse()
-      for (const e of [...x, ...y]) {
-        if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
-        if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
-      }
-      const i = x.findIndex((e, j) => e.bytes !== y[j]?.bytes);
-      const at = i >= 0 ? i : x.length < y.length ? x.length : -1;
-      if (at >= 0) {
-        // one RPC's list a strict prefix of the other's, every log it lacks past the finalized anchor: its log index
-        // is a moment behind its headers, a retry until both agree. Any other difference is a reorg or a lie.
-        const [short, long] = x.length < y.length ? [x, y] : [y, x];
-        if (at === short.length && long.slice(at).every((e) => e.block > fin.number)) lag(`rpc ${short === x ? 0 : 1}'s logs past block ${fin.number} are behind the other's`);
-        await refuse(`the two RPCs differ at log ${held.length + at} (blocks ${heldTo + 1n}..${anchor.number})`);
-      }
-      fresh = x;
-    }
+    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, page, held.length, signal) : [];
     const events = [...held, ...fresh];
     const stateTree = new VaultTree(events.map((e) => e.state));
     const labels = events.flatMap((e) => (e.label === null ? [] : [e.label]));
@@ -572,7 +691,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     const top = fin.number > heldTo ? fin.number : heldTo;
     held = events.filter((e) => e.block <= top);
     heldTo = top;
-    return { anchor, events, stateTree, labelTree };
+    return { fin, anchor, events, stateTree, labelTree };
   }
 
   /** The number of events whose block's timestamp * 1000 is below beforeMs: times never go back, so a search. */
@@ -591,7 +710,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     trees(beforeMs, signal, opts) {
       if (typeof beforeMs !== "bigint" || beforeMs <= 0n) return Promise.reject(new Error("beforeMs: a bigint above 0"));
       // a deposit's own note (opts.newest) reads the same newest agreed block as every epoch read
-      return serial(() => retryLag(async () => {
+      return serial(() => evmRetryLag(async () => {
         const r = await round(signal);
         // every leaf under the cut is in only once the anchor's time reached beforeMs; later blocks' times are too
         if (r.anchor.timestamp * 1000n < beforeMs) lag(`the anchor ${r.anchor.number} (${r.anchor.timestamp * 1000n} ms) has not reached ${beforeMs}`);
@@ -610,6 +729,13 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         return { stateTree, labelTree, stateRoot: stateTree.root!, labelRoot: labelTree.root! };
       }, sleep, signal));
     },
+    events(signal, once) {
+      const one = async (): Promise<Round> => {
+        const { fin, anchor, events } = await round(signal);
+        return { fin, anchor, events };
+      };
+      return serial(() => (once === true ? one() : evmRetryLag(one, sleep, signal)));
+    },
     depthAt(block, signal, hash) {
       if (typeof block !== "bigint" || block < 0n) return Promise.reject(new Error("block: a block number"));
       const once = async () => {
@@ -621,7 +747,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         }
         return depthOf(r.events.filter((e) => e.block <= block).length);
       };
-      return serial(() => (hash === undefined ? retryLag(once, sleep, signal) : once()));
+      return serial(() => (hash === undefined ? evmRetryLag(once, sleep, signal) : once()));
     },
   };
 }
@@ -730,7 +856,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
     lifeMs: EVM_LIFE_MS,
     sendMarginMs: EVM_SEND_MARGIN_MS,
     // an agreed read: a moment's fork at the newest height is a retry here, as in every other agreed read
-    now: (signal) => retryLag(() => evmNow(a.rpcs, signal), sleep, signal),
+    now: (signal) => evmRetryLag(() => evmNow(a.rpcs, signal), sleep, signal),
     trees: (beforeMs, signal, opts) => sync.trees(beforeMs, signal, opts),
     async bind({ chunk, wallet, refundPrecommitment, epochStartMs, deadlineMs }, signal) {
       if (!(wallet?.publicKey instanceof Uint8Array) || typeof wallet.address !== "string" || wallet.address !== evmAddress(wallet.publicKey))
@@ -746,7 +872,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       // the device's own fee: the epoch's first block and the tree depth there, each read on both RPCs
       // the depth on the epoch block's own chain: depthAt refuses (a retry) when that block is no longer at its height
-      const { block, depth } = await retryLag(async () => {
+      const { block, depth } = await evmRetryLag(async () => {
         const block = await evmEpochBlock(a.rpcs, epochStartMs, signal);
         return { block, depth: await sync.depthAt(block.number, signal, block.hash) };
       }, sleep, signal);
