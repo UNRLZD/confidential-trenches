@@ -196,6 +196,11 @@ test("recorded Robinhood makers: at least two live tokens per pad (each creation
   for (const c of RH.cases) assert.equal(got.get(c.address), c.pad, `${c.symbol} ${c.address}`);
   const bags = RH.cases.find((c) => c.address === "0x4dd4aad9887eb3b7615baace5fcd565c0f61008c")!;
   assert.deepEqual([bags.pad, bags.range[1]], ["bags", 98761499], "made in the 10th block of its second");
+  // Torch's three tokens on the lists at 13:45Z (BLEP, TORCH, LOBIN: addresses ending 1111) were served untagged
+  // before TorchFactory joined the table; DELTA is a Pons v1 token whose answers were recorded before that factory joined
+  const tagged = (pad: string) => RH.cases.filter((c) => c.pad === pad).map((c) => c.symbol);
+  assert.deepEqual(tagged("torch"), ["BLEP", "TORCH", "LOBIN"]);
+  for (const s of ["BLEP", "TORCH", "LOBIN", "DELTA"]) assert.equal(got.get(RH.cases.find((c) => c.symbol === s)!.address), s === "DELTA" ? "pons" : "torch", s);
 });
 
 test("an older token with a new pool: its creation block found from its code on chain, then its maker read there (two Clanker tokens tagged, Aerodrome's token none)", async () => {
