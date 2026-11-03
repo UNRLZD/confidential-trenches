@@ -15,30 +15,20 @@
 //   walk, the marks are read again on each RPC at or past the highest slot that RPC answered its pages at
 //   (minContextSlot, and the answer's own slot checked), and merged into the first read by the same union rule. A spend
 //   or deposit whose leaves are in the pages has its mark in that read.
-// - Rounds by a public rule first: while a read gives a mark the read before did not, the pages are read again past the
-//   merged marks, then the marks; the walk runs once, when two reads in a row give the same union. Which marks are new
-//   never changes these reads, so an RPC cannot tell whether a mark that landed during the restore is the user's.
-// - A mark is late when it is new to the union after the first read. A round is busy when a late mark gets its second
-//   RPC in that round's read: in the round it is new, or a round later, when the RPC a slot behind catches up. So two
-//   honest RPCs a slot apart on a busy pool count each landing once both have it, and only late marks count: a mark both
-//   RPCs gave from the first read never makes a round busy. Only after more than SOL_RESTORE_QUIET_ROUNDS busy rounds (a
-//   pool busy for the whole time, each round a pages read and a marks read, about a second or two) does the restore walk
-//   and stop at the first read whose new marks the walk never looked up: they change nothing it found. 8 rounds: a pool
-//   with a landing every few seconds settles in two or three rounds, and only a pool busy at every read for 10 to 20 s
-//   reaches the fallback. While the walk's own looked-up marks still grow, it walks again, SOL_RESTORE_ROUNDS times at
-//   most, then stops with a refusal, never a loop without end.
+// - Rounds by one public rule: while a read gives a mark the union did not hold, the pages are read again past the
+//   merged marks, then the marks; the walk runs once, at the first read that gives no new mark, on the marks held before
+//   it and the pages read just before it. Every mark the walk sees has its leaves in those pages (it landed at or before
+//   their slot), and every leaf in them has its mark (the read after them gave nothing new). Whether to read again, and
+//   so the number of reads and the outcome, depends only on the two RPCs' answers, never on the device's notes: an RPC
+//   learns nothing of which notes are the user's from how the restore reads. No cap and no timer: while marks keep
+//   landing the restore reads on as the chain moves (a round is a pages read and a marks read, about a second or two),
+//   and the signal stops it.
 // - The never-closed rule (solanaMarksGaps): no mark is ever closed, so a mark one RPC gives at slot s that the other
 //   lacks at an equal or later slot is a lie, refused on every device alike; the device never judges an RPC's answer by
 //   its own notes. Each RPC's next read is at or past every slot read before it (its pages at or past the merged marks'
-//   slot, its marks at or past its pages'), so a mark only one RPC gave is in both reads a round later, or refused. One
-//   RPC alone makes no busy round and no two rounds in a row of marks only it gives, so the rounds stay bounded.
-// - What the rounds still show (review Q2d): at the fallback the walk ends, or reads on, by whether one of the last
-//   round's new marks is the user's; the marks of the earlier rounds are already held, so an RPC learns that of one of
-//   the last round's new marks, never which one and never more. An attacker who picks the mark must buy the busy rounds
-//   (more than SOL_RESTORE_QUIET_ROUNDS rounds of real landings both RPCs see) and run one of the two RPCs: in the last
-//   round it gives the spent mark of a nullifier hash it holds (seen in a send) at a slot past the other RPC's. The
-//   owner's device reads one round more, then refuses at the lie; another device restores. The read count tells the
-//   attacker whether that one note is the user's.
+//   slot, its marks at or past its pages'), so a mark only one RPC gave is in both reads a round later, or refused. When a
+//   read gives no new mark, every mark the walk sees is in both RPCs' last reads: the walk runs only once every late mark
+//   (one new after the first read) is held by both RPCs, and a mark one RPC made up never reaches it.
 // - A deposit from its mark: label = keccak256(scope ‖ nonce) mod p, which must be the label tree's leaf nonce - 1, and
 //   commitment = Poseidon(value, label, precommitment), which must be a leaf of the state tree; else the restore stops.
 // - The walk: deposit indices lane by lane until RESTORE_GAP misses in a row (../notes/restore.ts walkLane), each
@@ -77,8 +67,8 @@ export type SolanaDepositMark = { value: bigint; nonce: bigint };
 export type SolanaMarks = { spent: ReadonlyMap<string, bigint>; pre: ReadonlyMap<string, SolanaDepositMark>; slot: number };
 /** One getProgramAccounts answer: the slot it was answered at and the marks' keys it gave. */
 export type SolanaMarkCall = { slot: number; keys: ReadonlySet<string> };
-/** One read of the marks: their union; the keys each RPC gave (both sizes); each RPC's two answers, [spent, pre]. */
-export type SolanaMarksRead = SolanaMarks & { by: readonly [ReadonlySet<string>, ReadonlySet<string>]; calls: readonly [readonly [SolanaMarkCall, SolanaMarkCall], readonly [SolanaMarkCall, SolanaMarkCall]] };
+/** One read of the marks: their union, and each RPC's two answers, [spent, pre]. */
+export type SolanaMarksRead = SolanaMarks & { calls: readonly [readonly [SolanaMarkCall, SolanaMarkCall], readonly [SolanaMarkCall, SolanaMarkCall]] };
 
 export const SOL_SPENT_MARK_LEN = 8;
 export const SOL_PRE_MARK_LEN = 16;
@@ -150,8 +140,7 @@ export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program
   const spent = new Map([...union(0)].map(([key, d]) => [key, u64(d, 0)] as const));
   const pre = new Map([...union(1)].map(([key, d]) => [key, { value: u64(d, 0), nonce: u64(d, 8) }] as const));
   const slot = Math.max(...reads.flatMap((r) => [r[0].slot, r[1].slot]));
-  const by = [0, 1].map((k) => new Set([...reads[k]![0].marks.keys(), ...reads[k]![1].marks.keys()])) as [Set<string>, Set<string>];
-  return { spent, pre, slot, by, calls };
+  return { spent, pre, slot, calls };
 }
 
 export type SolanaRestoredNote = { ref: NoteRef; scope: bigint; precommitment: bigint; leaf: Leaf; state: "UNSPENT" | "SPENT"; parent?: string };
@@ -254,12 +243,6 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
   return { notes, spends };
 }
 
-/** Rounds that only read (pages, then marks) while the pool keeps growing, before the walk's own marks decide (header). */
-export const SOL_RESTORE_QUIET_ROUNDS = 8;
-/** Walks past the quiet rounds whose looked-up marks may still grow before the restore refuses: each extra one needs a
- * spend or deposit of the user's own to land during the read before it. */
-export const SOL_RESTORE_ROUNDS = 4;
-
 /** Two reads of the marks as one: the union, a key both hold with different values refused, the higher slot. */
 export function solanaMarksUnion(x: SolanaMarks, y: SolanaMarks): SolanaMarks {
   const spent = new Map(x.spent);
@@ -277,26 +260,9 @@ export function solanaMarksUnion(x: SolanaMarks, y: SolanaMarks): SolanaMarks {
   return { spent, pre, slot: Math.max(x.slot, y.slot) };
 }
 
-// A map that records every key looked up in it: the marks a walk asked for.
-class Looked<V> extends Map<string, V> {
-  readonly asked: Set<string>;
-  constructor(m: ReadonlyMap<string, V>, asked: Set<string>) {
-    super(m);
-    this.asked = asked;
-  }
-  override get(key: string): V | undefined {
-    this.asked.add(key);
-    return super.get(key);
-  }
-  override has(key: string): boolean {
-    this.asked.add(key);
-    return super.has(key);
-  }
-}
-
 /**
  * Restore of the Solana pool from the 12 words, on two RPCs: the marks, then rounds of the pages and the marks again past
- * them until two marks reads agree (bounded, header), then solanaRestore once on the last marks and pages.
+ * them until a read gives no new mark (header), then solanaRestore once on those marks and pages.
  */
 export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number; /** tests only */ lagWait?: SolanaLagWait }) {
   const sync = solanaTreeSync(a.rpcs, a.program, a.lagWait);
@@ -306,32 +272,14 @@ export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: strin
   // every answer each RPC gave, for the never-closed rule across reads
   const calls = solanaMarkCalls();
   solanaMarksGaps(calls, first.calls);
-  // the keys each RPC has given, and the late keys (new to the union after the first read)
-  const gave = [new Set(first.by[0]), new Set(first.by[1])] as const;
-  const late = new Set<string>();
-  for (let busy = 0, walks = 0; ; ) {
+  for (;;) {
     const leaves = await sync.leaves(marks.slot, a.signal);
     const read = await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots, a.lagWait);
     solanaMarksGaps(calls, read.calls);
     const again = solanaMarksUnion(marks, read);
-    const fresh = [...again.spent.keys(), ...again.pre.keys()].filter((key) => !marks.spent.has(key) && !marks.pre.has(key));
-    for (const key of fresh) late.add(key);
-    // busy: a late key gets its second RPC in this read (in the round it is new, or later: a lagging RPC catching up)
-    const both = [...late].some((key) => !(gave[0].has(key) && gave[1].has(key)) && (gave[0].has(key) || read.by[0].has(key)) && (gave[1].has(key) || read.by[1].has(key)));
-    read.by.forEach((keys, k) => keys.forEach((key) => gave[k]!.add(key)));
-    // the public rule: read again while there are new marks, until the busy rounds pass SOL_RESTORE_QUIET_ROUNDS
-    if (fresh.length > 0) {
-      if (both) busy++;
-      if (busy <= SOL_RESTORE_QUIET_ROUNDS) {
-        marks = again;
-        continue;
-      }
-    }
-    const asked = new Set<string>();
-    const seen: SolanaMarks = { spent: new Looked(marks.spent, asked), pre: new Looked(marks.pre, asked), slot: marks.slot };
-    const out = solanaRestore({ seed64: a.seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks: seen, ...(a.gap === undefined ? {} : { gap: a.gap }) });
-    if (!fresh.some((key) => asked.has(key))) return out;
-    if (++walks >= SOL_RESTORE_ROUNDS) throw new Error(`restore: the user's own marks still grew after ${SOL_RESTORE_ROUNDS} reads; try again`);
+    // the one rule, on the RPCs' answers alone: walk at the first read with no new mark; else read again past it
+    if ([...again.spent.keys(), ...again.pre.keys()].every((key) => marks.spent.has(key) || marks.pre.has(key)))
+      return solanaRestore({ seed64: a.seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) });
     marks = again;
   }
 }
