@@ -30,6 +30,11 @@
 //   the kit's pinned signer refuses any sell its builder did not return.
 // - EVM authorization (EIP-7702): only the chain's pinned sell delegate, at W's account nonce read on two RPCs.
 //
+// - Everywhere: a compute budget within the runtime's limit and the kit's price cap, so no payer is made to pay more than
+//   1,400,000 lamports of priority fee; an EVM buy's or sell's min out at least the floor the device made from its own
+//   two-RPC reads; and each signer below signs only what a check passed, as the check read it (a copy, a byte or value
+//   changed after, or a proof checked as one op signed as another is refused "unchecked").
+//
 // Every other op, chain or instruction is refused. Draws are what the page shows before the press: chain, token,
 // amount, fee cap and the pool, as the pins name it (drawPool; its words are drafts until the owner picks them).
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -46,7 +51,7 @@ import {
   solanaTableIsActive,
   type SolanaLookupTable,
 } from "../../../kit/src/checks/solana/message.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM, checkSolanaTeardown, type SolanaTeardownReads } from "../../../kit/src/checks/solana/checks.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_SYSTEM_PROGRAM, checkSolanaTeardown, type SolanaTeardownReads } from "../../../kit/src/checks/solana/checks.ts";
 import {
   SOLANA_POOL_TAG_RELEASE,
   checkSolanaPoolBuy,
@@ -77,6 +82,42 @@ export const SOLANA_POOL_TAG_DEPOSIT = 1;
 export const SOLANA_POOL_DEPOSIT_LEN = 41;
 /** The most a user may give up to slippage on a pool trade: 50%, the trade box's own bound. */
 export const POOL_MAX_SLIPPAGE_BPS = 5_000;
+/** The most compute a Solana transaction may ask: the runtime's MAX_COMPUTE_UNIT_LIMIT. With the kit's price cap
+ *  (SOLANA_CU_PRICE_MAX) it bounds the priority fee a payer can be made to pay at 1,400,000 lamports. */
+export const SOLANA_POOL_CU_LIMIT_MAX = 1_400_000;
+
+// Every payload a check passed, by identity and by what it is: the signers below sign only these, so no path reaches a
+// key around a check, and a proof checked as a buy is never signed as a withdraw
+type Checked = "evm.buy" | "evm.withdraw" | "evm.sell" | "evm.authorization";
+const CHECKED: Readonly<Record<Checked, WeakSet<object>>> = Object.freeze({
+  "evm.buy": new WeakSet<object>(),
+  "evm.withdraw": new WeakSet<object>(),
+  "evm.sell": new WeakSet<object>(),
+  "evm.authorization": new WeakSet<object>(),
+});
+const passed = (as: Checked, ...xs: object[]): void => {
+  for (const x of xs) CHECKED[as].add(x);
+};
+const mustHavePassed = (as: Checked, ...xs: object[]): void => {
+  if (!xs.every((x) => typeof x === "object" && x !== null && CHECKED[as].has(x))) refuse("unchecked");
+};
+// A proof's values are an object its holder can still write to: the values the check read are kept beside it
+const PROOF_READ = new WeakMap<object, string>();
+const proofKey = (p: EvmPoolProofBinding): string => `${p.nullifier}:${p.context}:${p.value}`;
+const passedProof = (as: Checked, p: EvmPoolProofBinding): void => {
+  passed(as, p);
+  PROOF_READ.set(p, `${as}:${proofKey(p)}`);
+};
+const proofMustHavePassed = (as: Checked, p: EvmPoolProofBinding): void => {
+  mustHavePassed(as, p);
+  if (PROOF_READ.get(p) !== `${as}:${proofKey(p)}`) refuse("unchecked");
+};
+// A Solana wire is an array its holder can still write to: the bytes a check read are kept beside it, and signing
+// compares them, so a byte changed after the check is a wire no check passed
+const SOLANA_CHECKED = new WeakMap<Uint8Array, Uint8Array>();
+const passedWire = (...wires: readonly Uint8Array[]): void => {
+  for (const w of wires) SOLANA_CHECKED.set(w, w.slice());
+};
 
 /** A refusal: the answer is "not_allowed"; `rule` names the field for the device's own log, never the app's. */
 export class PoolRuleRefused extends Error {
@@ -202,11 +243,17 @@ function decode(wire: Uint8Array, reads: SolanaPoolReads): Decoded {
   return { message, signers, ixs, blockhash: m.blockhash };
 }
 
-/** The compute budget head: at most a limit (2) then a price (3), nothing else of that program anywhere. */
+/** The compute budget head: at most a limit (2) then a price (3), each within its cap, nothing else of that program. */
 function head(ixs: Ix[]): number {
   let n = 0;
-  if (ixs[n]?.program === SOLANA_COMPUTE_BUDGET_PROGRAM && ixs[n]!.data[0] === 2 && ixs[n]!.data.length === 5 && ixs[n]!.accounts.length === 0) n++;
-  if (ixs[n]?.program === SOLANA_COMPUTE_BUDGET_PROGRAM && ixs[n]!.data[0] === 3 && ixs[n]!.data.length === 9 && ixs[n]!.accounts.length === 0) n++;
+  if (ixs[n]?.program === SOLANA_COMPUTE_BUDGET_PROGRAM && ixs[n]!.data[0] === 2 && ixs[n]!.data.length === 5 && ixs[n]!.accounts.length === 0) {
+    if (new DataView(ixs[n]!.data.buffer, ixs[n]!.data.byteOffset + 1, 4).getUint32(0, true) > SOLANA_POOL_CU_LIMIT_MAX) refuse("cu_limit");
+    n++;
+  }
+  if (ixs[n]?.program === SOLANA_COMPUTE_BUDGET_PROGRAM && ixs[n]!.data[0] === 3 && ixs[n]!.data.length === 9 && ixs[n]!.accounts.length === 0) {
+    if (u64le(ixs[n]!.data, 1) > SOLANA_CU_PRICE_MAX) refuse("cu_price");
+    n++;
+  }
   if (ixs.slice(n).some((x) => x.program === SOLANA_COMPUTE_BUDGET_PROGRAM)) refuse("compute_budget");
   return n;
 }
@@ -255,6 +302,7 @@ export function checkSolanaDeposit(wire: Uint8Array, ask: PoolAsk, ctx: PoolCont
   const n = head(d.ixs);
   if (d.ixs.length !== n + 1) return refuse("instructions");
   if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads) !== ask.amount) return refuse("amount");
+  passedWire(wire);
   return { chain: "solana", op: ask.kind, token: null, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: pin.pool };
 }
 
@@ -290,6 +338,7 @@ export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolCon
     if (t.accounts.length !== 2 || !same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], to, false, true)) return refuse("transfer_to");
     if (u64le(t.data, 4) > got.withdrawnValue - got.relayFee) return refuse("transfer_amount");
   }
+  passedWire(wire);
   return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to };
 }
 
@@ -313,6 +362,7 @@ export function checkSolanaBuy(
   checkFeeAndDeadline(release.relayFee, release.relayFeeCap, release.deadlineMs, ctx);
   const verdict = checkSolanaPoolBuy(wire, { program: pin.program, pool: pin.pool }, release, venue, req, reads);
   if (!verdict.ok) return refuse(`buy_${verdict.results.find((r) => !r.ok)?.id ?? "checks"}`);
+  passedWire(wire);
   return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: release.relayFeeCap, pool: pin.pool, to: ctx.wallet };
 }
 
@@ -358,6 +408,7 @@ export function checkSolanaSell(
     if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
   }
   if (depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads) > minOut) return refuse("deposit_over_min_out");
+  passedWire(wire);
   return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: pin.pool };
 }
 
@@ -365,10 +416,14 @@ export function checkSolanaSell(
 export function checkSolanaTeardownFrames(wires: readonly Uint8Array[], ctx: PoolContext, reads: SolanaTeardownReads): void {
   const v = checkSolanaTeardown(wires, ctx.wallet, reads);
   if (!v.ok) refuse("teardown");
+  passedWire(...wires);
 }
 
-/** W's ed25519 signature of a checked Solana message: `wire` must be the one a check above passed. */
+/** W's ed25519 signature of a checked Solana message: `wire` must be the very array a check above passed (a copy, or
+ *  one changed after, is refused unchecked: the check read these bytes, so a change is bytes no check read). */
 export function signSolana(secretKey: Uint8Array, wire: Uint8Array): Uint8Array {
+  const read = wire instanceof Uint8Array ? SOLANA_CHECKED.get(wire) : undefined;
+  if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");
   const slots = wire[0]!;
   return ed25519.sign(wire.subarray(1 + 64 * slots), secretKey);
 }
@@ -410,8 +465,9 @@ function checkRelay(proof: EvmPoolProofBinding, relay: EvmRelayData, pins: Retur
   if (proof.context !== context) refuse("context");
 }
 
-/** An EVM pool buy: the kit's pinned Buy, the request's token and amount, the proof's relay data the device's. */
-export function checkEvmBuy(built: EvmPoolBuy, pool: string, proof: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, testnet = false): PoolDraw {
+/** An EVM pool buy: the kit's pinned Buy, the request's token and amount, a min out at least `floor` (the device's
+ *  own floor from its two-RPC pool reads, less the user's slippage), the proof's relay data the device's. */
+export function checkEvmBuy(built: EvmPoolBuy, pool: string, proof: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, floor: bigint, testnet = false): PoolDraw {
   if (ask.kind !== "pool.buy") return refuse("kind");
   const chain = evmChainOf(ask, testnet);
   const pins = evmPins(ctx, chain);
@@ -420,7 +476,10 @@ export function checkEvmBuy(built: EvmPoolBuy, pool: string, proof: EvmPoolProof
   if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");
   if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");
   if (proof.value !== ask.amount) return refuse("amount");
+  if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");
   checkRelay(proof, relay, pins, ctx);
+  passed("evm.buy", built);
+  passedProof("evm.buy", proof);
   return { chain: ask.chain, op: ask.kind, token: built.token, amount: ask.amount, feeCap: relay.feeCap, pool: pins.pool, to: ctx.wallet };
 }
 
@@ -432,11 +491,13 @@ export function checkEvmWithdraw(pool: string, proof: EvmPoolProofBinding, relay
   if (lower(pool) !== lower(pins.pool)) return refuse("pool");
   if (proof.value === 0n) return refuse("amount");
   checkRelay(proof, relay, pins, ctx);
+  passedProof("evm.withdraw", proof);
   return { chain: ask.chain, op: ask.kind, token: null, amount: proof.value, feeCap: relay.feeCap, pool: pins.pool, to: ctx.wallet };
 }
 
-/** An EVM pool sell: W's own Sell into the pinned pool, the request's token and amount, within the fee cap, unexpired. */
-export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext, testnet = false): PoolDraw {
+/** An EVM pool sell: W's own Sell into the pinned pool, the request's token and amount, a min out at least `floor` (the
+ *  device's own, from its two-RPC pool reads), within the fee cap, unexpired. */
+export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext, floor: bigint, testnet = false): PoolDraw {
   if (ask.kind !== "pool.sell") return refuse("kind");
   const chain = evmChainOf(ask, testnet);
   const pins = evmPins(ctx, chain);
@@ -447,32 +508,41 @@ export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext,
   if (built.amount !== ask.amount) return refuse("amount");
   if (built.feeCap > ctx.feeCap) return refuse("fee_cap_over_device_cap");
   if (built.deadline * 1000n <= ctx.nowMs) return refuse("deadline_past");
+  if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");
+  passed("evm.sell", built);
   return { chain: ask.chain, op: ask.kind, token: built.token, amount: built.amount, feeCap: built.feeCap, pool: pins.pool, to: pins.pool };
 }
 
 /** The pinned sell delegate W's EIP-7702 authorization names, at `nonce`, W's account nonce read on two RPCs. */
-export function checkEvmAuthorization(ask: PoolAsk, ctx: PoolContext, nonce: bigint, nonceReads: readonly [bigint, bigint], testnet = false): { chain: EvmPoolChain; delegate: string } {
+export type EvmAuthorizationChecked = { readonly chain: EvmPoolChain; readonly delegate: string; readonly nonce: bigint };
+export function checkEvmAuthorization(ask: PoolAsk, ctx: PoolContext, nonce: bigint, nonceReads: readonly [bigint, bigint], testnet = false): EvmAuthorizationChecked {
   if (ask.kind !== "pool.sell") return refuse("kind");
   const chain = evmChainOf(ask, testnet);
   const pins = evmPins(ctx, chain);
   if (pins.sellDelegate === undefined) return refuse("delegate_not_pinned");
   if (nonceReads[0] !== nonceReads[1] || nonce !== nonceReads[0]) return refuse("nonce");
-  return { chain, delegate: pins.sellDelegate };
+  const out = Object.freeze({ chain, delegate: pins.sellDelegate, nonce });
+  passed("evm.authorization", out);
+  return out;
 }
 
 // The signers: each takes only what its check passed, through the kit's pinned signer where the kit has one.
 
 /** W's Buy signature (the kit's pinned signer: a buy its builder did not return is refused not_built). */
 export function signEvmBuy(secretKey: Uint8Array, ctx: PoolContext, built: EvmPoolBuy, pool: string, proof: EvmPoolProofBinding): Uint8Array {
+  mustHavePassed("evm.buy", built);
+  proofMustHavePassed("evm.buy", proof);
   return pinnedSignBuy(ctx.evm!.venues, secretKey, built.chain, pool, built, proof);
 }
 /** W's Sell signature (the kit's pinned signer: a sell its builder did not return is refused not_built). */
 export function signEvmSell(secretKey: Uint8Array, ctx: PoolContext, built: EvmPoolSell): Uint8Array {
+  mustHavePassed("evm.sell", built);
   return pinnedSignSell(ctx.evm!.venues, secretKey, built.chain, built);
 }
-/** W's EIP-7702 authorization of the chain's pinned sell delegate only. */
-export function signEvmAuthorization(secretKey: Uint8Array, ctx: PoolContext, chain: EvmPoolChain, nonce: bigint): EvmPoolSellAuthorization {
-  return pinnedSignSellAuthorization(ctx.evm!.venues, secretKey, chain, nonce);
+/** W's EIP-7702 authorization of the chain's pinned sell delegate only, at the nonce checkEvmAuthorization passed. */
+export function signEvmAuthorization(secretKey: Uint8Array, ctx: PoolContext, checked: EvmAuthorizationChecked): EvmPoolSellAuthorization {
+  mustHavePassed("evm.authorization", checked);
+  return pinnedSignSellAuthorization(ctx.evm!.venues, secretKey, checked.chain, checked.nonce);
 }
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -500,6 +570,7 @@ export function evmWithdrawDigest(chainId: bigint, pool: string, proof: EvmPoolP
 
 /** W's Withdraw signature, 65 bytes r ‖ s ‖ v, s low: only after checkEvmWithdraw passed for this pool and proof. */
 export function signEvmWithdraw(secretKey: Uint8Array, ctx: PoolContext, ask: PoolAsk, pool: string, proof: EvmPoolProofBinding, testnet = false): Uint8Array {
+  proofMustHavePassed("evm.withdraw", proof);
   const pins = evmPins(ctx, evmChainOf(ask, testnet));
   if (lower(pool) !== lower(pins.pool)) return refuse("pool");
   const rec = secp256k1.sign(evmWithdrawDigest(pins.chainId, pins.pool, proof), secretKey, { prehash: false, lowS: true, format: "recovered" });

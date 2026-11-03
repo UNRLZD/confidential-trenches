@@ -95,6 +95,21 @@ export const MUTANTS = [
   ['if (built.deadline * 1000n <= ctx.nowMs) return refuse("deadline_past");', "", ESELL],
   ['if (nonceReads[0] !== nonceReads[1] || nonce !== nonceReads[0]) return refuse("nonce");', "", ESELL],
   ['if (pins.sellDelegate === undefined) return refuse("delegate_not_pinned");', "", ESELL],
+  // the compute budget caps
+  ['> SOLANA_POOL_CU_LIMIT_MAX) refuse("cu_limit");', '> 0xffffffff) refuse("cu_limit");', DEP],
+  ['if (u64le(ixs[n]!.data, 1) > SOLANA_CU_PRICE_MAX) refuse("cu_price");', "", DEP],
+  // the EVM floors
+  ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', "checkRelay", EBUY],
+  ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
+  // only what a check passed is signed
+  ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', "", "Solana deposit: the pinned pool's tag 1"],
+  ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', 'if (!read) return refuse("unchecked");', "Solana deposit: the pinned pool's tag 1"],
+  ['  mustHavePassed("evm.buy", built);\n', "", EBUY],
+  ['  proofMustHavePassed("evm.buy", proof);\n', "", EBUY],
+  ['if (PROOF_READ.get(p) !== `${as}:${proofKey(p)}`) refuse("unchecked");', "", EBUY],
+  ['  proofMustHavePassed("evm.withdraw", proof);\n', "", EBUY],
+  ['  mustHavePassed("evm.sell", built);\n', "", ESELL],
+  ['  mustHavePassed("evm.authorization", checked);\n', "", ESELL],
 ];
 
 const run = (name) => {
