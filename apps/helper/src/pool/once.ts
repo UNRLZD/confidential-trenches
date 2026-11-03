@@ -12,8 +12,11 @@ export type Once<A extends { status: number }> = {
   run(nullifier: string, carry: () => Promise<A>): Promise<A>;
   /** The first carry of `nullifier`, if remembered. */
   get(nullifier: string): Promise<A> | undefined;
-  /** Frees `nullifier`: its send ended on chain without spending it. */
-  forget(nullifier: string): void;
+  /**
+   * Frees `nullifier`: its send ended on chain without spending it. With `entry`, only while that entry is still the
+   * one stored, so two callers that both saw the same ended send free it once and never a newer carry (M356 (1)).
+   */
+  forget(nullifier: string, entry?: Promise<A>): void;
   readonly size: number;
 };
 
@@ -41,7 +44,7 @@ export function oncePerNullifier<A extends { status: number }>(max = POOL_SEND_M
       return p;
     },
     get: (nf) => m.get(nf),
-    forget: (nf) => void m.delete(nf),
+    forget: (nf, entry) => (entry === undefined ? void m.delete(nf) : drop(nf, entry)),
     get size() {
       return m.size;
     },

@@ -58,7 +58,8 @@ function rpc(calls: Calls, opts: { revert?: boolean; gas?: bigint; chain?: strin
     calls.push({ method, params });
     switch (method) {
       case "eth_chainId": return opts.chain ?? "0x7a69";
-      case "eth_call": if (opts.revert) throw new Error("execution reverted: 0x8b1c4b0b"); return "0x";
+      case "eth_getCode": return "0x";
+      case "eth_call": if (opts.revert) throw new Error("RPC error 3: execution reverted: 0x8b1c4b0b"); return "0x"; // the kit client's wording
       case "eth_estimateGas": return `0x${(opts.gas ?? 611_391n).toString(16)}`;
       case "eth_getBlockByNumber": {
         if (params[0] === "latest") return { ...block(c.latest), ...(opts.spike ? { baseFeePerGas: `0x${opts.spike.toString(16)}` } : {}) };
@@ -135,7 +136,7 @@ test("two callers and a restart get the same epoch fee; another epoch's base fee
   assert.deepEqual(a, b);
   assert.deepEqual(restarted, a);
   assert.deepEqual(a, { chain: "evm", network: "anvil", pool: POOL, fee_recipient: FEE_TO, epoch_ms: 60_000, epoch_start_ms: EPOCH, block: "0x1ae", fee: FEE.toString(), step: EVM_FEE_STEP.toString() });
-  const next = await s.fee(EPOCH + 60_000); // 1,999,999,920 s: block 460, 3 gwei
+  const next = await sender([], {}, [], c, EPOCH + 61_000).fee(EPOCH + 60_000); // 1,999,999,920 s: block 460, 3 gwei
   assert.equal(next!.fee, evmEpochFee(FLOOR, 3n * GWEI).toString());
   assert.equal(await s.fee(DEADLINE + 600_000), null, "no block in that epoch yet");
 });
@@ -150,12 +151,20 @@ test("a withdraw at its epoch's fee, under its cap, to this release's fee recipi
   assert.equal(`0x${Buffer.from(f[7]!).toString("hex")}`, calldata(), "the data is the calldata received");
   assert.equal(`0x${Buffer.from(f[5]!).toString("hex")}`, POOL);
   assert.equal(num(f[6]!), 0n, "value 0");
-  const call = calls.find((c) => c.method === "eth_call")!.params[0] as { from: string; to: string; data: string };
-  assert.deepEqual(call, { from: evmAddressOf(KEY), to: POOL, data: calldata(), value: "0x0" });
+  const sim = calls.find((c) => c.method === "eth_call")!;
+  const call = sim.params[0] as Record<string, string>;
+  assert.equal(sim.params[1], "pending");
+  const hexq = (u: Uint8Array) => `0x${num(u).toString(16)}`;
+  assert.deepEqual(call, { from: evmAddressOf(KEY), to: POOL, data: calldata(), value: "0x0", gas: hexq(f[4]!), maxFeePerGas: hexq(f[3]!), maxPriorityFeePerGas: hexq(f[2]!) }, "simulated as signed");
 });
 
-test("a base fee spike past the fee's cap never overpays: maxFeePerGas x gas limit stays within the fee", async () => {
-  for (const spike of [GWEI / 2n, GWEI, 1_000n * GWEI, 10n ** 15n]) {
+test("a base fee spike past the fee's cap never overpays: maxFeePerGas x gas limit stays within the fee, and a cap under the base fee is fee_stale", async () => {
+  for (const spike of [1_000n * GWEI, 10n ** 15n, 1_676_505_346n]) {
+    const calls: Calls = [];
+    assert.equal(code(await sender(calls, { spike }).carry(req())), "fee_stale", `spike ${spike}`);
+    assert.equal(sends(calls).length, 0);
+  }
+  for (const spike of [GWEI / 2n, GWEI, 1_676_505_345n]) {
     const calls: Calls = [];
     const a = await sender(calls, { spike }).carry(req());
     assert.equal(a.status, 200, JSON.stringify(a.body));
@@ -229,12 +238,12 @@ test("one send per nullifier: a repeat in flight or landed, even as other bytes,
   assert.equal(num(f[1]![1]!), num(f[0]![1]!) + 1n);
 });
 
-test("a first send that reverted on chain, or a refused carry, frees the nullifier", async () => {
+test("a first send that reverted on chain is never sent again in its epoch; a refused carry frees the nullifier", async () => {
   const calls: Calls = [];
   const s = sender(calls, { reverted: true });
   await s.carry(req());
-  await s.carry(req());
-  assert.equal(sends(calls).length, 2, "the first reverted: the retry is sent");
+  assert.equal(code(await s.carry(req())), "reverted");
+  assert.equal(sends(calls).length, 1, "the first reverted: the repeat is refused, not sent");
   const calls2: Calls = [];
   const r = sender(calls2, { revert: true });
   assert.equal(code(await r.carry(req())), "simulation_failed");
