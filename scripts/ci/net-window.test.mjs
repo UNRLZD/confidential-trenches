@@ -24,6 +24,7 @@ export const CHANGED = [
   "scripts/live-checks/app-host-gate.mjs",
   "scripts/live-checks/app-release-sri.mjs",
   "scripts/live-checks/app-shell.mjs",
+  "scripts/live-checks/app-token-chart.mjs",
   "scripts/live-checks/app-token-route.mjs",
   "scripts/live-checks/delete-refund-readback.mjs",
   "scripts/live-checks/delete-refund-readback.sweep.mjs",
