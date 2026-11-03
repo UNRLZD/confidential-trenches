@@ -26,6 +26,7 @@ export const CHANGED = [
   "scripts/live-checks/delete-refund-readback.mjs",
   "scripts/live-checks/delete-refund-readback.sweep.mjs",
   "scripts/live-checks/helper-host-health.mjs",
+  "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
   "scripts/live-checks/helper-token-watch.mjs",
