@@ -1,9 +1,9 @@
 // Every tracked test file runs in CI: each *.test.mjs and *.test.ts that git tracks is named, by path or by glob, by a
 // `node --test` command in a ci.yml run: line, in a root script such a line runs (`pnpm run <name>`), or in a workspace
-// package's test script (resolved from the package's folder) while ci.yml runs `pnpm -r ... run test`. Each tracked
-// Foundry test (*.t.sol) is under the test/ folder of a `forge test` that names no filter, at its --root or else its
-// folder. A test file that nothing runs passes review as coverage it does not give (net-window.test.mjs on main
-// bb4eafd, 1 Nov 06:30Z).
+// package's test script (resolved from the package's folder) while a ci.yml line runs `pnpm ... run test` for that
+// package (`-r`, or a --filter that selects it). Each tracked Foundry test (*.t.sol) is under the test/ folder of a
+// `forge test` that names no filter, at its --root or else its folder. A test file that nothing runs passes review as
+// coverage it does not give (net-window.test.mjs on main bb4eafd, 1 Nov 06:30Z).
 //   node --test scripts/ci/tests-run.test.mjs
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -58,18 +58,32 @@ function testArgs(command, cwd, rootScripts) {
   return out;
 }
 
+// the workspace packages one `pnpm ... run test` command runs the test script of, as a test of the package's name:
+// with no --filter, every package under -r and none without it; --filter <name> (or -F, or --filter=) that package;
+// --filter '!<name>' every package but that one (the shards of ci.yml's test job split the packages so). A selector
+// of any other form (a glob, a path, ...) selects nothing here, so its packages' test files read as unrun.
+function selects(command) {
+  const words = command.trim().split(/\s+/).map((w) => w.replace(/^(['"])(.*)\1$/, "$2"));
+  const filters = words.flatMap((w, i) => (w === "--filter" || w === "-F" ? [words[i + 1]] : w.startsWith("--filter=") ? [w.slice(9)] : []));
+  if (!filters.length) return () => words.includes("-r") || words.includes("--recursive");
+  const only = filters.filter((f) => !f.startsWith("!"));
+  const not = filters.filter((f) => f.startsWith("!")).map((f) => f.slice(1));
+  return (name) => (only.length ? only.includes(name) : true) && !not.includes(name);
+}
+
 // the tracked test files at root that no CI command runs
 export function unrun(root) {
   const read = (f) => readFileSync(path.join(root, f), "utf8");
   const rootScripts = JSON.parse(read("package.json")).scripts ?? {};
   const lines = runLines(read(".github/workflows/ci.yml"));
   const args = lines.flatMap((l) => testArgs(l, root, rootScripts));
-  if (lines.some((l) => /\bpnpm\b.*\s-r\s.*\brun\s+test(\s|$)/.test(l))) {
+  const selections = lines.flatMap((l) => l.split(/&&|\|\||[;\n]/)).filter((seg) => /\bpnpm\b.*\brun\s+test(\s|$)/.test(seg)).map(selects);
+  if (selections.length) {
     const globs = [...read("pnpm-workspace.yaml").matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((m) => m[1]);
     for (const pkg of globs.flatMap((g) => globSync(`${g}/package.json`, { cwd: root }))) {
       const dir = path.join(root, path.dirname(pkg));
-      const script = JSON.parse(read(pkg)).scripts?.test;
-      if (script) args.push(...testArgs(script, dir, {}));
+      const { name, scripts } = JSON.parse(read(pkg));
+      if (scripts?.test && selections.some((s) => s(name))) args.push(...testArgs(scripts.test, dir, {}));
     }
   }
   const ran = new Set(args.flatMap(({ cwd, pattern }) =>
@@ -131,6 +145,44 @@ test("a planted test file that no command names fails; the same tree without it 
     for (const f of planted) put(f, "");
     execFileSync("git", ["add", "--", ...planted], { cwd: dir });
     assert.deepEqual(unrun(dir), planted);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ci.yml's test job splits the packages over shards with pnpm --filter (card ci-test-shards): a shard list that drops a
+// package leaves its test files unrun, and must fail here, as a shard that runs no tests would pass on its own
+test("planted: a package no pnpm --filter shard selects fails; the full split passes", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tests-run-shards-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), text);
+    };
+    const ci = (...runs) => ["jobs:", ...runs.flatMap((r, i) => [`  s${i}:`, "    steps:", `      - run: ${r}`]), ""].join("\n");
+    put("package.json", JSON.stringify({ scripts: {} }));
+    put("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n');
+    put("packages/w/package.json", JSON.stringify({ name: "@x/w", scripts: { test: 'node --test "test/*.test.ts"' } }));
+    put("packages/v/package.json", JSON.stringify({ name: "@x/v", scripts: { test: 'node --test "test/*.test.ts"' } }));
+    for (const f of ["packages/w/test/a.test.ts", "packages/v/test/b.test.ts"]) put(f, "");
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["add", "."], { cwd: dir });
+    const unrunWith = (yml) => {
+      put(".github/workflows/ci.yml", yml);
+      return unrun(dir);
+    };
+
+    assert.deepEqual(unrunWith(ci("pnpm --filter @x/w run test", "pnpm -r --filter '!@x/w' --if-present --no-bail run test")), []);
+    assert.deepEqual(unrunWith(ci("pnpm -r --if-present --no-bail run test")), []);
+    assert.deepEqual(unrunWith(ci("pnpm --filter=@x/w run test", "pnpm -F @x/v run test")), []);
+    // the wallet-style shard dropped: the rest-of shard excludes it, so its files run nowhere
+    assert.deepEqual(unrunWith(ci("pnpm -r --filter '!@x/w' --if-present --no-bail run test")), ["packages/w/test/a.test.ts"]);
+    // a shard for a name no package has, a selector this does not read, and a run of another script vouch for nothing
+    assert.deepEqual(unrunWith(ci("pnpm --filter @x/nope run test", "pnpm -r --filter '!@x/w' run test")), ["packages/w/test/a.test.ts"]);
+    assert.deepEqual(unrunWith(ci("pnpm -r --filter './packages/*' run test")), ["packages/v/test/b.test.ts", "packages/w/test/a.test.ts"]);
+    assert.deepEqual(unrunWith(ci("pnpm --filter @x/w run test:e2e", "pnpm --filter @x/v run test")), ["packages/w/test/a.test.ts"]);
+    // with no filter and no -r, pnpm runs the root's own script, no package's
+    assert.deepEqual(unrunWith(ci("pnpm run test")), ["packages/v/test/b.test.ts", "packages/w/test/a.test.ts"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
