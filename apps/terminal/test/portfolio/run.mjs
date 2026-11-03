@@ -7,7 +7,9 @@
 // (S10) and 9 Activity rows' worth of height; phone rows 68 with at least 6 under the sticky segments; and the taps:
 // Closed, search and hide small, the Activity tab, a type chip, a row opened to its receipt, the phone action sheet and
 // its sell, each tx link on its explorer with target _blank.
-//   node apps/terminal/test/portfolio/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
+// The pool rows (card balances-per-chain): each pool view's data-pools, Ready a dash (never $0.00) when the page sends
+// no ready, and the block inside its panel with no clipped text. --scheme light|dark emulates the viewer's scheme.
+//   node apps/terminal/test/portfolio/run.mjs [--shots <dir>] [--scheme light|dark]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -20,6 +22,9 @@ const args = process.argv.slice(2);
 const shotsAt = args.indexOf("--shots");
 const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+const schemeAt = args.indexOf("--scheme");
+const SCHEME = schemeAt >= 0 ? args[schemeAt + 1] : "dark";
+if (SCHEME !== "light" && SCHEME !== "dark") throw new Error("--scheme light|dark");
 
 const NOW = Date.parse("2026-11-02T03:00:00Z");
 const WIDTHS = [
@@ -49,7 +54,19 @@ const STATES = [
   ["exported", "S14.4", ["390", "1440"], true],
   ["filtered", "S14.5", ["390", "1440"], true],
   ["receipt", "S14.6", ["390", "1440"], true],
+  ["pools", "S10.3", ["390", "1440"], false],
+  ["pools-noready", "S10.3", ["390", "1440"], false],
+  ["pools-empty", "S10.3", ["390", "1440"], false],
 ];
+// each fixture's pool view, and per row [chain, Balance, Ready, Pending] as drawn
+const POOLS = {
+  loading: ["loading"],
+  offline: ["offline"],
+  rows: ["unread"],
+  pools: ["rows", [["Solana", "$1.25M", "$999,999.99", "$250,000.51"], ["Base", "$320.00", "$300.00", "$20.00"], ["Robinhood", "$0.00", "$0.00", "$0.00"]]],
+  "pools-noready": ["rows", [["Solana", "$12,500.50", "—", "—"], ["Base", "$320.00", "—", "—"]]],
+  "pools-empty": ["empty"],
+};
 
 async function build() {
   const { build } = await import("vite");
@@ -81,7 +98,7 @@ const states = (page) => page.locator(".pf").getAttribute("data-states").then((s
 
 let BASE = "";
 async function open(browser, w, f) {
-  const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce", timezoneId: "UTC" });
+  const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce", timezoneId: "UTC", colorScheme: SCHEME });
   await ctx.addInitScript(INIT);
   const page = await ctx.newPage();
   await page.clock.install({ time: NOW - 1000 });
@@ -123,6 +140,22 @@ try {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(want);
       }
+      if (POOLS[f] && (f !== "rows" || want === "S10.3")) {
+        // the pool block of the form on screen: its view, its rows as drawn, inside its panel, no clipped text
+        const r = await page.evaluate((sel) => {
+          const b = document.querySelector(sel);
+          if (!b) return null;
+          const panel = b.closest(".panel, .mwhere").getBoundingClientRect();
+          const box = b.getBoundingClientRect();
+          const clipped = [...b.querySelectorAll("span")].filter((e) => e.getClientRects().length && e.scrollWidth > e.clientWidth + 0.5 && getComputedStyle(e).display !== "inline").map((e) => e.textContent);
+          const rows = [...b.querySelectorAll("[data-pool]")].filter((x) => x.getAttribute("data-pool") !== "unread").map((x) => [...x.children].map((c) => c.textContent));
+          return { view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped };
+        }, phone ? ".pfm .pools" : ".pfd .pools");
+        const [view, rows] = POOLS[f];
+        check(r?.view === view, `${tag}: pools view ${r?.view}, want ${view}`);
+        if (rows) check(JSON.stringify(r.rows) === JSON.stringify(rows), `${tag}: pool rows ${JSON.stringify(r?.rows)}`);
+        check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
+      }
       if (want === "S10.3" && !phone) {
         // the brief's S10 bar at 1440: rows 72 layout px (54 CSS px), at least 9 visible, at least 9 fields a row
         const r = await page.evaluate(() => {
@@ -149,7 +182,9 @@ try {
         check(Math.abs(r.h - 54) < 1, `${tag}: Activity rows ${r.h}px`);
         console.log(`@1440 activity: row ${r.h.toFixed(1)} css px, ${r.visible} visible (brief: 9)`);
       }
-      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}-${w.name}.png`) });
+      // a pool fixture's phone shot shows the pool rows (the S10.3 bar above scrolled to the segments)
+      if (phone && f.startsWith("pools")) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}-${w.name}${SCHEME === "dark" ? "" : `-${SCHEME}`}.png`) });
       n++;
       await ctx.close();
     }

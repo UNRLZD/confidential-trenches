@@ -267,10 +267,54 @@ test("S14.3 after a restore: the kit's restore op done", () => {
   assert.equal(restored([{ id: "rs", kind: "restore", stage: "reading", txs: [] }]), false);
 });
 
-test("words: every word has a source; the one draft left is the overflow button's accessible name", () => {
+// the pools (card balances-per-chain, v2 A1): the signing page sends each chain's sum of its own notes (packages/wallet
+// pool balances: spent, reserved, incoming and planned notes are left out there); the screen draws them as sent
+test("pools: loading, offline, unread (none sent), empty, and rows with balance, ready and pending in cents", () => {
+  assert.deepEqual(portfolio(snap(null), data(), NOW).pools, { view: "loading", rows: [] });
+  assert.deepEqual(portfolio(snap(null, "down"), data(), NOW).pools, { view: "offline", rows: [] });
+  // a page that sends no pools: dashes, never $0.00
+  assert.deepEqual(portfolio(snap(STATE), data(), NOW).pools, { view: "unread", rows: [] });
+  assert.deepEqual(portfolio(snap(STATE, "down"), data(), NOW).pools, { view: "offline", rows: [] });
+  assert.deepEqual(portfolio(snap({ ...STATE, pools: [] }), data(), NOW).pools, { view: "empty", rows: [] });
+  // a configured chain with none: still empty while no pool holds anything
+  assert.equal(portfolio(snap({ ...STATE, pools: [{ chain: "solana", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
+  const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", balance: "250.129", ready: "200" }, { chain: "base", balance: "0" }, { chain: "robinhood", balance: "70", ready: "0" }] }), data(), NOW).pools;
+  assert.equal(p.view, "rows");
+  assert.deepEqual(p.rows, [
+    { chain: "solana", balance: 25012n, ready: 20000n, pending: 5012n },
+    // a chain with none keeps its row at $0.00; no ready sent: ready and pending are null (dashes)
+    { chain: "base", balance: 0n, ready: null, pending: null },
+    // a ready of 0 is a real 0: every chunk still being proved
+    { chain: "robinhood", balance: 7000n, ready: 0n, pending: 7000n },
+  ]);
+});
+
+test("pools: a ready above the balance is held to it; a garbled amount reads as 0", () => {
+  const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", balance: "10", ready: "12" }, { chain: "base", balance: "x", ready: "1" }] }), data(), NOW).pools;
+  assert.deepEqual(p.rows, [
+    { chain: "solana", balance: 1000n, ready: 1000n, pending: 0n },
+    { chain: "base", balance: 0n, ready: 0n, pending: 0n },
+  ]);
+});
+
+test("cash: the vault, each pool and the ready wallets, each source counted once", () => {
+  const base = { ...STATE, positions: [] };
+  // vault 73.18 + ready wallet 10.00
+  assert.equal(portfolio(snap(base), data(), NOW).totals!.cash, 8318n);
+  // the pools add their balances once; ready is a part of the balance, never added again
+  const t = portfolio(snap({ ...base, pools: [{ chain: "solana", balance: "100.5", ready: "100" }, { chain: "base", balance: "20" }] }), data(), NOW).totals!;
+  assert.equal(t.cash, 8318n + 10050n + 2000n);
+  assert.equal(t.total, t.cash + t.onWay + t.inPos);
+  // the same amount in the vault and in a pool are two sources: both count, neither twice
+  const same = portfolio(snap({ ...base, vault_balance: "50", wallets: [], pools: [{ chain: "solana", balance: "50", ready: "50" }] }), data(), NOW).totals!;
+  assert.equal(same.cash, 10000n);
+  assert.equal(same.total, 10000n);
+});
+
+test("words: every word has a source; the drafts left are the overflow button's accessible name and the pool rows' words", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text && w.source, k);
   for (const k of ["total", "token", "holding", "value", "pnl", "realized", "tpsl", "search", "hideSmall", "minSize", "feesPaid", "receipt", "keyExported", "viewKey"] as const) assert.equal(WORDS[k].draft, false, k);
   // owner 2 Nov 06:08Z, all approved
   for (const k of ["cash", "noPositions", "noActivity", "open", "closed", "offline", "noRoute", "reverted", "held", "today", "yesterday", "notRestorable"] as const) assert.equal(WORDS[k].draft, false, k);
-  assert.deepEqual([...DRAFTS], ["more"]);
+  assert.deepEqual([...DRAFTS], ["more", "privateBalance", "balance", "ready", "pending", "noBalance"]);
 });

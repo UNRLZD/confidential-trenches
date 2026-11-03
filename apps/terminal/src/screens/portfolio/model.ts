@@ -187,6 +187,7 @@ export interface Portfolio {
   offline: boolean;
   rows: Row[];
   totals: Totals | null;
+  pools: Pools;
 }
 
 const key = (chain: Chain, token: string) => `${chain}:${token}`;
@@ -245,7 +246,9 @@ export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[],
 }
 
 export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
+  // Cash: the vault's USDC, each pool's private balance and the READY wallets, each source counted once
   let cash = cents(s.vault_balance) ?? 0n;
+  for (const p of s.pools ?? []) cash += cents(p.balance) ?? 0n;
   let onWay = 0n;
   for (const w of s.wallets) {
     if (w.state === "READY") cash += cents(w.size) ?? 0n;
@@ -270,9 +273,41 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
 export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: number): Portfolio {
   const offline = snap.status === "down";
   const s = snap.state;
-  if (!s) return { view: offline ? "S10.2" : "S10.1", offline, rows: [], totals: null };
+  if (!s) return { view: offline ? "S10.2" : "S10.1", offline, rows: [], totals: null, pools: { view: offline ? "offline" : "loading", rows: [] } };
   const rows = sortRows(s.positions.map((p) => rowOf(p, d, s.ops, now)));
-  return { view: rows.length ? "S10.3" : "S10.2", offline, rows, totals: totals(s, rows, d.closed, now) };
+  return { view: rows.length ? "S10.3" : "S10.2", offline, rows, totals: totals(s, rows, d.closed, now), pools: pools(s, offline) };
+}
+
+// ------------------------------------------------------------------------------------------------- the pools (A1)
+
+/** One chain's pool: its private balance from the device's own notes, the part with a proof ready (null: no proof
+ *  queue runs, drawn as a dash, never $0.00) and the rest, still being proved (null with ready). Cents, rounded down. */
+export interface PoolRow {
+  chain: Chain;
+  balance: bigint;
+  ready: bigint | null;
+  pending: bigint | null;
+}
+
+/** loading: no state yet. offline: the signing page is down. unread: the page sent no pools (it cannot read the
+ *  notes, or it is a page that does not send them): dashes. empty: no pool holds anything. rows: one per chain. */
+export type PoolsView = "loading" | "offline" | "unread" | "empty" | "rows";
+
+export interface Pools {
+  view: PoolsView;
+  rows: PoolRow[];
+}
+
+/** The pool rows from the signing page's state, in the page's order. A ready above the balance is held to it. */
+export function pools(s: SignpageState, offline = false): Pools {
+  if (s.pools === undefined) return { view: offline ? "offline" : "unread", rows: [] };
+  const rows = s.pools.map((p): PoolRow => {
+    const balance = cents(p.balance) ?? 0n;
+    const r = p.ready === undefined ? null : cents(p.ready) ?? 0n;
+    const ready = r === null ? null : r > balance ? balance : r;
+    return { chain: p.chain, balance, ready, pending: ready === null ? null : balance - ready };
+  });
+  return { view: rows.some((r) => r.balance > 0n) ? "rows" : "empty", rows };
 }
 
 export const SMALL = 100n; // VN-12 A: hide small hides positions worth under $1 (owner round 16)
