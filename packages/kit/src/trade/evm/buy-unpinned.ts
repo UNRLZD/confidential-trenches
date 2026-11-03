@@ -43,8 +43,6 @@ export type EvmPoolVenue = {
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
   readonly quoters?: Readonly<{ v3?: string; v4?: string }>;
-  /** Uniswap v3's factory (the v3 quoter's factory()), whose pools the device finds by CREATE2 to read their state. */
-  readonly v3Factory?: string;
   /** A route starts from the native asset whenever a native v4 pool exists and its route quotes at least as much as the
    *  WETH route (the chain's WETH is behind an upgradeable proxy). */
   readonly nativeFirst?: boolean;
@@ -85,9 +83,6 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
-      // QuoterV2.factory() on mainnet.base.org and base-rpc.publicnode.com; its getPool(WETH, USDC, 500) is the CREATE2
-      // address with Uniswap v3's init code hash (2026-11-03 20:34Z)
-      v3Factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
       providers: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
       maxLag: 5, // 2 s blocks: 10 s
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
@@ -119,9 +114,6 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // and robinhood.drpc.org, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak 0x3db0868d…96a28, and
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
-      // QuoterV2.factory() on both providers; its getPool(aeWETH, USDG, 100) is the CREATE2 address with Uniswap v3's
-      // init code hash (2026-11-03 20:34Z)
-      v3Factory: "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
       nativeFirst: true,
       providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
