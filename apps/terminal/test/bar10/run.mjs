@@ -9,7 +9,8 @@
 // names from local files as app-in-shell.mjs --harness does: APP_HOST the build under its _headers, SIGN_HOST the
 // stand-in shell, signed in; every read is of the terminal's frame inside the shell. Discover reads its lists from
 // HELPER_HOST, which answers APP_HOST's origin only, so the run answers that one read with a snapshot of the screen's
-// fixtures (the recorded Solana read, with its edge rows): every row kind Discover draws is on screen. A screen that
+// fixtures (the recorded Solana read, with its edge rows): every row kind Discover draws is on screen; the token route's
+// read of the top Trending token is answered with that token's row of the same answer. A screen that
 // breaks BAR-10 fails here, not after a deploy.
 // The shell's rules are read twice: with every answer at once, and with the answers late (LATE), so the lists and the
 // signing page's state land while the run clicks through the shell. A screen that moves when an answer is slow (card
@@ -30,6 +31,7 @@ const shotsAt = args.indexOf("--shots");
 const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : undefined;
 
 const LISTS_URL = "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana";
+const isTokenRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/token";
 
 /** The helper's answer: every list of the fixtures, edge rows after the recorded ones; New also holds the rows on a
  *  curve, as the live one does, so the percent pills are on its first screen. */
@@ -122,6 +124,15 @@ try {
     await ctx.route(LISTS_URL, async (r) => {
       if (late) await wait(LATE.helperMs);
       await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify(answer) }).catch(() => {});
+    });
+    // the token route (/) reads the top of these lists' Trending column: answered as the helper answers a listed token,
+    // its page row being Discover's own row (apps/helper/src/data/solana/token.ts), so / draws it with no failed load
+    await ctx.route(isTokenRead, async (r) => {
+      if (late) await wait(LATE.helperMs);
+      const u = new URL(r.request().url());
+      const row = Object.values(answer.lists).flat().find((x) => x.token === u.searchParams.get("token"));
+      const body = row && u.searchParams.get("chain") === "solana" ? { row, decimals: 6, pool: null, risk: {}, route: "ok" } : { error: "unknown token" };
+      await r.fulfill({ status: row ? 200 : 404, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) }).catch(() => {});
     });
   };
   const prepare = answering(false);

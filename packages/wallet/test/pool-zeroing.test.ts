@@ -79,7 +79,7 @@ test("solanaRestore zeroes each spent note's W secret key once it has the addres
   const cP = noteSecrets(SEED, { kind: "change", l: label, j: 0 }).precommitment;
   const marks = {
     pre: new Map([[solanaMarkOf(program, "pre", P), { value: 10_000_000n, nonce: 1n }]]),
-    spent: new Map([[solanaMarkOf(program, "spent", noteSecrets(SEED, dep).nullifierHash), 10_000_000n]]),
+    spent: new Map([[solanaMarkOf(program, "spent", noteSecrets(SEED, dep).nullifierHash), { withdrawn: 10_000_000n, number: 0 }]]),
     slot: 1,
   };
   const from = calls.length;

@@ -1,0 +1,163 @@
+{
+ "read": "GET /v1/market/token?chain=solana at HELPER_HOST for the mint DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF (the top of the Trending column of test/discover-data/helper-lists-2026-11-01.json), Origin APP_HOST, 2026-11-03T09:29:07Z, HTTP 200, x-helper-commit be4b353. The row is kept as a field list and its values, as the lists recording is (gitleaks reads a long id beside a token key as a secret)",
+ "fields": [
+  "chain",
+  "token",
+  "symbol",
+  "name",
+  "icon",
+  "venue",
+  "label",
+  "created_s",
+  "price_usd",
+  "mc_usd",
+  "vol_24h_usd",
+  "chg_5m_bps",
+  "chg_1h_bps",
+  "chg_24h_bps",
+  "liq_usd",
+  "holders",
+  "top10_bps",
+  "src",
+  "as_of_ms",
+  "creator",
+  "creator_sold_bps",
+  "dev_bps",
+  "snipers_bps",
+  "mint_auth",
+  "freeze_auth",
+  "vol_5m_usd",
+  "buys_5m",
+  "sells_5m",
+  "net_5m_usd",
+  "risk_src",
+  "launchpad",
+  "curve_bps",
+  "vol_1h_usd",
+  "chg_4h_bps",
+  "buys_24h",
+  "sells_24h",
+  "buys_1h",
+  "sells_1h"
+ ],
+ "row": [
+  "solana",
+  "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+  "DJT",
+  "Trump Media & Technology Group Corp. Common Stock - Backpack Sec",
+  false,
+  null,
+  null,
+  1788976680,
+  "5.67575686585",
+  "1248766.40071",
+  "16204380.3791",
+  -30,
+  21,
+  6,
+  "561882.088225",
+  71294,
+  2298,
+  "jupiter",
+  1793698141425,
+  "6wEAMnRmjvUhEPH3WvbVQxCARSJ6AVESRZkGCa9YPq3Q",
+  null,
+  null,
+  null,
+  true,
+  true,
+  "6385.56357802",
+  67,
+  59,
+  "36.1887598042",
+  "jupiter",
+  null,
+  null,
+  "264214.577364",
+  null,
+  137505,
+  139377,
+  916,
+  977
+ ],
+ "rest": {
+  "decimals": 6,
+  "pool": null,
+  "risk": {
+   "mint_auth": {
+    "v": true,
+    "src": "chain",
+    "as_of_ms": 1793698148372
+   },
+   "freeze_auth": {
+    "v": true,
+    "src": "chain",
+    "as_of_ms": 1793698148372
+   },
+   "lp": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1793698148372
+   },
+   "top10_bps": {
+    "v": 2298,
+    "src": "jupiter",
+    "as_of_ms": 1793698141403
+   },
+   "dev_bps": {
+    "v": null,
+    "src": "jupiter",
+    "as_of_ms": 1793698141403
+   },
+   "snipers_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1793698148372
+   },
+   "holders": {
+    "v": 71294,
+    "src": "jupiter",
+    "as_of_ms": 1793698141403
+   },
+   "liq_usd": {
+    "v": "561882.088225",
+    "src": "jupiter",
+    "as_of_ms": 1793698141403
+   },
+   "age_s": {
+    "v": 4721461,
+    "src": "jupiter",
+    "as_of_ms": 1793698141403
+   },
+   "tax": {
+    "v": {
+     "buy_bps": 0,
+     "sell_bps": 0
+    },
+    "src": "chain",
+    "as_of_ms": 1793698148372
+   },
+   "honeypot": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1793698148372
+   },
+   "insiders_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1793698148372
+   },
+   "bundlers_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1793698148372
+   },
+   "fresh_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1793698148372
+   }
+  },
+  "route": "unknown"
+ }
+}

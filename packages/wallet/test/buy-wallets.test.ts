@@ -14,7 +14,8 @@ import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
-import { buyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
+import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "../src/pool/solana.ts";
+import { type ReaderOpts, buyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string; wallets: { name: string; c: string; l: string; j: number; path: string; address: string }[] };
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
@@ -107,7 +108,7 @@ const evmState = (): EvmState => {
 };
 const evmChain = (s: EvmState = evmState()): EvmChain => ({ blocks: [s] });
 const TOKENS = [USDC, TOKEN_X];
-const solReader = (c: SolChain = solChain(), e?: Edit): HoldingsReader => solanaHoldingsReader(solRpc(c, e));
+const solReader = (c: SolChain = solChain(), e?: Edit, o?: ReaderOpts): HoldingsReader => solanaHoldingsReader(solRpc(c, e), o);
 const evmReader = (c: EvmChain = evmChain(), e?: Edit, tokens = TOKENS): HoldingsReader => evmHoldingsReader(evmRpc(c, e), tokens);
 const view = (h: { native: bigint; tokens: ReadonlyMap<string, { amount: bigint; frozen: boolean }>; unreadable: readonly string[] }) =>
   [h.native, Object.fromEntries([...h.tokens].map(([k, v]) => [k, v.frozen ? `${v.amount} frozen` : v.amount])), h.unreadable];
@@ -373,8 +374,8 @@ test("EVM: only a revert (code 3) or no code makes a token unreadable; a lagging
   assert.deepEqual([r.failed, r.wallets[0]!.holdings.unreadable], [[], [USDC]]);
 });
 
-test("Solana: a re-read a backend refuses with -32016 is a failed round, and the next round reads again", async () => {
-  // round 1: getBalance at 100, the token reads at 101; round 2 (min 101): getBalance answers -32016; round 3: all at 101
+test("Solana: a re-read a backend refuses with -32016 is asked again a slot later, within SOL_LAG_SLOTS waits, never a failed round", async () => {
+  // round 1: getBalance at 100, the token reads at 101; round 2 (min 101): getBalance answers -32016; a slot later: all at 101
   let n = 0;
   const c: SolChain = { slot: 101, at: () => solState() };
   const e: Edit = (m, o, p) => {
@@ -385,19 +386,41 @@ test("Solana: a re-read a backend refuses with -32016 is a failed round, and the
     return o;
   };
   log.length = 0;
-  const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c, e) }]);
+  const waits: number[] = [];
+  const opts: ReaderOpts = { sleep: async (ms) => void waits.push(ms) };
+  const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c, e, opts) }]);
   assert.deepEqual(r.failed, []);
   assert.equal(r.wallets[0]!.holdings.native, 5_000_000n);
-  assert.equal(log.length, 9, "three rounds of three");
+  assert.equal(log.length, 9, "three reads of three");
+  assert.deepEqual(waits, [SOL_LAG_WAIT_MS], "one wait of a slot");
+  // a backend behind for more than SOL_HOLDINGS_ROUNDS reads, within SOL_LAG_SLOTS slots: read, never refused
+  let k = 0;
+  const behind: Edit = (m, o, p) => {
+    const min = (p[p.length - 1] as { minContextSlot?: number }).minContextSlot;
+    if (min === undefined && m === "getBalance") return { ...(o as object), context: { slot: 100 } };
+    if (min !== undefined && m === "getBalance" && ++k <= SOL_LAG_SLOTS) throw new Error("RPC error -32016: Minimum context slot has not been reached");
+    return o;
+  };
+  waits.length = 0;
+  const b = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c, behind, opts) }]);
+  assert.deepEqual(b.failed, []);
+  assert.equal(waits.length, SOL_LAG_SLOTS);
   // a backend that never catches up: the bound, then the refusal
+  // its getBalance lags past the budget's SOL_LAG_SLOTS + 1 calls end in another error, so a reader with no budget fails,
+  // never spins
+  let lagged = 0;
   const never: Edit = (m, o, p) => {
     const min = (p[p.length - 1] as { minContextSlot?: number }).minContextSlot;
     if (min === undefined && m === "getBalance") return { ...(o as object), context: { slot: 100 } };
+    if (min !== undefined && m === "getBalance" && ++lagged > SOL_LAG_SLOTS + 1) throw new Error("RPC error -32005: the fake's lag ran past the budget");
     if (min !== undefined) throw new Error("RPC error -32016: Minimum context slot has not been reached");
     return o;
   };
-  const f = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c, never) }]);
-  assert.deepEqual(f.failed, [{ pool: "sol", error: `wallet 0: its reads met at no one slot in ${SOL_HOLDINGS_ROUNDS} rounds` }]);
+  waits.length = 0;
+  const f = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c, never, opts) }]);
+  assert.equal(f.failed.length, 1);
+  assert.match(f.failed[0]!.error, /^wallet 0: \w+: rpc error -32016$/);
+  assert.equal(waits.length, SOL_LAG_SLOTS, "the budget, then the refusal");
 });
 
 test("the helper's Solana reader is paced in the kit's provider queue: a burst of Ws is spread over the limit's window", async () => {

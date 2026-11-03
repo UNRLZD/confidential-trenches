@@ -1,9 +1,17 @@
 // node --test apps/helper/src/proxy/proxy.test.ts: the proxy (markets paper H2.1-H2.3, H7) with a fake vendor. Keys
 // come only from the environment and never come back; only allowlisted paths are served; a vendor that fails, holds
-// back (429) or answers anything but JSON answers 503 upstream; only public lists are cached, never a quote.
+// back past a short wait answers 429 with its reset, one that answers anything but JSON answers 503 upstream; only public lists are cached, never a quote.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import * as proxyModule from "./proxy.ts";
 import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
+// read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
+const { checkVendorPlans } = proxyModule as unknown as { checkVendorPlans: (env: Record<string, string | undefined>) => void };
+const { PROXY_BUDGETS, proxyBudgetEnv } = proxyModule as unknown as { PROXY_BUDGETS: Record<string, { total: number; perClient: number; reserve?: number }>; proxyBudgetEnv: (v: string) => string };
+// the mechanism tests run on an explicit budget, so they read the same whatever the defaults are
+const PROXY_VENDOR_MAX = 300;
+const PROXY_CLIENT_MAX = 60;
+const WIDE = { PROXY_BUDGET_JUPITER: `${PROXY_VENDOR_MAX},${PROXY_CLIENT_MAX}` };
 import { VENDOR_NAMES, VENDORS } from "./vendors.ts";
 
 const ENV = {
@@ -175,7 +183,10 @@ test("an answer that holds one of our keys in any form is refused, never passed 
   assert.equal(b.status, 503);
 });
 
-test("429: the vendor is left alone until its reset; a short wait is waited once, a long one answers 503 at once", async () => {
+// card helper-abuse-limits (review finding 3): the helper is the vendor's one client, so a vendor's 429 holds the
+// vendor until its reset and every caller is told the seconds left as a 429 (at be4b353 the hold answered 503; at
+// 06a656f the next caller still reached the vendor)
+test("429: the vendor is held until its reset (at most a minute); a short reset is waited once by that request; a long one answers every caller 429 with the seconds left, code only, and nothing reaches the vendor inside it", async () => {
   const c = clock();
   const f = vendor((_, n) => (n === 1 ? json({ e: "slow down" }, 429, { "retry-after": "0.5" }) : json({ ok: n })));
   const p = createProxy(ENV, { fetch: f.fetch, now: c.now, sleep: c.sleep });
@@ -185,17 +196,216 @@ test("429: the vendor is left alone until its reset; a short wait is waited once
   assert.equal(c.now() - t0, 500, "waited the vendor's Retry-After");
 
   const c2 = clock();
-  const g = vendor(() => json({ e: "slow down" }, 429, { "x-ratelimit-reset": "30" }));
+  let throttle = true;
+  const g = vendor(() => (throttle ? json({ e: "slow down, key fake" }, 429, { "x-ratelimit-reset": "30" }) : json({ ok: 1 })));
   const q = createProxy(ENV, { fetch: g.fetch, now: c2.now, sleep: c2.sleep });
-  assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 503);
-  assert.equal((await q.handle("lifi", "/v1/quote", "", "")).status, 503);
-  assert.equal(g.seen.length, 1, "no call while the vendor's reset is ahead");
-  assert.equal((await q.handle("relay", "/intents/status/v3", "", "")).status, 503, "relay's own (429ing fake) call");
-  c2.add(30_001);
-  g.seen.length = 0;
-  assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 503);
-  assert.equal(g.seen.length, 1, "after the reset the vendor is called again (and 429s again here)");
+  const t = await q.handle("lifi", "/v1/status", "", "", "heavy");
+  assert.deepEqual([t.status, t.headers["Retry-After"], JSON.parse(t.body)], [429, "30", { error: { code: "rate_limited" } }], "the code only: no vendor text");
+  assert.equal(g.seen.length, 1, "a long reset is not waited by the request");
+  throttle = false;
+  c2.add(10_000);
+  const h = await q.handle("lifi", "/v1/quote", "", "", "honest");
+  assert.deepEqual([h.status, h.headers["Retry-After"]], [429, "20"], "another caller waits out the vendor's reset too");
+  assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 429, "and so does the helper's own read");
+  assert.equal(g.seen.length, 1, "nothing reached the vendor inside its reset");
+  assert.equal((await q.handle("relay", "/quote/v2", "", "{}", "honest")).status, 200, "another vendor is not held");
+  c2.add(20_000);
+  assert.equal((await q.handle("lifi", "/v1/quote", "", "", "honest")).status, 200, "at the reset the vendor is open");
   assert.ok(WAIT_MAX_MS < 30_000);
+});
+
+test("each vendor is one budget callers draw from fairly: a heavy caller is throttled at its share while an honest one still goes; a cache hit counts in the caller's share only", async () => {
+  const c = clock();
+  const f = vendor(() => json({ ok: 1 }));
+  const p = createProxy({ ...ENV, ...WIDE }, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: c.sleep });
+  for (let i = 0; i < PROXY_CLIENT_MAX; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "heavy")).status, 200);
+  const h = await p.handle("jupiter", "/swap/v2/build", "n=x", "", "heavy");
+  assert.equal(h.status, 429);
+  assert.deepEqual(JSON.parse(h.body), { error: { code: "rate_limited" } });
+  const wait = Number(h.headers["Retry-After"]);
+  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 10, `Retry-After ${wait}`);
+  assert.equal(f.seen.length, PROXY_CLIENT_MAX, "the throttled draw never reached the vendor");
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=y", "", "honest")).status, 200, "an honest caller in the same window");
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "heavy")).status, 200, "another vendor is its own budget");
+  // a cached list: the first read draws; a hit reaches no vendor but counts in the reader's share, so a heavy reader
+  // of a hit is throttled at its share while the vendor sees one call
+  const before = f.seen.length;
+  for (let i = 0; i < PROXY_CLIENT_MAX; i++) assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 200, `read ${i}`);
+  assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 429, "past its share, a hit too");
+  assert.equal(f.seen.length, before + 1, "one vendor call for every read");
+  // readers enough that their hits, were they drawn from the vendor's total, would spend all of it
+  for (let r = 0; r < PROXY_VENDOR_MAX / PROXY_CLIENT_MAX; r++) for (let i = 0; i < PROXY_CLIENT_MAX; i++) await p.handle("jupiter", "/tokens/v2/recent", "", "", `reader-${r}`);
+  assert.equal(f.seen.length, before + 1, "still one vendor call");
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=w", "", "honest")).status, 200, "the hits took nothing from the vendor's total");
+  c.add(wait * 1000);
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=z", "", "heavy")).status, 200, "after the named wait the heavy caller goes again");
+  assert.ok(PROXY_CLIENT_MAX * 5 <= PROXY_VENDOR_MAX);
+});
+
+test("review F-C2: one address reading a cached proxy list 1000 times in one window meets a 429", async () => {
+  let t = 1_800_000_000_000;
+  let up = 0;
+  const big = JSON.stringify({ tokens: "x".repeat(250_000) });
+  const p = createProxy(WIDE, { now: () => (t += 1), fetch: async () => (up++, new Response(big, { status: 200, headers: { "content-type": "application/json" } })) });
+  let throttled = 0;
+  for (let i = 0; i < 1000; i++) if ((await p.handle("jupiter", "/tokens/v2/toptrending/1h", "", "", "203.0.113.67")).status === 429) throttled++;
+  assert.ok(throttled >= 1000 - PROXY_CLIENT_MAX, `${throttled} of 1000 cached reads throttled`);
+  assert.equal(up, 1, "one vendor call");
+});
+
+test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per client>\"), else its published limit's; a bad value stops the start naming the variable", async () => {
+  const M = 60_000; // every vendor's limit is a minute's
+  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M, reserve: 34 }, relay: { total: 50, perClient: 2, windowMs: M, reserve: 0 }, lifi: { total: 100, perClient: 2, windowMs: M, reserve: 0 }, oneclick: { total: 50, perClient: 2, windowMs: M, reserve: 0 } });
+  for (const v of VENDOR_NAMES) assert.ok(PROXY_BUDGETS[v]!.perClient < PROXY_BUDGETS[v]!.total, v);
+  assert.equal(proxyBudgetEnv("oneclick"), "PROXY_BUDGET_ONECLICK");
+  assert.throws(() => createProxy({ PROXY_BUDGET_RELAY: "8,8" }), /^Error: PROXY_BUDGET_RELAY must be/);
+  assert.throws(() => createProxy({ PROXY_BUDGET_LIFI: "secret-ish" }), (e: Error) => !e.message.includes("secret-ish"));
+  let t = 1_800_000_000_000;
+  const f = vendor(() => json({ ok: 1 }));
+  const p = createProxy({ PROXY_BUDGET_RELAY: "3,2" }, { fetch: f.fetch, now: () => (t += 1) });
+  for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "a");
+  assert.equal(f.seen.length, 2, "the share from the environment");
+  for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "b");
+  assert.equal(f.seen.length, 3, "the total from the environment");
+  for (let i = 0; i < 5; i++) await p.handle("jupiter", "/swap/v2/build", "", "", "a");
+  assert.equal(f.seen.length, 3 + PROXY_BUDGETS.jupiter!.perClient, "another vendor keeps its default");
+});
+
+// review F-D on the proxy: a vendor that keeps its published per-minute limit on a 60-second sliding window (the
+// helper's own Jupiter reads drawn too), and addresses at their full share until an honest first-time caller is
+// refused. At 06a656f's design budget (300 a window, 60 a caller) one or two addresses make the vendor throttle, which
+// holds the vendor for everyone; at the published defaults the vendor never throttles and it takes total / share.
+test("review F-D (proxy): at each vendor's published limit, no set of callers can make the vendor throttle; more addresses than today are needed to refuse an honest caller", async () => {
+  const PER_MIN = { jupiter: 60, relay: 50, lifi: 100, oneclick: 50 } as const;
+  const run = async (v: keyof typeof PER_MIN, env: Record<string, string>) => {
+    let t = 1_800_000_000_000;
+    const calls: number[] = [];
+    let throttledByVendor = 0;
+    const f = async () => {
+      while (calls.length > 0 && t - calls[0]! >= 60_000) calls.shift();
+      if (calls.length >= PER_MIN[v]) return (throttledByVendor++, json({ e: "slow" }, 429, { "retry-after": "60" }));
+      calls.push(t);
+      return json({ ok: 1 });
+    };
+    const p = createProxy(env, { fetch: f, now: () => (t += 1), sleep: async () => {} });
+    const path = { jupiter: "/swap/v2/build", relay: "/quote/v2", lifi: "/v1/quote", oneclick: "/v0/quote" }[v];
+    const body = v === "relay" || v === "oneclick" ? "{}" : "";
+    // the helper's own Jupiter reads (search at most 15 a minute, Discover's lists 15), here 5, drawn from its reserve
+    const own = v === "jupiter" ? 5 : 0;
+    for (let i = 0; i < own; i++) await p.handle(v, "/tokens/v2/search", `query=${i}`, "", undefined, true);
+    let n = 0;
+    for (; n < 50; n++) {
+      for (let i = 0; i < 200; i++) if ((await p.handle(v, path, `a=${i}`, body, `198.51.100.${n}`)).status !== 200) break;
+      if ((await p.handle(v, path, "h=1", body, `192.0.2.${n}`)).status !== 200) break; // a first-time caller each round
+    }
+    return { addresses: n + 1, throttledByVendor, own };
+  };
+  for (const v of VENDOR_NAMES) {
+    const today = await run(v, { [proxyBudgetEnv(v)]: "300,60" });
+    const now = await run(v, {});
+    assert.ok(today.throttledByVendor > 0, `${v} at 06a656f's budget: the vendor throttled, so it was held for everyone`);
+    assert.equal(now.throttledByVendor, 0, `${v}: the vendor never throttled`);
+    // each round an address takes its share and the honest caller one: refused once the rounds pass the total less the
+    // helper's own reserve (its own reads draw that, never the callers' part)
+    assert.equal(now.addresses, Math.floor((PROXY_BUDGETS[v]!.total - (PROXY_BUDGETS[v]!.reserve ?? 0)) / (PROXY_BUDGETS[v]!.perClient + 1)) + 1, v);
+    console.log(`  [F-D proxy] ${v}: ${now.addresses} addresses at the published default, ${today.addresses} at 06a656f's budget`);
+    assert.ok(now.addresses > today.addresses, `${v}: ${now.addresses} addresses, today ${today.addresses}`);
+  }
+});
+
+// re-check F-D (sustained): Jupiter Free (60 a sliding minute) for three minutes, addresses drawing the whole budget
+// at the last ms of each 10 s window and the first of the next (the most a sliding minute can hold under fixed windows),
+// with the helper's own Jupiter reads as deployed: Discover's three lists every 12 s through the 10 s cache
+// (data/solana/lists.ts) and one token search every 4 s (data/solana/token.ts JUP_GAP_MS).
+test("re-check F-D (sustained): at Jupiter Free's 60 a sliding minute, the helper's own reads and every caller together never make Jupiter throttle", async () => {
+  let t = 1_800_000_000_000;
+  const T0 = t;
+  const calls: number[] = [];
+  let refused = 0;
+  let peak = 0;
+  const f = async () => {
+    while (calls.length > 0 && t - calls[0]! >= 60_000) calls.shift();
+    if (calls.length >= 60) return (refused++, new Response("slow", { status: 429 }));
+    calls.push(t);
+    peak = Math.max(peak, calls.length);
+    return json({ ok: 1 });
+  };
+  const p = createProxy({}, { now: () => t, fetch: f, sleep: async (ms) => void (t += ms) });
+  let q = 0;
+  let own = 0;
+  let asked = 0;
+  for (let ms = 0; ms < 180_000; ms += 1) {
+    t = T0 + ms;
+    if (ms === 9_999 || (ms >= 10_000 && ms % 10_000 === 0))
+      for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) await p.handle("jupiter", "/swap/v2/build", `q=${q++}`, "", `198.51.100.${a}`);
+    if (ms % 12_000 === 0) for (const l of ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"]) (asked++, (await p.handle("jupiter", l, "limit=100", "", undefined, true)).status === 200 && own++);
+    if (ms % 4_000 === 0) (asked++, (await p.handle("jupiter", "/tokens/v2/search", `query=m${ms}`, "", undefined, true)).status === 200 && own++);
+  }
+  console.log(`  [F-D sustained] jupiter Free 3 min, 20 addresses at full draw + own reads: vendor peak ${peak}/60 s, vendor 429s ${refused}, own reads served ${own}/${asked}`);
+  assert.equal(refused, 0, "Jupiter never answered 429");
+  assert.equal(own, asked, "every own read was served: no caller can make Discover or the token page stale (fold 5)");
+  assert.ok(peak <= 60, `the plan is never passed: peak ${peak}`);
+});
+
+test("fold 5: the own-read reserve holds at any plan: a Developer key's 600 leaves callers 566 and the helper's own reads their 34; at Free 26 and 34", async () => {
+  for (const [env, total] of [[{ PROXY_BUDGET_JUPITER: "600,4" }, 600], [{}, 60]] as const) {
+    const f = vendor(() => json({ ok: 1 }));
+    const p = createProxy(env, { fetch: f.fetch, now: () => 1_800_000_000_000, sleep: async () => {} });
+    let callers = 0;
+    for (let a = 0; a < 200; a++) for (let i = 0; i < 4; i++) if ((await p.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
+    assert.equal(callers, total - 34, `callers' part at ${total}`);
+    assert.equal((await p.handle("jupiter", "/tokens/v2/search", "query=x", "")).status, 429, "an own read not marked reserved stops with the callers");
+    let own = 0;
+    for (let i = 0; i < 40; i++) if ((await p.handle("jupiter", "/tokens/v2/search", `query=${i}`, "", undefined, true)).status === 200) own++;
+    assert.equal(own, 34, `the reserve at ${total}`);
+    assert.equal(f.seen.length, total, "the vendor's limit, never past it");
+  }
+});
+
+test("re-check F-D: a retry after a vendor's short reset reaches the vendor again, so it draws from the total too", async () => {
+  const c = clock();
+  const f = vendor((_c, n) => (n === 1 ? json({ e: "slow" }, 429, { "retry-after": "0" }) : json({ ok: 1 })));
+  const p = createProxy({ PROXY_BUDGET_RELAY: "2,1" }, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "a")).status, 200, "served by the retry");
+  assert.equal(f.seen.length, 2);
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "b")).status, 429, "the call and its retry spent the total of 2");
+  assert.equal(f.seen.length, 2, "nothing past the total reached the vendor");
+});
+
+test("re-check F-D: a call joining one in flight reaches no vendor, so it draws only the caller's share", async () => {
+  const c = clock();
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const f = vendor(async () => (await gate, json({ list: [] })));
+  const p = createProxy({ PROXY_BUDGET_JUPITER: "36,1" }, { fetch: f.fetch, now: c.now, sleep: c.sleep }); // callers' part: 36 - 34 = 2
+  const a = p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", "a");
+  const b = p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", "b");
+  release();
+  assert.deepEqual([(await a).status, (await b).status], [200, 200]);
+  assert.equal(f.seen.length, 1, "one vendor call for both");
+  assert.equal((await p.handle("jupiter", "/tokens/v2/toptrending/1h", "limit=100", "", "c")).status, 200, "the total's second draw is still there");
+  assert.equal(f.seen.length, 2);
+});
+
+test("fold 6 (R5h): a reserved own read's retry after a vendor's short reset still draws on the reserve, with the callers' part full", async () => {
+  const c = clock();
+  const f = vendor((_c, n) => (n === 27 ? json({ e: "slow" }, 429, { "retry-after": "0" }) : json({ ok: 1 })));
+  const p = createProxy({}, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  let callers = 0;
+  for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await p.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
+  assert.equal(callers, 60 - 34, "the callers' part is full");
+  assert.equal((await p.handle("jupiter", "/tokens/v2/search", "query=x", "", undefined, true)).status, 200, "the own read is served by its retry");
+  assert.equal(f.seen.length, 28, "the call and its retry both reached the vendor");
+});
+
+test("fold 6 (re-check 4 finding 4): a vendor with no key needs its keyless plan named: the start stops, naming the variables only", () => {
+  const keys = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
+  assert.doesNotThrow(() => checkVendorPlans(keys));
+  for (const [key, budget] of [["JUPITER_API_KEY", "PROXY_BUDGET_JUPITER"], ["RELAY_API_KEY", "PROXY_BUDGET_RELAY"], ["LIFI_API_KEY", "PROXY_BUDGET_LIFI"], ["ONECLICK_JWT", "PROXY_BUDGET_ONECLICK"]] as const) {
+    for (const env of [{ ...keys, [key]: undefined }, { ...keys, [key]: "" }])
+      assert.throws(() => checkVendorPlans(env), (e: Error) => e.message === `${key} is unset: set it, or ${budget} to the plan without a key` && !Object.values(keys).some((k) => e.message.includes(k)), key);
+    assert.doesNotThrow(() => checkVendorPlans({ ...keys, [key]: "", [budget]: "100,2" }), `${key}: the keyless plan named`);
+  }
 });
 
 test("reset headers: seconds, an epoch in s or ms, an HTTP date; none means 1 s", () => {

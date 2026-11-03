@@ -8,8 +8,16 @@
 // digit for digit), never the caller's bytes, so a key the checker and the provider read differently (a repeated
 // "method", say) cannot carry an unlisted method; and content-type: application/json. No header of the caller.
 // What reaches the caller: the provider's status and JSON body. A provider that is down, slow, refusing our key (401,
-// 403), out of quota (429), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its
-// own URL's key in any form answers 503 upstream, so the device falls back to its own providers (H2.3).
+// 403), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its own URL's key in any
+// form answers 503 upstream, so the device falls back to its own providers (H2.3).
+// Throttling (card helper-abuse-limits, ../limits/limits.ts): each chain's provider is one budget every call draws
+// from, the helper's own reads included (RPC_BUDGET_<CHAIN>, default RPC_CHAIN_MAX requests in any 10 s, no caller
+// more than RPC_CLIENT_MAX of them a window, a batch drawing one per request in it), and where the provider also limits
+// one method (Solana's public endpoint, RPC_METHOD_MAX), each method a budget of its own drawn in the same step. The
+// totals sit at the provider's own limits, so no set of callers can make the provider throttle us; a draw past a share
+// or a total answers 429 rate_limited with the seconds until it would go ahead. If the provider throttles anyway (its 429), the helper, its one client, holds the chain until the reset
+// it named (at most a minute): every draw on that chain, the helper's own reads included, answers 429 with the seconds
+// left and nothing reaches the provider. A 503 is never a wait.
 //
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
@@ -18,12 +26,70 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { resetMs } from "../proxy/proxy.ts";
+import { budgetFromEnv, EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 
 export const RPC_ANSWER_MAX = 4 * 1024 * 1024; // a getMultipleAccounts of 100 accounts or an eth_getLogs page fits
 export const RPC_TIMEOUT_MS = 10_000; // NEAR send_tx waits for execution; the server's request timeout is 15 s
-export const RPC_PAUSE_MAX_MS = 60_000;
+/**
+ * Requests one chain's provider takes from every caller together per 10 s window, unless RPC_BUDGET_<CHAIN> names its
+ * plan's: the public Solana endpoint's published limit, "Maximum number of requests per 10 seconds per IP: 100"
+ * (solana-foundation/solana-com apps/docs/content/docs/en/references/clusters.mdx:153 at dd6c46a, "Mainnet rate
+ * limits", read 2026-11-03 08:31Z). The other chains' public endpoints publish no number (docs.base.org's connecting
+ * and faucet pages, docs.fastnear.com, read 08:33Z), so they default to the same, the most conservative known.
+ */
+export const RPC_CHAIN_MAX = 100;
+/**
+ * Requests one caller draws per chain per window, unless RPC_BUDGET_<CHAIN> says: what a device's one-transaction
+ * trade asks of one provider when it fills within its read burst, from the kit's own pattern
+ * (packages/kit/src/trade/solana/send.ts): the send (l.6-8), the burst of C = B/5 = 8 status reads over the keyless
+ * B = 40 (l.190-193), and a blockhash read, about 11, rounded up to 16. Six callers at their full share fill the public
+ * 100; a trade left undecided past its burst reads up to B - C = 32 statuses in a window (l.197-198), which only a
+ * keyed provider's larger RPC_BUDGET_<CHAIN> serves.
+ */
+export const RPC_CLIENT_MAX = 16;
+/**
+ * Requests of one method the public Solana endpoint takes in 10 s from every caller together: "Maximum number of
+ * requests per 10 seconds per IP for a single RPC: 40" (clusters.mdx:154, the same "Mainnet rate limits" list as
+ * RPC_CHAIN_MAX). Without it three callers at their share of one method (3 x 16 getSignatureStatuses) make the
+ * endpoint throttle, and its reset holds the chain for every caller. A keyed provider names its own as the third
+ * number of RPC_BUDGET_SOLANA, or none (two numbers: no limit per method).
+ */
+export const RPC_METHOD_MAX = 40;
+/**
+ * Requests per 10 s kept on each chain (its total and each method's) for the helper's own reads that serve every
+ * user, which only those reads may draw, whatever RPC_BUDGET_<CHAIN> says. Solana: Discover's curve reads, one
+ * getMultipleAccounts per 100 pump.fun mints (data/solana/lists.ts l.338), of at most 300 rows (three Jupiter lists of
+ * limit=100, READS), once per FRESH_MS 12 s refresh: 3 in any 10 s. The other chains: no own reads through here (the
+ * token watches and the pool senders read their own providers), so 0. The token page's reads are not in it: they are
+ * one per token a caller opens, so they draw that caller's share and stop at the total less this, as callers do.
+ */
+export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0 };
+/** Each chain's budget unless RPC_BUDGET_<CHAIN> says; only Solana's public endpoint publishes a limit per method. */
+export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?: number }>> = {
+  solana: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
+  base: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+  robinhood: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+  near: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+};
+/** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
+const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
+/** The whole seconds an EVM provider's -32005 in `answer` (one answer or a batch) asks to wait, 1 to RETRY_AFTER_MAX_S;
+ * 0 when there is none or the chain is not EVM. */
+function evmLimited(chain: RpcChain, answer: unknown): number {
+  if (!EVM_CHAINS.has(chain)) return 0;
+  let wait = 0;
+  for (const a of Array.isArray(answer) ? answer : [answer]) {
+    const e = (a as { error?: { code?: unknown; data?: { backoff_seconds?: unknown } } } | null)?.error;
+    if (e?.code !== EVM_LIMIT_CODE) continue;
+    const s = Number(e.data?.backoff_seconds);
+    wait = Math.max(wait, Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1);
+  }
+  return wait;
+}
+/** The environment variable naming a chain's budget, "<total>,<per client>[,<per method>]" per 10 s; the share at
+ * least RPC_BATCH_MAX, so a full batch can be served, and a method's at least that and at most the total. */
+export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase()}`;
 const ID_MAX = 128;
 
 /**
@@ -41,6 +107,7 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
 export type RpcAnswer = { status: number; body: string };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 type Deps = { fetch?: Fetch; now?: () => number };
+type Answer = RpcAnswer & { headers?: Record<string, string> };
 type Upstream = { url: string; forms: Buffer[] };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
@@ -113,7 +180,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const upstreams = readUpstreams(env);
-  const pausedUntil = new Map<RpcChain, number>();
+  const limits = Object.fromEntries(RPC_CHAINS.map((ch) => [ch, { ...budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE[ch] }), reserve: RPC_RESERVE[ch] }])) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
+  // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
+  const budget = upstreamBudget((key) => {
+    const [ch, method] = key.split(" ") as [RpcChain, string | undefined];
+    return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity, reserve: RPC_RESERVE[ch] };
+  }, now);
 
   async function readAnswer(r: Response): Promise<string | undefined> {
     if (Number(r.headers.get("content-length") ?? "0") > RPC_ANSWER_MAX) return undefined;
@@ -128,8 +200,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return Buffer.concat(chunks).toString("utf8");
   }
 
-  /** One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body. */
-  async function handle(chain: string, contentType: string | undefined, body: string): Promise<RpcAnswer> {
+  /**
+   * One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body, `client`
+   * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
+   * page) pass none: they draw from the provider's total, never a caller's share; `reserved` marks the ones RPC_RESERVE
+   * holds room for (Discover's), which alone may draw it.
+   */
+  async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
     if (Buffer.byteLength(body) > RPC_BODY_MAX) return error(413, "too_large");
@@ -158,7 +235,15 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return REFUSED(); // nesting too deep to write back
     }
 
-    if ((pausedUntil.get(c) ?? 0) > now()) return UPSTREAM();
+    // the provider's reset holds every caller, the helper's own reads too; then the call draws on the chain's total (a
+    // caller's share too) and each method's, a batch one per request in it, all or none
+    const held = budget.heldFor(c);
+    if (held > 0) return throttled(held);
+    const reqs = (Array.isArray(out) ? out : [out]) as { method: string }[];
+    const draws: [string, number][] = [[c, reqs.length]];
+    if (limits[c].perMethod !== undefined) for (const r of reqs) draws.push([`${c} ${r.method}`, 1]);
+    const wait = budget.takeEach(draws, client, false, reserved);
+    if (wait > 0) return throttled(wait);
     const up = upstreams[c];
     let r: Response;
     let text: string | undefined;
@@ -171,9 +256,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
       });
       if (r.status === 429) {
-        pausedUntil.set(c, now() + Math.min(Math.max(resetMs(r.headers, now()), 0), RPC_PAUSE_MAX_MS));
         await r.body?.cancel();
-        return UPSTREAM();
+        budget.hold(c, now() + upstreamRetryAfterS(r.headers, now()) * 1000);
+        return throttled(budget.heldFor(c));
       }
       text = await readAnswer(r);
     } catch {
@@ -181,10 +266,18 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM();
     if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return UPSTREAM();
+    let answer: unknown;
     try {
-      JSON.parse(text);
+      answer = JSON.parse(text);
     } catch {
       return UPSTREAM();
+    }
+    // an EVM provider's -32005 (limits.ts EVM_LIMIT_CODE) in any answer is its throttle, as its 429 is: the chain is held
+    // for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
+    const limited = evmLimited(c, answer);
+    if (limited > 0) {
+      budget.hold(c, now() + limited * 1000);
+      return throttled(budget.heldFor(c));
     }
     const b = Buffer.from(text, "utf8");
     if (up.forms.some((f) => b.includes(f))) return UPSTREAM();

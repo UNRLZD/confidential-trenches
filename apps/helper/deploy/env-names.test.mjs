@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createProxy } from "../src/proxy/proxy.ts";
+import { checkVendorPlans, createProxy } from "../src/proxy/proxy.ts";
 import { createRpc } from "../src/rpc/rpc.ts";
 import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
@@ -59,6 +59,8 @@ const noFee = { networkOf: () => null, quote: async () => { throw new Error("no 
 const noProxy = { handle: async () => ({ status: 503, headers: {}, body: "" }) };
 const noLists = { get: async () => ({ status: 503, body: "" }), warm: () => () => {} };
 export const ENV_READERS = {
+  // the start's check reads every vendor's key and budget; each read answers "set" so none stops it half way
+  checkVendorPlans: (env) => checkVendorPlans(new Proxy(env, { get: (t, k) => (t[k], "set") })),
   createProxy,
   createRpc,
   tokenWatchesFromEnv,
