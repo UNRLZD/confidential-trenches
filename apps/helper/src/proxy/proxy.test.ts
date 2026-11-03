@@ -228,7 +228,10 @@ test("each vendor is one budget callers draw from fairly: a heavy caller is thro
   for (let i = 0; i < PROXY_CLIENT_MAX; i++) assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 200, `read ${i}`);
   assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 429, "past its share, a hit too");
   assert.equal(f.seen.length, before + 1, "one vendor call for every read");
-  assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "honest")).status, 200, "the hits took nothing from the vendor's total");
+  // readers enough that their hits, were they drawn from the vendor's total, would spend all of it
+  for (let r = 0; r < PROXY_VENDOR_MAX / PROXY_CLIENT_MAX; r++) for (let i = 0; i < PROXY_CLIENT_MAX; i++) await p.handle("jupiter", "/tokens/v2/recent", "", "", `reader-${r}`);
+  assert.equal(f.seen.length, before + 1, "still one vendor call");
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=w", "", "honest")).status, 200, "the hits took nothing from the vendor's total");
   c.add(wait * 1000);
   assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=z", "", "heavy")).status, 200, "after the named wait the heavy caller goes again");
   assert.ok(PROXY_CLIENT_MAX * 5 <= PROXY_VENDOR_MAX);
