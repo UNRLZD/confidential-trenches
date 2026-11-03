@@ -26,9 +26,11 @@
 //   eth_getLogs takes a block range, not a hash (EIP-234's blockHash filter is one block a call, so a pool of N blocks
 //   would need N calls), so every page is a range that ends at or below the newest anchor; a log in either anchor's
 //   block must carry that anchor's hash, and both RPCs' lists must agree byte for byte (every field
-//   the device reads). Each RPC pages on its own: a range-cap error halves that RPC's page and tries again, down to
-//   one block, so no provider's cap (200 blocks on sepolia.base.org, 50,000 on publicnode, read 3 Nov 04:21Z) is a
-//   limit on the pool.
+//   the device reads). Each RPC pages on its own: only a provider's range cap (RANGE_CAP, its words read live) halves
+//   that RPC's page and tries again, down to one block, and a full page read doubles it again, so no provider's cap
+//   (200 blocks on sepolia.base.org, 50,000 on publicnode, read 3 Nov 05:35Z) is a limit on the pool. A log in the
+//   finalized anchor's block must carry its hash; one in the newest anchor's block that names another hash goes to the
+//   reorg-or-lie test below.
 // - The pool's state at the newest anchor, read with eth_call at its hash (EIP-1898) on both RPCs, first, before the
 //   logs (a pruning node keeps recent state only: Robinhood's publicnode about 30 s, so never at the finalized block):
 //   currentRoot, currentTreeSize, currentLabelRoot and
@@ -43,9 +45,15 @@
 //   that time is set (src/State.sol:198-209), so stateRootTimes(root) and labelRootTimes(labelRoot) read at the
 //   anchor on both RPCs must equal the cut's last leaf's block time. That is the pool's own record of the epoch root,
 //   readable without the cut block's historical state.
-// - A lagging RPC is a retry, never an answer: a tag block below beforeMs, an anchor block one RPC does not know yet,
-//   or a pool state call at a hash it does not know, waits EVM_LAG_WAIT_MS and reads again, at most EVM_LAG_TRIES
-//   times. Two RPCs that answer differently at one hash are refused at once.
+// - A lagging RPC is a retry, never an answer: a tag block below beforeMs, an anchor block one RPC does not know yet, a
+//   pool state call at a hash it does not know or no longer keeps (PRUNED), a log page past its own head (HEAD_LAG),
+//   or one RPC's logs a strict prefix of the other's lacking only logs past the finalized anchor (its log index a
+//   moment behind), waits EVM_LAG_WAIT_MS (ended at once by an abort) and reads again, at most EVM_LAG_TRIES times.
+//   Two RPCs that answer differently at one hash are refused at once. Each two-RPC read runs under one
+//   AbortController: when one side fails the other stops, and both settle before the read fails.
+// - Time (M373 (2)): now() is the newest block both RPCs agree on (evmAgreedBlock), never one RPC's word; bind's
+//   send-margin check takes the higher of the two RPCs' latest times (evmLatestHigh), so a lie can only refuse. The
+//   epoch's first block is searched below that agreed block, and bind reads the depth on that block's own chain.
 // - bind: the pool's context (src/PrivacyPool.sol:236; src/interfaces/IPrivacyPool.sol:26-51):
 //   keccak256(abi.encode(Withdrawal{processooor: the pool, data: abi.encode(RelayData)}, SCOPE)) mod p, RelayData
 //   exactly 192 bytes (src/PrivacyPool.sol:150-153): recipient W, feeRecipient (the pinned one), feeCap (the epoch's
@@ -228,11 +236,29 @@ export function checkEvmRpcs(rpcs: unknown): asserts rpcs is Rpcs {
   if (solanaSameProvider(rpcs[0], rpcs[1])) throw new Error("rpcs: one provider twice is one read");
 }
 
-async function both<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
+/**
+ * f on both RPCs at once, under one AbortController: when one side fails (or the caller aborts) the other is aborted
+ * too, and both are settled before the first error is thrown, so a failed read leaves nothing running behind it.
+ */
+async function both<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   signal?.throwIfAborted();
-  const r = await Promise.all([f(rpcs[0], 0), f(rpcs[1], 1)]);
-  signal?.throwIfAborted();
-  return r;
+  const ac = new AbortController();
+  const stop = () => ac.abort(signal!.reason);
+  signal?.addEventListener("abort", stop, { once: true });
+  let first: { e: unknown } | null = null;
+  const side = (k: number) => f(rpcs[k]!, k, ac.signal).catch((e: unknown) => {
+    first ??= { e };
+    ac.abort(e);
+    throw e;
+  });
+  try {
+    const rs = await Promise.allSettled([side(0), side(1)]);
+    if (first !== null) throw (first as { e: unknown }).e;
+    signal?.throwIfAborted();
+    return [(rs[0] as PromiseFulfilledResult<T>).value, (rs[1] as PromiseFulfilledResult<T>).value];
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
 }
 
 function blockOf(v: unknown, what: string): EvmBlock | null {
@@ -252,7 +278,22 @@ const getBlock = async (rpc: EvmRpc, at: string, what: string): Promise<EvmBlock
 const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such block/i;
 /** A JSON-RPC error that is a provider's cap on one eth_getLogs call's range or size (read 3 Nov 04:21Z: "eth_getLogs is
  * limited to a 200 range", "exceed maximum block range: 50000", "query exceeds max results 20000"). */
-const RANGE_CAP = /block range|limited to a?\s?\d+\s?(block )?range|range (is )?too (large|wide)|max(imum)? results|more than \d+ results|response size|query exceeds|too many (results|logs|blocks)/i;
+// The texts read live on 3 Nov 05:35Z (eth_getLogs over 1,000,000 and 100,000 blocks, then to 50 blocks past the
+// head): sepolia.base.org "-32614: eth_getLogs is limited to a 200 range" and, past its head, "-32602: block range
+// extends beyond current head block: requested 53811322, head 53811277"; base-sepolia-rpc.publicnode.com and
+// robinhood-sepolia-rpc.publicnode.com "-32701: exceed maximum block range: 50000", and past the head "-32602: block
+// range extends beyond current head block: ..." and "-32000: invalid block range params"; rpc.testnet.chain.robinhood.com
+// answered every range (no cap). Other providers' wording, as their docs give it: "limited to a 10,000 range"
+// (thousands separators), "query returned more than 10000 results", "Log response size exceeded".
+/** A provider's cap on one eth_getLogs page: only this shrinks the page. */
+const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max(imum)? block range|max(imum)? block range (is|of)? ?[\d,]+|range (is )?too (large|wide)|returned more than [\d,]+ results|more than [\d,]+ (results|logs)|response size (exceeded|is larger)|too many (results|logs|blocks)/i;
+/** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
+const HEAD_LAG = /beyond (the )?current head|invalid block range params|after last accepted block|is ahead of (the )?(head|latest)/i;
+// Read live on 3 Nov 05:35Z, eth_call at a block 20,000 blocks back by hash: rpc.testnet.chain.robinhood.com and
+// robinhood-sepolia-rpc.publicnode.com "-32000: historical state <root> is not available"; geth's own is "missing trie
+// node".
+/** A pruning node's answer for state it no longer keeps: a lag, so the retry reads at a newer anchor. */
+const PRUNED = /missing trie node|historical state \S* ?is not available|state \S* ?is not available|state (has been|was) pruned/i;
 
 /** One pool view's 32-byte answer, by eth_call at a block hash (EIP-1898). */
 async function view(rpc: EvmRpc, pool: string, data: string, blockHash: string, what: string): Promise<bigint> {
@@ -261,6 +302,7 @@ async function view(rpc: EvmRpc, pool: string, data: string, blockHash: string, 
     r = await rpc("eth_call", [{ to: pool, data: `0x${data}` }, { blockHash }]);
   } catch (e) {
     if (UNKNOWN_BLOCK.test(String((e as Error)?.message ?? e))) lag(`${what}: the RPC does not know block ${blockHash} yet`);
+    if (PRUNED.test(String((e as Error)?.message ?? e))) lag(`${what}: the RPC no longer keeps the state of block ${blockHash}`);
     throw e;
   }
   if (typeof r !== "string" || !H32.test(r)) throw new Error(`${what}: not one 32-byte word`);
@@ -308,24 +350,35 @@ function decodeLog(raw: unknown, pool: string, from: bigint, to: bigint, what: s
   return { block, blockHash, logIndex, state, label, bytes };
 }
 
-/** One RPC's pool logs over from..to, in pages that end at or below `to`; a range-cap error halves its page. */
+/**
+ * One RPC's pool logs over from..to, in pages that end at or below `to`. Only a provider's range cap (RANGE_CAP)
+ * halves its page; after a full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest
+ * size refused in this read, so a cap lifted or a page shrunk long ago comes back. A page past the provider's head
+ * (HEAD_LAG) is a lag.
+ */
 async function readLogs(rpc: EvmRpc, k: number, pool: string, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal): Promise<Ev[]> {
   const out: Ev[] = [];
+  let refused: bigint | null = null;
   for (let at = from; at <= to; ) {
     signal?.throwIfAborted();
-    const end = at + page[k]! - 1n < to ? at + page[k]! - 1n : to;
+    const size = page[k]!;
+    const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
     try {
       got = await rpc("eth_getLogs", [{ address: pool, topics: [[TOPIC_DEPOSITED, TOPIC_WITHDRAWN, TOPIC_BOUGHT]], fromBlock: tag(at), toBlock: tag(end) }]);
     } catch (e) {
-      if (RANGE_CAP.test(String((e as Error)?.message ?? e)) && end > at) {
-        page[k] = (end - at + 1n) / 2n;
+      const m = String((e as Error)?.message ?? e);
+      if (RANGE_CAP.test(m) && end > at) {
+        refused = end - at + 1n;
+        page[k] = refused / 2n;
         continue;
       }
+      if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       throw e;
     }
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
     out.push(...got.map((g, i) => decodeLog(g, pool, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
+    if (end - at + 1n === size && size * 2n <= EVM_LOG_PAGE_BLOCKS && (refused === null || size * 2n < refused)) page[k] = size * 2n;
     at = end + 1n;
   }
   for (let i = 1; i < out.length; i++) {
@@ -343,8 +396,10 @@ type Round = { anchor: EvmBlock; events: Ev[] };
 
 export type EvmTreeSync = {
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: EvmTreesOpts): Promise<PoolTrees>;
-  /** The state tree's depth after every leaf in blocks up to `block` (the pool's currentTreeDepth at that block). */
-  depthAt(block: bigint, signal?: AbortSignal): Promise<number>;
+  /** The state tree's depth after every leaf in blocks up to `block` (the pool's currentTreeDepth at that block). With
+   * `hash`, `block` must still be that block on both RPCs after the round (the round's chain), else a lag; then the
+   * caller retries (it re-reads the block), not depthAt. */
+  depthAt(block: bigint, signal?: AbortSignal, hash?: string): Promise<number>;
 };
 
 export type EvmSyncArgs = {
@@ -372,6 +427,24 @@ async function retryLag<T>(f: () => Promise<T>, sleep: (ms: number, signal?: Abo
       await sleep(EVM_LAG_WAIT_MS, signal);
     }
   }
+}
+
+/**
+ * The block both RPCs agree on at a tag: the lower of their `at` blocks, read by number on both, one hash, time and
+ * number on both. Two blocks at that height are a retry at EVM_NEWEST_TAG (two honest RPCs may hold two blocks of one
+ * height for a moment) and refused at a final tag (a final block never moves).
+ */
+export async function evmAgreedBlock(rpcs: readonly [EvmRpc, EvmRpc], at: string, signal?: AbortSignal): Promise<EvmBlock> {
+  const tops = await both(rpcs, (rpc, k) => getBlock(rpc, at, `rpc ${k} ${at} block`), signal);
+  if (tops[0] === null || tops[1] === null) return lag(`an RPC has no ${at} block`);
+  const n = tops[0].number < tops[1].number ? tops[0].number : tops[1].number;
+  const [x, y] = await both(rpcs, (rpc, k) => getBlock(rpc, tag(n), `rpc ${k} block ${n}`), signal);
+  if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${n} yet`);
+  if (x.hash !== y.hash || x.timestamp !== y.timestamp || x.number !== n || y.number !== n) {
+    if (at === EVM_NEWEST_TAG) return lag(`the two RPCs hold different blocks at ${n}`);
+    throw new Error(`the two RPCs hold different blocks at ${n}`);
+  }
+  return x;
 }
 
 /** LeanIMT's depth for `size` leaves: ceil(log2(size)), 0 for 0 or 1 (lean-imt InternalLeanIMT _insert). */
@@ -408,20 +481,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     return r;
   };
 
-  /** The lower tag block of the two RPCs, by number on both, with one hash. */
-  async function anchorAt(at: string, signal?: AbortSignal): Promise<EvmBlock> {
-    const tops = await both(rpcs, (rpc, k) => getBlock(rpc, at, `rpc ${k} ${at} block`), signal);
-    if (tops[0] === null || tops[1] === null) return lag(`an RPC has no ${at} block`);
-    const n = tops[0].number < tops[1].number ? tops[0].number : tops[1].number;
-    const [x, y] = await both(rpcs, (rpc, k) => getBlock(rpc, tag(n), `rpc ${k} block ${n}`), signal);
-    if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${n} yet`);
-    if (x.hash !== y.hash || x.timestamp !== y.timestamp || x.number !== n || y.number !== n) {
-      // at `latest` two honest RPCs may hold two blocks of one height for a moment; a final block never moves
-      if (at === EVM_NEWEST_TAG) return lag(`the two RPCs hold different blocks at ${n}`);
-      throw new Error(`the two RPCs hold different blocks at ${n}`);
-    }
-    return x;
-  }
+  const anchorAt = (at: string, signal?: AbortSignal): Promise<EvmBlock> => evmAgreedBlock(rpcs, at, signal);
 
   /** One view on both RPCs at the anchor; the two answers must be one. */
   async function agreed(data: string, h: string, what: string, signal?: AbortSignal): Promise<bigint> {
@@ -475,11 +535,22 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     };
     let fresh: Ev[] = [];
     if (anchor.number > heldTo) {
-      const [x, y] = await both(rpcs, (rpc, k) => readLogs(rpc, k, pool, heldTo + 1n, anchor.number, page, signal), signal);
-      for (let i = 0; i < Math.max(x.length, y.length); i++)
-        if (x[i]?.bytes !== y[i]?.bytes) await refuse(`the two RPCs differ at log ${held.length + i} (blocks ${heldTo + 1n}..${anchor.number})`);
-      for (const e of x)
-        for (const b of [fin, anchor]) if (e.block === b.number && e.blockHash !== b.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${b.hash}`);
+      const [x, y] = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, pool, heldTo + 1n, anchor.number, page, sig), signal);
+      // a log in the finalized anchor's block names that block's hash, or it is refused; one in the newest anchor's
+      // block that names another hash is a reorg or a lie, told apart by refuse()
+      for (const e of [...x, ...y]) {
+        if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
+        if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
+      }
+      const i = x.findIndex((e, j) => e.bytes !== y[j]?.bytes);
+      const at = i >= 0 ? i : x.length < y.length ? x.length : -1;
+      if (at >= 0) {
+        // one RPC's list a strict prefix of the other's, every log it lacks past the finalized anchor: its log index
+        // is a moment behind its headers, a retry until both agree. Any other difference is a reorg or a lie.
+        const [short, long] = x.length < y.length ? [x, y] : [y, x];
+        if (at === short.length && long.slice(at).every((e) => e.block > fin.number)) lag(`rpc ${short === x ? 0 : 1}'s logs past block ${fin.number} are behind the other's`);
+        await refuse(`the two RPCs differ at log ${held.length + at} (blocks ${heldTo + 1n}..${anchor.number})`);
+      }
       fresh = x;
     }
     const events = [...held, ...fresh];
@@ -534,28 +605,41 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         return { stateTree, labelTree, stateRoot: stateTree.root!, labelRoot: labelTree.root! };
       }, sleep, signal));
     },
-    depthAt(block, signal) {
+    depthAt(block, signal, hash) {
       if (typeof block !== "bigint" || block < 0n) return Promise.reject(new Error("block: a block number"));
-      return serial(() => retryLag(async () => {
+      const once = async () => {
         const r = await round(signal);
         if (r.anchor.number < block) lag(`the newest agreed block ${r.anchor.number} is below block ${block}`);
+        if (hash !== undefined) {
+          const now = await both(rpcs, (rpc, k) => getBlock(rpc, tag(block), `rpc ${k} block ${block}`), signal);
+          if (now.some((b) => b === null || b.hash !== hash)) lag(`block ${block} is no longer ${hash} (a reorg)`);
+        }
         return depthOf(r.events.filter((e) => e.block <= block).length);
-      }, sleep, signal));
+      };
+      return serial(() => (hash === undefined ? retryLag(once, sleep, signal) : once()));
     },
   };
 }
 
-/** The pool's time: the lower of two RPCs' EVM_NEWEST_TAG block times, ms (a finalized block lags past a life). */
+/** The pool's time: the newest block both RPCs agree on (evmAgreedBlock at EVM_NEWEST_TAG), ms; never one RPC's word. */
 export async function evmNow(rpcs: readonly [EvmRpc, EvmRpc], signal?: AbortSignal): Promise<bigint> {
   checkEvmRpcs(rpcs);
+  return (await evmAgreedBlock(rpcs, EVM_NEWEST_TAG, signal)).timestamp * 1000n;
+}
+
+/** The higher of the two RPCs' latest block times, ms: for a check a lie may only make refuse (bind's send margin). */
+export async function evmLatestHigh(rpcs: readonly [EvmRpc, EvmRpc], signal?: AbortSignal): Promise<bigint> {
+  checkEvmRpcs(rpcs);
   const [x, y] = await both(rpcs, (rpc, k) => getBlock(rpc, EVM_NEWEST_TAG, `rpc ${k} ${EVM_NEWEST_TAG} block`), signal);
-  if (x === null || y === null) throw new Error(`an RPC has no ${EVM_NEWEST_TAG} block`);
-  return (x.timestamp < y.timestamp ? x.timestamp : y.timestamp) * 1000n;
+  if (x === null || y === null) return lag(`an RPC has no ${EVM_NEWEST_TAG} block`);
+  return (x.timestamp > y.timestamp ? x.timestamp : y.timestamp) * 1000n;
 }
 
 /**
- * The epoch's first block: the first whose timestamp * 1000 is at or after `epochStartMs`, found on RPC 0 below its
- * EVM_NEWEST_TAG block, then it and the block before it read on both RPCs, one hash each.
+ * The epoch's first block: the first whose timestamp * 1000 is at or after `epochStartMs`, searched on RPC 0 at and
+ * below the newest block both RPCs agree on, then it and the block before it read on both RPCs, one hash each. RPC 0's
+ * block at a height it searched holding another hash now is a reorg under the search, and the two RPCs holding two
+ * blocks there a moment's fork: both a retry. One hash with two times or two base fees is refused.
  */
 export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartMs: bigint, signal?: AbortSignal): Promise<EvmBlock> {
   checkEvmRpcs(rpcs);
@@ -565,7 +649,7 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
     return b;
   };
   const after = (b: EvmBlock) => b.timestamp * 1000n >= epochStartMs;
-  let hi = await at(EVM_NEWEST_TAG);
+  let hi = await evmAgreedBlock(rpcs, EVM_NEWEST_TAG, signal);
   if (!after(hi)) return lag(`the ${EVM_NEWEST_TAG} block ${hi.number} is before ${epochStartMs}`);
   let lo: EvmBlock | null = null;
   for (let step = 1n; hi.number > 0n; step *= 2n) {
@@ -588,7 +672,9 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
   for (const want of [hi, lo]) {
     const [x, y] = await both(rpcs, (rpc, k) => getBlock(rpc, tag(want.number), `rpc ${k} block ${want.number}`), signal);
     if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${want.number} yet`);
-    if (x.hash !== want.hash || y.hash !== want.hash || y.timestamp !== want.timestamp || y.baseFeePerGas !== want.baseFeePerGas) throw new Error(`the two RPCs hold different blocks at ${want.number}`);
+    if (x.hash !== want.hash) return lag(`block ${want.number} moved under the search (a reorg)`);
+    if (y.hash !== want.hash) return lag(`the two RPCs hold different blocks at ${want.number}`);
+    if (y.timestamp !== want.timestamp || y.baseFeePerGas !== want.baseFeePerGas) throw new Error(`the two RPCs differ on block ${want.number} (${want.hash})`);
   }
   if (hi.baseFeePerGas === null) throw new Error(`block ${hi.number}: no base fee`);
   return hi;
@@ -648,12 +734,16 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
       if (typeof chunk !== "bigint" || chunk <= 0n || chunk >= U128) throw new Error("chunk: above 0 and below 2^128");
       if (typeof refundPrecommitment !== "bigint" || refundPrecommitment < 0n || refundPrecommitment >= VAULT_FIELD_P) throw new Error("refundPrecommitment: not a field element");
       if (typeof epochStartMs !== "bigint" || epochStartMs <= 0n || epochStartMs % EVM_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
-      const nowMs = await evmNow(a.rpcs, signal);
+      // the higher of the two latest times: one RPC's lie can only make this refuse
+      const nowMs = await evmLatestHigh(a.rpcs, signal);
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + EVM_LIFE_MS || deadlineMs > U64 || deadlineMs <= nowMs + EVM_SEND_MARGIN_MS)
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       // the device's own fee: the epoch's first block and the tree depth there, each read on both RPCs
-      const block = await retryLag(() => evmEpochBlock(a.rpcs, epochStartMs, signal), sleep, signal);
-      const depth = await sync.depthAt(block.number, signal);
+      // the depth on the epoch block's own chain: depthAt refuses (a retry) when that block is no longer at its height
+      const { block, depth } = await retryLag(async () => {
+        const block = await evmEpochBlock(a.rpcs, epochStartMs, signal);
+        return { block, depth: await sync.depthAt(block.number, signal, block.hash) };
+      }, sleep, signal);
       const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth });
       if (typeof fee !== "bigint" || fee < 0n) throw new Error("epochFee: not a fee");
       const f = await a.relayFee(epochStartMs, signal);
