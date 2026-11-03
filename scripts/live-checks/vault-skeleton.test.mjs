@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, wasmProblems, networkProblems, operatorProblems, DEPLOYMENT, RPCS, TESTNET_USDC } from "./vault-skeleton.mjs";
+import { check, wasmProblems, networkProblems, operatorProblems, DEPLOYMENT, RPCS, TESTNET_USDC, TEST_BUILD_MARK } from "./vault-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const load = (f) => JSON.parse(readFileSync(path.join(HERE, f), "utf8"));
@@ -41,9 +41,10 @@ test("recorded good answer: the deployed skeleton, keys [] on two RPCs, its code
   assert.equal(new Set(answers.map((a) => a.url)).size, 2);
   const r = await check({ deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 16);
+  assert.equal(r.lines.length, 18);
   assert.equal(r.lines.filter((l) => /key list is \[\] on .*: 0 key\(s\)/.test(l) && l.startsWith("ok ")).length, 2);
   assert.equal(r.lines.filter((l) => /^ok  withdraw is exported only with on_payout on .*: yes$/.test(l)).length, 2);
+  assert.equal(r.lines.filter((l) => /^ok  not the out-of-gas test build on .*: no test mark$/.test(l)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  code sha256 ${deployment.wasm_sha256} equals`)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  config() answers on `) && l.includes(`asset ${deployment.asset}`)).length, 2);
   const reg = answers.filter((a) => a.params.method_name === "storage_balance_of");
@@ -230,4 +231,39 @@ test("the live check FAILs a deployed wasm exporting withdraw without on_payout"
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD "));
   assert.ok(bad.length > 0 && bad.every((l) => /withdraw is exported only with on_payout on .*: withdraw without on_payout/.test(l)), bad.join("\n"));
+});
+
+// VT-S17's out-of-gas test build (contracts/vault feature test-on-payout-out-of-gas): its on_payout logs
+// src/payout.rs OUT_OF_GAS_BUILD_MARK, so the mark is in its bytes. A wasm holding it is refused (testBuild), so the
+// deploy script never deploys that build and this check fails it on chain; tests/s17.rs runs the refusal on the real
+// build.
+function withMark(wasm) {
+  const payload = [4, ...Buffer.from("mark"), ...Buffer.from(TEST_BUILD_MARK)];
+  return Buffer.concat([wasm, Buffer.from([0, payload.length, ...payload])]);
+}
+
+test("bad answer: a wasm holding the out-of-gas test build's mark is refused; the mark is the vault's own constant", () => {
+  const src = readFileSync(path.join(HERE, "../../contracts/vault/src/payout.rs"), "utf8");
+  const m = src.match(/pub const OUT_OF_GAS_BUILD_MARK: &str = "([^"]+)";/);
+  assert.ok(m, "contracts/vault/src/payout.rs names no OUT_OF_GAS_BUILD_MARK");
+  assert.equal(m[1], TEST_BUILD_MARK);
+  const clean = wasmExporting("promise_result", [...SPEND_ONLY, "on_payout"]);
+  assert.deepEqual(wasmProblems(clean).testBuild, []);
+  const marked = wasmProblems(withMark(clean));
+  assert.deepEqual([marked.banned, marked.promises, marked.exports, marked.withdrawWithoutPayout], [[], [], [], []]);
+  assert.deepEqual(marked.testBuild, [TEST_BUILD_MARK]);
+});
+
+test("the live check FAILs a deployed wasm holding the out-of-gas test build's mark", async () => {
+  // the good answer with view_code's result replaced by such a wasm and the record's sha256 set to it, so only this
+  // rule can fail
+  const wasm = withMark(wasmExporting("promise_result", [...SPEND_ONLY, "on_payout"]));
+  const sha = (await import("node:crypto")).createHash("sha256").update(wasm).digest("hex");
+  const answers = load("vault-skeleton.answers.json").map((a) =>
+    a.params?.request_type === "view_code" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_base64: wasm.toString("base64") } } } : a,
+  );
+  const r = await check({ deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD "));
+  assert.ok(bad.length === 2 && bad.every((l) => /^BAD not the out-of-gas test build on .*: holds "blindfill-vault test build: on_payout runs out of gas"$/.test(l)), bad.join("\n"));
 });
