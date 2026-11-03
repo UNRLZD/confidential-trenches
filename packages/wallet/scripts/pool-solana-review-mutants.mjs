@@ -1,7 +1,7 @@
 // node packages/wallet/scripts/pool-solana-review-mutants.mjs (card notes-per-pool-sol): the Opus review's 40 mutants of
 // bd8dea0, find strings mapped to fold 3's code; each runs the whole pool-solana.test.ts (any failing test kills it).
 import { readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { runTests } from "./mutant-run.mjs";
 import { fileURLToPath } from "node:url";
 const W = process.argv[2] ?? fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""); // packages/wallet
 const S = `${W}/src/pool/solana.ts`, R = `${W}/src/pool/solana-restore.ts`, K = `${W}/../kit/src/trade/solana/pool-buy.ts`;
@@ -56,13 +56,13 @@ for (const [id, f, find, repl] of M) {
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`${id} NOT ONCE: ${find.slice(0, 80)}`); continue; }
   writeFileSync(f, src.replace(find, repl));
-  const r = spawnSync("node", ["--test", "test/pool-solana.test.ts"], { cwd: W, encoding: "utf8", timeout: 180_000 });
+  const r = runTests(["test/pool-solana.test.ts"], { cwd: W, timeoutMs: 180_000 });
   writeFileSync(f, src);
-  const fail = Number((r.stdout.match(/ℹ fail (\d+)/) ?? [])[1] ?? -1);
   const names = [...r.stdout.matchAll(/^✖ (.+?) \(/gm)].map((m) => m[1].slice(0, 50));
-  const k = r.status !== 0 && fail > 0;
+  // HUNG: the whole file runs, so which test hangs is unknown: never counted as killed
+  const k = !r.hung && r.status !== 0 && r.fail > 0;
   if (k) killed++;
-  console.log(`${id} ${k ? "KILLED" : "SURVIVED"} fail=${fail} ${k ? names.join(" | ") : ""}`);
+  console.log(`${id} ${r.hung ? "HUNG" : k ? "KILLED" : "SURVIVED"} fail=${r.fail} ${k ? names.join(" | ") : ""}`);
 }
 console.log(`${killed}/${M.length} killed`);
 if (killed !== M.length) process.exitCode = 1;
