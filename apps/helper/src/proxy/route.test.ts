@@ -53,7 +53,7 @@ test("a proxied read: 200, the vendor's body, the source, the commit and the COR
   assert.match(String(r.headers["x-fetched-at"]), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["access-control-allow-origin"], APP);
-  assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At");
+  assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After"); // card helper-abuse-limits: every 429 wait is readable
   assert.equal(r.headers["vary"], "Origin");
   assert.equal(r.headers["access-control-allow-credentials"], undefined);
   assert.equal(r.headers["content-type"], "application/json; charset=utf-8");
