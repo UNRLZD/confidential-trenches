@@ -37,10 +37,12 @@ export const ACCOUNT = {
   way: "passkey",
   code_saved: true,
   vault_balance: "40.50",
-  pools: [{ chain: "base", asset: "USDC", balance: "7.25" }],
+  // the kit refuses a pool whose asset is not its chain's (base and robinhood hold ETH, solana SOL, near USDC): a SOL
+  // pool has no dollar value until a price read exists, so only the NEAR USDC one counts
+  pools: [{ chain: "near", asset: "USDC", balance: "7.25" }, { chain: "solana", asset: "SOL", balance: "0.5", ready: "0.5" }],
   wallets: [
     { chain: "solana", address: "Fixture1Wa11etSo1ana1111111111111111111111", role: "fresh", size: "20.12", state: "READY" },
-    { chain: "base", address: "0x00000000000000000000000000000000000f1x7e", role: "fresh", size: "10.12", state: "ARMING" },
+    { chain: "base", address: "0x00000000000000000000000000000000000f1fe7", role: "fresh", size: "10.12", state: "ARMING" },
   ],
   positions: [
     { chain: "solana", token: "Fixture1Token1111111111111111111111111111111", amount: "1000", cost: "3.06", wallets: ["Fixture1Wa11etSo1ana1111111111111111111111"] },
@@ -50,7 +52,7 @@ export const ACCOUNT = {
   held: [],
   ops: [],
 };
-/** ACCOUNT's total: 40.50 cash + 7.25 USDC pool + 20.12 READY + 10.12 on the way + 5.06 positions at cost (no price read). */
+/** ACCOUNT's total: 40.50 cash + 7.25 NEAR USDC pool + 20.12 READY + 10.12 on the way + 5.06 positions at cost (no price read). */
 export const TOTAL = "$83.05";
 export const WIDTHS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },

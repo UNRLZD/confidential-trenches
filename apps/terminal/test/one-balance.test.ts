@@ -50,7 +50,7 @@ const state = (over: Partial<SignpageState> = {}): SignpageState => ({
   orders: [],
   held: [],
   ops: [],
-  pools: [{ chain: "base", asset: "USDC", balance: "7.25" }],
+  pools: [{ chain: "near", asset: "USDC", balance: "7.25" }, { chain: "solana", asset: "SOL", balance: "0.5" }],
   ...over,
 });
 const snap = (s: SignpageState): SignpageClientSnapshot => ({ status: "ready", release: "signpage-v1", stale: false, state: s });
