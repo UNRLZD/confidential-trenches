@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { geckoBudget } from "../gecko.ts";
 import {
-  blockAt, blockRange, createEvmLists, SECOND_SPAN, FACTORIES, GT_BASE, GT_READS, LIST_MS, LISTS_PER_MIN, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, SETTLE_MS, STALE_MS, toRows,
+  blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, LIST_MS, LISTS_PER_MIN, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, SETTLE_MS, STALE_MS, toRows,
 } from "./lists.ts";
 
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
@@ -68,16 +68,16 @@ function recorded(opts: { gt?: number; rpcFails?: number[]; tamper?: (which: num
   return { fetch: f, calls };
 }
 
-test("the field list is the terminal's ROW_FIELDS; recorded GeckoTerminal answers give rows with exactly it, in wire forms", () => {
-  for (const f of ["gt-base-new.json", "gt-base-trending-5m.json", "gt-base-trending-1h.json"]) {
+test("the field list is the terminal's ROW_FIELDS; recorded GeckoTerminal answers (Base 11:35Z, Robinhood 11:46Z) give rows with exactly it, in wire forms", () => {
+  for (const [chain, f] of [["base", "gt-base-new.json"], ["base", "gt-base-trending-5m.json"], ["base", "gt-base-trending-1h.json"], ["robinhood", "gt-robinhood-new.json"], ["robinhood", "gt-robinhood-trending-5m.json"], ["robinhood", "gt-robinhood-trending-1h.json"]] as const) {
     const raw = JSON.parse(fx(f));
-    const { rows, created } = toRows("base", raw, NOW)!;
+    const { rows, created } = toRows(chain, raw, NOW)!;
     assert.ok(rows.length > 0 && rows.length <= raw.data.length, f);
     assert.equal(created.size, rows.length);
     for (const r of rows) {
       assert.deepEqual(Object.keys(r), [...TERMINAL_FIELDS], `${r.symbol}: keys`);
       for (const k of ROW_REQUIRED) assert.notEqual(r[k], undefined, `${r.symbol}: ${k}`);
-      assert.equal(r.chain, "base");
+      assert.equal(r.chain, chain);
       assert.match(r.token as string, /^0x[0-9a-f]{40}$/);
       assert.equal(r.src, "geckoterminal");
       assert.equal(r.launchpad, null, "a row is tagged only by the maker read");
@@ -162,6 +162,42 @@ test("recorded makers: at least two live tokens per Base pad come out with that 
   assert.ok(MAKERS.cases.some((c) => c.pad === null && c.code_before === "0x" && got.get(c.address) === null), "a token no listed factory made gets none");
 });
 
+const RH = JSON.parse(fx("maker-logs-robinhood.json")) as { recorded_at: string; head: number; block_times: Record<string, number>; cases: (Case & { creation_tx?: string; factory?: string })[] };
+
+/** Robinhood's recorded chain: block times (any provider, the head fixed at the recorded head) and each provider's
+ *  recorded eth_getLogs for each case's block range; a read the recording lacks is an error, as a provider's would be. */
+const rhRecorded = async (url: string, init: RequestInit): Promise<Response> => {
+  const which = MAKER_RPCS.robinhood.indexOf(url as never);
+  assert.ok(which >= 0, `unknown provider ${url}`);
+  const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: [Record<string, string> | string, boolean?] }[];
+  assert.ok(reqs.length <= (BATCH_MAX[url] ?? 10), `${url}: a batch within its cap`);
+  const err = (id: number) => ({ jsonrpc: "2.0", id, error: { code: -32000, message: "not recorded" } });
+  return new Response(JSON.stringify(reqs.map((q) => {
+    if (q.method === "eth_getBlockByNumber") {
+      const n = q.params[0] === "latest" ? RH.head : parseInt(q.params[0] as string, 16);
+      const t = RH.block_times[n];
+      return t === undefined ? err(q.id) : { jsonrpc: "2.0", id: q.id, result: { number: `0x${n.toString(16)}`, timestamp: `0x${t.toString(16)}` } };
+    }
+    assert.equal(q.method, "eth_getLogs");
+    const f = q.params[0] as Record<string, string>;
+    const c = RH.cases.find((x) => x.range[0] === parseInt(f.fromBlock!, 16) && x.range[1] === parseInt(f.toBlock!, 16));
+    if (c === undefined) return err(q.id);
+    const k = makerFilters("robinhood", ...c.range).findIndex((x) => JSON.stringify(x) === JSON.stringify(f));
+    const a = c.answers[which]?.[k];
+    return a === null || a === undefined ? err(q.id) : { jsonrpc: "2.0", id: q.id, result: a };
+  })), { status: 200 });
+};
+
+test("recorded Robinhood makers: at least two live tokens per pad (each creation tx cited) come out with that pad, two providers agreeing, the range covering every block of the pool's second (Bags' token made in the 10th); an unknown factory's token gets none", async () => {
+  for (const pad of new Set(FACTORIES.robinhood.map((f) => f.pad))) assert.ok(RH.cases.filter((c) => c.pad === pad).length >= 2, `${pad}: two recorded tokens`);
+  for (const c of RH.cases.filter((x) => x.creation_tx !== undefined)) assert.match(c.creation_tx!, /^0x[0-9a-f]{64}$/);
+  assert.ok(RH.cases.some((c) => c.pad === null), "a recorded token from an unknown factory");
+  const got = await readMakers("robinhood", rhRecorded, RH.cases.map((c) => ({ token: c.address, createdS: c.created_s })), Date.parse(RH.recorded_at), new Map());
+  for (const c of RH.cases) assert.equal(got.get(c.address), c.pad, `${c.symbol} ${c.address}`);
+  const bags = RH.cases.find((c) => c.address === "0x4dd4aad9887eb3b7615baace5fcd565c0f61008c")!;
+  assert.deepEqual([bags.pad, bags.range[1]], ["bags", 98761499], "made in the 10th block of its second");
+});
+
 test("an older token with a new pool: its creation block found from its code on chain, then its maker read there (two Clanker tokens tagged, Aerodrome's token none)", async () => {
   const { fetch } = recorded();
   for (const c of EARLIER.cases) {
@@ -244,9 +280,11 @@ test("the lists: tagged rows, the GeckoTerminal lane at LISTS_PER_MIN, the read 
   assert.equal((await down.get()).status, 503);
 });
 
-test("a chain with no fixed clock (Robinhood): the block range is found by reading block times, first block at the second and SECOND_SPAN after; a provider that refuses falls to the next; a time past the head is none", async () => {
+test("a chain with no fixed clock (Robinhood): the block range is every block whose time is the pool's second, found by reading block times; a provider that refuses falls to the next; a time past the head is none", async () => {
   const HEAD = 105_000_000;
-  const time = (n: number) => 1_700_000_000 + Math.floor(n / 4); // 4 blocks a second
+  // 16 blocks a second: Robinhood put Bags' creation of 0x4dd4aad9887eb3b7615baace5fcd565c0f61008c in block 98761499, the 10th
+  // block of its second (fixtures/maker-logs-robinhood.json, bags-1)
+  const time = (n: number) => 1_700_000_000 + Math.floor(n / 16);
   let reads = 0;
   const chain = (refuse: string[] = []) => async (url: string, init: RequestInit): Promise<Response> => {
     if (refuse.includes(url)) return new Response("{}", { status: 429 });
@@ -260,10 +298,10 @@ test("a chain with no fixed clock (Robinhood): the block range is found by readi
     })), { status: 200 });
   };
   const s = time(93_296_272);
-  const first = 93_296_272 - (93_296_272 % 4);
-  assert.deepEqual(await blockRange("robinhood", s, chain()), [first, first + SECOND_SPAN]);
+  const first = 93_296_272 - (93_296_272 % 16);
+  assert.deepEqual(await blockRange("robinhood", s, chain()), [first, first + 15]);
   assert.ok(reads <= 140, `reads ${reads}`);
-  assert.deepEqual(await blockRange("robinhood", s, chain([MAKER_RPCS.robinhood[1]])), [first, first + SECOND_SPAN], "the second provider refuses: the first answers");
+  assert.deepEqual(await blockRange("robinhood", s, chain([MAKER_RPCS.robinhood[1]])), [first, first + 15], "the second provider refuses: the first answers");
   assert.equal(await blockRange("robinhood", time(HEAD) + 5, chain()), null, "after the head");
   assert.equal(await blockRange("robinhood", s, chain([...MAKER_RPCS.robinhood])), null, "every provider refuses");
 });

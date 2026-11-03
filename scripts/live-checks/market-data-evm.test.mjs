@@ -2,7 +2,8 @@
 // (market-data-evm.answers.json). good: apps/helper at d8f408e run on a Mac against the real GeckoTerminal and Base
 // providers, with every RPC answer the maker re-read got: PASS. bad_not_deployed: the deployed helper before this card,
 // 404: FAIL. Made from the good answer: a tagged row's pad swapped for another table pad (wrong tag), an untagged row from
-// no listed factory given a tag, a row missing a frozen field, a pad no table row has: each FAIL.
+// no listed factory given a tag, a row missing a frozen field, a pad no table row has: each FAIL. good_robinhood: the same
+// helper with Robinhood served (13:58Z): PASS; a wrong tag and a Base pad on a Robinhood row: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -15,19 +16,53 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "market-data-evm.answers.json"), "utf8"));
 
 // a fetch that answers the helper's recorded answer and each RPC request with its recorded answer; an RPC request not
-// recorded fails the test, so the check can only ask what it asked when recorded
-const replay = (a) => async (url, init) => {
+// recorded fails the test, so the check can only ask what it asked when recorded. Block reads are answered per block from
+// any recorded read of it (a block's number and time never change), "latest" in the order recorded (Robinhood's head
+// moved between the reads)
+const blockReads = (a) => {
+  const byNumber = new Map();
+  const latest = [];
+  for (const r of a.rpc) {
+    const reqs = Array.isArray(r.request) ? r.request : [r.request];
+    const ans = Array.isArray(r.answer) ? r.answer : [r.answer];
+    for (const q of reqs) {
+      if (q?.method !== "eth_getBlockByNumber") continue;
+      const got = ans.find((x) => x?.id === q.id)?.result;
+      if (got?.number === undefined) continue;
+      if (q.params[0] === "latest") latest.push(got);
+      else byNumber.set(q.params[0], got);
+    }
+  }
+  return { byNumber, latest };
+};
+const replay = (a, chain = "base") => {
+  const used = new Set();
+  const blocks = blockReads(a);
+  let head = 0;
+  return async (url, init) => {
+  const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
+  if (Array.isArray(body) && body.length > 0 && body.every((q) => q.method === "eth_getBlockByNumber")) {
+    const out = body.map((q) => {
+      const got = q.params[0] === "latest" ? blocks.latest[Math.min(head++, blocks.latest.length - 1)] : blocks.byNumber.get(q.params[0]);
+      assert.ok(got, `unrecorded block ${q.params[0]}`);
+      return { jsonrpc: "2.0", id: q.id, result: got };
+    });
+    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+  }
   if (url.startsWith("https://api.confidential.unrealized.trade")) {
-    assert.equal(url, "https://api.confidential.unrealized.trade/v1/market/lists?chain=base");
+    assert.equal(url, `https://api.confidential.unrealized.trade/v1/market/lists?chain=${chain}`);
     assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
     return new Response(a.answer.body, { status: a.answer.status, headers: a.answer.headers });
   }
-  const hit = a.rpc.find((r) => r.url === url && JSON.stringify(r.request) === init.body);
+  const same = (r) => r.url === url && JSON.stringify(r.request) === init.body;
+  const i = a.rpc.findIndex((r, k) => !used.has(k) && same(r));
+  const hit = i >= 0 ? (used.add(i), a.rpc[i]) : a.rpc.findLast(same);
   assert.ok(hit, `unrecorded RPC request to ${url}`);
   return new Response(JSON.stringify(hit.answer), { status: hit.status, headers: { "content-type": "application/json" } });
+  };
 };
-const run = async (a) => {
-  const r = await read("base", undefined, replay(a));
+const run = async (a, chain = "base") => {
+  const r = await read(chain, undefined, replay(a, chain));
   r.readAt = a.answer.readAt; // the recorded read's own time, for the freshness windows
   let lists = {};
   try {
@@ -35,14 +70,14 @@ const run = async (a) => {
   } catch {
     lists = {};
   }
-  const makers = await rereadMakers("base", sample(lists), replay(a), [], Date.parse(a.answer.readAt));
-  return judge("base", r, makers);
+  const makers = await rereadMakers(chain, sample(lists), replay(a, chain), [], Date.parse(a.answer.readAt));
+  return judge(chain, r, makers);
 };
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
-const edit = (fn) => {
-  const s = JSON.parse(A.good.answer.body);
+const edit = (fn, g = A.good) => {
+  const s = JSON.parse(g.answer.body);
   fn(s);
-  return { ...A.good, answer: { ...A.good.answer, body: JSON.stringify(s) } };
+  return { ...g, answer: { ...g.answer, body: JSON.stringify(s) } };
 };
 const rows = (s) => ["new", "trending_5m", "trending_1h", "trending"].flatMap((k) => s.lists[k]);
 const each = (s, token, fn) => rows(s).filter((r) => r.token === token).forEach(fn);
@@ -89,4 +124,22 @@ test("a missing field, a pad no table row has, a stale read: each FAIL", async (
   assert.ok(bad(unknown).some((l) => l.includes("not a table pad")));
   const stale = await run({ ...A.good, answer: { ...A.good.answer, readAt: new Date(Date.parse(A.good.answer.readAt) + 11 * 60_000).toISOString() } });
   assert.equal(stale.ok, false);
+});
+
+test("good_robinhood: the local helper's Robinhood lists and their makers re-read on chain: PASS; a wrong tag and a Base pad on a Robinhood row: FAIL", async () => {
+  const g = A.good_robinhood;
+  const r = await run(g, "robinhood");
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.ok, true);
+  assert.ok(r.lines.filter((l) => /tagged "[a-z]+", the creation events/.test(l)).length >= 2, "tagged rows re-read");
+  const s0 = JSON.parse(g.answer.body);
+  const t = sample(s0.lists).find((x) => typeof x.launchpad === "string");
+  const other = t.launchpad === "pons" ? "clanker" : "pons";
+  const wrong = await run(edit((s) => each(s, t.token, (x) => (x.launchpad = other)), g), "robinhood");
+  assert.equal(wrong.ok, false);
+  assert.ok(bad(wrong).some((l) => l.includes(t.token) && l.includes(`tagged "${other}"`)), bad(wrong).join("\n"));
+  // a tag on an untagged row moves it into the tagged sample, which reorders the re-reads; Robinhood's block search
+  // depends on the head each read saw, so that case is replayed on Base above (the judge is the same for both chains)
+  const zora = await run(edit((s) => (s.lists.new[0].launchpad = "zora"), g), "robinhood");
+  assert.equal(zora.ok, false, "a Base pad on a Robinhood row");
 });

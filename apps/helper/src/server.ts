@@ -453,7 +453,7 @@ if (import.meta.main) {
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);
     // GeckoTerminal's one keyless budget (src/data/gecko.ts): the EVM lists' lane and the Solana token page's candles
-    const SERVED_EVM: readonly EvmChain[] = ["base"];
+    const SERVED_EVM: readonly EvmChain[] = ["base", "robinhood"];
     const listsLane = LISTS_PER_MIN * SERVED_EVM.length;
     const gecko = geckoBudget(Date.now, { lists: listsLane, pages: GT_LIMIT_PER_MIN - listsLane });
     const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko)]));

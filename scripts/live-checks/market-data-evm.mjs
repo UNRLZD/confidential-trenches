@@ -24,7 +24,7 @@ const KEY = "market-data-evm";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 /** The chains whose lists the helper serves (fold 1: Base). */
-export const CHAINS = ["base"];
+export const CHAINS = ["base", "robinhood"];
 export const FIELDS = [...ROW_FIELDS];
 export const LISTS = ["new", "trending", "trending_5m", "trending_1h", "graduating"];
 export const SAMPLE = 6;

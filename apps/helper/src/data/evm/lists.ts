@@ -98,8 +98,7 @@ const VIRTUALS_GRADUATED = "0x381d54fa425631e6266af114239150fae1d5db67bb65b4fa9e
 const VIRTUALS_PERSONA = "0xf9d151d23a5253296eb20ab40959cf48828ea2732d337416716e302ed83ca658"; // NewPersona(uint256 virtualId,address token,address dao,address tba,address veToken,address lp)
 const FLAUNCH_POOL = "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be94088bf5"; // PoolCreated(bytes32 indexed _poolId,address _memecoin,address _memecoinTreasury,uint256 _tokenId,bool _currencyFlipped,uint256 _flaunchFee,(string,string,string,uint256,address,uint24,uint256,bytes,bytes,address) _params)
 const PONS_LAUNCHED = "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607"; // TokenLaunched(address indexed token,address indexed curve,address indexed deployer,address pairToken,uint256 launchConfigId,uint256 graduationThreshold)
-const BAGS_CREATED = "0xf14df69f42401aca6b8db1f415b9c18809e05ea2ef9aa7ee50a47bc6c2f9c6ff"; // TokenCreated(address indexed token,address indexed curve,address indexed creator,address feeShare,bytes32 poolId,string name,string symbol,string metadataURI)
-const SPAWN_CREATED = "0x60122e78030aba0a2e4a67adb3e52b411343cc51778f919095d3fe394090c1b2"; // ERC20TokenCreated(address indexed tokenAddress)
+const BAGS_CREATED = "0x643b3b606052cbadac2f906ad0b462da99eda2a1d4f824d315d7f6edd3e4cced"; // TokenCreated(address indexed token,address indexed curve,address indexed creator,address feeShare,address partner,bytes32 poolId,string name,string symbol,string metadataURI)
 
 /** The launchpads' factories per chain; each address's cite is on its line. A pad with no row on a chain is one whose
  *  factory there is not published or could not be cited (the hand-back of card market-data-evm-lists names them). */
@@ -140,10 +139,10 @@ export const FACTORIES: Readonly<Record<EvmChain, readonly Factory[]>> = {
     { pad: "doppler", address: "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862", topic0: DOPPLER_CREATE, at: { word: 0 }, shared: true },
     // Pons v2: Sourcify chain 4663 [PonsV2LaunchFactory] (no Pons-own page found)
     { pad: "pons", address: "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", topic0: PONS_LAUNCHED, at: { topic: 1 } },
-    // docs.bags.fm/robinhood/overview.md: "BagsFactory | 0xe8Cc4431adF8b5A847C113EF0c6af9043219Cb37" (Sourcify: proxy, implementation 0x46aD6f53A3C26C8027826e2104cF0595b7b24D40 [BagsFactory])
+    // docs.bags.fm/robinhood/overview.md: "BagsFactory | 0xe8Cc4431adF8b5A847C113EF0c6af9043219Cb37" (a proxy; its EIP-1967 slot read 2026-11-03 13:41Z names
+    // implementation 0x7dfa0131f6c8626f199a2e33e49dfb5660e6ef1c, Sourcify [BagsFactory], whose TokenCreated adds `partner`: every one of the
+    // factory's 4449 creation logs on chain carries this topic0, none the older implementation 0x46aD6f53's)
     { pad: "bags", address: "0xe8Cc4431adF8b5A847C113EF0c6af9043219Cb37", topic0: BAGS_CREATED, at: { topic: 1 } },
-    // Spawn: Sourcify chain 4663 [SpawnFactory]
-    { pad: "spawn", address: "0x787E1DB46ab59dfE658F0f7032f0f7104Cd9c781", topic0: SPAWN_CREATED, at: { topic: 1 } },
   ],
 };
 
@@ -294,9 +293,9 @@ export function makerFilters(chain: EvmChain, from: number, to: number): Record<
 /** The logs of several filters' answers as one, or undefined when any is not a list. */
 export const joinLogs = (answers: readonly unknown[]): unknown[] | undefined => (answers.every(Array.isArray) ? (answers as unknown[][]).flat() : undefined);
 
-/** Blocks past the first one at a pool's second that the maker read covers on a chain with no fixed clock: Arbitrum
- *  chains make a block at most every 250 ms, so a second holds at most 4. */
-export const SECOND_SPAN = 8;
+/** The most blocks one second may hold before a block-time answer is refused (Robinhood put 10 or more in one second:
+ *  Bags' creation of 0x4dd4aad9887eb3b7615baace5fcd565c0f61008c is the 10th block of its second, block 98761499). */
+export const SECOND_BLOCKS_MAX = 1_000;
 const hexInt = (v: unknown): number | null => (typeof v === "string" && /^0x[0-9a-f]{1,13}$/i.test(v) ? parseInt(v, 16) : null);
 
 /** Block reads for the search: from the chain's second provider, or its first when the second refuses (a 429). The
@@ -321,9 +320,9 @@ async function blockTime(doFetch: Fetch, chain: EvmChain, n: number | "latest"):
 
 /**
  * The blocks a pool made at unix second `s` can be in: on a chain with a fixed clock its block and the one before; else
- * the first block whose time is at least `s` (searched between block 0 and the head,
- * in rounds of one batch of 10 block reads around the interpolated guess and across the interval, at most 12 rounds)
- * and the SECOND_SPAN after it. A wrong range
+ * every block whose time is `s`: from the first block whose time is at least `s` to the one before the first at least
+ * `s + 1` (each searched between block 0 and the head, in rounds of one batch of 10 block reads around the interpolated
+ * guess and across the interval, at most 12 rounds; the second search starts from the first's reads). A wrong range
  * finds no creation event, so it can only leave a row untagged, never tag it.
  */
 export async function blockRange(chain: EvmChain, s: number, doFetch: Fetch, known: Map<number, number> = new Map()): Promise<[number, number] | null> {
@@ -332,36 +331,45 @@ export async function blockRange(chain: EvmChain, s: number, doFetch: Fetch, kno
   if (BLOCK_CLOCK[chain] !== null || !Number.isSafeInteger(s)) return null;
   const [head, zero] = await Promise.all([blockTime(doFetch, chain, "latest"), known.has(0) ? { n: 0, t: known.get(0)! } : blockTime(doFetch, chain, 0)]);
   if (head === null || zero === null || s > head.t || s <= zero.t) return null;
-  let lo = zero; // lo.t < s <= hi.t
-  let hi = head;
-  // start from the closest blocks earlier searches read (a block's time never changes)
-  for (const [n, t] of known) {
-    if (t < s && n > lo.n && n < hi.n) lo = { n, t };
-    else if (t >= s && n < hi.n && n > lo.n) hi = { n, t };
-  }
   const keep = (m: { n: number; t: number }) => {
     if (known.size >= 4_096) known.delete(known.keys().next().value!);
     known.set(m.n, m.t);
   };
   keep(zero);
-  for (let round = 0; hi.n - lo.n > 1; round++) {
-    if (round >= 12) return null;
-    const g = lo.n + Math.round(((s - lo.t) * (hi.n - lo.n)) / Math.max(1, hi.t - lo.t));
-    const span = hi.n - lo.n;
-    const picks = [g, g - 2, g + 2, g - 32, g + 32, g - 1_024, g + 1_024, lo.n + Math.floor(span / 4), lo.n + Math.floor(span / 2), lo.n + Math.floor((3 * span) / 4)];
-    const ns = [...new Set(picks.map((n) => Math.min(hi.n - 1, Math.max(lo.n + 1, n))))].sort((a, b) => a - b);
-    const got = await blocks(doFetch, chain, ns);
-    for (const [k, r] of got.entries()) {
-      const o = obj(r);
-      const m = { n: hexInt(o.number), t: hexInt(o.timestamp) };
-      if (m.n !== ns[k] || m.t === null) return null;
-      keep(m as { n: number; t: number });
-      if (m.t < s && m.n > lo.n) lo = m as { n: number; t: number };
-      else if (m.t >= s && m.n < hi.n) hi = m as { n: number; t: number };
+  /** The first block whose time is at least `at` (zero.t < at <= head.t), or null when the reads fail. */
+  const firstAt = async (at: number): Promise<{ n: number; t: number } | null> => {
+    let lo = zero; // lo.t < at <= hi.t
+    let hi = head;
+    // start from the closest blocks earlier searches read (a block's time never changes)
+    for (const [n, t] of known) {
+      if (t < at && n > lo.n && n < hi.n) lo = { n, t };
+      else if (t >= at && n < hi.n && n > lo.n) hi = { n, t };
     }
-    if (lo.t >= hi.t && hi.n - lo.n > 1) return null; // times out of order: not a chain
-  }
-  return hi.t > s ? null : [hi.n, Math.min(head.n, hi.n + SECOND_SPAN)];
+    for (let round = 0; hi.n - lo.n > 1; round++) {
+      if (round >= 12) return null;
+      const g = lo.n + Math.round(((at - lo.t) * (hi.n - lo.n)) / Math.max(1, hi.t - lo.t));
+      const span = hi.n - lo.n;
+      const picks = [g, g - 2, g + 2, g - 32, g + 32, g - 1_024, g + 1_024, lo.n + Math.floor(span / 4), lo.n + Math.floor(span / 2), lo.n + Math.floor((3 * span) / 4)];
+      const ns = [...new Set(picks.map((n) => Math.min(hi.n - 1, Math.max(lo.n + 1, n))))].sort((a, b) => a - b);
+      const got = await blocks(doFetch, chain, ns);
+      for (const [k, r] of got.entries()) {
+        const o = obj(r);
+        const m = { n: hexInt(o.number), t: hexInt(o.timestamp) };
+        if (m.n !== ns[k] || m.t === null) return null;
+        keep(m as { n: number; t: number });
+        if (m.t < at && m.n > lo.n) lo = m as { n: number; t: number };
+        else if (m.t >= at && m.n < hi.n) hi = m as { n: number; t: number };
+      }
+      if (lo.t >= hi.t && hi.n - lo.n > 1) return null; // times out of order: not a chain
+    }
+    return hi;
+  };
+  const start = await firstAt(s);
+  if (start === null || start.t > s) return null; // no block at that second
+  const after = s + 1 > head.t ? null : await firstAt(s + 1);
+  if (s + 1 <= head.t && after === null) return null;
+  const end = after === null ? head.n : after.n - 1;
+  return end < start.n || end - start.n >= SECOND_BLOCKS_MAX ? null : [start.n, end];
 }
 
 const tokenWord = (token: string) => `000000000000000000000000${token.slice(2).toLowerCase()}`;
