@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The dry run of deploy.mjs on anvil forks of Base Sepolia and Robinhood testnet, on loopback. A stand-in for the
-# test wallet (anvil's first dev account, unlocked on the fork, no key here) funds exactly the need the script prints
-# and is the --return address:
+# test wallet (a fresh random address, given 1 ETH and impersonated on each fork, so no key here; anvil's dev accounts
+# carry EIP-7702 code on these testnets, and deploy.mjs refuses a --return with code) funds exactly the need the
+# script prints and is the --return address:
 #   1. each chain: the whole run (build, need, deploys, sweep), then the live check on two loopback URLs, recorded;
 #   2. Base Sepolia again, sent SIGTERM as soon as it is funded: a deploy already sent lands, no other is sent, the
 #      sweep runs; its record lists what landed, and the live check fails it (contracts missing).
@@ -12,7 +13,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT="${DRY_RUN_OUT:-$ROOT/contracts/pool-evm/out/dry-run}"
 rm -rf "$OUT" && mkdir -p "$OUT"
-STANDIN=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+STANDIN=0x$(openssl rand -hex 20)
 PIDS=()
 cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; wait 2>/dev/null || true; }
 trap cleanup EXIT
@@ -25,6 +26,8 @@ for chain in base-sepolia robinhood-testnet; do
   anvil --fork-url "$(fork_of "$chain")" --port "$port" --host 127.0.0.1 --silent >"$OUT/anvil-$chain.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 60); do cast chain-id --rpc-url "http://127.0.0.1:$port" >/dev/null 2>&1 && break; sleep 1; done
+  cast rpc anvil_setBalance "$STANDIN" 0xde0b6b3a7640000 --rpc-url "http://127.0.0.1:$port" >/dev/null
+  cast rpc anvil_impersonateAccount "$STANDIN" --rpc-url "http://127.0.0.1:$port" >/dev/null
   echo "dry-run: $chain fork at http://127.0.0.1:$port, chain id $(cast chain-id --rpc-url "http://127.0.0.1:$port"), block $(cast block-number --rpc-url "http://127.0.0.1:$port")"
 done
 
