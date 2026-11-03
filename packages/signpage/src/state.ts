@@ -25,7 +25,9 @@
 //   SIGNPAGE_MAX_ARRAY, the newest that many, then the oldest dropped until the answer's UTF-8 JSON fits
 //   SIGNPAGE_MAX_ANSWER_BYTES with ANSWER_ROOM to spare for its envelope: a longer one fails the client's checks and
 //   would leave the frame down.
-// - Nothing secret enters state: no words, key, seed, entropy, note value or passkey data. Every field is built here
+// - Nothing secret enters the state built here: no words, key, seed, entropy, note value or passkey data. The top-level
+//   page's state adds per-chain pool totals (src/pools.ts), never a note; read on each change of the store, the step
+//   between two totals can show a single note's value. Every field is built here
 //   from a checked value; nothing is spread from a record.
 // - A store the frame cannot open or read (IndexedDB blocked or missing) answers signed out, with no error text, and the
 //   next read tries again.

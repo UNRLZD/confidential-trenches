@@ -1,7 +1,9 @@
 // node --test apps/helper/src/server.test.ts: the helper answers /v1/health with the six parts and its commit, and
 // allows cross-origin reads for exactly the two origins (markets paper H7), on a real server on a free port.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { readFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -9,13 +11,20 @@ import { after, before, mock, test } from "node:test";
 import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
 import { PARTS, releaseOf } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
+import { createProxy } from "./proxy/proxy.ts";
+import { b58encode, createSolanaLists } from "./data/solana/lists.ts";
+import { randomBytes } from "node:crypto";
+import { heldPerClient, throttleOf, upstreamBudget } from "./limits/limits.ts";
+import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
 import { BIND_BODY_MAX, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
-import { FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
+import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+/** Test values for the vendor keys a start requires (proxy.ts checkVendorPlans); no real key. */
+const TEST_VENDOR_KEYS = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
 const APP = "https://confidential.unrealized.trade";
 const SIGN = "https://sign.confidential.unrealized.trade";
 let port = 0;
@@ -25,6 +34,10 @@ after(() => new Promise<void>((ok) => (server.closeAllConnections(), server.clos
 /** Closes a test's own server, from t.after: a failed assertion anywhere in the test can never leave it open and hold
  *  the file's process (a server closed already in the test's finally answers ERR_SERVER_NOT_RUNNING, which is fine). */
 const closeServer = (s: ReturnType<typeof createServer>) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok())));
+/** A server a helper function or a long test makes, closed when the file ends whatever failed (the same guard as t.after). */
+const owned = new Set<ReturnType<typeof createServer>>();
+const own = (s: ReturnType<typeof createServer>) => (owned.add(s), s);
+after(() => Promise.all([...owned].map(closeServer)).then(() => undefined));
 
 // raw http, so the Origin header is sent exactly as written (fetch would add or forbid some headers)
 function call(method: string, path: string, headers: Record<string, string> = {}, body?: string, to = port) {
@@ -273,7 +286,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const SERVED_EVM: readonly EvmChain\[\] = \["base", "robinhood"\];/);
   assert.match(main, /const gecko = geckoBudget\(Date\.now, \{ lists: listsLane, pages: GT_LIMIT_PER_MIN - listsLane \}\);/);
   assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko\)\]\)\);/);
-  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, gecko\);/);
+  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko\);/);
   assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
@@ -486,7 +499,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
   await new Promise((ok) => free.close(ok));
   const run = (fee: string) =>
     spawn(process.execPath, [join(import.meta.dirname, "server.ts")], {
-      env: { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: String(hp), POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: fee, POOL_SOLANA_RPCS_DEVNET: urls },
+      env: { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: String(hp), ...TEST_VENDOR_KEYS, POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: fee, POOL_SOLANA_RPCS_DEVNET: urls },
       stdio: ["ignore", "pipe", "pipe"],
     });
   const exited = (c: ReturnType<typeof run>) => new Promise<number | null>((ok) => c.on("exit", ok));
@@ -519,4 +532,316 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
   } finally {
     await Promise.all(stubs.map((s) => new Promise((ok) => (s.closeAllConnections(), s.close(ok)))));
   }
+});
+
+// card helper-abuse-limits: one throttling contract on every route, keyed on the forwarded address in memory only.
+// A helper on a real socket, its clock a fake that moves with time; the address is the last X-Forwarded-For hop, as
+// Caddy writes it.
+async function limited(o: { rpc?: ReturnType<typeof createRpc> } = {}) {
+  let t = 1_800_000_000_000;
+  const now = () => (t += 3);
+  const h = own(createServer(handler(COMMIT, undefined, o.rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), now)));
+  await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
+  const to = (h.address() as AddressInfo).port;
+  return {
+    to,
+    jump: (ms: number) => (t += ms),
+    close: () => new Promise<void>((ok) => (h.closeAllConnections(), h.close(() => ok()))),
+  };
+}
+const IP_A = "203.0.113.7";
+const IP_B = "203.0.113.8";
+/** The 429 contract: status, a whole-second Retry-After of 1 to 60 that CORS lets the browser read, the code only. */
+function isThrottle(r: { status: number; headers: Record<string, string | string[] | undefined>; body: string }, origin = APP) {
+  assert.equal(r.status, 429);
+  const wait = Number(r.headers["retry-after"]);
+  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 60, `Retry-After ${String(r.headers["retry-after"])}`);
+  assert.equal(r.headers["access-control-allow-origin"], origin);
+  assert.ok(String(r.headers["access-control-expose-headers"]).split(", ").includes("Retry-After"), "Retry-After is exposed");
+  assert.deepEqual(JSON.parse(r.body), { error: { code: "rate_limited" } });
+  return wait;
+}
+
+test("every route without its own budget: one client past API_RATE_MAX in a window gets 429 with a readable Retry-After; a second client in the same window still goes; after the wait the first goes again", async () => {
+  const { API_RATE_MAX } = await import("./server.ts");
+  const L = await limited();
+  try {
+    for (let i = 0; i < API_RATE_MAX; i++) assert.equal((await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to)).status, 200);
+    const over = await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to);
+    const wait = isThrottle(over);
+    for (const p of ["/v1/token-status?token=x", "/v1/withdraw/fee?token=x", "/v1/market/lists?chain=solana", "/nope"]) isThrottle(await call("GET", p, { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to));
+    isThrottle(await call("POST", "/v1/bind", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to));
+    isThrottle(await call("POST", "/v1/withdraw", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to));
+    assert.equal((await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_B }, undefined, L.to)).status, 200, "a second client in the same window");
+    assert.ok(!over.body.includes(IP_A) && !JSON.stringify(over.headers).includes(IP_A), "the address is never answered");
+    L.jump(wait * 1000);
+    assert.equal((await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to)).status, 200, "after the named wait");
+  } finally {
+    await L.close();
+  }
+});
+
+test("the pool routes: past POOL_RATE_MAX the same 429 contract (at be4b353 the wait was not readable by a browser)", async () => {
+  const { POOL_RATE_MAX } = await import("./server.ts");
+  const L = await limited();
+  try {
+    for (let i = 0; i < POOL_RATE_MAX; i++) assert.equal((await call("GET", "/v1/pool/fee?pool=x", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to)).status, 404);
+    isThrottle(await call("GET", "/v1/pool/fee?pool=x", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to));
+    isThrottle(await call("POST", "/v1/pool/solana/send", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to));
+    isThrottle(await call("POST", "/v1/pool/evm/send", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to), APP);
+    isThrottle(await call("GET", "/v1/pool/fee?pool=x", { origin: SIGN, "x-forwarded-for": IP_A }, undefined, L.to), SIGN);
+    assert.equal((await call("GET", "/v1/pool/fee?pool=x", { origin: APP, "x-forwarded-for": IP_B }, undefined, L.to)).status, 404, "a second client");
+  } finally {
+    await L.close();
+  }
+});
+
+test("the RPC route: the caller's address reaches the chain's budget, and a provider's 429 holds the chain for every caller as a readable 429 until its reset", async () => {
+  let throttle = false;
+  let rt = 1_800_000_000_000; // the RPC part's own clock
+  const rpc = createRpc({}, { now: () => rt, fetch: async () => (throttle ? new Response("provider says slow down", { status: 429, headers: { "retry-after": "7" } }) : new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } })) });
+  const L = await limited({ rpc });
+  const body = rpcBody("getBalance");
+  try {
+    const { RPC_CLIENT_MAX } = (await import("./rpc/rpc.ts")) as unknown as { RPC_CLIENT_MAX: number };
+    for (let i = 0; i < RPC_CLIENT_MAX; i++) assert.equal((await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, body, L.to)).status, 200);
+    isThrottle(await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, body, L.to));
+    throttle = true;
+    const up = await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_B }, body, L.to);
+    assert.equal(isThrottle(up), 7, "the provider's reset");
+    assert.ok(!up.body.includes("slow down"), "no provider text");
+    throttle = false;
+    isThrottle(await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": "203.0.113.9" }, body, L.to));
+    rt += 7_000;
+    assert.equal((await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": "203.0.113.9" }, body, L.to)).status, 200, "at the reset the chain is open");
+  } finally {
+    await L.close();
+  }
+});
+
+test("the RPC and proxy routes: past UPSTREAM_ROUTE_MAX a client meets the same 429 before its body is read, a refused request counted too; a second client still goes", async () => {
+  const { UPSTREAM_ROUTE_MAX } = (await import("./server.ts")) as unknown as { UPSTREAM_ROUTE_MAX: number };
+  let calls = 0;
+  const rpc = createRpc({}, { fetch: async () => (calls++, new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } })) });
+  const L = await limited({ rpc });
+  try {
+    for (let i = 0; i < UPSTREAM_ROUTE_MAX; i++) assert.equal((await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, rpcBody("notAllowed"), L.to)).status, 400);
+    isThrottle(await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, rpcBody("getBalance"), L.to));
+    isThrottle(await call("GET", "/v1/rpc/solana", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to));
+    assert.equal(calls, 0, "nothing reached the provider");
+    assert.equal((await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_B }, rpcBody("getBalance"), L.to)).status, 200, "a second client");
+    for (let i = 0; i < UPSTREAM_ROUTE_MAX; i++) assert.equal((await call("POST", "/v1/proxy/nope", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to)).status, 404);
+    isThrottle(await call("POST", "/v1/proxy/nope", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to));
+    assert.equal((await call("POST", "/v1/proxy/nope", { ...JSON_H, "x-forwarded-for": IP_B }, "{}", L.to)).status, 404, "a second client");
+  } finally {
+    await L.close();
+  }
+});
+
+test("a throttle behind a read answers the same 429 contract, never 503: the market lists, token, holders and candles, the withdraw fee (a NEAR provider's 429) and the pool fee (a pool provider's 429)", async () => {
+  const limitedRead = async () => ({ status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 9 });
+  const lists = { get: limitedRead } as never;
+  const token = { page: limitedRead, holders: limitedRead, candles: limitedRead } as never;
+  // the NEAR client names a provider's 429 by its status, whatever its body, and the fee's read carries it
+  const near = nearRpc("https://provider-a.example", (async () => new Response("", { status: 429 })) as never);
+  const refused = await agreedBlock([near, near], Date.now).then(() => null, (e: unknown) => e);
+  assert.ok(refused instanceof FeeReadRefused && throttleOf(refused) === 1, String(refused));
+  const fee: FeeQuoter = { networkOf: () => "mainnet", quote: async () => { throw refused; }, reads: () => ({ feeMin: async () => 0n }) };
+  const POOL = "11111111111111111111111111111111";
+  const pools = new Map([[POOL, { fee: async () => { throw new Error("HTTP 429"); } }]]) as never;
+  const h = own(createServer(handler(COMMIT, undefined, undefined, undefined, lists, fee, undefined, token, undefined, null, pools, new Map())));
+  await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
+  const to = (h.address() as AddressInfo).port;
+  try {
+    const mint = "So11111111111111111111111111111111111111112";
+    for (const p of ["/v1/market/lists?chain=solana", `/v1/market/token?chain=solana&token=${mint}`, `/v1/market/holders?chain=solana&token=${mint}`, `/v1/market/candles?chain=solana&token=${mint}&tf=1h`]) {
+      assert.equal(isThrottle(await call("GET", p, { origin: APP }, undefined, to)), 9, p);
+    }
+    assert.equal(isThrottle(await call("GET", "/v1/withdraw/fee?token=x.near", { origin: APP }, undefined, to)), 1);
+    assert.equal(isThrottle(await call("GET", `/v1/pool/fee?pool=${POOL}`, { origin: APP }, undefined, to)), 1);
+  } finally {
+    await new Promise<void>((ok) => (h.closeAllConnections(), h.close(() => ok())));
+  }
+});
+
+// review F-C: a refusal before the budget draw (an off-list method) costs a full body read and parse, so the route
+// itself is limited per client
+function postRaw(port: number, path: string, body: string, xff: string): Promise<number> {
+  return new Promise((ok, fail) => {
+    const r = request({ host: "127.0.0.1", port, path, method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": xff, "content-length": Buffer.byteLength(body) }, agent: false }, (res) => {
+      res.resume();
+      res.on("end", () => ok(res.statusCode!));
+    });
+    r.on("error", fail);
+    r.end(body);
+  });
+}
+test("review F-C: one address sending 600 off-list RPC calls of ~250 KB in one window meets a 429", async () => {
+  let t = 1_800_000_000_000;
+  const rpc = createRpc({}, { now: () => (t += 1), fetch: async () => new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } }) });
+  const h = own(createServer(handler(COMMIT, undefined, rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), () => (t += 1))));
+  await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+  const to = (h.address() as AddressInfo).port;
+  const nums = Array.from({ length: 62_000 }, (_, i) => i % 10).join(",");
+  const big = `{"jsonrpc":"2.0","id":1,"method":"notAllowed","params":[${nums}]}`;
+  assert.ok(Buffer.byteLength(big) < 262_144);
+  const statuses = new Map<number, number>();
+  try {
+    for (let i = 0; i < 600; i++) {
+      const s = await postRaw(to, "/v1/rpc/solana", big, "203.0.113.66");
+      statuses.set(s, (statuses.get(s) ?? 0) + 1);
+    }
+  } finally {
+    await new Promise<void>((r) => (h.closeAllConnections(), h.close(() => r())));
+  }
+  assert.ok((statuses.get(429) ?? 0) > 0, `no 429 for one address's 600 requests in one window: ${JSON.stringify([...statuses])}`);
+});
+
+// End state 5: no limit path writes or logs the address. Every console method (the helper's only logger) and every fs
+// write are stubbed while each limit is driven past its edge from one address.
+test("no IP stored: driving every limit past its edge logs nothing and writes nothing that holds the address", async () => {
+  const IP = "198.51.100.77";
+  const out: string[] = [];
+  const keep = (...a: unknown[]) => void out.push(a.map(String).join(" "));
+  const mocks = [
+    ...(["log", "error", "warn", "info", "debug", "trace"] as const).map((m) => mock.method(console, m, keep)),
+    ...(["writeFileSync", "appendFileSync", "writeFile", "appendFile", "writeSync", "write", "createWriteStream", "openSync", "open", "renameSync", "mkdirSync"] as const).map((m) => mock.method(fs, m, (...a: unknown[]) => void keep("fs." + m, ...a))),
+    ...(["writeFile", "appendFile", "open", "mkdir", "rename"] as const).map((m) => mock.method(fs.promises, m, async (...a: unknown[]) => void keep("fs.promises." + m, ...a))),
+  ];
+  syncBuiltinESMExports();
+  // the provider answers the first RPC_CLIENT_MAX reads, then throttles
+  const { RPC_CLIENT_MAX } = (await import("./rpc/rpc.ts")) as unknown as { RPC_CLIENT_MAX: number };
+  let n = 0;
+  const rpc = createRpc({}, { fetch: async () => (++n <= RPC_CLIENT_MAX ? new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } }) : new Response("slow", { status: 429, headers: { "retry-after": "2" } })) });
+  const L = await limited({ rpc });
+  try {
+    const { API_RATE_MAX, POOL_RATE_MAX, UPSTREAM_ROUTE_MAX } = (await import("./server.ts")) as unknown as Record<string, number>;
+    const h = { ...JSON_H, "x-forwarded-for": IP };
+    for (let i = 0; i <= API_RATE_MAX!; i++) await call("GET", "/v1/health", h, undefined, L.to);
+    for (let i = 0; i <= POOL_RATE_MAX!; i++) await call("GET", "/v1/pool/fee?pool=x", h, undefined, L.to);
+    await call("POST", "/v1/pool/solana/send", h, "{}", L.to);
+    // the chain's budget: the share drawn, then refused (no provider call); another address meets the provider's 429,
+    // which holds the chain, and this one's next draw is refused by the hold; then the route's own window
+    for (let i = 0; i <= RPC_CLIENT_MAX; i++) await call("POST", "/v1/rpc/solana", h, rpcBody("getBalance"), L.to);
+    await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": "192.0.2.1" }, rpcBody("getBalance"), L.to);
+    await call("POST", "/v1/rpc/solana", h, rpcBody("getBalance"), L.to);
+    for (let i = 0; i <= UPSTREAM_ROUTE_MAX!; i++) await call("POST", "/v1/rpc/solana", h, rpcBody("notAllowed"), L.to);
+    for (let i = 0; i <= UPSTREAM_ROUTE_MAX!; i++) await call("POST", "/v1/proxy/nope", h, "{}", L.to);
+    // and each refusal of the limits themselves, driven directly: a share, a total, a hold, a held-request limit
+    const b = upstreamBudget(() => ({ total: 2, perClient: 1 }));
+    b.take("k", IP);
+    b.take("k", IP);
+    b.take("k", "a");
+    b.take("k", "b");
+    b.hold("k", Date.now() + 1_000);
+    b.take("k", IP);
+    const held = heldPerClient(1);
+    held.enter(IP);
+    held.enter(IP);
+    held.leave(IP);
+  } finally {
+    await L.close();
+    for (const m of mocks) m.mock.restore();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(out.filter((l) => l.startsWith("fs.")), [], "no file written");
+  assert.deepEqual(out.filter((l) => l.includes(IP) || l.includes("198.51.100")), [], "nothing logged holds the address");
+});
+
+// ---- fold 6 (card helper-abuse-limits, re-check 4) ----
+
+test("re-check 4 finding 4: a start with a vendor's key unset and no PROXY_BUDGET_<VENDOR> exits 2, naming the variables only", async () => {
+  const { spawn } = await import("node:child_process");
+  for (const [key, budget] of [["JUPITER_API_KEY", "PROXY_BUDGET_JUPITER"], ["LIFI_API_KEY", "PROXY_BUDGET_LIFI"]] as const) {
+    const env: Record<string, string | undefined> = { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: "0", ...TEST_VENDOR_KEYS };
+    delete env[key];
+    const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "ignore", "pipe"] });
+    let err = "";
+    c.stderr!.on("data", (d) => (err += d));
+    const code = await Promise.race([new Promise<number | null>((ok) => c.on("exit", ok)), new Promise<string>((ok) => setTimeout(() => ok("still running"), 10_000))]);
+    if (code === "still running") c.kill();
+    assert.equal(code, 2, `${key}: ${err}`);
+    assert.equal(err.trim(), `helper: ${key} is unset: set it, or ${budget} to the plan without a key`);
+  }
+});
+
+function postAs(port: number, path: string, body: string, xff: string): Promise<number> {
+  return new Promise((ok, fail) => {
+    const r = request({ host: "127.0.0.1", port, path, method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": xff, "content-length": Buffer.byteLength(body) }, agent: false }, (res) => (res.resume(), res.on("end", () => ok(res.statusCode!))));
+    r.on("error", fail);
+    r.end(body);
+  });
+}
+function getAs(port: number, path: string, xff: string): Promise<number> {
+  return new Promise((ok, fail) => {
+    const r = request({ host: "127.0.0.1", port, path, method: "GET", headers: { "x-forwarded-for": xff }, agent: false }, (res) => (res.resume(), res.on("end", () => ok(res.statusCode!))));
+    r.on("error", fail);
+    r.end();
+  });
+}
+/** The helper as deployed, on a stub of the public Solana endpoint (100 a 10 s, 40 a 10 s for one method, rolling) and
+ * a Jupiter that lists nothing: `pages` token pages of fresh mints opened by one address, then `then` while they run. */
+async function tokenPagesThen(pages: number, then: (port: number) => Promise<number[]>) {
+  const all: number[] = [];
+  const per = new Map<string, number[]>();
+  let refused = 0;
+  const realFetch = globalThis.fetch;
+  const stub = (async (u: string | URL | Request, i?: RequestInit) => {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
+    if (!String(u).includes("api.mainnet-beta.solana.com")) return json({ tokens: [] });
+    const t = Date.now();
+    const b = JSON.parse(String(i?.body));
+    const reqs: { id: unknown; method: string }[] = Array.isArray(b) ? b : [b];
+    const roll = (a: number[]) => {
+      while (a.length && t - a[0]! >= 10_000) a.shift();
+    };
+    roll(all);
+    for (const r of reqs) {
+      const a = per.get(r.method) ?? [];
+      roll(a);
+      per.set(r.method, a);
+    }
+    if (all.length + reqs.length > 100 || reqs.some((r) => per.get(r.method)!.length + 1 > 40)) return (refused++, new Response("slow", { status: 429, headers: { "retry-after": "10" } }));
+    for (const r of reqs) (all.push(t), per.get(r.method)!.push(t));
+    const one = (r: { id: unknown; method: string }) => ({ jsonrpc: "2.0", id: r.id, result: r.method === "getMultipleAccounts" ? { context: { slot: 1 }, value: [null, null] } : 1 });
+    return json(Array.isArray(b) ? reqs.map(one) : one(reqs[0]!));
+  }) as typeof fetch;
+  // the share is a fixed 10 s window: start early in one, so the run stays inside it
+  while (Date.now() % 10_000 > 2_000) await new Promise((r) => setTimeout(r, 50));
+  globalThis.fetch = stub;
+  try {
+    const proxy = createProxy({}, { fetch: stub });
+    const rpc = createRpc({}, { fetch: stub });
+    const lists = createSolanaLists(proxy, rpc);
+    const h = own(createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, undefined, undefined, null, new Map(), new Map())));
+    await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+    const port = (h.address() as AddressInfo).port;
+    const opened = Array.from({ length: pages }, () => getAs(port, `/v1/market/token?chain=solana&token=${b58encode(randomBytes(32))}`, "198.51.100.77"));
+    await new Promise((r) => setTimeout(r, 300));
+    const st = await then(port);
+    const ps = await Promise.all(opened);
+    h.closeAllConnections();
+    await new Promise<void>((r) => h.close(() => r()));
+    return { refused, st, ps };
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+const someGma = () => JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [[b58encode(randomBytes(32))]] });
+
+test("re-check 4 P5b: one address's token pages of fresh mints take only its own share; two honest devices' getMultipleAccounts in the same 10 s are all served", async () => {
+  const r = await tokenPagesThen(40, async (port) => {
+    const st: number[] = [];
+    for (let d = 0; d < 2; d++) for (let i = 0; i < 10; i++) st.push(await postAs(port, "/v1/rpc/solana", someGma(), `192.0.2.${20 + d}`));
+    return st;
+  });
+  assert.equal(r.refused, 0, "the endpoint never answered 429");
+  assert.deepEqual(r.st.filter((x) => x !== 200), [], "every honest device read was served");
+  assert.ok(r.ps.filter((x) => x === 429).length >= 40 - 16, `the address stops at its share: ${JSON.stringify(r.ps)}`);
+});
+
+test("re-check 4 R5e: the token page reads through the helper's one RPC budget: an address's pages spend its own share of the chain", async () => {
+  const r = await tokenPagesThen(16, async (port) => [await postAs(port, "/v1/rpc/solana", someGma(), "198.51.100.77"), await postAs(port, "/v1/rpc/solana", someGma(), "192.0.2.30")]);
+  assert.equal(r.refused, 0);
+  assert.deepEqual(r.st, [429, 200], "the address's 16 pages spent its share of the one budget; another address still reads");
 });

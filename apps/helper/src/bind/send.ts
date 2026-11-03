@@ -635,6 +635,8 @@ export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = 
       signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await res.text();
+    // a provider's throttle, named so (limits.ts throttleOf): the fee route answers it 429, never 503
+    if (res.status === 429) throw new Error(`${method}: HTTP 429`);
     if (text.length > RPC_ANSWER_MAX) throw new Error(`${method}: answer over ${RPC_ANSWER_MAX} B`);
     const a = JSON.parse(text) as { result?: unknown; error?: unknown };
     if (a.error !== undefined) throw new RpcError(method, a.error);

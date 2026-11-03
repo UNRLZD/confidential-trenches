@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
 import { geckoBudget } from "../gecko.ts";
+import { createProxy } from "../../proxy/proxy.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
   CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
@@ -72,6 +73,40 @@ function fakeGecko(opts: { status?: number; headers?: Record<string, string> } =
 }
 
 // ---- the page ------------------------------------------------------------------------------------------------
+
+test("fold 6 (R5c): Jupiter's batched search draws on the helper's own reserve, so a page is served with every caller's part of Jupiter spent", async () => {
+  const searched: string[] = [];
+  const proxy = createProxy({}, {
+    now: () => NOW,
+    fetch: (async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname !== "/tokens/v2/search") return new Response('{"ok":1}', { status: 200, headers: { "content-type": "application/json" } });
+      const mints = u.searchParams.get("query")!.split(",");
+      searched.push(...mints);
+      return new Response(JSON.stringify(mints.flatMap((m) => FX.tokens[m]?.search ?? [])), { status: 200, headers: { "content-type": "application/json" } });
+    }) as never,
+  });
+  let callers = 0;
+  for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await proxy.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
+  assert.equal(callers, 60 - 34, "callers' part of Jupiter Free is spent");
+  const a = await createSolanaToken(proxy, fakeRpc(), { now: () => NOW }).page(PUMP);
+  assert.equal(a.status, 200, "the page is served");
+  assert.deepEqual(searched, [PUMP], "its search reached Jupiter");
+  assert.equal(JSON.parse(a.body).row.symbol, "PUMP");
+});
+
+test("fold 6 (re-check 4 P5b): the token page's chain reads draw the share of the caller who opened it; a hit draws nothing", async () => {
+  const seen: (string | undefined)[] = [];
+  const rpc = fakeRpc();
+  const spy = { handle: (c: string, ct: string | undefined, body: string, client?: string) => (seen.push(client), rpc.handle(c, ct, body)) };
+  const t = createSolanaToken(fakeProxy(), spy, { now: () => NOW });
+  assert.equal((await t.page(PUMP, "198.51.100.9")).status, 200);
+  assert.deepEqual(seen, ["198.51.100.9"], "the mint read carried the caller");
+  assert.equal((await t.page(PUMP, "198.51.100.10")).status, 200);
+  assert.equal(seen.length, 1, "a cache hit reaches no provider and draws nothing");
+  await t.holders(PUMP, "198.51.100.11");
+  assert.deepEqual(seen.slice(1), ["198.51.100.11"], "the holders' mint read carries its caller too");
+});
 
 test("page: a Token-2022 mint off any curve, in 06b's TokenPage fields, the chain's authorities and fee, Jupiter's row", async () => {
   const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW });
@@ -334,7 +369,7 @@ test("candles: the token's top pool on GeckoTerminal, bars oldest first in USD d
   assert.equal(g.urls[2], `https://api.geckoterminal.com/api/v2/networks/solana/pools/${topPool(FX.gt_token)}/ohlcv/hour?aggregate=4&limit=1000&currency=usd&token=${CURVE}&before_timestamp=1793620800`);
 });
 
-test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal; at most GT_PER_MIN calls a minute", async () => {
+test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal and answers 429 with the pause left; at most GT_PER_MIN calls a minute, past it 429 with the wait to the next call", async () => {
   const g = fakeGecko();
   let now = NOW;
   const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: g.fetch });
@@ -345,11 +380,15 @@ test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal; at mos
   for (let i = 0; i < 20; i++) if ((await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10)).status === 200) ok++;
   assert.equal(g.urls.length, GT_PER_MIN);
   assert.equal(ok, GT_PER_MIN - 1, "one token read, then bars until the minute's calls are spent");
+  const full = await t.candles(CURVE, "1m", 1793620800 - 21 * 86_400, 10);
+  assert.deepEqual([full.status, JSON.parse(full.body), full.retryAfterS], [429, { error: { code: "rate_limited" } }, 60], "the queue's first call frees in 60 s");
   now += 61_000;
   const limited = fakeGecko({ status: 429, headers: { "retry-after": "30" } });
   const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: limited.fetch });
-  assert.equal((await t2.candles(CURVE, "1m", null, 10)).status, 503);
-  assert.equal((await t2.candles(CURVE, "5m", null, 10)).status, 503);
+  const first = await t2.candles(CURVE, "1m", null, 10);
+  assert.deepEqual([first.status, JSON.parse(first.body), first.retryAfterS], [429, { error: { code: "rate_limited" } }, 30], "the code only, GeckoTerminal's wait");
+  now += 10_000;
+  assert.deepEqual([(await t2.candles(CURVE, "5m", null, 10)).status, (await t2.candles(CURVE, "15m", null, 10)).retryAfterS], [429, 20], "the paused queue answers the pause left");
   assert.equal(limited.urls.length, 1, "paused after the 429");
 });
 
@@ -363,6 +402,36 @@ test("candles: the server's one GeckoTerminal budget holds the token page to its
   for (let i = 0; i < 20; i++) await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10);
   assert.equal(g.urls.length, 7, "the pages lane's 7, never the whole 10");
   assert.equal(shared.take("lists"), false, "and the minute's 10 are spent");
+  const over = await t.candles(CURVE, "1d", 1793620800 - 40 * 86_400, 10);
+  assert.deepEqual([over.status, over.retryAfterS], [429, 60], "a call past the lane is a throttle naming the wait to its oldest call's minute");
+});
+
+test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 429 with a wait, not 503", async () => {
+  let gt = 0;
+  const proxy = { handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) };
+  const rpc = { handle: async () => ({ status: 503, body: '{"error":{"code":"upstream"}}' }) };
+  const t = createSolanaToken(proxy as never, rpc as never, { fetch: (async () => (gt++, new Response("slow", { status: 429, headers: { "retry-after": "30" } }))) as never });
+  const mint = "So11111111111111111111111111111111111111112";
+  await t.candles(mint, "1h", null, 10);
+  const second = await t.candles(mint, "1h", null, 10);
+  assert.equal(second.status, 429, "the helper's own paused GT queue is a throttle");
+});
+
+test("page and holders: a throttled RPC or Jupiter read with nothing good to serve answers 429 with the throttle's wait; the last good page still serves", async () => {
+  const throttledRpc = { handle: async () => ({ status: 429, headers: { "Retry-After": "7" }, body: '{"error":{"code":"rate_limited"}}' }) };
+  const a = await createSolanaToken(fakeProxy(), throttledRpc, { now: () => NOW }).page(PUMP);
+  assert.deepEqual([a.status, JSON.parse(a.body), a.retryAfterS], [429, { error: { code: "rate_limited" } }, 7]);
+  const throttledProxy = { handle: async () => ({ status: 429, headers: { "Retry-After": "12" }, body: '{"error":{"code":"rate_limited"}}' }) };
+  const b = await createSolanaToken(throttledProxy, fakeRpc(), { now: () => NOW }).page(PUMP);
+  assert.deepEqual([b.status, b.retryAfterS], [429, 12]);
+  let now = NOW;
+  let throttle = false;
+  const rpc = fakeRpc();
+  const t = createSolanaToken(fakeProxy(), { handle: (c, ct, body) => (throttle ? throttledRpc.handle() : rpc.handle(c, ct, body)) }, { now: () => now });
+  assert.equal((await t.page(PUMP)).status, 200);
+  throttle = true;
+  now += 10_000;
+  assert.equal((await t.page(PUMP)).status, 200, "the last good page, under 60 s old");
 });
 
 test("toCandles: bars off the grid, from the future, with a zero, negative or non-finite price, or low above high are dropped", () => {

@@ -34,3 +34,18 @@ test("a 429 pauses every lane until its time", () => {
   now = 30_000;
   assert.equal(b.take("pages"), true);
 });
+
+test("retryAt: now when a call can be taken; else the pause's end, or when the minute's or the lane's oldest call leaves the window", () => {
+  let t = 1_000_000;
+  const b = geckoBudget(() => t, { lists: 2 }, 3);
+  assert.equal(b.retryAt("lists"), t);
+  b.take("lists");
+  t += 10_000;
+  b.take("lists");
+  assert.equal(b.retryAt("lists"), 1_000_000 + 60_000, "the lane's cap: its oldest call's minute");
+  b.take("pages");
+  assert.equal(b.retryAt("pages"), 1_000_000 + 60_000, "the minute's total: the oldest call's minute");
+  b.pause(t + 120_000);
+  assert.equal(b.retryAt("pages"), t + 120_000, "a pause past both");
+});
+

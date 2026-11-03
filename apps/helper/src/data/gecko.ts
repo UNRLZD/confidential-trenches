@@ -10,6 +10,9 @@ export type GeckoBudget = {
   take(lane: string): boolean;
   /** A 429: no lane calls until `untilMs`. */
   pause(untilMs: number): void;
+  /** When `lane` can next take a call (now when it can now): the pause's end, or the minute's or the lane's oldest call
+   *  leaving the window; what a refused caller names as its wait. */
+  retryAt(lane: string): number;
 };
 
 /** A budget of at most `perMin` calls in any 60 s, with each lane held to its cap (a lane not named has `perMin`). */
@@ -27,6 +30,16 @@ export function geckoBudget(now: () => number, caps: Readonly<Record<string, num
     },
     pause(untilMs) {
       pausedUntil = Math.max(pausedUntil, untilMs);
+    },
+    retryAt(lane) {
+      const t = now();
+      while (calls.length > 0 && t - calls[0]!.at >= 60_000) calls.shift();
+      const own = calls.filter((c) => c.lane === lane);
+      const cap = caps[lane] ?? perMin;
+      let at = Math.max(t, pausedUntil);
+      if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + 60_000);
+      if (own.length >= cap) at = Math.max(at, own[own.length - cap]!.at + 60_000);
+      return at;
     },
   };
 }
