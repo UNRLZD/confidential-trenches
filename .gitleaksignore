@@ -1,4 +1,6 @@
 # a public testnet account id (bf-usdc-20261101t022248.testnet, card wallet-deposit-account), before its gitleaks:allow mark
 8b956213a605a8d679e9f1cf18f307ea994fc884:packages/wallet/src/deposit/account.ts:generic-api-key:53
+# a public pump.fun mint address (7G36...pump) under a "token" key in the --dry record (card solana-buy-flow), renamed "mint" in the next commit
+5d010eb2926e84db98875e2f846fa79712711d20:packages/kit/test/fixtures/solana-flow-dry.json:generic-api-key:4
 # a public Base token address in a test (0xd5e61aca87b9... USDDT, read on chain; card index-evm-swaps), before the variable was renamed
 7328a89bf2a8dff749624877376e7ba2a6f653a0:apps/helper/src/data/evm/swaps.test.ts:generic-api-key:123
