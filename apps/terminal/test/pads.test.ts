@@ -63,7 +63,7 @@ test("null, undefined, an unknown id, an Object prototype key and a pad with no 
 });
 
 test("every chain a row can carry has its mark, with its source cited; an unknown chain none", () => {
-  for (const [c, name] of [["solana", "Solana"], ["base", "Base"], ["robinhood", "Robinhood"], ["eip155:4663", "Robinhood"], ["near", "NEAR"]] as const) {
+  for (const [c, name] of [["solana", "Solana"], ["base", "Base"], ["robinhood", "Robinhood"], ["near", "NEAR"]] as const) {
     const m = chainOf(c);
     assert.ok(m, c);
     assert.equal(m.name, name);
@@ -71,8 +71,8 @@ test("every chain a row can carry has its mark, with its source cited; an unknow
     assert.match(m.src, /^https:\/\//);
     assert.ok(m.inset >= 0 && m.inset < 0.5);
   }
-  assert.deepEqual(Object.keys(CHAINS).sort(), ["base", "eip155:4663", "near", "robinhood", "solana"]);
-  for (const c of [null, undefined, "", "ethereum", "__proto__"]) assert.equal(chainOf(c), null, String(c));
+  assert.deepEqual(Object.keys(CHAINS).sort(), ["base", "near", "robinhood", "solana"]);
+  for (const c of [null, undefined, "", "ethereum", "eip155:4663", "__proto__"]) assert.equal(chainOf(c), null, String(c));
 });
 
 test("the live lists recorded 2026-11-03 12:43Z: every launchpad id they serve has a row; a planted new id is caught", () => {

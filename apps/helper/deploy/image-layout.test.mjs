@@ -4,6 +4,11 @@
 // src/server.ts` would. A module that needs a file or a package the image lacks fails here, before a deploy (card
 // helper-image-workspace: on main a5097ca, src/withdraw/checks.ts failed with ERR_MODULE_NOT_FOUND).
 // Only the RUN lines that hold `pnpm install` run here, with this machine's pnpm, which must be packageManager's.
+// The install reads this repository's own pnpm store first (npm_config_store_dir, npm_config_prefer_offline): the
+// repository's `pnpm install --frozen-lockfile` has just filled it with every package the lockfile names, so on a
+// machine with no route out (a reviewer's) the same install, from the same lockfile and its integrity hashes, needs no
+// network. A package the store lacks is still fetched. It stays a default test, with the same assertions: it is the
+// helper's only guard against an image that cannot start, and it costs about a second.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, globSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -15,6 +20,7 @@ import { IMAGE_INPUTS } from "./image-inputs.mjs";
 
 const DEPLOY = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["-C", DEPLOY, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+const STORE = execFileSync("pnpm", ["store", "path"], { cwd: ROOT, encoding: "utf8" }).trim();
 
 /** compose.yaml's build of the helper service: the context folder and the Dockerfile in it. */
 export function composeBuild(yml) {
@@ -132,7 +138,7 @@ export function layout({ context, dockerfile }, out) {
     } else if (op === "RUN") {
       for (const seg of text.split("&&").map((x) => x.trim())) {
         if (!/^pnpm install\b/.test(seg)) continue;
-        execFileSync("sh", ["-c", seg], { cwd: path.join(st.dir, st.cwd), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, CI: "true" } });
+        execFileSync("sh", ["-c", seg], { cwd: path.join(st.dir, st.cwd), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, CI: "true", npm_config_store_dir: STORE, npm_config_prefer_offline: "true" } });
       }
     } else if (op === "CMD") {
       st.cmd = JSON.parse(text);

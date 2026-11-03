@@ -10,7 +10,7 @@
 // when the other is there, and both unknown is null (the helper's `sides`, apps/helper/src/data/solana/lists.ts).
 
 /** A chain id as 06b's stream names it; this card draws Solana only. */
-export type MarketChain = "solana" | "base" | "eip155:4663" | "near";
+export type MarketChain = "solana" | "base" | "robinhood" | "near";
 
 /** 06b §6.1 `Row` (v1.15 to v1.22 additions included). Every optional field may also be null. */
 export interface MarketRow {

@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { gunzipSync } from "node:zlib";
 import { start } from "../../server.ts";
-import { createSolanaLists, READS, ROW_FIELDS } from "./lists.ts";
+import { createSolanaLists, pumpCurveAddress, READS, ROW_FIELDS } from "./lists.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://confidential.unrealized.trade";
@@ -16,7 +16,14 @@ const AT = "2026-11-01T15:16:30.000Z";
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
 const BODY: Record<string, string> = { [READS.new]: fx("jupiter-recent.json"), [READS.trending_5m]: fx("jupiter-toptrending-5m.json"), [READS.trending_1h]: fx("jupiter-toptrending-1h.json") };
 const CURVES = JSON.parse(fx("solana-pump-curves.json"));
-const rpc = { handle: async () => ({ status: 200, body: JSON.stringify(CURVES.answer) }) };
+// each account from the recording by its address (the recorded pump.fun curves), every other account none
+const CURVE_BY_KEY = new Map((CURVES.request_mints as string[]).map((m, i) => [pumpCurveAddress(m), CURVES.answer.result.value[i]]));
+const rpc = {
+  handle: async (_c: string, _t: string | undefined, body: string) => {
+    const keys = JSON.parse(body).params[0] as string[];
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: keys.map((k) => CURVE_BY_KEY.get(k) ?? null) } }) };
+  },
+};
 const up = createSolanaLists({ handle: async (_v: string, p: string) => ({ status: 200, headers: { "X-Fetched-At": AT }, body: BODY[p]! }) }, rpc);
 const down = createSolanaLists({ handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) }, rpc);
 
