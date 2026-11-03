@@ -252,7 +252,7 @@ test("the resume refuses a program another loader owns, programdata another prog
 });
 
 // ---- the cleanup's keys and the two-transaction --final (review of bc57e12) ----
-import { chainOps, chainRecord, main } from "./deploy.mjs";
+import { buildOf, chainOps, chainRecord, main } from "./deploy.mjs";
 import { existsSync, mkdtempSync, readdirSync as ls, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -372,4 +372,19 @@ test("the record from chain reads: the programdata's SetAuthority gets a line, f
   assert.deepEqual(r.funders, ["F1", "F2"]);
   chainTx.auth = { ...chainTx.auth, meta: { err: { InstructionError: [0, "x"] } } };
   await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [] }), /failed/);
+});
+
+// card pool-sol-mark-tag: the record's toolchain is read from the binaries that built the code, never a fixed string (a
+// final program's record that names the wrong builder stays wrong for good, and a judge checks the hash against it)
+test("the record names the toolchain read at build time: cargo-build-sbf's --version with its platform-tools, and the agave release", () => {
+  const sbf = "cargo-build-sbf 4.5.0\nDefault platform-tools: v1.57\nDefault Rust: 1.95.0\n";
+  const sol = "solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave)\n";
+  assert.equal(buildOf(sbf, sol), "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked");
+  assert.match(buildOf("cargo-build-sbf 4.4.0\nDefault platform-tools: v1.58\n", sol), /^cargo-build-sbf 4\.4\.0; Default platform-tools: v1\.58; solana-cli 4\.4\.0/);
+  for (const [s, c] of [["", sol], [undefined, sol], ["cargo-build-sbf 4.5.0\n", sol], ["error: no such command\n", sol], [sbf, ""], [sbf, "solana-cli 4.4.0\n"]])
+    assert.throws(() => buildOf(s, c), /not a version answer/, JSON.stringify([s, c]));
+  // no record is written with a toolchain typed by hand
+  const src = readFileSync(new URL("./deploy.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /build: "cargo-build-sbf/);
+  assert.match(src, /so_sha256: soSha, build,/);
 });

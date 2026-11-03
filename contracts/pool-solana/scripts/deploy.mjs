@@ -366,6 +366,21 @@ async function waitFinalized(fetchFn, url, sigs) {
   throw new Error("not every transaction finalized in 120 s");
 }
 
+/**
+ * What built the code, as the record states it: the --version lines of the cargo-build-sbf that ran the build (its own
+ * version, its default platform-tools and Rust) and of the solana CLI beside it (the agave release and its commit), read
+ * at build time from the binaries on PATH, then the build command. Refused when either is not a version answer, so a
+ * record never names a toolchain it did not read.
+ */
+export function buildOf(sbfVersion, cliVersion) {
+  const lines = (t) => String(t ?? "").trim().split("\n").map((l) => l.trim()).filter(Boolean);
+  const sbf = lines(sbfVersion), sol = lines(cliVersion);
+  if (!/^cargo-build-sbf \d+\.\d+\.\d+/.test(sbf[0] ?? "") || !sbf.some((l) => /^Default platform-tools: v\d+\.\d+/.test(l)))
+    throw new Error(`cargo-build-sbf --version: not a version answer: ${sbf.join(" | ").slice(0, 200)}`);
+  if (!/^solana-cli \d+\.\d+\.\d+ \(src:[0-9a-f]{8}/.test(sol[0] ?? "")) throw new Error(`solana --version: not a version answer: ${sol.join(" | ").slice(0, 200)}`);
+  return `${sbf.join("; ")}; ${sol[0]}; cargo-build-sbf --sbf-out-dir out -- --locked`;
+}
+
 export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = cli } = {}) {
   const opt = (n, d) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
   const url = opt("--url", "https://api.devnet.solana.com");
@@ -403,12 +418,15 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
   const prior = (opt("--prior") ?? "").split(",").filter(Boolean);
   log(`cluster ${cluster} (genesis ${genesis}) at ${url}`);
 
+  // the toolchain the record names: read from the binaries that build, never written by hand
+  let build = "--no-build: the code was built before this run, by a toolchain this record does not name";
   if (!argv.includes("--no-build")) {
+    build = buildOf(spawnSync("cargo-build-sbf", ["--version"], { encoding: "utf8" }).stdout, spawnSync("solana", ["--version"], { encoding: "utf8" }).stdout);
     const b = spawnSync("cargo-build-sbf", ["--sbf-out-dir", "out", "--", "--locked"], { cwd: POOL_DIR, encoding: "utf8" });
     const out = `${b.stdout}${b.stderr}`;
     if (b.status !== 0) throw new Error(`cargo-build-sbf: exit ${b.status}: ${out.trim().split("\n").slice(-3).join(" | ")}`);
     if (out.includes("overflows the maximum allowed frame space")) throw new Error("a stack frame overflows 4 KiB");
-    log(`built with ${spawnSync("cargo-build-sbf", ["--version"], { encoding: "utf8" }).stdout.trim().split("\n")[0]}`);
+    log(`built with ${build}`);
   }
   rmSync(path.join(POOL_DIR, "out/blindfill_pool_solana-keypair.json"), { force: true }); // unread: the id is made below
   const soFile = opt("--so", SO); // the test passes its own code
@@ -535,7 +553,7 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     result = {
       cluster, genesis_hash: genesis, rpc: url, at: new Date().toISOString(),
       program_id: program.id, programdata: programDataAddress(program.id), pool: pool.address, scope: hex(scope),
-      so_len: so.length, so_sha256: soSha, build: "cargo-build-sbf 4.4.0 (agave v4.4.0), --locked",
+      so_len: so.length, so_sha256: soSha, build,
       deposit: { value: String(value), nonce: String(nonce), precommitment: hex(pre), label: hex(label), commitment: hex(commitment) },
       funder: funder.id, return_to: returnTo, need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])),
     };
