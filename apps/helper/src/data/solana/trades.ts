@@ -391,7 +391,11 @@ export function createSolanaTrades(deps: {
     const ordered = events.filter((ev, k) => k === 0 || ev.block !== events[k - 1]!.block || ev.index !== events[k - 1]!.index);
     const reading = Math.min(Infinity, ...e.inflight.values()) - 1;
     const settle = e.state === "live" ? Math.max(e.book.settledTo, Math.min(e.covered - SETTLE_SLOTS, reading)) : e.book.settledTo;
-    e.book.ingest(from, ordered, settle);
+    try {
+      e.book.ingest(from, ordered, settle); // every held trade is after the settled point (hold refuses the rest)
+    } catch {
+      return; // never: the book keeps what it holds, and the next fold tries again
+    }
     // what is settled lives in the book now (a settled ref is the book's price in force)
     for (const [sig, h] of e.held) if (h.slot <= e.book.settledTo) e.held.delete(sig);
     for (const slot of e.refs.keys()) if (slot <= e.book.settledTo) e.refs.delete(slot);
@@ -470,7 +474,7 @@ export function createSolanaTrades(deps: {
   const source = (deps.source ?? ((on) => wsSource(deps.wsUrl ?? STREAM_WS, on)))({
     note(mint, n) {
       const e = entries.get(mint);
-      if (e !== undefined) void onNote(e, n);
+      if (e !== undefined) void onNote(e, n).catch(() => undefined);
     },
     down() {
       for (const e of entries.values()) e.state = "refilling"; // a cold walk's gap is walked again from its newest held
