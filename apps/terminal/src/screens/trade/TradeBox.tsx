@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Chain } from "@blindfill/kit";
+import { headerModel } from "../signin/model.ts";
+import { useSigninSheet } from "../signin/source.tsx";
 import {
   amountOk,
   busy,
@@ -28,7 +31,8 @@ import "./trade.css";
 // click, `You receive`, the max line, the main button and the Route & fees and settings line. States: S8.3 Ready,
 // S8.9 Sending, S8.10 Landing, S8.11 Slow, S8.12 Filled, and a buy the kit ended (States.tsx): S8.23 Failed, S8.24 Not
 // landed, each with Retry, and part filled, with the ready label back. Seams for the next cards: Sell, Limit and TP/SL
-// are drawn off; Route & fees opens on its own card. No dialog, no confirm, ever.
+// are drawn off; Route & fees opens on its own card. Signed out (S8.1, card app-trade-box-mount): `Bal —`, the exit plan
+// block off, the main button `Sign in to trade` (and a preset) opens the sign-in sheet. No dialog, no confirm, ever.
 
 /** A word, marked when it is still the owner's draft. */
 function W({ id }: { id: WordId }) {
@@ -76,9 +80,14 @@ const pct = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
 /** The amount box takes digits and one point with up to two decimals: USD cents, nothing finer. */
 const TYPING = /^\d{0,15}(?:\.\d{0,2})?$/;
 
-export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmount = "" }: { chain: Chain; token: string; symbol: string; slippageBps?: number; initialAmount?: string }) {
+/** `footer` draws inside the panel, under the Route & fees line (the token page's safety grid). */
+export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmount = "", footer }: { chain: Chain; token: string; symbol: string; slippageBps?: number; initialAmount?: string; footer?: ReactNode }) {
   const src = useTradeSource();
   const { kit, moneyOn, snapshot } = src;
+  // signed out as the header reads it (never for a user whose first `state` has not landed): Sign in opens the one sheet
+  const account = headerModel(snapshot).kind;
+  const signedOut = account === "out";
+  const { setOpen: openSignin } = useSigninSheet();
   const [text, setText] = useState(initialAmount);
   const [phase, setPhase] = useState<Phase>(READY);
   const phaseRef = useRef<Phase>(READY);
@@ -87,7 +96,8 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   const [, tick] = useState(0);
 
   const amount = text === "" ? null : parseUsd(text);
-  const balance = snapshot.state ? parseUsd(snapshot.state.vault_balance) : null;
+  // signed out there is no balance to show: the signing page sends a state with a zero one, which is not "$0" of anyone's
+  const balance = snapshot.state && !signedOut ? parseUsd(snapshot.state.vault_balance) : null;
   const maxText = kit.maxBuy(chain);
   const max = maxText === null ? null : parseUsd(maxText);
   const running = busy(phase);
@@ -141,11 +151,13 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   const pending = shown === null && last !== null;
   const est = (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
   const now = src.now();
-  const state = stateId(phase, now, "buy") ?? "S8.3";
+  const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
   const canBuy = ready && !running && amountOk(amount, max, balance);
 
   let label;
-  if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} />;
+  if (signedOut) label = <W id="signInToTrade" />;
+  else if (account === "loading") label = "\u00a0"; // the header's skeleton state: no word until the first `state` says which
+  else if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} />;
   else
     label = (
       <span className="trb-ctaLbl" title={`${WORDS.buy.text} ${symbol}`}>
@@ -175,7 +187,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
           {WORDS.bal.text} {balance === null ? "—" : fmtUsd(balance)}
         </span>
       </div>
-      <label className="trb-amount" data-bad={amount !== null && amount > 0n && !amountOk(amount, max, balance)}>
+      <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && !amountOk(amount, max, balance)}>
         <input
           className="trb-input"
           value={text}
@@ -199,8 +211,9 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
             className="trb-preset"
             data-preset={centsToDecimal(p)}
             data-on={amount === p || undefined}
-            disabled={!ready || !presetOn(p, max, balance, running)}
+            disabled={!signedOut && (!ready || !presetOn(p, max, balance, running))}
             onClick={() => {
+              if (signedOut) return openSignin(true);
               setText(String(p / 100n));
               buy(p);
             }}
@@ -209,6 +222,13 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
             {fmtUsd(p)}
           </button>
         ))}
+      </div>
+      <div className="trb-exit" data-testid="trade-exit" data-on="false">
+        <div className="trb-exitText">
+          <span><W id="exitPlan" /></span>
+          <span><W id="exitPlanSub" /></span>
+        </div>
+        <button type="button" className="trb-toggle" data-on="false" aria-pressed="false" aria-label={WORDS.exitPlan.text} disabled />
       </div>
       <div className="trb-receive">
         <span><W id="receive" /></span>
@@ -227,11 +247,11 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
         type="button"
         className="trb-cta"
         data-tone="buy"
-        data-kind={running ? "live" : "trade"}
-        disabled={!canBuy && !running}
+        data-kind={signedOut ? "setup" : running ? "live" : "trade"}
+        disabled={!signedOut && !canBuy && !running}
         aria-disabled={running || undefined}
         data-testid="trade-cta"
-        onClick={() => amount !== null && buy(amount)}
+        onClick={() => (signedOut ? openSignin(true) : amount !== null && buy(amount))}
       >
         {label}
       </button>
@@ -247,6 +267,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
           <span className="trb-pair" title={WORDS.fee.text}><Coins /><span data-testid="trade-fee">{(shown ?? last) ? pct((shown ?? last)!.fee_bps) : "—"}</span></span>
         </div>
       </div>
+      {footer}
     </div>
   );
 }

@@ -31,6 +31,25 @@ export const WORDS = {
   slippage: ok("Slippage", "09-design-brief S8 Slippage (CN-15, signed); the settings cell's accessible name only"),
   network: draft("Network", "09-design-brief S8 Network fee [draft copy: Network $0.02]; the settings cell's accessible name only"),
   fee: draft("Fee", "09-design-brief S8 Platform fee [draft copy: Fee 1%]; the settings cell's accessible name only"),
+  // signed out (R5 trenches-1440.html ticket: `o.cta = "Sign in to trade"`, token-390.html the sheet's button; S8.1) and the
+  // exit plan block's two lines (R5 token.js U.exitBlock, UNRLZD's own words; drawn off, its card turns it on)
+  signInToTrade: draft("Sign in to trade", "09-design-brief S8.1 [draft copy: Sign in to trade]; R5 trenches-1440.html ticket and token-390.html sheet button"),
+  exitPlan: ok("Exit plan", "R5 token.js U.exitBlock tk-blockHead; the toggle's accessible name too"),
+  exitPlanSub: ok("Sells automatically once this buy fills", "R5 token.js U.exitBlock tk-blockHead"),
+  // the safety grid under the box (R5 token.js U.riskGrid and app.js P.riskCells at design-lock-r5: UNRLZD's RiskGrid labels)
+  top10: ok("Top 10 %", "R5 app.js P.riskCells"),
+  dev: ok("Dev %", "R5 app.js P.riskCells"),
+  snipers: ok("Snipers %", "R5 app.js P.riskCells"),
+  holders: ok("Holders", "R5 app.js P.riskCells"),
+  liq: ok("Liq", "R5 app.js P.riskCells"),
+  age: ok("Age", "R5 app.js P.riskCells"),
+  insiders: ok("Insiders", "R5 app.js P.riskCells"),
+  tax: ok("Tax", "R5 app.js P.riskCells"),
+  mintAuth: ok("Mint auth", "R5 app.js P.riskCells"),
+  freezeAuth: ok("Freeze auth", "R5 app.js P.riskCells"),
+  lp: ok("LP", "R5 app.js P.riskCells (CN-92, signed round 14)"),
+  lpCurve: ok("Curve", "R5 app.js P.riskCells LP value (CN-92, signed round 14)"),
+  honeypot: draft("Honeypot", "R5 token.js U.riskGrid, drawn through P.dc (owner round 15 brought it back)"),
   // the owner's approved entries for the same words (Portfolio's S10.12, owner 2 Nov 06:08Z): an approved word never
   // goes back to draft, so the buy and the sell side draw these, not drafts of their own (09-design-brief S8.9, S8.10)
   sending: PF.sending,
