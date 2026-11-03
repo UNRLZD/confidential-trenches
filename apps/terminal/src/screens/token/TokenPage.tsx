@@ -114,7 +114,7 @@ function Desktop({ v }: { v: TokenView | null }) {
               <span className="tkp-lbl"><W id="mc" /></span>
               {v ? <span className="tkp-mcval">{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
             </div>
-            <Tile k="price" label="price" value={s(v?.price)} />
+            <Tile k="price" label="price" value={s(v?.priceTile)} />
             <Tile k="change" label="change" value={s(v?.chg.text)} dir={v?.chg.dir} />
             <Tile k="vol" label="vol" value={s(v?.vol)} />
             <Tile k="liq" label="liq" value={s(v?.liq)} />

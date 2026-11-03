@@ -40,6 +40,9 @@ test("header edges: tiny, huge, zero, rounding into the next unit, garbage and m
   assert.equal(at({ price_usd: "0.00000000001234" }).price, "$0.0₁₀123");
   assert.equal(at({ price_usd: "184223.5" }).price, "$184,223.50");
   assert.equal(at({ price_usd: "0" }).price, "$0");
+  // the strip tile's price is cut to its width; the header's price is not (card app-shell-cls-chrome)
+  assert.equal(at({ price_usd: "184223.5" }).priceTile, "$184.2K");
+  assert.equal(at({ price_usd: "0.00273" }).priceTile, "$0.00273");
   assert.equal(at({ price_usd: null }).price, "—");
   assert.equal(at({ price_usd: "-1" }).price, "—");
   assert.equal(at({ mc_usd: "999999" }).mc, "$1.00M");

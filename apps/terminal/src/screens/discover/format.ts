@@ -34,6 +34,22 @@ export function price(v: string | null | undefined): string {
   return `$${p.n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** The price in the token page's strip tile, at most 8 characters, the width the tile is drawn for (like $1.25M and 71.3K
+ *  in its neighbours): from $100,000 it is compact ($184.2K); below, a full form longer than 8 characters drops its
+ *  decimals, cut and never rounded up, until it fits; $1 and under are `price`'s own small-number form. The header and
+ *  Discover draw `price`. */
+export function priceTile(v: string | null | undefined): string {
+  const p = parse(v);
+  if (!p) return DASH;
+  if (p.n >= 1e5) return `$${compact(p.n)}`;
+  const full = price(v);
+  if (p.n < 1 || full.length <= 8) return full;
+  const [int = "0", frac = ""] = p.s.split(".");
+  const whole = Number(int).toLocaleString("en-US");
+  const one = `$${whole}.${frac.padEnd(1, "0").slice(0, 1)}`;
+  return one.length <= 8 ? one : `$${whole}`;
+}
+
 const BANDS = [
   { min: 1e3, div: 1e3, unit: "K", dp: 2 },
   { min: 1e4, div: 1e3, unit: "K", dp: 1 },

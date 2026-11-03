@@ -2,7 +2,7 @@
 // as Discover draws them (format.ts), so one token reads the same on both screens. The curve rule, one for every screen,
 // is in ../market/curve.ts.
 import type { MarketRow } from "../discover/fields.ts";
-import { age, count, DASH, price, usd } from "../discover/format.ts";
+import { age, count, DASH, price, priceTile, usd } from "../discover/format.ts";
 import { curve } from "../market/curve.ts";
 import type { Curve } from "../market/curve.ts";
 
@@ -28,6 +28,8 @@ export interface TokenView {
   /** Empty when it repeats the symbol. */
   name: string;
   price: string;
+  /** `price` cut to the strip tile's width. */
+  priceTile: string;
   mc: string;
   vol: string;
   liq: string;
@@ -46,6 +48,7 @@ export function tokenView(r: MarketRow, nowMs: number): TokenView {
     symbol: r.symbol,
     name: r.name && r.name !== r.symbol ? r.name : "",
     price: price(r.price_usd),
+    priceTile: priceTile(r.price_usd),
     mc: usd(r.mc_usd),
     vol: usd(r.vol_24h_usd),
     liq: usd(r.liq_usd),
