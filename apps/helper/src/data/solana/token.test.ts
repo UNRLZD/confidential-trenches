@@ -34,6 +34,11 @@ function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown
       if (opts.down) return { status: 503, body: '{"error":{"code":"upstream"}}' };
       if (r.method === "getTokenLargestAccounts") return opts.largest === undefined ? { status: 503, body: '{"error":{"code":"upstream"}}' } : { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.largest }) };
       const keys = r.params[0] as string[];
+      if ((r.params[1] as { encoding?: string }).encoding === "base64") {
+        // the launch read (origin.ts): each recorded token's pump.fun curve account where it is asked, else none
+        const curves = new Map(Object.keys(FX.tokens).map((m) => [pumpCurveAddress(m), FX.tokens[m].accounts.result.value[1]]));
+        return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value: keys.map((k) => (opts.accounts ? null : (curves.get(k) ?? null))) } }) };
+      }
       if (keys.length === 2 && keys[1] === pumpCurveAddress(keys[0]!)) {
         const rec = FX.tokens[keys[0]!]?.accounts ?? { jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value: [null, null] } };
         return { status: 200, body: JSON.stringify(opts.accounts ? opts.accounts(keys[0]!) : rec) };
@@ -41,7 +46,10 @@ function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown
       if (keys.length === 1) {
         const rec = FX.tokens[keys[0]!]?.accounts;
         const v = rec ? { ...rec, result: { ...rec.result, value: [rec.result.value[0]] } } : { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [null] } };
-        return { status: 200, body: JSON.stringify(opts.accounts ? opts.accounts(keys[0]!) : v) };
+        // an `accounts` answer is recorded for the mint and its curve: the mint read takes its first account
+        const o = opts.accounts?.(keys[0]!) as { result?: { value?: unknown[] } } | undefined;
+        const one = o?.result?.value ? { ...o, result: { ...o.result, value: o.result.value.slice(0, 1) } } : o;
+        return { status: 200, body: JSON.stringify(opts.accounts ? one : v) };
       }
       return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.owners }) };
     },
@@ -101,11 +109,11 @@ test("fold 6 (re-check 4 P5b): the token page's chain reads draw the share of th
   const spy = { handle: (c: string, ct: string | undefined, body: string, client?: string) => (seen.push(client), rpc.handle(c, ct, body)) };
   const t = createSolanaToken(fakeProxy(), spy, { now: () => NOW });
   assert.equal((await t.page(PUMP, "198.51.100.9")).status, 200);
-  assert.deepEqual(seen, ["198.51.100.9"], "the mint read carried the caller");
+  assert.deepEqual(seen, ["198.51.100.9", "198.51.100.9"], "the mint read and the launch read carried the caller");
   assert.equal((await t.page(PUMP, "198.51.100.10")).status, 200);
-  assert.equal(seen.length, 1, "a cache hit reaches no provider and draws nothing");
+  assert.equal(seen.length, 2, "a cache hit reaches no provider and draws nothing");
   await t.holders(PUMP, "198.51.100.11");
-  assert.deepEqual(seen.slice(1), ["198.51.100.11"], "the holders' mint read carries its caller too");
+  assert.deepEqual(seen.slice(2), ["198.51.100.11"], "the holders' mint read carries its caller too");
 });
 
 test("page: a Token-2022 mint off any curve, in 06b's TokenPage fields, the chain's authorities and fee, Jupiter's row", async () => {
@@ -506,4 +514,30 @@ test("the routes refuse: another method 405; no, two or another chain, no or two
     const r = await call("GET", q);
     assert.equal(r.status, 404, q);
   }
+});
+
+// card helper-launchpad-origin: the page's launchpad and pool are the chain's, on the launch reads recorded 2026-11-03
+// 16:49Z (fixtures/solana-origins.json, origin.test.ts)
+test("page: a LaunchLab token on its curve trades in its LaunchLab pool, read on chain; a token Jupiter tags with no launch on chain is untagged", async () => {
+  const OX = JSON.parse(readFileSync(new URL("./fixtures/solana-origins.json", import.meta.url), "utf8")) as { tokens: { case: string; mint: string; origin: { pad: string; pool: string; curveBps: number | null } | null; jupiter: Record<string, unknown> }[]; accounts: Record<string, unknown> };
+  const mintAcct = FX.tokens[PUMP].accounts.result.value[0];
+  const rpc = {
+    async handle(_c: string, _t: string | undefined, body: string) {
+      const r = JSON.parse(body) as RpcCall;
+      const keys = r.params[0] as string[];
+      const base64 = (r.params[1] as { encoding?: string }).encoding === "base64";
+      const value = base64 ? keys.map((k) => OX.accounts[k] ?? null) : keys.map(() => mintAcct);
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value } }) };
+    },
+  };
+  const ll = OX.tokens.find((t) => t.case === "raydium-launchlab" && t.origin!.curveBps! < 10_000)!;
+  const md = OX.tokens.find((t) => t.jupiter.launchpad === "metadao")!;
+  const t = createSolanaToken(fakeProxy({ search: (m) => OX.tokens.filter((x) => x.mint === m).map((x) => x.jupiter) }), rpc, { now: () => NOW });
+  const p = JSON.parse((await t.page(ll.mint)).body);
+  assert.equal(p.row.launchpad, "raydium-launchlab");
+  assert.equal(p.row.curve_bps, ll.origin!.curveBps);
+  assert.equal(p.pool, ll.origin!.pool, "on its curve: the LaunchLab pool");
+  assert.equal(p.risk.lp.v.class, "curve");
+  const q = JSON.parse((await t.page(md.mint)).body);
+  assert.equal(q.row.launchpad, null, "Jupiter's metadao tag with no launch read on chain");
 });

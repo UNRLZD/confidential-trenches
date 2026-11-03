@@ -4,9 +4,10 @@
 // `buys_1h` and `sells_1h` added for the Trending column (asked in card app-discover-solana).
 //
 // Sources: Jupiter's `/tokens/v2/recent` (New) and `/tokens/v2/toptrending/5m` and `/1h` (limit 100), read through the
-// helper's own proxy (src/proxy/), so its key, cache, 429 back-off and key-in-answer refusal apply unchanged; and, for
-// the pump.fun rows still on their curve, the curve account by one `getMultipleAccounts` per 100 through the helper's
-// RPC path (src/rpc/). Every row is listed, with no filter by `launchpad` (D-S4); `launchpad` is only a tag.
+// helper's own proxy (src/proxy/), so its key, cache, 429 back-off and key-in-answer refusal apply unchanged; and each
+// token's launch read on chain (origin.ts) through the helper's RPC path (src/rpc/): the account its launchpad program
+// made for it, read once per token, and its curve while it is on one, read each refresh. A row's `launchpad` and
+// `curve_bps` are that read's, never Jupiter's word alone. Every row is listed, with no filter by `launchpad` (D-S4).
 //
 // Display only: nothing here feeds a signature. Every vendor and RPC value is hostile input: a row with no valid mint,
 // symbol or name is dropped, every number is checked finite and in range or becomes null, text is cut and stripped of
@@ -18,6 +19,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { gzipSync } from "node:zlib";
 import { retryAfterOf, Throttled } from "../../limits/limits.ts";
+import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 
 /** fields.ts ROW_FIELDS in its order, then the two added for the Trending column. */
 export const ROW_FIELDS = [
@@ -34,7 +36,9 @@ export type RowField = (typeof ROW_FIELDS)[number];
 export type Row = Record<RowField, string | number | boolean | null>;
 
 export const LISTS = ["new", "trending", "trending_5m", "trending_1h", "graduating"] as const;
-export type Snapshot = { chain: "solana"; lists: Record<(typeof LISTS)[number], Row[]>; as_of_ms: number };
+/** `unsettled`: the listed tokens whose launch is not read yet; their rows' launchpad null means "not read yet", every
+ *  other row's null means no launchpad program made the token. Not a row field: the frozen rows are unchanged. */
+export type Snapshot = { chain: "solana"; lists: Record<(typeof LISTS)[number], Row[]>; as_of_ms: number; unsettled: string[] };
 
 export const LIST_MAX = 100;
 /** The Jupiter reads, each with limit=100 (D-S2, D-S3). */
@@ -301,14 +305,17 @@ export function pumpCurveBps(account: unknown): number | null {
 /** Rows of every list at once, so each token is read once. */
 const allRows = (lists: Record<string, Row[]>) => Object.values(lists).flat();
 
-/** The rows whose curve the pump.fun read can fill: tagged pump.fun, no graduated pool, one per mint. */
-export function pumpCandidates(rows: readonly Row[]): string[] {
-  return [...new Set(rows.filter((r) => r.launchpad === "pump.fun" && r.curve_bps === null).map((r) => r.token as string))];
-}
-
-/** The snapshot from the three lists' rows and the curve progress read for some mints. */
-export function snapshot(read: { new: Row[]; trending_5m: Row[]; trending_1h: Row[] }, curves: ReadonlyMap<string, number>, asOfMs: number): Snapshot {
-  const fill = (rows: Row[]) => rows.map((r) => (r.curve_bps === null && curves.has(r.token as string) ? { ...r, curve_bps: curves.get(r.token as string)! } : r));
+/**
+ * The snapshot from the three lists' rows and each token's launch as read on chain (origin.ts): a row's `launchpad`
+ * is its launch's pad (null for a token no launchpad program made, and while its launch is not read: those tokens are
+ * named in `unsettled`), its `curve_bps` the launch's progress when read, else the row's own.
+ */
+export function snapshot(read: { new: Row[]; trending_5m: Row[]; trending_1h: Row[] }, origin: (mint: string) => Origin | null | undefined, asOfMs: number): Snapshot {
+  const fill = (rows: Row[]) =>
+    rows.map((r) => {
+      const o = origin(r.token as string);
+      return { ...r, launchpad: o?.pad ?? null, curve_bps: o?.curveBps ?? r.curve_bps };
+    });
   const lists = { new: fill(read.new), trending_5m: fill(read.trending_5m), trending_1h: fill(read.trending_1h) };
   // Graduating (06b): still on a launchpad curve (a launchpad and 0-9,999), highest progress first, each token once
   const seen = new Set<string>();
@@ -317,7 +324,8 @@ export function snapshot(read: { new: Row[]; trending_5m: Row[]; trending_1h: Ro
     .filter((r) => (seen.has(r.token as string) ? false : (seen.add(r.token as string), true)))
     .sort((a, b) => (b.curve_bps as number) - (a.curve_bps as number))
     .slice(0, LIST_MAX);
-  return { chain: "solana", lists: { new: lists.new, trending: lists.trending_1h, trending_5m: lists.trending_5m, trending_1h: lists.trending_1h, graduating }, as_of_ms: asOfMs };
+  const unsettled = [...new Set(allRows(lists).map((r) => r.token as string))].filter((t) => origin(t) === undefined);
+  return { chain: "solana", lists: { new: lists.new, trending: lists.trending_1h, trending_5m: lists.trending_5m, trending_1h: lists.trending_1h, graduating }, as_of_ms: asOfMs, unsettled };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -332,28 +340,6 @@ export type ListsAnswer = { status: number; body: string; gzip?: Buffer; asOfMs?
 
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
 
-/** The curve progress of these pump.fun mints, by one getMultipleAccounts per 100; an RPC failure leaves them unknown. */
-export async function readPumpCurves(rpc: Rpc, mints: readonly string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  for (let i = 0; i < mints.length; i += 100) {
-    const part = mints.slice(i, i + 100);
-    const keys = part.map(pumpCurveAddress);
-    try {
-      const a = await rpc.handle("solana", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [keys, { encoding: "base64", commitment: "confirmed" }] }), undefined, true); // rpc.ts RPC_RESERVE
-      if (a.status !== 200) continue;
-      const value = obj(obj(JSON.parse(a.body)).result).value;
-      if (!Array.isArray(value) || value.length !== part.length) continue;
-      part.forEach((mint, k) => {
-        const b = pumpCurveBps(value[k]);
-        if (b !== null) out.set(mint, b);
-      });
-    } catch {
-      // unknown stays null
-    }
-  }
-  return out;
-}
-
 /** Discover's Solana lists, refreshed at most once per FRESH_MS and shared by every caller. */
 export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => number } = {}) {
   const now = deps.now ?? Date.now;
@@ -362,7 +348,10 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
   let builtAt = -Infinity;
   let running: Promise<ListsAnswer> | null = null;
 
-  async function read(path: string): Promise<{ rows: Row[]; at: number } | null> {
+  // each token's launch, read on chain once, and the progress of those on a curve each refresh (origin.ts)
+  const origins = createOrigins(rpcAccounts(rpc, true)); // rpc.ts RPC_RESERVE
+
+  async function read(path: string): Promise<{ rows: Row[]; hints: Map<string, Hint>; at: number } | null> {
     const a = await proxy.handle("jupiter", path, "limit=100", "", undefined, true); // proxy.ts PROXY_RESERVE
     if (a.status === 429) throw new Throttled(retryAfterOf(a.headers));
     if (a.status !== 200) return null;
@@ -375,15 +364,17 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
       return null;
     }
     const rows = toRows(parsed, asOf);
-    return rows === null ? null : { rows, at: asOf };
+    return rows === null ? null : { rows, hints: hintsOf(parsed), at: asOf };
   }
 
   async function refresh(): Promise<ListsAnswer> {
     const [n, t5, t1] = await Promise.all([read(READS.new), read(READS.trending_5m), read(READS.trending_1h)]);
     if (n === null || t5 === null || t1 === null) return last !== null && now() - last.asOfMs <= STALE_MS ? last : UPSTREAM;
     const asOf = Math.min(n.at, t5.at, t1.at);
-    const curves = await readPumpCurves(rpc, pumpCandidates([...n.rows, ...t5.rows, ...t1.rows]));
-    const body = JSON.stringify(snapshot({ new: n.rows, trending_5m: t5.rows, trending_1h: t1.rows }, curves, asOf));
+    const hints = new Map([...n.hints, ...t5.hints, ...t1.hints]);
+    const asks = [...n.rows, ...t5.rows, ...t1.rows].map((r) => ({ mint: r.token as string, hint: hints.get(r.token as string), createdS: r.created_s as number | null }));
+    await origins.refresh(asks, now());
+    const body = JSON.stringify(snapshot({ new: n.rows, trending_5m: t5.rows, trending_1h: t1.rows }, origins.get, asOf));
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
     builtAt = now();
     return last;
