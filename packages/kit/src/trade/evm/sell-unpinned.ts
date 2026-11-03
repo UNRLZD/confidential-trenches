@@ -24,7 +24,7 @@
 // precommitment by signing again with a fresh one.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_MAX_HOPS, evmPoolVenues, type EvmPoolChain, type EvmPoolVenue, type EvmV3Route } from "./buy-unpinned.ts";
+import { EVM_POOL_MAX_HOPS, evmPoolVenues, venuePins, type EvmPoolChain, type EvmPoolVenue, type EvmV3Route } from "./buy-unpinned.ts";
 
 /** A sell's deadline, seconds past now: at least the helper's send margin (apps/helper pool/evm.ts
  *  EVM_POOL_SEND_MARGIN_MS, 60 s, card helper-pool-senders: a send needs time to be mined before the deadline), at
@@ -283,9 +283,10 @@ export function evmPoolSignSellAuthorizationUnpinned(secretKey: Uint8Array, chai
 // the index's functions pass evmPoolVenues(). W's proceeds go only to the chain's pinned pool, and W delegates only to
 // the chain's pinned sell delegate: a helper that names its own would take them (the review of 8fd535f).
 
-function pinsOf(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain): EvmPoolVenue {
+/** The pins of `chain` in `venues` (buy-unpinned.ts's venuePins: own keys only), refused as a sell's error. */
+function pinsOf(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain): ReturnType<typeof venuePins> {
   if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");
-  return venues[chain];
+  return venuePins(venues, chain);
 }
 
 /** evmPoolBuildSellUnpinned into the chain's pinned pool. */

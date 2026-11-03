@@ -408,3 +408,37 @@ test("M370 W's authorization names only the chain's pinned sell delegate", () =>
   assert.equal(code(() => pinnedSignSellAuthorization(noDelegate, W_KEY, "robinhood", 0n)), "not_deployed");
   assert.equal(code(() => pinnedSignSellAuthorization(PINNED, W_KEY, "ethereum" as EvmPoolChain, 0n)), "bad_route");
 });
+
+// ------------------------------------------------------------------ the review of 8d8675d: a polluted Object.prototype
+
+const EVIL = "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD0";
+/** Runs `f` with Object.prototype filled the way a prototype-pollution bug in the same page would, then empties it. */
+function polluted(f: () => void): void {
+  const P = Object.prototype as Record<string, unknown>;
+  const fill: Record<string, unknown> = { pool: EVIL, sellDelegate: EVIL, adapters: { v3: EVIL, v4: EVIL }, v3: EVIL, v4: EVIL };
+  try {
+    for (const k of Object.keys(fill)) P[k] = fill[k];
+    f();
+  } finally {
+    for (const k of Object.keys(fill)) delete P[k];
+  }
+}
+
+test("M370 a polluted Object.prototype names no pool and no delegate: every sell builder and signer still refuses not_deployed", () => {
+  assert.equal(Object.getPrototypeOf(evmPoolVenues()), null, "the venue list has no prototype");
+  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) assert.equal(Object.getPrototypeOf(evmPoolVenues()[chain]), null, chain);
+  const noPins = Object.freeze({ base: Object.freeze({ ...B }), robinhood: Object.freeze({ ...R }) }); // an ordinary list
+  polluted(() => {
+    for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
+      const v = evmPoolVenues()[chain];
+      const r = { ...pinnedReq, target: v.routers[0]!, route: v3([X, v.weth]) };
+      assert.equal(code(() => kit.evmPoolBuildSell(chain, r)), "not_deployed", chain);
+      assert.equal(code(() => kit.evmPoolSignSell(W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
+      assert.equal(code(() => kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuildSell(noPins, chain, r)), "not_deployed", chain);
+      assert.equal(code(() => pinnedSignSell(noPins, W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
+      assert.equal(code(() => pinnedSignSellAuthorization(noPins, W_KEY, chain, 0n)), "not_deployed", chain);
+    }
+  });
+  assert.equal(({} as Record<string, unknown>).pool, undefined, "the prototype is emptied again");
+});

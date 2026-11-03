@@ -250,6 +250,8 @@ function checkAppFees(v: unknown, path: OneClickPath, sameAsset: boolean): numbe
     if (!(Array.isArray(v) && v.length === 0)) fail("app-fees", `appFees ${show(JSON.stringify(v))} on a same-asset quote is not []`);
     return 0;
   }
+  // an own key only: a path outside the two names no fee, even when a polluted page's Object.prototype has one
+  if (typeof path !== "string" || !Object.hasOwn(ONECLICK_FEE_BPS, path)) fail("app-fees", `no such path ${show(path)}`);
   const e = Array.isArray(v) && v.length === 1 ? v[0] : undefined;
   const ok = isObj(e) && e.recipient === ONECLICK_COLLECTOR && e.fee === ONECLICK_FEE_BPS[path] &&
     Object.keys(e).every((k) => k === "recipient" || k === "fee" || e[k] === null || e[k] === undefined);

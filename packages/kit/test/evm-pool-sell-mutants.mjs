@@ -110,6 +110,13 @@ export const MUTANTS = [
   [SELL, 'if (BUILT.has(built) && lower(built.pool) !== lower(pool)) return refuse("not_pinned", `the sell\'s pool is not ${chain}\'s pinned pool`);', "", PINPOOL],
   [SELL, 'if (delegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);', "", PINAUTH],
   [SELL, 'if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");', "", PINPOOL],
+  // no read of a pin reaches Object.prototype (the review of 8d8675d): the list has no prototype, a pin is an own key
+  [BUY, "(venues ??= bare({", "(venues ??= Object.freeze({", "M370 a polluted Object.prototype names no pool"],
+  [BUY, "    base: bare({", "    base: Object.freeze({", "M370 a polluted Object.prototype names no pool"],
+  [BUY, "    robinhood: bare({", "    robinhood: Object.freeze({", "M370 a polluted Object.prototype names no pool"],
+  [BUY, 'pool: ownPin(v, "pool")', "pool: (v as { pool?: string }).pool", "M370 a polluted Object.prototype names no pool"],
+  [BUY, 'sellDelegate: ownPin(v, "sellDelegate")', "sellDelegate: (v as { sellDelegate?: string }).sellDelegate", "M370 a polluted Object.prototype names no pool"],
+  [BUY, 'if (typeof o !== "object" || o === null || !Object.hasOwn(o, k)) return undefined;', 'if (typeof o !== "object" || o === null) return undefined;', "M370 a polluted Object.prototype names no pool"],
   // the fork fixture is the kit's output
   [SELL, "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });", "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)).replace(/.$/, \"0\") });", FIXTURE],
 ];

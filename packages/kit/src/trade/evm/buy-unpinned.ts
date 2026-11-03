@@ -44,11 +44,14 @@ export type EvmPoolVenue = {
 /** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
  *  read only this list. Frozen all the way down, so no code can swap a chain id, WETH or a middle (nor, once
  *  pool-evm-deploy pins them here, an adapter or a pool, M366 (4)); made on first use, never at load: the kit's index
- *  reaches the signing page's bundle, which keeps any top-level call (build-app.mjs --check). */
+ *  reaches the signing page's bundle, which keeps any top-level call (build-app.mjs --check). Every object level has
+ *  no prototype, so no read of the list reaches Object.prototype, which a polluted page could fill with a pool, an
+ *  adapter or a delegate (the review of 8d8675d); the adapters pool-evm-deploy adds get the same `bare`. */
+const bare = <T extends object>(o: T): Readonly<T> => Object.freeze(Object.assign(Object.create(null) as T, o));
 let venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>> | undefined;
 export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
-  (venues ??= Object.freeze({
-    base: Object.freeze({
+  (venues ??= bare({
+    base: bare({
       chainId: 8453,
       weth: "0x4200000000000000000000000000000000000006",
       middles: Object.freeze(["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"]), // USDC
@@ -56,7 +59,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // base-rpc.publicnode.com: the same 24,498 bytes, codehash 0x38bd640f…124e4 (2026-11-03)
       routers: Object.freeze(["0x2626664c2603336E57B271c5C0b26F421741e481"]),
     }),
-    robinhood: Object.freeze({
+    robinhood: bare({
       chainId: 4663,
       weth: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", // aeWETH, an upgradeable proxy (contracts/pool-evm/NOTICE)
       middles: Object.freeze(["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"]), // USDG
@@ -299,18 +302,27 @@ export function evmPoolSignBuyUnpinned(secretKey: Uint8Array, chain: EvmPoolChai
 // The pinned buy (M370): what the kit's index exports as evmPoolBuild and evmPoolSignBuy (buy.ts), here with the venue
 // list as an input so the tests can pin a list of their own; the index's functions pass evmPoolVenues().
 
-/** The pins of `chain` in `venues`: only the list's own keys. */
-function pinsOf(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain): EvmPoolVenue {
+/** A pin: `o`'s own `k` when it is a string, never one inherited from a prototype a polluted page filled. */
+function ownPin(o: unknown, k: string): string | undefined {
+  if (typeof o !== "object" || o === null || !Object.hasOwn(o, k)) return undefined;
+  const x = (o as Record<string, unknown>)[k];
+  return typeof x === "string" ? x : undefined;
+}
+
+/** The pins of `chain` in `venues` (also sell-unpinned.ts's): only the list's own keys, each read once. */
+export function venuePins(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain): { pool: string | undefined; v3: string | undefined; v4: string | undefined; sellDelegate: string | undefined } {
   if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");
-  return venues[chain];
+  const v = venues[chain];
+  const adapters = typeof v === "object" && v !== null && Object.hasOwn(v, "adapters") ? v.adapters : undefined;
+  return { pool: ownPin(v, "pool"), v3: ownPin(adapters, "v3"), v4: ownPin(adapters, "v4"), sellDelegate: ownPin(v, "sellDelegate") };
 }
 const samePin = (a: unknown, pin: string) => typeof a === "string" && lower(a) === lower(pin);
 
 /** evmPoolBuildUnpinned through the chain's pinned adapter for the route's venue only. */
 export function pinnedBuild(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string): EvmPoolBuy {
-  const v = pinsOf(venues, chain);
+  const v = venuePins(venues, chain);
   const r = copyRoute(route);
-  const pin = r.venue === "uniswap-v3" ? v.adapters?.v3 : v.adapters?.v4;
+  const pin = r.venue === "uniswap-v3" ? v.v3 : v.v4;
   if (pin === undefined) return refuse("not_deployed", `${chain} has no pinned ${r.venue} adapter yet`);
   if (!samePin(adapter, pin)) return refuse("not_pinned", `the adapter is not ${chain}'s pinned ${r.venue} adapter`);
   return evmPoolBuildUnpinned(chain, adapter, r, minOut, token);
@@ -318,12 +330,11 @@ export function pinnedBuild(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>
 
 /** evmPoolSignBuyUnpinned into the chain's pinned pool only, of a buy through a pinned adapter. */
 export function pinnedSignBuy(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, secretKey: Uint8Array, chain: EvmPoolChain, pool: string, built: EvmPoolBuy, proof: EvmPoolProofBinding): Uint8Array {
-  const v = pinsOf(venues, chain);
+  const v = venuePins(venues, chain);
   if (v.pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);
   if (!samePin(pool, v.pool)) return refuse("not_pinned", `the pool is not ${chain}'s pinned pool`);
-  const a = v.adapters;
   // a buy the builder did not return is left to the unpinned signer, which refuses it (not_built)
-  if (BUILT.has(built) && !((a?.v3 !== undefined && samePin(built.adapter, a.v3)) || (a?.v4 !== undefined && samePin(built.adapter, a.v4)))) {
+  if (BUILT.has(built) && !((v.v3 !== undefined && samePin(built.adapter, v.v3)) || (v.v4 !== undefined && samePin(built.adapter, v.v4)))) {
     return refuse("not_pinned", `the buy's adapter is not one of ${chain}'s pinned adapters`);
   }
   return evmPoolSignBuyUnpinned(secretKey, chain, pool, built, proof);
