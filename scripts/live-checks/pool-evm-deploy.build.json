@@ -1,0 +1,79 @@
+{
+  "notes": [
+    "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs."
+  ],
+  "contracts": {
+    "WithdrawalVerifier": {
+      "length": 1947,
+      "masked": "0x54515096fff858166d381897047ecf92c8b6a595c01416cafa7b9b608670ab67",
+      "immutables": []
+    },
+    "PrivacyPoolSimple": {
+      "length": 9441,
+      "masked": "0x0d28ad57bfa889d772433fc15f3492c60366387b296b2773743a6e24e6973bd0",
+      "immutables": [
+        [
+          569
+        ],
+        [
+          431,
+          3161,
+          5438
+        ],
+        [
+          754,
+          5979
+        ]
+      ]
+    },
+    "UniswapV4Adapter": {
+      "length": 4322,
+      "masked": "0x101b5cfda8dded369e8c5bbe5e7ada371c6cec73223940a320b231ab03c5b71b",
+      "immutables": [
+        [
+          104,
+          277,
+          503,
+          964,
+          1640,
+          1979,
+          2129,
+          2287,
+          2513
+        ],
+        [
+          241,
+          732,
+          1790,
+          2176
+        ]
+      ]
+    },
+    "UniswapV3Adapter": {
+      "length": 2104,
+      "masked": "0x9be86543cc88537862959a8032c208c8ff73be129d81e40db08cf67ff5556fa9",
+      "immutables": [
+        [
+          61,
+          180,
+          439,
+          595,
+          891,
+          1158
+        ]
+      ]
+    },
+    "SellDelegate": {
+      "length": 4119,
+      "masked": "0x6b3391e03a047821cc2d2199fa94c46c46e72d98dfe7ae1c9fd39a0ada14f4cf",
+      "immutables": [
+        [
+          82,
+          792,
+          1438,
+          1608
+        ]
+      ]
+    }
+  }
+}
