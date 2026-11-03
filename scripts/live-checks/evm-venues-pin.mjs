@@ -12,7 +12,8 @@
 //     zeroed, the same keccak256), and its immutables hold exactly the words pool-evm-deploy's getters must return
 //     (gettersOf: the pool's verifier, asset and scope, the adapters' PoolManager, router and WETH, the delegate's WETH);
 //     the record's verifier is the build's; the PoolManager's, WETH's and each router's code hash is the one CHAINS
-//     pins, and where WETH is a proxy (Robinhood testnet), its implementation slot and that implementation's code hash.
+//     pins, and where WETH is a proxy (Robinhood testnet), its implementation slot and that implementation's code hash,
+//     both read at each RPC's latest block (the one value here an upgrade can change).
 //   node scripts/live-checks/evm-venues-pin.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>, for the test's replay (evm-venues-pin.answers.json).
 import "../net-window.mjs";
@@ -89,16 +90,23 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
       const must = getters[name].map(([, w]) => w).sort();
       say(JSON.stringify(held) === JSON.stringify(must), `the ${role} ${pin}: ${name}'s immutables hold ${held.join(", ") || "none"}, each one word, the ones its getters must return`);
     }
-    const deps = [["the PoolManager", c.poolManager], ["WETH", c.weth], ...(c.router ? [["the router", c.router]] : []), ...(c.weth.implementation ? [["WETH's implementation", c.weth.implementation]] : [])];
+    const deps = [["the PoolManager", c.poolManager], ["WETH", c.weth], ...(c.router ? [["the router", c.router]] : [])];
     for (const [what, { address: addr, codehash: hash }] of deps) {
       const [a, b] = await codeAt(addr);
       say(a === b && a !== "0x" && keccak(a) === hash, `${what} ${addr}: code hash ${keccak(a)} on both RPCs at block ${BigInt(block)} is the pinned ${hash}`);
     }
+    // WETH's implementation is the one value here an upgrade changes: read at each RPC's latest block, as
+    // pool-evm-deploy does, never at the agreed block, which one RPC's stale head could set in the past
     if (c.weth.implementation) {
       const slot = [];
-      for (const u of two) slot.push(await rpc(fetchFn, u, "eth_getStorageAt", [c.weth.address, EIP1967.implementation, block], sleep));
+      const code = [];
+      for (const u of two) {
+        slot.push(await rpc(fetchFn, u, "eth_getStorageAt", [c.weth.address, EIP1967.implementation, "latest"], sleep));
+        code.push(await rpc(fetchFn, u, "eth_getCode", [c.weth.implementation.address, "latest"], sleep));
+      }
       const want = "0x" + "0".repeat(24) + lower(c.weth.implementation.address).slice(2);
-      say(slot.every((x) => lower(x) === want), `WETH's implementation slot holds the pinned ${c.weth.implementation.address} on both RPCs at block ${BigInt(block)}: ${slot.join(", ")}`);
+      say(slot.every((x) => lower(x) === want), `WETH's implementation slot holds the pinned ${c.weth.implementation.address} on both RPCs at latest: ${slot.join(", ")}`);
+      say(code.every((x) => x !== "0x" && keccak(x) === c.weth.implementation.codehash), `WETH's implementation ${c.weth.implementation.address}: code hash ${code.map((x) => keccak(x)).join(", ")} on both RPCs at latest is the pinned ${c.weth.implementation.codehash}`);
     }
   } catch (e) {
     say(false, `read: ${String(e.message).split("\n")[0]}`);

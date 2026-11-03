@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check, deployed } from "./evm-venues-pin.mjs";
-import { BUILD, CHAINS } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, EIP1967 } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-venues-pin.answers.json", import.meta.url), "utf8"));
 const RECORD = Object.fromEntries(deployed());
@@ -124,4 +124,27 @@ test("the pool's verifier, the PoolManager or Robinhood testnet WETH's implement
 
 test("a middle listed on a testnet fails", async () => {
   for (const chain of A.chains) fails(await run(chain, { venue: { ...evmPoolVenues()[chain], middles: ["0x000000000000000000000000000000000000bad0"] } }), /middle/);
+});
+
+test("one RPC's stale head does not hide a WETH upgrade: the implementation slot is read at latest (the review of ccee09a)", async () => {
+  const chain = "robinhood-testnet";
+  const [u1, u2] = CHAINS[chain].rpcs;
+  const W = CHAINS[chain].weth;
+  const answers = structuredClone(A.good);
+  const heads = [u1, u2].map((u) => BigInt(answers.find((a) => a.url === u && a.method === "eth_blockNumber").json.result));
+  const agreed = "0x" + (heads[0] < heads[1] ? heads[0] : heads[1]).toString(16);
+  const stale = "0x" + ((heads[0] < heads[1] ? heads[0] : heads[1]) - 9000n).toString(16);
+  const isSlot = (a) => a.method === "eth_getStorageAt" && lower(a.params[0]) === lower(W.address);
+  const implCode = answers.find((a) => a.method === "eth_getCode" && lower(a.params[0]) === lower(W.implementation.address)).json.result;
+  for (const a of answers) {
+    if (a.url === u2 && a.method === "eth_blockNumber") a.json.result = stale; // one RPC's stale head sets the agreed block
+    if (Array.isArray(a.params) && a.params.at(-1) === agreed) a.params[a.params.length - 1] = stale;
+    if (isSlot(a)) a.json.result = "0x" + word("0x" + "ba".repeat(20)); // the proxy upgraded since that block
+  }
+  for (const u of [u1, u2]) {
+    // that block, from history: the pinned implementation still
+    answers.push({ url: u, method: "eth_getStorageAt", params: [W.address, EIP1967.implementation, stale], status: 200, json: { jsonrpc: "2.0", id: 1, result: "0x" + word(W.implementation.address) } });
+    answers.push({ url: u, method: "eth_getCode", params: [W.implementation.address, stale], status: 200, json: { jsonrpc: "2.0", id: 1, result: implCode } });
+  }
+  fails(await run(chain, { answers }), /implementation slot/);
 });
