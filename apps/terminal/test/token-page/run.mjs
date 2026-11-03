@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
+import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
@@ -27,12 +28,13 @@ const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 
-// id, the URL's fx (none: the default), the page's state
+// id, the URL's fx (none: the default), the page's state; a ready state's fixture launchpad and chain (fixtures.ts),
+// whose badges sit at the avatar's corners (card app-launchpad-chain-badges)
 const STATES = [
-  { id: "S7.2-curve", fx: null, state: "ready", curve: true },
-  { id: "S7.2-pool", fx: "pool", state: "ready", curve: false },
-  { id: "S7.2-listed", fx: "listed", state: "ready", curve: false },
-  { id: "S7.3-edges", fx: "edges", state: "ready", curve: false },
+  { id: "S7.2-curve", fx: null, state: "ready", curve: true, served: { launchpad: "pump.fun", chain: "solana" } },
+  { id: "S7.2-pool", fx: "pool", state: "ready", curve: false, served: { launchpad: "pump.fun", chain: "solana" } },
+  { id: "S7.2-listed", fx: "listed", state: "ready", curve: false, served: { launchpad: null, chain: "solana" } },
+  { id: "S7.3-edges", fx: "edges", state: "ready", curve: false, served: { launchpad: "pons", chain: "near" } },
   { id: "S7.1-loading", fx: "loading", state: "loading" },
   { id: "empty", fx: "empty", state: "empty" },
   { id: "error", fx: "error", state: "error" },
@@ -100,6 +102,35 @@ try {
         check(bars === (s.curve ? 1 : 0), `${tag}: ${bars} curve bars`);
         const field = (await f.locator(`${box} [data-k="curve"] .tkp-val`).textContent())?.trim();
         check(s.curve ? /^\d+%$/.test(field ?? "") : field === "—", `${tag}: the curve field reads ${field}`);
+        // the origin badges: the fixture's pad (or none) bottom-right, its chain top-right, loaded, named, not cut
+        const drawnRow = await f.evaluate(async (box) => {
+          await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
+          const root = document.querySelector(box);
+          const av = root?.querySelector(".tok-avw");
+          if (!av) return null;
+          // cut: outside the nearest box that clips its content, or the viewport
+          let c = null;
+          for (let p = av.parentElement; p && !c; p = p.parentElement) if (getComputedStyle(p).overflow !== "visible") c = p.getBoundingClientRect();
+          c ??= { top: 0, left: 0, bottom: innerHeight, right: innerWidth };
+          const g = (sel, at) => {
+            const e = av.querySelector(sel);
+            if (!e) return null;
+            const i = e.querySelector("img");
+            const r = e.getBoundingClientRect();
+            return { id: e.getAttribute(at), title: e.getAttribute("title"), loaded: !!i && i.complete && i.naturalWidth > 0, out: r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5 || r.left < c.left - 0.5 || r.right > c.right + 0.5 || r.width < 9.5 };
+          };
+          const pad = g(".tok-pb", "data-pad");
+          const chain = g(".tok-cb", "data-chain");
+          const clipped = [pad?.out && "launchpad badge cut by its box", chain?.out && "chain badge cut by its box"].filter(Boolean);
+          const texts = [...root.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.getClientRects().length).map((e) => e.textContent.trim()).filter(Boolean);
+          const strip = (b) => (b ? { id: b.id, title: b.title, loaded: b.loaded } : null);
+          return { pad: strip(pad), chain: strip(chain), texts, clipped };
+        }, box);
+        check(drawnRow !== null, `${tag}: no avatar with badges`);
+        if (drawnRow) {
+          const faults = rowFaults({ ...drawnRow, served: s.served });
+          check(faults.length === 0, `${tag}: badges: ${faults.join("; ")}`);
+        }
         if (phone) {
           const g = await f.evaluate(() => {
             window.scrollTo(0, document.documentElement.scrollHeight);

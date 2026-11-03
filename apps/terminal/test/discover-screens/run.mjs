@@ -11,6 +11,8 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { READ, rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
+import { edgy, solana } from "./snapshots.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -45,7 +47,9 @@ async function build() {
   return out;
 }
 
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
+const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png" };
+/** Each fixture row's launchpad and chain, as the lists serve them (card app-launchpad-chain-badges). */
+const SERVED = new Map([solana, edgy].flatMap((s) => Object.values(s.lists).flat()).map((r) => [r.token, { launchpad: r.launchpad, chain: r.chain }]));
 function serve(dir) {
   const server = createServer((req, res) => {
     const p = new URL(req.url, "http://x").pathname;
@@ -100,7 +104,19 @@ try {
         check(external.length === 0, `${tag}: external requests ${external.join(" ")}`);
         const wide = await page.$$eval(`${box(w.name)} [role="listitem"]`, (els) => els.filter((e) => e.getClientRects().length && e.scrollWidth > e.clientWidth + 1).map((e) => e.getAttribute("data-token")));
         check(wide.length === 0, `${tag}: rows wider than their column: ${wide.join(" ")}`);
-        check((await page.locator(".dsc img").count()) === 0, `${tag}: token text drew an element`);
+        check((await page.locator(".dsc img:not(.tok-pb img):not(.tok-cb img)").count()) === 0, `${tag}: token text drew an element`);
+        // every row: its launchpad's logo badge (none for null or an unknown id), its chain's mark, no raw id, not cut
+        if (s.f === "rows" || s.f === "edges") {
+          await page.evaluate(() => Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; })))));
+          const rows = await page.evaluate(READ, { scope: box(w.name), column: s.tab ?? "new" });
+          // the planted unknown id is meant to have no table row: that fault alone is expected on its row
+          const faulty = rows.map((r) => ({ t: r.addr, bad: rowFaults({ ...r, served: SERVED.get(r.addr) ?? null }).filter((m) => !(r.addr.startsWith("NewPad") && m === 'launchpad "some-new-pad" has no row in the table')) })).filter((x) => x.bad.length);
+          check(rows.length > 0 && faulty.length === 0, `${tag}: badges: ${rows.length} rows, ${faulty.slice(0, 3).map((x) => `${x.t.slice(0, 8)} ${x.bad.join("; ")}`).join(" | ")}`);
+          if (s.f === "edges") {
+            const unknown = rows.find((r) => r.addr.startsWith("NewPad"));
+            check(!!unknown && unknown.pad === null && unknown.chain?.id === "solana" && !unknown.texts.includes("some-new-pad"), `${tag}: the unknown id's row drew ${JSON.stringify(unknown)}`);
+          }
+        }
         if (s.f === "rows" && w.name === "1440" && !s.tab) {
           const full = await page.$$eval(".dsc-grid .dsc-rows", (cols) => cols.map((c) => { const b = c.getBoundingClientRect().bottom; return [...c.querySelectorAll('[role="listitem"]')].filter((r) => r.getBoundingClientRect().bottom <= b + 0.5).length; }));
           check(full.length === 4 && full.every((x) => x >= 9), `${tag}: full rows per column ${full.join(",")} (S5.7 wants 9)`);
