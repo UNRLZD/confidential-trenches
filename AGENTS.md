@@ -95,8 +95,8 @@ over public RPCs that rate-limit.
 - **A money path is done when it has landed.** Deposit, withdraw, trade and orders count as done only after a real
   run reaches arrival and every transaction reads back on chain. Money code is what `MONEY` in
   `scripts/ci/money-gate.mjs` names: `contracts/vault/`, the pool programs in `contracts/pool-solana/` and
-  `contracts/pool-evm/`, `packages/kit/`, `packages/wallet/`, and the terminal's trading code once it lands in
-  `apps/terminal/src/trading/`.
+  `contracts/pool-evm/`, `packages/kit/`, `packages/wallet/`, the signing page in `packages/signpage/`, and the
+  terminal's trading code once it lands in `apps/terminal/src/trading/`.
 - **A security fix comes with a test that fails before the fix and passes after it.** Without it, nothing shows the
   fix works or keeps it working.
 - **Every commit subject starts with `Card <key>: `**, where `<key>` names the change in lowercase letters, digits and

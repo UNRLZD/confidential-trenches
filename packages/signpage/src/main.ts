@@ -74,7 +74,7 @@ import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
-import { testnetPoolDeps, testnetPoolFlow } from "./pool-testnet.ts";
+import { testnetPoolDeps, testnetPoolFlow, testnetPoolSettle } from "./pool-testnet.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import type { PoolChain } from "./rules/pool.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
@@ -499,6 +499,8 @@ function notesMoved(e: WalletEvent): void {
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
+  // the testnet build: a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
+  if (POOL_TESTNET && !framed) testnetPoolSettle({ store: () => open(), seed64: () => openSeed64() });
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }

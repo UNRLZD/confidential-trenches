@@ -5,12 +5,12 @@
 //   CHAINS, card evm-venues-pin), each answered as the app's "base" and "robinhood". A chain is pinned only when the
 //   wallet's EVM_POOLS holds its testnet pool, so until then every EVM pool kind is refused, as on mainnet.
 // - The flow (card signpage-pool-notes): pool.deposit on the devnet pool (src/pool-deposit.ts), with the page's own
-//   note store and seed; every other op is refused until its card.
+//   note store and seed; every other op is refused until its card. A signed-in load finishes the pool's INCOMING notes.
 // main.ts takes these only in the testnet build; SIGN_HOST's build keeps its mainnet deps and carries none of this.
 import { solanaJsonRpc } from "../../kit/src/trade/solana/send.ts";
 import type { WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
-import { poolDepositKind } from "./pool-deposit.ts";
+import { poolDepositKind, type PoolDepositHost } from "./pool-deposit.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -37,9 +37,8 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
 /** What the page gives the testnet flow: its wallet store and the seed, each opened when a run needs it. */
 export type TestnetPage = { store(): Promise<WalletStore>; seed64(): Promise<Uint8Array> };
 
-/** The testnet build's pool flow: pool.deposit into the pinned devnet pool, read on TESTNET_RPCS.solana. */
-export function testnetPoolFlow(page: TestnetPage): NonNullable<PoolKindsDeps["flow"]> {
-  const deposit = poolDepositKind(() => {
+function depositHost(page: TestnetPage): () => PoolDepositHost {
+  return () => {
     let notes: NoteStore | null = null;
     return {
       pin: SOL_POOLS.devnet!,
@@ -48,6 +47,17 @@ export function testnetPoolFlow(page: TestnetPage): NonNullable<PoolKindsDeps["f
       seed64: page.seed64,
       end: () => notes?.close(),
     };
-  });
+  };
+}
+
+/** The testnet build's pool flow: pool.deposit into the pinned devnet pool, read on TESTNET_RPCS.solana. */
+export function testnetPoolFlow(page: TestnetPage): NonNullable<PoolKindsDeps["flow"]> {
+  const deposit = poolDepositKind(depositHost(page));
   return (ask, ctx) => (ask.kind === "pool.deposit" && ask.chain === "solana" && SOL_POOLS.devnet !== undefined ? deposit(ask, ctx) : { error: "not_allowed" });
+}
+
+/** On a signed-in page load: the devnet pool's INCOMING notes finished (src/pool-deposit.ts settlePoolDeposits). */
+export function testnetPoolSettle(page: TestnetPage): void {
+  if (SOL_POOLS.devnet === undefined) return;
+  poolDepositKind(depositHost(page))(null, null);
 }

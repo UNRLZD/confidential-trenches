@@ -79,7 +79,9 @@ export type NoteState = (typeof NOTE_STATES)[number];
 export const NOTE_EDGES: Readonly<Record<NoteState, readonly NoteState[]>> = Object.freeze({
   // INCOMING: money on its way. TAKEN: a deposit index with history this store did not record (:347-348)
   PLANNED: Object.freeze(["INCOMING", "TAKEN"] as const),
-  INCOMING: Object.freeze(["UNSPENT"] as const), // its leaf read on two RPCs (:418)
+  // UNSPENT: its leaf read on two RPCs (:418). TAKEN: a pool deposit's precommitment another deposit used first (card
+  // signpage-pool-notes): its mark is not one of its own sends', every one of which failed or expired
+  INCOMING: Object.freeze(["UNSPENT", "TAKEN"] as const),
   // HELD: a proof of this device has started. SPENT: another device's withdrawal spent it (:230-231)
   UNSPENT: Object.freeze(["HELD", "SPENT"] as const),
   // UNSPENT: the proof dropped or too late to send (:389-390); RESERVED: written before the proof is sent; HELD: the
@@ -107,6 +109,7 @@ export type NoteRecord = {
   attempt?: string; // HELD and RESERVED: the attempt whose proof holds it (not a secret)
   tab?: string; // HELD: the id of the tab whose proof holds it (not a secret)
   calls?: BindCall[]; // from INCOMING on: the deposit calls U signed for it, in the order written
+  sends?: PoolSend[]; // from INCOMING on: each pool deposit tx U signed for it, written before it is sent
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
 };
 
@@ -126,6 +129,10 @@ export type BindCall = {
 };
 export type NewBindCall = Omit<BindCall, "tx_hashes">;
 
+/** A pool deposit tx U signed for a note (card signpage-pool-notes): its signature (base58), the value it deposits and
+ *  the last block height its blockhash is valid to, as the device read it. */
+export type PoolSend = { signature: string; value: bigint; last_valid_block_height: bigint };
+
 /** A note born PLANNED (a return, move or second-arrival note) or UNSPENT (a change or refund note, or one restore found). */
 export type NewNote = {
   ref: NoteRef;
@@ -139,7 +146,7 @@ export type NewNote = {
 // leaf: INCOMING -> UNSPENT. deadlineMs and context: UNSPENT -> HELD, and the holder's HELD -> HELD (with its attempt).
 // attempt: the holder's HELD -> RESERVED, HELD -> HELD or HELD -> UNSPENT. blockTimeMs: RESERVED -> UNSPENT (past deadline_ms), or another tab's HELD -> UNSPENT (past
 // deadline_ms - margin).
-export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint };
+export type MoveFields = { leaf?: Leaf; deadlineMs?: bigint; context?: string; attempt?: string; blockTimeMs?: bigint; send?: PoolSend };
 
 export interface NoteStore {
   get(id: string): Promise<NoteRecord | undefined>;
@@ -154,6 +161,12 @@ export interface NoteStore {
   addCall(id: string, call: NewBindCall, seen: number): Promise<NoteRecord>;
   /** Writes a tx hash the relayer gave for one of the note's calls (named by its nonce and max_block_height). */
   addCallTx(id: string, call: Pick<BindCall, "nonce" | "max_block_height">, txHash: string): Promise<NoteRecord>;
+  /**
+   * Writes a pool deposit tx U signed again for an INCOMING note, before it is sent, when the note still holds `seen`
+   * sends (else nothing is written: another run's send came first). Its value is the note's first send's. The first
+   * send is written with the move PLANNED -> INCOMING (MoveFields.send).
+   */
+  addSend(id: string, send: PoolSend, seen: number): Promise<NoteRecord>;
   /** Lets this tab's lock go, as the page's death does (tests; a page need not call it). */
   close(): void;
 }
@@ -302,18 +315,38 @@ function checkCalls(calls: unknown, id: string): BindCall[] {
   return calls;
 }
 
+function checkSend(x: unknown, what: string): PoolSend {
+  if (x === null || typeof x !== "object" || Array.isArray(x)) throw new Error(`${what} is not a send`);
+  onlyKeys(x, ["signature", "value", "last_valid_block_height"], what);
+  const s = x as PoolSend;
+  if (typeof s.signature !== "string" || s.signature.length < 64 || s.signature.length > 88 || !B58.test(s.signature)) throw new Error(`${what}: signature is base58`);
+  if (u64(s.value, `${what}: value`) === 0n) throw new Error(`${what}: value is above 0`);
+  u64(s.last_valid_block_height, `${what}: last_valid_block_height`);
+  return s;
+}
+// The sends of a note: one value, each signature once.
+function checkSends(sends: unknown, id: string): PoolSend[] {
+  if (!Array.isArray(sends) || sends.length === 0) throw new Error(`note ${id}: sends is a list of sends`);
+  sends.forEach((x, k) => {
+    const s = checkSend(x, `note ${id}: send ${k}`);
+    if (s.value !== (sends[0] as PoolSend).value) throw new Error(`note ${id}: send ${k} deposits another value`);
+    if (sends.some((d: PoolSend, j) => j < k && d.signature === s.signature)) throw new Error(`note ${id}: send ${k} is written twice`);
+  });
+  return sends;
+}
+
 // A record read back: the whole shape, so a broken record stops the caller instead of being acted on.
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "contexts"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "sends", "contexts"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
   if (n.ref.kind === "deposit" && n.ref.s !== n.scope) throw new Error(`note ${id}: a deposit note's scope is its s`);
   field(n.precommitment, "precommitment");
   if (!NOTE_STATES.includes(n.state)) throw new Error(`note ${id} has no state`);
-  if (n.state === "TAKEN" && n.ref.kind !== "deposit") throw new Error(`note ${id}: only a deposit index is taken`);
+  if (n.state === "TAKEN" && n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note is taken`);
   if (LANDED.includes(n.state) !== (n.leaf !== undefined)) throw new Error(`note ${id}: a leaf from UNSPENT on, and only then`);
   if (n.leaf !== undefined) checkLeaf(n.leaf, n.precommitment);
   const proving = n.state === "HELD" || n.state === "RESERVED";
@@ -326,6 +359,11 @@ function checkRecord(id: string, r: unknown): NoteRecord {
     if (n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note has calls`);
     if (n.state === "PLANNED" || n.state === "TAKEN") throw new Error(`note ${id}: calls from INCOMING on`);
     checkCalls(n.calls, id);
+  }
+  if (n.sends !== undefined) {
+    if (n.ref.kind !== "deposit" && n.ref.kind !== "second") throw new Error(`note ${id}: only a deposit or second-arrival note has sends`);
+    if (n.state === "PLANNED") throw new Error(`note ${id}: sends from INCOMING on`);
+    checkSends(n.sends, id);
   }
   // contexts: only on a note that has been HELD (a landed note), always while HELD or RESERVED, the last one this attempt's
   if (n.contexts !== undefined) {
@@ -346,6 +384,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.attempt !== undefined) out.attempt = n.attempt;
   if (n.tab !== undefined) out.tab = n.tab;
   if (n.calls !== undefined) out.calls = n.calls;
+  if (n.sends !== undefined) out.sends = n.sends;
   if (n.contexts !== undefined) out.contexts = n.contexts;
   return out;
 }
@@ -427,7 +466,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   // The one write of a state change: shape and fields checked, then one put. The callers check edge and ownership.
   async function put(cur: NoteRecord, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
     const next: NoteRecord = { ...cur, state: to };
-    if (cur.state === "INCOMING") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
+    if (cur.state === "INCOMING" && to === "UNSPENT") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
     else if (fields.leaf !== undefined) throw new Error("a leaf is set once, when the note lands");
     if (to === "HELD") {
       next.deadlineMs = u64(fields.deadlineMs, "deadlineMs");
@@ -474,7 +513,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   async function moveLocked(id: string, from: NoteState, to: NoteState, fields: MoveFields = {}): Promise<NoteRecord> {
     if (!NOTE_STATES.includes(from) || !NOTE_STATES.includes(to)) throw new Error("unknown note state");
     if (fields === null || typeof fields !== "object") throw new Error("fields is an object");
-    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs"], "a move");
+    onlyKeys(fields, ["leaf", "deadlineMs", "context", "attempt", "blockTimeMs", "send"], "a move");
     const all = await settle();
     const cur = all.find((n) => n.id === id);
     if (cur === undefined) throw new Error(`no note ${id}`);
@@ -482,7 +521,8 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     if (to === "SPENT" && cur.state === "SPENT" && from !== "SPENT" && all.some((c) => c.parent === id)) return cur;
     if (cur.state !== from) throw new Error(`note ${id} is ${cur.state}, not ${from}`);
     if (!(NOTE_EDGES[from] as readonly NoteState[]).includes(to)) throw new Error(`a note never goes from ${from} to ${to}`);
-    if (to === "TAKEN" && cur.ref.kind !== "deposit") throw new Error("only a deposit index is marked taken");
+    if (to === "TAKEN" && cur.ref.kind !== "deposit" && cur.ref.kind !== "second") throw new Error("only a deposit index or a second arrival is marked taken");
+    if (fields.send !== undefined && !(from === "PLANNED" && to === "INCOMING")) throw new Error("a send is written with the move PLANNED -> INCOMING only");
     const time = fields.blockTimeMs === undefined ? undefined : u64(fields.blockTimeMs, "blockTimeMs");
     const own = fields.attempt !== undefined && fields.attempt === cur.attempt && cur.tab === tab;
     if (from === "HELD" && to === "HELD" && !own) throw new Error(`note ${id} is held by another attempt: only the attempt that holds it replaces its proof`);
@@ -491,6 +531,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       throw new Error(`note ${id} is held by another attempt: freed only by that attempt, or once block time is past deadline_ms - ${SEND_MARGIN_MS} ms`);
     if (from === "RESERVED" && to === "UNSPENT" && !(time !== undefined && time > cur.deadlineMs!))
       throw new Error(`note ${id} is RESERVED until block time is past its deadline_ms: its proof can still land`);
+    if (fields.send !== undefined) return put({ ...cur, sends: checkSends([checkSend(fields.send, "a send")], id) }, to, {});
     return put(cur, to, { leaf: fields.leaf, deadlineMs: fields.deadlineMs, context: fields.context });
   }
 
@@ -514,7 +555,8 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         const idKey = secondIdKey(id);
         const before = note.ref.n === 0 ? firstOf(id) : { kind: "second" as const, id, n: note.ref.n - 1 };
         const prev = before === null ? undefined : all.find((x) => refKey(x.ref) === refKey(before));
-        if (before !== null && (prev === undefined || !LANDED.includes(prev.state))) throw new Error(`second arrival ${note.ref.n} of ${idKey} waits until the note before it has landed`);
+        // a note before it that another deposit took (TAKEN) is done too: it never lands
+        if (before !== null && (prev === undefined || !(LANDED.includes(prev.state) || prev.state === "TAKEN"))) throw new Error(`second arrival ${note.ref.n} of ${idKey} waits until the note before it has landed`);
       }
     } else if (note.state === "UNSPENT") {
       n.leaf = checkLeaf(note.leaf, precommitment);
@@ -549,6 +591,18 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     await write(next);
     return next;
   }
+  async function addSendLocked(id: string, send: PoolSend, seen: number): Promise<NoteRecord> {
+    const x = checkSend(send, "a new send");
+    if (!Number.isSafeInteger(seen) || seen < 0) throw new Error("seen is a count of sends");
+    const cur = (await settle()).find((n) => n.id === id);
+    if (cur === undefined) throw new Error(`no note ${id}`);
+    if (cur.state !== "INCOMING") throw new Error(`note ${id} is ${cur.state}: a send is signed only for an INCOMING note`);
+    const sends = cur.sends ?? [];
+    if (sends.length !== seen) return cur; // another run's send came first: this one is not written, so never sent
+    const next: NoteRecord = { ...cur, sends: checkSends([...sends, x], id) };
+    await write(next);
+    return next;
+  }
   async function addCallTxLocked(id: string, call: Pick<BindCall, "nonce" | "max_block_height">, txHash: string): Promise<NoteRecord> {
     if (typeof txHash !== "string" || txHash.length > 44 || !B58.test(txHash)) throw new Error("a tx hash is base58");
     const cur = (await settle()).find((n) => n.id === id);
@@ -577,6 +631,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     move: (id, from, to, fields) => locked(() => moveLocked(id, from, to, fields)),
     addCall: (id, call, seen) => locked(() => addCallLocked(id, call, seen)),
     addCallTx: (id, call, txHash) => locked(() => addCallTxLocked(id, call, txHash)),
+    addSend: (id, send, seen) => locked(() => addSendLocked(id, send, seen)),
     close: () => {
       closed = true;
       letGo();

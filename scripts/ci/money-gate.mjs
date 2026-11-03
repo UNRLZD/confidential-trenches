@@ -91,7 +91,8 @@ export const FLOOR = Date.parse("2026-11-01T00:00:00Z");
 // terminal's apps/terminal/src/trading/, which the terminal is rebuilt from), and the pool programs on Solana and EVM
 // (contracts/pool-solana/, contracts/pool-evm/), which hold deposits as the vault does. Screens and docs are not
 // money code.
-export const MONEY = ["contracts/vault/", "contracts/pool-solana/", "contracts/pool-evm/", "packages/kit/", "packages/wallet/", "apps/terminal/src/trading/"];
+// packages/signpage/: the signing page builds, checks, signs and sends deposits into the pools (card signpage-pool-notes)
+export const MONEY = ["contracts/vault/", "contracts/pool-solana/", "contracts/pool-evm/", "packages/kit/", "packages/wallet/", "packages/signpage/", "apps/terminal/src/trading/"];
 export const LIVE = "scripts/live-checks/";
 const CHAIN_ID = { base: "0x2105", robinhood: "0x1237", "base-sepolia": "0x14a34", "robinhood-testnet": "0xb626" }; // 8453, 4663, 84532, 46630
 const B58 = "[1-9A-HJ-NP-Za-km-z]";
