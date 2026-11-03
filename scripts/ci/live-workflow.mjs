@@ -8,10 +8,11 @@
 //   - live.yml: dispatches on inputs host (exactly app, sign, helper: the keys of live-plan's HOSTS) and commit; has the
 //     plan, check, live and browser-e2e jobs; the check job's run is the check its matrix names (a file in
 //     scripts/live-checks), its artifact step runs `if: always()`, and the verdict job runs `if: always()`; no run line
-//     names a check that does not exist; no step installs Playwright's own Chromium (a browser starts only as the
-//     installed Chrome, scripts/browsers.mjs);
+//     names a check that does not exist; the plan job runs on a dispatch alone; no step installs Playwright's own
+//     Chromium (a browser starts only as the installed Chrome, scripts/browsers.mjs);
 //   - every check each host's plan runs exists, with its test and its recorded answers, and none reads the
-//     environment (a check that needs a secret is listed SKIPPED, never run).
+//     environment (a check that needs a secret is listed SKIPPED, never run); each run gives every flag its check's
+//     usage line needs (live-plan's planFor refuses a run that lacks one).
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,6 +68,7 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   want(options === [...hosts].sort().join(","), `the host input's options are ${options ?? "missing"}, want ${[...hosts].sort().join(",")}`);
   want(/^ {6}commit:\n(?: {8}.*\n)*? {8}required: true/m.test(text), "no required commit input");
   for (const job of ["plan", "check", "live", "browser-e2e"]) want(new RegExp(`^  ${job}:`, "m").test(text), `no ${job} job`);
+  want(/^  plan:\n    if: github\.event_name == 'workflow_dispatch'\n/m.test(text), "the plan job runs on something other than a dispatch (a deploy's commit and host come only from its inputs)");
   const jobText = (name) => new RegExp(`^  ${name}:\\n((?:   .*\\n|\\s*\\n|  #.*\\n)*)`, "m").exec(text)?.[0] ?? "";
   want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)/.test(jobText("check")), "the check job's artifact step does not run `if: always()`");
   want(/^  live:\n(?:.*\n)*?    if: always\(\)/m.test(jobText("live") || ""), "the live job does not run `if: always()`");
