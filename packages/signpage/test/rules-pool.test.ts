@@ -13,7 +13,7 @@ import { sha512 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import {
   buildSolanaPoolBuy,
@@ -62,10 +62,10 @@ const NOW = 1_800_000_000_000n;
 test("a request: each pool kind's good params pass; every other kind, a chain that is not a pool's, a bad token, amount or slippage is refused", () => {
   const sol = key(5);
   const evm = "0xF111111111111111111111111111111111111111";
-  assert.deepEqual(checkPoolRequest({ kind: "pool.deposit", chain: "solana", amount: "1.5" }, 9), { kind: "pool.deposit", chain: "solana", token: null, amount: 1_500_000_000n, slippageBps: 0 });
-  assert.deepEqual(checkPoolRequest({ kind: "pool.buy", chain: "solana", token: sol, amount: "0.005", slippage_bps: 300 }, 9).amount, 5_000_000n);
-  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "base", token: evm, amount: "2", slippage_bps: 0 }, 18).amount, 2n * 10n ** 18n);
-  assert.equal(checkPoolRequest({ kind: "pool.withdraw", chain: "robinhood" }, 18).kind, "pool.withdraw");
+  assert.deepEqual(checkPoolRequest({ kind: "pool.deposit", chain: "solana", amount: "1.5" }), { kind: "pool.deposit", chain: "solana", token: null, amount: 1_500_000_000n, slippageBps: 0, decimals: 9 });
+  assert.deepEqual(checkPoolRequest({ kind: "pool.buy", chain: "solana", token: sol, amount: "0.005", slippage_bps: 300 }).amount, 5_000_000n);
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "base", token: evm, amount: "2", slippage_bps: 0 }, evmDec(18)).amount, 2n * 10n ** 18n);
+  assert.equal(checkPoolRequest({ kind: "pool.withdraw", chain: "robinhood" }).kind, "pool.withdraw");
   for (const [p, rule] of [
     [{ kind: "buy", chain: "solana" }, "kind"],
     [{ kind: "pool.hop", chain: "solana" }, "kind"],
@@ -79,9 +79,67 @@ test("a request: each pool kind's good params pass; every other kind, a chain th
     [{ kind: "pool.buy", chain: "solana", token: sol, amount: "1", slippage_bps: 5_001 }, "slippage"],
     [{ kind: "pool.sell", chain: "solana", token: sol, amount: "1", slippage_bps: 1.5 }, "slippage"],
   ] as const) {
-    assert.throws(() => checkPoolRequest(p as never, 9), refusedAs(rule), JSON.stringify(p));
+    assert.throws(() => checkPoolRequest(p as never, solMint(9)), refusedAs(rule), JSON.stringify(p));
   }
   assert.deepEqual([...POOL_KINDS], ["pool.deposit", "pool.buy", "pool.sell", "pool.withdraw"]);
+});
+
+// The token's decimals as two providers answered: the mint (byte 44, initialized at 45) or decimals() (one word)
+const mintData = (dec: number, o: { len?: number; init?: number; type?: number } = {}) => {
+  const d = new Uint8Array(o.len ?? 82);
+  d[44] = dec;
+  d[45] = o.init ?? 1;
+  if (d.length > 165) d[165] = o.type ?? 1;
+  return d;
+};
+const mintAnswer = (dec: number, o: { len?: number; init?: number; type?: number; owner?: string } = {}) => ({
+  context: { slot: 1 },
+  value: { owner: o.owner ?? SOLANA_TOKEN_PROGRAM, data: [Buffer.from(mintData(dec, o)).toString("base64"), "base64"], lamports: 1, executable: false },
+});
+function solMint(dec: number) {
+  return [mintAnswer(dec), mintAnswer(dec)] as const;
+}
+const evmWord = (n: bigint) => "0x" + n.toString(16).padStart(64, "0");
+function evmDec(n: number) {
+  return [evmWord(BigInt(n)), evmWord(BigInt(n))] as const;
+}
+
+test("a request's decimals are never the caller's: the pool asset's for a deposit or a buy (SOL 9, ETH 18), the token's from two agreeing reads for a sell", () => {
+  const sol = key(5);
+  const evm = "0xF111111111111111111111111111111111111111";
+  // EVM amounts are uint256: 19 ETH into a pool and a 100-token sell of an 18-decimals token pass (no u64 bound)
+  assert.equal(checkPoolRequest({ kind: "pool.deposit", chain: "base", amount: "19" }).amount, 19n * 10n ** 18n);
+  assert.equal(checkPoolRequest({ kind: "pool.buy", chain: "robinhood", token: evm, amount: "0.000000000000000001", slippage_bps: 1 }).amount, 1n);
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "base", token: evm, amount: "100", slippage_bps: 100 }, evmDec(18)).amount, 100n * 10n ** 18n);
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "base", token: evm, amount: "1.5", slippage_bps: 100 }, evmDec(24)).amount, 15n * 10n ** 23n);
+  // Solana stays u64: 2^64 - 1 lamports passes, 2^64 does not
+  assert.throws(() => checkPoolRequest({ kind: "pool.deposit", chain: "solana", amount: "18446744073.709551616" }), refusedAs("amount"));
+  assert.equal(checkPoolRequest({ kind: "pool.deposit", chain: "solana", amount: "18446744073.709551615" }).amount, (1n << 64n) - 1n);
+  // a Solana sell: an SPL mint or a Token-2022 mint (with extensions, account type 1), at its own decimals
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, amount: "2.5", slippage_bps: 1 }, solMint(6)).amount, 2_500_000n);
+  const t22 = mintAnswer(6, { owner: SOLANA_TOKEN_2022_PROGRAM, len: 200 });
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, amount: "2.5", slippage_bps: 1 }, [t22, t22]).amount, 2_500_000n);
+  assert.throws(() => checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, amount: "0.0000001", slippage_bps: 1 }, solMint(6)), refusedAs("amount"));
+  const sell = (chain: "solana" | "base", reads: unknown) => checkPoolRequest({ kind: "pool.sell", chain, token: chain === "solana" ? sol : evm, amount: "1", slippage_bps: 1 }, reads as never);
+  for (const [chain, reads] of [
+    ["solana", undefined],
+    ["solana", [mintAnswer(6)]],
+    ["solana", [mintAnswer(6), mintAnswer(9)]],
+    ["solana", [mintAnswer(6), mintAnswer(6, { owner: key(3) })]],
+    ["solana", [mintAnswer(6, { init: 0 }), mintAnswer(6, { init: 0 })]],
+    ["solana", [mintAnswer(6, { len: 165 }), mintAnswer(6, { len: 165 })]],
+    ["solana", [mintAnswer(6, { owner: SOLANA_TOKEN_2022_PROGRAM, len: 200, type: 2 }), mintAnswer(6, { owner: SOLANA_TOKEN_2022_PROGRAM, len: 200, type: 2 })]],
+    ["solana", [mintAnswer(6, { len: 200 }), mintAnswer(6, { len: 200 })]],
+    ["solana", [{ value: null }, { value: null }]],
+    ["solana", [{ value: { owner: SOLANA_TOKEN_PROGRAM, data: ["!!", "base64"] } }, mintAnswer(6)]],
+    ["base", undefined],
+    ["base", [evmWord(18n), evmWord(6n)]],
+    ["base", [evmWord(256n), evmWord(256n)]],
+    ["base", ["0x12", "0x12"]],
+    ["base", [18, 18]],
+  ] as const) {
+    assert.throws(() => sell(chain, reads), refusedAs("decimals"), `${chain} ${JSON.stringify(reads)?.slice(0, 120)}`);
+  }
 });
 
 // ---------- Solana deposit (tag 1) ----------
@@ -124,19 +182,19 @@ const wire = (payer: string, ixs: Ixx[], signers: string[] = [payer], blockhash 
   w.set(message, 1 + 64 * signers.length);
   return w;
 };
-const depAsk: PoolAsk = { kind: "pool.deposit", chain: "solana", token: null, amount: 2_000_000_000n, slippageBps: 0 };
+const depAsk: PoolAsk = { kind: "pool.deposit", chain: "solana", token: null, amount: 2_000_000_000n, slippageBps: 0, decimals: 9 };
 
 test("Solana deposit: the pinned pool's tag 1 from W of the request's amount and the device's precommitment passes, draws and signs", () => {
   const w = wire(SOL_W, [cuLimit, depositIx()]);
   const d = checkSolanaDeposit(w, depAsk, solCtx(), SOL_READS);
-  assert.deepEqual(d, { chain: "solana", op: "pool.deposit", token: null, amount: 2_000_000_000n, feeCap: 0n, pool: POOL, to: POOL });
+  assert.deepEqual(d, { chain: "solana", op: "pool.deposit", token: null, amount: 2_000_000_000n, feeCap: 0n, pool: POOL, to: POOL, decimals: 9, back: null });
   const sig = signSolana(SOL_SECRET, w);
   assert.ok(ed25519.verify(sig, w.subarray(65), base58.decode(SOL_W)));
   // only the very wire a check passed, as the check read it: a copy, or a byte changed after, is refused
   assert.throws(() => signSolana(SOL_SECRET, w.slice()), refusedAs("unchecked"));
   w[w.length - 1] ^= 1;
   assert.throws(() => signSolana(SOL_SECRET, w), refusedAs("unchecked"));
-  assert.deepEqual(drawPool(d, (a) => a.toString()).map((l) => l[0]), ["Chain", "Amount", "Fee cap", "Pool"]);
+  assert.deepEqual(drawPool(d), [["Chain", "Solana"], ["Amount", "2"], ["Fee cap", "0"], ["Pool", POOL]]);
 });
 
 test("Solana deposit: another program, pool, depositor, amount, precommitment, page, blockhash, an extra instruction or a kind is refused", () => {
@@ -177,13 +235,16 @@ const relIx = (r: SolanaPoolRelease = release, w = SOL_W, fp = SOL_FEE_PAYER, pr
 const send = (to = TO, v = release.withdrawnValue - release.relayFee, from = SOL_W): Ixx => ({
   program: SOLANA_SYSTEM_PROGRAM, accounts: [acc(from, true, true), acc(to, false, true)], data: Uint8Array.of(2, 0, 0, 0, ...u64(v)),
 });
-const wdAsk: PoolAsk = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0 };
+const wdAsk: PoolAsk = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
 const wdWire = (ixs: Ixx[], signers = [SOL_FEE_PAYER, SOL_W]) => wire(signers[0]!, ixs, signers);
 
 test("Solana withdraw: the device's release to W through the pinned pool, then one send to the typed address, passes and draws", () => {
   const d = checkSolanaWithdraw(wdWire([cuLimit, relIx(), send()]), wdAsk, solCtx(), release, TO, SOL_READS);
-  assert.deepEqual(d, { chain: "solana", op: "pool.withdraw", token: null, amount: release.withdrawnValue - release.relayFee, feeCap: release.relayFeeCap, pool: POOL, to: TO });
-  assert.equal(checkSolanaWithdraw(wdWire([relIx()]), wdAsk, solCtx(), release, TO, SOL_READS).pool, POOL, "the send is optional");
+  assert.deepEqual(d, { chain: "solana", op: "pool.withdraw", token: null, amount: release.withdrawnValue - release.relayFee, feeCap: release.relayFeeCap, pool: POOL, to: TO, decimals: 9, back: null });
+  // the page shows where the money lands, under the withdraw form's own label
+  assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Amount", "To", "Fee cap", "Pool"]);
+  assert.deepEqual(drawPool(d)[2], ["To", TO]);
+  assert.throws(() => checkSolanaWithdraw(wdWire([relIx()]), wdAsk, solCtx(), release, TO, SOL_READS), refusedAs("instructions"), "the send is the withdraw");
 });
 
 test("Solana withdraw: another pool program, release, recipient, fee payer, a fee cap over the device's, a past deadline or a send elsewhere is refused", () => {
@@ -197,6 +258,8 @@ test("Solana withdraw: another pool program, release, recipient, fee payer, a fe
     [wdWire([relIx()]), solCtx({ nowMs: release.deadlineMs }), "deadline_past"],
     [wdWire([relIx(), send(key(78))]), solCtx(), "transfer_to"],
     [wdWire([relIx(), send(TO, release.withdrawnValue)]), solCtx(), "transfer_amount"],
+    [wdWire([relIx(), send(TO, 1n)]), solCtx(), "transfer_amount"],
+    [wdWire([relIx(), send(TO, release.withdrawnValue - release.relayFee - 1n)]), solCtx(), "transfer_amount"],
     [wdWire([relIx(), send(), send()]), solCtx(), "instructions"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 0 ? { ...x, key: key(48) } : x)) }]), solCtx(), "release_accounts"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 6 ? { ...x, key: solanaPoolPage(PROGRAM, 0, 2_000) } : x)) }]), solCtx(), "release_accounts"],
@@ -211,7 +274,7 @@ test("Solana buy: the kit's tag 3 on the pinned pool for W, the request's token 
   const { venue, req, chain, reads } = await setup("pump");
   const built = buildSolanaPoolBuy({ program: FX_PROGRAM, pool: solanaProgramAddress([enc("pool")], FX_PROGRAM) }, fxRelease, venue, req, chain, { pick: () => 3 });
   const ctx: PoolContext = { nowMs: NOW, wallet: FX_W, feeCap: 3_000_000n, solana: { program: FX_PROGRAM, feePayer: FEE_PAYER } };
-  const ask: PoolAsk = { kind: "pool.buy", chain: "solana", token: req.token, amount: req.spend, slippageBps: 300 };
+  const ask: PoolAsk = { kind: "pool.buy", chain: "solana", token: req.token, amount: req.spend, slippageBps: 300, decimals: 9 };
   const d = checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, req, reads);
   assert.equal(d.to, FX_W);
   assert.equal(d.token, req.token);
@@ -237,32 +300,44 @@ test("Solana buy: the kit's tag 3 on the pinned pool for W, the request's token 
 
 // ---------- Solana sell ----------
 
-test("Solana sell: the kit's venue sell from W at or above the device's floor, then a deposit of at most min out into the pinned pool, passes; each bad field is refused", async () => {
+test("Solana sell: the kit's venue sell from W at or above the device's floor, then a deposit of exactly min out less the device's reserve into the pinned pool, passes and draws it; each bad field is refused", async () => {
   const { venue, ref, reads } = await setup("pump");
   const amount = 5_000_000n;
   const reference = { amount, ref, slippageBps: 300 };
   const slot = reads.slot;
   const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
-  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300 };
+  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
   const sellWire = (o: { minOut?: bigint; amount?: bigint; dep?: Partial<Parameters<typeof depositIx>[0]>; w?: string; extra?: Ixx[] } = {}) => {
     const steps = solanaPoolSellSteps(venue, o.w ?? SOL_W, o.amount ?? amount, o.minOut ?? floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
-    return wire(o.w ?? SOL_W, [cuLimit, ...steps, ...(o.extra ?? []), depositIx({ value: floor, ...o.dep })]);
+    return wire(o.w ?? SOL_W, [cuLimit, ...steps, ...(o.extra ?? []), depositIx({ value: (o.minOut ?? floor) - RESERVE, ...o.dep })]);
   };
-  const d = checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS);
-  assert.deepEqual([d.op, d.token, d.amount, d.pool], ["pool.sell", venue.mint, amount, POOL]);
+  const RESERVE = 5_000n;
+  const d = checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE);
+  assert.deepEqual([d.op, d.token, d.amount, d.pool, d.to, d.back, d.decimals], ["pool.sell", venue.mint, amount, POOL, POOL, floor - RESERVE, 6]);
+  assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Token", "Amount", "To", "Amount", "Fee cap", "Pool"]);
+  assert.deepEqual(drawPool(d)[2], ["Amount", "5"]);
+  assert.deepEqual(drawPool(d)[4], ["Amount", String(Number(floor - RESERVE) / 1e9)]);
+  // a higher min out the bytes carry is fine, its deposit that min out less the reserve
+  assert.equal(checkSolanaSell(sellWire({ minOut: floor + 10n }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE).back, floor + 10n - RESERVE);
   for (const [w, rule] of [
     [sellWire({ minOut: floor - 1n }), "min_out"],
     [sellWire({ amount: amount - 1n }), "sell"],
-    [sellWire({ dep: { value: floor + 1n } }), "deposit_over_min_out"],
+    [sellWire({ dep: { value: floor + 1n } }), "deposit_amount"],
+    [sellWire({ dep: { value: floor - RESERVE + 1n } }), "deposit_amount"],
+    [sellWire({ dep: { value: floor - RESERVE - 1n } }), "deposit_amount"],
+    [sellWire({ dep: { value: 1n } }), "deposit_amount"],
     [sellWire({ dep: { pool: key(44) } }), "pool"],
     [sellWire({ dep: { pre: PRE + 1n } }), "precommitment"],
     [sellWire({ dep: { program: key(43) } }), "program"],
     [sellWire({ extra: [send(key(79), 1n)] }), "sell"],
   ] as const) {
-    assert.throws(() => checkSolanaSell(w, ask, solCtx(), venue, reference, slot, SOL_READS), refusedAs(rule), rule);
+    assert.throws(() => checkSolanaSell(w, ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE), refusedAs(rule), rule);
   }
-  assert.throws(() => checkSolanaSell(sellWire(), { ...ask, token: key(63) }, solCtx(), venue, reference, slot, SOL_READS), refusedAs("token"));
-  assert.throws(() => checkSolanaSell(sellWire(), { ...ask, slippageBps: 301 }, solCtx(), venue, reference, slot, SOL_READS), refusedAs("slippage"));
+  assert.throws(() => checkSolanaSell(sellWire(), { ...ask, token: key(63) }, solCtx(), venue, reference, slot, SOL_READS, RESERVE), refusedAs("token"));
+  assert.throws(() => checkSolanaSell(sellWire(), { ...ask, slippageBps: 301 }, solCtx(), venue, reference, slot, SOL_READS, RESERVE), refusedAs("slippage"));
+  for (const r of [-1n, floor, floor + 1n, 5000 as never]) {
+    assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, r), refusedAs("reserve"), String(r));
+  }
 });
 
 // ---------- EVM ----------
@@ -305,11 +380,16 @@ const v3 = (tokens: string[]) => ({ venue: "uniswap-v3" as const, tokens, fees: 
 test("EVM buy: the kit's pinned Buy of the request's token, the proof bound to W's relay data on the pinned pool, passes and signs; each bad field is refused", () => {
   const built = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 1n, X);
   const r = relay();
-  const ask: PoolAsk = { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 16n, slippageBps: 100 };
+  const ask: PoolAsk = { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 16n, slippageBps: 100, decimals: 18 };
   const proof = proofOf(r);
   const d = checkEvmBuy(built, EVM_POOL, proof, r, ask, evmCtx(), 1n);
   assert.deepEqual([d.to, d.pool, d.feeCap], [EVM_W, EVM_POOL, r.feeCap]);
-  assert.equal(signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proof).length, 65);
+  const sig = signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proof);
+  assert.equal(sig.length, 65);
+  // the signer signs what the check read: a context handed to it after, with another venue list, changes nothing
+  const otherCtx = evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 1, adapters: Object.freeze({ v3: A_V3 }) }) }), feeRecipient: FEE_TO } });
+  assert.deepEqual(signEvmBuy(EVM_SECRET, otherCtx, built, EVM_POOL, proof), sig);
+  assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, "0x2222222222222222222222222222222222222222", proof), refusedAs("unchecked"));
   // only what the check passed: another proof object, a proof changed after, a proof checked as a buy signed as a withdraw
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proofOf(r)), refusedAs("unchecked"));
   assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), { ...ask, kind: "pool.withdraw" }, EVM_POOL, proof), refusedAs("unchecked"));
@@ -340,7 +420,7 @@ test("EVM buy: the kit's pinned Buy of the request's token, the proof bound to W
 
 test("EVM withdraw: Withdraw(nullifier, context, value) on the pinned pool to W passes and signs as PrivacyPool recovers it; each bad field is refused", () => {
   const r = relay();
-  const ask: PoolAsk = { kind: "pool.withdraw", chain: "base", token: null, amount: 0n, slippageBps: 0 };
+  const ask: PoolAsk = { kind: "pool.withdraw", chain: "base", token: null, amount: 0n, slippageBps: 0, decimals: 18 };
   const proof = proofOf(r);
   const d = checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx());
   assert.deepEqual([d.to, d.amount], [EVM_W, proof.value]);
@@ -356,6 +436,9 @@ test("EVM withdraw: Withdraw(nullifier, context, value) on the pinned pool to W 
     [() => checkEvmWithdraw(EVM_POOL, { ...proof, context: proof.context + 1n }, r, ask, evmCtx()), "context"],
     [() => checkEvmWithdraw(EVM_POOL, proof, r, { ...ask, kind: "pool.buy" }, evmCtx()), "kind"],
     [() => signEvmWithdraw(EVM_SECRET, evmCtx(), ask, other, proof), "pool"],
+    // a venue list whose chain id is not a safe integer above 0 signs no domain
+    [() => checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 0 }) }), feeRecipient: FEE_TO } })), "chain"],
+    [() => checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 2 ** 53 }) }), feeRecipient: FEE_TO } })), "chain"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
@@ -365,8 +448,8 @@ test("EVM sell and authorization: W's own Sell into the pinned pool and the pinn
   const t = BigInt(Math.floor(Date.now() / 1000));
   const req = { w: EVM_W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: v3([X, B.weth]), minOut: 10n ** 15n, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n };
   const built = pinnedBuildSell(VENUES, "base", req);
-  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100 };
-  const ctx = evmCtx({ nowMs: t * 1000n });
+  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 };
+  const ctx = { ...evmCtx({ nowMs: t * 1000n }), precommitment: 5n };
   const d = checkEvmSell(built, ask, ctx, req.minOut);
   assert.deepEqual([d.pool, d.amount, d.feeCap], [EVM_POOL, req.amount, req.feeCap]);
   assert.equal(signEvmSell(EVM_SECRET, ctx, built).length, 65);
@@ -380,6 +463,8 @@ test("EVM sell and authorization: W's own Sell into the pinned pool and the pinn
     [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: { base: pin(B, { pool: other }) }, feeRecipient: FEE_TO } }, 1n), "pool"],
     [() => checkEvmSell(built, { ...ask, kind: "pool.buy" }, ctx, 1n), "kind"],
     [() => checkEvmSell(built, ask, ctx, req.minOut + 1n), "min_out"],
+    // the proceeds go into the pool under the device's own precommitment only, never another's note
+    [() => checkEvmSell(built, ask, { ...ctx, precommitment: 6n }, 1n), "precommitment"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
@@ -387,6 +472,10 @@ test("EVM sell and authorization: W's own Sell into the pinned pool and the pinn
   const a = checkEvmAuthorization(ask, ctx, 4n, [4n, 4n]);
   assert.deepEqual(a, { chain: "base", delegate: DELEGATE, nonce: 4n });
   assert.equal(signEvmAuthorization(EVM_SECRET, ctx, a).address, DELEGATE);
+  // the signer signs what the check read: a context handed to it after, naming another delegate, changes nothing
+  const EVIL = "0x00000000000000000000000000000000000ba0ba";
+  const evil = { ...ctx, evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3 }), sellDelegate: EVIL }) }), feeRecipient: FEE_TO } };
+  assert.equal(signEvmAuthorization(EVM_SECRET, evil, a).address, DELEGATE);
   assert.throws(() => signEvmAuthorization(EVM_SECRET, ctx, { chain: "base", delegate: DELEGATE, nonce: 9n }), refusedAs("unchecked"));
   assert.throws(() => checkEvmAuthorization(ask, ctx, 4n, [4n, 5n]), refusedAs("nonce"));
   assert.throws(() => checkEvmAuthorization(ask, ctx, 3n, [4n, 4n]), refusedAs("nonce"));

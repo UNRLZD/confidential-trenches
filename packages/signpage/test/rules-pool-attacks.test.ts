@@ -1,0 +1,236 @@
+// The review of src/rules/pool.ts (card signpage-pool-kinds): each attack it planted, kept as a test that failed before
+// its fold (A1-A4, A9) and passes after. The setup is test/rules-pool.test.ts's: a good payload of each kind passes its
+// check and signs; each bad field is refused not_allowed, named by its rule; no rule takes a field from a server.
+// Keys: the all-zero ed25519 seed and the Hardhat mnemonic's account 0, both published test vectors. The Solana buy
+// replays the kit's recorded LiteSVM reads (packages/kit/test/solana-pool-buy-fx.ts).
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
+import { sha512 } from "@noble/hashes/sha2.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { base58 } from "@scure/base";
+import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
+import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
+import {
+  buildSolanaPoolBuy,
+  solanaEncodePoolRelease,
+  solanaPoolPage,
+  solanaPoolReleaseAccounts,
+  solanaPoolSellSteps,
+  type SolanaPoolRelease,
+} from "../../kit/src/trade/solana/pool-buy.ts";
+import { evmPoolVenues, pinnedBuild, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
+import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
+import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
+import {
+  POOL_KINDS,
+  PoolRuleRefused,
+  checkEvmAuthorization,
+  checkEvmBuy,
+  checkEvmSell,
+  checkEvmWithdraw,
+  checkPoolRequest,
+  checkSolanaBuy,
+  checkSolanaDeposit,
+  checkSolanaSell,
+  checkSolanaWithdraw,
+  drawPool,
+  evmWithdrawDigest,
+  signEvmAuthorization,
+  signEvmBuy,
+  signEvmSell,
+  signEvmWithdraw,
+  signSolana,
+  type PoolAsk,
+  type PoolContext,
+  type SolanaPoolReads,
+} from "../src/rules/pool.ts";
+
+const enc = (s: string) => new TextEncoder().encode(s);
+const key = (n: number) => base58.encode(new Uint8Array(32).fill(n));
+const u64 = (v: bigint) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, v, true); return [...b]; };
+const NOW = 1_800_000_000_000n;
+// ---------- Solana deposit (tag 1) ----------
+
+const SOL_SECRET = new Uint8Array(32); // the all-zero seed, a published vector
+const SOL_W = base58.encode(ed25519.getPublicKey(SOL_SECRET));
+const PROGRAM = key(41);
+const SOL_FEE_PAYER = key(42);
+const POOL = solanaProgramAddress([enc("pool")], PROGRAM);
+const BLOCKHASH = key(7);
+const PRE = 123_456_789n;
+const preBytes = (v: bigint) => Uint8Array.from({ length: 32 }, (_, i) => Number((v >> BigInt(8 * (31 - i))) & 0xffn));
+const SOL_READS: SolanaPoolReads = { blockhash: BLOCKHASH, tables: {}, stateSize: 6, labelSize: 4 };
+const solCtx = (o: Partial<PoolContext> = {}): PoolContext & { precommitment: bigint } => ({
+  nowMs: NOW, wallet: SOL_W, feeCap: 3_000_000n, solana: { program: PROGRAM, feePayer: SOL_FEE_PAYER }, precommitment: PRE, ...o,
+});
+const acc = (k: string, signer: boolean, writable: boolean) => ({ key: k, signer, writable });
+const cuLimit = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, 0x40, 0x0d, 0x03, 0) };
+type Ixx = { program: string; accounts: { key: string; signer: boolean; writable: boolean }[]; data: Uint8Array };
+const depositIx = (o: { program?: string; pool?: string; from?: string; fromSigns?: boolean; value?: bigint; pre?: bigint; state?: number; label?: number; mark?: string; system?: string } = {}): Ixx => {
+  const program = o.program ?? PROGRAM;
+  const pre = preBytes(o.pre ?? PRE);
+  return {
+    program,
+    accounts: [
+      acc(o.pool ?? POOL, false, true),
+      acc(o.from ?? SOL_W, o.fromSigns ?? true, true),
+      acc(solanaPoolPage(PROGRAM, 0, o.state ?? 6), false, true),
+      acc(solanaPoolPage(PROGRAM, 1, o.label ?? 4), false, true),
+      acc(o.mark ?? solanaProgramAddress([enc("pre"), pre], PROGRAM), false, true),
+      acc(o.system ?? SOLANA_SYSTEM_PROGRAM, false, false),
+    ],
+    data: Uint8Array.from([1, ...u64(o.value ?? 2_000_000_000n), ...pre]),
+  };
+};
+const wire = (payer: string, ixs: Ixx[], signers: string[] = [payer], blockhash = BLOCKHASH) => {
+  const { message } = solanaCompileV0(payer, ixs, blockhash, [], signers);
+  const w = new Uint8Array(1 + 64 * signers.length + message.length);
+  w[0] = signers.length;
+  w.set(message, 1 + 64 * signers.length);
+  return w;
+};
+const depAsk: PoolAsk = { kind: "pool.deposit", chain: "solana", token: null, amount: 2_000_000_000n, slippageBps: 0, decimals: 9 };
+
+const release: SolanaPoolRelease = { ...fxRelease, deadlineMs: NOW + 120_000n };
+const TO = key(77);
+const relIx = (r: SolanaPoolRelease = release, w = SOL_W, fp = SOL_FEE_PAYER, program = PROGRAM): Ixx => ({
+  program,
+  accounts: solanaPoolReleaseAccounts({ program, pool: solanaProgramAddress([enc("pool")], program) }, w, fp, r, 6).map((a) => ({ ...a })),
+  data: solanaEncodePoolRelease(r),
+});
+const send = (to = TO, v = release.withdrawnValue - release.relayFee, from = SOL_W): Ixx => ({
+  program: SOLANA_SYSTEM_PROGRAM, accounts: [acc(from, true, true), acc(to, false, true)], data: Uint8Array.of(2, 0, 0, 0, ...u64(v)),
+});
+const wdAsk: PoolAsk = { kind: "pool.withdraw", chain: "solana", token: null, amount: 0n, slippageBps: 0, decimals: 9 };
+const wdWire = (ixs: Ixx[], signers = [SOL_FEE_PAYER, SOL_W]) => wire(signers[0]!, ixs, signers);
+const N = secp256k1.Point.CURVE().n;
+const hex = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
+function hardhatAccount0(): Uint8Array {
+  const seed = pbkdf2(sha512, enc("test test test test test test test test test test test junk"), enc("mnemonic"), { c: 2048, dkLen: 64 });
+  let I = hmac(sha512, enc("Bitcoin seed"), seed);
+  let k = BigInt(hex(I.slice(0, 32)));
+  let c = I.slice(32);
+  for (const [i, hard] of [[44, true], [60, true], [0, true], [0, false], [0, false]] as [number, boolean][]) {
+    const kb = Buffer.from(k.toString(16).padStart(64, "0"), "hex");
+    const head = hard ? Uint8Array.of(0, ...kb) : secp256k1.getPublicKey(kb, true);
+    const idx = Buffer.alloc(4);
+    idx.writeUInt32BE(hard ? i + 0x80000000 : i);
+    I = hmac(sha512, c, Uint8Array.of(...head, ...idx));
+    k = (BigInt(hex(I.slice(0, 32))) + k) % N;
+    c = I.slice(32);
+  }
+  return Buffer.from(k.toString(16).padStart(64, "0"), "hex");
+}
+const EVM_SECRET = hardhatAccount0();
+const EVM_W = hex(keccak_256(secp256k1.getPublicKey(EVM_SECRET, false).slice(1)).slice(12));
+const B = evmPoolVenues().base;
+const X = "0xF111111111111111111111111111111111111111";
+const EVM_POOL = "0x00000000000000000000000000000000000f0011";
+const A_V3 = "0x000000000000000000000000000000000000ad03";
+const A_V4 = "0x000000000000000000000000000000000000ad04";
+const DELEGATE = "0x00000000000000000000000000000000000de1e9";
+const FEE_TO = "0x0000000000000000000000000000000000000fee";
+const pin = (v: EvmPoolVenue, o: Partial<EvmPoolVenue>): EvmPoolVenue => Object.freeze({ ...v, ...o });
+const VENUES = Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }), sellDelegate: DELEGATE }) });
+const evmCtx = (o: Partial<PoolContext> = {}): PoolContext => ({ nowMs: NOW, wallet: EVM_W, feeCap: 10n ** 15n, evm: { venues: VENUES, feeRecipient: FEE_TO }, ...o });
+const relay = (o: Partial<EvmRelayData> = {}): EvmRelayData => ({ recipient: EVM_W, feeRecipient: FEE_TO, feeCap: 10n ** 14n, deadlineMs: NOW + 120_000n, refundPrecommitment: 7n, salt: "0x" + "ab".repeat(16), ...o });
+const ctxOf = (r: EvmRelayData, pool = EVM_POOL) => evmPoolContextOf({ processooor: pool, relay: r }, evmPoolScopeOf(pool, BigInt(B.chainId)));
+const proofOf = (r: EvmRelayData, value = 10n ** 16n) => ({ nullifier: 11n, context: ctxOf(r), value });
+const v3 = (tokens: string[]) => ({ venue: "uniswap-v3" as const, tokens, fees: tokens.slice(1).map(() => 500) });
+
+// ======================= the reviewer's planted attacks: each payload must be refused =======================
+const refused = (f: () => unknown) => assert.throws(f, (e: unknown) => e instanceof PoolRuleRefused);
+
+// A1: the EVM sell's proceeds deposited under a precommitment the device did not make (the helper's own note)
+test("ATTACK A1: EVM sell whose Sell carries the attacker's precommitment is refused", () => {
+  const t = BigInt(Math.floor(Date.now() / 1000));
+  const ATTACKER_PRE = 666n; // the device's would be ctx.precommitment; the Solana sell holds it, the EVM sell must too
+  const req = { w: EVM_W, token: X, amount: 10n ** 18n, target: B.routers[0]!, route: v3([X, B.weth]), minOut: 10n ** 15n, precommitment: ATTACKER_PRE, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n };
+  const built = pinnedBuildSell(VENUES, "base", req);
+  const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 };
+  const ctx = { ...evmCtx({ nowMs: t * 1000n }), precommitment: 5n };
+  refused(() => { checkEvmSell(built, ask, ctx, req.minOut); signEvmSell(EVM_SECRET, ctx, built); });
+});
+
+// A2: the withdraw draws "amount X to <typed address>" while the signed bytes send 1 lamport (or nothing) there
+test("ATTACK A2a: Solana withdraw whose onward send is 1 lamport, drawn as the full amount to the typed address, is refused", () => {
+  refused(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send(TO, 1n)]), wdAsk, solCtx(), release, TO, SOL_READS));
+});
+test("ATTACK A2b: Solana withdraw with no onward send, drawn as going to the typed address, is refused", () => {
+  let d: ReturnType<typeof checkSolanaWithdraw> | null = null;
+  try { d = checkSolanaWithdraw(wdWire([cuLimit, relIx()]), wdAsk, solCtx(), release, TO, SOL_READS); } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
+  if (d) assert.notEqual(d.to, TO, `drawn: ${d.amount} to ${d.to}, signed: nothing to ${TO}`);
+});
+
+// A3: request amounts on an EVM chain: an ordinary sell of 100 tokens of an 18-decimals ERC-20 (not an attack: a limit)
+test("LIMIT A3: an EVM sell of 100 tokens of an 18-decimals token is a valid request", () => {
+  // decimals come from the device's two reads of decimals() (fold: never the caller's number), here both 18
+  const d18 = "0x" + (18).toString(16).padStart(64, "0");
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "base", token: X, amount: "100", slippage_bps: 100 }, [d18, d18]).amount, 100n * 10n ** 18n);
+});
+
+// A4: a proof object whose context reads one way for the checks and another for the digest
+test("ATTACK A4: an EVM withdraw proof whose context changes after the check (an accessor) never signs another context", () => {
+  const r = relay();
+  const ask: PoolAsk = { kind: "pool.withdraw", chain: "base", token: null, amount: 0n, slippageBps: 0, decimals: 18 };
+  const real = ctxOf(r);
+  let reads = 0;
+  const proof = { nullifier: 11n, value: 10n ** 16n, get context() { return ++reads <= 3 ? real : real + 1n; } };
+  checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx());
+  let sig: Uint8Array | null = null;
+  try { sig = signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, proof); } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
+  if (sig) {
+    const want = evmWithdrawDigest(BigInt(B.chainId), EVM_POOL, { nullifier: 11n, context: real, value: 10n ** 16n });
+    const rec = secp256k1.Signature.fromBytes(sig.slice(0, 64), "compact").addRecoveryBit(sig[64]! - 27).recoverPublicKey(want);
+    assert.equal(hex(keccak_256(rec.toBytes(false).slice(1)).slice(12)), EVM_W, "the signature is over a context no check read");
+  }
+});
+
+// A5: Solana wire aliasing: a second view over the checked wire's buffer, written after the check
+test("ATTACK A5: a byte written through another view of the checked wire's buffer is refused at signing", () => {
+  const w = wire(SOL_W, [cuLimit, depositIx()]);
+  checkSolanaDeposit(w, { kind: "pool.deposit", chain: "solana", token: null, amount: 2_000_000_000n, slippageBps: 0, decimals: 9 }, solCtx(), SOL_READS);
+  new Uint8Array(w.buffer)[w.byteOffset + w.length - 1] ^= 1;
+  refused(() => signSolana(SOL_SECRET, w));
+});
+
+// A6: an extra privilege on a release account: the state root page writable
+test("ATTACK A6: the release's state root page made writable is refused", () => {
+  const ix = relIx();
+  const root = solanaPoolPage(PROGRAM, 0, release.stateRootIndex);
+  const newPage = solanaPoolPage(PROGRAM, 0, 6);
+  if (root === newPage) return; // same page: writable is the merge's right answer
+  ix.accounts = ix.accounts.map((a) => (a.key === root ? { ...a, writable: true } : a));
+  refused(() => checkSolanaWithdraw(wdWire([cuLimit, ix, send()]), wdAsk, solCtx(), release, TO, SOL_READS));
+});
+
+// A7: a second transfer leg, or a transfer from the fee payer, or W's transfer to the fee payer
+test("ATTACK A7: a withdraw with two sends, or a send to the fee payer, is refused", () => {
+  refused(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send(TO, 1n), send(TO, 1n)]), wdAsk, solCtx(), release, TO, SOL_READS));
+  refused(() => checkSolanaWithdraw(wdWire([cuLimit, relIx(), send(SOL_FEE_PAYER)]), wdAsk, solCtx(), release, TO, SOL_READS));
+});
+
+// A8: compute budget: a price over the cap, a heap frame request, a loaded-data limit, a limit over 1.4M
+test("ATTACK A8: compute budget instructions outside the caps are refused", () => {
+  const cb = (data: number[]) => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from(data) });
+  for (const x of [cb([2, 0xc1, 0x5c, 0x15, 0]), cb([3, ...u64(10n ** 12n)]), cb([1, 0, 0, 4, 0]), cb([4, 0, 0, 4, 0])]) {
+    refused(() => checkSolanaDeposit(wire(SOL_W, [x, depositIx()]), { kind: "pool.deposit", chain: "solana", token: null, amount: 2_000_000_000n, slippageBps: 0, decimals: 9 }, solCtx(), SOL_READS));
+  }
+});
+
+// A9: the EVM withdraw's chain id from the context's venue list: a list with chain id 0 signs a chain-id-0 domain
+test("HARDEN A9: an EVM withdraw signs only under the kit's own chain id, never a context list's 0", () => {
+  const r = relay();
+  const ask: PoolAsk = { kind: "pool.withdraw", chain: "base", token: null, amount: 0n, slippageBps: 0, decimals: 18 };
+  const zero = Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 0, adapters: Object.freeze({ v3: A_V3 }), sellDelegate: DELEGATE }) });
+  const ctx = evmCtx({ evm: { venues: zero, feeRecipient: FEE_TO } });
+  const proof = { nullifier: 11n, context: evmPoolContextOf({ processooor: EVM_POOL, relay: r }, evmPoolScopeOf(EVM_POOL, 0n)), value: 10n ** 16n };
+  refused(() => { checkEvmWithdraw(EVM_POOL, proof, r, ask, ctx); signEvmWithdraw(EVM_SECRET, ctx, ask, EVM_POOL, proof); });
+});
