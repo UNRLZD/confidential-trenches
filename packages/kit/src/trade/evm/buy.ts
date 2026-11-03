@@ -27,20 +27,27 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 
 export type EvmPoolChain = "base" | "robinhood";
 
-/** The chains the EVM pool runs on: chain id, WETH (a route's only wrapped start) and the middle tokens a route may
- *  pass through (the venue list). */
-export const EVM_POOL_VENUES: Readonly<Record<EvmPoolChain, { chainId: number; weth: string; middles: readonly string[] }>> = {
-  base: {
-    chainId: 8453,
-    weth: "0x4200000000000000000000000000000000000006",
-    middles: ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"], // USDC
-  },
-  robinhood: {
-    chainId: 4663,
-    weth: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", // aeWETH, an upgradeable proxy (contracts/pool-evm/NOTICE)
-    middles: ["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"], // USDG
-  },
-};
+/** One chain's venue: chain id, WETH (a route's only wrapped start) and the middle tokens a route may pass through. */
+export type EvmPoolVenue = { readonly chainId: number; readonly weth: string; readonly middles: readonly string[] };
+
+/** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
+ *  read only this list. Frozen all the way down, so no code can swap a chain id, WETH or a middle (nor, once
+ *  pool-evm-deploy pins them here, an adapter or a pool, M366 (4)); made on first use, never at load: the kit's index
+ *  reaches the signing page's bundle, which keeps any top-level call (build-app.mjs --check). */
+let venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>> | undefined;
+export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
+  (venues ??= Object.freeze({
+    base: Object.freeze({
+      chainId: 8453,
+      weth: "0x4200000000000000000000000000000000000006",
+      middles: Object.freeze(["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"]), // USDC
+    }),
+    robinhood: Object.freeze({
+      chainId: 4663,
+      weth: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", // aeWETH, an upgradeable proxy (contracts/pool-evm/NOTICE)
+      middles: Object.freeze(["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"]), // USDG
+    }),
+  }));
 
 /** Most hops a route takes; a fee fits u24; v4's tick spacing is 1 to 32,767 (v4-core TickMath); hook data is bounded. */
 export const EVM_POOL_MAX_HOPS = 4;
@@ -100,8 +107,9 @@ const addressBytes = (a: string) => word(BigInt(a)).slice(12);
 
 /** The venue of `chain`, or a refusal: only the list's own keys, never one an object inherits ("constructor"). */
 function venueOf(chain: EvmPoolChain) {
-  if (typeof chain !== "string" || !Object.hasOwn(EVM_POOL_VENUES, chain)) return refuse("bad_route", "no such chain");
-  return EVM_POOL_VENUES[chain];
+  const all = evmPoolVenues();
+  if (typeof chain !== "string" || !Object.hasOwn(all, chain)) return refuse("bad_route", "no such chain");
+  return all[chain];
 }
 
 // A copy holds at most this many items per list, before the shape checks bound the route exactly

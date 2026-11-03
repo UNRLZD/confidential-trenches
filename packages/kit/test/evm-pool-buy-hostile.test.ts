@@ -10,7 +10,7 @@ import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
-import { EVM_POOL_VENUES, EvmPoolBuyError, evmPoolBuild, evmPoolRouteData, evmPoolSignBuy, type EvmPoolChain, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
+import { evmPoolVenues, EvmPoolBuyError, evmPoolBuild, evmPoolRouteData, evmPoolSignBuy, type EvmPoolChain, type EvmRoute, type EvmV4Hop } from "../src/index.ts";
 
 const CAST = JSON.parse(readFileSync(new URL("./evm-pool-buy-hostile.cast.json", import.meta.url), "utf8"));
 const PROOFS = JSON.parse(readFileSync(new URL("../../../contracts/pool-evm/test/fixtures/buy-proofs.json", import.meta.url), "utf8"));
@@ -25,8 +25,8 @@ const code = (f: () => unknown): string => {
 };
 
 const ZERO = "0x0000000000000000000000000000000000000000";
-const B = EVM_POOL_VENUES.base;
-const R = EVM_POOL_VENUES.robinhood;
+const B = evmPoolVenues().base;
+const R = evmPoolVenues().robinhood;
 const USDC = B.middles[0]!;
 const USDG = R.middles[0]!;
 const X = "0xF111111111111111111111111111111111111111";
@@ -133,7 +133,7 @@ test("F2 no input of W's signer takes a digest: an EIP-7702 delegation of W to t
   assert.equal(code(() => evmPoolSignBuy(W_KEY, "base", POOL, built, any)), "bad_amount");
   // the kit's public entry exports no digest maker and no signer but the one
   assert.equal("evmPoolBuyDigest" in kit, false);
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolRouteData", "evmPoolSignBuy"]);
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolVenues"]);
 });
 
 test("F2b W signs only the buy object the builder returned: a copy, an edit or a hand-made buy is refused", () => {
@@ -192,6 +192,23 @@ test("F5 a null or non-object hop or route is refused with the builder's own err
   assert.equal(c(null), "bad_route");
   assert.equal(c("uniswap-v4"), "bad_route");
   assert.equal(c(undefined), "bad_route");
+});
+
+test("V1 the venue list is frozen all the way down: every write throws, and the builder and the signer read what they did", () => {
+  const v = evmPoolVenues() as unknown as Record<string, { chainId: number; weth: string; middles: string[] }>;
+  assert.equal(v, evmPoolVenues() as unknown);
+  const built = evmPoolBuild("base", ADAPTER, v4(ZERO, hop(USDC), hop(X)), 1n, X);
+  const before = hex(evmPoolSignBuy(W_KEY, "base", POOL, built, PROOF));
+  assert.throws(() => void (v.base = { chainId: 4663, weth: X, middles: [Z] }), TypeError);
+  assert.throws(() => void (v.ethereum = v.base!), TypeError);
+  assert.throws(() => void (v.base!.chainId = 4663), TypeError);
+  assert.throws(() => void (v.base!.weth = X), TypeError);
+  assert.throws(() => void v.base!.middles.push(Z), TypeError);
+  assert.throws(() => void (v.base!.middles[0] = Z), TypeError);
+  assert.throws(() => void (v.robinhood!.middles[0] = Z), TypeError);
+  assert.equal(code(() => evmPoolBuild("base", ADAPTER, v4(ZERO, hop(Z), hop(X)), 1n, X)), "middle_not_listed");
+  assert.equal(code(() => evmPoolBuild("ethereum" as EvmPoolChain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "bad_route");
+  assert.equal(hex(evmPoolSignBuy(W_KEY, "base", POOL, built, PROOF)), before);
 });
 
 // ------------------------------------------------------------------ R: one test per check the review's mutants removed

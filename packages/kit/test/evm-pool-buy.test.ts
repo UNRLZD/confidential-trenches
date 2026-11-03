@@ -13,7 +13,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
   EVM_POOL_MAX_HOOK_DATA,
   EVM_POOL_MAX_HOPS,
-  EVM_POOL_VENUES,
+  evmPoolVenues,
   EvmPoolBuyError,
   evmPoolBuild,
   evmPoolRouteData,
@@ -39,9 +39,9 @@ const code = (f: () => unknown): string => {
 };
 
 const ZERO = "0x0000000000000000000000000000000000000000";
-const B = EVM_POOL_VENUES.base;
+const B = evmPoolVenues().base;
 const USDC = B.middles[0]!;
-const USDG = EVM_POOL_VENUES.robinhood.middles[0]!;
+const USDG = evmPoolVenues().robinhood.middles[0]!;
 const X = "0xF111111111111111111111111111111111111111";
 const Y = "0x2222222222222222222222222222222222222222";
 const hop = (currency: string, o: Partial<EvmV4Hop> = {}): EvmV4Hop => ({ currency, fee: 500, tickSpacing: 10, hooks: ZERO, hookData: "0x", ...o });
@@ -200,7 +200,7 @@ test("W's Buy signature equals cast's EIP-712 signature byte for byte, on Base a
     const route: EvmRoute = r.venue === "uniswap-v3" ? v3(r.tokens, r.fees) : v4(r.currencyIn, ...r.hops);
     const built = evmPoolBuild(t.chain, t.adapter, route, BigInt(t.minOut), t.buys);
     assert.equal(built.data, t.data.toLowerCase(), name);
-    assert.equal(EVM_POOL_VENUES[t.chain as EvmPoolChain].chainId, t.chainId, name);
+    assert.equal(evmPoolVenues()[t.chain as EvmPoolChain].chainId, t.chainId, name);
     const proof = { nullifier: BigInt(t.nullifier), context: BigInt(t.context), value: BigInt(t.value) };
     assert.equal(hex(evmPoolSignBuy(W_KEY, t.chain, t.pool, built, proof)), t.signature, name);
   }
