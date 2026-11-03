@@ -2,6 +2,7 @@
 // Removes each of the pool's checks, one at a time, in a copy of contracts/pool-evm, and runs the test named for it:
 // each named test passes on the pool as it is and fails on every mutant. Exits 1 when a named test passes on its
 // mutant, fails on the pool as it is, or a mutant's text is not found exactly once. Needs forge and cast (Foundry).
+// forge runs through test/fork-rpc.mjs, so the fork tests replay their recorded RPC answers.
 //   node contracts/pool-evm/test/mutants.mjs
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +15,7 @@ const PP = "src/PrivacyPool.sol";
 const ST = "src/State.sol";
 const SIMPLE = "src/PrivacyPoolSimple.sol";
 const VERIFIER = "src/verifiers/WithdrawalVerifier.sol";
+const ADAPTER = "src/adapters/UniswapV3Adapter.sol";
 // lib/forge-std's submodule commit (v1.9.7), fetched into the copy when the checkout has no submodule files
 const FORGE_STD = "77041d2ce690e692d6e03cc812b57d1ddaa4d505";
 
@@ -72,6 +74,67 @@ export const MUTANTS = [
   [PP, "  /// @inheritdoc IPrivacyPool\n  function deposit(", "  function depositors(uint256) external pure returns (address) {\n    return address(0);\n  }\n\n  /// @inheritdoc IPrivacyPool\n  function deposit(", "test_ragequitIsAbsent"],
   ["src/poseidon/PoseidonT3.sol", "function hash(uint256[2] memory _inputs) internal pure returns (uint256) {", "function hash(uint256[2] memory _inputs) public pure returns (uint256) {", "test_noDelegatecallCallcodeSelfdestructOrCreate"],
   [ST, "  /// @inheritdoc IState\n  uint256 public nonce;", "  /// @inheritdoc IState\n  uint256 public nonce;\n  address internal admin;", "layout"],
+  // the buy (card pool-evm-buy): the request's length, W's signature and each field it binds, what W gets
+  [PP, "if (_encoded.length != 192) revert InvalidRelayData();", "", "test_trailingRelayDataIsRefused"],
+  [PP, "if (_signature.length != 65) revert InvalidSignature();", "", "test_aSignatureWithATrailingByteIsRefused"],
+  [PP, "if (uint256(_s) > HALF_N) revert InvalidSignature();", "", "test_aHighSSignatureIsRefused"],
+  // W signs every release: the check, then each field of each signed type and of the domain
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aWrongSignerIsRefused"],
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aBuysSignatureIsRefusedAsAWithdraw"],
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aWithdrawWithNoOrAWrongSignatureIsRefused"],
+  [PP, "if (_signer(_digest, _signature) != _data.recipient) revert InvalidSignature();", "", "test_aSignatureForAnotherProofOfTheNoteIsRefused"],
+  [SIMPLE, "          _buy.adapter,\n", "          address(0),\n", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "keccak256(_buy.data),", "bytes32(0),", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "          _buy.minOut,\n", "          uint256(0),\n", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "          _buy.token,\n", "          address(0),\n", "test_aChangedBuyIsRefused"],
+  [SIMPLE, "          _proof.existingNullifierHash(),\n", "          uint256(0),\n", "test_aSignatureForAnotherNoteIsRefused"],
+  [SIMPLE, "          _proof.context(),\n", "          uint256(0),\n", "test_aSignatureForAnotherProofOfTheNoteIsRefused"],
+  [SIMPLE, "          _proof.withdrawnValue()\n", "          uint256(0)\n", "test_aSignatureForASmallerChunkOfTheNoteIsRefused"],
+  [SIMPLE, "uint256 nullifier,uint256 context,uint256 value)'", "uint256 nullifier,uint256 context)'", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, uint256(0), _proof.context(), _proof.withdrawnValue())", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), uint256(0), _proof.withdrawnValue())", "test_aSignatureForAnotherProofOfTheNoteIsRefused"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), uint256(0))", "test_aSignatureForASmallerChunkOfTheNoteIsRefused"],
+  [PP, "keccak256('Withdraw(uint256 nullifier,uint256 context,uint256 value)')", "keccak256('Withdraw(uint256 nullifier,uint256 context)')", "test_oneProofServesWithdrawOrBuy"],
+  [PP, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, uint256(31337), address(this))", "test_anotherChainsSignatureIsRefused"],
+  [PP, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, block.chainid, address(uint160(0xb1f1f001)))", "test_anotherPoolsSignatureIsRefused"],
+  [PP, "NAME_HASH = keccak256('Blindfill');", "NAME_HASH = keccak256('Blindfill pool');", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "abi.encodePacked(hex'1901', _domain, _struct)", "abi.encodePacked(_domain, _struct)", "test_oneProofServesWithdrawOrBuy"],
+  [SIMPLE, "if (_buy.minOut == 0) revert InvalidMinOut();", "", "test_aZeroMinOutIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "", "test_minOutNotMetIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "", "test_anAdapterThatSendsElsewhereIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "", "test_aRouteToAnotherTokenFails"],
+  [SIMPLE, "uint256 _before = IERC20Balance(_buy.token).balanceOf(_data.recipient);", "uint256 _before = 0;", "test_tokensWAlreadyHoldsDoNotCount"],
+  [SIMPLE, "{value: _withdrawn - _fee}", "{value: _withdrawn}", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "    if (_fee != 0) _push(_data.feeRecipient, _fee);\n", "", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "if (_fee != 0) _push(_data.feeRecipient, _fee);", "_push(_data.feeRecipient, _fee);", "test_aBuyWithFeeZeroSendsTheWholeChunk"],
+  [SIMPLE, "(_buy.token, _data.recipient, _buy.minOut, _buy.data)", "(_buy.token, _data.recipient, 0, _buy.data)", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "(_buy.token, _data.recipient, _buy.minOut, _buy.data)", "(_buy.token, msg.sender, _buy.minOut, _buy.data)", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "bytes memory _signature\n  ) external nonReentrant {", "bytes memory _signature\n  ) external {", "test_anAdapterCannotReenter"],
+  [PP, "_withdrawn = _spendChecked(_withdrawal, _proof, _data.deadlineMs);", "_withdrawn = _proof.withdrawnValue();", "test_aReplayedSignatureIsRefused"],
+  [ADAPTER, "recipient: recipient,", "recipient: msg.sender,", "test_aBuyLandsAndWHoldsAtLeastMinOut"],
+  [ADAPTER, "amountIn: msg.value,", "amountIn: msg.value / 2,", "test_aBuyLandsAndWHoldsAtLeastMinOut"],
+  [ADAPTER, "amountOutMinimum: minOut", "amountOutMinimum: 0", "test_aMinOutOverTheQuoteFails"],
+  // a partial fill: the router's ETH, each middle token's balance at the router, and the hop count that finds them
+  [ADAPTER, "if (address(ROUTER).balance != _eth) revert PartialFill();", "", "test_aPartialFillRevertsTheBuy"],
+  [ADAPTER, "!= _mid[_i]) {", "!= _mid[_i] && false) {", "test_aPartialSecondHopRevertsTheBuy"],
+  [ADAPTER, "uint256 _hops = (data.length - 20) / 23;", "uint256 _hops = (data.length - 20) / 24;", "test_aPartialSecondHopRevertsTheBuy"],
+  // the Opus review's mutants (b61f0f5): EIP-712 strings and encoding, signature parsing, the request's length, what
+  // W gets, the fee cap, v, and the fee recipient's reentry
+  [PP, "keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')", "keccak256('EIP712Domain(string name,uint256 chainId,address verifyingContract)')", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "VERSION_HASH = keccak256('1');", "VERSION_HASH = keccak256('2');", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [SIMPLE, "'Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)'", "'Buy(address token,bytes data,uint256 minOut,address adapter,uint256 nullifier,uint256 context,uint256 value)'", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "keccak256(_buy.data),", "keccak256(abi.encode(_buy.data)),", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.newCommitmentHash(), _proof.context(), _proof.withdrawnValue())", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [PP, "_v := byte(0, mload(add(_signature, 0x60)))", "_v := 27", "test_signaturesWithVOf27And28BothLand"],
+  [PP, "_r := mload(add(_signature, 0x20))\n      _s := mload(add(_signature, 0x40))", "_s := mload(add(_signature, 0x20))\n      _r := mload(add(_signature, 0x40))", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "_release(_withdrawal, _proof, _fee, _data, _buyDigest(_buy, _proof), _signature)", "_release(_withdrawal, _proof, _fee, _data, _typedDigest(keccak256(abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue()))), _signature)", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [PP, "if (_encoded.length != 192) revert InvalidRelayData();", "if (_encoded.length < 192) revert InvalidRelayData();", "test_trailingRelayDataIsRefused"],
+  [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "if (_out + 1 < _buy.minOut) revert MinOutNotMet();", "test_minOutNotMetIsRefused"],
+  [SIMPLE, "{value: _withdrawn - _fee}", "{value: _withdrawn - _fee - 1}", "test_buyLandsAndWHoldsMinOut"],
+  [SIMPLE, "if (_buy.minOut == 0) revert InvalidMinOut();", "if (_buy.minOut == 0 && _fee != 0) revert InvalidMinOut();", "test_aZeroMinOutIsRefused"],
+  [PP, "if (_fee > _data.feeCap) revert FeeOverCap();", "if (_fee >= _data.feeCap) revert FeeOverCap();", "test_buyLandsAndWHoldsMinOut"],
+  [PP, "return ecrecover(_digest, _v, _r, _s);", "return ecrecover(_digest, _v < 27 ? _v + 27 : _v, _r, _s);", "test_R_vOtherThan27Or28IsRefused"],
+  [SIMPLE, "bytes memory _signature\n  ) external nonReentrant {", "bytes memory _signature\n  ) external {", "test_R_feeRecipientCannotReenterBuy"],
 ];
 
 // keccak256 of the withdrawal verifier's deployed code as `dir` builds it
@@ -80,7 +143,7 @@ function verifierHash(dir) {
   return execFileSync("cast", ["keccak", code.trim()], { encoding: "utf8", stdio: "pipe" }).trim();
 }
 
-// "pass" or "fail" of one named test; throws unless forge ran exactly that one test (forge matches --mt against
+// "pass", "fail" or "error (...)" of one named test; throws unless forge ran exactly that one test (forge matches --mt against
 // `name()`, and a pattern that matches nothing exits 0)
 function run(dir, test) {
   if (test === "layout") {
@@ -93,13 +156,18 @@ function run(dir, test) {
   }
   let out;
   try {
-    out = execFileSync("forge", ["test", "--mt", `^${test}\\(`], { cwd: dir, encoding: "utf8", stdio: "pipe" });
+    out = execFileSync("node", ["test/fork-rpc.mjs", "--", "forge", "test", "--no-storage-caching", "--mt", `^${test}\\(`], { cwd: dir, encoding: "utf8", stdio: "pipe" });
   } catch (e) {
     out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
   }
-  const ran = out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? [];
+  // a read the fork replay has no answer for makes a fork test fail for the wrong reason: an error, never a kill.
+  // forge 1.8.6's two probes (anvil_nodeInfo, eth_getAccountInfo) are answered by its own fallback and do not count
+  const misses = [...new Set((out.match(/fork-rpc: not recorded[^\n]*/g) ?? []).filter((m) => !/anvil_nodeInfo|eth_getAccountInfo/.test(m)))];
+  if (misses.length > 0) return `error (the replay has no answer: ${misses.join("; ").slice(0, 300)})`;
+  // PASS or FAIL of each test of that name (two contracts may share it, each failing for its own reason)
+  const ran = (out.match(new RegExp(`^\\[(PASS|FAIL).*\\] ${test}\\(`, "gm")) ?? []).map((r) => r.slice(1, 5));
   // forge prints a failing test twice, in the run and in the summary
-  if (ran.length >= 1 && ran.every((r) => r === ran[0])) return ran[0].startsWith("[PASS") ? "pass" : "fail";
+  if (ran.length >= 1 && ran.every((r) => r === ran[0])) return ran[0] === "PASS" ? "pass" : "fail";
   throw new Error(`forge ran ${ran.length} tests named ${test}:\n${out.slice(-2000)}`);
 }
 
@@ -117,8 +185,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       git("checkout", "-q", FORGE_STD);
     }
     for (const t of new Set(MUTANTS.map((m) => m[3]))) {
-      if (run(dir, t) !== "pass") {
-        console.log(`FAIL ${t} fails on the pool as it is`);
+      const r = run(dir, t);
+      if (r !== "pass") {
+        console.log(`FAIL ${t} is ${r} on the pool as it is`);
         bad++;
       }
     }
@@ -143,7 +212,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       for (const x of new Set(MUTANTS.map((m) => m[0]))) {
         if (readFileSync(path.join(dir, x), "utf8") !== readFileSync(path.join(ROOT, x), "utf8")) throw new Error(`mutant ${i + 1} left ${x} changed`);
       }
-      console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1} ${file}: ${find.trim().split("\n")[0].slice(0, 70)} -> ${t} ${r === "fail" ? "fails" : "PASSES"}`);
+      console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1} ${file}: ${find.trim().split("\n")[0].slice(0, 70)} -> ${t} ${r === "fail" ? "fails" : r === "pass" ? "PASSES" : r}`);
       if (r !== "fail") bad++;
     });
   } finally {
