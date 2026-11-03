@@ -97,14 +97,28 @@ export function toCandleData(body: unknown, tf: ChartTf, headerSrc: string | nul
   return bars.length === 0 ? { status: "empty", gecko } : { status: "ready", tf, bars, gecko, precision: pricePrecision(bars) };
 }
 
+/** Reads after a 429 (the helper's GeckoTerminal budget is shared by every page: apps/helper/src/data/gecko.ts), each
+ *  after the answer's Retry-After, at most THROTTLE_WAIT_MAX_S; the chart stays loading meanwhile. */
+export const THROTTLE_RETRIES = 2;
+export const THROTTLE_WAIT_MAX_S = 10;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /** One candle read: the bars, the empty state when the helper holds none (an answer of no bars, or a 404 for a token or
- *  chain it draws no candles for), else the error state. */
-export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf, fetchFn: typeof fetch = fetch): Promise<CandleData> {
+ *  chain it draws no candles for), else the error state. A 429 is read again after its Retry-After, THROTTLE_RETRIES
+ *  times, then is the error state (Retry reads again). */
+export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf, fetchFn: typeof fetch = fetch, wait: (ms: number) => Promise<void> = sleep): Promise<CandleData> {
   try {
-    const r = await fetchFn(CANDLES_URL(chain, token, tf), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
-    if (r.status === 404) return { status: "empty", gecko: false };
-    if (r.status !== 200) return { status: "error" };
-    return toCandleData(await r.json(), tf, r.headers.get(HELPER_SOURCE_HEADER)) ?? { status: "error" };
+    for (let i = 0; ; i++) {
+      const r = await fetchFn(CANDLES_URL(chain, token, tf), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      if (r.status === 429 && i < THROTTLE_RETRIES) {
+        const after = Number(r.headers.get("Retry-After"));
+        await wait(1000 * (Number.isFinite(after) && after > 0 ? Math.min(after, THROTTLE_WAIT_MAX_S) : 1));
+        continue;
+      }
+      if (r.status === 404) return { status: "empty", gecko: false };
+      if (r.status !== 200) return { status: "error" };
+      return toCandleData(await r.json(), tf, r.headers.get(HELPER_SOURCE_HEADER)) ?? { status: "error" };
+    }
   } catch {
     return { status: "error" };
   }

@@ -2,7 +2,7 @@
 // and every planted bad answer refused whole (the chart's error state, never a partly drawn chart).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CANDLES_URL, isGecko, loadCandles, pricePrecision, priceText, toCandleData, volumeText } from "../src/screens/token/candles.ts";
+import { CANDLES_URL, THROTTLE_RETRIES, THROTTLE_WAIT_MAX_S, isGecko, loadCandles, pricePrecision, priceText, toCandleData, volumeText } from "../src/screens/token/candles.ts";
 
 const T0 = 1_762_000_200; // a 15m bucket start
 const good = () => ({
@@ -125,4 +125,23 @@ test("the read: 404 is empty, another status, a bad body or a failed fetch is th
   let asked = "";
   await loadCandles("base", "0xab", "4H", async (u) => { asked = String(u); return new Response("{}", { status: 503 }); });
   assert.match(asked, /chain=base&token=0xab&tf=4h&limit=500$/);
+});
+
+test("a 429: read again after its Retry-After (capped), then the error state", async () => {
+  const waits: number[] = [];
+  const wait = async (ms: number) => void waits.push(ms);
+  let n = 0;
+  const throttledThenGood = async () => {
+    n++;
+    return n <= 2 ? new Response("{}", { status: 429, headers: { "Retry-After": n === 1 ? "3" : "600" } }) : new Response(JSON.stringify(good()), { status: 200, headers: { "X-Helper-Source": "geckoterminal" } });
+  };
+  const d = await loadCandles("solana", "M", "15m", throttledThenGood, wait);
+  assert.equal(d.status, "ready");
+  assert.deepEqual(waits, [3000, THROTTLE_WAIT_MAX_S * 1000]);
+  n = 0;
+  waits.length = 0;
+  const always = async () => (n++, new Response("{}", { status: 429 }));
+  assert.deepEqual(await loadCandles("solana", "M", "15m", always, wait), { status: "error" });
+  assert.equal(n, THROTTLE_RETRIES + 1);
+  assert.deepEqual(waits, [1000, 1000], "no Retry-After: a second");
 });
