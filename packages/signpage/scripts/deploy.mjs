@@ -25,10 +25,21 @@ import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
 export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "app-harness-signin-e2e"];
-// the arguments a check is run with after this deploy: signpage-release reads SIGN_HOST alone against this commit's
-// own build, and app-harness-signin-e2e SIGN_HOST's backdrop alone, so an APP_HOST that lags does not fail this deploy
-export const LIVE_ARGS = { "signpage-release": "--host sign", "app-harness-signin-e2e": "--host sign" };
-export const liveRun = (k) => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}`;
+// the arguments a check is run with after this deploy (a list: one run for each, each its own job in live.yml):
+// signpage-release reads SIGN_HOST alone against this commit's own build, and app-harness-signin-e2e SIGN_HOST's
+// backdrop alone, so an APP_HOST that lags does not fail this deploy; signpage-shell takes an engine and runs live on
+// Chromium and Firefox at both widths (its WebKit run is the Mac's own harness, which a runner has not); the engines a
+// run needs are named, so live.yml installs Playwright's Firefox and WebKit only where an argument says so
+export const LIVE_ARGS = {
+  "signpage-prover-threads": "--browser webkit",
+  "signpage-release": "--host sign",
+  "app-harness-signin-e2e": "--host sign",
+  "signpage-shell": ["chromium", "firefox"].flatMap((e) => ["phone", "desktop"].map((w) => `--engine ${e} --live --width ${w}`)),
+};
+/** The runs of one check, each as `scripts/live-checks/<key>.mjs <args>`. */
+export const liveRuns = (k) => [LIVE_ARGS[k] ?? ""].flat().map((a) => `scripts/live-checks/${k}.mjs${a ? ` ${a}` : ""}`);
+/** The command a deploy prints for the live run on GitHub's runners (card ci-live-runners). */
+export const liveCommands = (sha) => [`next: gh workflow run live.yml -f host=sign -f commit=${sha}`, "then: gh run watch --exit-status"];
 export const PROJECT = "confidential-trenches-sign";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves SIGN_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
@@ -155,7 +166,7 @@ export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
       stdio: "inherit",
     });
     if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-    return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map(liveRun).join(", ")} next`] };
+    return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}${dirty ? " from a tree with uncommitted changes in packages/signpage: the live checks read the commit's own build, not yours" : ""}`, ...liveCommands(sha || "$(git rev-parse HEAD)")] };
   } finally {
     if (!dryRun) rmSync(dir, { recursive: true, force: true }); // the build holds 24 MB of setup files; --dry-run keeps it to serve
   }

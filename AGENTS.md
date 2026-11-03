@@ -32,7 +32,7 @@ For the longer read, see [docs/architecture.md](docs/architecture.md) and [docs/
 | The helper server | `apps/helper/src/` | Node; deploy files in `apps/helper/deploy/` |
 | A CI gate | `scripts/ci/` | Each gate has a `*.test.mjs` with planted failures |
 | A test browser | `scripts/browsers.mjs` | The only place a browser starts: the installed Google Chrome with its sandbox on, held by `scripts/ci/browser-launch.mjs` |
-| A live check | `scripts/live-checks/` | One per change, see below |
+| A live check | `scripts/live-checks/` | One per change, see below; `.github/workflows/live.yml` runs a deploy's checks on GitHub's runners |
 | The performance table | `perf/runs/*.json` | `scripts/perf-table.mjs` writes the table from these |
 | CI | `.github/workflows/ci.yml` | Five required jobs |
 
@@ -105,7 +105,9 @@ over public RPCs that rate-limit.
 2. Make the change and watch the test pass. Then run the commands above that cover what you touched.
 3. Add the live check: `scripts/live-checks/<key>.mjs` checks the change's end state on what is deployed. Its
    `<key>.test.mjs` replays `<key>.answers.json`: a recorded good answer must pass and a recorded bad one must fail.
-   Each deploy script prints the live check to run next.
+   Each Cloudflare deploy script prints the `gh workflow run live.yml -f host=<app|sign> -f commit=<sha>` line that runs
+   them on GitHub's runners, each check its own job, then `gh run watch --exit-status`; after `redeploy.sh` run the same
+   with `host=helper` (its list is `scripts/ci/helper-live-checks.mjs`).
 4. A change with nothing to check live writes, on its own line in the pull request body,
    `Live check: none (<reason>)`.
 5. A money-path change keeps its run record in `scripts/live-checks/<key>.md`: a `Money path: yes` line and one
