@@ -115,7 +115,9 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     const o = (typeof j === "object" && j !== null && !Array.isArray(j) ? j : {}) as { result?: unknown; error?: { code?: unknown; message?: unknown } };
     if (o.error !== undefined) {
       const msg = `${String(o.error?.code)}: ${String(o.error?.message).slice(0, 120)}`;
-      return /rate.?limit|too many/i.test(msg) ? { kind: "busy", detail: msg, throttled: true } : { kind: "refused", detail: msg };
+      // a throttle is Jito's own answer only: "429 or rate limit error indicating what you hit" (docs.jito.wtf
+      // lowlatencytxnsend, Rate Limits); other words ("too many" transactions in a bundle) are a refusal
+      return /rate.?limit/i.test(msg) ? { kind: "busy", detail: msg, throttled: true } : { kind: "refused", detail: msg };
     }
     if (!r.ok) return { kind: "refused", detail: `HTTP ${r.status}` };
     if (o.result !== signature) return { kind: "refused", detail: "the answer is not this transaction's signature" };

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 import { test } from "node:test";
-import { clientOf, clientWindow, heldPerClient, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS } from "./limits.ts";
+import { budgetFromEnv, clientOf, clientWindow, heldPerClient, keyOf, RETRY_AFTER_MAX_S, throttled, throttleOf, upstreamBudget, upstreamRetryAfterS } from "./limits.ts";
 
 /** A clock that moves `step` ms at every read, from `t0`. */
 const moving = (t0: number, step: number) => {
@@ -35,7 +35,7 @@ test("clientWindow: the memory is bounded: past the most clients the oldest goes
 
 test("upstreamBudget: one heavy caller is throttled at its share while an honest one still draws; only the shared total stops everyone", () => {
   const c = moving(2_000_000, 3);
-  const b = upstreamBudget(10, 4, c.now);
+  const b = upstreamBudget(() => ({ total: 10, perClient: 4 }), c.now);
   for (let i = 0; i < 4; i++) assert.equal(b.take("solana", "heavy"), 0);
   assert.ok(b.take("solana", "heavy") > 0, "the heavy caller is throttled at its share");
   for (let i = 0; i < 20; i++) b.take("solana", "heavy"); // hammering on draws nothing more
@@ -48,7 +48,52 @@ test("upstreamBudget: one heavy caller is throttled at its share while an honest
   assert.ok(w >= 1 && w <= 10, "past the total, the wait to the window's end");
   c.jump(w * 1000);
   assert.equal(b.take("solana", "heavy"), 0, "the next window draws again");
-  assert.throws(() => upstreamBudget(4, 4), /under the shared total/);
+});
+
+test("upstreamBudget: a batch of n draws n in one step, checked whole against the share and the total (review F-A)", () => {
+  const c = moving(3_000_000, 1);
+  const b = upstreamBudget(() => ({ total: 10, perClient: 4 }), c.now);
+  assert.ok(b.take("solana", "a", 5) > 0, "a batch past the share is refused whole");
+  assert.equal(b.take("solana", "a", 4), 0, "a batch at the share draws");
+  assert.ok(b.take("solana", "a", 1) > 0, "the share is spent by the batch");
+  assert.equal(b.take("solana", "b", 4), 0);
+  assert.ok(b.take("solana", "c", 3) > 0, "a batch past the total is refused whole");
+  assert.equal(b.take("solana", "c", 2), 0, "the total's last two");
+});
+
+test("upstreamBudget: a share-only draw (a cache hit) counts in the caller's share, never in the total (review F-C2)", () => {
+  const b = upstreamBudget(() => ({ total: 5, perClient: 3 }), moving(4_000_000, 1).now);
+  for (let i = 0; i < 3; i++) assert.equal(b.take("v", "hits", 1, true), 0);
+  assert.ok(b.take("v", "hits", 1, true) > 0, "cache hits past the share are throttled");
+  for (let i = 0; i < 3; i++) assert.equal(b.take("v", "x"), 0);
+  for (let i = 0; i < 2; i++) assert.equal(b.take("v", "y"), 0);
+  assert.ok(b.take("v", "y") > 0, "the total is the five provider draws, the hits took none of it");
+});
+
+test("upstreamBudget: hold(key) stops every caller's draw on that key until the provider's reset, capped at a minute; other keys draw (review F-B)", () => {
+  const c = moving(5_000_000, 0);
+  const b = upstreamBudget(() => ({ total: 100, perClient: 10 }), c.now);
+  b.hold("solana", c.at() + 30_000);
+  assert.equal(b.heldFor("solana"), 30);
+  assert.equal(b.take("solana", "never-drew"), 30, "a caller that drew nothing waits the reset too");
+  assert.equal(b.take("base", "never-drew"), 0, "another key is its own");
+  c.jump(29_500);
+  assert.equal(b.take("solana", "x"), 1);
+  c.jump(500);
+  assert.equal(b.take("solana", "x"), 0, "at the reset, draws go ahead");
+  b.hold("solana", c.at() + 3_600_000);
+  assert.equal(b.heldFor("solana"), RETRY_AFTER_MAX_S, "a provider's hour is held to a minute");
+  c.jump(RETRY_AFTER_MAX_S * 1000);
+  assert.equal(b.heldFor("solana"), 0);
+});
+
+test("budgetFromEnv: \"<total>,<per client>\" with the share under the total, else a start stops naming the variable only", () => {
+  const fb = { total: 100, perClient: 16 };
+  assert.deepEqual(budgetFromEnv({}, "RPC_BUDGET_SOLANA", fb), fb);
+  assert.deepEqual(budgetFromEnv({ RPC_BUDGET_SOLANA: "" }, "RPC_BUDGET_SOLANA", fb), fb);
+  assert.deepEqual(budgetFromEnv({ RPC_BUDGET_SOLANA: "400,40" }, "RPC_BUDGET_SOLANA", fb), { total: 400, perClient: 40 });
+  for (const bad of ["40,40", "40,400", "0,0", "1e3,10", "100", "100,16,1", " 100,16", "-1,1"])
+    assert.throws(() => budgetFromEnv({ RPC_BUDGET_SOLANA: bad }, "RPC_BUDGET_SOLANA", fb), (e: Error) => /^RPC_BUDGET_SOLANA must be/.test(e.message) && !e.message.includes(bad), bad);
 });
 
 test("heldPerClient: at most `max` held at once per client; a leave frees one; the address goes with its last request", () => {
@@ -79,4 +124,27 @@ test("the client is the proxy's last X-Forwarded-For entry, else the socket's pe
   const req = (h: Record<string, string>, peer = "10.0.0.9") => ({ headers: h, socket: { remoteAddress: peer } }) as unknown as IncomingMessage;
   assert.equal(clientOf(req({ "x-forwarded-for": "198.51.100.1, 203.0.113.7" })), "203.0.113.7");
   assert.equal(clientOf(req({})), "10.0.0.9");
+});
+
+test("an IPv6 client is keyed by its /64, so one subscriber's block is one client; IPv4, mapped ones included, is itself (review finding 8)", () => {
+  const req = (peer: string) => ({ headers: {}, socket: { remoteAddress: peer } }) as unknown as IncomingMessage;
+  assert.equal(clientOf(req("2001:db8:1:2::1")), "2001:db8:1:2::/64");
+  assert.equal(clientOf(req("2001:db8:1:2:ffff:ffff:ffff:fffe")), "2001:db8:1:2::/64");
+  assert.equal(clientOf(req("2001:0db8:0001:0002:0:0:0:9")), "2001:db8:1:2::/64");
+  assert.notEqual(clientOf(req("2001:db8:1:3::1")), clientOf(req("2001:db8:1:2::1")), "the next /64 is another client");
+  assert.equal(keyOf("2001:db8::1"), "2001:db8:0:0::/64");
+  assert.equal(keyOf("::1"), "0:0:0:0::/64");
+  assert.equal(keyOf("fe80::1%en0"), "fe80:0:0:0::/64");
+  assert.equal(keyOf("::ffff:203.0.113.7"), "203.0.113.7");
+  assert.equal(keyOf("203.0.113.7"), "203.0.113.7");
+});
+
+test("throttleOf: a provider read that threw for a throttle names 1 s; any other failure 0", () => {
+  assert.equal(throttleOf(new Error("HTTP 429")), 1);
+  assert.equal(throttleOf(new Error("rpc: rate limit exceeded")), 1);
+  assert.equal(throttleOf(new Error("Too Many Requests")), 1);
+  assert.equal(throttleOf(new Error("HTTP 4290")), 0);
+  assert.equal(throttleOf(new Error("HTTP 503")), 0);
+  assert.equal(throttleOf(new Error("blockhash not found")), 0);
+  assert.equal(throttleOf(undefined), 0);
 });

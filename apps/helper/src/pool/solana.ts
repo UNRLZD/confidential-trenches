@@ -35,11 +35,13 @@
 //                       failure per nullifier per epoch);
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
 //   upstream (503)      the simulation or the blockhash read could not be made, this epoch's rent could not be read,
-//                       or (mainnet tag 3) every block engine failed (a 5xx) or refused it;
+//                       or (mainnet tag 3) every block engine failed (a 5xx) or refused it; a provider that throttled
+//                       one of those reads (its HTTP 429, a rate-limit error) is rate_limited (429) instead, never 503;
 //   in_flight (429)     mainnet tag 3: this client already holds POOL_JITO_IN_FLIGHT_MAX requests open waiting for a
 //                       fill, repeats of one carry each counted (M369 (M1), M374 (5): the block engines' seconds are
 //                       shared by every caller); Retry-After POOL_IN_FLIGHT_RETRY_S;
-//   rate_limited (429)  mainnet tag 3: the block engines throttled it (every second booked, a 429 or rate-limit words
+//   rate_limited (429)  a pool provider throttled a read (Retry-After 1, limits.ts throttleOf); or mainnet tag 3: the
+//                       block engines throttled it (every second booked, a 429 or rate-limit words
 //                       from a region); Retry-After 1. A nullifier whose last send expired goes again only into a second
 //                       free now (M374 (4)), else this;
 //   not_landed          mainnet tag 3: the send ended without a fill: expired (503; never landed, the nullifier is free
@@ -94,7 +96,7 @@ import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
 import { jitoSender, type JitoSender } from "./jito.ts";
 import { oncePerNullifier } from "./once.ts";
-import { heldPerClient } from "../limits/limits.ts";
+import { heldPerClient, throttleOf } from "../limits/limits.ts";
 import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, type PoolFeeAnswer } from "./fee.ts";
 import { POOL_LIFE_MAX_MS } from "./evm.ts";
 
@@ -432,6 +434,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       send: async (tx: string) => String(await rpc("sendTransaction", [tx, { encoding: "base64", skipPreflight: true, maxRetries: 0 }])),
     }));
   const no = (status: number, code: PoolSendCode, detail?: string): PoolSendAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
+  // a provider read that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
+  // upstream (card helper-abuse-limits: a 503 never means "wait")
+  const unread = (e: unknown): PoolSendAnswer => {
+    const wait = throttleOf(e);
+    return wait > 0 ? { ...no(429, "rate_limited"), retryAfterS: wait } : no(503, "upstream");
+  };
   const once = oncePerNullifier<PoolSendAnswer>(deps.memory);
   const now = deps.now ?? Date.now;
   // M356 (1)/(2): a nullifier whose send failed on chain waits for the next epoch; one whose outcome is unknown is held
@@ -477,8 +485,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       let current: EpochFee;
       try {
         current = await feeOf(epochStartOf(at));
-      } catch {
-        return no(503, "upstream");
+      } catch (e) {
+        return unread(e);
       }
       // the release's relay fee is this epoch's, or an earlier epoch's still inside a proof's life
       const relay = relayFeeOf(wire);
@@ -522,8 +530,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
               tables[l.table] = [tableOf(x), tableOf(y)];
             }),
           );
-        } catch {
-          return no(503, "upstream");
+        } catch (e) {
+          return unread(e);
         }
         const k = checkSolanaPoolKeys(tx, { pool }, tables);
         if (!k.ok) return no(422, k.code, k.detail);
@@ -537,8 +545,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         ]);
         sim = s;
         height = (h as { value?: { lastValidBlockHeight?: unknown } })?.value?.lastValidBlockHeight as number;
-      } catch {
-        return no(503, "upstream");
+      } catch (e) {
+        return unread(e);
       }
       const v = (sim as { value?: { err?: unknown } } | null)?.value;
       if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");

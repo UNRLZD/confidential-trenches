@@ -37,6 +37,14 @@ test("an answer that is not this transaction's signature, not JSON, or a 4xx is 
   }
 });
 
+test("a throttle is only Jito's documented answer (a 429, or an error naming a rate limit); other words, \"too many\" ones included, are a refusal", async () => {
+  const err = (message: string) => answer(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32097, message } }));
+  const limited = await jitoSender({ fetch: err("Rate limit exceeded. Limit: 1 per second for txn requests"), intervalMs: 0 }).send("AA==", SIG, 0);
+  assert.deepEqual([limited.kind, (limited as { throttled?: boolean }).throttled], ["busy", true]);
+  const other = await jitoSender({ fetch: err("bundle has too many transactions") }).send("AA==", SIG);
+  assert.equal(other.kind, "refused");
+});
+
 test("an answer over 16 KB or a timeout is a transport failure: every region is tried, then transport", async () => {
   let n = 0;
   const big = async () => (n++, new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG, pad: "x".repeat(20_000) })));

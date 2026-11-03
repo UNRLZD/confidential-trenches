@@ -233,11 +233,16 @@ test("the send queue holds at most EVM_QUEUE_MAX waiting; past it 429 rate_limit
   assert.equal(evm.EVM_QUEUE_MAX, QUEUE_MAX);
 });
 
-test("a provider's transport error or HTTP 429 is 503 upstream; an execution revert stays 422 simulation_failed", async () => {
+test("a provider's transport error is 503 upstream; its HTTP 429 or rate-limit error is 429 rate_limited with a wait (card helper-abuse-limits), on every read and the send; an execution revert stays 422 simulation_failed", async () => {
   for (const [method, msg, want] of [
-    ["eth_estimateGas", "HTTP 429", "upstream"],
+    ["eth_estimateGas", "HTTP 429", "rate_limited"],
     ["eth_estimateGas", "fetch failed", "upstream"],
-    ["eth_call", "HTTP 429", "upstream"],
+    ["eth_call", "HTTP 429", "rate_limited"],
+    ["eth_call", "RPC error -32016: rate limit exceeded", "rate_limited"],
+    ["eth_getCode", "HTTP 429", "rate_limited"],
+    ["eth_chainId", "HTTP 429", "rate_limited"],
+    ["eth_getBlockByNumber", "HTTP 429", "rate_limited"],
+    ["eth_sendRawTransaction", "HTTP 429", "rate_limited"],
     ["eth_call", "The operation was aborted due to timeout", "upstream"],
     ["eth_call", "RPC error -32005: limit exceeded", "upstream"],
     ["eth_getCode", "HTTP 503", "upstream"],
@@ -250,8 +255,9 @@ test("a provider's transport error or HTTP 429 is 503 upstream; an execution rev
     const a: Calls = [];
     const x = await make(a, { fail: { [method]: msg } }).carry(req());
     assert.equal(code(x), want, `${method} ${msg}`);
-    assert.equal(x.status, want === "upstream" ? 503 : 422);
-    assert.equal(sends(a).length, 0);
+    assert.equal(x.status, want === "upstream" ? 503 : want === "rate_limited" ? 429 : 422);
+    assert.equal(x.retryAfterS, want === "rate_limited" ? 1 : undefined, "a throttle names its wait");
+    if (method !== "eth_sendRawTransaction") assert.equal(sends(a).length, 0);
   }
 });
 

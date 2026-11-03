@@ -6,12 +6,14 @@
 // What reaches the vendor: the allowlisted path, the caller's query string re-encoded, for a POST entry the caller's
 // body byte for byte as JSON, and the key header. No header of the caller (no cookie, origin, user agent or address).
 // What reaches the caller: the vendor's status and JSON body, with X-Helper-Source and X-Fetched-At. A vendor that is
-// down, slow, out of quota, refusing our key, or answering anything but JSON within the size cap answers
-// 503 upstream, so the device falls back to its public path (H2.3). Throttling (card helper-abuse-limits,
-// ../limits/limits.ts): each vendor is one budget every caller draws from, PROXY_VENDOR_MAX requests a window and no
-// caller more than PROXY_CLIENT_MAX of them; a draw past either answers 429 rate_limited with the seconds to the window's
-// end. A vendor's own 429 is waited out once when its reset is at most WAIT_MAX_MS, else answered to the caller that
-// drew it as 429 with the vendor's reset (at most a minute); it pauses nobody else.
+// down, slow, refusing our key, or answering anything but JSON within the size cap answers 503 upstream, so the device
+// falls back to its public path (H2.3). Throttling (card helper-abuse-limits, ../limits/limits.ts): each vendor is one
+// budget every caller draws from, PROXY_VENDOR_MAX requests a window and no caller more than PROXY_CLIENT_MAX of them (a
+// cache hit counts in the caller's share only, as it reaches no vendor); a draw past either answers 429 rate_limited
+// with the seconds to the window's end. A vendor's own 429 holds that vendor until the reset it named (at most a
+// minute): the helper is its one client, so every caller drawing on it, the helper's own reads included, answers 429
+// with the seconds left and nothing reaches the vendor. A reset of at most WAIT_MAX_MS is waited out once by the
+// request that met it.
 import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER, HELPER_V1_PATHS, type HelperV1Path } from "@blindfill/kit";
 import { throttled, upstreamBudget, upstreamRetryAfterS } from "../limits/limits.ts";
 import { VENDOR_NAMES, VENDORS, type Upstream, type Vendor, type VendorName } from "./vendors.ts";
@@ -89,7 +91,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const keys = readKeys(env);
   const forms = keyForms(keys);
-  const budget = upstreamBudget(PROXY_VENDOR_MAX, PROXY_CLIENT_MAX, now);
+  const budget = upstreamBudget(() => ({ total: PROXY_VENDOR_MAX, perClient: PROXY_CLIENT_MAX }), now);
   const cache = new Map<string, Read & { expires: number }>();
   let cacheBytes = 0;
   const inflight = new Map<string, Promise<Read | ProxyAnswer>>();
@@ -130,6 +132,9 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
 
   async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string): Promise<Read | ProxyAnswer> {
     for (let attempt = 0; ; attempt++) {
+      // the vendor's reset holds every call to it
+      const held = budget.heldFor(name);
+      if (held > 0) return throttled(held);
       const headers: Record<string, string> = { accept: "application/json" };
       const key = keys[name];
       if (key) headers[v.header] = key;
@@ -146,13 +151,15 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         });
         if (r.status === 429) {
           await r.body?.cancel();
-          // a short reset is waited out once by this request alone; a longer one, or a second 429, is the caller's wait
+          // the vendor is held until its reset; a short one is waited out once by this request, a longer one (or a
+          // second 429) is every caller's wait
           const wait = Math.max(resetMs(r.headers, now()), 0);
+          budget.hold(name, now() + (wait <= WAIT_MAX_MS ? wait : upstreamRetryAfterS(r.headers, now()) * 1000));
           if (attempt === 0 && wait <= WAIT_MAX_MS) {
             await sleep(wait);
             continue;
           }
-          return { ...throttled(upstreamRetryAfterS(r.headers, now())) };
+          return throttled(Math.max(budget.heldFor(name), 1));
         }
         text = await readBody(r);
       } catch {
@@ -186,8 +193,9 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     const up = v.paths[path]!;
     if (Buffer.byteLength(body) > PROXY_BODY_MAX) return source(error(413, "too_large"));
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
-    // a draw on the vendor's budget for every call that may reach it (a cache hit reaches nothing and draws nothing)
-    const draw = (): number => (client === undefined ? 0 : budget.take(name, client));
+    // a draw on the vendor's budget for every call that may reach it; a cache hit reaches nothing, so it counts in the
+    // caller's share alone
+    const draw = (shareOnly = false): number => (client === undefined ? 0 : budget.take(name, client, 1, shareOnly));
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
@@ -195,8 +203,11 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (up.cacheMs) {
       const id = `${name} ${path}${qs}`;
       const hit = cache.get(id);
-      if (hit && hit.expires > now()) out = hit;
-      else {
+      if (hit && hit.expires > now()) {
+        const wait = draw(true);
+        if (wait > 0) return source(throttled(wait));
+        out = hit;
+      } else {
         const wait = draw();
         if (wait > 0) return source(throttled(wait));
         let p = inflight.get(id);

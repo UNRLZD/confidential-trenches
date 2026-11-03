@@ -744,3 +744,62 @@ test("M374 (4): an expired nullifier's re-send goes only into a free second, els
   await sleep(1_050);
   assert.equal(code(await s.carry(body(old), "a")), "ok", "in a free second the re-send goes");
 });
+
+// card helper-abuse-limits, the review's probes (R-S1 to R-S4)
+// R-S1: a carry whose send throws (a rejection, not an answer) frees the client's held place.
+test("review R-S1: a mainnet tag 3 whose block-engine send rejects frees its held place (no leak until restart)", async () => {
+  const boom = { send: async () => { throw new Error("boom"); }, rebroadcast: async () => ({ kind: "refused" as const, detail: "" }) };
+  const s = solanaPoolSender(
+    { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    { providers: [stub([]), stub([])], now: () => NOW, readRent: async () => MAINNET, jito: boom as never, send: () => { throw new Error("unused"); } },
+  );
+  for (let i = 0; i < 5; i++) {
+    const r = await s.carry(body(tipped({ r: { existingNullifierHash: f32(100 + i) } })), "x").then((a) => a, (e: Error) => ({ status: -1, body: { error: { code: e.message } } }) as never);
+    assert.notEqual(code(r as PoolSendAnswer), "in_flight", `carry ${i}: a rejected carry left its place held`);
+  }
+});
+// R-S2: the kit's send throwing synchronously (a set that fails its own checks) frees the held place too.
+test("review R-S2: a mainnet tag 3 whose sendSolanaSet throws synchronously frees its held place", async () => {
+  const engine = blockEngine(() => "ok");
+  const s = solanaPoolSender(
+    { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    { providers: [stub([]), stub([])], now: () => NOW, readRent: async () => MAINNET, jito: jitoSender({ fetch: engine.fetchFn, timeoutMs: 1_000, intervalMs: 0 }), send: () => { throw new Error("the set fails its own checks"); } },
+  );
+  for (let i = 0; i < 5; i++) {
+    const r = await s.carry(body(tipped({ r: { existingNullifierHash: f32(110 + i) } })), "x").then((a) => a, (e: Error) => ({ status: -1, body: { error: { code: "threw:" + e.message } } }) as never);
+    assert.notEqual(code(r as PoolSendAnswer), "in_flight", `carry ${i}: a throwing send left its place held`);
+  }
+});
+// R-S3: end state 1 on the pool route: the pool provider's own 429 (what the kit's solanaJsonRpc throws: "HTTP 429")
+// is an upstream throttle, so it should answer 429 with a Retry-After; it answers 503 upstream (fatal for the device).
+test("review R-S3: a pool provider's 429 on the simulation answers 429 rate_limited with a wait (end state 1)", async () => {
+  const throttling: SolanaRpc = Object.assign(async () => { throw new Error("HTTP 429"); }, { url: "https://stub.invalid/429" });
+  const s = solanaPoolSender(
+    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    { providers: [throttling, stub([])], now: () => NOW, readRent: async () => MAINNET, send: () => { throw new Error("not reached"); } },
+  );
+  const a = await s.carry(body(wire()), "x");
+  assert.deepEqual([a.status, code(a), a.retryAfterS !== undefined], [429, "rate_limited", true], `got ${a.status} ${code(a)}`);
+});
+test("a pool provider's throttle on the epoch's rent read is 429 rate_limited with a wait too; any other failed read stays 503 upstream", async () => {
+  for (const [msg, want] of [["HTTP 429", 429], ["RPC error -32429: rate limit reached", 429], ["HTTP 503", 503], ["fetch failed", 503]] as const) {
+    const s = solanaPoolSender(
+      { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+      { providers: [stub([]), stub([])], now: () => NOW, readRent: async () => { throw new Error(msg); }, send: () => { throw new Error("not reached"); } },
+    );
+    const a = await s.carry(body(wire()), "x");
+    assert.deepEqual([a.status, code(a), a.retryAfterS], want === 429 ? [429, "rate_limited", 1] : [503, "upstream", undefined], msg);
+  }
+});
+// R-S4: jito send(queueMaxMs 0) never waits, and a 5xx alone is never "throttled".
+test("review R-S4: send with queue limit 0 answers at once when every second is booked; all-5xx is busy, not throttled", async () => {
+  const j = jitoSender({ regions: ["https://a.invalid/x", "https://b.invalid/x"], fetch: async (u, i) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "SIG" }), { status: 200 }), timeoutMs: 500, intervalMs: 5_000 });
+  assert.equal((await j.send("AA==", "SIG")).kind, "ok");
+  assert.equal((await j.send("AA==", "SIG")).kind, "ok");
+  const t0 = performance.now();
+  const r = await j.send("AA==", "SIG", 0);
+  assert.ok(performance.now() - t0 < 50, "no wait");
+  assert.deepEqual(r, { kind: "busy", detail: "every region's next second is booked", throttled: true });
+  const j5 = jitoSender({ regions: ["https://a.invalid/x", "https://b.invalid/x"], fetch: async () => new Response("", { status: 502 }), timeoutMs: 500, intervalMs: 0 });
+  assert.deepEqual(await j5.send("AA==", "SIG", 0), { kind: "busy", detail: "HTTP 502", throttled: false });
+});

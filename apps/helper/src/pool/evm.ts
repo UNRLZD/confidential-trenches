@@ -26,10 +26,11 @@
 //   fee_stale        the fee's cap per gas (fee / gas limit) is under the current base fee: it could not be mined, so
 //                    the device re-proves at a newer epoch's fee (M356 (2));
 //   rate_limited (429) EVM_QUEUE_MAX sends are already waiting (Retry-After EVM_BUSY_RETRY_S; card helper-abuse-limits:
-//                    the helper's own budget is a wait, never a 503);
+//                    the helper's own budget is a wait, never a 503); or a provider throttled a read or the send (its
+//                    HTTP 429, a rate-limit error; Retry-After 1, limits.ts throttleOf);
 //   in_flight (429)  this client already holds EVM_IN_FLIGHT_MAX requests open (M374 (5) on this route too: one client
 //                    cannot fill the shared queue); Retry-After EVM_BUSY_RETRY_S;
-//   upstream (503)   a read could not be made (a transport error, an HTTP status such as 429, another JSON-RPC error),
+//   upstream (503)   a read could not be made (a transport error, an HTTP status but 429, another JSON-RPC error),
 //                    or the two providers name different chains.
 // A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing; a repeat after that send
 // reverted is refused as reverted. Each send's maxFeePerGas is at most fee / gas limit, so the sender never pays more
@@ -41,7 +42,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { solanaJsonRpc } from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
-import { heldPerClient } from "../limits/limits.ts";
+import { heldPerClient, throttleOf } from "../limits/limits.ts";
 
 /** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 27 = 868 bytes). */
 export const POOL_EVM_BODY_MAX = 4_096;
@@ -211,8 +212,8 @@ const qty = (v: unknown): bigint => {
  * The node ran the call and it failed in execution: a JSON-RPC error (the kit's client words it "RPC error <code>:
  * <message>") with code 3 (execution reverted), -32000 (geth: insufficient funds, a fee under the base fee, an invalid
  * opcode) or -32003 (EIP-1474 transaction rejected; anvil 1.8.6 answers an INVALID halt "EVM error InvalidFEOpcode"
- * and insufficient funds with it, read on an anvil fork, 3 Nov), unless its message names a rate limit. Anything else (a transport error, an HTTP status such as 429, a timeout, another
- * code) is the provider's, so it answers 503 upstream and never blames the request.
+ * and insufficient funds with it, read on an anvil fork, 3 Nov), unless its message names a rate limit. Anything else (a transport error, an HTTP status, a timeout, another
+ * code) is the provider's, so it answers 503 upstream (429 rate_limited for a throttle) and never blames the request.
  */
 const failedInExecution = (e: unknown): boolean => {
   const m = String((e as Error | undefined)?.message ?? e);
@@ -246,6 +247,12 @@ export function evmPoolSender(
   let waiting = 0;
   const fees = new Map<number, Promise<{ block: EvmBlock; fee: bigint } | null>>();
   const no = (status: number, code: PoolEvmCode, detail?: string): PoolEvmAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
+  // a provider call that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
+  // upstream (card helper-abuse-limits: a 503 never means "wait")
+  const unread = (e: unknown): PoolEvmAnswer => {
+    const wait = throttleOf(e);
+    return wait > 0 ? { ...no(429, "rate_limited"), retryAfterS: wait } : no(503, "upstream");
+  };
   const chain = (): Promise<bigint> => {
     chainId ??= Promise.all([a("eth_chainId", []), b("eth_chainId", [])]).then(([x, y]) => {
       if (qty(x) !== qty(y)) throw new Error("the providers name different chains");
@@ -308,8 +315,8 @@ export function evmPoolSender(
     let epochFee: { block: EvmBlock; fee: bigint } | null;
     try {
       epochFee = await feeOf(epoch);
-    } catch {
-      return no(503, "upstream");
+    } catch (e) {
+      return unread(e);
     }
     if (epochFee === null) return no(422, "epoch_off", "no block in the epoch yet");
     if (w.fee !== epochFee.fee) return no(422, "fee_off", `fee ${w.fee}, published ${epochFee.fee} for epoch ${epoch}`);
@@ -354,14 +361,14 @@ export function evmPoolSender(
       base = qty((block as { baseFeePerGas?: unknown })?.baseFeePerGas);
       tip = qty(t);
       pending = qty(n);
-    } catch {
-      return no(503, "upstream");
+    } catch (e) {
+      return unread(e);
     }
     let gas: bigint;
     try {
       gas = qty(await a("eth_estimateGas", [call, "pending"]));
     } catch (e) {
-      return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : no(503, "upstream");
+      return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
     }
     gas = (gas * 12n) / 10n;
     if (gas > EVM_GAS_MAX) return no(422, "simulation_failed", `gas ${gas} over ${EVM_GAS_MAX}`);
@@ -376,12 +383,13 @@ export function evmPoolSender(
     try {
       await a("eth_call", [{ ...call, gas: tag(gas), maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(maxPriorityFeePerGas) }, "pending"]);
     } catch (e) {
-      return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : no(503, "upstream");
+      return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
     }
     const nonce = pending > nextNonce ? pending : nextNonce;
     const { raw, hash } = signEvmTx({ chainId: id, nonce, maxPriorityFeePerGas, maxFeePerGas, gas, to: pool, data: bytes }, cfg.senderKey);
     const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);
-    if (sent.every((s) => s.status === "rejected")) return no(503, "upstream");
+    const why = sent.flatMap((s) => (s.status === "rejected" ? [s.reason as unknown] : []));
+    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e) > 0) ?? why[0]);
     nextNonce = nonce + 1n;
     return { status: 200, body: { hash } };
   }

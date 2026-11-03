@@ -4,6 +4,7 @@
  *
  *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
  *     [SOLANA_RPC_URL=..] [SOLANA_HOLDERS_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..]
+ *     [RPC_BUDGET_<CHAIN>=<total>,<per client>]
  *     [NEAR_TESTNET_RPC_URL=..] [NEAR_TESTNET_RPC_URL_B=..] [WITHDRAW_RELAYER_MAINNET=.. WITHDRAW_FEE_RECIPIENT_MAINNET=..]
  *     [WITHDRAW_RELAYER_TESTNET=.. WITHDRAW_FEE_RECIPIENT_TESTNET=..] [WITHDRAW_VAULT_<NET>=.. WITHDRAW_RELAYER_KEYS_<NET>=..]
  *     [BIND_VAULT_<NET>=.. BIND_RELAYER_<NET>=.. BIND_RELAYER_KEY_<NET>=.. BIND_MARGIN_K=..] [HELPER_RELEASE=.. HELPER_STORE_DIR=..]
@@ -35,7 +36,7 @@ import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
-import { clientOf, clientWindow, throttled } from "./limits/limits.ts";
+import { clientOf, clientWindow, throttled, throttleOf } from "./limits/limits.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
@@ -77,6 +78,11 @@ export const POOL_RATE_MAX = 30;
  * withdraw, bind, market data, an unknown path) [design: 120 per 10 s, a screen's refreshes several times over; the
  * reads behind them are cached and shared, so this bounds only what one client can make the helper do]. */
 export const API_RATE_MAX = 120;
+/** Requests one client makes per limit window to the RPC route, and apart to the proxy route, counted before the body
+ * is read, a refused request and a cache hit included [design: 120 per 10 s, as API_RATE_MAX: above every share a
+ * device draws there (RPC_CLIENT_MAX a chain, PROXY_CLIENT_MAX a vendor), so an honest device meets its share first,
+ * while the bodies one client makes the helper read and parse stay bounded]. */
+export const UPSTREAM_ROUTE_MAX = 120;
 const METHODS: readonly string[] = HELPER_CORS.allowMethods;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -156,9 +162,11 @@ export function handler(
   // GET /v1/token-status serves each network's token from that network's own watch
   const watchOf = new Map<string, TokenWatch>(Object.values(watches).map((w) => [w.token, w]));
   // the per-client limits (limits/limits.ts): in memory for one window, the client's address never logged; the RPC
-  // and proxy routes draw from their upstream's budget instead (rpc/rpc.ts, proxy/proxy.ts)
+  // and proxy routes have their own windows and also draw from their upstream's budget (rpc/rpc.ts, proxy/proxy.ts)
   const poolRate = clientWindow(POOL_RATE_MAX, now);
   const apiRate = clientWindow(API_RATE_MAX, now);
+  const rpcRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
+  const proxyRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
       [HELPER_COMMIT_HEADER]: commit,
@@ -189,7 +197,7 @@ export function handler(
       } catch {
         return send(400, { error: "bad_request" }, cors(req));
       }
-      // every route but the pool, RPC and proxy routes (which have their own limits below) counts in the client's window
+      // every route but the pool, RPC and proxy routes (which have their own windows below) counts in the client's window
       if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait));
@@ -213,13 +221,13 @@ export function handler(
       if (path === WITHDRAW_FEE) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         // the relayer's quote (withdraw/fee.ts): exactly one token, one this relayer carries; reads that fail or
-        // disagree answer upstream (503) and quote nothing
+        // disagree answer upstream (503) and quote nothing; a provider's throttle answers 429 with its wait
         const tokens = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("token");
         if (tokens.length !== 1 || fee.networkOf(tokens[0]!) === null) return send(404, { error: { code: "not_found" } }, cors(req));
         void fee
           .quote(tokens[0]!)
           .then((a) => send(200, a, cors(req)))
-          .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? send(503, { error: { code: "upstream" } }, cors(req)) : send(500, { error: "internal" }, cors(req))));
+          .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? (throttleOf(e) > 0 ? reply(throttled(throttleOf(e))) : send(503, { error: { code: "upstream" } }, cors(req))) : send(500, { error: "internal" }, cors(req))));
         return;
       }
       if (path === POOL_FEE) {
@@ -240,7 +248,8 @@ export function handler(
         void Promise.resolve()
           .then((): unknown => pool.fee(epochs.length === 1 ? Number(epochs[0]) : nowMs))
           .then((a) => (a === null ? send(404, { error: { code: "not_found" } }, cors(req)) : send(200, a, cors(req))))
-          .catch(() => (res.headersSent ? res.destroy() : send(503, { error: { code: "upstream" } }, cors(req))));
+          // a provider's throttle is a wait (429), any other failed read 503
+          .catch((e) => (res.headersSent ? res.destroy() : throttleOf(e) > 0 ? reply(throttled(throttleOf(e))) : send(503, { error: { code: "upstream" } }, cors(req))));
         return;
       }
       if (path === POOL_SOLANA_SEND) {
@@ -340,6 +349,7 @@ export function handler(
           .get()
           .then((a) => {
             const h: Headers = { ...base, ...cors(req), Vary: "Origin, Accept-Encoding", "Content-Type": "application/json; charset=utf-8" };
+            if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1));
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
             h[HELPER_SOURCE_HEADER] = "jupiter";
             h[HELPER_FETCHED_AT_HEADER] = new Date(a.asOfMs).toISOString();
@@ -375,6 +385,7 @@ export function handler(
         } else read = path === MARKET_TOKEN ? token.page(mint) : token.holders(mint);
         void read
           .then((a) => {
+            if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1));
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
             const h: Headers = { [HELPER_SOURCE_HEADER]: a.src ?? "", [HELPER_FETCHED_AT_HEADER]: new Date(a.asOfMs).toISOString() };
             reply({ status: 200, headers: h, body: a.body }); // node sends no body on a HEAD
@@ -383,6 +394,9 @@ export function handler(
         return;
       }
       if (path.startsWith(PROXY_PREFIX)) {
+        // counted before anything is read: a refused request and a cache hit spend the window too
+        const wait = proxyRate.take(clientOf(req));
+        if (wait > 0) return reply(throttled(wait));
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         // the raw path, never URL's normalised one: only a path written exactly as on the allowlist is served
         const raw = req.url ?? "";
@@ -401,6 +415,9 @@ export function handler(
         return;
       }
       if (path.startsWith(RPC_PREFIX)) {
+        // counted before anything is read, as for the proxy
+        const wait = rpcRate.take(clientOf(req));
+        if (wait > 0) return reply(throttled(wait));
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         // the raw path, as for the proxy: the chain is the one segment after the prefix, written exactly
         const raw = req.url ?? "";

@@ -20,6 +20,7 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, dec, pumpCurveAddress, pumpCurveBps, toRow, type Row } from "./lists.ts";
+import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -257,13 +258,16 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
 type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string): Promise<Answer> };
-type Rpc = { handle(chain: string, contentType: string | undefined, body: string): Promise<{ status: number; body: string }> };
+type Rpc = { handle(chain: string, contentType: string | undefined, body: string): Promise<{ status: number; headers?: Record<string, string>; body: string }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number };
+/** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
+export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number };
 
 const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 export const NOT_FOUND = err(404, "not_found");
 export const UPSTREAM = err(503, "upstream");
+/** A throttled read with nothing good to serve: 429 with its wait, never 503 (a 503 never means "wait"). */
+const limited = (retryAfterS: number): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS });
 
 /** A map that keeps at most `max` keys, dropping the oldest written. */
 function bounded<V>(max: number) {
@@ -297,7 +301,7 @@ function cached(freshMs: number, now: () => number, read: (key: string) => Promi
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: now() });
             return a;
           })
-          .catch(() => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : UPSTREAM))
+          .catch((e) => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : e instanceof Throttled ? limited(e.retryAfterS) : UPSTREAM))
           .finally(() => running.delete(key));
         running.set(key, p);
       }
@@ -320,6 +324,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
 
   async function call(method: string, params: unknown[], via: Rpc = rpc): Promise<{ result: Record<string, unknown> }> {
     const a = await via.handle("solana", "application/json", rpcBody(method, params));
+    if (a.status === 429) throw new Throttled(retryAfterOf(a.headers));
     if (a.status !== 200) throw new Upstream();
     const j = obj(JSON.parse(a.body));
     if (!Object.hasOwn(j, "result")) throw new Upstream();
@@ -348,8 +353,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     lastSearch = now();
     let rows: unknown = null;
     let at = now();
+    let wait = 0;
     try {
       const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "");
+      if (a.status === 429) wait = retryAfterOf(a.headers);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -362,7 +369,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const ws = waiting.get(mint) ?? [];
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
-        for (const w of ws) w.fail(new Upstream());
+        for (const w of ws) w.fail(wait > 0 ? new Throttled(wait) : new Upstream());
         continue;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };
@@ -467,19 +474,21 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
   });
 
-  // GeckoTerminal: one queue of at most GT_PER_MIN calls a minute, shared by every token; a 429 pauses it
+  // GeckoTerminal: one queue of at most GT_PER_MIN calls a minute, shared by every token; a 429 pauses it. A full or
+  // paused queue is a throttle: the wait to its next free call or the pause's end (card helper-abuse-limits)
   const gtCalls: number[] = [];
   let gtPausedUntil = 0;
   async function gecko(path: string): Promise<unknown> {
     const t = now();
     while (gtCalls.length > 0 && t - gtCalls[0]! >= 60_000) gtCalls.shift();
-    if (t < gtPausedUntil || gtCalls.length >= GT_PER_MIN) throw new Upstream();
+    if (t < gtPausedUntil) throw new Throttled(secondsUntil(gtPausedUntil, t));
+    if (gtCalls.length >= GT_PER_MIN) throw new Throttled(secondsUntil(gtCalls[0]! + 60_000, t));
     gtCalls.push(t);
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
       const ra = Number(r.headers.get("retry-after"));
       gtPausedUntil = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
-      throw new Upstream();
+      throw new Throttled(secondsUntil(gtPausedUntil, now()));
     }
     if (r.status === 404) return null;
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) throw new Upstream();
@@ -499,6 +508,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const p = await pools.get(mint);
     if (p.status !== 200) {
       if (p.status === 404) return NOT_FOUND;
+      if (p.status === 429) throw new Throttled(p.retryAfterS ?? 1);
       throw new Upstream();
     }
     const { period, aggregate } = TF[tf];

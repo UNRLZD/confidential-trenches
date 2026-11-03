@@ -333,7 +333,7 @@ test("candles: the token's top pool on GeckoTerminal, bars oldest first in USD d
   assert.equal(g.urls[2], `https://api.geckoterminal.com/api/v2/networks/solana/pools/${topPool(FX.gt_token)}/ohlcv/hour?aggregate=4&limit=1000&currency=usd&token=${CURVE}&before_timestamp=1793620800`);
 });
 
-test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal; at most GT_PER_MIN calls a minute", async () => {
+test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal and answers 429 with the pause left; at most GT_PER_MIN calls a minute, past it 429 with the wait to the next call", async () => {
   const g = fakeGecko();
   let now = NOW;
   const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: g.fetch });
@@ -344,12 +344,44 @@ test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal; at mos
   for (let i = 0; i < 20; i++) if ((await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10)).status === 200) ok++;
   assert.equal(g.urls.length, GT_PER_MIN);
   assert.equal(ok, GT_PER_MIN - 1, "one token read, then bars until the minute's calls are spent");
+  const full = await t.candles(CURVE, "1m", 1793620800 - 21 * 86_400, 10);
+  assert.deepEqual([full.status, JSON.parse(full.body), full.retryAfterS], [429, { error: { code: "rate_limited" } }, 60], "the queue's first call frees in 60 s");
   now += 61_000;
   const limited = fakeGecko({ status: 429, headers: { "retry-after": "30" } });
   const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: limited.fetch });
-  assert.equal((await t2.candles(CURVE, "1m", null, 10)).status, 503);
-  assert.equal((await t2.candles(CURVE, "5m", null, 10)).status, 503);
+  const first = await t2.candles(CURVE, "1m", null, 10);
+  assert.deepEqual([first.status, JSON.parse(first.body), first.retryAfterS], [429, { error: { code: "rate_limited" } }, 30], "the code only, GeckoTerminal's wait");
+  now += 10_000;
+  assert.deepEqual([(await t2.candles(CURVE, "5m", null, 10)).status, (await t2.candles(CURVE, "15m", null, 10)).retryAfterS], [429, 20], "the paused queue answers the pause left");
   assert.equal(limited.urls.length, 1, "paused after the 429");
+});
+
+test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 429 with a wait, not 503", async () => {
+  let gt = 0;
+  const proxy = { handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) };
+  const rpc = { handle: async () => ({ status: 503, body: '{"error":{"code":"upstream"}}' }) };
+  const t = createSolanaToken(proxy as never, rpc as never, { fetch: (async () => (gt++, new Response("slow", { status: 429, headers: { "retry-after": "30" } }))) as never });
+  const mint = "So11111111111111111111111111111111111111112";
+  await t.candles(mint, "1h", null, 10);
+  const second = await t.candles(mint, "1h", null, 10);
+  assert.equal(second.status, 429, "the helper's own paused GT queue is a throttle");
+});
+
+test("page and holders: a throttled RPC or Jupiter read with nothing good to serve answers 429 with the throttle's wait; the last good page still serves", async () => {
+  const throttledRpc = { handle: async () => ({ status: 429, headers: { "Retry-After": "7" }, body: '{"error":{"code":"rate_limited"}}' }) };
+  const a = await createSolanaToken(fakeProxy(), throttledRpc, { now: () => NOW }).page(PUMP);
+  assert.deepEqual([a.status, JSON.parse(a.body), a.retryAfterS], [429, { error: { code: "rate_limited" } }, 7]);
+  const throttledProxy = { handle: async () => ({ status: 429, headers: { "Retry-After": "12" }, body: '{"error":{"code":"rate_limited"}}' }) };
+  const b = await createSolanaToken(throttledProxy, fakeRpc(), { now: () => NOW }).page(PUMP);
+  assert.deepEqual([b.status, b.retryAfterS], [429, 12]);
+  let now = NOW;
+  let throttle = false;
+  const rpc = fakeRpc();
+  const t = createSolanaToken(fakeProxy(), { handle: (c, ct, body) => (throttle ? throttledRpc.handle() : rpc.handle(c, ct, body)) }, { now: () => now });
+  assert.equal((await t.page(PUMP)).status, 200);
+  throttle = true;
+  now += 10_000;
+  assert.equal((await t.page(PUMP)).status, 200, "the last good page, under 60 s old");
 });
 
 test("toCandles: bars off the grid, from the future, with a zero, negative or non-finite price, or low above high are dropped", () => {

@@ -246,26 +246,116 @@ test("a provider that fails answers 503 upstream: 5xx, 401, 403, a redirect, not
   assert.deepEqual(code(await call(dead, "near", ok)), "upstream");
 });
 
-// card helper-abuse-limits (M367 (3)): a provider's 429 is answered to the caller that drew it, as 429 with the
-// provider's reset, and pauses nobody else (at be4b353 it paused the chain for every caller and answered 503)
-test("a provider's 429 answers that caller 429 with its reset as Retry-After, and the chain stays open to the next caller", async () => {
+// card helper-abuse-limits (M367 (3), review finding 3): the helper is the provider's one client, so a provider's 429
+// holds the chain until the reset it named and every caller is told the seconds left as a 429 (at be4b353 the pause
+// answered 503, which the device reads as fatal; at 06a656f the next caller still reached the provider)
+test("a provider's 429 holds that chain until the reset it named (at most a minute): every caller, the helper's own reads included, gets 429 with the seconds left and nothing reaches the provider", async () => {
   let t = 1_800_000_000_000;
-  const r = createRpc({ SOLANA_RPC_URL: base, NEAR_RPC_URL: base }, { now: () => (t += 5) });
+  const r = createRpc({ SOLANA_RPC_URL: base, NEAR_RPC_URL: base }, { now: () => t });
   const ok = { jsonrpc: "2.0", id: 1, method: "getBalance", params: ["x"] };
   next = { status: 429, type: JSON_T, body: () => JSON.stringify({ error: "slow down from the provider" }), headers: { "retry-after": "5" } };
   seen.length = 0;
   const a = await r.handle("solana", JSON_T, JSON.stringify(ok), "heavy");
   assert.deepEqual([a.status, a.headers, JSON.parse(a.body)], [429, { "Retry-After": "5" }, { error: { code: "rate_limited" } }], "the code only: no provider text");
   next = { status: 200, type: JSON_T, body: echo };
+  t += 2_000;
   const b = await r.handle("solana", JSON_T, JSON.stringify(ok), "honest");
-  assert.equal(b.status, 200, "another caller is not paused");
-  assert.equal(seen.length, 2, "the chain was asked again at once");
-  assert.equal((await call(r, "near", { ...ok, method: "block" })).status, 200);
+  assert.deepEqual([b.status, b.headers?.["Retry-After"]], [429, "3"], "another caller waits out the provider's reset too");
+  assert.equal((await call(r, "solana", ok)).status, 429, "and so does the helper's own read");
+  assert.equal(seen.length, 1, "nothing reached the provider inside its reset");
+  assert.equal((await call(r, "near", { ...ok, method: "block" })).status, 200, "another chain is not held");
+  t += 3_000;
+  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "honest")).status, 200, "at the reset the chain is open");
   // a reset past a minute is held to 60 s, a missing one is 1 s
   next = { status: 429, type: JSON_T, body: () => "{}", headers: { "retry-after": "3600" } };
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "c")).headers?.["Retry-After"], "60");
+  t += 60_000;
   next = { status: 429, type: JSON_T, body: () => "{}" };
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "c")).headers?.["Retry-After"], "1");
+});
+
+// a provider in memory that keeps its own published limit: past `limit` calls a window it answers 429 (Retry-After 10)
+const keepsLimit = (limit: number, now: () => number) => {
+  const p = { calls: 0, throttled: 0, window: -1, inWindow: 0 };
+  const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
+    const w = Math.floor(now() / 10_000);
+    if (w !== p.window) ((p.window = w), (p.inWindow = 0));
+    const body = JSON.parse(String(init.body)) as { id: unknown } | { id: unknown }[];
+    const n = Array.isArray(body) ? body.length : 1;
+    p.calls += n;
+    p.inWindow += n;
+    if (p.inWindow > limit) return (p.throttled++, new Response("slow down", { status: 429, headers: { "retry-after": "10" } }));
+    const one = (r: { id: unknown }) => ({ jsonrpc: "2.0", id: r.id, result: 1 });
+    return new Response(JSON.stringify(Array.isArray(body) ? body.map(one) : one(body)), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { p, fetch };
+};
+const getBalance = (id = 1) => ({ jsonrpc: "2.0", id, method: "getBalance", params: [] });
+
+test("end state 2: no single caller can trigger a hold by itself, because the per-client share stays under the provider's own limit", async () => {
+  let t = 1_800_000_000_000;
+  const now = () => (t += 1);
+  const provider = keepsLimit(RPC_CHAIN_MAX, () => t);
+  const r = createRpc({}, { now, fetch: provider.fetch as never });
+  assert.ok(RPC_CLIENT_MAX < RPC_CHAIN_MAX, "the share is under the provider's limit");
+  const batch = JSON.stringify(Array.from({ length: RPC_BATCH_MAX }, (_, i) => getBalance(i + 1)));
+  for (let i = 0; i < 300; i++) {
+    await r.handle("solana", JSON_T, batch, "heavy");
+    await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "heavy");
+  }
+  assert.equal(provider.p.throttled, 0, "the provider never throttled: no hold");
+  assert.ok(provider.p.calls <= RPC_CLIENT_MAX, `one caller reached the provider ${provider.p.calls} times`);
+  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "honest")).status, 200, "an honest caller is served");
+});
+
+test("review F-A: a batch draws its size, so the provider sees at most RPC_CLIENT_MAX calls per client and RPC_CHAIN_MAX per chain a window", async () => {
+  let calls = 0;
+  let t = 1_800_000_000_000;
+  const r = createRpc({}, { now: () => (t += 1), fetch: (async (_u: string, init: RequestInit) => { const b = JSON.parse(String(init.body)); calls += Array.isArray(b) ? b.length : 1; return new Response(JSON.stringify(Array.isArray(b) ? b.map((x: { id: number }) => ({ jsonrpc: "2.0", id: x.id, result: 1 })) : { jsonrpc: "2.0", id: b.id, result: 1 }), { status: 200, headers: { "content-type": "application/json" } }); }) as never });
+  const batch = JSON.stringify(Array.from({ length: RPC_BATCH_MAX }, (_, i) => getBalance(i + 1)));
+  for (let i = 0; i < RPC_CLIENT_MAX + 5; i++) await r.handle("solana", JSON_T, batch, "203.0.113.1");
+  assert.ok(calls <= RPC_CLIENT_MAX, `one client: ${calls} provider calls`);
+  for (let c = 2; c <= 20; c++) for (let i = 0; i < RPC_CLIENT_MAX; i++) await r.handle("solana", JSON_T, batch, `203.0.113.${c}`);
+  assert.ok(calls <= RPC_CHAIN_MAX, `twenty clients: ${calls} provider calls > RPC_CHAIN_MAX ${RPC_CHAIN_MAX}`);
+});
+
+test("review F-B: after a provider 429 with Retry-After 30, zero provider calls inside those 30 s", async () => {
+  let calls = 0;
+  let t = 1_800_000_000_000;
+  const r = createRpc({}, { now: () => (t += 1), fetch: (async () => (calls++, new Response("slow down", { status: 429, headers: { "retry-after": "30" } }))) as never });
+  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "203.0.113.1")).status, 429);
+  for (let c = 2; c <= 21; c++) assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), `203.0.113.${c}`)).status, 429);
+  t += 29_000;
+  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()))).status, 429, "the helper's own read waits too");
+  assert.equal(calls, 1, `the provider was called ${calls - 1} more times inside the reset it named`);
+});
+
+test("review F-D: more than five addresses at their full share are needed to throttle an honest first-time caller", async () => {
+  let t = 1_800_000_000_000;
+  const r = createRpc({}, { now: () => (t += 1), fetch: (async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } })) as never });
+  let n = 0;
+  for (; n < 100; n++) {
+    for (let i = 0; i < RPC_CLIENT_MAX; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), `198.51.100.${n}`);
+    if ((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "192.0.2.200")).status === 429) break;
+  }
+  assert.ok(n + 1 > 5, `${n + 1} addresses lock out an honest caller`);
+});
+
+test("each chain's budget is RPC_BUDGET_<CHAIN> when set (\"<total>,<per client>\"), else the provider's published limit; a bad value stops the start naming the variable", () => {
+  let calls = 0;
+  let t = 1_800_000_000_000;
+  const f = (async () => (calls++, new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } }))) as never;
+  assert.throws(() => createRpc({ RPC_BUDGET_BASE: "16,16" }, { fetch: f }), /^Error: RPC_BUDGET_BASE must be/);
+  assert.throws(() => createRpc({ RPC_BUDGET_SOLANA: "lots" }, { fetch: f }), (e: Error) => !e.message.includes("lots"));
+  const r = createRpc({ RPC_BUDGET_SOLANA: "4,2" }, { now: () => (t += 1), fetch: f });
+  return (async () => {
+    for (let i = 0; i < 3; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "a");
+    assert.equal(calls, 2, "the share from the environment");
+    for (let i = 0; i < 3; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "b");
+    assert.equal(calls, 4, "the total from the environment");
+    for (let i = 0; i < RPC_CLIENT_MAX + 1; i++) await r.handle("base", JSON_T, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), "a");
+    assert.equal(calls, 4 + RPC_CLIENT_MAX, "another chain keeps the default");
+  })();
 });
 
 test("each chain is one budget callers draw from fairly: a heavy caller is throttled at RPC_CLIENT_MAX while an honest one still goes; the helper's own reads draw nothing", async () => {
@@ -286,7 +376,7 @@ test("each chain is one budget callers draw from fairly: a heavy caller is throt
   assert.equal((await r.handle("solana", JSON_T, ok)).status, 200, "the helper's own read (no caller) draws from no share");
   t += wait * 1000;
   assert.equal((await r.handle("solana", JSON_T, ok, "heavy")).status, 200, "after the named wait the heavy caller goes again");
-  assert.ok(RPC_CLIENT_MAX * 5 <= RPC_CHAIN_MAX, "five callers at their full share before anyone else is throttled");
+  assert.ok(RPC_CLIENT_MAX * 6 <= RPC_CHAIN_MAX, "six callers at their full share before anyone else is throttled");
 });
 
 test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default", () => {

@@ -8,12 +8,15 @@
 // digit for digit), never the caller's bytes, so a key the checker and the provider read differently (a repeated
 // "method", say) cannot carry an unlisted method; and content-type: application/json. No header of the caller.
 // What reaches the caller: the provider's status and JSON body. A provider that is down, slow, refusing our key (401,
-// 403), out of quota (429), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its
-// own URL's key in any form answers 503 upstream, so the device falls back to its own providers (H2.3).
+// 403), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its own URL's key in any
+// form answers 503 upstream, so the device falls back to its own providers (H2.3).
 // Throttling (card helper-abuse-limits, ../limits/limits.ts): each chain's provider is one budget every caller draws
-// from, RPC_CHAIN_MAX requests a window, and no caller more than RPC_CLIENT_MAX of them; a draw past either answers 429
-// rate_limited with the seconds to the window's end. A provider's own 429 is answered to the caller that drew it, as
-// 429 with the provider's reset (at most a minute), and pauses nobody else. A 503 is never a wait.
+// from (RPC_BUDGET_<CHAIN>, default RPC_CHAIN_MAX requests a window, no caller more than RPC_CLIENT_MAX of them, a
+// batch drawing one per request in it). The share sits under the provider's own limit, so no single caller can make
+// the provider throttle us; a draw past the share or the total answers 429 rate_limited with the seconds to the
+// window's end. If the provider throttles anyway (its 429), the helper, its one client, holds the chain until the reset
+// it named (at most a minute): every draw on that chain, the helper's own reads included, answers 429 with the seconds
+// left and nothing reaches the provider. A 503 is never a wait.
 //
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
@@ -22,17 +25,30 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { throttled, upstreamBudget, upstreamRetryAfterS } from "../limits/limits.ts";
+import { budgetFromEnv, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 
 export const RPC_ANSWER_MAX = 4 * 1024 * 1024; // a getMultipleAccounts of 100 accounts or an eth_getLogs page fits
 export const RPC_TIMEOUT_MS = 10_000; // NEAR send_tx waits for execution; the server's request timeout is 15 s
-/** Requests one chain's provider takes from every caller together per limit window [design: 50 a second, under a
- * paid provider plan's rate; a provider that allows less answers its own 429, which goes to the caller that drew it]. */
-export const RPC_CHAIN_MAX = 500;
-/** Requests one caller draws per chain per window [design: 10 a second, about twice a device's busiest trade; a fifth
- * of the chain's, so it takes five callers at their full share to throttle anyone else]. */
-export const RPC_CLIENT_MAX = 100;
+/**
+ * Requests one chain's provider takes from every caller together per 10 s window, unless RPC_BUDGET_<CHAIN> names its
+ * plan's: the public Solana endpoint's published limit, "Maximum number of requests per 10 seconds per IP: 100"
+ * (solana-foundation/solana-com apps/docs/content/docs/en/references/clusters.mdx:153 at dd6c46a, "Mainnet rate
+ * limits", read 2026-11-03 08:31Z). The other chains' public endpoints publish no number (docs.base.org's connecting
+ * and faucet pages, docs.fastnear.com, read 08:33Z), so they default to the same, the most conservative known.
+ */
+export const RPC_CHAIN_MAX = 100;
+/**
+ * Requests one caller draws per chain per window, unless RPC_BUDGET_<CHAIN> says: what a device's one-transaction
+ * trade asks of one provider when it fills within its read burst, from the kit's own pattern
+ * (packages/kit/src/trade/solana/send.ts): the send (l.6-8), the burst of C = B/5 = 8 status reads over the keyless
+ * B = 40 (l.190-193), and a blockhash read, about 11, rounded up to 16. Six callers at their full share fill the public
+ * 100; a trade left undecided past its burst reads up to B - C = 32 statuses in a window (l.197-198), which only a
+ * keyed provider's larger RPC_BUDGET_<CHAIN> serves.
+ */
+export const RPC_CLIENT_MAX = 16;
+/** The environment variable naming a chain's budget, "<total>,<per client>" per 10 s. */
+export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase()}`;
 const ID_MAX = 128;
 
 /**
@@ -123,7 +139,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const upstreams = readUpstreams(env);
-  const budget = upstreamBudget(RPC_CHAIN_MAX, RPC_CLIENT_MAX, now);
+  const limits = Object.fromEntries(RPC_CHAINS.map((ch) => [ch, budgetFromEnv(env, rpcBudgetEnv(ch), { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX })])) as Record<RpcChain, BudgetLimits>;
+  const budget = upstreamBudget((ch) => limits[ch as RpcChain], now);
 
   async function readAnswer(r: Response): Promise<string | undefined> {
     if (Number(r.headers.get("content-length") ?? "0") > RPC_ANSWER_MAX) return undefined;
@@ -172,8 +189,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return REFUSED(); // nesting too deep to write back
     }
 
+    // the provider's reset holds every caller, the helper's own reads too; then a caller draws its share, a batch one
+    // per request in it
+    const held = budget.heldFor(c);
+    if (held > 0) return throttled(held);
     if (client !== undefined) {
-      const wait = budget.take(c, client);
+      const wait = budget.take(c, client, Array.isArray(out) ? out.length : 1);
       if (wait > 0) return throttled(wait);
     }
     const up = upstreams[c];
@@ -189,7 +210,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       });
       if (r.status === 429) {
         await r.body?.cancel();
-        return throttled(upstreamRetryAfterS(r.headers, now()));
+        budget.hold(c, now() + upstreamRetryAfterS(r.headers, now()) * 1000);
+        return throttled(budget.heldFor(c));
       }
       text = await readAnswer(r);
     } catch {
