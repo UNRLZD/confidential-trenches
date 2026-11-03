@@ -507,6 +507,13 @@ test("RV5 inverted: the marks are the union of the two RPCs: one RPC a slot behi
       assert.equal(r.notes.length, 5);
       assert.equal(r.spends.length, 1);
     }
+  // the user's spend lands between the two RPCs' slots, RPC b ahead: its mark is in b's read alone, then in both
+  const { beforeSpend } = restorePool();
+  for (const ahead of [0, 1] as const) {
+    const at = (sl: number): Chain => ({ ...(sl >= 702 ? chain : beforeSpend), slot: sl });
+    const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lagWait: instant, rpcs: [skewRpc("https://a.example", ahead === 0 ? 0 : 1, at, []), skewRpc("https://b.example", ahead === 1 ? 0 : 1, at, [])], gap: 4 });
+    assert.equal(js(r), js(await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 })), `rpc ${ahead} ahead`);
+  }
   // at the same slot, or two RPCs each lacking a mark the other gives: no mark is ever closed, so one of them lies
   for (const rs of [pair(noSpent(chain.slot), chain), pair(chain, noOurs(chain.slot)), pair(noSpent(chain.slot - 1), noOurs(chain.slot - 1)), pair(noOurs(chain.slot + 1), chain)])
     await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: rs, gap: 4 }), /lacks it at slot \d+; a mark is never closed/);

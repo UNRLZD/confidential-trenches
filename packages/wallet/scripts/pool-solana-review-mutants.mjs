@@ -41,7 +41,7 @@ const M = [
   ["R1", R, `if (have !== undefined && have !== d) throw`, `if (false) throw`],
   ["R2", R, `if (m.has(x.pubkey)) throw`, `if (false) throw`],
   ["R3", R, `x.account?.owner !== program || `, ``],
-  ["R4", R, `if (leafAt.has(c)) throw`, `if (false) throw`],
+  ["R4", R, `a.stateLeaves.forEach((c, k) => {\n    if (leafAt.has(c)) throw`, `a.stateLeaves.forEach((c, k) => {\n    if (false) throw`],
   ["R5", R, `const j = ref.kind === "change" ? ref.j + 1 : 0;`, `const j = ref.kind === "change" ? ref.j : 0;`],
   ["R6", R, `    asDeposit({ kind: "move", l, j });\n`, ``],
   ["R7", R, `    seconds({ id: "V", l, j });\n    seconds({ id: "A", l, j });\n`, ``],
@@ -49,7 +49,7 @@ const M = [
   ["R9", R, `if (base64.decode(d[0]).length !== size) throw`, `if (false) throw`],
   ["R10", R, `getBigUint64(at, true)`, `getBigUint64(at, false)`],
   ["R11", R, `if (m.value === 0n || m.nonce === 0n || `, `if (`],
-  ["R12", R, `if (withdrawn === 0n || withdrawn > note.leaf.value) throw`, `if (false) throw`],
+  ["R12", R, `if (withdrawn === 0n || withdrawn > leaf.value) throw`, `if (false) throw`],
 ];
 let killed = 0;
 for (const [id, f, find, repl] of M) {
