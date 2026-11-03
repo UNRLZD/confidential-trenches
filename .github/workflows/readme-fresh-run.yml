@@ -4,7 +4,7 @@
 # What it proves, on a clean ubuntu-24.04 runner with no secret and the read-only token:
 # - the commands are the README's own: scripts/ci/readme-commands.mjs --agent-steps reads them, scripts/ci/readme-fresh-run.mjs
 #   runs them in a new folder from a clone of the commit under test (`git clone <url>` is the one line it rewrites);
-# - the machine has no Chrome (its folder is moved aside below), no Rust (the runner's PATH drops it), no key (the
+# - the machine has no browser (each the image ships is moved aside below, and the run checks none is left), no Rust (the runner's PATH drops it), no key (the
 #   run's environment drops every name with KEY, JWT, SECRET, TOKEN or PASSWORD) and no route out after the install
 #   (every step but `git clone` and `pnpm install` runs under scripts/ci/no-network.mjs);
 # - the run exits 0, every package with a test script prints a summary, every summary reads `fail 0`, and the whole
@@ -112,14 +112,33 @@ jobs:
           # a reviewer clones with the whole history; the tests that read git get it too
           fetch-depth: 0
           persist-credentials: false
-      # The runner image ships Google Chrome; a reviewer's machine may not. A browser a default test starts would find
-      # none here. (Rust is dropped from PATH by the runner script itself.)
-      - name: a machine with no Chrome
+      # The runner image ships browsers (Google Chrome in /opt/google, Chromium in /usr/bin, Edge, Firefox) and may carry
+      # Playwright's cache; a reviewer's machine may have none. Every one found is moved aside, and the step fails if
+      # one is still found, so a browser a default test starts would find none here. (Rust is dropped from PATH by
+      # the runner script itself.)
+      - name: a machine with no browser
         run: |
-          if [ -d /opt/google/chrome ]; then sudo mv /opt/google/chrome /opt/google/chrome.moved-aside; fi
-          test ! -e /opt/google/chrome/chrome
-          echo "no Chrome at /opt/google/chrome"
-          for b in google-chrome google-chrome-stable chromium chromium-browser; do command -v "$b" && { echo "::error::$b is still on PATH"; exit 1; } || true; done
+          names="google-chrome google-chrome-stable google-chrome-beta chrome chromium chromium-browser microsoft-edge microsoft-edge-stable msedge firefox"
+          for b in $names; do
+            while p=$(command -v "$b" 2>/dev/null); do
+              echo "moving aside $p -> $(readlink -f "$p")"
+              sudo mv "$p" "$p.moved-aside"
+              hash -r
+            done
+          done
+          for d in /opt/google /opt/microsoft /usr/lib/chromium /usr/lib/chromium-browser /usr/lib/firefox /snap/chromium "$HOME/.cache/ms-playwright" "${PLAYWRIGHT_BROWSERS_PATH:-/nonexistent}"; do
+            if [ -e "$d" ]; then echo "moving aside $d"; sudo mv "$d" "$d.moved-aside"; fi
+          done
+          hash -r
+          left=0
+          for b in $names; do
+            if command -v "$b" > /dev/null 2>&1; then echo "::error::$b is still on PATH: $(command -v "$b")"; left=1; fi
+          done
+          for f in /opt/google/chrome/chrome /usr/lib/chromium/chromium "$HOME/.cache/ms-playwright"; do
+            if [ -e "$f" ]; then echo "::error::$f is still there"; left=1; fi
+          done
+          [ "$left" = 0 ] || exit 1
+          echo "no browser on this machine"
       # Node and pnpm, the two tools the README names (Node 24 or later, pnpm 10.33.1: packageManager in package.json)
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
