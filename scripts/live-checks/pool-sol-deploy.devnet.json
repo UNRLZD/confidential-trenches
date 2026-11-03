@@ -2,67 +2,69 @@
   "cluster": "devnet",
   "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
   "rpc": "https://api.devnet.solana.com",
-  "at": "2026-11-03T10:28:13.576Z",
-  "program_id": "HAQSdJEJb1bomc3Cdam9VJ25RV6zTs75vqiPh6FZ78L7",
-  "programdata": "6s22EU9yyHRMYpx3XF32U9AtL1NvtDkeE2NunKo3JbEP",
-  "pool": "D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef",
-  "scope": "15cd4e4ab87a2ad970f23802a74043ffda8a048ce4379c98a00c1e64f3fb4755",
-  "so_len": 77344,
-  "so_sha256": "c518a66e2544dcdabf8d11c6e9803bf553a1fe7c3884eedcdb228e7a615eaf0b",
-  "build": "cargo-build-sbf 4.4.0 (agave v4.4.0), --locked",
+  "at": "2026-11-03T19:30:39.249Z",
+  "program_id": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+  "programdata": "2z2CxFYEeik3PQsui67mxUFFjAVZcmb1z61GJiPdyDrv",
+  "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+  "scope": "2e2c02e1ea70ff51ed15a9e901d9e6d2a0852b2df75582b775dd65346029d0eb",
+  "so_len": 77472,
+  "so_sha256": "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01",
+  "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41700702945, pool-solana job 126144439173, commit 10e685dd2294a32ebf4d9852efaf32e54b929359",
+  "ci_run": "41700702945",
+  "commit": "10e685dd2294a32ebf4d9852efaf32e54b929359",
   "deposit": {
     "value": "10000000",
     "nonce": "1",
-    "precommitment": "008d7e63e72059817d7d5a7af921559bc22eb2b68510a82b8f5e365df877e96c",
-    "label": "0e4e229fa090732bb2d82b51d0205b1f948de8a06e96c2188761640142916873",
-    "commitment": "1ccf54b57189890ba59ffa2d8f2fa568e74e96b217d6148a8efe2ddf749403fa"
+    "precommitment": "13d795c96f00c2a5ea68c15e29ba995b6914a00da16e14d9ce596fd57921bc6a",
+    "label": "1c1b38e96453a87883eed3197fb66f3cf68371442d2c12cf19038ef87acdc59b",
+    "commitment": "0e4076e2b452c124ac30d8d23e4ec2017d2e796ca1ab7a273d6398c1b905f6f9"
   },
-  "funder": "4t4t3NA4iCZU67SeSUUZHZsiQi7gPfaEAHrRNjaSziK2",
+  "funder": "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn",
   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
-  "need": "420890360",
+  "need": "421550680",
   "need_parts": {
     "program_account": "833120",
-    "programdata": "393786360",
+    "programdata": "394436600",
     "pool": "11719560",
     "deposit": "10000000",
-    "deposit_mark": "731520",
+    "deposit_mark": "736600",
     "deposit_pages": "2194560",
     "funder_floor": "650240",
-    "fees": "975000"
+    "fees": "980000"
   },
   "funder_after": "0",
-  "swept": "1195240",
+  "swept": "1200240",
   "txs": [
     {
       "step": "funding (to the funder)",
-      "signature": "5ky8dDdioLKTPSoYLWZreY9XynYiBTa6s1eQQoufve2cw9yPaNnrjTgUUdueJnSHnUrfFLKFL38TxVEKPrTBb4vp"
+      "signature": "3Pk3GhfX9nZ8NnLA69rah6afoCBDMJJbqRtkWLHhm533XYr4ZGJ339sQGyJ7GWwt3pVbhT6xYiQqL6V5Kk3jLbMc"
     },
     {
       "step": "deploy with the upgradeable loader, --final",
-      "signature": "2RbctyMfs8YRDUVkrDHFcnW5zTboVMZJAhd7HhgEnbWEbdT9gmsthKZZrzUm36RqyWM8fd46RuFzF3UXRnB7siex"
+      "signature": "5uAzzsgscZsdPHDLqBy9DZKRLxDYCBaEc2iU4JBgPonNAxJJzn76evSNKML3B8GETpcp5iuMkd3qBwP9tZyhiVMg"
     },
     {
       "step": "the upgradeable loader: SetAuthority (--final: to none)",
-      "signature": "4kdXUFWQ6xwUXLeirWR6Vu3hbFg7EoCrU2UWZgoHnxPW47iGNagYKa366yXxyHHoQm7SttAga44UMxLqac5xFY2E"
+      "signature": "66BcwYwsdXDmMmbgWg9yfcTuUCR97Y8Ahk6V1vu8pRHG5dqomp8qydc8sCCUAqqxBbLgmFULHVS8e6WgofBuaNf"
     },
     {
       "step": "init (tag 0)",
-      "signature": "Ey5Rgkq4bDnrQMZrJDWJ3csBa64c2itKkDyV1zWziFyzEwLV7FqnqFiWHVPMSbj2V3NEzCJiTAz9TaujTcfFy1u"
+      "signature": "3A1jysvq6P2CJMTxZD2oardRS5BEtKSuUakHaSFUGUzc4Zs8ahWYurrNhivJWX6vFbZxdtXG95x92bUfshd5gshW"
     },
     {
       "step": "deposit 0.01 SOL (tag 1)",
-      "signature": "2sWubsaEgBHKdUQUmX3mzoiz4s8BbWFSZQYfW6pdj9hG7Kf3SfXwsGppxHsEhiSJECDfaJwJPbN44vTe4MEYKzGw"
+      "signature": "D2xcLtj9sBWpwT2HoNMt8kromhZKDmnvSVjn78CvHbAGLW8h66tCt8APP11wCWgo94iJwUD69o6ZUCKs8Rd3uwj"
     },
     {
       "step": "sweep (the funder's rest back)",
-      "signature": "3HWqdh7rUAixvXvtwYfhWSdHBZTDU46k3WKmtvTNwdu4orfbFmf2Z4hE2e9gupp2Rwz2ZW2n1rHLMg6hTgTELkmu"
+      "signature": "25QsubihKQh3rebfAd9Nbsd8t6dt63KdSWAbNhJTbfZai9JdGYERxc2W5xmccHiy41Kz2mmRpKH2rb5KsJ9dMJJj"
     },
     {
       "step": "sweep (the funder's rest back)",
-      "signature": "3VdcE5dS8zBBopEkKWkbZg4yHXUvE1m6aNqbsEXWGWMmouJKfrRMiVChCGcNatExwAMTssfQmEkmbSBgkoSL4eeh"
+      "signature": "2g8ypRJJNggQCusW9EuJWrwnTkcjq5fU7wyTWdjfme45rfUcWF8ntu1VZTba88dd57qeD5HX3Ud7fjfQ2Db7eVhf"
     }
   ],
   "funders": [
-    "4t4t3NA4iCZU67SeSUUZHZsiQi7gPfaEAHrRNjaSziK2"
+    "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn"
   ]
 }
