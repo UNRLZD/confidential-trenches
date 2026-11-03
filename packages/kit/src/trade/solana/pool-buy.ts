@@ -9,7 +9,7 @@
 // instructions W signed for with W's signer privilege only (never invoke_signed); the venue's program is an account, so
 // it loads from our lookup table. The helper carries only compute budget plus one pool tag 2 or tag 3 instruction
 // (card helper-pool-senders), so there is no other path. Measured in LiteSVM on mainnet copies 2026-11-02 22:50Z: pump
-// 977 B (979 with a tip), 244k CU; PumpSwap 1,134 B (1,136), 294k CU.
+// 977 B (1,010 with a tip, its account a static key, M362 (4)), 244k CU; PumpSwap 1,134 B (1,167), 294k CU.
 //
 // The release (tag 2), as contracts/pool-solana/src/release.rs lays it out at f0d85a8:
 // - data, 387 bytes: tag 2 ‖ proof (256) ‖ newCommitmentHash (32) ‖ existingNullifierHash (32) ‖ withdrawnValue u64 ‖
@@ -253,9 +253,10 @@ export const solanaPoolPages = (program: string, stateSize: number, labelSize: n
 ];
 
 /** The program-wide accounts a pool buy uses: what our lookup table holds (the pool and its pages, the venue's shared
- * accounts and programs, the token programs, wSOL and the Jito tip accounts). */
+ * accounts and programs, the token programs and wSOL). Not the Jito tip accounts: the tip goes as a static key
+ * (solanaCompileV0 never loads one, M362 (4)). */
 export function solanaPoolBuyTableAccounts(cfg: SolanaPoolConfig, venue: SolanaPoolBuyVenue, pages: readonly string[] = []): string[] {
-  const common = [cfg.pool, ...pages, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SOL_MINT, SOLANA_PUMP_FEES_PROGRAM, ...SOLANA_JITO_TIP_ACCOUNTS];
+  const common = [cfg.pool, ...pages, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SOL_MINT, SOLANA_PUMP_FEES_PROGRAM];
   return venue.kind === "pump-curve"
     ? [...common, SOLANA_PUMP_PROGRAM, PUMP_GLOBAL, venue.feeRecipient, solanaEventAuthority(SOLANA_PUMP_PROGRAM), PUMP_GLOBAL_VOLUME, PUMP_FEE_CONFIG, ...venue.buybackFeeRecipients]
     : [
@@ -335,14 +336,16 @@ const transfer = (from: string, to: string, lamports: bigint): SolanaApiInstruct
 
 /**
  * Every program a pool buy's steps invoke as a tag 3 inner instruction (solanaPoolBuySteps, solanaPoolVenueBuy): the two
- * venues, the token programs, the ATA program and the system program (test/solana-pool-step-programs.test.ts holds the
- * builder's steps to it). The one list the helper carries (M356 (1)): the pool program stays open to any venue and relayer.
+ * venues, the SPL Token program (wSOL's SyncNative and CloseAccount), the ATA program and the system program, and no
+ * other (test/solana-pool-step-programs.test.ts holds the list equal to the builder's steps over both venues and both
+ * token programs). Token-2022 is only an account of the ATA create, never invoked directly: a direct Token-2022 transfer
+ * runs its mint's transfer hook, a program the mint's owner chose, which can fail on chain after the simulation passed
+ * (M362 (1)). The one list the helper carries (M356 (1)): the pool program stays open to any venue and relayer.
  */
 export const SOLANA_POOL_STEP_PROGRAMS: readonly string[] = Object.freeze([
   SOLANA_PUMP_PROGRAM,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
-  SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_ATA_PROGRAM,
   SOLANA_SYSTEM_PROGRAM,
 ]);

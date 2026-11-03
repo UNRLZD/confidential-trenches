@@ -273,7 +273,29 @@ test("size table: tag 3 with the compressed proof, pump and PumpSwap, with and w
     }
   }
   console.log(rows.join("\n"));
-  assert.deepEqual(sizes, { "pump none": 977, "pump tip": 979, "pumpswap none": 1134, "pumpswap tip": 1136 });
+  // with a tip, the tip account is a static key (32 B) instead of a table index (1 B): M362 (4)
+  assert.deepEqual(sizes, { "pump none": 977, "pump tip": 1010, "pumpswap none": 1134, "pumpswap tip": 1167 });
+});
+
+test("M362 (4): a table holding every Jito tip account still compiles the tip account as a static key, both venues", async () => {
+  for (const v of ["pump", "pumpswap"] as const) {
+    const { venue, req, chain, addresses } = await setup(v);
+    assert.ok(!addresses.some((k) => SOLANA_JITO_TIP_ACCOUNTS.includes(k)), "our table holds no tip account");
+    // a table on chain that does hold them (an older table, or anyone's)
+    const meta = new Uint8Array(56);
+    const dv = new DataView(meta.buffer);
+    dv.setUint32(0, 1, true);
+    dv.setBigUint64(4, (1n << 64n) - 1n, true);
+    const withTips = solanaDecodeLookupTable(Uint8Array.from([...meta, ...[...addresses, ...SOLANA_JITO_TIP_ACCOUNTS].flatMap((k) => [...base58.decode(k)])]));
+    for (let pick = 0; pick < SOLANA_JITO_TIP_ACCOUNTS.length; pick++) {
+      const b = buildSolanaPoolBuy(cfg, release, venue, { ...req, tip: TIP }, { ...chain, table: { address: chain.table.address, table: withTips } }, { pick: () => pick });
+      const m = solanaDecodeMessage(b.message);
+      const tip = SOLANA_JITO_TIP_ACCOUNTS[pick]!;
+      assert.ok(m.staticKeys.includes(tip), `${v}: ${tip} is static`);
+      for (const l of m.lookups) for (const i of [...l.writable, ...l.readonly]) assert.ok(!SOLANA_JITO_TIP_ACCOUNTS.includes(withTips.addresses[i]!), `${v}: no tip account loaded`);
+      assert.ok(b.size <= 1232, `${v}: ${b.size} B`);
+    }
+  }
 });
 
 test("the check passes the built transaction and names each check", async () => {

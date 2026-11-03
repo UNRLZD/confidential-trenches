@@ -123,9 +123,12 @@ test("A7: an extra key in tag 3's accounts that no inner instruction names is re
 
 test("A7b: an unreferenced key loaded from the table (one more readonly index) is refused (PRIVILEGES)", async () => {
   const s = await setup();
-  const m = buildSolanaPoolBuy(cfg, release, s.venue, s.req, s.chain, { pick: () => 0 }).message;
-  const unused = SOLANA_JITO_TIP_ACCOUNTS.find((k) => k !== JITO)!;
-  const idx = s.addresses.indexOf(unused);
+  const built = buildSolanaPoolBuy(cfg, release, s.venue, s.req, s.chain, { pick: () => 0 });
+  const m = built.message;
+  // a table key the buy names nowhere (the table holds no tip account since M362 (4))
+  const named = new Set(built.instructions.flatMap((i) => [i.program, ...i.accounts.map((a) => a.key)]));
+  const idx = s.addresses.findIndex((k) => !named.has(k));
+  assert.ok(idx >= 0);
   const dec = solanaDecodeMessage(m);
   assert.equal(dec.lookups.length, 1);
   const at = m.length - dec.lookups[0]!.readonly.length - 1;
