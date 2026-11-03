@@ -94,13 +94,24 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      fill reverts the sell. It unwraps the WETH the sale paid W, refuses an ETH gain under minOut (never 0), pays
      the sender the fee it names (at most feeCap) and deposits the rest with W's precommitment; ETH or WETH W already
      held is not counted. No owner, setter, selfdestruct, DELEGATECALL or CREATE; WETH is an immutable (code); the one
-     stored value is W's nonce, at the ERC-7201 slot of "blindfill.sell" in W's own account, and a transient guard
-     refuses a target that calls back into W. Its own address has no key, so a call to it, not through W, moves nothing.
-     A sell, Uniswap v3 one hop through SwapRouter02, W's authorization in the same transaction, the pool's trees
-     empty (test/SellFork.t.sol): Base 507,305 gas on 1.8.6 (plan) and 462,705 on 1.7.1; Robinhood 556,941 on 1.8.6
-     (plan) and 512,341 on 1.7.1. The deposit inserts into both trees, about 41,078 gas a level of depth
-     (test/Sell.t.sol test_gasSellMockRouterDepth0 and Depth32: 502,228 and 1,816,738 on 1.8.6, 442,528 and
-     1,757,038 on 1.7.1).
+     stored value is W's nonce, at the ERC-7201 slot of "blindfill.sell" in W's own account, and a reentrancy guard,
+     at the ERC-7201 transient slot of "blindfill.sell.guard" (as OpenZeppelin's ReentrancyGuardTransient keeps its
+     own, so a smart account that runs this code as a module and guards itself at transient slot 0 never meets it),
+     refuses a target, a token hook or a sender that calls back into W. Its own address has no key, so a call to it,
+     not through W, moves nothing. test/HostileSell.t.sol holds the Opus review's hostile cases (review of c2a8da2).
+     Gas. Forge counts none of the 25,000 that EIP-7702 charges for each authorization of an empty account, and forge
+     1.8.6 reports gas before refunds while 1.7.1 reports it after. So the gas limit to plan for is the 1.8.6 figure
+     plus 25,000, and the cost paid is at most the 1.7.1 figure plus 25,000. A sell, Uniswap v3 one hop through
+     SwapRouter02, W's authorization in the same transaction, the pool's trees empty (test/SellFork.t.sol):
+       chain       1.8.6    plan (+25,000)    1.7.1    paid at most (+25,000)
+       Base        507,127  532,127           462,527  487,527
+       Robinhood   556,763  581,763           512,163  537,163
+     The deposit inserts into both trees, so each level of depth adds about 41,078 (test/Sell.t.sol
+     test_gasSellMockRouterDepth0 and Depth32, a mock router: 502,050 and 1,816,560 on 1.8.6; 442,350 and 1,756,860
+     on 1.7.1). The same mock sell sent as real transactions to a Prague anvil 1.8.6 (the review's run, repeated at
+     this code): eth_estimateGas 524,409 with W's authorization (W empty) and 499,409 with W already delegated; the
+     receipts' gasUsed 460,811 and 435,811, the 25,000 apart. On a live chain the sender sets the limit from
+     eth_estimateGas; Robinhood's gasUsed also includes the cost of posting the transaction to its parent chain.
 
 Gas, each pool call its own transaction (isolate = true in foundry.toml), so a figure is what a sender pays: the
 21,000 base, calldata and cold reads included. The kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH.
