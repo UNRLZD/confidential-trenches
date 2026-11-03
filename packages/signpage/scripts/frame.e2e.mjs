@@ -1,8 +1,10 @@
-// node packages/signpage/scripts/frame.e2e.mjs: in headless Chromium, the signing page under its recorded headers
-// (scripts/live-checks/signpage-skeleton.answers.json, good) loads in a frame on APP_HOST and is blocked in a frame on
-// https://example.com; under the same headers with frame-ancestors taken out it loads on example.com too, so the
-// probe can fail. No network: Playwright answers every request from the recorded headers and packages/signpage.
-// A Playwright run in headless Chromium. exit 0 all as expected, 1 otherwise.
+// node packages/signpage/scripts/frame.e2e.mjs: in headless Chrome, the signing page under its recorded headers
+// (scripts/live-checks/signpage-skeleton.answers.json, good) is blocked in a frame on every page: SIGN_HOST is the top
+// window and frames APP_HOST, never the other way (card signpage-shell, frame-ancestors 'none'), so it is blocked on
+// APP_HOST and on https://example.com alike; under the same headers with frame-ancestors taken out it loads on both, so
+// the probe can fail. The recorded Content-Security-Policy is held to the one in public/_headers, so a record that has
+// gone stale against the real file fails here. No network: Playwright answers every request from the recorded headers
+// and packages/signpage. exit 0 all as expected, 1 otherwise.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +20,7 @@ const APP = "https://confidential.unrealized.trade/";
 const STRANGER = "https://example.com/";
 const DROP = new Set(["content-encoding", "transfer-encoding", "content-length", "date", "etag"]);
 const recorded = Object.fromEntries(Object.entries(GOOD.headers).filter(([k]) => !DROP.has(k)));
+const REAL_CSP = /^\/\*\n(?:  .*\n)*?  Content-Security-Policy: (.*)$/m.exec(readFileSync(join(PKG, "public/_headers"), "utf8"))?.[1];
 const noAncestors = { ...recorded, "content-security-policy": recorded["content-security-policy"].replace(/ ?frame-ancestors [^;]*;/, "") };
 
 async function framed(browser, parent, signHeaders) {
@@ -40,11 +43,15 @@ async function framed(browser, parent, signHeaders) {
 const browser = await launchBrowser("chromium");
 const label = browserLabel(browser);
 const cases = [
-  ["recorded headers, framed from APP_HOST", APP, recorded, true],
+  ["recorded headers, framed from APP_HOST", APP, recorded, false],
   ["recorded headers, framed from https://example.com", STRANGER, recorded, false],
+  ["frame-ancestors taken out, framed from APP_HOST", APP, noAncestors, true],
   ["frame-ancestors taken out, framed from https://example.com", STRANGER, noAncestors, true],
 ];
 let ok = true;
+const same = recorded["content-security-policy"] === REAL_CSP;
+ok &&= same;
+console.log(`${same ? "ok " : "BAD"} the recorded Content-Security-Policy is public/_headers' own`);
 for (const [name, parent, headers, wantLoaded] of cases) {
   const r = await framed(browser, parent, headers);
   // the same headers load on APP_HOST, so a frame left on Chromium's error page here was blocked by frame-ancestors
