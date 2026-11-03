@@ -3,7 +3,7 @@
 // built app at its route, not a test page: apps/terminal built with its own vite config and opened at /
 // (src/screens/token/source.ts: the top of the helper's Trending column, then its token read), with HELPER_HOST
 // answered per state from the fixtures (fixtures.ts, every age shifted to the run's clock), at 390 x 844 (dpr 2, touch)
-// and 1440 x 900 (dpr 1). The terminal runs only inside SIGN_HOST's shell (a top-level visit moves there,
+// 1440 x 900 and 1280 x 800 (dpr 1). The terminal runs only inside SIGN_HOST's shell (a top-level visit moves there,
 // src/shell/in-shell.ts), so the run answers the hosts' real names from local files as app-in-shell.mjs --harness and
 // the BAR-10 run do: APP_HOST the build under its _headers, SIGN_HOST the stand-in shell, signed in; every read is of
 // the terminal's frame inside the shell, and each shot is the whole window. Per shot: the token route drew the page in
@@ -33,6 +33,8 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+  // the chart's desktop at the fit's narrower width (card app-token-chart)
+  { name: "1280", viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 
 // id, the helper's top Trending token (a TOKENS key) or how it answers, the page's state; `query` is put in the address bar
@@ -46,7 +48,32 @@ const STATES = [
   { id: "empty", lists: "empty", state: "empty" },
   { id: "error", lists: 503, state: "error" },
   { id: "error-token", top: "curve", token: 503, state: "error" },
+  // the chart (card app-token-chart): GeckoTerminal's bars by default (the label shows), our own (no label), none, a
+  // failed read, and a read that never ends (the skeleton)
+  { id: "chart-chain", top: "pool", state: "ready", curve: false, candles: "chain" },
+  { id: "chart-empty", top: "pool", state: "ready", curve: false, candles: "empty" },
+  { id: "chart-error", top: "pool", state: "ready", curve: false, candles: 503 },
+  { id: "chart-loading", top: "pool", state: "ready", curve: false, candles: "hang" },
 ];
+
+/** CANDLE_COUNT bars of a 15m walk ending at the run's clock, around `p` (a price string), as the helper's answer. */
+const CANDLE_COUNT = 160;
+function candles(p, tf) {
+  const step = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 }[tf];
+  const base = Number(p) > 0 ? Number(p) : 0.0000273;
+  const end = Math.floor(Date.now() / 1000 / step) * step;
+  const out = [];
+  let c = base;
+  for (let i = 0; i < CANDLE_COUNT; i++) {
+    const o = c;
+    c = base * (1 + 0.25 * Math.sin(i / 9) + 0.08 * Math.sin(i * 1.7));
+    const hi = Math.max(o, c) * 1.02;
+    const lo = Math.min(o, c) * 0.98;
+    const f = (x) => x.toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+    out.push([end - (CANDLE_COUNT - 1 - i) * step, f(o), f(hi), f(lo), f(c), String(200 + ((i * 37) % 23) * 90)]);
+  }
+  return out;
+}
 
 /** A fixture as the helper sends it now: its age kept, read at the run's clock; the route reads Solana only, so the
  *  edges token (a NEAR id, the longest text) is answered as a Solana row. */
@@ -73,6 +100,18 @@ function helperAnswer(s, url, calls) {
     if (url.searchParams.get("token") !== row.token) return json(404, { error: "unknown token" });
     return json(200, { row, decimals: 6, pool: null, risk: {}, route: "ok" });
   }
+  if (url.pathname === "/v1/market/candles") {
+    if (s.candles === "hang") return "hang";
+    if (typeof s.candles === "number") return json(s.candles, { error: "unavailable" });
+    const row = live(s.top);
+    if (url.searchParams.get("token") !== row.token) return json(404, { error: { code: "not_found" } });
+    const tf = url.searchParams.get("tf");
+    const src = s.candles === "chain" ? "chain" : "geckoterminal";
+    const a = json(200, { tf, candles: s.candles === "empty" ? [] : candles(row.price_usd, tf), src, as_of_ms: Date.now() });
+    a.headers["x-helper-source"] = src;
+    a.headers["access-control-expose-headers"] = "X-Helper-Source";
+    return a;
+  }
   return null;
 }
 
@@ -86,6 +125,8 @@ async function build() {
 const fails = [];
 const drafts = new Map();
 const refused = new Set();
+/** The plot's size per width over the same token's ready states: one size, whatever the chart's state (CLS 0). */
+const plots = new Map();
 const check = (ok, what) => {
   if (!ok) fails.push(what);
 };
@@ -176,6 +217,23 @@ try {
           const faults = rowFaults({ ...drawnRow, served: { launchpad: row.launchpad, chain: row.chain } });
           check(faults.length === 0, `${tag}: badges: ${faults.join("; ")}`);
         }
+        // the chart: its state, every fixture bar drawn, CoinGecko's label only over GeckoTerminal's bars, and the plot
+        // the same size in every state (CLS 0)
+        const want = s.candles === undefined || s.candles === "chain" ? "ready" : s.candles === "empty" ? "empty" : s.candles === "hang" ? "loading" : "error";
+        await f.waitForSelector(`${box} [data-chart="${want}"]`, { timeout: 8_000 }).catch(() => {});
+        const ch = await f.evaluate((box) => {
+          const c = document.querySelector(`${box} [data-chart]`);
+          const plot = c?.querySelector(".tkp-plot")?.getBoundingClientRect();
+          return { state: c?.getAttribute("data-chart"), bars: c?.querySelector("[data-testid=chart-canvas]")?.getAttribute("data-bars") ?? null, vendor: !!c?.querySelector("[data-testid=chart-vendor]"), canvases: c?.querySelectorAll("canvas").length ?? 0, h: plot?.height ?? 0, w: plot?.width ?? 0 };
+        }, box);
+        check(ch.state === want, `${tag}: the chart reads ${ch.state}, want ${want}`);
+        if (want === "ready") {
+          check(ch.bars === String(CANDLE_COUNT), `${tag}: the chart drew ${ch.bars} bars, want ${CANDLE_COUNT}`);
+          check(ch.canvases > 0, `${tag}: no canvas in the chart`);
+        }
+        check(ch.vendor === ((want === "ready" || want === "empty") && s.candles !== "chain"), `${tag}: CoinGecko's label ${ch.vendor ? "shown" : "not shown"}`);
+        check(ch.h >= (phone ? 299 : 300) && ch.w > 300, `${tag}: the plot is ${Math.round(ch.w)}x${Math.round(ch.h)}`);
+        if (s.top === "pool") plots.set(w.name, [...(plots.get(w.name) ?? []), `${s.id}:${Math.round(ch.w)}x${Math.round(ch.h)}`]);
         if (phone) {
           const g = await f.evaluate(() => {
             window.scrollTo(0, document.documentElement.scrollHeight);
@@ -233,6 +291,10 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
+for (const [wn, sizes] of plots) {
+  const one = new Set(sizes.map((x) => x.split(":")[1]));
+  check(one.size === 1, `@${wn}: the plot changes size with the chart's state: ${sizes.join(" ")}`);
+}
 for (const [d, ids] of [...drafts].sort()) console.log(`draft copy: ${d} (${[...ids].join(", ")})`);
 if (refused.size) console.log(`refused off-host requests (the shell's): ${[...refused].join(" ")}`);
 if (fails.length) {
@@ -240,4 +302,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} states`);
   process.exit(1);
 }
-console.log(`PASS ${n} states (${STATES.length} at 390 and 1440) from the built app at the token route inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} states (${STATES.length} at 390, 1440 and 1280) from the built app at the token route inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
