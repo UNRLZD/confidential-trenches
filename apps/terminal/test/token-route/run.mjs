@@ -131,6 +131,9 @@ try {
       check(bad.length === 0, `${tag}: rows that are not a link to /token/solana/<mint>: ${bad.map((r) => `${r.token} ${r.href}`).slice(0, 3).join(" ")}`);
       const nested = await f.$$eval(`${list} [role="listitem"] a`, (as) => as.filter((a) => a.querySelector("a, button, input")).length);
       check(nested === 0, `${tag}: ${nested} rows hold another control inside the link`);
+      // the badges (card app-launchpad-chain-badges) sit inside the link: a chain badge on every row, and the link holds every badge its row draws
+      const outside = await f.$$eval(`${list} [role="listitem"]`, (els) => els.filter((e) => e.getClientRects().length).filter((e) => e.querySelectorAll(".tok-pb, .tok-cb").length !== (e.querySelector("a")?.querySelectorAll(".tok-pb, .tok-cb").length ?? -1) || e.querySelectorAll(".tok-cb").length !== 1).map((e) => e.getAttribute("data-token")));
+      check(outside.length === 0, `${tag}: rows whose badges are not all inside the link (or with no chain badge): ${outside.slice(0, 3).join(" ")}`);
 
       // hover (desktop) and keyboard focus
       if (!phone) {
