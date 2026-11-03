@@ -1,11 +1,11 @@
 // The token page's chart drawing (card app-token-chart): KLineChart, the library the live UNRLZD terminal draws its
-// chart with (klinecharts 10.0.3, Apache-2.0; its NOTICE below). Candles in the main pane
+// chart with (klinecharts 10.0.3, Apache-2.0; its NOTICE below, kept in the built script by vite.config.ts). Candles in the main pane
 // with the price axis and the last price's mark, volume bars in their own pane under it, and the crosshair; the legend
 // (R5 token.js U.legend) is the page's own text over the plot (TokenPage.tsx), fed by `onBar`. Every number the chart
 // draws goes through Discover's formatters (../discover/format.ts): prices as `price`, volume as `usd`. Colours and
 // fonts are the page's own tokens, read from the plot's computed style. The library draws on canvas and sets styles only
 // through the CSSOM, so APP_HOST's CSP (style-src 'self', trusted types) needs nothing new.
-/* KLineChart v10.0.3 Copyright (c) 2019 lihu. Licensed under the Apache License 2.0
+/*! @license KLineChart v10.0.3 Copyright (c) 2019 lihu. Licensed under the Apache License 2.0
  *  https://www.apache.org/licenses/LICENSE-2.0. NOTICE: KLineChart, Copyright (c) 2019 lihu. TradingView Lightweight
  *  Charts, Copyright (c) 2019 TradingView, Inc. https://www.tradingview.com */
 import { dispose, init } from "klinecharts";
