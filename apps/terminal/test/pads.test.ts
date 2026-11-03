@@ -12,7 +12,7 @@ import { badgeSize, CHAINS, chainOf, NO_LOGO, PADS, padOf } from "../src/screens
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-/** The ids the lists served on 3 Nov: the CO's read at 12:30Z, the card's, and this card's read at 12:43Z (Raydium). */
+/** The ids the lists served on 3 Nov: a read at 12:30Z, the card's, and this card's read at 12:43Z (Raydium). */
 const SOLANA = ["pump.fun", "stonkfun", "raydium-launchlab", "Raydium", "met-dbc", "letsbonk.fun", "metadao", "jup-studio", "bags.fun", "grainpad"];
 /** The factory table's pads (apps/helper/src/data/evm/lists.ts FACTORIES, card market-data-evm-lists at 8d6e279). */
 const EVM = ["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags"];

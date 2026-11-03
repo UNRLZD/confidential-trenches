@@ -8,7 +8,7 @@
 //   - with an id, the launchpad badge draws that pad: data-pad is the id, the hover title is the pad's proper name, its
 //     logo loaded; with null (or a pad the table holds no cited logo for, NO_LOGO), no launchpad badge;
 //   - the chain badge always draws: data-chain is the row's chain, the title the chain's name, its mark loaded;
-//   - no element of the row has the raw id as its text;
+//   - no element of the row (the avatar's initials aside) has the raw id as its text;
 //   - each badge lies inside its row's box and is not cut by the column (no clipping at either width).
 // A screenshot of every width is kept.
 //   node scripts/live-checks/app-launchpad-badges.mjs [--url <page>] [--shots <dir>] [--record <file>]
@@ -122,7 +122,8 @@ export const READ = ({ scope, column }) => {
       if (rowIn && (r.left < c.left - 0.5 || r.right > c.right + 0.5 || r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5)) clipped.push(`${k} badge cut by its box`);
       if (r.width < 9.5) clipped.push(`${k} badge ${r.width}px`);
     }
-    const texts = [...row.querySelectorAll("*")].filter((e) => e.children.length === 0).map((e) => e.textContent.trim()).filter(Boolean);
+    // the row's own words, not the avatar's drawn initials (two letters of the symbol, never an id)
+    const texts = [...row.querySelectorAll("*")].filter((e) => e.children.length === 0 && !e.closest(".tok-av")).map((e) => e.textContent.trim()).filter(Boolean);
     const strip = (b) => (b ? { id: b.id, title: b.title, loaded: b.loaded } : null);
     out.push({ column, addr: row.dataset.token, pad: strip(pad), chain: strip(chain), texts, clipped });
   }

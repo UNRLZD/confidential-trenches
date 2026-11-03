@@ -165,7 +165,7 @@ try {
           const pad = g(".tok-pb", "data-pad");
           const chain = g(".tok-cb", "data-chain");
           const clipped = [pad?.out && "launchpad badge cut by its box", chain?.out && "chain badge cut by its box"].filter(Boolean);
-          const texts = [...root.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.getClientRects().length).map((e) => e.textContent.trim()).filter(Boolean);
+          const texts = [...root.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.getClientRects().length && !e.closest(".tok-av")).map((e) => e.textContent.trim()).filter(Boolean);
           const strip = (b) => (b ? { id: b.id, title: b.title, loaded: b.loaded } : null);
           return { pad: strip(pad), chain: strip(chain), texts, clipped };
         }, box);
