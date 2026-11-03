@@ -8,7 +8,7 @@
 //   yet) and a pool.withdraw (its onward send from W to the typed address has no EVM check yet).
 // - The flows that build, prove, sign and send each op land with the pools; until a pinned pool has its flow, a
 //   request that passed every check is refused not_allowed too, never half run.
-import type { KindContext, Deferred, HostRefusal } from "./api.ts";
+import type { KindContext, Deferred, HostRefusal, Running } from "./api.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
@@ -35,8 +35,8 @@ export type PoolKindsDeps = {
   pinned(chain: PoolChain): boolean;
   /** The chain's two providers, or null when the page has none for it. */
   rpcs(chain: PoolChain): readonly [PoolRpc, PoolRpc] | null;
-  /** The op's flow once its pool is pinned: none yet, so a checked request is refused. */
-  flow?: (ask: PoolAsk, ctx: KindContext) => HostRefusal;
+  /** The ops' flow once their pool is pinned (src/pool-testnet.ts testnetPoolFlow); with none a checked request is refused. */
+  flow?: (ask: PoolAsk, ctx: KindContext) => HostRefusal | Running<PoolKind>;
 };
 type Answer<K extends PoolKind> = HostRefusal | Deferred<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
@@ -64,7 +64,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         const ask = checked(p);
         if (!ask) return NO;
         if (!deps.pinned(ask.chain) || (ask.chain !== "solana" && EVM_REFUSED.has(kind)) || !deps.flow) return NO;
-        return deps.flow(ask, ctx);
+        return deps.flow(ask, ctx) as Answer<K>;
       }
       // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals read
       // on two providers, then the whole request checked with them; no read is made for any other string
@@ -75,7 +75,8 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
       const after = readTokenDecimals(chain, p.token, rpcs).then(
         (reads) => {
           const ask = checked(p, reads);
-          answer = ask && deps.flow ? deps.flow(ask, ctx) : NO;
+          // a sell's flow answers a refusal until its card (signpage-pool-sell) runs one: testnetPoolFlow refuses it
+          answer = (ask && deps.flow ? deps.flow(ask, ctx) : NO) as HostRefusal;
         },
         () => {
           answer = NO;
