@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { cleanup, compileMessage, newKey, needOf, signTx, transferIx, DEPOSIT, FEE_PER_SIGNATURE } from "./deploy.mjs";
+import { cleanup, compileMessage, newKey, needOf, signTx, transferIx, CLEANUP_RESERVE, DEPOSIT, FEE_PER_SIGNATURE } from "./deploy.mjs";
 import { b58decode, labelOf, scopeOf, poolAddress, programDataAddress } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -20,49 +20,60 @@ const { poseidon3 } = await import(pathToFileURL(req.resolve("poseidon-lite")).h
 const { ed25519 } = await import(pathToFileURL(req.resolve("@noble/curves/ed25519.js")).href);
 const RETURN = "CTnQzcmRUwDYkBx9cuyfcAidQZ6ogo27uGmWFEUyQGvb";
 
-// a funder on a fake chain: each op can be made to throw `failures[op]` times
-function chain({ balance = 1_000_000n, upgradeable = false, failures = {} } = {}) {
+// a funder on a fake chain, as the real ops do: each close and transfer costs the funder one fee, a close's rent goes to
+// the return address (--recipient), and each op can be made to throw `failures[op]` times
+const START = 10_000_000n;
+function chain({ balance = START, upgradeable = false, failures = {} } = {}) {
   const calls = [];
+  let returned = 0n;
+  let fees = 0n;
   const fail = (op) => {
     if ((failures[op] ?? 0) > 0) {
       failures[op]--;
       throw new Error(`planted ${op} failure`);
     }
   };
+  const pay = (rent) => ((balance -= FEE_PER_SIGNATURE), (fees += FEE_PER_SIGNATURE), (returned += rent));
   const ops = {
-    closeBuffers: async () => (calls.push("closeBuffers"), fail("closeBuffers"), (balance += 100n)),
+    closeBuffers: async () => (calls.push("closeBuffers"), fail("closeBuffers"), pay(100n)),
     upgradeableByFunder: async () => (calls.push("upgradeableByFunder"), fail("upgradeableByFunder"), upgradeable),
-    closeProgram: async () => (calls.push("closeProgram"), fail("closeProgram"), (upgradeable = false), (balance += 1000n)),
+    closeProgram: async () => (calls.push("closeProgram"), fail("closeProgram"), (upgradeable = false), pay(1000n)),
     balance: async () => (calls.push("balance"), fail("balance"), balance),
     transfer: async (to, lamports) => {
       calls.push(`transfer ${to} ${lamports}`);
       fail("transfer");
       assert.ok(lamports + FEE_PER_SIGNATURE <= balance);
-      balance -= lamports + FEE_PER_SIGNATURE;
-      return "sig";
+      balance -= lamports;
+      pay(lamports);
+      return `sig${calls.length}`;
     },
   };
-  return { ops, calls, get balance() { return balance; } };
+  return { ops, calls, get balance() { return balance; }, get returned() { return returned; }, get fees() { return fees; } };
 }
 const fast = { wait: async () => {} };
+const firstTransfer = (c) => c.calls.findIndex((x) => x.startsWith("transfer"));
+const lastTransfer = (c) => c.calls.findLastIndex((x) => x.startsWith("transfer"));
 
-test("the cleanup sweeps everything less one fee to the return address", async () => {
+test("the cleanup sweeps the bulk first, then closes, then the rest: everything less the fees reaches the return address", async () => {
   const c = chain();
   const r = await cleanup(c.ops, RETURN, fast);
-  assert.deepEqual([r.after, r.swept, r.signature, r.problems], [0n, 1_000_100n - FEE_PER_SIGNATURE, "sig", []]);
+  assert.deepEqual([r.after, r.problems, r.signatures.length], [0n, [], 2]);
   assert.equal(c.balance, 0n);
-  assert.ok(c.calls.includes(`transfer ${RETURN} ${1_000_100n - FEE_PER_SIGNATURE}`));
+  assert.equal(c.calls[firstTransfer(c)], `transfer ${RETURN} ${START - CLEANUP_RESERVE - FEE_PER_SIGNATURE}`, "the bulk leaves first, less the reserve");
+  assert.ok(firstTransfer(c) < c.calls.indexOf("closeBuffers"), "before the slow closes");
+  assert.equal(c.returned + c.fees, START + 100n);
+  assert.equal(r.swept, START - CLEANUP_RESERVE - FEE_PER_SIGNATURE + (CLEANUP_RESERVE - 2n * FEE_PER_SIGNATURE));
 });
 
-test("a program the funder can still upgrade is closed first, and its rent swept too", async () => {
+test("a program the funder can still upgrade is closed after the bulk, its rent to the return address", async () => {
   const c = chain({ upgradeable: true });
   const r = await cleanup(c.ops, RETURN, fast);
-  assert.ok(c.calls.indexOf("closeProgram") < c.calls.findIndex((x) => x.startsWith("transfer")));
+  assert.ok(firstTransfer(c) < c.calls.indexOf("closeProgram") && c.calls.indexOf("closeProgram") < lastTransfer(c));
   assert.equal(r.after, 0n);
-  assert.equal(r.swept, 1_001_100n - FEE_PER_SIGNATURE);
+  assert.equal(c.returned + c.fees, START + 1100n);
 });
 
-test("a failure planted at each cleanup step still ends with the funder at 0", async () => {
+test("a failure planted at each cleanup step still ends with the funder at 0 and the program closed", async () => {
   for (const op of ["closeBuffers", "upgradeableByFunder", "closeProgram", "balance", "transfer"]) {
     const c = chain({ upgradeable: true, failures: { [op]: 1 } });
     const r = await cleanup(c.ops, RETURN, fast);
@@ -70,22 +81,23 @@ test("a failure planted at each cleanup step still ends with the funder at 0", a
     assert.equal(r.after, 0n, op);
     assert.equal(r.problems.length, 1, `${op}: ${r.problems}`);
     assert.ok(c.calls.includes("closeProgram"), `${op}: the program is still closed`);
-    assert.equal(r.swept, 1_001_100n - FEE_PER_SIGNATURE, `${op}: buffer and program rent swept`);
+    assert.equal(c.returned + c.fees, START + 1100n, `${op}: buffer and program rent returned`);
   }
 });
 
 test("a sweep that keeps failing reports the funder unread, never claims a sweep", async () => {
   const c = chain({ failures: { transfer: 99 } });
   const r = await cleanup(c.ops, RETURN, { ...fast, tries: 3 });
-  assert.deepEqual([r.signature, r.after, r.swept], [null, null, 0n]);
+  assert.deepEqual([r.signatures, r.after, r.swept], [[], null, 0n]);
   assert.equal(r.problems.filter((p) => p.startsWith("sweep try")).length, 3);
+  assert.equal(r.problems.filter((p) => p.startsWith("first sweep")).length, 1);
 });
 
 test("a balance of one fee or less is left, and said", async () => {
   for (const b of [0n, FEE_PER_SIGNATURE - 100n]) {
     const c = chain({ balance: b });
     const r = await cleanup({ ...c.ops, closeBuffers: async () => {} }, RETURN, fast);
-    assert.equal(r.signature, null);
+    assert.deepEqual(r.signatures, []);
     assert.equal(r.after, b);
     assert.equal(r.problems.length, b > 0n ? 1 : 0);
   }
@@ -226,4 +238,136 @@ test("a pool that exists skips init and its rent; another account at the pool ad
   assert.equal(initialized.parts.pool, undefined);
   assert.equal(resumed.total - initialized.total, resumed.parts.pool + FEE_PER_SIGNATURE);
   assert.ok(fresh.total - resumed.total > fresh.parts.programdata);
+});
+
+test("the resume refuses a program another loader owns, programdata another program owns, a pointer elsewhere, a buffer", async () => {
+  const so = recordedCode();
+  const p = (change) => programProblems(chainOf(change), "u", RD.program_id, so).then((x) => x.join());
+  assert.match(await p({ [RD.program_id]: (v) => ({ ...v, owner: "BPFLoader2111111111111111111111111111111111" }) }), /not an executable upgradeable-loader program/);
+  assert.match(await p({ [RD.programdata]: (v) => ({ ...v, owner: "11111111111111111111111111111111" }) }), /missing or not the loader's/);
+  assert.match(await p({ [RD.program_id]: withData((d) => d.fill(5, 4, 36)) }), /pointing at/);
+  assert.match(await p({ [RD.programdata]: withData((d) => (d[0] = 1)) }), /missing or not the loader's/);
+});
+
+// ---- the cleanup's keys and the two-transaction --final (review of bc57e12) ----
+import { chainOps, chainRecord, main } from "./deploy.mjs";
+import { existsSync, mkdtempSync, readdirSync as ls, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+
+test("main keeps the run's key folder when the sweep fails: the funder still holds its lamports", async () => {
+  // a local chain where every send fails: the resume's init throws, and the cleanup's sweeps fail 99 times over
+  const work = mkdtempSync(path.join(tmpdir(), "deploy-test-"));
+  const soFile = path.join(work, "code.so");
+  writeFileSync(soFile, recordedCode());
+  let sends = 0;
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getAccountInfo": return ok(REC.good.find((x) => x.method === method && x.params[0] === params[0])?.json.result ?? { value: null });
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getLatestBlockhash": return ok({ value: { blockhash: "11111111111111111111111111111111" } });
+      case "sendTransaction": sends++; return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32002, message: "Blockhash not found" } }) };
+      case "getSignatureStatuses": return ok({ value: [null] });
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  const before = new Set(ls(tmpdir()).filter((f) => f.startsWith("pool-sol-deploy-")));
+  const said = [];
+  const realLog = console.log;
+  console.log = (s) => said.push(String(s));
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--no-build", "--so", soFile, "--program", RD.program_id, "--return", RETURN], fetchFn,
+      { wait: async () => {}, cli: () => ({ status: 0, stdout: "", stderr: "" }) }));
+  } finally {
+    console.log = realLog;
+  }
+  const kept = ls(tmpdir()).filter((f) => f.startsWith("pool-sol-deploy-") && !before.has(f)).map((f) => path.join(tmpdir(), f));
+  try {
+    assert.ok(sends > 5, "the sweep was tried");
+    assert.equal(kept.length, 1, "the key folder is kept");
+    assert.ok(existsSync(path.join(kept[0], "funder.json")));
+    assert.ok(said.some((l) => l.includes(`KEYS KEPT in ${kept[0]}`) && /1000000000/.test(l)), said.join("\n"));
+  } finally {
+    for (const k of kept) rmSync(k, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("the cleanup reads the authority at confirmed: a deploy whose SetAuthority never landed is closed", async () => {
+  // the deploy landed a moment ago: finalized reads nothing yet, confirmed shows the funder as the upgrade authority
+  const funder = newKey();
+  const pd = REC.good.find((x) => x.method === "getAccountInfo" && x.params[0] === RD.programdata).json.result.value;
+  const data = Buffer.from(pd.data[0], "base64");
+  data[12] = 1;
+  Buffer.from(funder.pub).copy(data, 13);
+  let closed = false;
+  const reads = [];
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    if (method === "getAccountInfo") {
+      reads.push(params[1].commitment);
+      const show = params[1].commitment === "confirmed" && !closed;
+      return ok({ value: show ? { ...pd, data: [data.toString("base64"), "base64"] } : null });
+    }
+    throw new Error(`unexpected ${method}`);
+  };
+  const runs = [];
+  const ops = chainOps({ fetchFn, url: "u", second: "u", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {}, say: () => {},
+    cli: (args) => (runs.push(args.slice(0, 3).join(" ")), args[1] === "close" && args[2] === RD.program_id && (closed = true), { status: 0, stdout: "", stderr: "" }) });
+  assert.equal(await ops.upgradeableByFunder(), true);
+  await cleanup({ ...ops, balance: async () => 0n }, RETURN, fast);
+  assert.ok(runs.includes(`program close ${RD.program_id}`), runs.join("; "));
+  assert.ok(reads.every((c) => c === "confirmed"));
+  // and a read that fails throws: never taken for "not upgradeable"
+  const down = chainOps({ fetchFn: async () => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "node behind" } }) }),
+    url: "u", second: "u", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN });
+  await assert.rejects(down.upgradeableByFunder(), /node behind/);
+});
+
+test("what is left keeps the keys: a lamport on either RPC, a buffer or programdata under the funder", async () => {
+  const funder = newKey();
+  const run = async ({ bal = {}, gpa = {} }) => {
+    const fetchFn = async (url, init) => {
+      const { method, params } = JSON.parse(init.body);
+      const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+      if (method === "getBalance") return ok({ value: bal[url] ?? 0 });
+      if (method === "getProgramAccounts") {
+        const f = params[1].filters;
+        assert.equal(f[1].memcmp.bytes, (await import("../../../scripts/live-checks/pool-sol-deploy.mjs")).b58encode(Uint8Array.from([1, ...funder.pub])));
+        return ok(gpa[f[1].memcmp.offset] ?? []);
+      }
+      throw new Error(`unexpected ${method}`);
+    };
+    return chainOps({ fetchFn, url: "a", second: "b", funder, programId: RD.program_id, keyFile: "k", returnTo: RETURN, wait: async () => {} }).leftovers();
+  };
+  assert.deepEqual(await run({}), []);
+  assert.match((await run({ bal: { b: 1 } })).join(), /holds 1 lamports on b/);
+  assert.match((await run({ gpa: { 4: [{ pubkey: "Buf1" }] } })).join(), /buffer Buf1/);
+  assert.match((await run({ gpa: { 12: [{ pubkey: "Pd1" }] } })).join(), /upgradeable program's data Pd1/);
+});
+
+test("the record from chain reads: the programdata's SetAuthority gets a line, funders are the fee payers, slot order", async () => {
+  const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
+  const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, "BPFLoaderUpgradeab1e11111111111111111111111"],
+    instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, data: (loaderTag === 4 ? "5" : "3") }] } } });
+  const chainTx = { fund: tx(1, D0), dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), init: tx(4, "F2") };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    if (method === "getSignaturesForAddress") return ok([{ signature: "auth", err: null }, { signature: "dep", err: null }]);
+    if (method === "getTransaction") return ok(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [{ step: "init", signature: "init" }, { step: "funding", signature: "fund" }, { step: "deploy", signature: "dep" }] });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "dep", "auth", "init"]);
+  assert.match(r.txs[2].step, /SetAuthority/);
+  assert.equal(r.txs[1].step, "deploy", "a known step keeps its name");
+  assert.deepEqual(r.funders, ["F1", "F2"]);
+  chainTx.auth = { ...chainTx.auth, meta: { err: { InstructionError: [0, "x"] } } };
+  await assert.rejects(chainRecord(fetchFn, "u", { programdata: "PD", return_to: D0, txs: [] }), /failed/);
 });

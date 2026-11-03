@@ -12,7 +12,9 @@
 //     keccak256(scope || nonce) mod p with the scope this program and pool give (contracts/pool-solana/src/context.rs),
 //     so the pool was initialised for this program's scope; the state leaf equals the record's commitment, which the
 //     deploy script computed as Poseidon(value, label, precommitment) and checked against this leaf when it deployed
-//     (contracts/pool-solana/scripts/deploy.mjs; deploy.test.mjs re-checks every committed record).
+//     (contracts/pool-solana/scripts/deploy.mjs; deploy.test.mjs re-checks every committed record);
+//   - every funder of the run (the record's `funders`, the fee payers of its transactions that are not the return
+//     address): 0 lamports at finalized, so no lamport is left behind a run key.
 // Every constant it compares against is pinned here or read from chain; the record gives only the ids, the code's
 // sha256 and the deposit.
 //   node scripts/live-checks/pool-sol-deploy.mjs [--deployment <file>] [--rpc <url>,<url>] [--record <file>]
@@ -171,9 +173,10 @@ export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries =
     return j.result;
   }
 }
-/** An account's { owner, executable, lamports, data } at finalized, or null when it does not exist. */
-export async function account(fetchFn, url, addr, sleep) {
-  const r = await rpc(fetchFn, url, "getAccountInfo", [addr, { encoding: "base64", commitment: "finalized" }], sleep);
+/** An account's { owner, executable, lamports, data } at `commitment` (finalized unless said), or null when it does
+ * not exist. */
+export async function account(fetchFn, url, addr, sleep, commitment = "finalized") {
+  const r = await rpc(fetchFn, url, "getAccountInfo", [addr, { encoding: "base64", commitment }], sleep);
   const v = r?.value;
   if (!v) return null;
   return { owner: v.owner, executable: v.executable, lamports: v.lamports, data: new Uint8Array(Buffer.from(v.data[0], "base64")) };
@@ -262,6 +265,12 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
         say(!!leaf && Buffer.from(leaf).equals(Buffer.from(want)) && root.some((b) => b !== 0),
           `${name} page ${pageNo} entry ${slotNo} holds ${name === "label" ? "keccak256(scope, nonce) mod p" : "the record's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : "missing"}`);
       }
+      const funders = d.funders ?? (d.funder ? [d.funder] : []);
+      say(funders.length > 0, `the record names the run's funders: ${funders.length} ${at}`);
+      for (const f of funders) {
+        const b = (await rpc(fetchFn, url, "getBalance", [f, { commitment: "finalized" }], sleep))?.value;
+        say(b === 0, `funder ${f} holds 0 lamports ${at}: ${b}`);
+      }
     } catch (e) {
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
     }
@@ -292,9 +301,9 @@ export function runRecord(d, rpcs) {
     "",
     `The run: contracts/pool-solana/scripts/deploy.mjs on Solana devnet, ${d.at}. Its steps, in the order of the Tx lines above: ${d.txs.map((t) => t.step).join(", ")}.`,
     `Program ${d.program_id}, programdata ${d.programdata}, pool ${d.pool}; code ${d.so_len} bytes, sha256 ${d.so_sha256} (${d.build}).`,
-    `Upgrade authority: none (set in the deploy itself, --final), read back by this live check on ${rpcs.join(" and ")}.`,
+    `Upgrade authority: none. --final is two transactions, the deploy and then a SetAuthority to none, both in the Tx lines above; this live check reads the authority none on ${rpcs.join(" and ")}.`,
     `Test deposit: ${d.deposit.value} lamports (0.01 SOL), nonce ${d.deposit.nonce}, precommitment ${d.deposit.precommitment}. Its note's secrets lived only in the run, so the 0.01 SOL stays in the pool as a test deposit.`,
-    `Funder: a run key, funded with ${d.need} lamports (the printed need) and swept to ${d.return_to} at the end, holding ${d.funder_after} lamports after; its key and the program's key lived only in the run.`,
+    `Funders: ${(d.funders ?? [d.funder]).join(", ")}, run keys, each swept to ${d.return_to} at its run's end; this live check reads each at 0 lamports on both RPCs. The last run was funded with ${d.need} lamports (the printed need). Every key lived only in its run.`,
     "",
   ].join("\n");
 }

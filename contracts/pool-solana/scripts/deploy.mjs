@@ -4,6 +4,9 @@
 // SOL pool and one test deposit. Every key lives only in this run.
 //
 //   node contracts/pool-solana/scripts/deploy.mjs --return <address> [--url <rpc>] [--no-build] [--out <file>]
+//     [--program <id> [--prior <sig>,...]]     a resume: the program is final already, init (if missing) and deposit only
+//   node contracts/pool-solana/scripts/deploy.mjs --rebuild-record <deployment.json> [--url <rpc>]
+//     rewrites a record's transactions and funders from chain reads alone: no key, no transaction
 //
 // Steps:
 //  1. The cluster from its genesis hash: devnet, or a local validator on a loopback URL. Mainnet is refused (its
@@ -12,22 +15,28 @@
 //     sha256 and length printed. The keypair cargo-build-sbf writes beside the .so is deleted unread: the program id
 //     is made here, fresh.
 //  3. Two keys made in memory: the program's and the run's funder. The solana CLI reads keys only from files, so both
-//     go to a 0700 temp folder, files 0600, removed at exit; neither is ever printed.
+//     go to a 0700 temp folder, files 0600; neither is ever printed. The folder is removed only once the cleanup reads
+//     the funder at 0 on two RPCs with no buffer or upgradeable program of its left; otherwise it is kept and its path
+//     printed with why, so no lamport is ever stranded behind a deleted key.
 //  4. The funder's need, printed with its parts: rent of the program account (36 B) and its programdata (45 B + the
 //     code), the pool (POOL_LEN), the deposit (0.01 SOL, its 16 B mark and two first page entries), the funder's own
 //     rent(0) (it must stay rent-exempt between steps), and a fee bound for
 //     every signature (the CLI's write chunks counted at 900 B, fewer than it writes). Then it waits until the
 //     funder holds that much, and records the funding transactions.
-//  5. solana program deploy --final (the upgradeable loader; --final sets the upgrade authority to none in the deploy
-//     itself), then reads the authority back.
+//  5. solana program deploy --final (the upgradeable loader). --final is two transactions: the deploy, then a
+//     SetAuthority to none (on devnet 3H2Vatu... then 2Wii4A6vy... 10 s later), so a stop between them leaves a program
+//     the funder can upgrade; the cleanup closes it. The authority is read back.
 //  6. Tag 0 init, then a 0.01 SOL deposit from the funder with a fresh note (nullifier and secret random in this run,
 //     never printed or kept; the precommitment is public). The mark and both page leaves are read back and checked:
 //     the label leaf against keccak256(scope, nonce) mod p, the state leaf against Poseidon(value, label,
 //     precommitment).
-//  7. Always, in a finally: any buffer the funder still owns is closed, a program the funder can still upgrade is
-//     closed, and the funder's rest is swept to --return (retried), its signature printed; then the keys are removed.
+//  7. Always, in a finally: the funder's bulk is swept to --return first, in one transfer (heavy.sh stops a job with
+//     TERM, then KILL 10 s later), keeping CLEANUP_RESERVE for the closes; then any buffer the funder still owns and a
+//     program it can still upgrade (read at confirmed) are closed with their rent to --return; then the rest is swept
+//     (retried). Every sweep's signature is printed. The keys are removed only after the reads in step 3.
 //  8. Waits for every transaction to be finalized, writes the deployment record (scripts/live-checks/pool-sol-deploy.
-//     <cluster>.json) and prints the live check to run next.
+//     <cluster>.json) with every transaction on the programdata (the deploy and its SetAuthority) and every funder
+//     (the fee payers that are not --return), and prints the live check to run next.
 import "../../../scripts/net-window.mjs";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -38,7 +47,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEVNET_GENESIS, MAINNET_GENESIS, LOADER_V3, SYSTEM, POOL_LEN, PRE_MARK_LEN, P,
-  RPCS as DEVNET_RPCS, account, address, b58encode, be32, cat, hex, labelOf, le, pageAddress, poolAddress, preMarkAddress, programDataAddress, rpc,
+  RPCS as DEVNET_RPCS, account, address, b58decode, b58encode, be32, cat, hex, labelOf, le, pageAddress, poolAddress, preMarkAddress, programDataAddress, rpc,
   scopeOf,
 } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
 
@@ -173,13 +182,30 @@ export async function needOf(rent, soLen, { resume = false, poolExists = false }
 }
 
 // ---- the cleanup: never strands a lamport on a run key ----
+/** What the funder keeps after the first sweep: the closes' fees and its own rent(0) (890,880 on a local validator,
+ * 650,240 on devnet), so it stays rent-exempt between them. */
+export const CLEANUP_RESERVE = 1_000_000n;
 /**
- * Runs every step, whichever one throws, each retried: closes the funder's buffers, closes the program while the
- * funder can still upgrade it, then sweeps the funder's balance less one fee to `returnTo`, retried. Returns { swept, signature,
- * after, problems }. `ops` holds the chain calls (the test plants failures in them).
+ * Runs every step, whichever one throws: sweeps the funder's bulk to `returnTo` at once (less `reserve`), closes the
+ * funder's buffers and the program while the funder can still upgrade it (each retried, their rent to `returnTo`),
+ * then sweeps the rest less one fee, retried. Returns { swept, signatures, after, problems }. `ops` holds the chain
+ * calls (the test plants failures in them).
  */
-export async function cleanup(ops, returnTo, { tries = 5, wait = sleep } = {}) {
+export async function cleanup(ops, returnTo, { tries = 5, wait = sleep, reserve = CLEANUP_RESERVE } = {}) {
   const problems = [];
+  const signatures = [];
+  let swept = 0n;
+  // the bulk first, one try and no wait: a stop's KILL may come 10 s after its TERM
+  try {
+    const bal = await ops.balance();
+    if (bal > reserve + FEE_PER_SIGNATURE) {
+      const amount = bal - reserve - FEE_PER_SIGNATURE;
+      signatures.push(await ops.transfer(returnTo, amount));
+      swept += amount;
+    }
+  } catch (e) {
+    problems.push(`first sweep: ${e.message}`);
+  }
   // buffer and program closes are retried like the sweep: a program left upgradeable by a deleted key would strand its
   // rent for good
   const retry = async (name, fn) => {
@@ -196,23 +222,98 @@ export async function cleanup(ops, returnTo, { tries = 5, wait = sleep } = {}) {
   await retry("program close", async () => {
     if (await ops.upgradeableByFunder()) await ops.closeProgram();
   });
-  let signature = null;
-  let swept = 0n;
   for (let i = 0; i < tries; i++) {
     try {
       const bal = await ops.balance();
       if (bal <= FEE_PER_SIGNATURE) {
-        return { swept, signature, after: bal, problems: bal > 0n ? [...problems, `${bal} lamports left: not more than one fee`] : problems };
+        return { swept, signatures, after: bal, problems: bal > 0n ? [...problems, `${bal} lamports left: not more than one fee`] : problems };
       }
-      swept = bal - FEE_PER_SIGNATURE;
-      signature = await ops.transfer(returnTo, swept);
-      return { swept, signature, after: await ops.balance(), problems };
+      signatures.push(await ops.transfer(returnTo, bal - FEE_PER_SIGNATURE));
+      swept += bal - FEE_PER_SIGNATURE;
+      return { swept, signatures, after: await ops.balance(), problems };
     } catch (e) {
       problems.push(`sweep try ${i + 1}: ${e.message}`);
       await wait(2000 * (i + 1));
     }
   }
-  return { swept: 0n, signature: null, after: null, problems };
+  return { swept, signatures, after: null, problems };
+}
+
+/**
+ * The chain calls of a run's cleanup and its key check. `cli` runs the solana CLI (the test plants one). The program's
+ * upgrade authority is read at confirmed, and a read that fails throws: a finalized read of a deploy that landed a
+ * moment ago reads nothing, and "nothing" must never be taken for "not upgradeable".
+ */
+export function chainOps({ fetchFn, url, second, funder, programId, keyFile, returnTo, resume = false, cli: run = cli, wait = sleep, say = log }) {
+  const common = ["--url", url, "--keypair", keyFile, "--commitment", "confirmed"];
+  const pdAddr = programDataAddress(programId);
+  const byFunder = async () => {
+    const pd = await account(fetchFn, url, pdAddr, undefined, "confirmed");
+    return !!pd && pd.owner === LOADER_V3 && pd.data[0] === 3 && pd.data[12] === 1 && b58encode(pd.data.subarray(13, 45)) === funder.id;
+  };
+  const balanceOn = async (u) => BigInt((await rpc(fetchFn, u, "getBalance", [funder.id, { commitment: "confirmed" }])).value);
+  return {
+    closeBuffers: async () => {
+      const r = run(["program", "close", "--buffers", "--recipient", returnTo, "--bypass-warning", ...common]);
+      const said = `${r.stdout}${r.stderr}`.trim().split("\n").filter(Boolean).slice(-1)[0] ?? "";
+      say(`buffers closed: ${said}`);
+    },
+    upgradeableByFunder: byFunder,
+    closeProgram: async () => {
+      if (resume) throw new Error("a resumed program is never closed here");
+      run(["program", "close", programId, "--recipient", returnTo, "--bypass-warning", ...common]);
+      // done once the confirmed read agrees
+      for (let i = 0; i < 15; i++) {
+        if (!(await byFunder())) return say(`program ${programId} closed (it was not final)`);
+        await wait(2000);
+      }
+      throw new Error(`${programId} still reads upgradeable by the funder after its close`);
+    },
+    balance: () => balanceOn(url),
+    transfer: async (to, lamports) => sendAndConfirm(fetchFn, url, [transferIx(funder.id, to, lamports)], funder, [funder]),
+    /** Why the run's keys must be kept: the funder's balance on two RPCs, then any buffer or programdata on `url` whose
+     * authority is the funder (the 33-byte Option at offset 4 or 12 equal to Some(funder)). [] when none. */
+    leftovers: async () => {
+      const out = [];
+      for (const u of [...new Set([url, second])]) {
+        const b = await balanceOn(u);
+        if (b !== 0n) out.push(`the funder holds ${b} lamports on ${u}`);
+      }
+      for (const [tag, at, what] of [[1, 4, "buffer"], [3, 12, "upgradeable program's data"]]) {
+        const found = await rpc(fetchFn, url, "getProgramAccounts", [LOADER_V3, {
+          encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 0 },
+          filters: [{ memcmp: { offset: 0, bytes: b58encode(Uint8Array.of(tag, 0, 0, 0)) } }, { memcmp: { offset: at, bytes: b58encode(cat(Uint8Array.of(1), funder.pub)) } }],
+        }]);
+        for (const a of found) out.push(`${what} ${a.pubkey} still has the funder as its authority`);
+      }
+      return out;
+    },
+  };
+}
+
+// ---- the record from chain reads ----
+const LOADER_STEPS = { 0: "buffer made", 1: "buffer write", 2: "deploy with the upgradeable loader (DeployWithMaxDataLen)", 3: "upgrade", 4: "SetAuthority (--final: to none)", 5: "close" };
+/**
+ * A deployment record's transactions and funders from chain reads alone: its transactions plus every one on its
+ * programdata (the deploy and the SetAuthority --final sends after it; immutable after, so the list ends there), each
+ * read at finalized with no error, in slot order; and `funders`, every fee payer among them that is not `return_to`.
+ */
+export async function chainRecord(fetchFn, url, d) {
+  const steps = new Map(d.txs.map((t) => [t.signature, t.step]));
+  for (const h of await rpc(fetchFn, url, "getSignaturesForAddress", [d.programdata, { commitment: "finalized" }])) {
+    if (h.err === null && !steps.has(h.signature)) steps.set(h.signature, null);
+  }
+  const rows = [];
+  for (const [signature, known] of steps) {
+    const t = await rpc(fetchFn, url, "getTransaction", [signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+    if (!t || t.meta?.err !== null) throw new Error(`${signature}: ${t ? `failed: ${JSON.stringify(t.meta?.err)}` : "not found at finalized"} on ${url}`);
+    const keys = t.transaction.message.accountKeys;
+    const ix = t.transaction.message.instructions.find((i) => keys[i.programIdIndex] === LOADER_V3);
+    const step = known ?? (ix ? `the upgradeable loader: ${LOADER_STEPS[b58decode(ix.data)[0]] ?? "another instruction"}` : "on the programdata");
+    rows.push({ step, signature, slot: t.slot, payer: keys[0] });
+  }
+  rows.sort((a, b) => a.slot - b.slot);
+  return { ...d, txs: rows.map(({ step, signature }) => ({ step, signature })), funders: [...new Set(rows.map((r) => r.payer).filter((p) => p !== d.return_to))] };
 }
 
 /** An account once a finalized read shows it (and `ready(acc)` holds), waiting up to 60 s: steps confirm at
@@ -265,16 +366,26 @@ async function waitFinalized(fetchFn, url, sigs) {
   throw new Error("not every transaction finalized in 120 s");
 }
 
-export async function main(argv, fetchFn = fetch) {
+export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = cli } = {}) {
   const opt = (n, d) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
   const url = opt("--url", "https://api.devnet.solana.com");
-  const returnTo = opt("--return");
-  if (!returnTo) throw new Error("--return <address> is required: the funder's rest goes back there");
-  address(returnTo);
   const genesis = await rpc(fetchFn, url, "getGenesisHash", []);
   const cluster = genesis === DEVNET_GENESIS ? "devnet" : genesis === MAINNET_GENESIS ? "mainnet" : LOOPBACK.test(url) ? "localnet" : null;
   if (cluster === "mainnet") throw new Error("mainnet refused: its deploy is the owner's, with a program id of its own (M351)");
   if (!cluster) throw new Error(`genesis ${genesis} at ${url} is neither devnet nor a loopback validator`);
+  const rebuild = opt("--rebuild-record");
+  if (rebuild) {
+    const d = JSON.parse(readFileSync(rebuild, "utf8"));
+    if (d.genesis_hash !== genesis) throw new Error(`${rebuild} is ${d.cluster}'s (genesis ${d.genesis_hash}), not ${url}'s`);
+    const r = await chainRecord(fetchFn, url, d);
+    writeFileSync(rebuild, JSON.stringify(r, null, 2) + "\n");
+    log(`rebuilt ${rebuild} from ${url}: ${r.txs.length} transactions, funders ${r.funders.join(", ")}`);
+    for (const t of r.txs) log(`tx ${t.step}: ${t.signature}`);
+    return r;
+  }
+  const returnTo = opt("--return");
+  if (!returnTo) throw new Error("--return <address> is required: the funder's rest goes back there");
+  address(returnTo);
   const failAfter = opt("--fail-after");
   if ((failAfter || argv.includes("--flaky")) && cluster !== "localnet") throw new Error("--fail-after and --flaky are for the local dry run only");
   if (argv.includes("--flaky")) {
@@ -300,7 +411,8 @@ export async function main(argv, fetchFn = fetch) {
     log(`built with ${spawnSync("cargo-build-sbf", ["--version"], { encoding: "utf8" }).stdout.trim().split("\n")[0]}`);
   }
   rmSync(path.join(POOL_DIR, "out/blindfill_pool_solana-keypair.json"), { force: true }); // unread: the id is made below
-  const so = readFileSync(SO);
+  const soFile = opt("--so", SO); // the test passes its own code
+  const so = readFileSync(soFile);
   const soSha = createHash("sha256").update(so).digest("hex");
   log(`code ${so.length} bytes, sha256 ${soSha}`);
 
@@ -317,6 +429,7 @@ export async function main(argv, fetchFn = fetch) {
 
   const dir = mkdtempSync(path.join(tmpdir(), "pool-sol-deploy-"));
   chmodSync(dir, 0o700);
+  log(`the run's keys are in ${dir} until the cleanup reads the funder empty`);
   const program = resumeId ? { id: resumeId } : newKey();
   const funder = newKey();
   const fileOf = (k, name) => {
@@ -327,6 +440,7 @@ export async function main(argv, fetchFn = fetch) {
   const programFile = resumeId ? null : fileOf(program, "program.json");
   const funderFile = fileOf(funder, "funder.json");
   const common = ["--url", url, "--keypair", funderFile, "--commitment", "confirmed"];
+  const cli = runCli;
   const txs = [];
   let result = null;
   let stop = false;
@@ -336,25 +450,7 @@ export async function main(argv, fetchFn = fetch) {
     if (stop) throw new Error("stopped");
     if (failAfter === step) throw new Error(`planted failure after ${step} (--fail-after)`);
   };
-  const ops = {
-    closeBuffers: async () => {
-      const r = cli(["program", "close", "--buffers", "--recipient", funder.id, "--bypass-warning", ...common]);
-      const said = `${r.stdout}${r.stderr}`.trim().split("\n").filter(Boolean).slice(-1)[0] ?? "";
-      log(`buffers closed: ${said}`);
-    },
-    upgradeableByFunder: async () => {
-      if (resumeId) return false; // final already: read on two RPCs before this run spent anything
-      const pd = await account(fetchFn, url, programDataAddress(program.id)).catch(() => null);
-      return !!pd && pd.data[12] === 1 && b58encode(pd.data.subarray(13, 45)) === funder.id;
-    },
-    closeProgram: async () => {
-      if (resumeId) throw new Error("a resumed program is never closed here");
-      cli(["program", "close", program.id, "--recipient", funder.id, "--bypass-warning", ...common]);
-      log(`program ${program.id} closed (it was not final)`);
-    },
-    balance: async () => BigInt((await rpc(fetchFn, url, "getBalance", [funder.id, { commitment: "confirmed" }])).value),
-    transfer: async (to, lamports) => sendAndConfirm(fetchFn, url, [transferIx(funder.id, to, lamports)], funder, [funder]),
-  };
+  const ops = chainOps({ fetchFn, url, second, funder, programId: program.id, keyFile: funderFile, returnTo, resume: !!resumeId, cli: runCli, wait });
   try {
     const rent = async (n) => BigInt(await rpc(fetchFn, url, "getMinimumBalanceForRentExemption", [n]));
     const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists });
@@ -373,12 +469,11 @@ export async function main(argv, fetchFn = fetch) {
 
     if (resumeId) {
       // the first run's transactions: its own (--prior: its funding and sweep), then the program's history before now
+      // (the record adds the programdata's own: the deploy and its SetAuthority)
       for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig });
-      const hist = (await rpc(fetchFn, url, "getSignaturesForAddress", [program.id, { commitment: "confirmed" }])).filter((x) => x.err === null);
-      for (const h of hist.reverse()) txs.push({ step: "first run: deploy with the upgradeable loader, --final, or an earlier step on the program", signature: h.signature });
-      log(`resume: ${prior.length} prior and ${hist.length} program transaction(s) kept for the record`);
+      log(`resume: ${prior.length} prior transaction(s) kept for the record`);
     } else {
-      const dep = cli(["program", "deploy", SO, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
+      const dep = cli(["program", "deploy", soFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
         "--final", "--use-rpc", "--output", "json", ...common]);
       const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
       if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
@@ -445,23 +540,32 @@ export async function main(argv, fetchFn = fetch) {
       funder: funder.id, return_to: returnTo, need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])),
     };
   } finally {
-    const c = await cleanup(ops, returnTo);
+    const c = await cleanup(ops, returnTo, { wait });
     for (const p of c.problems) log(`cleanup: ${p}`);
-    if (c.signature) {
-      txs.push({ step: "sweep (the funder's rest back)", signature: c.signature });
-      log(`swept ${c.swept} lamports to ${returnTo}: ${c.signature}; the funder holds ${c.after}`);
-    } else log(`no sweep sent; the funder holds ${c.after ?? "an unread balance"}`);
-    rmSync(dir, { recursive: true, force: true });
-    log(`keys removed (${existsSync(dir) ? "STILL THERE" : "gone"})`);
+    for (const sig of c.signatures) txs.push({ step: "sweep (the funder's rest back)", signature: sig });
+    log(c.signatures.length ? `swept ${c.swept} lamports to ${returnTo}: ${c.signatures.join(", ")}; the funder holds ${c.after ?? "an unread balance"}` : `no sweep sent; the funder holds ${c.after ?? "an unread balance"}`);
+    // the keys go only once the funder reads empty on both RPCs with nothing left under its authority
+    let left;
+    try {
+      left = [...(c.after === 0n ? [] : [`the cleanup left the funder at ${c.after ?? "an unread balance"}`]), ...(await ops.leftovers())];
+    } catch (e) {
+      left = [`the check for what is left failed: ${String(e.message).split("\n")[0]}`];
+    }
+    if (left.length) log(`KEYS KEPT in ${dir} (0700; funder.json${programFile ? ", program.json" : ""}): ${left.join("; ")}`);
+    else {
+      rmSync(dir, { recursive: true, force: true });
+      log(`keys removed (${existsSync(dir) ? "STILL THERE" : "gone"})`);
+    }
     if (result) Object.assign(result, { funder_after: String(c.after), swept: String(c.swept) });
-    if (c.after === null || c.after > FEE_PER_SIGNATURE) result = null;
+    if (left.length) result = null;
     process.removeListener("SIGINT", onSignal).removeListener("SIGTERM", onSignal);
   }
-  if (!result) throw new Error("the sweep left the funder with more than one fee");
-  // one line per transaction: a --prior signature may also be in the program's history
+  if (!result) throw new Error("the cleanup did not read the funder empty with nothing left: its keys are kept");
+  // one line per transaction: a --prior signature may also be on the programdata
   const seen = new Set();
   result.txs = txs.filter((t) => !seen.has(t.signature) && seen.add(t.signature));
   await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature));
+  result = await chainRecord(fetchFn, url, result);
   const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
   writeFileSync(outFile, JSON.stringify(result, null, 2) + "\n");
   log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)}`);

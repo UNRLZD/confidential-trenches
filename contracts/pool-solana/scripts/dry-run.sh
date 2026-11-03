@@ -61,6 +61,7 @@ run resumed --no-build --flaky --program "$PROGRAM"
 run resumed-again --no-build --program "$PROGRAM"
 run stopped --no-build
 echo "dry-run: stand-in wallet $D holds $(solana -u "$URL" balance "$D" --lamports) after every run"
+echo "dry-run: runs whose cleanup read the funder empty with nothing left, so removed its keys: $(grep -l 'keys removed (gone)' "$OUT"/*.log | wc -l | tr -d ' ') of 5; kept: $(grep -h 'KEYS KEPT' "$OUT"/*.log | wc -l | tr -d ' ')"
 echo "dry-run: buffers left with any authority: $(solana -u "$URL" program show --buffers --all 2>&1 | tail -n +1 | grep -c '^ *[1-9A-HJ-NP-Za-km-z]\{32,44\} ' || true)"
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/whole.json" --rpc "$URL,http://localhost:$PORT" --record "$OUT/whole-answers.json"
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/resumed.json" --rpc "$URL,http://localhost:$PORT" | tail -1

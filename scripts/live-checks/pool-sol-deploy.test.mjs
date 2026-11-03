@@ -1,7 +1,8 @@
 // Replays pool-sol-deploy.answers.json through the live check: the recorded good answer (the dry run on a local
 // validator, read on two loopback URLs) passes; the same recording with one thing changed fails: an upgrade authority
 // set, other code bytes, bytes after the code, a program the loader does not own, a missing pool, a mark that
-// disagrees with its leaves, a leaf that disagrees with its mark, and RPCs that are not two devnet operators.
+// disagrees with its leaves, a leaf that disagrees with its mark, a funder holding a lamport, and RPCs that are not two
+// devnet operators.
 //   node --test scripts/live-checks/pool-sol-deploy.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -47,7 +48,8 @@ const mark = preMarkAddress(D.program_id, Buffer.from(D.deposit.precommitment, "
 test("the recorded good answer passes, every line ok on both RPCs", async () => {
   const r = await run(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.filter((l) => / on http/.test(l)).length, 2 * 9);
+  assert.equal(r.lines.filter((l) => / on http/.test(l)).length, 2 * (9 + 1 + D.funders.length));
+  assert.ok(D.funders.length >= 1);
 });
 
 test("an upgrade authority set fails", async () => {
@@ -98,4 +100,13 @@ test("a devnet record needs devnet's genesis on two devnet operators", async () 
   assert.match(operatorProblems(["https://api.devnet.solana.com", "http://127.0.0.1:8899"], "localnet")[0], /non-loopback/);
   assert.equal(DEVNET_GENESIS, "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG");
   fails(await run(A.good, { ...D, cluster: "mainnet" }), /cluster is devnet or localnet: mainnet/);
+});
+
+test("a funder holding one lamport fails, on either RPC; a record with no funder fails", async () => {
+  for (const url of A.rpcs) {
+    const out = structuredClone(A.good);
+    for (const a of out) if (a.url === url && a.method === "getBalance" && a.params[0] === D.funders[0]) a.json.result.value = 1;
+    fails(await run(out), new RegExp(`funder ${D.funders[0]} holds 0 lamports on ${url.replace(/[.[\]]/g, "\\$&")}: 1$`, "m"));
+  }
+  fails(await run(A.good, { ...D, funders: [], funder: undefined }), /names the run's funders: 0/);
 });
