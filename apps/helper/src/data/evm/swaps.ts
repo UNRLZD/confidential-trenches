@@ -1,13 +1,15 @@
 // The EVM token page's candles and trade tape from the helper's own chain reads (card index-evm-swaps; markets paper 06b
-// §6.1 `Candles` and `Trades`, 06c §4.12): GET /v1/market/candles and /v1/market/trades with chain=base. No vendor key and no
+// §6.1 `Candles` and `Trades`, 06c §4.12; card index-evm-swaps-2 adds Robinhood): GET /v1/market/candles and
+// /v1/market/trades with chain=base or chain=robinhood. No vendor key and no
 // vendor limit: the swaps are read from the chain, priced by ../candles.ts (the one pricing rule is in its header) and
 // served from memory.
 //
 // The main pool. A listed token is priced from the pool of a supported venue that carried most of its swaps in the last
-// DISCOVER_BLOCKS blocks, found on chain and kept (POOL_KEEP_MS): the token's Transfer logs over those blocks (two
+// cold window's blocks (VENUES[chain].cold), found on chain and kept (POOL_KEEP_MS): the token's Transfer logs over those blocks (two
 // providers that agree) name the addresses that held and moved it; each is checked on chain, never taken on a vendor's
 // word. A v2, v3 or Slipstream pool counts when its factory() is one of the venues below and its token0() and token1()
-// are the token and USDC or WETH; a v4 pool counts when its key hashes to the pool id (keccak256 of the key, the id the
+// are the token and the chain's dollar (USDC, USDG) or WETH; a Pons v2 curve counts when the Pons factory's own record of
+// the token names it (Robinhood); a v4 pool counts when its key hashes to the pool id (keccak256 of the key, the id the
 // PoolManager logs) and pairs the token with USDC, WETH or ETH: the key is the PositionManager's poolKeys() when it knows
 // the pool, and for a pool it never made (Doppler) v4Key works the key out from the swap's fee and the addresses in its
 // transaction, trusted only when the hash equals the id. A token with
@@ -33,13 +35,15 @@
 // the first block it has not settled up to the agreed block on both; a token's logs count only when the two answers are
 // identical. The last REWIND_BLOCKS blocks are read again every tick and replace what the book held for them (a reorg
 // or a late log changes them, ../candles.ts ingest), so a block is settled only REWIND_BLOCKS behind the agreed one.
-// A provider that lags (more than LAG_MAX blocks behind the other) is passed over for the third; one that refuses (429,
+// A provider that lags (more than VENUES[chain].lagMax blocks behind the other) is passed over for the third; one that refuses (429,
 // -32005, a limit message) is held for the wait it names (the helper's RPC rules, ../../rpc/rpc.ts); an answer over
 // ANSWER_MAX bytes or not JSON is a failure. A tick that cannot agree changes nothing; the book keeps serving what it
 // holds until STALE_MS, then the routes answer 503.
 //
-// Block times come from Base's fixed clock (BLOCK_CLOCK, lists.ts): checked against each tick's newest block on both
-// providers, and a tick whose block disagrees with the clock reads nothing.
+// Block times on Base come from its fixed clock (BLOCK_CLOCK, lists.ts): checked against each tick's newest block on both
+// providers, and a tick whose block disagrees with the clock reads nothing. Robinhood has no fixed clock (it put 10 or
+// more blocks in one second): a swap is timed by its log's `blockTimestamp`, part of what two providers must answer
+// alike, never 0 and never before an earlier swap's.
 //
 // Display only: nothing here feeds a signature. Every provider value is hostile input: a log counts only when its
 // emitter, topic0, topic count and data length match the venue exactly; an amount must fit its type and its legs have
@@ -62,6 +66,8 @@ export const TOPIC = {
   swap4: topic("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)"),
   swap3: topic("Swap(address,address,int256,int256,uint160,uint128,int24)"),
   swap2: topic("Swap(address,address,uint256,uint256,uint256,uint256)"),
+  curveBuy: topic("CurveBuy(address,address,uint256,uint256,uint256,uint256)"),
+  curveSell: topic("CurveSell(address,address,uint256,uint256,uint256,uint256)"),
   transfer: topic("Transfer(address,address,uint256)"),
 } as const;
 
@@ -75,12 +81,96 @@ export const BASE_VENUES = {
   weth: "0x4200000000000000000000000000000000000006",
 } as const;
 const ZERO = "0x0000000000000000000000000000000000000000";
-/** Selectors: token0(), token1(), factory(), decimals(), and the PositionManager's poolKeys(bytes25). */
-const SEL = { token0: "0x0dfe1681", token1: "0xd21220a7", factory: "0xc45a0155", decimals: "0x313ce567", poolKeys: "0x86b6be7d" } as const;
+/** Selectors: token0(), token1(), factory(), decimals(), the PositionManager's poolKeys(bytes25), and the Pons v2
+ *  factory's getLaunchedToken(address). */
+const SEL = { token0: "0x0dfe1681", token1: "0xd21220a7", factory: "0xc45a0155", decimals: "0x313ce567", poolKeys: "0x86b6be7d", launched: "0x3cf28b5a" } as const;
 /** The ETH price: Uniswap v4's native ETH / USDC 0.05% pool (tick spacing 10, no hook), the one BuyV4Fork.t.sol buys through.
  *  Its id is keccak256(abi.encode(currency0 0x0, currency1 USDC, fee 500, tickSpacing 10, hooks 0x0)); 7 swaps in 100
  *  blocks read 2026-11-03 17:08Z, the last at 2,295.6 USD per ETH. */
 export const REF_POOL_ID = "0x96d4b53a38337a5733179751781178a2613306063c511b78cd02684739288c0a";
+
+/**
+ * Robinhood Chain (chain id 4663: eth_chainId 0x1237 on its three public providers, 2026-11-03 19:1xZ). Uniswap's own
+ * addresses (@uniswap/sdk-core 7.20.0 dist/cjs/src/addresses.js ROBINHOOD_ADDRESSES): v3CoreFactoryAddress 0x1f7d7550...,
+ * v4PoolManagerAddress 0x8366a39c... (also contracts/pool-evm/test/BuyV4Fork.t.sol), v4PositionManagerAddress
+ * 0x58daec31.... WETH and USDG are the kit's (packages/kit/src/trade/evm/buy-unpinned.ts). The ETH price is v4's native
+ * ETH / USDG 0.05% pool (tick spacing 10, no hook; BuyV4Fork.t.sol's Robinhood hop): 166 swaps in 9,000 blocks read
+ * 2026-11-03 19:2xZ, the longest gap 386 blocks.
+ *
+ * The Pons v2 curve: PonsV2LaunchFactory 0x7ed598bc... (Sourcify chain 4663, exact match, contracts/src/v2/
+ * PonsV2LaunchFactory.sol) makes each token's own PonsV2BondingCurve (its source is in the same Sourcify compilation,
+ * contracts/src/v2/PonsV2BondingCurve.sol) and records it: getLaunchedToken(token) answers the LaunchedToken struct
+ * (15 static words: token, curve, deployer, creatorFeeRecipient, pairToken, ..., exists last); pairToken zero is native
+ * ETH. A curve trade logs CurveBuy(address indexed buyer, address indexed recipient, uint256 quoteIn, uint256 tokensOut,
+ * uint256 fee, uint256 tax), quoteIn the quote the buyer spent with the fees in it, or CurveSell(address indexed seller,
+ * address indexed recipient, uint256 tokensIn, uint256 quoteOut, uint256 fee, uint256 tax), quoteOut what the seller
+ * got after them; both topics are the ones the chain's curves log (75 and 69 of 175 curve logs over 5,000 blocks,
+ * 2026-11-03 19:2xZ). A graduated token trades on its v4 pool, found as any v4 pool is.
+ */
+export const ROBINHOOD_VENUES = {
+  poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+  positionManager: "0x58daec3116aae6d93017baaea7749052e8a04fa7",
+  uniswapV3: "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+  usdg: "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+  weth: "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+  ponsV2: "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+} as const;
+export const ROBINHOOD_REF_POOL_ID = "0x387bf619da4d3fb62bb276482693dba1b9b3520f573cabdfe033384a24125982";
+
+/** A chain's venues and read sizes. `usd` is the chain's dollar stablecoin (6 decimals on both). */
+export type Venues = {
+  poolManager: string;
+  positionManager: string;
+  v3: readonly string[];
+  v2: readonly string[];
+  usd: string;
+  weth: string;
+  refPoolId: string;
+  pons: readonly string[];
+  /** The most blocks one `eth_getLogs` asks (the smallest the chain's providers take). */
+  span: number;
+  /** The blocks a token's first read and its discovery go back, and the ETH price's first read. */
+  cold: number;
+  refCold: number;
+  /** A provider this many blocks behind the other is passed over for the third. */
+  lagMax: number;
+};
+export const VENUES: Readonly<Record<EvmChain, Venues>> = {
+  base: {
+    poolManager: BASE_VENUES.poolManager,
+    positionManager: BASE_VENUES.positionManager,
+    v3: [BASE_VENUES.uniswapV3, ...BASE_VENUES.slipstream],
+    v2: [BASE_VENUES.aerodromeV2],
+    usd: BASE_VENUES.usdc,
+    weth: BASE_VENUES.weth,
+    refPoolId: REF_POOL_ID,
+    pons: [],
+    span: 1_000,
+    cold: 600,
+    refCold: 2_000,
+    lagMax: 10,
+  },
+  // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): 3,000 blocks are its last
+  // five minutes (600, one minute, found no pool for a v4 token with 213 swaps in the 2,000 blocks before, read live
+  // 2026-11-03 19:5xZ), the bars before them come from GeckoTerminal's OHLCV as on Base; 100 blocks is the widest
+  // `eth_getLogs` its keyless providers all take (api.blockvectra.com "block range exceeds 100 blocks",
+  // robinhood.drpc.org refuses 500), so a first read is 30 spans, batched; the ETH price pool's longest gap read was
+  // 386 blocks, so its first read goes 1,000 blocks further back
+  robinhood: {
+    poolManager: ROBINHOOD_VENUES.poolManager,
+    positionManager: ROBINHOOD_VENUES.positionManager,
+    v3: [ROBINHOOD_VENUES.uniswapV3],
+    v2: [],
+    usd: ROBINHOOD_VENUES.usdg,
+    weth: ROBINHOOD_VENUES.weth,
+    refPoolId: ROBINHOOD_REF_POOL_ID,
+    pons: [ROBINHOOD_VENUES.ponsV2],
+    span: 100,
+    cold: 3_000,
+    refCold: 4_000,
+    lagMax: 50,
+  },
+};
 
 /** Base's providers for the swap read, public and keyless, measured 2026-11-03 17:02Z: `eth_getLogs` for one pool over 1,000
  *  blocks answered by base-rpc.publicnode.com (457 ms) and base.gateway.tenderly.co (582 ms); base.drpc.org up to 10,000
@@ -88,39 +178,46 @@ export const REF_POOL_ID = "0x96d4b53a38337a5733179751781178a2613306063c511b78cd
  *  1rpc.io 50 blocks. */
 export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.drpc.org", "https://base-pokt.nodies.app"],
-  robinhood: [],
+  // Robinhood, 2026-11-03 19:2xZ, `eth_getLogs` of the v4 PoolManager: robinhood.daybreak-rpc.network up to 2,000 blocks
+  // (batches of 10), robinhood.drpc.org up to 101 blocks (batches of 3), api.blockvectra.com up to 100 blocks (no
+  // batches); each of the three fills a log's `blockTimestamp`. rpc.mainnet.chain.robinhood.com answers 5,000 blocks but
+  // logs `blockTimestamp` 0x0 and refused a fourth quick read with 429; robinhood-rpc.publicnode.com refused every
+  // `eth_getLogs` ("Archive requests require a personal token"); blockreq.com's public endpoint took 21 s.
+  robinhood: ["https://robinhood.daybreak-rpc.network", "https://robinhood.drpc.org", "https://api.blockvectra.com/v1/robinhood_mainnet/public"],
 };
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
-const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://base.gateway.tenderly.co": 4 };
+const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://base.gateway.tenderly.co": 4, "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1 };
 
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
  *  are enough for the reorgs seen and the live tape stays within seconds. */
 export const REWIND_BLOCKS = 10;
-/** The blocks a token's first read goes back: 200 on Base, 06c §4.12's cold open. */
-export const COLD_BLOCKS = 600;
-/** The blocks of a token's Transfer logs its main pool is found from. */
-export const DISCOVER_BLOCKS = 600; // the book's first read is the discovery's own: the same window as COLD_BLOCKS
+/** The blocks a token's first read goes back on Base (06c §4.12's cold open); each chain's own is VENUES[chain].cold. */
+export const COLD_BLOCKS = VENUES.base.cold;
+/** The blocks of a token's Transfer logs its main pool is found from: the chain's cold window, so the book's first read
+ *  is the discovery's own. */
+export const DISCOVER_BLOCKS = COLD_BLOCKS;
 /** The addresses of a token's transfers checked as pools, busiest first, and the v4 pools checked. */
 const CANDIDATES_MAX = 6;
 const V4_TXS = 3;
 /** A token's main pool is looked for again after this. */
 export const POOL_KEEP_MS = 6 * 3_600_000;
-/** The blocks the ETH price's first read goes back, so that a swap in the cold window has one before it. */
-export const REF_COLD_BLOCKS = 2_000;
-/** The most blocks one `eth_getLogs` asks, and the most such reads one tick makes for a token. */
-export const SPAN_MAX = 1_000;
+/** The blocks the ETH price's first read goes back, so that a swap in the cold window has one before it (Base). */
+export const REF_COLD_BLOCKS = VENUES.base.refCold;
+/** The most blocks one `eth_getLogs` asks on Base, and the most such reads one tick makes for a token past its cold
+ *  window (which takes cold / span reads). */
+export const SPAN_MAX = VENUES.base.span;
 const CHUNKS_MAX = 3;
 /** Providers asked for one answer at most: two, and two more when they differ. */
 const PROVIDERS_MAX = 4;
-/** A provider this many blocks behind the other is passed over for the third. */
-export const LAG_MAX = 10;
+/** A provider this many blocks behind the other is passed over for the third (Base). */
+export const LAG_MAX = VENUES.base.lagMax;
 /** A token nobody asked for this long stops being read (its book is dropped). */
 export const IDLE_MS = 60_000;
-/** The tick period: Base's block time. */
-export const TICK_MS = 2_000;
+/** The tick period. */
+export const TICK_MS = 1_000;
 /** A book not read for this long answers 503 rather than a stale chart. */
 export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
@@ -156,13 +253,14 @@ const DYNAMIC_FEE = 0x800000;
  * standard tier, the hooks among the addresses in the transaction (or none), and a tick spacing. A hash that equals the
  * id proves the key; nothing else is accepted.
  */
-export function v4Key(id: string, token: string, swapFee: number, around: readonly string[]): string | null {
+export function v4Key(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): string | null {
+  const V = VENUES[chain];
   const w = (n: bigint): string => n.toString(16).padStart(64, "0");
   const a = (x: string): string => x.slice(2).padStart(64, "0");
-  const hooks = [ZERO, ...around.filter((x) => x !== token && x !== BASE_VENUES.poolManager && x !== BASE_VENUES.weth && x !== BASE_VENUES.usdc).slice(0, HOOKS_MAX)];
+  const hooks = [ZERO, ...around.filter((x) => x !== token && x !== V.poolManager && x !== V.weth && x !== V.usd).slice(0, HOOKS_MAX)];
   const fees = [...new Set([swapFee, DYNAMIC_FEE, 100, 500, 2500, 3000, 10000])];
   const spacings = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
-  for (const other of [ZERO, BASE_VENUES.weth, BASE_VENUES.usdc]) {
+  for (const other of [ZERO, V.weth, V.usd]) {
     const [c0, c1] = token < other ? [token, other] : [other, token];
     for (const ts of spacings) for (const h of hooks) for (const f of fees) {
       const k = `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
@@ -172,7 +270,8 @@ export function v4Key(id: string, token: string, swapFee: number, around: readon
   return null;
 }
 
-export type Log = { block: number; index: number; tx: string; address: string; topics: string[]; data: string };
+/** `t`: the block's time as the provider logged it (`blockTimestamp`), null when it gave none; 0 is no time either. */
+export type Log = { block: number; index: number; tx: string; address: string; topics: string[]; data: string; t?: number | null };
 const WORD = /^0x[0-9a-f]{64}$/;
 const HEXDATA = /^0x([0-9a-f]{64})*$/;
 const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
@@ -190,7 +289,8 @@ export function parseLog(raw: unknown): Log | null {
   const ts = topics.map((t) => (typeof t === "string" ? t.toLowerCase() : ""));
   const data = typeof l.data === "string" ? l.data.toLowerCase() : "";
   if (!ts.every((t) => WORD.test(t)) || data.length > 2 + 64 * 16 || !HEXDATA.test(data)) return null;
-  return { block, index, tx, address, topics: ts, data };
+  const t = l.blockTimestamp === undefined ? null : hexInt(l.blockTimestamp);
+  return { block, index, tx, address, topics: ts, data, t };
 }
 
 /** The logs of an `eth_getLogs` result, in block and log order, or null when it is not a list of valid logs. */
@@ -206,9 +306,10 @@ export function parseLogs(result: unknown): Log[] | null {
   return out.sort((a, b) => a.block - b.block || a.index - b.index);
 }
 
-const key = (l: Log) => `${l.block}:${l.index}:${l.tx}:${l.address}:${l.topics.join(",")}:${l.data}`;
-/** Whether two providers' answers for one filter are the same logs. */
-export const sameLogs = (a: Log[], b: Log[]): boolean => a.length === b.length && a.every((l, i) => key(l) === key(b[i]!));
+const key = (l: Log, withTime: boolean) => `${l.block}:${l.index}:${l.tx}:${l.address}:${l.topics.join(",")}:${l.data}${withTime ? `:${l.t ?? "-"}` : ""}`;
+/** Whether two providers' answers for one filter are the same logs; `withTime`: with the same block times too (a chain
+ *  with no fixed block clock, whose swaps are timed by them). */
+export const sameLogs = (a: Log[], b: Log[], withTime = false): boolean => a.length === b.length && a.every((l, i) => key(l, withTime) === key(b[i]!, withTime));
 
 const word = (data: string, i: number): string => data.slice(2 + 64 * i, 2 + 64 * (i + 1));
 const addrOf = (w: string): string => `0x${w.slice(24)}`;
@@ -229,8 +330,8 @@ const unsigned = (w: string, bits: number): bigint | null => {
 // ---------------------------------------------------------------------------------------------------------------
 
 export type Pool = {
-  venue: "v4" | "v3" | "v2";
-  /** A pool's address, or a v4 pool's id (what GeckoTerminal calls the pool). */
+  venue: "v4" | "v3" | "v2" | "curve";
+  /** A pool's address (a Pons curve's), or a v4 pool's id (what GeckoTerminal calls the pool). */
   id: string;
   token: string;
   tokenIs0: boolean;
@@ -238,18 +339,20 @@ export type Pool = {
 };
 
 /** The `eth_getLogs` filter for a pool's swaps over blocks `from` to `to`. */
-export function swapFilter(pool: Pick<Pool, "venue" | "id">, from: number, to: number): Record<string, unknown> {
+export function swapFilter(pool: Pick<Pool, "venue" | "id">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown> {
   const range = { fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` };
-  if (pool.venue === "v4") return { address: BASE_VENUES.poolManager, topics: [TOPIC.swap4, pool.id], ...range };
+  if (pool.venue === "v4") return { address: VENUES[chain].poolManager, topics: [TOPIC.swap4, pool.id], ...range };
+  if (pool.venue === "curve") return { address: pool.id, topics: [[TOPIC.curveBuy, TOPIC.curveSell]], ...range };
   return { address: pool.id, topics: [pool.venue === "v3" ? TOPIC.swap3 : TOPIC.swap2], ...range };
 }
-const refFilter = (from: number, to: number) => swapFilter({ venue: "v4", id: REF_POOL_ID }, from, to);
+const refFilter = (from: number, to: number, chain: EvmChain) => swapFilter({ venue: "v4", id: VENUES[chain].refPoolId }, from, to, chain);
 
 const TWO_192 = 1n << 192n;
 /** A swap log of the ETH price pool as the ETH price it leaves, or null: USD per ETH times 10^18 from the pool's price
  *  after the swap (sqrtPriceX96 squared over 2^192 is USDC units per wei; times 10^12 for USD per ETH; times 10^18). */
-export function decodeRef(l: Log): Ref | null {
-  if (l.address !== BASE_VENUES.poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.topics[1] !== REF_POOL_ID || l.data.length !== 2 + 64 * 6) return null;
+export function decodeRef(l: Log, chain: EvmChain = "base"): Ref | null {
+  const V = VENUES[chain];
+  if (l.address !== V.poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.topics[1] !== V.refPoolId || l.data.length !== 2 + 64 * 6) return null;
   const sqrt = unsigned(word(l.data, 2), 160);
   if (sqrt === null || sqrt === 0n) return null;
   const ethUsd = (sqrt * sqrt * 10n ** 30n) / TWO_192;
@@ -260,11 +363,20 @@ export function decodeRef(l: Log): Ref | null {
 
 /** A swap log of `pool` as a Swap (its `t` is set by the caller), or null when it is not one. The pool's deltas: v3 as
  *  logged; v4 the swapper's, negated; v2 in minus out. Side is `b` when the pool paid the token out. */
-export function decodeSwap(pool: Pool, l: Log): Omit<Swap, "t"> | null {
+export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<Swap, "t"> | null {
   let d0: bigint | null;
   let d1: bigint | null;
+  if (pool.venue === "curve") {
+    // a Pons curve's own trade: the token and the quote it moved, as the buyer paid or the seller got them
+    if (l.address !== pool.id || l.topics.length !== 3 || (l.topics[0] !== TOPIC.curveBuy && l.topics[0] !== TOPIC.curveSell) || l.data.length !== 2 + 64 * 4) return null;
+    const [a, b] = [unsigned(word(l.data, 0), 256)!, unsigned(word(l.data, 1), 256)!];
+    const buy = l.topics[0] === TOPIC.curveBuy;
+    const [amt, quote] = buy ? [b, a] : [a, b];
+    if (amt === 0n || quote === 0n) return null;
+    return { kind: "swap", block: l.block, index: l.index, tx: l.tx, side: buy ? "b" : "s", amt, quote };
+  }
   if (pool.venue === "v4") {
-    if (l.address !== BASE_VENUES.poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.topics[1] !== pool.id || l.data.length !== 2 + 64 * 6) return null;
+    if (l.address !== VENUES[chain].poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.topics[1] !== pool.id || l.data.length !== 2 + 64 * 6) return null;
     const [a0, a1] = [signed(word(l.data, 0), 128), signed(word(l.data, 1), 128)];
     [d0, d1] = [a0 === null ? null : -a0, a1 === null ? null : -a1];
   } else if (pool.venue === "v3") {
@@ -289,11 +401,20 @@ type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
 export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
-  if (chain !== "base") throw new Error("swaps: only Base is served");
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
-  const clock = BLOCK_CLOCK[chain]!;
+  const V = VENUES[chain];
+  // Base's fixed clock times its blocks; a chain with none (Robinhood) is timed by each log's own block time, which two
+  // providers must give alike
+  const clock = BLOCK_CLOCK[chain];
+  const timeOf = (l: Log): number | null => (clock !== null ? clock.genesisS + clock.blockS * l.block : typeof l.t === "number" && l.t > 0 ? l.t : null);
+  /** Blocks `from` to `to` in spans of at most V.span. */
+  const spans = (from: number, to: number): [number, number][] => {
+    const out: [number, number][] = [];
+    for (let lo = from; lo <= to; lo += V.span) out.push([lo, Math.min(to, lo + V.span - 1)]);
+    return out;
+  };
   const held = new Map<string, number>(); // provider -> held until (ms)
 
   /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
@@ -366,11 +487,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const ok = usable(rpcs);
     await read(ok.slice(0, 2));
     const first = [...heads.values()];
-    if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > LAG_MAX)) await read(ok.slice(2, 3));
+    if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await read(ok.slice(2, 3));
     const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
     const withIt = sorted.filter(([, h]) => h.n >= agreed).map(([u]) => u);
+    if (clock === null) return { n: agreed, t: sorted[1]![1].t, with: withIt };
     // every provider's head block must sit on the chain's clock
     for (const [, h] of sorted) if (h.t !== clock.genesisS + clock.blockS * h.n) return null;
     return { n: agreed, t: clock.genesisS + clock.blockS * agreed, with: withIt };
@@ -415,8 +537,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const r = await batchTo(u, idx.map((i) => ({ method: "eth_getLogs", params: [filters[i]] })));
         return idx.map((_, k) => (r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null));
       },
-      sameLogs,
+      (a, b) => sameLogs(a, b, clock === null),
     );
+  }
+
+  /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed. */
+  async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown>, from: number, to: number): Promise<Log[] | null> {
+    const parts = await agreedLogs(urls, spans(from, to).map(([lo, hi]) => filter(lo, hi)));
+    return parts.some((x) => x == null) ? null : (parts as Log[][]).flat();
   }
 
   /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. */
@@ -448,11 +576,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const wordAddr = (r: string | undefined, i = 0): string | null => (r !== undefined && /^0x([0-9a-f]{64})+$/.test(r) && r.length >= 2 + 64 * (i + 1) ? `0x${r.slice(2 + 64 * i + 24, 2 + 64 * (i + 1))}` : null);
 
   async function findPool(token: string): Promise<Found | null> {
-    const V = BASE_VENUES;
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
-    const from = head.n - DISCOVER_BLOCKS + 1;
-    const [tlogs] = await agreedLogs(head.with, [{ address: token, topics: [TOPIC.transfer], fromBlock: `0x${from.toString(16)}`, toBlock: `0x${head.n.toString(16)}` }]);
+    const from = head.n - V.cold + 1;
+    const tlogs = await agreedRange(head.with, (lo, hi) => ({ address: token, topics: [TOPIC.transfer], fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }), from, head.n);
     if (tlogs == null) throw new Error("transfers not agreed");
     // who held and moved the token, and the PoolManager's latest transactions
     const count = new Map<string, number>();
@@ -472,17 +599,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const factories = await callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory })));
     const ofVenue = top.filter((_, i) => {
       const f = wordAddr(factories[i]);
-      return f !== null && (f === V.aerodromeV2 || f === V.uniswapV3 || (V.slipstream as readonly string[]).includes(f));
+      return f !== null && (V.v2.includes(f) || V.v3.includes(f));
     });
     const pairs = await callsAgreed(head.n, ofVenue.flatMap((a) => [SEL.token0, SEL.token1].map((data) => ({ to: a, data }))));
     ofVenue.forEach((a, i) => {
       const [f, t0, t1] = [wordAddr(factories[top.indexOf(a)]), wordAddr(pairs[2 * i]), wordAddr(pairs[2 * i + 1])];
       if (f === null || t0 === null || t1 === null) return;
-      const isV2 = f === V.aerodromeV2;
+      const isV2 = V.v2.includes(f);
       const tokenIs0 = t0 === token;
       if (!tokenIs0 && t1 !== token) return;
       const other = tokenIs0 ? t1 : t0;
-      const quote = other === V.usdc ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
+      const quote = other === V.usd ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
       if (quote !== null) cands.push({ venue: isV2 ? "v2" : "v3", id: a, token, tokenIs0, quote });
     });
     // v4 pools: the pool ids the PoolManager's recent swaps in the token's transactions name. A key is the
@@ -510,25 +637,35 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         let k: string | undefined = keys[i];
         if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k) || keccakHex(k) !== id) {
           const e = seen.get(id)!;
-          k = v4Key(id, token, e.fee, [...e.around]) ?? undefined; // the key must hash to the id
+          k = v4Key(id, token, e.fee, [...e.around], chain) ?? undefined; // the key must hash to the id
         }
         if (k === undefined) return;
         const [c0, c1] = [wordAddr(k, 0)!, wordAddr(k, 1)!];
         const tokenIs0 = c0 === token;
         if (!tokenIs0 && c1 !== token) return;
         const other = tokenIs0 ? c1 : c0;
-        const quote = other === V.usdc ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth || other === ZERO ? ({ kind: "eth", decimals: 18 } as const) : null;
+        const quote = other === V.usd ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth || other === ZERO ? ({ kind: "eth", decimals: 18 } as const) : null;
         if (quote !== null) cands.push({ venue: "v4", id, token, tokenIs0, quote });
       });
+    }
+    // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
+    if (V.pons.length > 0) {
+      const recs = await callsAgreed(head.n, V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` })));
+      for (const r of recs) {
+        if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) continue;
+        const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
+        const quote = pair === V.usd ? ({ kind: "usd", decimals: 6 } as const) : pair === ZERO || pair === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
+        if (curve !== ZERO && quote !== null) cands.push({ venue: "curve", id: curve, token, tokenIs0: false, quote });
+      }
     }
     if (cands.length === 0) return null;
     // the pool with most swaps in the window is the main pool (ties: the lower id); its logs are the book's first read
     const [swaps, [d], refOk] = await Promise.all([
-      agreedLogs(head.with, cands.map((c) => swapFilter(c, from, head.n))),
+      Promise.all(cands.map((c) => agreedRange(head.with, (lo, hi) => swapFilter(c, lo, hi, chain), from, head.n))),
       callsAgreed(head.n, [{ to: token, data: SEL.decimals }]),
       cands.some((c) => c.quote.kind === "eth") ? readRef(head.with, head.n) : Promise.resolve(true),
     ]);
-    const score = cands.map((c, i) => (swaps[i] == null ? -1 : swaps[i]!.filter((l) => decodeSwap(c, l) !== null).length));
+    const score = cands.map((c, i) => (swaps[i] == null ? -1 : swaps[i]!.filter((l) => decodeSwap(c, l, chain) !== null).length));
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
     const best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
     if (best.n <= 0) return null;
@@ -565,17 +702,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** Reads the ETH price pool's swaps up to `to` (once per tick, shared). */
   async function readRef(urls: readonly string[], to: number): Promise<boolean> {
-    const from = refTo === null ? to - REF_COLD_BLOCKS + 1 : refTo + 1 - REWIND_BLOCKS;
+    const from = refTo === null ? to - V.refCold + 1 : refTo + 1 - REWIND_BLOCKS;
     if (from > to) return true;
-    let events = refEvents.filter((e) => e.block < from);
-    for (let lo = from; lo <= to; lo += SPAN_MAX) {
-      const hi = Math.min(to, lo + SPAN_MAX - 1);
-      const [logs] = await agreedLogs(urls, [refFilter(lo, hi)]);
-      if (logs == null) return false;
-      events = events.concat(logs.map(decodeRef).filter((r): r is Ref => r !== null));
-    }
-    // kept: the last REF_COLD_BLOCKS blocks, so a book's first swaps always have a price before them
-    refEvents = events.filter((e) => e.block > to - REF_COLD_BLOCKS);
+    const logs = await agreedRange(urls, (lo, hi) => refFilter(lo, hi, chain), from, to);
+    if (logs == null) return false;
+    const events = refEvents.filter((e) => e.block < from).concat(logs.map((l) => decodeRef(l, chain)).filter((r): r is Ref => r !== null));
+    // kept: the last refCold blocks, so a book's first swaps always have a price before them
+    refEvents = events.filter((e) => e.block > to - V.refCold);
     refTo = to;
     return true;
   }
@@ -584,10 +717,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  or an ETH-quoted swap has no ETH price before it yet (the caller reads again). */
   function apply(e: Entry, from: number, to: number, headN: number, logs: Log[]): boolean {
     const events: Event[] = [];
+    let last = 0;
     for (const l of logs) {
       if (l.block < from || l.block > to) return false;
-      const s = decodeSwap(e.pool, l);
-      if (s !== null) events.push({ ...s, t: clock.genesisS + clock.blockS * s.block });
+      const s = decodeSwap(e.pool, l, chain);
+      if (s === null) continue;
+      // a swap is timed by its block: never 0, never before an earlier block's time
+      const t = timeOf(l);
+      if (t === null || t < last) return false;
+      last = t;
+      events.push({ ...s, t });
     }
     let merged: Event[] = events;
     if (e.pool.quote.kind === "eth") {
@@ -604,34 +743,47 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return true;
   }
 
-  /** One book's read up to the agreed head: its pool's swaps (and the ETH price's) from where it is settled. */
-  async function readBook(e: Entry, urls: readonly string[], head: { n: number; t: number }): Promise<boolean> {
+  /** One book's read up to the agreed head: its pool's swaps from where it is settled, folded in once `refReady` says
+   *  the ETH price is read to the same block (an ETH-quoted book; read at the same time, so a tick is one round). */
+  async function readBook(e: Entry, urls: readonly string[], head: { n: number; t: number }, refReady: Promise<boolean>): Promise<boolean> {
     const first = e.book.settledTo < 0 && e.readAt === null;
-    let from = first ? head.n - COLD_BLOCKS + 1 : e.book.settledTo + 1;
-    for (let chunks = 0; from <= head.n && chunks < CHUNKS_MAX; chunks++) {
-      const to = Math.min(head.n, from + SPAN_MAX - 1);
-      const [logs] = await agreedLogs(urls, [swapFilter(e.pool, from, to)]);
-      if (logs == null || !apply(e, from, to, head.n, logs)) return false;
-      from = to + 1;
-    }
-    return true;
+    const from = first ? head.n - V.cold + 1 : e.book.settledTo + 1;
+    // one tick reads at most the cold window, or CHUNKS_MAX spans past it; the rest is read the next tick
+    const to = Math.min(head.n, from + Math.max(V.cold, CHUNKS_MAX * V.span) - 1);
+    if (from > to) return true;
+    const logs = await agreedRange(urls, (lo, hi) => swapFilter(e.pool, lo, hi, chain), from, to);
+    if (logs == null || (e.pool.quote.kind === "eth" && !(await refReady))) return false;
+    return apply(e, from, to, head.n, logs);
   }
 
   let running: Promise<void> | null = null;
+  /** The timer fired while a tick ran: the next starts as soon as it ends, never a skipped period. */
+  let again = false;
   async function tick(): Promise<void> {
     for (const [t, e] of books) if (now() - e.touched > IDLE_MS) books.delete(t);
     if (books.size === 0) return;
     const head = await agreedHead();
     if (head === null) return;
-    // an ETH-quoted book is read only once the ETH price is read to the same block, so no swap is priced by an older price
+    // the ETH price and the books are read at once; an ETH-quoted book is folded in only once the ETH price is read to
+    // the same block, so no swap is priced by an older price (a tick of three rounds one after another outlasted 1 s)
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
-    const refOk = !needRef || (await readRef(head.with, head.n));
+    const refReady = needRef ? readRef(head.with, head.n).catch(() => false) : Promise.resolve(true);
     // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks
-    const due = [...books.values()].filter((e) => e.pool.quote.kind !== "eth" || refOk);
-    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head).catch(() => false)));
+    const due = [...books.values()];
+    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
+    await refReady;
   }
   function start(): Promise<void> {
-    if (!running) running = tick().catch(() => undefined).finally(() => (running = null));
+    if (!running)
+      running = tick()
+        .catch(() => undefined)
+        .finally(() => {
+          running = null;
+          if (again) {
+            again = false;
+            void start();
+          }
+        });
     return running;
   }
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -643,7 +795,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         timer = null;
         return;
       }
-      void start();
+      if (running !== null) again = true;
+      else void start();
     }, deps.tickMs ?? TICK_MS);
     timer.unref();
   }

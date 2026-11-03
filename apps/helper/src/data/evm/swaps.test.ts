@@ -311,3 +311,48 @@ test("a tick reads the open tokens at once, not one after another (a dozen books
   // each book's read asks two providers at once; two books at once make four
   assert.ok(most >= 4, `at most ${most} requests in flight`);
 });
+
+/** A fetch that waits `ms` before each answer and keeps what was asked, with when. */
+function slowChain(ms: number) {
+  const chain = fakeChain();
+  const st = { flying: 0, most: 0, heads: 0 };
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    st.flying++;
+    st.most = Math.max(st.most, st.flying);
+    if (String(init.body).includes("eth_getBlockByNumber")) st.heads++;
+    await new Promise((r) => setTimeout(r, ms));
+    try {
+      return await chain.fetch(url, init);
+    } finally {
+      st.flying--;
+    }
+  };
+  return { chain, st, fetch };
+}
+
+test("a tick reads the ETH price and an ETH-quoted book at once, not the price first (three rounds outlast a 1 s tick on Robinhood's providers)", async () => {
+  const { chain, st, fetch } = slowChain(15);
+  const s = createSwaps("base", { fetch, now: () => 1_000_000, listed: async () => true, rpcs: URLS, pools: new Map([[VVV, KNOWN.get(VVV)!]]), tickMs: 0 });
+  chain.st.head = REC.firstHead + 100;
+  await s.candles(VVV, "1m", null, 5);
+  st.most = 0;
+  chain.st.head = REC.firstHead + 110;
+  await s.tick();
+  s.stop();
+  // two providers asked for the ETH price and two for the book, at once
+  assert.ok(st.most >= 4, `at most ${st.most} requests in flight`);
+});
+
+test("a tick that outlasts the period is followed at once by the next, never a skipped period", async () => {
+  // each request takes 150 ms, so a tick (the head, then the book and the ETH price) takes about 300 ms, past the 250 ms
+  // period: ticks back to back make about five in 1.5 s; a timer that drops the period a tick overran makes three
+  const { chain, st, fetch } = slowChain(150);
+  const s = createSwaps("base", { fetch, now: () => 1_000_000, listed: async () => true, rpcs: URLS, pools: new Map([[VVV, KNOWN.get(VVV)!]]), tickMs: 250 });
+  chain.st.head = REC.firstHead + 100;
+  await s.candles(VVV, "1m", null, 5);
+  st.heads = 0;
+  await new Promise((r) => setTimeout(r, 1_500));
+  s.stop();
+  const ticks = st.heads / 2; // each tick reads two providers' heads
+  assert.ok(ticks >= 4, `${ticks} ticks in 1.5 s`);
+});
