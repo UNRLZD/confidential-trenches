@@ -567,18 +567,46 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
   return { chunk, peak, left, problem };
 }
 
-/** M352/M353: the fee payer's cost of one release, from the device's own rent read: the spent mark's rent(0), the
- * change note's 72-byte page entry and two signatures (5,000 each). 1,026,000 lamports at 5,080 a byte. */
-export const solanaPoolReleaseCost = (rent: SolanaRent): bigint => solanaRentMin(rent, 0) + 72n * rent.lamportsPerByte * rent.factor + 10_000n;
+/** M352/M353/M355: the fee payer's cost of one release, from the device's own rent read: the spent mark, which records
+ * withdrawnValue in 8 bytes (rent(8)), the change note's 72-byte page entry and two signatures (5,000 each). 1,066,640
+ * lamports at 5,080 a byte. The one definition of the Solana fee rules (M356 (6)): the wallet and the helper import
+ * this cost, the fee, the priority budget and the send margin from here. */
+export const SOLANA_POOL_SPENT_MARK_LEN = 8;
+export const solanaPoolReleaseCost = (rent: SolanaRent): bigint =>
+  solanaRentMin(rent, SOLANA_POOL_SPENT_MARK_LEN) + 72n * rent.lamportsPerByte * rent.factor + 10_000n;
+/** The epoch relay fee's step, and the headroom over the cost (M353): two steps. */
+export const SOLANA_POOL_FEE_STEP = 100_000n;
+export const SOLANA_POOL_FEE_HEADROOM = 2n * SOLANA_POOL_FEE_STEP;
+/** The epoch relay fee: the cost rounded up to the step, plus two steps. 1,300,000 at 5,080 a byte. */
+export const solanaPoolFee = (rent: SolanaRent): bigint => {
+  const cost = solanaPoolReleaseCost(rent);
+  return ((cost + SOLANA_POOL_FEE_STEP - 1n) / SOLANA_POOL_FEE_STEP) * SOLANA_POOL_FEE_STEP + SOLANA_POOL_FEE_HEADROOM;
+};
+/** M356 (5): the share of a page's opening each entry carries, so a release that opens a page stays paid for: the
+ * page's rent beyond its entries (its 16-byte header and the account overhead) over its 1,024 entries, rounded up.
+ * ceil(731,520 / 1,024) = 715 lamports at 5,080 a byte. */
+export const SOLANA_POOL_PAGE_HEADER_LEN = 16;
+export const solanaPoolPageReserve = (rent: SolanaRent): bigint => {
+  const open = solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER_LEN);
+  const n = BigInt(SOLANA_POOL_PAGE_ENTRIES);
+  return (open + n - 1n) / n;
+};
+/** M356 (5): what a release may spend on priority (CU limit x price / 1e6, lamports): the relay fee less the cost and
+ * the page reserve. 232,645 at 5,080 a byte and the epoch fee 1,300,000. */
+export const solanaPoolPriorityBudget = (rent: SolanaRent, relayFee: bigint = solanaPoolFee(rent)): bigint =>
+  relayFee - solanaPoolReleaseCost(rent) - solanaPoolPageReserve(rent);
+/** M356 (1): the Solana send margin. A deadline under now + 90 s is refused by the device and the helper; 90 s is
+ * longer than a blockhash lives (150 blocks), so a signed send cannot outlive its deadline. */
+export const SOLANA_POOL_SEND_MARGIN_MS = 90_000n;
 /**
- * The priority fee W sets (CU limit x price, in micro-lamports) must fit in what the relay fee leaves after the
- * release's cost, or the helper refuses the transaction W already signed (apps/helper/src/pool/solana.ts
- * fee_below_cost: relay_fee >= cost + ceil(limit x price / 1e6)).
+ * The priority fee W sets (CU limit x price, in micro-lamports) must fit in the priority budget of the release's relay
+ * fee, or the helper refuses the transaction W already signed (apps/helper/src/pool/solana.ts fee_below_cost:
+ * relay_fee >= cost + page reserve + ceil(limit x price / 1e6)).
  */
 export function solanaPoolPriorityProblem(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "cuPrice">, rent: SolanaRent): string | null {
-  const room = release.relayFee - solanaPoolReleaseCost(rent);
+  const room = solanaPoolPriorityBudget(rent, release.relayFee);
   const priority = BigInt(SOLANA_POOL_BUY_CU[venue.kind]) * req.cuPrice;
-  return room < 0n || priority > room * 1_000_000n ? `the priority fee (${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)}` : null;
+  return room < 0n || priority > room * 1_000_000n ? `the priority fee (${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)} and the page reserve ${solanaPoolPageReserve(rent)}` : null;
 }
 
 function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, rent: SolanaRent): void {

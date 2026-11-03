@@ -84,8 +84,10 @@ export interface Pool<R = unknown> {
   readonly sendMarginMs: bigint;
   /** The pool's time in ms (its chain's newest final block, the lower of two RPCs). */
   now(signal?: AbortSignal): Promise<bigint>;
-  /** The tree source: both trees holding only the leaves that landed before `beforeMs`, and their roots. */
-  trees(beforeMs: bigint, signal?: AbortSignal): Promise<PoolTrees>;
+  /** The tree source: both trees holding only the leaves that landed before `beforeMs`, and their roots. `newest`: the
+   * read for a deposit's own note (beforeMs = now + 1), which a pool may make at a lower commitment than its epoch
+   * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. */
+  trees(beforeMs: bigint, signal?: AbortSignal, opts?: { newest?: boolean }): Promise<PoolTrees>;
   /** The context function. */
   bind(a: PoolBindArgs, signal?: AbortSignal): Promise<PoolBinding<R>>;
 }

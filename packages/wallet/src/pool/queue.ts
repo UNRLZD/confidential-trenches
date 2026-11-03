@@ -226,7 +226,9 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       .sort(byChunkThenLeaf(pool.ladder));
     if (open.length === 0 && again.length === 0) return out;
     const epochTrees = await pool.trees(start, signal);
-    let newest: PoolTrees | undefined;
+    // the newest trees, read once for every deposit note of this pass; a failed read fails those notes only, and the
+    // epoch's remakes and other notes still run
+    let newest: PoolTrees | Error | undefined;
     const todo: { n: NoteRecord; trees: PoolTrees; root: "epoch" | "newest"; prev?: ReadyProof<R> }[] = [];
     // the ready set's own notes first (each landed before the epoch began), then the open notes
     for (const n of again.sort(byChunkThenLeaf(pool.ladder))) todo.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
@@ -234,8 +236,9 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       if (todo.length === want) break;
       if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });
       else if (n.ref.kind === "deposit" || (n.ref.kind === "second" && n.ref.id.id === "U")) {
-        newest ??= await pool.trees(nowMs + 1n, signal); // every leaf up to now
-        todo.push({ n, trees: newest, root: "newest" });
+        newest ??= await pool.trees(nowMs + 1n, signal, { newest: true }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))); // every leaf up to now
+        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });
+        else todo.push({ n, trees: newest, root: "newest" });
       } // any other note that landed in this epoch (change, refund, return, move) waits for the next
     }
     let k = 0;

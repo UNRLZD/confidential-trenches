@@ -280,6 +280,27 @@ test("a deposit's own note is proved at once on the newest root, and on the epoc
   assert.equal(again.publicSignals[3], pool.rootAt(START + E).state.toString());
 });
 
+test("a failed newest read fails only the deposit note waiting on it: the epoch's notes are still made, and the newest read asks newest (M355 (5))", async () => {
+  const v = await vaultWith([usd(2), usd(5)]);
+  const pool = fakePool(v);
+  const asked: (boolean | undefined)[] = [];
+  const epochTrees = pool.trees;
+  pool.trees = async (before, signal, opts) => {
+    asked.push(opts?.newest);
+    if (opts?.newest) throw new Error("the newest read has not reached now");
+    return epochTrees(before, signal);
+  };
+  const q = queue(v, pool);
+  pool.t.now += 10_000n;
+  const dep = await landDeposit(v, pool, usd(50), 1000n);
+  const out = await q.refresh();
+  assert.deepEqual(out.failed.map((f) => [f.noteId, f.error]), [[dep.id, "the newest read has not reached now"]]);
+  assert.equal(out.made.length, 2, "the two epoch notes are made all the same");
+  assert.ok(q.ready().every((r) => r.root === "epoch" && r.noteId !== dep.id));
+  assert.deepEqual(asked, [undefined, true]);
+  assert.equal((await state(v, dep.id)).state, "UNSPENT", "the deposit note is free for the next pass");
+});
+
 /** A note of `ref` (born PLANNED), landed now under a label of its own. */
 async function landPlanned(v: Vault, pool: Fake, ref: NoteRef, value: bigint, nonce: bigint): Promise<NoteRecord> {
   const pre = noteSecrets(SEED, ref).precommitment;
