@@ -156,3 +156,35 @@ test("units reads a decimal string into the token's smallest unit, or null past 
   assert.equal(units("12", 6), 12_000_000n);
   assert.equal(units("0.0000001", 6), null);
 });
+
+// Robinhood (card index-evm-swaps-2): robinhood_good is apps/helper at the card branch run on a Mac against the real
+// lists and Robinhood's keyless providers, PASS; robinhood_bad_not_deployed is the deployed helper before the card, 404
+// on Robinhood candles and trades, FAIL. Made from the good answer: a trade time off its block's time on two providers,
+// a block time the providers did not agree on, a swap after the oldest trade that the tape lacks: each FAIL.
+test("Robinhood: the good answer passes and the deployed helper before this card fails", () => {
+  const g = judge(A.robinhood_good);
+  assert.ok(g.ok, bad(g).join("\n"));
+  assert.equal(A.robinhood_good.net, "robinhood");
+  assert.ok(g.lines.some((l) => /whose time on two providers/.test(l)));
+  const b = judge(A.robinhood_bad_not_deployed);
+  assert.equal(b.ok, false);
+  assert.ok(bad(b).some((l) => /answers 404/.test(l)));
+});
+
+test("Robinhood: a trade time off its block's time, a block time not read on two providers, and a swap the tape lacks fail", () => {
+  const off = structuredClone(A.robinhood_good);
+  const t0 = JSON.parse(off.reads.trades.body);
+  t0.trades[0].t_ms += 1000;
+  off.reads.trades.body = JSON.stringify(t0);
+  assert.ok(bad(judge(off)).some((l) => /whose time on two providers/.test(l)));
+
+  const unread = structuredClone(A.robinhood_good);
+  const n = Number.parseInt(unread.chain.receipts[JSON.parse(unread.reads.trades.body).trades[0].tx].blockNumber, 16);
+  delete unread.chain.blockTimes[n];
+  assert.equal(judge(unread).ok, false);
+
+  const lacks = structuredClone(A.robinhood_good);
+  const pl = lacks.chain.poolLogs;
+  pl.logs.push({ blockNumber: `0x${pl.to.toString(16)}`, transactionHash: `0x${"ab".repeat(32)}`, t: Math.floor(Date.parse(lacks.readAt) / 1000) });
+  assert.ok(bad(judge(lacks)).some((l) => /1 missing from the tape/.test(l)));
+});

@@ -179,18 +179,21 @@ export function judge(run) {
 
   // no swap missing
   const pl = c.poolLogs;
-  // the oldest trade's block: on Base its clock's; on Robinhood the read starts BACK blocks behind and must reach a block
-  // no newer than the oldest trade (its time no later than the trade's)
-  const oldestBlock = net === "base" ? blockOf(trades.trades.at(-1).t_ms / 1000) : (isObj(pl) && Number.isSafeInteger(timeOf(pl.from)) && timeOf(pl.from) * 1000 <= trades.trades.at(-1).t_ms ? pl.from : Infinity);
+  // the oldest trade's block: on Base its clock's. On Robinhood the read goes BACK blocks behind (its time read on two
+  // providers) and each log carries its block's time, so a swap is due when its time is after the oldest trade's
+  const oldestT = trades.trades.at(-1).t_ms;
+  const oldestBlock = net === "base" ? blockOf(oldestT / 1000) : Infinity;
   const last = head - MARGIN[net];
-  say(isObj(pl) && pl.key === pool && pl.to === last && pl.from <= oldestBlock && Array.isArray(pl.logs), `the pool's Swap logs read on two agreeing providers over blocks ${show(pl?.from)} to ${show(pl?.to)}`);
-  if (isObj(pl) && Array.isArray(pl.logs)) {
+  const timed = net === "base" || (isObj(pl) && Number.isSafeInteger(timeOf(pl.from)) && Array.isArray(pl.logs) && pl.logs.every((l) => Number.isSafeInteger(l.t)));
+  say(isObj(pl) && pl.key === pool && pl.to === last && pl.from <= oldestBlock && Array.isArray(pl.logs) && timed, `the pool's Swap logs read on two agreeing providers over blocks ${show(pl?.from)} to ${show(pl?.to)}${net === "base" ? "" : `, from ${show(timeOf(pl?.from))} s, every log with its block time`}`);
+  if (isObj(pl) && Array.isArray(pl.logs) && timed) {
     const onTape = new Set(trades.trades.map((t) => t.tx));
-    const from = Math.max(pl.from, oldestBlock + 1); // the oldest trade's block may hold more swaps than the tape
-    const due = [...new Set(pl.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= from && Number.parseInt(l.blockNumber, 16) <= last).map((l) => l.transactionHash))];
+    const from = Math.max(pl.from, net === "base" ? oldestBlock + 1 : pl.from); // the oldest trade's block may hold more swaps than the tape
+    const inWindow = (l) => Number.parseInt(l.blockNumber, 16) >= from && Number.parseInt(l.blockNumber, 16) <= last && (net === "base" || l.t * 1000 > oldestT);
+    const due = [...new Set(pl.logs.filter(inWindow).map((l) => l.transactionHash))];
     const missing = due.filter((t) => !onTape.has(t));
     // the tape is full (50) when it covers fewer than 50 swaps on the window: a full tape's oldest rows are cut, not missing
-    say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
+    say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}${net === "base" ? "" : ` after the oldest trade's time`}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ") || l.startsWith("-- ")), lines };
 }
@@ -286,7 +289,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     const topics = id === undefined ? [topic0 === TOPIC.curveBuy || topic0 === TOPIC.curveSell ? [TOPIC.curveBuy, TOPIC.curveSell] : topic0] : [TOPIC.swap4, id];
     const all = [];
     for (let lo = from; lo <= last; lo += SPAN[net]) {
-      const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(lo), toBlock: hex(Math.min(last, lo + SPAN[net] - 1)) }], fetchFn, rpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex })));
+      const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(lo), toBlock: hex(Math.min(last, lo + SPAN[net] - 1)) }], fetchFn, rpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex, ...(net === "base" ? {} : { t: Number.parseInt(l.blockTimestamp, 16) }) })));
       if (!Array.isArray(logs)) {
         all.length = 0;
         all.push(null);
@@ -294,7 +297,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
       }
       all.push(...logs);
     }
-    if (!all.includes(null)) run.chain.poolLogs = { key: pool, from, to: last, logs: all.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash })) };
+    if (!all.includes(null)) run.chain.poolLogs = { key: pool, from, to: last, logs: all.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, ...(net === "base" ? {} : { t: l.t }) })) };
   }
   if (net !== "base") {
     // the block times the check needs: the heads', the sampled trades', and the pool read's first block
