@@ -13,10 +13,10 @@
 //   past it exists at s. A bucket names a range of public counters, never a note or a wallet; which buckets are read
 //   depends only on the RPC's own answers. The marks are the union of the two RPCs' (M355 (4)): two honest RPCs at
 //   different finalized slots differ by the marks between them, and an RPC cannot invent a mark of ours, since a note's
-//   nullifier hash and precommitment stay secret until used; a key both hold with different bytes stops the restore. Then the pages, on both RPCs at or
-//   past the higher of the marks' slots (./solana.ts solanaTreeSync leaves), so every deposit and release a mark
-//   records has its leaves in them. The device derives its own marks' addresses and looks them up
-//   here; a read per mark (a note's own address) would tell the RPC which notes are one user's, so none is made.
+//   nullifier hash and precommitment stay secret until used; a key both hold with different bytes stops the restore.
+//   Then the pages, on both RPCs at or past the higher of the marks' slots (./solana.ts solanaTreeSync leaves), so every
+//   deposit and release a mark records has its leaves in them. The device derives its own marks' addresses and looks
+//   them up here; a read per mark (a note's own address) would tell the RPC which notes are one user's, so none is made.
 // - A mark that lands while the pages are read (card sol-restore-race, review N1): straight after the pages, before any
 //   walk, the marks are read again on each RPC at or past the highest slot that RPC answered its pages at
 //   (minContextSlot, and the answer's own slot checked), and merged into the first read by the same union rule. A spend
