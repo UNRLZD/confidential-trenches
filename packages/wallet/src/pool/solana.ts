@@ -41,7 +41,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { readSolanaRent, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
+import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import type { Ladder } from "./ladder.ts";
 import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
@@ -66,8 +66,17 @@ const PAGE_ENTRY = 72;
 const PAGE_DISC = new TextEncoder().encode("bfpage01");
 const TREE_STATE = 0;
 const TREE_LABEL = 1;
-/** Accounts per getMultipleAccounts (the RPC's limit is 100). */
-const BATCH = 50;
+/** One full page account's bytes. */
+const PAGE_BYTES = PAGE_HEADER + SOL_PAGE_ENTRIES * PAGE_ENTRY;
+/** The JSON around one account in a getMultipleAccounts answer, at most: its field names, owner, lamports, rentEpoch and
+ * space take under 200 bytes with every number at u64 width (pool-solana.test.ts builds that answer). */
+const ACCOUNT_JSON_MAX = 256;
+/** Page accounts per getMultipleAccounts, half for each tree: the even number whose full answer (each page in base64, 4
+ * bytes for 3, with its JSON) stays under 4/5 of the kit's SOLANA_ANSWER_MAX_BYTES, which its client refuses past
+ * (trade/solana/send.ts); the fifth left is the margin for the answer's envelope. 8 today, about 770 KiB a full call; the
+ * RPC's own limit is 100 accounts. */
+export const SOL_PAGES_A_CALL = 2 * Math.floor((SOLANA_ANSWER_MAX_BYTES * 4) / 5 / (4 * Math.ceil(PAGE_BYTES / 3) + ACCOUNT_JSON_MAX) / 2);
+const BATCH = SOL_PAGES_A_CALL;
 const U64 = (1n << 64n) - 1n;
 
 const enc = new TextEncoder();

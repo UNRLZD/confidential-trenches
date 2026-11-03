@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
+import { SOLANA_ANSWER_MAX_BYTES, VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
 import { solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent } from "../src/pool/solana-restore.ts";
@@ -18,7 +18,7 @@ import { openWalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import {
-  SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
+  SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_PAGES_A_CALL, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
 } from "../src/pool/solana.ts";
 
 type Spend = { name: string; note: number; new_commitment: string; withdrawn: string; state_root_index: number; label_root_index: number; salt: string; public_signals: string[] };
@@ -90,6 +90,9 @@ function rpc(c: Chain, o: Over = {}, log: string[] = []): SolanaRpc {
         // an RPC whose slot is below minContextSlot refuses, as the RPC's own -32016 does
         const min = (params[1] as { minContextSlot?: number }).minContextSlot;
         if (min !== undefined && c.slot < min) throw new Error(`Minimum context slot has not been reached: ${c.slot} < ${min}`);
+        // an answer past the kit's cap is refused, as its JSON-RPC client does (trade/solana/send.ts)
+        const answer = { context: ctx, value: (params[0] as string[]).map((a) => (c.accounts.has(a) ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(c.accounts.get(a)!), "base64"] } : null)) };
+        if (JSON.stringify({ jsonrpc: "2.0", id: 1, result: answer }).length > SOLANA_ANSWER_MAX_BYTES) throw new Error("answer too large");
         return { context: ctx, value: (params[0] as string[]).map((a) => (c.accounts.has(a) ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(c.accounts.get(a)!), "base64"] } : null)) };
       }
       case "getLatestBlockhash": return { context: ctx, value: { blockhash: base58.encode(new Uint8Array(32).fill(7)), lastValidBlockHeight: 1 } };
@@ -777,7 +780,7 @@ function scripted(pick: (m: string, n: number) => Chain, log: RLog[] = []): [Sol
 }
 const js = (x: unknown): string => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v));
 
-test("N1 race (the review's P1): first marks from before the spend, pages from after it: SPENT, with its change", async () => {
+test("N1 race (the review's P1): first marks from before the spend, pages from after it: SPENT, with its change", { timeout: 20_000 }, async () => {
   const { chain, beforeSpend, l0 } = restorePool();
   const base = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 });
   const log: RLog[] = [];
@@ -901,7 +904,7 @@ test("RPC lag: the wait of about a slot comes between two calls, never after the
   assert.equal(SOL_LAG_WAIT_MS, 400);
 });
 
-test("RPC lag: a -32016 answer is tried again a slot apart, SOL_LAG_SLOTS waits at most, then refused", async () => {
+test("RPC lag: a -32016 answer is tried again a slot apart, SOL_LAG_SLOTS waits at most, then refused", { timeout: 20_000 }, async () => {
   const { chain } = restorePool();
   const base = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 });
   const flaky = (url: string, every: number, calls: string[]): SolanaRpc => {
@@ -1344,6 +1347,12 @@ test("fold 6 (T2): one RPC pages without the change leaf of the user's release (
     assert.match(mine.out, /^refused: restore: the pages hold 4 state and 4 label leaves for 5 deposits and 2 releases$/, liar);
     assert.equal(other.out, mine.out, liar);
   }
+  // the state tree alone cut just before the change leaf (the label tree whole): what a relayer that knows the change
+  // commitment can serve
+  const statePage = solanaPageOf(PROGRAM, 0, 0);
+  const cut = (i: number): Chain => ({ ...full(i), accounts: new Map(chain.accounts).set(statePage, beforeSpend.accounts.get(statePage)!) });
+  const outs = await Promise.all([SEED, SEED_OTHER].map((seed64) => outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: [perRpc("https://a.example", full, full, []), perRpc("https://b.example", full, cut, [])], gap: 4 }))));
+  assert.deepEqual(outs, Array(2).fill("refused: restore: the pages hold 4 state and 5 label leaves for 5 deposits and 2 releases"));
 });
 
 test("fold 6 (T3): an honest pair on the same pools: both devices restore", async () => {
@@ -1388,4 +1397,22 @@ test("fold 6 (LAG): an honest RPC up to SOL_LAG_SLOTS finalized slots behind the
   };
   for (const skew of [0, 1, 2, 3, 4, 6, 13, SOL_LAG_SLOTS]) assert.equal(await run(skew), "restored", String(skew));
   assert.match(await run(SOL_LAG_SLOTS + 1), /-32016/);
+});
+
+test("fold 6 (M376): a full call of pages stays under the kit's answer cap, and a pool of 30 full pages in both trees syncs", { timeout: 60_000 }, async () => {
+  // the answer a provider sends for SOL_PAGES_A_CALL full pages, every number at u64 width
+  const page = base64.encode(new Uint8Array(16 + 72 * 1024).fill(255));
+  const u64 = "18446744073709551615";
+  const acct = `{"data":["${page}","base64"],"executable":false,"lamports":${u64},"owner":"${PROGRAM}","rentEpoch":${u64},"space":${16 + 72 * 1024}}`;
+  const full = `{"jsonrpc":"2.0","id":${u64},"result":{"context":{"apiVersion":"9.99.999","slot":${u64}},"value":[${Array(SOL_PAGES_A_CALL).fill(acct).join(",")}]}}`;
+  assert.equal(SOL_PAGES_A_CALL, 8);
+  assert.ok(acct.length - page.length < 200, "the JSON around one account");
+  assert.ok(full.length < SOLANA_ANSWER_MAX_BYTES * 0.8, `${full.length} bytes`);
+  // 30 full pages a tree (30,720 leaves; the roots are not read by leaves()), each call under the cap the fake keeps
+  const es = Array.from({ length: 30 * 1024 }, (_, i) => ({ leaf: BigInt(1_000 + i), root: 1n, t: 1_800_000_000n + BigInt(i) }));
+  const c: Chain = { accounts: new Map([...pages(0, es), ...pages(1, es)]), slot: 700, time: () => 1_900_000_000n };
+  const log: string[] = [];
+  const got = await solanaTreeSync([rpc(c, { ...MAINNET, url: "https://a.example" }, log), rpc(c, { ...MAINNET, url: "https://b.example" })], PROGRAM).leaves(0);
+  assert.deepEqual([got.state.length, got.label.length], [30 * 1024, 30 * 1024]);
+  assert.equal(log.filter((m) => m === "getMultipleAccounts").length, Math.ceil(31 / (SOL_PAGES_A_CALL / 2)), "pages 0..30 of each tree (30 is the empty one), SOL_PAGES_A_CALL a call");
 });
