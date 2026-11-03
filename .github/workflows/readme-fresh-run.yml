@@ -1,0 +1,129 @@
+# A fresh machine with no keys runs the README's "For AI agents and scripts" steps to the passing line, as a reviewer's
+# machine and the hackathon's AI screen will (card readme-fresh-run).
+#
+# What it proves, on a clean ubuntu-24.04 runner with no secret and the read-only token:
+# - the commands are the README's own: scripts/ci/readme-commands.mjs --agent-steps reads them, scripts/ci/readme-fresh-run.mjs
+#   runs them in a new folder from a clone of the commit under test (`git clone <url>` is the one line it rewrites);
+# - the machine has no Chrome (its folder is moved aside below), no Rust (the runner's PATH drops it), no key (the
+#   run's environment drops every name with KEY, JWT, SECRET, TOKEN or PASSWORD) and no route out after the install
+#   (every step but `git clone` and `pnpm install` runs under scripts/ci/no-network.mjs);
+# - the run exits 0, every package with a test script prints a summary, every summary reads `fail 0`, and the whole
+#   run takes under 15 minutes (its wall time is printed).
+# The planted job first runs the same checks on a failing step, a vendor host and a browser launch in a default test:
+# each must fail, or this workflow fails.
+#
+# Every action is pinned by commit sha, as ci.yml pins them (read 2026-10-26 11:24Z):
+#   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0.
+name: readme-fresh-run
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - README.md
+      - AGENTS.md
+      - "**/package.json"
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - "**/*.test.*"
+      - "**/test/**"
+      - "**/scripts/**"
+      - .github/workflows/readme-fresh-run.yml
+  # weekly until 25 Nov 2026 (the window job below skips every later run)
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readme-fresh-run-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  window:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      open: ${{ steps.window.outputs.open }}
+    steps:
+      - id: window
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(date -u +%F)" \> 2026-11-25 ]; then
+            echo "the weekly run ended on 2026-11-25"
+            echo "open=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "open=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  planted:
+    needs: window
+    if: needs.window.outputs.open == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: the gates' and the runner's own tests
+        run: |
+          node --test scripts/ci/readme-commands.test.mjs
+          node --test scripts/ci/readme-fresh-run.test.mjs
+          node --test scripts/ci/no-network.test.mjs
+          node --test scripts/ci/default-tests.test.mjs
+      # Each planted case must end in failure (exit 1) for the reason it plants; a case that passes, or fails for another
+      # reason, fails its step. (No pipe into tee: this shell has no pipefail.)
+      - name: a README with a failing step fails the run
+        run: |
+          rc=0
+          node scripts/ci/readme-fresh-run.mjs --readme scripts/ci/fixtures/readme-fresh-run/failing-step.md --checkout "$GITHUB_WORKSPACE" --max-minutes 2 > "$RUNNER_TEMP/planted-1.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/planted-1.log"
+          [ "$rc" = 1 ] || { echo "::error::the planted failing step ended $rc, not 1"; exit 1; }
+          grep -q 'FAIL step failed: false (exit 1)' "$RUNNER_TEMP/planted-1.log"
+      - name: a default test that reaches a vendor host fails the run
+        run: |
+          rc=0
+          node scripts/ci/readme-fresh-run.mjs --readme scripts/ci/fixtures/readme-fresh-run/vendor-fetch.md --checkout "$GITHUB_WORKSPACE" --max-minutes 2 > "$RUNNER_TEMP/planted-2.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/planted-2.log"
+          [ "$rc" = 1 ] || { echo "::error::the planted vendor fetch ended $rc, not 1"; exit 1; }
+          grep -q 'no-network: a connection to api.jup.ag was refused' "$RUNNER_TEMP/planted-2.log"
+      - name: a default test that launches a browser fails the gate
+        run: |
+          rc=0
+          node scripts/ci/default-tests.mjs scripts/ci/fixtures/default-tests/browser-launch > "$RUNNER_TEMP/planted-3.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/planted-3.log"
+          [ "$rc" = 1 ] || { echo "::error::the planted browser launch ended $rc, not 1"; exit 1; }
+          grep -q 'launch.mjs:8: a browser launch: launchBrowser' "$RUNNER_TEMP/planted-3.log"
+      - name: the repository's own default tests reach no browser, no Rust build and no key
+        run: node scripts/ci/default-tests.mjs
+
+  fresh-run:
+    needs: window
+    if: needs.window.outputs.open == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # a reviewer clones with the whole history; the tests that read git get it too
+          fetch-depth: 0
+          persist-credentials: false
+      # The runner image ships Google Chrome; a reviewer's machine may not. A browser a default test starts would find
+      # none here. (Rust is dropped from PATH by the runner script itself.)
+      - name: a machine with no Chrome
+        run: |
+          if [ -d /opt/google/chrome ]; then sudo mv /opt/google/chrome /opt/google/chrome.moved-aside; fi
+          test ! -e /opt/google/chrome/chrome
+          echo "no Chrome at /opt/google/chrome"
+          for b in google-chrome google-chrome-stable chromium chromium-browser; do command -v "$b" && { echo "::error::$b is still on PATH"; exit 1; } || true; done
+      # Node and pnpm, the two tools the README names (Node 24 or later, pnpm 10.33.1: packageManager in package.json)
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: the README's AI-agent steps, from a fresh clone
+        run: node scripts/ci/readme-fresh-run.mjs --checkout "$GITHUB_WORKSPACE" --workdir "$RUNNER_TEMP/fresh" --max-minutes 15
