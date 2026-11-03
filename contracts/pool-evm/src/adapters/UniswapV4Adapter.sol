@@ -50,11 +50,13 @@ interface IWETH9 {
  *         (address(0)) or the chain's WETH, which the adapter wraps all it is sent into. Inside one unlock each hop
  *         swaps exactly what the hop before gave (the first, msg.value), the adapter pays in msg.value and the last
  *         hop's output goes to the recipient. A v4 pool may fill only part of an exact input (it stops at the price
- *         limit when its liquidity runs out), and a hook may change what the swap takes or gives. So every hop must
- *         take exactly its whole amount, or the call reverts with PartialFill and the buy with it: nothing of the
- *         value is left with the adapter or as a balance in the PoolManager, which in any case reverts the unlock
- *         unless every balance the adapter has there ends at zero. What the last hop gives must be at least minOut
- *         (the pool then checks the recipient's own balance). No owner, no storage, nothing kept.
+ *         limit when its liquidity runs out), so every hop must take exactly its whole amount, or the call reverts
+ *         with PartialFill and the buy with it: nothing of the value is left with the adapter or as a balance in the
+ *         PoolManager, which in any case reverts the unlock unless every balance the adapter has there ends at zero.
+ *         A hook is part of the price: it may keep part of the input or output as its fee, even the part its pool
+ *         would not fill, so for a hooked hop minOut is the bound; for a hookless hop a partial fill reverts. What the
+ *         last hop gives must be at least minOut (the pool then checks the recipient's own balance). No owner, no
+ *         storage, nothing kept.
  */
 contract UniswapV4Adapter is IBuyAdapter {
   /// @notice The chain's v4 PoolManager
