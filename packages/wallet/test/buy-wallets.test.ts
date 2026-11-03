@@ -135,7 +135,7 @@ async function storeWith(notes: readonly Seed[]): Promise<NoteStore> {
 const SEEDED: Seed[] = [
   { ref: DEP, scope: SOL_SCOPE, label: L, state: "SPENT" }, // W_{sol, l, 0}
   { ref: { kind: "change", l: L, j: 0 }, scope: SOL_SCOPE, label: L, state: "RESERVED" }, // W_{sol, l, 1}: its proof left
-  { ref: { kind: "change", l: L, j: 1 }, scope: SOL_SCOPE, label: L, state: "HELD" }, // its proof never left: no W
+  { ref: { kind: "deposit", s: SOL_SCOPE, i: 2 }, scope: SOL_SCOPE, label: 56n, state: "HELD" }, // its proof never left: no W
   { ref: { kind: "deposit", s: SOL_SCOPE, i: 1 }, scope: SOL_SCOPE, label: 55n, state: "UNSPENT" }, // no W
   { ref: { kind: "deposit", s: EVM_SCOPE, i: 0 }, scope: EVM_SCOPE, label: L, state: "SPENT" }, // W_{evm, l, 0}
   { ref: { kind: "return", c: "evm", l: L, j: 0 }, scope: EVM_SCOPE, label: L2, state: "SPENT" }, // W_{evm, L2, 0}
@@ -144,6 +144,7 @@ const SEEDED: Seed[] = [
 
 test("a seeded store's spent and reserved notes on Solana and EVM: each W (the A.8 addresses) and its holdings; no request names two Ws", async () => {
   const ns = await storeWith(SEEDED);
+  assert.deepEqual((await ns.list()).sort((x, y) => (x.leaf!.leafIndex < y.leaf!.leafIndex ? -1 : 1)).map((n) => n.state), SEEDED.map((n) => n.state), "the store holds each note in its seeded state");
   log.length = 0;
   const pools: BuyPool[] = [
     { id: "sol", chain: "sol", spent: await spentNotesOf(ns, SOL_SCOPE), reader: solReader() },
@@ -226,7 +227,7 @@ test("one failure hides nothing else: a failing pool reports and the others list
 
 test("Solana: a frozen account flags its mint; one pubkey under both token programs is refused", async () => {
   const s = solState();
-  s.accounts[1]!.state = 2;
+  s.accounts[0]!.state = 2; // the first of MINT_A's two accounts: the second, not frozen, must not clear the flag
   const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(solChain(s)) }]);
   assert.deepEqual(r.wallets.map((w) => view(w.holdings)), [[5_000_000n, { [MINT_A]: "123 frozen", [MINT_B]: 7n }, []]]);
   const twice = solState();
