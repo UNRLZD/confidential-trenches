@@ -256,7 +256,8 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
   assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, statusesOf\(watches\)\);/);
   assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind\);/);
+  assert.match(main, /await Promise\.all\(\[\.\.\.pools\.values\(\)\]\.map\(\(p\) => p\.ready\)\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind, pools\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   try {
