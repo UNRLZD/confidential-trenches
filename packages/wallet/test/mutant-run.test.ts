@@ -33,3 +33,16 @@ test("a run that hangs is killed at its timeout, the process that spins with it"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a test cancelled at its own timeout counts as failed, never a survivor (fold 6: M7 read SURVIVED on fail 0, cancelled 1)", { timeout: 30_000 }, () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mutant-run-"));
+  try {
+    writeFileSync(path.join(dir, "slow.test.mjs"), `import { test } from "node:test";\ntest("yields forever", { timeout: 200 }, async () => {\n  for (;;) await new Promise((ok) => setImmediate(ok));\n});\n`);
+    const r = runTests(["slow.test.mjs"], { cwd: dir, timeoutMs: 20_000 }) as { hung: boolean; status: number; fail: number };
+    assert.equal(r.hung, false);
+    assert.notEqual(r.status, 0);
+    assert.equal(r.fail, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
