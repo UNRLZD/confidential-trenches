@@ -1,8 +1,11 @@
 import { useState } from "react";
+import { useParams } from "react-router";
+import { parseTokenRoute } from "../../routes/routes.ts";
+import type { MarketChain } from "../discover/fields.ts";
 import { Avatar } from "../market/Avatar.tsx";
 import { tokenView } from "./model.ts";
 import type { Curve, TokenView } from "./model.ts";
-import { useTopToken } from "./source.ts";
+import { useToken, useTopToken } from "./source.ts";
 import type { TokenData } from "./source.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
@@ -202,8 +205,22 @@ export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: nu
   );
 }
 
-/** The token route: the top Trending token, read from the helper (source.ts). */
+/** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
+ *  not-found, with no read. / draws the top Trending token. */
 export function TokenRoute() {
+  const params = useParams();
+  if (params.chain === undefined) return <TopToken />;
+  const t = parseTokenRoute(params);
+  if (!t) return <TokenPage data={{ status: "empty" }} nowMs={0} onRetry={() => {}} />;
+  return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;
+}
+
+function TopToken() {
   const { data, nowMs, retry } = useTopToken();
+  return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
+}
+
+function ReadToken({ chain, id }: { chain: MarketChain; id: string }) {
+  const { data, nowMs, retry } = useToken(chain, id);
   return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
 }
