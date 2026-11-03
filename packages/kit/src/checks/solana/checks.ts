@@ -59,6 +59,9 @@ export const SOLANA_JITO_TIP_ACCOUNTS: readonly string[] = [
 ];
 export const SOLANA_SENDER_TIP = 5_000n;
 export const SOLANA_JITO_TIP = 10_000n;
+/** The least tip a Jito bundle carries: "Jito enforces a minimum tip of 1000 lamports for bundles"
+ * (docs.jito.wtf/lowlatencytxnsend, read 2026-11-03 02:20Z). A mainnet pool buy goes bundle-only, so it tips at least this. */
+export const SOLANA_JITO_TIP_MIN = 1_000n;
 // S8 (P4S "Slippage and priority"; run.mjs:85-91).
 export const SOLANA_CU_PRICE_MAX = 1_000_000n;
 export const SOLANA_CU_LIMIT = { pumpBuy: 200_000, pumpSell: 150_000, other: 600_000 } as const;

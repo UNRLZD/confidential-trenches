@@ -334,7 +334,7 @@ test("the router lists are frozen with the rest of the venue list, and the kit e
   assert.throws(() => void (v.base!.routers[0] = Y), TypeError);
   assert.throws(() => void (v.robinhood!.routers[0] = Y), TypeError);
   assert.equal(code(() => evmPoolBuildSell("base", req({ target: Y }))), "bad_target");
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolBuildSell", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolBuildSell", "evmPoolGas", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
 });
 
 test("the fork fixture is the kit's own output: forkSells() equals contracts/pool-evm/test/fixtures/kit-sells.json", () => {

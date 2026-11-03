@@ -164,10 +164,13 @@ export function solanaDecodeMint(acc: SolanaPoolAccount): { supply: bigint; prog
   return { supply: u64(acc.data, 36), program: acc.owner };
 }
 
-/** A token account: mint at 0, owner at 32, amount at 64, state at 108 (1 initialized, 2 frozen). */
+/** A token account: mint at 0, owner at 32, amount at 64, state at 108 (1 initialized, 2 frozen). An account longer than
+ * the base 165 bytes (Token-2022 with extensions) must carry AccountType::Account (2) at byte 165, so a Token-2022
+ * mint, padded to 165 and typed 1 there, is never read as a token account. */
 export function solanaDecodeTokenAccount(acc: SolanaPoolAccount): { mint: string; owner: string; amount: bigint; state: number } {
   if (acc.owner !== SOLANA_TOKEN_PROGRAM && acc.owner !== SOLANA_TOKEN_2022_PROGRAM) throw new Error(`token account owned by ${acc.owner}`);
   if (acc.data.length < 165) throw new Error("token account too short");
+  if (acc.data.length > 165 && acc.data[165] !== 2) throw new Error(`not a token account: account type ${acc.data[165]}`);
   const state = acc.data[108]!;
   if (state !== 1 && state !== 2) throw new Error(`token account state ${state}`);
   return { mint: key(acc.data, 0), owner: key(acc.data, 32), amount: u64(acc.data, 64), state };

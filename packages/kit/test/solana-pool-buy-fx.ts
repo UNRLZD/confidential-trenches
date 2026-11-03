@@ -67,7 +67,7 @@ export async function setup(v: "pump" | "pumpswap" = "pump", spend = SPEND) {
   dv.setBigUint64(4, (1n << 64n) - 1n, true);
   const tableData = Uint8Array.from([...meta, ...addresses.flatMap((k) => [...base58.decode(k)])]);
   const table = solanaDecodeLookupTable(tableData);
-  const req: SolanaPoolBuyRequest = { wallet: W, feePayer: FEE_PAYER, token: mint, spend, minOut, tip: TIP, cuPrice: 100_000n };
+  const req: SolanaPoolBuyRequest = { wallet: W, feePayer: FEE_PAYER, token: mint, spend, minOut, tip: TIP, cuPrice: 100_000n, cluster: "mainnet" };
   const chain: SolanaPoolBuyChain = { blockhash: BLOCKHASH, lastValidBlockHeight: 100, table: { address: tableAddr, table }, stateSize: 6, rent };
   const reads: SolanaPoolBuyReads = {
     blockhash: BLOCKHASH, slot: ref.slot + 2, stateSize: 6, rent,

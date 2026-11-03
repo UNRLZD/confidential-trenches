@@ -135,7 +135,8 @@ test("F2 no input of W's signer takes a digest: an EIP-7702 delegation of W to t
   assert.equal(code(() => evmPoolSignBuy(W_KEY, "base", POOL, built, any)), "bad_amount");
   // the kit's public entry exports no digest maker and no signer but the one
   assert.equal("evmPoolBuyDigest" in kit, false);
-  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolBuildSell", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
+  // evmPoolGas (trade/evm/pool-fee.ts) takes only a tree depth and gives the gas of one release: no key and no digest
+  assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolBuildSell", "evmPoolGas", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
 });
 
 test("F2b W signs only the buy object the builder returned: a copy, an edit or a hand-made buy is refused", () => {
