@@ -32,20 +32,24 @@
   "swept": "1160240",
   "txs": [
     {
-      "step": "funding (to the funder)",
-      "signature": "4vHiNudSE6MDEw96oDXSVXMAh1JbxZQ1XSmAKcPHqaAq2XAKm8PSC3iJgFzQNVsA2gwaA9fCeX4GNkFKNWcQG1WE"
-    },
-    {
       "step": "first run (--prior)",
       "signature": "4tQ6sQqHdjUY8zsKNYydUHBNuarLEb6Mg8jGQPQdr9ZFRCQEHzD27E3MjztwYvcqtmBK8wS1ya4X1UmAkZ3hyB3q"
+    },
+    {
+      "step": "first run: deploy with the upgradeable loader, --final, or an earlier step on the program",
+      "signature": "3H2Vatu78qcxvPKzxpGDE7r2v3XdkPDM8AbgMqkLJBUFdqbiLoQNu4rnAtCv5TsbHDEuNdtccUbq2AR4qyXJsY1B"
+    },
+    {
+      "step": "the upgradeable loader: SetAuthority (--final: to none)",
+      "signature": "2Wii4A6vyFxXsXEF8G58LNwfz4cfCHKJbwT5ixkAvj7suFhwVT89wQDyTGuCsFAxBXGR5AJgoabBXKPB6q2sPQEf"
     },
     {
       "step": "first run (--prior)",
       "signature": "kawrTQi6tbDaNB6cdmLeBSN5G4hm5G64iAxu3D2E6ie6cuxKLAsJEFEWPZVz8FUKKn1DUs778MLJknweZpH7xRE"
     },
     {
-      "step": "first run: deploy with the upgradeable loader, --final, or an earlier step on the program",
-      "signature": "3H2Vatu78qcxvPKzxpGDE7r2v3XdkPDM8AbgMqkLJBUFdqbiLoQNu4rnAtCv5TsbHDEuNdtccUbq2AR4qyXJsY1B"
+      "step": "funding (to the funder)",
+      "signature": "4vHiNudSE6MDEw96oDXSVXMAh1JbxZQ1XSmAKcPHqaAq2XAKm8PSC3iJgFzQNVsA2gwaA9fCeX4GNkFKNWcQG1WE"
     },
     {
       "step": "init (tag 0)",
@@ -59,5 +63,9 @@
       "step": "sweep (the funder's rest back)",
       "signature": "3sNYGu9HQUw1x65gMetLT9pZuatPHWKWLseYYvASmgMKERHJbUi5MRDnM19owmfPRDQAyXxyLA1kKfNQZDFeRw3i"
     }
+  ],
+  "funders": [
+    "2L2yVWb3TugFTB977NmcB4U4mFcdBNVSeBV6hZV44YbH",
+    "9bEdyeRYmBhvS91wBKZmkk4FUeqVjZ4nEx3UDKDHyfcp"
   ]
 }
