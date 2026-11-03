@@ -198,18 +198,15 @@ export function retryAfterMs(header: string | null, nowMs: number): number {
 }
 /** The helper transport's fetch, which keeps the Retry-After of the latest 429 it saw for the reader's next wait. */
 function retryAfterFetch(): { fetch: SolanaFetch; wait429: () => number } {
-  let next: number | undefined;
+  // a reader waits only after a 429 this fetch saw, so `next` is always that answer's wait
+  let next = RETRY_AFTER_DEFAULT_MS;
   return {
     fetch: async (url, init) => {
       const r = await globalThis.fetch(url, init);
       if (r.status === 429) next = retryAfterMs(r.headers.get("retry-after"), Date.now());
       return r;
     },
-    wait429: () => {
-      const ms = next ?? RETRY_AFTER_DEFAULT_MS;
-      next = undefined;
-      return ms;
-    },
+    wait429: () => next,
   };
 }
 /** The readers' paced transport on one helper route at one limit, made once and shared by every reader of it. Its
