@@ -25,6 +25,11 @@ const BOUNDARY: &str = include_str!("../../fixtures/boundary-spends.json");
 const SYSTEM: Pubkey = Pubkey::new_from_array([0; 32]);
 /// A page entry: leaf (32) ‖ root (32) ‖ the Clock's unix_timestamp at the insert (i64 LE).
 const ENTRY: usize = 72;
+/// Every mark's last byte (src/state.rs MARK_TAG), and each mark's size: a spent mark withdrawnValue u64 ‖ number u32 ‖
+/// tag, a precommitment mark value u64 ‖ nonce u64 ‖ tag.
+const MARK_TAG: u8 = 1;
+const SPENT_MARK_LEN: usize = 13;
+const PRE_MARK_LEN: usize = 17;
 const P_HEX: &str = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
 
 // the program's error codes (src/error.rs)
@@ -179,21 +184,21 @@ fn deposit(env: &mut Env, value: u64, precommitment: &[u8; 32], state_size: u64,
     send(env, &[ix], &payer, &[&d])
 }
 
-/// The 16 bytes deposit writes into its precommitment mark `["pre", precommitment]`: value u64 LE, then the deposit's
-/// nonce u64 LE (the one its label hashes).
+/// The 17 bytes deposit writes into its precommitment mark `["pre", precommitment]`: value u64 LE, then the deposit's
+/// nonce u64 LE (the one its label hashes), then the tag.
 fn mark_data(env: &Env, pre: &[u8; 32]) -> Vec<u8> {
     let a = env.svm.get_account(&pda(&[b"pre", pre], &env.program)).expect("the precommitment mark");
     assert_eq!(a.owner, env.program, "the mark is the pool's");
-    assert_eq!(a.lamports, env.svm.minimum_balance_for_rent_exemption(16), "the mark holds rent for 16 bytes");
+    assert_eq!(a.lamports, env.svm.minimum_balance_for_rent_exemption(PRE_MARK_LEN), "the mark holds rent for 17 bytes");
     a.data
 }
 
-/// The 12 bytes a release writes into its spent mark `["spent", nullifierHash]`: withdrawnValue u64 LE (M355 (3)), then
-/// the release's number u32 LE, the count of releases before it (M376).
+/// The 13 bytes a release writes into its spent mark `["spent", nullifierHash]`: withdrawnValue u64 LE (M355 (3)), then
+/// the release's number u32 LE, the count of releases before it (M376), then the tag.
 fn spent_data(env: &Env, nullifier: &[u8; 32]) -> Vec<u8> {
     let a = env.svm.get_account(&pda(&[b"spent", nullifier], &env.program)).expect("the spent mark");
     assert_eq!(a.owner, env.program, "the spent mark is the pool's");
-    assert_eq!(a.lamports, env.svm.minimum_balance_for_rent_exemption(12), "the spent mark holds rent for 12 bytes");
+    assert_eq!(a.lamports, env.svm.minimum_balance_for_rent_exemption(SPENT_MARK_LEN), "the spent mark holds rent for 13 bytes");
     a.data
 }
 
@@ -202,9 +207,10 @@ fn spent_data(env: &Env, nullifier: &[u8; 32]) -> Vec<u8> {
 /// `spent_mark`.
 fn assert_spent(env: &Env, r: &Rel, s: &Value, number: u32) {
     let m = spent_data(env, &r.nullifier);
-    assert_eq!(m.len(), 12, "the spent mark is 12 bytes");
+    assert_eq!(m.len(), SPENT_MARK_LEN, "the spent mark is 13 bytes");
     assert_eq!(u64::from_le_bytes(m[0..8].try_into().unwrap()), r.withdrawn, "withdrawnValue rebuilt from the spent mark");
     assert_eq!(u32::from_le_bytes(m[8..12].try_into().unwrap()), number, "the release's number in the spent mark");
+    assert_eq!(m[12], MARK_TAG, "the spent mark's tag");
     assert_eq!(hex(&m), s["spent_mark"].as_str().expect("the fixture's spent mark"), "the fixture's spent mark");
 }
 
@@ -250,7 +256,8 @@ fn assert_mark(env: &Env, value: u64, pre: &[u8; 32], nonce: u64, state_index: u
     let m = mark_data(env, pre);
     let mut want = value.to_le_bytes().to_vec();
     want.extend_from_slice(&nonce.to_le_bytes());
-    assert_eq!(hex(&m), hex(&want), "deposit {nonce}: the mark is value ‖ nonce");
+    want.push(MARK_TAG);
+    assert_eq!(hex(&m), hex(&want), "deposit {nonce}: the mark is value ‖ nonce ‖ tag");
     let (label, commitment) = rebuilt_from_mark(env, &m, pre);
     assert_eq!(hex(&label), hex(&leaf_at(env, 1, label_index)), "deposit {nonce}: the label from the mark is the label leaf");
     assert_eq!(hex(&commitment), hex(&leaf_at(env, 0, state_index)), "deposit {nonce}: the commitment from the mark is the state leaf");
@@ -730,13 +737,13 @@ fn a_funded_mark_address_blocks_nothing() {
     env.svm.airdrop(&mark, min).unwrap();
     release(&mut env, &r).expect("the release lands");
     assert_eq!(env.svm.get_account(&mark).unwrap().owner, env.program);
-    // topped up to 12 bytes' rent and holding this release's withdrawnValue and number, like any spent mark
+    // topped up to 13 bytes' rent and holding this release's withdrawnValue and number, like any spent mark
     assert_spent(&env, &r, &spend_fx(&env, "release"), 0);
     // and a precommitment's mark address before the deposit
     let pre = h32(&format!("{:064x}", 77));
     env.svm.airdrop(&pda(&[b"pre", &pre], &env.program), min + 5).unwrap();
     deposit(&mut env, 1_000_000, &pre, 7, 6).expect("the deposit lands");
-    // topped up to 16 bytes' rent and filled like any mark (mark_data checks the rent)
+    // topped up to 17 bytes' rent and filled like any mark (mark_data checks the rent)
     assert_mark(&env, 1_000_000, &pre, 7, 7, 6);
 }
 
@@ -1769,4 +1776,142 @@ fn a_copied_precommitment_fails_the_whole_sell() {
     let w = env.w.insecure_clone();
     assert_eq!(send(&mut env, &ixs, &w.pubkey(), &[&w]).err(), Some(PRECOMMITMENT_ALREADY_USED));
     assert_eq!(token_amount(&env, &ata), held, "W keeps its tokens");
+}
+
+// ------------------------------------------------------------------------------------------- card pool-sol-mark-tag
+// A stranger's zero-filled accounts. The system program lets anyone make an account of any size owned by any program
+// (CreateAccount with that owner, or Allocate then Assign on a key they hold); its data stays zero, since only the owner
+// writes it. The device reads the marks of each size in buckets of 256 counters: getProgramAccounts with dataSize and
+// one memcmp from offset 9 (packages/wallet/src/pool/solana-restore.ts), the counter's bytes past its low byte, then
+// every byte the program writes after the counter. Every zero-filled account has counter 0, so without a nonzero byte
+// in that memcmp each one is in bucket 0's answer, and about 4,400 of them push it past an RPC's 1 MiB cap (the kit's
+// SOLANA_ANSWER_MAX_BYTES): every restore and settle refused, for good.
+
+/// The kit's cap on one JSON-RPC answer (packages/kit/src/trade/solana/send.ts SOLANA_ANSWER_MAX_BYTES).
+const ANSWER_MAX_BYTES: usize = 1024 * 1024;
+/// Zero-filled accounts the stranger makes at each size.
+const STRANGER_PER_SIZE: usize = 5_000;
+
+fn base64_of(d: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::new();
+    for c in d.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            s.push(if i <= c.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    s
+}
+
+/// One getProgramAccounts answer over every account LiteSVM holds, as an RPC applies the filters (dataSize, then
+/// memcmp: equal bytes at the offset, no match past the data's end), with its JSON text's length in a real RPC's shape.
+fn program_accounts(env: &Env, size: usize, offset: usize, bytes: &[u8]) -> (Vec<(Pubkey, Vec<u8>)>, usize) {
+    use solana_account::ReadableAccount;
+    let mut rows = vec![];
+    let mut text = String::from(r#"{"jsonrpc":"2.0","result":{"context":{"apiVersion":"3.0.6","slot":700},"value":["#);
+    for (k, a) in env.svm.accounts_db().inner.iter() {
+        let d = a.data();
+        if *a.owner() != env.program || d.len() != size || offset + bytes.len() > d.len() || &d[offset..offset + bytes.len()] != bytes {
+            continue;
+        }
+        if !rows.is_empty() {
+            text.push(',');
+        }
+        text.push_str(&format!(
+            r#"{{"account":{{"data":["{}","base64"],"executable":false,"lamports":{},"owner":"{}","rentEpoch":18446744073709551615,"space":{}}},"pubkey":"{}"}}"#,
+            base64_of(d), a.lamports(), env.program, d.len(), k
+        ));
+        rows.push((*k, d.to_vec()));
+    }
+    text.push_str(r#"]},"id":"1"}"#);
+    (rows, text.len())
+}
+
+/// A system program instruction: its u32 tag, then its fields.
+fn system_ix(accounts: Vec<AccountMeta>, tag: u32, fields: &[&[u8]]) -> Instruction {
+    let mut data = tag.to_le_bytes().to_vec();
+    for f in fields {
+        data.extend_from_slice(f);
+    }
+    Instruction { program_id: SYSTEM, accounts, data }
+}
+
+/// The stranger's zero-filled accounts owned by the program: `n` of `size` bytes, half by CreateAccount (owner = the
+/// program), half by Transfer, Allocate and Assign. Four to a transaction.
+fn strangers_zero_accounts(env: &mut Env, stranger: &Keypair, size: usize, n: usize) {
+    let rent = env.svm.minimum_balance_for_rent_exemption(size);
+    let program = env.program;
+    for batch in 0..n.div_ceil(4) {
+        let keys: Vec<Keypair> = (0..(n - 4 * batch).min(4)).map(|_| Keypair::new()).collect();
+        let mut ixs = vec![];
+        for k in &keys {
+            let (from, to) = (AccountMeta::new(stranger.pubkey(), true), AccountMeta::new(k.pubkey(), true));
+            if batch % 2 == 0 {
+                ixs.push(system_ix(vec![from, to], 0, &[&rent.to_le_bytes(), &(size as u64).to_le_bytes(), program.as_ref()]));
+            } else {
+                ixs.push(system_ix(vec![from, AccountMeta::new(k.pubkey(), false)], 2, &[&rent.to_le_bytes()]));
+                ixs.push(system_ix(vec![to.clone()], 8, &[&(size as u64).to_le_bytes()]));
+                ixs.push(system_ix(vec![to], 1, &[program.as_ref()]));
+            }
+        }
+        let mut signers = vec![stranger];
+        signers.extend(keys.iter());
+        let payer = stranger.pubkey();
+        send(env, &ixs, &payer, &signers).unwrap_or_else(|e| panic!("the stranger's accounts of {size} bytes: {e}"));
+    }
+}
+
+/// card pool-sol-mark-tag: a stranger makes 5,000 zero-filled accounts owned by the program at each mark size, old
+/// (12, 16) and new (13, 17), by the system program alone. The device's read of each mark size, bucket by bucket until
+/// a short bucket (solana-restore.ts solanaMarks), stays under the 1 MiB cap in every answer and gives exactly the
+/// marks the program wrote: the six deposits' and the three releases', byte for byte the fixture's.
+#[test]
+fn a_strangers_zero_accounts_match_no_bucket_of_the_marks_read() {
+    let mut env = with_deposits();
+    for (k, name) in ["release", "old_root", "third"].iter().enumerate() {
+        let r = rel(&env, name);
+        release(&mut env, &r).unwrap_or_else(|e| panic!("release {k}: {e}"));
+    }
+    let stranger = Keypair::new();
+    env.svm.airdrop(&stranger.pubkey(), 100_000_000_000).unwrap();
+    for size in [12, 13, 16, 17] {
+        strangers_zero_accounts(&mut env, &stranger, size, STRANGER_PER_SIZE);
+    }
+    let zeros = |env: &Env, size: usize| program_accounts(env, size, 0, &vec![0; size]).0.len();
+    for size in [12, 13, 16, 17] {
+        assert_eq!(zeros(&env, size), STRANGER_PER_SIZE, "the stranger's zero accounts of {size} bytes, owned by the program");
+    }
+    // the program's own marks, and the layout it writes: the counter at 8, then the bytes after it, the same in every mark
+    let deps = env.f["deposits"].as_array().unwrap().clone();
+    // (read raw, not through mark_data and spent_data, so that this test runs on any layout the program writes)
+    let raw = |env: &Env, k: &Pubkey| env.svm.get_account(k).expect("a mark").data;
+    let pre0 = raw(&env, &pda(&[b"pre", &h32(deps[0]["precommitment"].as_str().unwrap())], &env.program));
+    let spent0 = raw(&env, &pda(&[b"spent", &rel(&env, "release").nullifier], &env.program));
+    let mut want: Vec<(String, String)> = deps.iter().map(|d| (pda(&[b"pre", &h32(d["precommitment"].as_str().unwrap())], &env.program).to_string(), d["mark"].as_str().unwrap().to_string())).collect();
+    for name in ["release", "old_root", "third"] {
+        let s = spend_fx(&env, name);
+        want.push((pda(&[b"spent", &h32(s["nullifier_hash"].as_str().unwrap())], &env.program).to_string(), s["spent_mark"].as_str().unwrap().to_string()));
+    }
+    want.sort();
+    let mut got: Vec<(String, String)> = vec![];
+    // the device's read: each size in buckets of 256 counters, from bucket 0 until one is short; the memcmp from offset 9
+    // holds the counter's bytes past its low byte, then the bytes the program writes after the counter
+    for (mark, width, first) in [(&spent0, 4usize, 0usize), (&pre0, 8, 1)] {
+        let after = &mark[8 + width..];
+        for b in 0u64.. {
+            let mut filter = b.to_le_bytes()[..width - 1].to_vec();
+            filter.extend_from_slice(after);
+            let (rows, bytes) = program_accounts(&env, mark.len(), 9, &filter);
+            println!("MARKS {} B bucket {b}: {} accounts, answer {bytes} B", mark.len(), rows.len());
+            assert!(bytes < ANSWER_MAX_BYTES, "the {} B marks' bucket {b}: an answer of {bytes} B, past the 1 MiB cap", mark.len());
+            got.extend(rows.iter().map(|(k, d)| (k.to_string(), hex(d))));
+            if rows.len() < 256 - if b == 0 { first } else { 0 } {
+                break;
+            }
+        }
+        assert_eq!(after, [MARK_TAG], "the {} B mark's bytes after its counter: the tag", mark.len());
+    }
+    got.sort();
+    assert_eq!(got, want, "the marks read are the program's marks, every one, and nothing else");
 }

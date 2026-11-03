@@ -48,6 +48,8 @@ const le = (x, n) => {
   for (let i = 0, v = BigInt(x); i < n; i++, v >>= 8n) b[i] = Number(v & 0xffn);
   return b;
 };
+// every mark's last byte (src/state.rs MARK_TAG)
+const MARK_TAG = Uint8Array.of(1);
 const fieldOf = (...parts) => BigInt("0x" + hex(keccak_256(cat(...parts)))) % P;
 const testField = (tag) => fieldOf(enc("pool-sol-core/" + tag));
 
@@ -150,8 +152,8 @@ async function spend(name, p, n, withdrawn, stateLeaves, labels, number, recipie
     new_commitment: b(publicSignals[0]),
     nullifier_hash: b(publicSignals[1]),
     withdrawn: String(withdrawn),
-    // the spent mark's 12 bytes after this release (M355 (3), M376): withdrawnValue u64 LE ‖ the release's number u32 LE
-    spent_mark: hex(cat(le(withdrawn, 8), le(number, 4))),
+    // the spent mark's 13 bytes after this release (M355 (3), M376): withdrawnValue u64 LE ‖ the release's number u32 LE ‖ the tag 1
+    spent_mark: hex(cat(le(withdrawn, 8), le(number, 4), MARK_TAG)),
     state_root_index: stateLeaves.length - 1,
     state_depth: sp.depth,
     label_root_index: labels - 1,
@@ -194,8 +196,8 @@ const out = {
     precommitment: hex(be32(x.precommitment)),
     label: hex(be32(x.label)),
     commitment: hex(be32(x.commitment)),
-    // the precommitment mark's 16 bytes after this deposit (M353): value u64 LE ‖ nonce u64 LE
-    mark: hex(cat(le(x.value, 8), le(BigInt(i + 1), 8))),
+    // the precommitment mark's 17 bytes after this deposit (M353): value u64 LE ‖ nonce u64 LE ‖ the tag 1
+    mark: hex(cat(le(x.value, 8), le(BigInt(i + 1), 8), MARK_TAG)),
   })),
   // the state tree's root after each deposit, and the label tree's
   state_roots: six.map((_, i) => hex(be32(new VaultTree(six.slice(0, i + 1)).root))),

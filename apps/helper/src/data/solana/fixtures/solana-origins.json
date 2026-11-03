@@ -1,0 +1,2328 @@
+{
+ "read_at": "2026-11-03T16:49:04.291Z",
+ "rpc": "https://api.mainnet-beta.solana.com",
+ "method": "getMultipleAccounts base64 confirmed",
+ "tokens": [
+  {
+   "case": "pump.fun on its curve",
+   "mint": "2mPnKboWekvU3mKMs2dBLkci51wXxgBgEjUFLXzCpump",
+   "hint": {
+    "tag": "pump.fun",
+    "config": null,
+    "graduated": null
+   },
+   "origin": {
+    "pad": "pump.fun",
+    "family": "pump",
+    "pool": "629bX7thfjcT7toZWHDFPvYQWeAYUmjT41AsL7bQoFRJ",
+    "config": null,
+    "curveBps": 109
+   },
+   "jupiter": {
+    "id": "2mPnKboWekvU3mKMs2dBLkci51wXxgBgEjUFLXzCpump",
+    "name": "pincat",
+    "symbol": "pcat",
+    "icon": "https://axiomtrading-v2.axiom-cdn.io/HntwpMMRZiDzyHGwbmTUhoGJZd4oxM4GyJy1AZfSpump.webp",
+    "decimals": 6,
+    "twitter": "https://x.com/Meehan1x/status/2117659899169517836",
+    "website": "https://x.com/pumpfuneco/status/2117650464510763041?s=46",
+    "dev": "CfkaAru9ArJ2tAStYHvbAyRBJL3EhDzsWYV2KYg9shxB",
+    "circSupply": 1000000000,
+    "totalSupply": 1000000000,
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "launchpad": "pump.fun",
+    "holderCount": 3,
+    "fdv": 3203.259490884509,
+    "mcap": 3203.259490884509,
+    "usdPrice": 0.000003203259490884509,
+    "priceBlockId": 464971250,
+    "liquidity": 3374.9021941362116,
+    "stats5m": {
+     "priceChange": -20.436560496957636,
+     "liquidityChange": -4.203467734090972,
+     "buyVolume": 562.7535943109813,
+     "sellVolume": 507.4546392653252,
+     "numBuys": 6,
+     "numSells": 3,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "stats1h": {
+     "priceChange": -20.436560496957636,
+     "liquidityChange": -4.203467734090972,
+     "buyVolume": 562.7535943109813,
+     "sellVolume": 507.4546392653252,
+     "numBuys": 6,
+     "numSells": 3,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "stats6h": {
+     "priceChange": -20.436560496957636,
+     "liquidityChange": -4.203467734090972,
+     "buyVolume": 562.7535943109813,
+     "sellVolume": 507.4546392653252,
+     "numBuys": 6,
+     "numSells": 3,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "stats24h": {
+     "priceChange": -20.436560496957636,
+     "liquidityChange": -4.203467734090972,
+     "buyVolume": 562.7535943109813,
+     "sellVolume": 507.4546392653252,
+     "numBuys": 6,
+     "numSells": 3,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "firstPool": {
+     "id": "2mPnKboWekvU3mKMs2dBLkci51wXxgBgEjUFLXzCpump",
+     "createdAt": "2026-11-03T16:47:19Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "devMigrations": 27,
+     "devMints": 347
+    },
+    "organicScore": 0,
+    "organicScoreLabel": "low",
+    "tags": [
+     "unknown",
+     "token-2022"
+    ],
+    "createdAt": "2026-11-03T16:47:19Z",
+    "updatedAt": "2026-11-03T16:47:23.13594562Z"
+   }
+  },
+  {
+   "case": "pump.fun on its curve",
+   "mint": "v4JZWpZNNtHhQZkqEjVSZYxADjTq7J8QRJnehRy5dSt",
+   "hint": {
+    "tag": "pump.fun",
+    "config": null,
+    "graduated": null
+   },
+   "origin": {
+    "pad": "pump.fun",
+    "family": "pump",
+    "pool": "EMw8kDQR15QN3jNFyN1fAov2GQWqZsu1qbvV2bhLjmfv",
+    "config": null,
+    "curveBps": 0
+   },
+   "jupiter": {
+    "id": "v4JZWpZNNtHhQZkqEjVSZYxADjTq7J8QRJnehRy5dSt",
+    "name": "pulymerket",
+    "symbol": "pulymerket",
+    "icon": "https://axiomtrading.sfo3.cdn.digitaloceanspaces.com/52bRK6ti8GLN6MJA1tHCYwXhZ5eeEmquCfeWHpxPpump.webp",
+    "decimals": 6,
+    "twitter": "https://x.com/tradfi/status/2117659850771722367",
+    "dev": "bwamJzztZsepfkteWRChggmXuiiCQvpLqPietdNfSXa",
+    "circSupply": 1000000000,
+    "totalSupply": 1000000000,
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "launchpad": "pump.fun",
+    "holderCount": 2,
+    "fdv": 3528.713612964988,
+    "mcap": 3528.713612964988,
+    "usdPrice": 0.000003528713612964988,
+    "priceBlockId": 464971226,
+    "liquidity": 3250.958457645755,
+    "stats5m": {
+     "buyVolume": 505.6331709768136,
+     "sellVolume": 46.13374224947524,
+     "numBuys": 3,
+     "numSells": 2,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "stats1h": {
+     "buyVolume": 505.6331709768136,
+     "sellVolume": 46.13374224947524,
+     "numBuys": 3,
+     "numSells": 2,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "stats6h": {
+     "buyVolume": 505.6331709768136,
+     "sellVolume": 46.13374224947524,
+     "numBuys": 3,
+     "numSells": 2,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "stats24h": {
+     "buyVolume": 505.6331709768136,
+     "sellVolume": 46.13374224947524,
+     "numBuys": 3,
+     "numSells": 2,
+     "numTraders": 3,
+     "numNetBuyers": 1
+    },
+    "firstPool": {
+     "id": "v4JZWpZNNtHhQZkqEjVSZYxADjTq7J8QRJnehRy5dSt",
+     "createdAt": "2026-11-03T16:47:16Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "devBalancePercentage": 15.166077733404498,
+     "devMigrations": 1929,
+     "devMints": 179930
+    },
+    "organicScore": 0,
+    "organicScoreLabel": "low",
+    "tags": [
+     "unknown",
+     "token-2022"
+    ],
+    "createdAt": "2026-11-03T16:47:16Z",
+    "updatedAt": "2026-11-03T16:47:18.135757788Z"
+   }
+  },
+  {
+   "case": "pump.fun graduated",
+   "mint": "5DnWmSL9t3YqK5MeYq8ozJpna46VcdePWzHvyN8avg2g",
+   "hint": {
+    "tag": "pump.fun",
+    "config": null,
+    "graduated": "7Jyz7YkQvvrHcjrmKhzs1Z6fUP16PKPcwonVDNkqrert"
+   },
+   "origin": {
+    "pad": "pump.fun",
+    "family": "pump",
+    "pool": "FAeiDS5uYHEYqQqwYxByMkL8hDkppowXpaLQCHC8agLj",
+    "config": null,
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "5DnWmSL9t3YqK5MeYq8ozJpna46VcdePWzHvyN8avg2g",
+    "name": "Capycoin",
+    "symbol": "CAPY",
+    "icon": "https://axiomtrading-v2.axiom-cdn.io/7kseWhkzx95ypdCTiCBfBeSMUKtjGjo45HCvtGYkpump.webp",
+    "decimals": 6,
+    "dev": "GuAKE5EgK7Au7EARH81oHrWjJvvg2Axf9AVNMpt7yEzH",
+    "circSupply": 979463644.439418,
+    "totalSupply": 979463644.439418,
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "launchpad": "pump.fun",
+    "graduatedPool": "7Jyz7YkQvvrHcjrmKhzs1Z6fUP16PKPcwonVDNkqrert",
+    "graduatedAt": "2026-11-02T18:45:32Z",
+    "holderCount": 2599,
+    "fdv": 157567.91080244083,
+    "mcap": 157567.91080244083,
+    "usdPrice": 0.00016087162774951446,
+    "priceBlockId": 464971080,
+    "liquidity": 36373.5079203237,
+    "stats5m": {
+     "priceChange": 1.118587230815292,
+     "holderChange": -0.1536688436419516,
+     "liquidityChange": 0.7855340687747718,
+     "volumeChange": -19.980157438311018,
+     "buyVolume": 500.3432606706116,
+     "sellVolume": 219.73287396644474,
+     "numBuys": 5,
+     "numSells": 17,
+     "numTraders": 16,
+     "numOrganicBuyers": 1,
+     "numNetBuyers": 5
+    },
+    "stats1h": {
+     "priceChange": -17.102647792657272,
+     "holderChange": -2.695619618120554,
+     "liquidityChange": -11.233072072566685,
+     "volumeChange": -24.494931727204975,
+     "buyVolume": 21181.748763849522,
+     "sellVolume": 24142.812582432543,
+     "buyOrganicVolume": 598.7550736855644,
+     "sellOrganicVolume": 904.4553177285397,
+     "numBuys": 387,
+     "numSells": 381,
+     "numTraders": 390,
+     "numOrganicBuyers": 10,
+     "numNetBuyers": 163
+    },
+    "stats6h": {
+     "priceChange": -47.149894580133164,
+     "holderChange": -9.189378057302585,
+     "liquidityChange": -40.47928261368156,
+     "volumeChange": -43.31021816086148,
+     "buyVolume": 135512.31351726622,
+     "sellVolume": 148295.64973171943,
+     "buyOrganicVolume": 7305.865134497455,
+     "sellOrganicVolume": 14056.439985819956,
+     "numBuys": 2773,
+     "numSells": 2689,
+     "numTraders": 1605,
+     "numOrganicBuyers": 37,
+     "numNetBuyers": 523
+    },
+    "stats24h": {
+     "priceChange": 2941.833212682866,
+     "holderChange": 21558.333333333336,
+     "liquidityChange": 378.88348141858785,
+     "buyVolume": 3071430.3988349265,
+     "sellVolume": 3608478.419571239,
+     "buyOrganicVolume": 119794.28809037786,
+     "sellOrganicVolume": 110172.41711659092,
+     "numBuys": 60456,
+     "numSells": 58094,
+     "numTraders": 13836,
+     "numOrganicBuyers": 148,
+     "numNetBuyers": 4506
+    },
+    "firstPool": {
+     "id": "5DnWmSL9t3YqK5MeYq8ozJpna46VcdePWzHvyN8avg2g",
+     "createdAt": "2026-11-02T18:44:00Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 19.0823014534226,
+     "devMigrations": 34,
+     "devMints": 1379
+    },
+    "organicScore": 75,
+    "organicScoreLabel": "medium",
+    "tags": [
+     "unknown",
+     "token-2022"
+    ],
+    "createdAt": "2026-11-02T18:44:00Z",
+    "updatedAt": "2026-11-03T16:46:47.136077908Z"
+   }
+  },
+  {
+   "case": "raydium-launchlab",
+   "mint": "2oPyJBEZF9GL98XU4mPy8APiNUWw4yUvM8yP6YcfLoat",
+   "hint": {
+    "tag": "raydium-launchlab",
+    "config": "2TDPJJPV6nvTEqXABxrqno6Uzpipxxvh1zjLN3SMYn69",
+    "graduated": null
+   },
+   "origin": {
+    "pad": "raydium-launchlab",
+    "family": "launchlab",
+    "pool": "HgqGg3Mx6N9NsrCf2QKzi66YUcAmoXCVKn4dEizTQpF3",
+    "config": "2TDPJJPV6nvTEqXABxrqno6Uzpipxxvh1zjLN3SMYn69",
+    "curveBps": 32
+   },
+   "jupiter": {
+    "id": "2oPyJBEZF9GL98XU4mPy8APiNUWw4yUvM8yP6YcfLoat",
+    "name": "Elevate",
+    "symbol": "Elevate",
+    "decimals": 6,
+    "dev": "EVZCCbLkiFj6AMvC2fjQ4rwSfhFsD4dUhUebufnsYt97",
+    "circSupply": 1000000000,
+    "totalSupply": 1000000000,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "raydium-launchlab",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "2TDPJJPV6nvTEqXABxrqno6Uzpipxxvh1zjLN3SMYn69",
+    "holderCount": 3,
+    "fdv": 18657.752149796343,
+    "mcap": 18657.752149796343,
+    "usdPrice": 0.000018657752149796342,
+    "priceBlockId": 464971159,
+    "liquidity": 225.38620236605453,
+    "stats5m": {
+     "priceChange": -5.419312549818866,
+     "liquidityChange": -59.24770256231267,
+     "buyVolume": 680.4937577211651,
+     "sellVolume": 443.8195912027783,
+     "numBuys": 7,
+     "numSells": 4,
+     "numTraders": 5,
+     "numNetBuyers": 2
+    },
+    "stats1h": {
+     "priceChange": -5.419312549818866,
+     "liquidityChange": -59.24770256231267,
+     "buyVolume": 680.4937577211651,
+     "sellVolume": 443.8195912027783,
+     "numBuys": 7,
+     "numSells": 4,
+     "numTraders": 5,
+     "numNetBuyers": 2
+    },
+    "stats6h": {
+     "priceChange": -5.419312549818866,
+     "liquidityChange": -59.24770256231267,
+     "buyVolume": 680.4937577211651,
+     "sellVolume": 443.8195912027783,
+     "numBuys": 7,
+     "numSells": 4,
+     "numTraders": 5,
+     "numNetBuyers": 2
+    },
+    "stats24h": {
+     "priceChange": -5.419312549818866,
+     "liquidityChange": -59.24770256231267,
+     "buyVolume": 680.4937577211651,
+     "sellVolume": 443.8195912027783,
+     "numBuys": 7,
+     "numSells": 4,
+     "numTraders": 5,
+     "numNetBuyers": 2
+    },
+    "firstPool": {
+     "id": "2oPyJBEZF9GL98XU4mPy8APiNUWw4yUvM8yP6YcfLoat",
+     "createdAt": "2026-11-03T16:46:46Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 2.3155860961783,
+     "devMints": 1
+    },
+    "organicScore": 0,
+    "organicScoreLabel": "low",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-11-03T16:46:46Z",
+    "updatedAt": "2026-11-03T16:47:12.920017683Z"
+   }
+  },
+  {
+   "case": "raydium-launchlab",
+   "mint": "2mpn5Yduu4pszLxAeSe1qPEw6Jq9RowEQYbcad1fLoat",
+   "hint": {
+    "tag": "raydium-launchlab",
+    "config": "CKpEUk5SRk8CUNhhxaVPKtzKUKLgQe2tQHPH2eXWtaGR",
+    "graduated": null
+   },
+   "origin": {
+    "pad": "raydium-launchlab",
+    "family": "launchlab",
+    "pool": "BRts9qJYb7TSr58kJQHX4qRskMFgmuu5JqeBHPVy68q2",
+    "config": "CKpEUk5SRk8CUNhhxaVPKtzKUKLgQe2tQHPH2eXWtaGR",
+    "curveBps": 857
+   },
+   "jupiter": {
+    "id": "2mpn5Yduu4pszLxAeSe1qPEw6Jq9RowEQYbcad1fLoat",
+    "name": "Floatie",
+    "symbol": "Floatie",
+    "icon": "https://float.mypinata.cloud/ipfs/bafkreicyx54b7xshxmmpdjqhbl4fv2ifhehhsd53zz63w3bxr4lh3ktxzm",
+    "decimals": 6,
+    "twitter": "https://x.com/FloatieFloat",
+    "website": "https://www.floatie.games/",
+    "dev": "CzhKiZLU2piKspbZHJaUtwsdcomptwRfSaT1WXPvNBjt",
+    "circSupply": 1000000000,
+    "totalSupply": 1000000000,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "raydium-launchlab",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "CKpEUk5SRk8CUNhhxaVPKtzKUKLgQe2tQHPH2eXWtaGR",
+    "holderCount": 40,
+    "fdv": 25212.483146270726,
+    "mcap": 25212.483146270726,
+    "usdPrice": 0.000025212483146270725,
+    "priceBlockId": 464971252,
+    "liquidity": 5873.331820391619,
+    "stats5m": {
+     "priceChange": 37.90469753703127,
+     "holderChange": 5.263157894736842,
+     "liquidityChange": 96.65328490484958,
+     "buyVolume": 7792.254633725706,
+     "sellVolume": 3550.5179277252114,
+     "buyOrganicVolume": 871.1333852008745,
+     "numBuys": 91,
+     "numSells": 46,
+     "numTraders": 61,
+     "numNetBuyers": 51
+    },
+    "stats1h": {
+     "priceChange": 37.90469753703127,
+     "holderChange": 5.263157894736842,
+     "liquidityChange": 96.65328490484958,
+     "buyVolume": 7792.254633725706,
+     "sellVolume": 3550.5179277252114,
+     "buyOrganicVolume": 871.1333852008745,
+     "numBuys": 91,
+     "numSells": 46,
+     "numTraders": 61,
+     "numNetBuyers": 51
+    },
+    "stats6h": {
+     "priceChange": 37.90469753703127,
+     "holderChange": 5.263157894736842,
+     "liquidityChange": 96.65328490484958,
+     "buyVolume": 7792.254633725706,
+     "sellVolume": 3550.5179277252114,
+     "buyOrganicVolume": 871.1333852008745,
+     "numBuys": 91,
+     "numSells": 46,
+     "numTraders": 61,
+     "numNetBuyers": 51
+    },
+    "stats24h": {
+     "priceChange": 37.90469753703127,
+     "holderChange": 5.263157894736842,
+     "liquidityChange": 96.65328490484958,
+     "buyVolume": 7792.254633725706,
+     "sellVolume": 3550.5179277252114,
+     "buyOrganicVolume": 871.1333852008745,
+     "numBuys": 91,
+     "numSells": 46,
+     "numTraders": 61,
+     "numNetBuyers": 51
+    },
+    "firstPool": {
+     "id": "2mpn5Yduu4pszLxAeSe1qPEw6Jq9RowEQYbcad1fLoat",
+     "createdAt": "2026-11-03T16:46:41Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 13.366291790300403,
+     "devMints": 1
+    },
+    "organicScore": 0,
+    "organicScoreLabel": "low",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-11-03T16:46:41Z",
+    "updatedAt": "2026-11-03T16:47:23.228332958Z"
+   }
+  },
+  {
+   "case": "raydium-launchlab",
+   "mint": "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr",
+   "hint": {
+    "tag": "raydium-launchlab",
+    "config": "s1ChXD2gHFkr6QJRCU24mbqgcUmSXLRwgqXKFrtrizJ",
+    "graduated": "FJk9sajdc2Q4heRPPu3yLzkmf2ZByZkpiHQLv9e2bn5A"
+   },
+   "origin": {
+    "pad": "raydium-launchlab",
+    "family": "launchlab",
+    "pool": "HCvVkQCnU4Z2G1T1SNZBenwor13SW4inRV85cKvzwFDz",
+    "config": "s1ChXD2gHFkr6QJRCU24mbqgcUmSXLRwgqXKFrtrizJ",
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr",
+    "name": "FLOAT",
+    "symbol": "FLOAT",
+    "icon": "https://float.mypinata.cloud/ipfs/bafybeia4zlazqj7yvf3u2yvm3prs4di67m4hjtm4ytms4vgzseu6sldbma",
+    "decimals": 6,
+    "dev": "2rQ13KrAdDsAtd1LuKV1kGj6nFB4V4GsD9GAYKXi353T",
+    "circSupply": 945208154.604829,
+    "totalSupply": 945208154.604829,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "raydium-launchlab",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "s1ChXD2gHFkr6QJRCU24mbqgcUmSXLRwgqXKFrtrizJ",
+    "graduatedPool": "FJk9sajdc2Q4heRPPu3yLzkmf2ZByZkpiHQLv9e2bn5A",
+    "graduatedAt": "2026-10-28T22:15:43Z",
+    "holderCount": 6296,
+    "fdv": 4129795.395895347,
+    "mcap": 4129795.395895347,
+    "usdPrice": 0.0043691914588082715,
+    "priceBlockId": 464971218,
+    "liquidity": 407213.37950207357,
+    "stats5m": {
+     "priceChange": -0.584674477942154,
+     "liquidityChange": -0.21260439028474584,
+     "volumeChange": -4.3430601438887795,
+     "buyVolume": 5583.361169164265,
+     "sellVolume": 5084.566232595764,
+     "buyOrganicVolume": 179.02723166346317,
+     "sellOrganicVolume": 0.2061514745255964,
+     "numBuys": 94,
+     "numSells": 81,
+     "numTraders": 66,
+     "numOrganicBuyers": 6,
+     "numNetBuyers": 34
+    },
+    "stats1h": {
+     "priceChange": -5.970688136235054,
+     "holderChange": -0.5214093853689367,
+     "liquidityChange": -2.9313339575097648,
+     "volumeChange": -61.14866368220531,
+     "buyVolume": 50931.01917884613,
+     "sellVolume": 60113.14296206734,
+     "buyOrganicVolume": 6027.500606121224,
+     "sellOrganicVolume": 1246.0477645395988,
+     "numBuys": 960,
+     "numSells": 946,
+     "numTraders": 687,
+     "numOrganicBuyers": 13,
+     "numNetBuyers": 300
+    },
+    "stats6h": {
+     "priceChange": 29.909300402214168,
+     "holderChange": 11.88910609561045,
+     "liquidityChange": 17.68371388469849,
+     "volumeChange": 137.59279292944797,
+     "buyVolume": 334180.1243695953,
+     "sellVolume": 303335.38910258916,
+     "buyOrganicVolume": 27960.881596999392,
+     "sellOrganicVolume": 15240.453780484775,
+     "numBuys": 5863,
+     "numSells": 4628,
+     "numTraders": 2599,
+     "numOrganicBuyers": 56,
+     "numNetBuyers": 1221
+    },
+    "stats24h": {
+     "priceChange": 156.1144201034177,
+     "holderChange": 72.35149192444567,
+     "liquidityChange": 138.14926742130953,
+     "volumeChange": 232.659596502316,
+     "buyVolume": 1911395.6820343505,
+     "sellVolume": 1818468.7992474074,
+     "buyOrganicVolume": 154997.45679632208,
+     "sellOrganicVolume": 93428.29416625109,
+     "numBuys": 26250,
+     "numSells": 22478,
+     "numTraders": 7916,
+     "numOrganicBuyers": 144,
+     "numNetBuyers": 3515
+    },
+    "firstPool": {
+     "id": "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr",
+     "createdAt": "2026-10-28T21:53:17Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 21.859188416858103,
+     "devBalancePercentage": 1.057968020195592e-13,
+     "devMigrations": 1,
+     "devMints": 1
+    },
+    "organicScore": 81.92297395285595,
+    "organicScoreLabel": "high",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-10-28T21:53:17Z",
+    "updatedAt": "2026-11-03T16:46:58.470433375Z"
+   }
+  },
+  {
+   "case": "Raydium",
+   "mint": "APLPiTjBWzwfZ5U1TBeqLF9XJ7dV7XKGe7j4BZhkDray",
+   "hint": {
+    "tag": "Raydium",
+    "config": "4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4",
+    "graduated": "H4sb6cH4bJ4G9vJG3cDA2h3gYAMgCfuzXu8h56RhkVnC"
+   },
+   "origin": {
+    "pad": "Raydium",
+    "family": "launchlab",
+    "pool": "GtAgnXHTSabKGtJYp7puX7fjc1pmkDtozEJ1GgPPCh6w",
+    "config": "4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4",
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "APLPiTjBWzwfZ5U1TBeqLF9XJ7dV7XKGe7j4BZhkDray",
+    "name": "Peak",
+    "symbol": "PEAK",
+    "icon": "https://ipfs.io/ipfs/bafkreifnayiclb54k3aescf6i43tlakmmsbwihj47bosaoobl2cwn5y4a4",
+    "decimals": 6,
+    "dev": "8b2gyvcg6nyB22zhgqHWUsFCQ2ymcXQmvfRV1YyiHQkt",
+    "circSupply": 988581353.942669,
+    "totalSupply": 988581353.942669,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "Raydium",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4",
+    "graduatedPool": "H4sb6cH4bJ4G9vJG3cDA2h3gYAMgCfuzXu8h56RhkVnC",
+    "graduatedAt": "2026-10-27T00:46:47Z",
+    "holderCount": 2133,
+    "fdv": 351481.1381689411,
+    "mcap": 351481.1381689411,
+    "usdPrice": 0.00035554093425610434,
+    "priceBlockId": 464971202,
+    "liquidity": 55941.11496394628,
+    "stats5m": {
+     "priceChange": -1.1448589158506086,
+     "holderChange": -0.5594405594405595,
+     "liquidityChange": 0.15012490119413377,
+     "volumeChange": 206.74964911534158,
+     "buyVolume": 1801.0242326874197,
+     "sellVolume": 2420.125620315662,
+     "sellOrganicVolume": 739.779737840449,
+     "numBuys": 14,
+     "numSells": 22,
+     "numTraders": 24,
+     "numNetBuyers": 7
+    },
+    "stats1h": {
+     "priceChange": -1.309443585324544,
+     "holderChange": -2.780309936189608,
+     "liquidityChange": -4.660825563692349,
+     "volumeChange": -61.69842942367825,
+     "buyVolume": 17425.771898346247,
+     "sellVolume": 17651.409873599147,
+     "buyOrganicVolume": 822.7885865915773,
+     "sellOrganicVolume": 1780.0702928311496,
+     "numBuys": 274,
+     "numSells": 255,
+     "numTraders": 246,
+     "numOrganicBuyers": 6,
+     "numNetBuyers": 69
+    },
+    "stats6h": {
+     "priceChange": -36.564996854060155,
+     "holderChange": -1.5235457063711912,
+     "liquidityChange": -12.706161545033389,
+     "volumeChange": 197.55704771603692,
+     "buyVolume": 86772.6961645977,
+     "sellVolume": 97225.46669564466,
+     "buyOrganicVolume": 7516.448978335145,
+     "sellOrganicVolume": 7694.229517067912,
+     "numBuys": 1118,
+     "numSells": 836,
+     "numTraders": 634,
+     "numOrganicBuyers": 20,
+     "numNetBuyers": 224
+    },
+    "stats24h": {
+     "priceChange": -52.89531547483549,
+     "holderChange": -4.177897574123989,
+     "liquidityChange": -15.449582246643665,
+     "volumeChange": -20.333345708416477,
+     "buyVolume": 396709.62077225384,
+     "sellVolume": 419493.6006806223,
+     "buyOrganicVolume": 26845.74034834748,
+     "sellOrganicVolume": 26077.674362242222,
+     "numBuys": 4852,
+     "numSells": 4534,
+     "numTraders": 1836,
+     "numOrganicBuyers": 46,
+     "numNetBuyers": 534
+    },
+    "firstPool": {
+     "id": "APLPiTjBWzwfZ5U1TBeqLF9XJ7dV7XKGe7j4BZhkDray",
+     "createdAt": "2026-10-27T00:44:09Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 22.796116981293103,
+     "devMigrations": 1,
+     "devMints": 1
+    },
+    "organicScore": 69.10660636629153,
+    "organicScoreLabel": "medium",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-10-27T00:44:09Z",
+    "updatedAt": "2026-11-03T16:47:14.269091719Z"
+   }
+  },
+  {
+   "case": "letsbonk.fun",
+   "mint": "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk",
+   "hint": {
+    "tag": "letsbonk.fun",
+    "config": "FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1",
+    "graduated": "Q2sPHPdUWFMg7M7wwrQKLrn619cAucfRsmhVJffodSp"
+   },
+   "origin": {
+    "pad": "letsbonk.fun",
+    "family": "launchlab",
+    "pool": "GWqWrb44KJ8rmKvytQVUDh9X2pAVUkT8zE5RqTnJ4Dw4",
+    "config": "FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1",
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk",
+    "name": "USELESS COIN",
+    "symbol": "USELESS",
+    "icon": "https://ipfs.io/ipfs/bafkreihsdoqkmpr5ryebaduoutyhj3nxco6wdp4s4743l2qrae4sz4hqrm",
+    "decimals": 6,
+    "twitter": "https://x.com/theunipcs/status/1921208257399382410",
+    "otherUrl": "https://tronscan.org/#/transaction/3f4ab216fdaff71e2c03c576994c5758d6e3845512f6827c003b64bb5aac593d",
+    "dev": "ArfVe1K5gt5zsxzRCWSQeWc1rJSJjZzuuYxmvRh71mMQ",
+    "circSupply": 999077950.820677,
+    "totalSupply": 999077950.820677,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "letsbonk.fun",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1",
+    "graduatedPool": "Q2sPHPdUWFMg7M7wwrQKLrn619cAucfRsmhVJffodSp",
+    "graduatedAt": "2025-05-10T14:23:16Z",
+    "holderCount": 68724,
+    "fdv": 124763616.74739975,
+    "mcap": 124763616.74739975,
+    "usdPrice": 0.12487876110659295,
+    "priceBlockId": 464971234,
+    "liquidity": 2209219.2965613664,
+    "stats5m": {
+     "priceChange": -0.3299770311908551,
+     "holderChange": -0.010184632843985974,
+     "liquidityChange": -0.4809720769560892,
+     "volumeChange": 158.08161416894998,
+     "buyVolume": 1091.5813003530404,
+     "sellVolume": 10056.816112349185,
+     "buyOrganicVolume": 435.18338541696056,
+     "sellOrganicVolume": 434.7441132822837,
+     "numBuys": 83,
+     "numSells": 150,
+     "numTraders": 68,
+     "numNetBuyers": 4
+    },
+    "stats1h": {
+     "priceChange": -1.2583115017785176,
+     "holderChange": 0.02037549119487702,
+     "liquidityChange": -0.7732347812041487,
+     "volumeChange": 6.7166886640208325,
+     "buyVolume": 26257.576835034975,
+     "sellVolume": 33016.10820943658,
+     "buyOrganicVolume": 1330.054215855621,
+     "sellOrganicVolume": 1585.7838890279088,
+     "numBuys": 521,
+     "numSells": 579,
+     "numTraders": 193,
+     "numOrganicBuyers": 5,
+     "numNetBuyers": 34
+    },
+    "stats6h": {
+     "priceChange": 0.8045238848299779,
+     "holderChange": -0.010184632843985974,
+     "liquidityChange": 0.5938702462667477,
+     "volumeChange": -8.743180779763895,
+     "buyVolume": 212533.31533358977,
+     "sellVolume": 224921.39435469685,
+     "buyOrganicVolume": 52795.708011023846,
+     "sellOrganicVolume": 26535.050126276106,
+     "numBuys": 3155,
+     "numSells": 3062,
+     "numTraders": 840,
+     "numOrganicBuyers": 25,
+     "numNetBuyers": 141
+    },
+    "stats24h": {
+     "priceChange": -1.3394070590885887,
+     "holderChange": 0.010186707801562932,
+     "liquidityChange": -0.8780768837534622,
+     "volumeChange": 11.223154602657614,
+     "buyVolume": 1103822.1205371022,
+     "sellVolume": 1559024.886152148,
+     "buyOrganicVolume": 147840.67004923607,
+     "sellOrganicVolume": 142646.58102989025,
+     "numBuys": 15249,
+     "numSells": 14717,
+     "numTraders": 3245,
+     "numOrganicBuyers": 80,
+     "numNetBuyers": 724
+    },
+    "firstPool": {
+     "id": "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk",
+     "createdAt": "2025-05-10T14:20:53Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 36.784597846717986,
+     "devBalancePercentage": 0.0004574861957713626,
+     "devMigrations": 200,
+     "devMints": 815
+    },
+    "organicScore": 86.43294288301726,
+    "organicScoreLabel": "high",
+    "isVerified": true,
+    "tags": [
+     "community-assist",
+     "launchpad",
+     "moonshot-verified",
+     "verified",
+     "meme"
+    ],
+    "createdAt": "2025-05-10T14:20:53Z",
+    "updatedAt": "2026-11-03T16:46:01.136348489Z"
+   }
+  },
+  {
+   "case": "stonkfun",
+   "mint": "SCGBBnSwnekytGFHgyeHHxPMiN7xDxsWFGg9JgFSTNK",
+   "hint": {
+    "tag": "stonkfun",
+    "config": "4E876qZTE9FJMrBzgVtBrSrzz2TLivB5Y5QXPjB4gZL7",
+    "graduated": "HPeXruE5Msv7paz5WPViwScLeSYWgZr8vhDakuiEp5ku"
+   },
+   "origin": {
+    "pad": "stonkfun",
+    "family": "launchlab",
+    "pool": "BPAM9R9iXRUBi9VAQB3Z1u3NUvqabdW7qNSyzdtM33CS",
+    "config": "4E876qZTE9FJMrBzgVtBrSrzz2TLivB5Y5QXPjB4gZL7",
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "SCGBBnSwnekytGFHgyeHHxPMiN7xDxsWFGg9JgFSTNK",
+    "name": "MAMESUKE",
+    "symbol": "MAMESUKE",
+    "icon": "https://gateway.irys.xyz/6xVxfxsJYHxWKLSTadiJ6t7SQa8NuRMchq6QADwNq1pG",
+    "decimals": 6,
+    "dev": "4S5TEe372KCZZuLkuJHQzu3EPqT8vepUJ5YF7p6VTBMG",
+    "circSupply": 999963151.803772,
+    "totalSupply": 999963151.803772,
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "launchpad": "stonkfun",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "4E876qZTE9FJMrBzgVtBrSrzz2TLivB5Y5QXPjB4gZL7",
+    "graduatedPool": "HPeXruE5Msv7paz5WPViwScLeSYWgZr8vhDakuiEp5ku",
+    "graduatedAt": "2026-11-02T11:34:57Z",
+    "holderCount": 6451,
+    "fdv": 1967865.1483798798,
+    "mcap": 1967865.1483798798,
+    "usdPrice": 0.001967937663333063,
+    "priceBlockId": 464971207,
+    "liquidity": 296626.47786062217,
+    "stats5m": {
+     "priceChange": 5.104636516659002,
+     "holderChange": 0.1397081651660975,
+     "liquidityChange": 0.8525340853644209,
+     "volumeChange": 13.658524562786864,
+     "buyVolume": 16139.45327901822,
+     "sellVolume": 8055.260531949512,
+     "buyOrganicVolume": 739.7165029196076,
+     "sellOrganicVolume": 930.5838858260428,
+     "numBuys": 248,
+     "numSells": 184,
+     "numTraders": 155,
+     "numOrganicBuyers": 6,
+     "numNetBuyers": 64
+    },
+    "stats1h": {
+     "priceChange": -11.925486838644257,
+     "holderChange": -0.7691124442393479,
+     "liquidityChange": 1.2144556358681409,
+     "volumeChange": -41.44379617877023,
+     "buyVolume": 85252.4996786545,
+     "sellVolume": 103103.75299069985,
+     "buyOrganicVolume": 2754.351846369162,
+     "sellOrganicVolume": 3548.3357312571698,
+     "numBuys": 1800,
+     "numSells": 1822,
+     "numTraders": 977,
+     "numOrganicBuyers": 16,
+     "numNetBuyers": 378
+    },
+    "stats6h": {
+     "priceChange": 47.52452736705119,
+     "holderChange": 20.98649662415604,
+     "liquidityChange": 161.64638061434175,
+     "volumeChange": 485.31747656194915,
+     "buyVolume": 1241820.3396972965,
+     "sellVolume": 1256850.3115611395,
+     "buyOrganicVolume": 67514.40888662191,
+     "sellOrganicVolume": 51048.400744622144,
+     "numBuys": 16193,
+     "numSells": 16066,
+     "numTraders": 5774,
+     "numOrganicBuyers": 134,
+     "numNetBuyers": 2363
+    },
+    "stats24h": {
+     "priceChange": 75.94915669911188,
+     "holderChange": 36.67372881355932,
+     "liquidityChange": 83.79565726734289,
+     "volumeChange": 90.5837577489672,
+     "buyVolume": 2752594.7832156913,
+     "sellVolume": 2781378.990327864,
+     "buyOrganicVolume": 135594.884940346,
+     "sellOrganicVolume": 125353.58170274565,
+     "numBuys": 45685,
+     "numSells": 43380,
+     "numTraders": 11798,
+     "numOrganicBuyers": 244,
+     "numNetBuyers": 4869
+    },
+    "firstPool": {
+     "id": "SCGBBnSwnekytGFHgyeHHxPMiN7xDxsWFGg9JgFSTNK",
+     "createdAt": "2026-11-02T11:34:56Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 14.417119758113989,
+     "devMigrations": 1,
+     "devMints": 1
+    },
+    "organicScore": 85.11004075498599,
+    "organicScoreLabel": "high",
+    "tags": [
+     "unknown",
+     "token-2022"
+    ],
+    "createdAt": "2026-11-02T11:34:56Z",
+    "updatedAt": "2026-11-03T16:47:21.206859143Z"
+   }
+  },
+  {
+   "case": "stonkfun",
+   "mint": "DEW9dSN6QpWyNthphCpMmAbZP1Q4cEKR9xQXAri98WDP",
+   "hint": {
+    "tag": "stonkfun",
+    "config": "6BwHHDg3u1854jC8PDLXvR4spTcLNaoBxLJNGC4nTESt",
+    "graduated": "B4VFURUHHzyt8YzBGBV9jiarBvjh1EbMAbRNBnNqaxUD"
+   },
+   "origin": {
+    "pad": "stonkfun",
+    "family": "launchlab",
+    "pool": "5aBH535rESkhjVb2nEaMPfyjiTw3uK57vE6c5uhZHjPY",
+    "config": "6BwHHDg3u1854jC8PDLXvR4spTcLNaoBxLJNGC4nTESt",
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "DEW9dSN6QpWyNthphCpMmAbZP1Q4cEKR9xQXAri98WDP",
+    "name": "Super Inu",
+    "symbol": "SI",
+    "icon": "https://axiomtrading.sfo3.cdn.digitaloceanspaces.com/7ovByu4CKE2ogdbYTRx8o9z1XarkNMA3hXyxThWamoon.webp",
+    "decimals": 6,
+    "dev": "9pkJqJLtefuna3GLtKZyF5DBWwEGUdxZUSGCmf5jZhA9",
+    "circSupply": 994771640.264905,
+    "totalSupply": 994771640.264905,
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "launchpad": "stonkfun",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "6BwHHDg3u1854jC8PDLXvR4spTcLNaoBxLJNGC4nTESt",
+    "graduatedPool": "B4VFURUHHzyt8YzBGBV9jiarBvjh1EbMAbRNBnNqaxUD",
+    "graduatedAt": "2026-09-21T15:45:00Z",
+    "holderCount": 49703,
+    "fdv": 9901195.585941743,
+    "mcap": 9901195.585941743,
+    "usdPrice": 0.009953234677362819,
+    "priceBlockId": 464970881,
+    "liquidity": 874905.5995531222,
+    "stats5m": {
+     "priceChange": -1.3499600788689847,
+     "liquidityChange": 0.00438992056133292,
+     "volumeChange": 142.9287225046399,
+     "buyVolume": 1175.4871824693323,
+     "sellVolume": 52.856991552588376,
+     "numBuys": 16,
+     "numSells": 8,
+     "numTraders": 9,
+     "numOrganicBuyers": 2,
+     "numNetBuyers": 8
+    },
+    "stats1h": {
+     "priceChange": -0.7500580873894908,
+     "holderChange": -0.01810428065658191,
+     "liquidityChange": 1.773867927305055,
+     "volumeChange": -53.34644144138942,
+     "buyVolume": 8260.613551505841,
+     "sellVolume": 5028.7365891595455,
+     "buyOrganicVolume": 1088.694764837804,
+     "sellOrganicVolume": 183.916659599892,
+     "numBuys": 124,
+     "numSells": 104,
+     "numTraders": 80,
+     "numOrganicBuyers": 3,
+     "numNetBuyers": 39
+    },
+    "stats6h": {
+     "priceChange": 3.540123870353039,
+     "holderChange": -0.06032212012144853,
+     "liquidityChange": 3.282722323066474,
+     "volumeChange": -37.60783702436721,
+     "buyVolume": 70047.06926292219,
+     "sellVolume": 49842.460272390534,
+     "buyOrganicVolume": 7167.774444019348,
+     "sellOrganicVolume": 573.9689840234618,
+     "numBuys": 834,
+     "numSells": 642,
+     "numTraders": 387,
+     "numOrganicBuyers": 22,
+     "numNetBuyers": 212
+    },
+    "stats24h": {
+     "priceChange": -8.721495909339518,
+     "holderChange": -0.19678319712455572,
+     "liquidityChange": -2.144143345004963,
+     "volumeChange": 9.497225182876575,
+     "buyVolume": 387303.5248202341,
+     "sellVolume": 421683.05465042125,
+     "buyOrganicVolume": 33080.97365542066,
+     "sellOrganicVolume": 44880.92968988633,
+     "numBuys": 4007,
+     "numSells": 3621,
+     "numTraders": 1468,
+     "numOrganicBuyers": 59,
+     "numNetBuyers": 847
+    },
+    "firstPool": {
+     "id": "DEW9dSN6QpWyNthphCpMmAbZP1Q4cEKR9xQXAri98WDP",
+     "createdAt": "2026-09-21T15:44:55Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 11.519726129435965,
+     "devMigrations": 96,
+     "devMints": 7621
+    },
+    "organicScore": 75,
+    "organicScoreLabel": "medium",
+    "isVerified": true,
+    "tags": [
+     "verified",
+     "token-2022"
+    ],
+    "createdAt": "2026-09-21T15:44:55Z",
+    "updatedAt": "2026-11-03T16:46:45.741434814Z"
+   }
+  },
+  {
+   "case": "met-dbc",
+   "mint": "J6uvzzH31DVqeiFdMdwirKkkCWviTBvUbsNRg6KznuLL",
+   "hint": {
+    "tag": "met-dbc",
+    "config": "25JgZ6vkjXRGkMiTqHja7KSbJvvCyYVLLoedT2vv83DK",
+    "graduated": null
+   },
+   "origin": {
+    "pad": "met-dbc",
+    "family": "dbc",
+    "pool": "6MLs2YGCSErjU6jUha6CxkjctoFcSdAc8syvmxHeAn2S",
+    "config": "25JgZ6vkjXRGkMiTqHja7KSbJvvCyYVLLoedT2vv83DK",
+    "curveBps": 0
+   },
+   "jupiter": {
+    "id": "J6uvzzH31DVqeiFdMdwirKkkCWviTBvUbsNRg6KznuLL",
+    "name": "NULLIFY",
+    "symbol": "NULLIFY",
+    "icon": "https://brown-advanced-caterpillar-960.mypinata.cloud/ipfs/bafkreif7n5xmj454grp6g3gu2buaxp2wnh4tzp4bnyjy2aksqth5qmsnym",
+    "decimals": 6,
+    "dev": "3rKg9FgDqRNzEQ9SecgJ7jGREk4mZCWMVg5JJH7t7Y1o",
+    "circSupply": 1000000000,
+    "totalSupply": 1000000000,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "met-dbc",
+    "metaLaunchpad": "met-dbc",
+    "partnerConfig": "25JgZ6vkjXRGkMiTqHja7KSbJvvCyYVLLoedT2vv83DK",
+    "holderCount": 5,
+    "fdv": 1264.3692333960942,
+    "mcap": 1264.3692333960942,
+    "usdPrice": 0.0000012643692333960942,
+    "priceBlockId": 464971205,
+    "liquidity": 0.6620072563709013,
+    "stats5m": {
+     "priceChange": -26.774070962420875,
+     "holderChange": -16.666666666666664,
+     "liquidityChange": -99.4768704093167,
+     "buyVolume": 126.54746895624801,
+     "sellVolume": 125.86118711636314,
+     "numBuys": 7,
+     "numSells": 3,
+     "numTraders": 7,
+     "numNetBuyers": 5
+    },
+    "stats1h": {
+     "priceChange": -26.774070962420875,
+     "holderChange": -16.666666666666664,
+     "liquidityChange": -99.4768704093167,
+     "buyVolume": 126.54746895624801,
+     "sellVolume": 125.86118711636314,
+     "numBuys": 7,
+     "numSells": 3,
+     "numTraders": 7,
+     "numNetBuyers": 5
+    },
+    "stats6h": {
+     "priceChange": -26.774070962420875,
+     "holderChange": -16.666666666666664,
+     "liquidityChange": -99.4768704093167,
+     "buyVolume": 126.54746895624801,
+     "sellVolume": 125.86118711636314,
+     "numBuys": 7,
+     "numSells": 3,
+     "numTraders": 7,
+     "numNetBuyers": 5
+    },
+    "stats24h": {
+     "priceChange": -26.774070962420875,
+     "holderChange": -16.666666666666664,
+     "liquidityChange": -99.4768704093167,
+     "buyVolume": 126.54746895624801,
+     "sellVolume": 125.86118711636314,
+     "numBuys": 7,
+     "numSells": 3,
+     "numTraders": 7,
+     "numNetBuyers": 5
+    },
+    "firstPool": {
+     "id": "J6uvzzH31DVqeiFdMdwirKkkCWviTBvUbsNRg6KznuLL",
+     "createdAt": "2026-11-03T16:46:44Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 9.6399215298172,
+     "devMints": 2
+    },
+    "organicScore": 0,
+    "organicScoreLabel": "low",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-11-03T16:46:44Z",
+    "updatedAt": "2026-11-03T16:47:15.787299197Z"
+   }
+  },
+  {
+   "case": "met-dbc",
+   "mint": "EgqxxR7zowzaLEm24oep5qqBieLVAWYX78LhgeqAJAo",
+   "hint": {
+    "tag": "met-dbc",
+    "config": "8JXkUnoSEoyY5pWJATvoub3p5nvSfetCXxVMK6W4cExa",
+    "graduated": "CryBbh9QQttrUrfLVXLLEuhkM5wZ8W1DUZFYNhUEhYqs"
+   },
+   "origin": {
+    "pad": "met-dbc",
+    "family": "dbc",
+    "pool": "9JYXGyrm82yVfG4gRkUGSSbBS12xSFSfdiyExDS7vWLQ",
+    "config": "8JXkUnoSEoyY5pWJATvoub3p5nvSfetCXxVMK6W4cExa",
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "EgqxxR7zowzaLEm24oep5qqBieLVAWYX78LhgeqAJAo",
+    "name": "H0 81 Capital",
+    "symbol": "H081",
+    "icon": "https://pbs.twimg.com/profile_images/2114467688860766208/vTGnkSNX_400x400.jpg",
+    "decimals": 6,
+    "twitter": "https://x.com/H081CAP/",
+    "dev": "2wjxKzH7fVGpjcA9KpjDBDHjSAhz7u8ZgMLnVPVGSkDP",
+    "circSupply": 999995459.104353,
+    "totalSupply": 999995459.104353,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "met-dbc",
+    "metaLaunchpad": "met-dbc",
+    "partnerConfig": "8JXkUnoSEoyY5pWJATvoub3p5nvSfetCXxVMK6W4cExa",
+    "graduatedPool": "CryBbh9QQttrUrfLVXLLEuhkM5wZ8W1DUZFYNhUEhYqs",
+    "graduatedAt": "2026-10-30T22:13:05Z",
+    "holderCount": 325,
+    "fdv": 182825.12306683205,
+    "mcap": 182825.12306683205,
+    "usdPrice": 0.00018282595326040736,
+    "priceBlockId": 464969849,
+    "liquidity": 18691.55551453695,
+    "stats5m": {
+     "priceChange": -0.7076975632190049,
+     "liquidityChange": -0.6356211696072526,
+     "volumeChange": -79.595500315715,
+     "sellVolume": 98.29555483265733,
+     "numSells": 2,
+     "numTraders": 1,
+     "numOrganicBuyers": 1
+    },
+    "stats1h": {
+     "priceChange": 38.13509725821542,
+     "holderChange": 2.848101265822785,
+     "liquidityChange": 18.35603786649931,
+     "volumeChange": 96.81191413572877,
+     "buyVolume": 5732.893258068804,
+     "sellVolume": 3701.1339202918734,
+     "buyOrganicVolume": 2681.9804909264726,
+     "sellOrganicVolume": 40.54410620057037,
+     "numBuys": 111,
+     "numSells": 100,
+     "numTraders": 59,
+     "numOrganicBuyers": 3,
+     "numNetBuyers": 14
+    },
+    "stats6h": {
+     "priceChange": 124.7327252737982,
+     "holderChange": -11.444141689373296,
+     "liquidityChange": 49.804083616125325,
+     "volumeChange": 110.40789028972597,
+     "buyVolume": 18898.862956028705,
+     "sellVolume": 13975.310409657415,
+     "buyOrganicVolume": 3806.907231174041,
+     "sellOrganicVolume": 1885.7014321739227,
+     "numBuys": 404,
+     "numSells": 427,
+     "numTraders": 197,
+     "numOrganicBuyers": 5,
+     "numNetBuyers": 43
+    },
+    "stats24h": {
+     "priceChange": 227.3463040416607,
+     "holderChange": 20.817843866171003,
+     "liquidityChange": 91.05034162113253,
+     "volumeChange": 44.04268684797021,
+     "buyVolume": 59471.50080482265,
+     "sellVolume": 52315.645969814446,
+     "buyOrganicVolume": 5004.5689636697225,
+     "sellOrganicVolume": 3779.439028545264,
+     "numBuys": 1275,
+     "numSells": 1094,
+     "numTraders": 384,
+     "numOrganicBuyers": 10,
+     "numNetBuyers": 113
+    },
+    "firstPool": {
+     "id": "EgqxxR7zowzaLEm24oep5qqBieLVAWYX78LhgeqAJAo",
+     "createdAt": "2026-10-30T21:29:51Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 25.989961091477586,
+     "devMigrations": 1,
+     "devMints": 1
+    },
+    "organicScore": 48.99369200196069,
+    "organicScoreLabel": "medium",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-10-30T21:29:51Z",
+    "updatedAt": "2026-11-03T16:42:31.021988729Z"
+   }
+  },
+  {
+   "case": "a DBC partner tag the app does not draw: the family pad",
+   "mint": "241aTYhVXZ4WBVSFpfY37RqoCGBQ73KiRFAKvTtnmoon",
+   "hint": {
+    "tag": "moonshot",
+    "config": "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM",
+    "graduated": "EcFsXQJjVCjCYWHsuhXUnZH4XB2MzF7iZ3dJu48wmoa9"
+   },
+   "origin": {
+    "pad": "met-dbc",
+    "family": "dbc",
+    "pool": "8MgnhTkmiAH38v7g9hgjBxPFphNekCroBUcSeL117BG2",
+    "config": "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM",
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "241aTYhVXZ4WBVSFpfY37RqoCGBQ73KiRFAKvTtnmoon",
+    "name": "Mooncat",
+    "symbol": "MCAT",
+    "icon": "https://cdn.moonshot.com/GQ05HXjcn2lh2F9C7FuwOnK6.jpg",
+    "decimals": 6,
+    "website": "https://moonshot.com/241aTYhVXZ4WBVSFpfY37RqoCGBQ73KiRFAKvTtnmoon",
+    "dev": "14ZmvqkfaLktiWh2S7efeNpzQqQZ5RxxEae3ufepjiyp",
+    "circSupply": 999351811.75396,
+    "totalSupply": 999351811.75396,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "moonshot",
+    "metaLaunchpad": "met-dbc",
+    "partnerConfig": "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM",
+    "graduatedPool": "EcFsXQJjVCjCYWHsuhXUnZH4XB2MzF7iZ3dJu48wmoa9",
+    "graduatedAt": "2026-09-17T20:51:56Z",
+    "holderCount": 3944,
+    "fdv": 17108.675764015687,
+    "mcap": 17108.675764015687,
+    "usdPrice": 0.000017119772599389487,
+    "priceBlockId": 464971113,
+    "liquidity": 8967.280508574233,
+    "stats5m": {
+     "priceChange": 3.027539489274416,
+     "liquidityChange": 1.2741981347475102,
+     "buyVolume": 112.92070689773001,
+     "numBuys": 1,
+     "numTraders": 1,
+     "numNetBuyers": 1
+    },
+    "stats1h": {
+     "priceChange": -0.5083320020354177,
+     "holderChange": 0.025361399949277198,
+     "liquidityChange": 2.9362977947552125,
+     "volumeChange": -46.44402540891,
+     "buyVolume": 255.110676901307,
+     "numBuys": 2,
+     "numTraders": 1,
+     "numNetBuyers": 1
+    },
+    "stats6h": {
+     "priceChange": -5.056089714735808,
+     "holderChange": -0.05068423720223011,
+     "liquidityChange": -1.3067652035923971,
+     "volumeChange": 1517.0224684185669,
+     "buyVolume": 355.93869694535096,
+     "sellVolume": 476.33879393839527,
+     "numBuys": 5,
+     "numSells": 4,
+     "numTraders": 4,
+     "numNetBuyers": 1
+    },
+    "stats24h": {
+     "priceChange": -3.4262887327177034,
+     "holderChange": -0.1771703366236396,
+     "liquidityChange": -1.0452273468461988,
+     "volumeChange": 30.722125109879155,
+     "buyVolume": 401.5924103392068,
+     "sellVolume": 495.8832588415568,
+     "numBuys": 8,
+     "numSells": 9,
+     "numTraders": 9,
+     "numNetBuyers": 2
+    },
+    "firstPool": {
+     "id": "241aTYhVXZ4WBVSFpfY37RqoCGBQ73KiRFAKvTtnmoon",
+     "createdAt": "2026-09-17T20:42:33Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 19.600635539807012,
+     "devMigrations": 92,
+     "devMints": 176516
+    },
+    "organicScore": 0,
+    "organicScoreLabel": "low",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-09-17T20:42:33Z",
+    "updatedAt": "2026-11-03T16:46:54.135234677Z"
+   }
+  },
+  {
+   "case": "untagged by Jupiter, tagged from the chain",
+   "mint": "5UUH9RTDiSpq6HKS6bp4NdU9PNJpXRXuiw6ShBTBhgH2",
+   "hint": {
+    "tag": null,
+    "config": null,
+    "graduated": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama"
+   },
+   "origin": {
+    "pad": "pump.fun",
+    "family": "pump",
+    "pool": "9v2bZjjz981ojybxtem7LdMb7aiygeVx4nLjtydyztvG",
+    "config": null,
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "5UUH9RTDiSpq6HKS6bp4NdU9PNJpXRXuiw6ShBTBhgH2",
+    "name": "TROLL",
+    "symbol": "TROLL",
+    "icon": "https://ipfs.io/ipfs/QmWV8QgmH1gSw41yapzsFwkC8yPbzoSreAcJbzqfvo2sVq",
+    "decimals": 6,
+    "twitter": "https://x.com/troll_",
+    "dev": "AB5EUPJjBSAoGqWCAQ3EHPSTbBarsAMEf6TJi7tibo2D",
+    "circSupply": 998744801.047955,
+    "totalSupply": 998744801.047955,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "graduatedPool": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama",
+    "graduatedAt": "2025-04-20T18:30:26Z",
+    "holderCount": 69375,
+    "fdv": 27641896.57127809,
+    "mcap": 27641896.57127809,
+    "usdPrice": 0.027676636256102883,
+    "priceBlockId": 464971052,
+    "liquidity": 1264282.0179730216,
+    "stats5m": {
+     "priceChange": -0.6529984520136298,
+     "holderChange": -0.001441420664206642,
+     "liquidityChange": -0.08783444698032071,
+     "volumeChange": 10210.414893692745,
+     "buyVolume": 51.57515783867589,
+     "sellVolume": 72.35633117471957,
+     "numBuys": 2,
+     "numSells": 3,
+     "numTraders": 2,
+     "numOrganicBuyers": 1,
+     "numNetBuyers": 2
+    },
+    "stats1h": {
+     "priceChange": 0.22181103758349535,
+     "holderChange": -0.005765433344383747,
+     "liquidityChange": -0.1303490423014088,
+     "volumeChange": -20.9641656368274,
+     "buyVolume": 6781.775130508848,
+     "sellVolume": 2619.15280579273,
+     "buyOrganicVolume": 126.24543703463257,
+     "sellOrganicVolume": 121.88541156917168,
+     "numBuys": 55,
+     "numSells": 45,
+     "numTraders": 49,
+     "numOrganicBuyers": 2,
+     "numNetBuyers": 21
+    },
+    "stats6h": {
+     "priceChange": 1.4234939289564181,
+     "holderChange": -0.004324137334601747,
+     "liquidityChange": 1.4027082953859824,
+     "volumeChange": 38.8009279584915,
+     "buyVolume": 27933.285165762354,
+     "sellVolume": 20293.178070586077,
+     "buyOrganicVolume": 3308.9945847785093,
+     "sellOrganicVolume": 3524.1268667557565,
+     "numBuys": 353,
+     "numSells": 295,
+     "numTraders": 221,
+     "numOrganicBuyers": 9,
+     "numNetBuyers": 96
+    },
+    "stats24h": {
+     "priceChange": -4.417073302014188,
+     "holderChange": -0.017294305849798956,
+     "liquidityChange": -2.920888120821206,
+     "volumeChange": 38.87328480194433,
+     "buyVolume": 98258.35399564965,
+     "sellVolume": 129677.98204486757,
+     "buyOrganicVolume": 11666.528685295756,
+     "sellOrganicVolume": 22198.78527696418,
+     "numBuys": 1592,
+     "numSells": 1596,
+     "numTraders": 710,
+     "numOrganicBuyers": 31,
+     "numNetBuyers": 272
+    },
+    "firstPool": {
+     "id": "2dDRYU6dByYuUKVYRUjpLyGXj1YMYAmCPqZnqDBsVTqS",
+     "createdAt": "2025-04-20T13:22:51Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 27.15937224948065,
+     "devMigrations": 3,
+     "devMints": 3
+    },
+    "organicScore": 72.90154525855722,
+    "organicScoreLabel": "medium",
+    "isVerified": true,
+    "tags": [
+     "community-assist",
+     "moonshot-verified",
+     "verified",
+     "meme"
+    ],
+    "updatedAt": "2026-11-03T16:46:49.932208721Z"
+   }
+  },
+  {
+   "case": "untagged by Jupiter, tagged from the chain",
+   "mint": "8XtRWb4uAAJFMP4QQhoYYCWR6XXb7ybcCdiqPwz9s5WS",
+   "hint": {
+    "tag": null,
+    "config": null,
+    "graduated": null
+   },
+   "origin": {
+    "pad": "pump.fun",
+    "family": "pump",
+    "pool": "4ScohuMYLXGHQq2URGPEwZxQZWc891z22y8XbdvvpJA3",
+    "config": null,
+    "curveBps": 10000
+   },
+   "jupiter": {
+    "id": "8XtRWb4uAAJFMP4QQhoYYCWR6XXb7ybcCdiqPwz9s5WS",
+    "name": "alon",
+    "symbol": "ALON",
+    "icon": "https://ipfs.io/ipfs/QmavnBN2FbwW8o43KYBEQSnjYyGrRZKXbEN6N598dkFCLz",
+    "decimals": 6,
+    "twitter": "https://twitter.com/a1lon9",
+    "telegram": "https://t.me/aloncomcoin",
+    "dev": "CxgPWvH2GoEDENELne2XKAR2z2Fr4shG2uaeyqZceGve",
+    "circSupply": 989127449.807889,
+    "totalSupply": 989127449.807889,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "holderCount": 19739,
+    "fdv": 3049152.0291215153,
+    "mcap": 3049152.0291215153,
+    "usdPrice": 0.003082668497081675,
+    "priceBlockId": 464966254,
+    "liquidity": 347123.7335827889,
+    "stats1h": {
+     "priceChange": 1.3205826144201271,
+     "liquidityChange": 0.7255580689339478,
+     "volumeChange": -26.747085217651012,
+     "buyVolume": 4011.2939670673345,
+     "sellVolume": 1392.561772129505,
+     "buyOrganicVolume": 466.45999529490564,
+     "sellOrganicVolume": 465.8879666629346,
+     "numBuys": 12,
+     "numSells": 11,
+     "numTraders": 13,
+     "numNetBuyers": 4
+    },
+    "stats6h": {
+     "priceChange": 7.851468696316827,
+     "holderChange": -0.04557423536560664,
+     "liquidityChange": 4.2421851309354635,
+     "volumeChange": 276.78477274150464,
+     "buyVolume": 22000.990938042254,
+     "sellVolume": 11959.542931508648,
+     "buyOrganicVolume": 679.3352361880139,
+     "sellOrganicVolume": 666.7016945169416,
+     "numBuys": 313,
+     "numSells": 296,
+     "numTraders": 129,
+     "numOrganicBuyers": 2,
+     "numNetBuyers": 24
+    },
+    "stats24h": {
+     "priceChange": 2.625971537714432,
+     "holderChange": 0.06590286930954072,
+     "liquidityChange": -0.11466623442387888,
+     "volumeChange": 41.42744920489431,
+     "buyVolume": 37130.94162732741,
+     "sellVolume": 30315.054889585877,
+     "buyOrganicVolume": 6461.32154939292,
+     "sellOrganicVolume": 3989.7584716717556,
+     "numBuys": 622,
+     "numSells": 656,
+     "numTraders": 270,
+     "numOrganicBuyers": 12,
+     "numNetBuyers": 104
+    },
+    "firstPool": {
+     "id": "Eb9qkfiSzKd185KdWLkZrMrejKEbA2ah2BK7spNmoPej",
+     "createdAt": "2024-06-10T06:20:37.467Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 17.768519361887623,
+     "devBalancePercentage": 0.008467852363643096,
+     "devMigrations": 33,
+     "devMints": 148
+    },
+    "organicScore": 61.16154282296431,
+    "organicScoreLabel": "medium",
+    "isVerified": true,
+    "tags": [
+     "community",
+     "moonshot-verified",
+     "verified",
+     "meme"
+    ],
+    "createdAt": "2024-06-07T10:56:42.584Z",
+    "updatedAt": "2026-11-03T16:29:40.140652121Z"
+   }
+  },
+  {
+   "case": "tagged by Jupiter, no launch on chain: untagged",
+   "mint": "PRVT6TB7uss3FrUd2D9xs2zqDBsa3GbMJMwCQsgmeta",
+   "hint": {
+    "tag": "metadao",
+    "config": null,
+    "graduated": "BLkBSE96kQys7SrMioKxeMiVbeo4Ckk2Y4n1JphKxYnv"
+   },
+   "origin": null,
+   "jupiter": {
+    "id": "PRVT6TB7uss3FrUd2D9xs2zqDBsa3GbMJMwCQsgmeta",
+    "name": "Umbra",
+    "symbol": "UMBRA",
+    "icon": "https://raw.githubusercontent.com/metaDAOproject/futarchy/refs/heads/develop/scripts/assets/UMBRA/UMBRA.png",
+    "decimals": 6,
+    "dev": "tSTp6B6kE9o6ZaTmHm2ZwnJBBtgd3x112tapxFhmBEQ",
+    "circSupply": 13844417,
+    "totalSupply": 27344355.381058,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "mintAuthority": "6VsC8PuKkXm5xo54c2vbrAaSfQipkpGHqNuKTxXFySx6",
+    "launchpad": "metadao",
+    "graduatedPool": "BLkBSE96kQys7SrMioKxeMiVbeo4Ckk2Y4n1JphKxYnv",
+    "graduatedAt": "2025-10-10T15:02:58Z",
+    "holderCount": 6564,
+    "fdv": 17971867.748123292,
+    "mcap": 9099136.838538373,
+    "usdPrice": 0.6572423265304976,
+    "priceBlockId": 464971136,
+    "liquidity": 892659.0204769629,
+    "stats5m": {
+     "priceChange": 0.03776306981644716,
+     "liquidityChange": 0.020674473923448265,
+     "volumeChange": 12.674278906206599,
+     "buyVolume": 185.088112889336,
+     "sellVolume": 4.868839634023978,
+     "numBuys": 8,
+     "numSells": 1,
+     "numTraders": 5,
+     "numNetBuyers": 4
+    },
+    "stats1h": {
+     "priceChange": 1.4277427774679259,
+     "holderChange": 0.015236934328813042,
+     "liquidityChange": 0.4455746679954479,
+     "volumeChange": -79.73522000847825,
+     "buyVolume": 3799.321836503302,
+     "sellVolume": 1237.5605908484715,
+     "buyOrganicVolume": 28.41515132031429,
+     "sellOrganicVolume": 250.83490721587302,
+     "numBuys": 36,
+     "numSells": 14,
+     "numTraders": 19,
+     "numOrganicBuyers": 1,
+     "numNetBuyers": 10
+    },
+    "stats6h": {
+     "priceChange": 14.687155348374631,
+     "holderChange": 0.5052824988516307,
+     "liquidityChange": 7.423984758918328,
+     "volumeChange": 432.3655769696559,
+     "buyVolume": 85441.28165551301,
+     "sellVolume": 24473.17843502251,
+     "buyOrganicVolume": 22041.437407413705,
+     "sellOrganicVolume": 1264.8243807288848,
+     "numBuys": 518,
+     "numSells": 313,
+     "numTraders": 148,
+     "numOrganicBuyers": 8,
+     "numNetBuyers": 60
+    },
+    "stats24h": {
+     "priceChange": 24.06038397277691,
+     "holderChange": 0.25966091339544833,
+     "liquidityChange": 11.716768564389533,
+     "volumeChange": -51.073911361861924,
+     "buyVolume": 141381.23385716794,
+     "sellVolume": 47390.557862581256,
+     "buyOrganicVolume": 32175.4723649943,
+     "sellOrganicVolume": 9159.275868685303,
+     "numBuys": 1096,
+     "numSells": 570,
+     "numTraders": 246,
+     "numOrganicBuyers": 10,
+     "numNetBuyers": 75
+    },
+    "firstPool": {
+     "id": "EnsGqQKXRCkr8emAi6LeQxGmEV4omd4j3QXqRyJqoLn3",
+     "createdAt": "2025-10-09T23:02:29Z"
+    },
+    "audit": {
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 63.7352924443695,
+     "devMigrations": 14,
+     "devMints": 84
+    },
+    "organicScore": 65.42060991394291,
+    "organicScoreLabel": "medium",
+    "isVerified": true,
+    "tags": [
+     "verified",
+     "defi"
+    ],
+    "createdAt": "2025-10-06T08:08:49Z",
+    "updatedAt": "2026-11-03T16:47:08.38959056Z"
+   }
+  },
+  {
+   "case": "a LaunchLab token on its curve against another quote: not found, untagged",
+   "mint": "AFeroa9ZPHKDi4XTPd3N1aZgnUyPzsckCYkv9JomU5Le",
+   "hint": {
+    "tag": "raydium-launchlab",
+    "config": "2TDPJJPV6nvTEqXABxrqno6Uzpipxxvh1zjLN3SMYn69",
+    "graduated": null
+   },
+   "origin": null,
+   "jupiter": {
+    "id": "AFeroa9ZPHKDi4XTPd3N1aZgnUyPzsckCYkv9JomU5Le",
+    "name": "RAYCAT",
+    "symbol": "RAYCAT",
+    "icon": "https://float.mypinata.cloud/ipfs/bafkreicnyufqjl4irzi6yantokje6yuypjaq6hqp4q554rmrmywrfg2ycq",
+    "decimals": 6,
+    "dev": "DhPxpBYYQ8Z3B51vaQPm5UFSYJXkdnhsSxNdMz4q5i1S",
+    "circSupply": 999983291.918088,
+    "totalSupply": 999983291.918088,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "launchpad": "raydium-launchlab",
+    "metaLaunchpad": "raydium-launchlab",
+    "partnerConfig": "2TDPJJPV6nvTEqXABxrqno6Uzpipxxvh1zjLN3SMYn69",
+    "holderCount": 103,
+    "fdv": 47880.976171134585,
+    "mcap": 47880.976171134585,
+    "usdPrice": 0.000047881776183773156,
+    "priceBlockId": 464969577,
+    "liquidity": 12733.633068729903,
+    "stats5m": {
+     "buyVolume": 51.476880680566616,
+     "numBuys": 1,
+     "numTraders": 1,
+     "numNetBuyers": 1
+    },
+    "stats1h": {
+     "priceChange": 0.2878347850160778,
+     "holderChange": -12.711864406779661,
+     "liquidityChange": 1.1269628182040272,
+     "volumeChange": -80.55770731634158,
+     "buyVolume": 1590.4204002280799,
+     "sellVolume": 1422.9792952997861,
+     "buyOrganicVolume": 22.38324539650733,
+     "sellOrganicVolume": 33.94063875796601,
+     "numBuys": 18,
+     "numSells": 27,
+     "numTraders": 31,
+     "numOrganicBuyers": 1,
+     "numNetBuyers": 7
+    },
+    "stats6h": {
+     "priceChange": 18.40286309991957,
+     "holderChange": -2.8301886792452833,
+     "liquidityChange": 26.948269529690812,
+     "volumeChange": 163.5225797752164,
+     "buyVolume": 12134.280733364263,
+     "sellVolume": 9454.346677742275,
+     "buyOrganicVolume": 552.2516377578966,
+     "sellOrganicVolume": 188.337098327468,
+     "numBuys": 128,
+     "numSells": 87,
+     "numTraders": 80,
+     "numOrganicBuyers": 4,
+     "numNetBuyers": 22
+    },
+    "stats24h": {
+     "priceChange": 118.1762760283451,
+     "holderChange": 635.7142857142857,
+     "liquidityChange": 699.0445821356274,
+     "volumeChange": 1297.0630675886152,
+     "buyVolume": 94987.80373264887,
+     "sellVolume": 82208.45974507743,
+     "buyOrganicVolume": 1896.0263343964261,
+     "sellOrganicVolume": 1369.0323293784147,
+     "numBuys": 1007,
+     "numSells": 697,
+     "numTraders": 362,
+     "numOrganicBuyers": 5,
+     "numNetBuyers": 104
+    },
+    "firstPool": {
+     "id": "AFeroa9ZPHKDi4XTPd3N1aZgnUyPzsckCYkv9JomU5Le",
+     "createdAt": "2026-10-31T02:47:35Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 23.196232278199957,
+     "devMints": 1
+    },
+    "organicScore": 41.33982514273728,
+    "organicScoreLabel": "medium",
+    "tags": [
+     "unknown"
+    ],
+    "createdAt": "2026-10-31T02:47:35Z",
+    "updatedAt": "2026-11-03T16:41:23.135796468Z"
+   }
+  },
+  {
+   "case": "untagged, no launchpad",
+   "mint": "Crz4eEgLkSe4nrR27K7wj6kZtiw3Kt4NzAikavGweRUg",
+   "hint": {
+    "tag": null,
+    "config": null,
+    "graduated": null
+   },
+   "origin": null,
+   "jupiter": {
+    "id": "Crz4eEgLkSe4nrR27K7wj6kZtiw3Kt4NzAikavGweRUg",
+    "name": "Life If",
+    "symbol": "LIFE",
+    "icon": "https://lens.google.com/uploadbyurl?url=https://gmgn.ai/external-res/a4223135e347411d0d2c930cc7dc70b9_v2.webp",
+    "decimals": 6,
+    "twitter": "https://x.com/MarioPrezldente/status/2117656828284641425",
+    "instagram": "https://www.instagram.com/p/DfSRaSJANyK/",
+    "dev": "56wPW2WWFqtTSeo1W12Wg4e7e1uYh1sDSHQ7MApU8SUk",
+    "circSupply": 1000000000,
+    "totalSupply": 1000000000,
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "holderCount": 38,
+    "fdv": 8213.02750732829,
+    "mcap": 8213.02750732829,
+    "usdPrice": 0.00000821302750732829,
+    "priceBlockId": 464971250,
+    "liquidity": 7758.168453231923,
+    "stats5m": {
+     "priceChange": 11.868934261632456,
+     "holderChange": 1166.6666666666665,
+     "liquidityChange": 3.581670440577841,
+     "buyVolume": 2657.8011273729408,
+     "sellVolume": 2239.3553897125057,
+     "numBuys": 44,
+     "numSells": 17,
+     "numTraders": 37,
+     "numNetBuyers": 25
+    },
+    "stats1h": {
+     "priceChange": 11.868934261632456,
+     "holderChange": 1166.6666666666665,
+     "liquidityChange": 3.581670440577841,
+     "buyVolume": 2657.8011273729408,
+     "sellVolume": 2239.3553897125057,
+     "numBuys": 44,
+     "numSells": 17,
+     "numTraders": 37,
+     "numNetBuyers": 25
+    },
+    "stats6h": {
+     "priceChange": 11.868934261632456,
+     "holderChange": 1166.6666666666665,
+     "liquidityChange": 3.581670440577841,
+     "buyVolume": 2657.8011273729408,
+     "sellVolume": 2239.3553897125057,
+     "numBuys": 44,
+     "numSells": 17,
+     "numTraders": 37,
+     "numNetBuyers": 25
+    },
+    "stats24h": {
+     "priceChange": 11.868934261632456,
+     "holderChange": 1166.6666666666665,
+     "liquidityChange": 3.581670440577841,
+     "buyVolume": 2657.8011273729408,
+     "sellVolume": 2239.3553897125057,
+     "numBuys": 44,
+     "numSells": 17,
+     "numTraders": 37,
+     "numNetBuyers": 25
+    },
+    "firstPool": {
+     "id": "G8YDged43cdn7ZKeAV63ygFb6Bs3dxAcXtZU76k93QJB",
+     "createdAt": "2026-11-03T16:47:07Z"
+    },
+    "audit": {
+     "mintAuthorityDisabled": true,
+     "freezeAuthorityDisabled": true,
+     "topHoldersPercentage": 0.0118405824433,
+     "devMints": 4
+    },
+    "organicScore": 0,
+    "organicScoreLabel": "low",
+    "tags": [
+     "unknown",
+     "token-2022"
+    ],
+    "createdAt": "2026-11-03T16:47:06Z",
+    "updatedAt": "2026-11-03T16:47:23.346742654Z"
+   }
+  }
+ ],
+ "accounts": {
+  "629bX7thfjcT7toZWHDFPvYQWeAYUmjT41AsL7bQoFRJ": {
+   "data": [
+    "F7f4N2DYrGDXoHv6BcgDAGcCBuC2AAAA1whprnTJAgBApUd5AQAAAACAxqR+jQMAAJctwubeivGHzLRzhvFIS91LEtzqveaCRmMC7i34oOdZAAAMRfffjZ5ylWKEkz9tmLdXAy6D34RgT7XhF//2HVsS+QAAAAAAAAAAAAESaUAbAAAAALP7JSsAAAAAACddvma1AAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 1493520,
+   "owner": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+   "rentEpoch": 18446744073709552000,
+   "space": 166
+  },
+  "De75mosrUvNkMUFjwKTr6ofi6bFZFGL7F8e1cuk2oZah": null,
+  "739D5yGwX8mkEztYRnm7J4iJPZKB3undKmwEk5QcvV2N": null,
+  "EMw8kDQR15QN3jNFyN1fAov2GQWqZsu1qbvV2bhLjmfv": {
+   "data": [
+    "F7f4N2DYrGD/D9hH488DAAisI/wGAAAA/3fF+1HRAgAIAAAAAAAAAACAxqR+jQMAAHkOlsKGXvhbLCtDEGBDkFj83RJSTvadYU6Ko6PLXNAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHmJlkCAAAAAO7StwMAAAAAAACsI/wGAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 103269356,
+   "owner": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+   "rentEpoch": 18446744073709552000,
+   "space": 166
+  },
+  "2UqGfchbv55dGEGm7TbVQxXZ8ZN1SGrEXeZF6zSeog78": null,
+  "B4NkkpQpkCKi75aJWVYgS86gSdcaLumXjk8GyLADPct6": null,
+  "FAeiDS5uYHEYqQqwYxByMkL8hDkppowXpaLQCHC8agLj": {
+   "data": [
+    "F7f4N2DYrGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAxqR+jQMAAUHKdILyj15j4YHtqvEPaW0wN9MIVukuh08kYmgea8lzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAACsI/wGAAAAhr0pBUsAAAAlwuYHAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 1493520,
+   "owner": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+   "rentEpoch": 18446744073709552000,
+   "space": 166
+  },
+  "9Ny2qcFNKBbrc9fTBnPzzcjF56G6jWrrYPC7A2AsMJL": null,
+  "DbqYEDopFhJXUuW1CbFwjs6bykCZx7EnDbWSCRzfL4uJ": null,
+  "7Jyz7YkQvvrHcjrmKhzs1Z6fUP16PKPcwonVDNkqrert": {
+   "data": [
+    "8ZptBBGxbbz5AABhRiivXhPbXj8sZdE5vAKkqkAoZ1uNsZr17YpYOV80NT61LerSW6YqMDfzs3nuja/j9nORoFpZzW6s6RRaswHVBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAGbfKWrx8rtoHuVuDB5kI1fD2hgetcPdgDI+sRvk/KZcbLpR44iTrt6L3dLHXJSV86ZQeK1CFB0xP/C01UkLmCNVph46oJxESySNOeVrzqy/ma56qE0HznyB+eKbu2eYc/Es2tZ0AMAAEHKdILyj15j4YHtqvEPaW0wN9MIVukuh08kYmgea8lzAAB35bQUBAAAAAAAAAAAAAAAAAAAAAAAAAAAAZpNGAAAAAAAqQ9RAwAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2182175,
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "rentEpoch": 18446744073709552000,
+   "space": 301
+  },
+  "6AQtvFGJHMLKbaSeoGBzENX1e5f5X3pReb3LKGJkvAyf": null,
+  "HgqGg3Mx6N9NsrCf2QKzi66YUcAmoXCVKn4dEizTQpF3": {
+   "data": [
+    "9+3j9dfD3kY0BAAAAAAAAPoABgkBAIDGpH6NAwAASExyNJoCAN1iSaZzGQQAvrVo/TQAAABB+VboMAIAAKKQYRwAAAAAesv9HFwAAACC5RgCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVxqOAcjfeCD51ms8c2W40eSvqBt4VMwu91zvWL0Ihn4VksqGDGviF4o8ub5o/P3hElthT+OKDJMPliqi4b8BNhq+YIpMRmZyWYdLCasBm8HNcrwEeq9E9Z61JFDE88KdBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAG4zp5Lg4dvRYUM8uLHeWZ/M1/1F58vR+Z393MGuA5PgfzutlZ2lJjXh7wKy59pN151mJBbMrVarEPFa2sV5X99yHiX8whmbAOdYgUCQw/ukw5pE2pUhx3p2UAYZXDE9JoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2829560,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 429
+  },
+  "EuN9AoAk9nYeExrn2kNhDaEntRReR4ADU8MTQfZRfVr5": null,
+  "2TDPJJPV6nvTEqXABxrqno6Uzpipxxvh1zjLN3SMYn69": {
+   "data": [
+    "oE6AAPhT5qAuBAAAAAAAAGg/m/d69Bl3mgfPoN/yiiHUElCU/g/a5qgLp74nYDSNaD+b93r0GXeaB8+g3/KKIdQSUJT+D9rmqAunvidgNI1AQg8AAAAAAAAAAAAAAAAAAAAAAAAAAABwFwAAAAAAAEZsb2F0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABodHRwczovL3d3dy5mbG9hdGxhdW5jaC54eXoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaHR0cHM6Ly93d3cuZmxvYXRsYXVuY2gueHl6L2ljb24ucG5nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH3jG4BeBbownMn9DviOP4S9X2S2Us/4ayW+t5/BzSPN3AUAAAAAAABoP5v3evQZd5oHz6Df8ooh1BJQlP4P2uaoC6e+J2A0jWg/m/d69Bl3mgfPoN/yiiHUElCU/g/a5qgLp74nYDSNAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 5445760,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 944
+  },
+  "DvTXtuSSoQAi7pi3QyvvEheURc3ReoqqSxi7V5tMuTL6": null,
+  "BRts9qJYb7TSr58kJQHX4qRskMFgmuu5JqeBHPVy68q2": {
+   "data": [
+    "9+3j9dfD3kY0BAAAAAAAAPoABgkBAIDGpH6NAwAASExyNJoCAN1iSaZzGQQAvrVo/TQAAABN0bJiIzkAADx7Gw0DAAAAesv9HFwAAACp1bYcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVxqOAcjfeCD51ms8c2W40eSvqBt4VMwu91zvWL0Ihn6oQmqlDmbYRLmJiQkg7xrGKyzsDRsGy8+cnDPDv1yUahpXQ69BQ9udk7wSyFlsm9f8Ico/4OffWj6E8fRNsLv9BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEXCEe/A8TdhdS+94/i358v7xLThkls0xMcmZ7iAaWUV2Zqz4r6v3RRx9luOOYnTI/miY9UFAE7TkpHnHwMiukAsjhBXSabjhJHKWEpj6sKO185N8LcH9N9kXhqNUNMHncAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2829560,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 429
+  },
+  "B55wopprecDHmrfyvoqtorJGHqbdFL5JmirqaD5iyxtQ": null,
+  "CKpEUk5SRk8CUNhhxaVPKtzKUKLgQe2tQHPH2eXWtaGR": {
+   "data": [
+    "oE6AAPhT5qAuBAAAAAAAACUH/k+NIzgj8w3myhtyrg8LEukyNM8E8pVjfLhou3xFJQf+T40jOCPzDebKG3KuDwsS6TI0zwTylWN8uGi7fEVAQg8AAAAAAAAAAAAAAAAAAAAAAAAAAABQRgAAAAAAAEZsb2F0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABodHRwczovL3d3dy5mbG9hdGxhdW5jaC54eXoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaHR0cHM6Ly93d3cuZmxvYXRsYXVuY2gueHl6L2ljb24ucG5nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMelwL5V6vEWRiDBQ1QVFr02SOQrAqqqEu5i4PK0Y7d7lBEAAAAAAAAlB/5PjSM4I/MN5sobcq4PCxLpMjTPBPKVY3y4aLt8RSUH/k+NIzgj8w3myhtyrg8LEukyNM8E8pVjfLhou3xFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 5445760,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 944
+  },
+  "EnUAdYkZQpssfamcu75RAe6smtE9bcWR4gvHmZhB3S25": null,
+  "HCvVkQCnU4Z2G1T1SNZBenwor13SW4inRV85cKvzwFDz": {
+   "data": [
+    "9+3j9dfD3kYuBAAAAAAAAPoCBgkBAIDGpH6NAwAAoK9e7pcCAI0cOD2hHQQAx+6OijQAAAAAoK9e7pcCAO4cxINZAAAAjRvEg1kAAABwPtTKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVxqOAcjfeCD51ms8c2W40eSvqBt4VMwu91zvWL0Ihn4Mz0S9jYhULhtaJK6kxHrjHQg3tn0pz5PyGZKb2gRlt6IpTDXbH/5O7aTkEchVlkmIJK8k7G0MXDHIV5KpdFGZBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEPOY+E3QH560tfo6zUyR/o3kvNnIFysVAnZ4vPt8MqGLHVQSqKRXx1qHgt9FQ8TzMrv3YEdYPu3X/DHLGcHVRrG4MnThiXGmO293LtcMMHryGiOPJcYEs9kjgUhnasjr4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2829560,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 429
+  },
+  "8zWhA4kbun84jJcnyjYoBcRaNgnLuKW3zytodKAwMrpn": null,
+  "s1ChXD2gHFkr6QJRCU24mbqgcUmSXLRwgqXKFrtrizJ": {
+   "data": [
+    "oE6AAPhT5qAuBAAAAAAAAE9MR4c2FfgmUyMWa0IXoib5yAYNtkOwcR/Tx97ocvC3G4MnThiXGmO293LtcMMHryGiOPJcYEs9kjgUhnasjr4AAAAAAAAAAAAAAAAAAAAAQEIPAAAAAABcRAAAAAAAAEZsb2F0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABodHRwczovL3d3dy5mbG9hdGxhdW5jaC54eXoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaHR0cHM6Ly93d3cuZmxvYXRsYXVuY2gueHl6L2ljb24ucG5nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANVWC7wxOOAwZdycF8fWECj0+UK3CMYEdDWd/0HgSBAPAAAAAAAAAAAbgydOGJcaY7b3cu1wwwevIaI48lxgSz2SOBSGdqyOvhuDJ04Ylxpjtvdy7XDDB68hojjyXGBLPZI4FIZ2rI6+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 5445760,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 944
+  },
+  "FJk9sajdc2Q4heRPPu3yLzkmf2ZByZkpiHQLv9e2bn5A": {
+   "data": [
+    "9+3j9dfD3kbVVgu8MTjgMGXcnBfH1hAo9PlCtwjGBHQ1nf9B4EgQDxuDJ04Ylxpjtvdy7XDDB68hojjyXGBLPZI4FIZ2rI6+GYtON5Oeiy2jjfnVOYyu02n8yTa/Xyngr4B0hlPnYaLvAV2f4wtT6OEB9qnHvAaGQwVu7y4OKe6hDo0sPpeI4sY17rc2jOXcS5pEwClD6bgvu0u3T0n0GotzW65C6s0fBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAGiKUw12x/+Tu2k5BHIVZZJiCSvJOxtDFwxyFeSqXRRmQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKnGgzrLyMAX52e/rHyuMePJumFC8/wqhGlcvY1mbnHUKv0ACQkG9S00MEQJAAAoNAYBAAAAAItG9BQAAAAAa01rAAAAAABzDMIIAAAAAA904moAAAAANAQAAAAAAAABAQAAAAAAAOO+nXQUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 3886200,
+   "owner": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+   "rentEpoch": 18446744073709552000,
+   "space": 637
+  },
+  "2Un3aNDZpaX92qtoh4y62KAfKuqTBKMnmfJE1FtoWyu9": null,
+  "GtAgnXHTSabKGtJYp7puX7fjc1pmkDtozEJ1GgPPCh6w": {
+   "data": [
+    "9+3j9dfD3kYtBAAAAAAAAPoCBgkBAIDGpH6NAwAAeMX7UdECAN50Dj7pzwMA168w/AYAAAAAeMX7UdECADoSZcoTAAAAABJlyhMAAAAf/cMXAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVxqOAcjfeCD51ms8c2W40eSvqBt4VMwu91zvWL0Ihn4vXdLCJ5JL53Z/9r1eidJ6hcBTq7ZuiGcR5rrvxYW4S4tx4uZvIdJ8YJxrSRyFpNixnCCja0JlibpEYU5DK2AmBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAGKwAzvC/WFZADwDp2OtmQnVRLEgqs5gkdX9BU2lQGa1+uooJA96r5lIGIoceBwrxXVc8u/cxgmtOtz7Yu9GfvHcLl3VFcjZ+5hQjOCIFHMIkumfppuN+YxTq9I3FBcuv0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2829560,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 429
+  },
+  "HnzqcMsPLLdXAjRnHNibmDtLbMTB5Ti4qaDUwwtV9ceU": null,
+  "4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4": {
+   "data": [
+    "oE6AAPhT5qBDAwAAAAAAAAyz4KxhxszieJPXInW2/oaPr/D9TgPLZwJnF1N10fnmBkxciPt6t7h+Y9K+oUQz/0LoC2mAU9wUKUNWXYM5qkgAAAAAAAAAAKCGAQAAAAAAoLsNAAAAAABMHQAAAAAAAFJheWRpdW0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABodHRwczovL3JheWRpdW0uaW8vAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaHR0cHM6Ly9pbWctdjEucmF5ZGl1bS5pby9zaGFyZS9sYXVuY2hfaWNvbi5wbmcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALMhP7qL+ch/qR5HgZYow4PgC+p+mMegPgO6EGnPw/bz9AEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 7461120,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 944
+  },
+  "H4sb6cH4bJ4G9vJG3cDA2h3gYAMgCfuzXu8h56RhkVnC": {
+   "data": [
+    "9+3j9dfD3kazIT+6i/nIf6keR4GWKMOD4AvqfpjHoD4DuhBpz8P283C5d1RXI2fuYUIzgiBRzCJLpn6abjfmMU6vSNxQXLr9j+gQMWDnnxqKcsEIvhiLKLjadkORiZi9zH+F2bOyEf0+TN2Dp2EyltqY8IGvNcaoDK1r94j0tVZILfqBLOeBVrIjoXse+v4uFkvEb4b7OVB5LPvU3Eeokx3dkhz2csNNBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAGLceLmbyHSfGCca0kchaTYsZwgo2tCZYm6RGFOQytgJgbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKl794IXUEoKW1avGHFz0Ym5I1wF+tsWq1VFITvgCNReD/0ACQkG11SYZ9ADAAAAAAAAAAAAABOTCgAAAAAAVFkZAQAAAAA+/ycoAQAAAHf032oAAAAANAQAAAAAAAABAQAAAAAAAL8VkroAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 3886200,
+   "owner": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+   "rentEpoch": 18446744073709552000,
+   "space": 637
+  },
+  "EwFFtvnxPGRot8jkgBAnUpEyjrP3qFVM9U8uB8MxJQ1Q": null,
+  "GWqWrb44KJ8rmKvytQVUDh9X2pAVUkT8zE5RqTnJ4Dw4": {
+   "data": [
+    "9+3j9dfD3kYuAwAAAAAAAPoCBgkBAIDGpH6NAwAAeMX7UdECAN50Dj7pzwMA168w/AYAAAAAeMX7UdECANESZcoTAAAAABJlyhMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVxqOAcjfeCD51ms8c2W40eSvqBt4VMwu91zvWL0Ihn7Z43muccQHrOyvERB3Ee6vHb7tmq6FmYSy3N5CMGKU7sDwQqqsn4I3RswQ4QTTY1WRzy16NHGubwcnwI/bJ02FBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAFEtqQEEek6hjJcKPCcH075d23T739T/YZmsuJb5MpipPLRo0E7+eCO7ydtIUvJZmdxoivIP1HLvMY+1QB6X0+jknIqwWz/ChFgMOU/FTATvslNxuR4c8lOaGKIOL4oVq8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 3876720,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 429
+  },
+  "9VSFLG5epVGqcmkZsouEVUha6hkscrgyXcCQ42GQcBC": null,
+  "FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1": {
+   "data": [
+    "oE6AAPhT5qC1AwAAAAAAAAgtghGIICARFR930bOehVt6UbVcWi9Wl4KRyJitByu0RkFZ9kiIyU2q25d1aNE2jpyN7ik8b6ZUqI0K30PZ4HIBAAAAAAAAAAAAAAAAAAAAP0IPAAAAAADUMAAAAAAAAGxldHNib25rLmZ1bgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABodHRwczovL2xldHNib25rLmZ1bi8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaHR0cHM6Ly9zYXBwaGlyZS13b3JraW5nLWtvaS0yNzYubXlwaW5hdGEuY2xvdWQvaXBmcy9iYWZrcmVpY2dudXllYnRtbnlobWpid2QzMnQ1dzJoY3didHdxbHJ4c2M1ZWVkcGd0ank3cTRyZW1mYQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOwZciOO4jOPaWmD2np5EGAF8yjNHIYHHJe2NdlqjKmUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEZBWfZIiMlNqtuXdWjRNo6cje4pPG+mVKiNCt9D2eByAAAAAAAAAABGQVn2SIjJTarbl3Vo0TaOnI3uKTxvplSojQrfQ9ngcgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 8928332,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 944
+  },
+  "Q2sPHPdUWFMg7M7wwrQKLrn619cAucfRsmhVJffodSp": {
+   "data": [
+    "9+3j9dfD3kazIT+6i/nIf6keR4GWKMOD4AvqfpjHoD4DuhBpz8P28weDqBUmIQ+UoOjoTSCHADs6QmDSnOedrP4hpOp3H6Yo99DR9Nz3HrIvLX+7YqZ2L5QFPcbvqO5j7jgEz1A6FvWFLTQUxi+NcVdpuk2Us1Cb8MiCjK8yI7k/I/2wM8rbvkgG4f/8XSR9OfB6FhamY3bUmPUZIrYgM7RdSto8z863BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAHA8EKqrJ+CN0bMEOEE02NVkc8tejRxrm8HJ8CP2ydNhQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkzpvRZyLWF6nuaHB6SMwzfHdkN/3ZUCsHaqKbnX+PiTv0ACQkGRUmJHlEDAAAAAAAAAAAAAGihoQAAAAAAtzW8AQAAAACfkBgCAAAAAFVhH2gAAAAANAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 5324402,
+   "owner": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+   "rentEpoch": 18446744073709552000,
+   "space": 637
+  },
+  "AZ6QnSoQqu4ruHUU2TdU7TrXGr9i3p4up1repZ4KeAWD": null,
+  "84G7kdWgWqY9EmjHrxvFXCaheJnTvNhV9c8RSt5dtZch": null,
+  "CAHQb7Bu9RSMGcptwSnwrQz9k5mW2NhZziV26bZhPUCD": null,
+  "4E876qZTE9FJMrBzgVtBrSrzz2TLivB5Y5QXPjB4gZL7": {
+   "data": [
+    "oE6AAPhT5qAEBAAAAAAAAD5PhCp9CwyeyOJOoDoxyfh5o13DBHWJGqruXZ6wCC/5Pk+EKn0LDJ7I4k6gOjHJ+HmjXcMEdYkaqu5dnrAIL/lAQg8AAAAAAAAAAAAAAAAAAAAAAAAAAAAQJwAAAAAAAFN0b25rRnVuAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABodHRwczovL3d3dy5zdG9ua2Z1bi54eXoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaHR0cHM6Ly93d3cuc3RvbmtmdW4ueHl6L3N0b25rZnVuLWxvZ28ucG5nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKmyHxd+m5dujuEp9BrvN4SqxRSUkJWwAuYRfVnQNpaPAAAAAAAAAABALVyvepfFNJdljlYbJiPQ449TQPIIrdUKTvRUCwrLLj5PhCp9CwyeyOJOoDoxyfh5o13DBHWJGqruXZ6wCC/5AAAAAAAAAAA+T4QqfQsMnsjiTqA6Mcn4eaNdwwR1iRqq7l2esAgv+QABGv1mAdFtt7hdam3csaoALEDujVMj8YuY7QspWaQA7JUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 7461120,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 944
+  },
+  "HPeXruE5Msv7paz5WPViwScLeSYWgZr8vhDakuiEp5ku": {
+   "data": [
+    "9+3j9dfD3kapsh8XfpuXbo7hKfQa7zeEqsUUlJCVsALmEX1Z0DaWjz5PhCp9CwyeyOJOoDoxyfh5o13DBHWJGqruXZ6wCC/5LRH9HiNuHAJSsiH1kzuIs4Tk7vuSBnXtW0PSm3yJmeMJ69yGFtClO0q8N8QY+PJ9bDZMmSJ3MT9eEUzVB6j6iZo3JvaRJPLWuSOzt8cigEYeXeqSL7Aebg+HEUVYfnGKBnRA+ezULkoHJq4m9coV3EGLik4k7IkEA4u1tJrjdeROVBP6DR6jIjj1JhHBJ7XDrPeiREnJXbWaX7rvICx36Qbd9uHudY/eGEJdvORszdq2GvxNg7kNJ/69+SjYoYv8Bt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkspc4os5+Q9KZP6VxoYtZ2sMAbSP/W5ItGjauViU57oP0ACQYJRu3B/yRsAABwWSkAAAAAAAAAAAAAAAAA6+h9aAAAAADjB1tDBgAAAGF16GoAAAAANAQAAAAAAAACAQAAAAAAAAAAAAAAAAAAFPqrnwYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 3886200,
+   "owner": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+   "rentEpoch": 18446744073709552000,
+   "space": 637
+  },
+  "2anrJfuaZDqWzqXPxkV7ZuzQ88uHb7Y9LyYSMReW2k54": null,
+  "4zLsNFRMkr41iXJn9vsY3VCAcxRMPjG6hKufDN4if97G": null,
+  "DonmHwdTgij1vUUg7uRWzy19MwbEs1k2zsg4JcV3F7MB": null,
+  "6BwHHDg3u1854jC8PDLXvR4spTcLNaoBxLJNGC4nTESt": {
+   "data": [
+    "oE6AAPhT5qAXBAAAAAAAAD5PhCp9CwyeyOJOoDoxyfh5o13DBHWJGqruXZ6wCC/5Pk+EKn0LDJ7I4k6gOjHJ+HmjXcMEdYkaqu5dnrAIL/lAQg8AAAAAAAAAAAAAAAAAAAAAAAAAAAAQJwAAAAAAAFN0b25rRnVuAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABodHRwczovL3d3dy5zdG9ua2Z1bi54eXoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaHR0cHM6Ly93d3cuc3RvbmtmdW4ueHl6L3N0b25rZnVuLWxvZ28ucG5nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKmyHxd+m5dujuEp9BrvN4SqxRSUkJWwAuYRfVnQNpaPAAAAAAAAAABALVyvepfFNJdljlYbJiPQ449TQPIIrdUKTvRUCwrLLj5PhCp9CwyeyOJOoDoxyfh5o13DBHWJGqruXZ6wCC/5AAAAAAAAAAA+T4QqfQsMnsjiTqA6Mcn4eaNdwwR1iRqq7l2esAgv+QABGv1mAdFtt7hdam3csaoALEDujVMj8YuY7QspWaQA7JUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 7461120,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 944
+  },
+  "B4VFURUHHzyt8YzBGBV9jiarBvjh1EbMAbRNBnNqaxUD": {
+   "data": [
+    "9+3j9dfD3kapsh8XfpuXbo7hKfQa7zeEqsUUlJCVsALmEX1Z0DaWjz5PhCp9CwyeyOJOoDoxyfh5o13DBHWJGqruXZ6wCC/5bTrw8S+MFZV4uW/xvyb9MyPp3Zia0eCc8EdGPTI3l/K7eVJtCOuj52dhmK6wvdFiqd0WkTTqloGKej7obosgo7tFmKFGKgk85k+SXNGge3u32klPNdetS2YcS6lvg8WcB+ilDhQP2leR9FZqlX/Trj+HPmo0Zv/BPXkRnfqatQq1wcCTIuZuqbxwd+twAcTxuZXTqBM6mX3PclIHUip22gbd9uHudY/eGEJdvORszdq2GvxNg7kNJ/69+SjYoYv8Bt324e51j94YQl285GzN2rYa/E2DuQ0n/r35KNihi/wYulnksqYdgrH8G6q5gxfDwgj2/TqZ8hCFLIDzYWcGtv0ACQgGmySdHt4AAACXhQkAAAAAAEc4fAEAAAAArAMDAAAAAAAfHO0DAAAAAP1QsWoAAAAANAQAAAAAAAABAQAAAAAAAJoNAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 53622252,
+   "owner": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+   "rentEpoch": 18446744073709552000,
+   "space": 637
+  },
+  "4djpJpssmy8xtqidmhAPBZsBxKEQpinreKAJrXNhZc16": null,
+  "aDyDc9LtHzSCPNSPnDdRsc89qmMRJpGprn2cs1NH7ky": null,
+  "DbgLqmne6BuXqRSz7V4GJQQmMJdc5CJC3cPADDhHqoF4": null,
+  "25JgZ6vkjXRGkMiTqHja7KSbJvvCyYVLLoedT2vv83DK": {
+   "data": [
+    "GmwOe3TmgSsGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAASpZ8wExpk3NADUqEKIaBz2tVErDHsBkWug9zTaqZvvqKlnzATGmTc0ANSoQohoHPa1USsMewGRa6D3NNqpm++qAlpgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYBAAAyADIABgFkAQFkAAAAAAAAAPH+6EHMawEAAOh2SBcAAABdwuixeEQAANZAn/L8hkgJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgMakfo0DAACAxqR+jQMAAABkAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC4hZwhNz7PAAAAAAAAAAAANIxCQ8LYhgYAAAAAAAAAAABw10m10tDadEFhuwwBAAAw3K3y/IZICQAAAAAAAAAAAMBz/zOIJivENt3rRAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 5974080,
+   "owner": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+   "rentEpoch": 18446744073709552000,
+   "space": 1048
+  },
+  "BS1hR7ZUh2ibnJ1zhYikJJbDiYdM2xYLcVDiQCqtRGwn": null,
+  "HY7NWz4H8u2BQNhtZkscttxG1vtP6GGkMspCeJooUxXk": null,
+  "Gr9yWy6ajgaVQaqVviePZmgKfkxQiNZmKnQ9a9GkcpX7": null,
+  "8JXkUnoSEoyY5pWJATvoub3p5nvSfetCXxVMK6W4cExa": {
+   "data": [
+    "GmwOe3TmgSsGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAARzhnmeiACV4o5rTKqbhANG4vOk9hdjk38Xpenl01DmyHOGeZ6IAJXijmtMqpuEA0bi86T2F2OTfxel6eXTUObIALTEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQYBAAAAAGQABgFkAQAAAAAAAAAAAPtV5WuvzQIAoQKUnxQAAACbbFg4z78AAOpu19icFj8FAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgMakfo0DAACAxqR+jQMAAADIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABD2QOmfRmAQAAAAAAAAAA6m7X2JwWPwUAAAAAAAAAAF40Sapptyu/iCUEXV0FAACbV2lOqRpchLHE/v8AAAAA64K7nC9qJMNlzQIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 5974080,
+   "owner": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+   "rentEpoch": 18446744073709552000,
+   "space": 1048
+  },
+  "CryBbh9QQttrUrfLVXLLEuhkM5wZ8W1DUZFYNhUEhYqs": {
+   "data": [
+    "8ZptBBGxbbwALTEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADqbtfYnBY/BQAAAAAAAAAAA4GaPtAINPbZKqkDRThzvTZWLKeHinz7fnDSJSiceOQGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQkSG5qkrEhmzeb9aANSY+3jCzTUTfCMQXwQUw/aT6NcSZKT88w8O7YKzSMiz/R4MFerUBAxio29iZfEeE1rGC4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZbMs1qp/rW7AUGmN7AMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAErnwRMAAAAAAAAAAAAAAAAAAAAAAAAAAFA7AQABAAAAAAAAAAAAAACbV2lOqRpchLHE/v8AAAAATWbK7PL+WAsAAAAAAAAAAHEW5WoAAAAAAQAAAAEBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPqY9AOjWYQIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZXkNMkj8i58l/81N7AMAAAAAAAAAAAAAAAAAAAAAAAAnQEnLIQAAAAAAAAAAAAAAAAAAAAAAAADtoSI7CAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAA2mNoH3KGvMgGcZ4sK1CiAVckO/yWaLEVILxThD7c2wiyig91hlgAAFKgTIcsAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 6299200,
+   "owner": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+   "rentEpoch": 18446744073709552000,
+   "space": 1112
+  },
+  "4wHyoERryzcTN1zqTrjoA3BjewzX1UQKhj7783SZDPU": null,
+  "HdmzEfCDJx4kgJkPk8FHkN7HKJAkYqgou7ZgFBXcnbS7": null,
+  "N3Cip3Zx9wV1tydriRFLVh2cbgHyJoFnT8P1Drj1kGB": null,
+  "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM": {
+   "data": [
+    "GmwOe3TmgSvG+nrzvtutOj1l82qryXQxsbvkwtL24OR8pgIDRS9dYUl11GsBazLk7yNTbicYOVahkt9fWBWTwB2dZr/Zx7IVSXXUawFrMuTvI1NuJxg5VqGS319YFZPAHZ1mv9nHshVAS0wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUFAABAAYAAAAAAGQAAQFkAQAAAAAAAAAAALo4/kxuUQMAY+VXYA8AAAA+dF9XEDwAAPg4HVAnbhgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgMakfo0DAACAxqR+jQMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACM7hvp/oqSAAAAAAAAAAAA+DgdUCduGAgAAAAAAAAAAAbGjGACOl8RV1jJPQsCAACbV2lOqRpchLHE/v8AAAAANUJHofd+hiOZUAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 8184960,
+   "owner": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+   "rentEpoch": 18446744073709552000,
+   "space": 1048
+  },
+  "EcFsXQJjVCjCYWHsuhXUnZH4XB2MzF7iZ3dJu48wmoa9": {
+   "data": [
+    "8ZptBBGxbbzAxi0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAAUAAAAAAABAAAAAAAAAGCk3AAeAQAAAQAKAHgAiBP8D+pqAAAAAMsQx7q4jQYAAAAAAAAAAADvFsyT3nUNAQAAAAAAAAAAYPonAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD4OB1QJ24YCAAAAAAAAAAAD6EU5D5kmYFvh73kIBTxl4o942piWFw+4Fz6OvkyU6HG+nrzvtutOj1l82qryXQxsbvkwtL24OR8pgIDRS9dYY+g42PleXfEAh/SshCFfYj77MPaX+4OfhrvkVK5TYGPWkMLabjS1apkR5eN5NGratL+kLGOr1oegzxc48PVioYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa2Ct5m50GfsFoSZF5QEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAR/3AEAAAAAAAAAAAAAAAAAAAAAAAAAAFA7AQABAAAAAAAAAAAAAACbV2lOqRpchLHE/v8AAAAApTZQP00DEQEAAAAAAAAAAOxSrGoAAAAAAQAAAAEAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOlLMyKJZ4YFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa2Ct5m50GfsFoSZF5QEAAAAAAAAAAAAAAAAAAAAAAAD86RekCgAAAAAAAAAAAAAAAAAAAAAAAAAoZBSTAgAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAA2mNoH3KGvMgGcZ4sK1CiAVckO/yWaLEVILxThD7c2wiHBDXEB8cBAE6ThQUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 6299200,
+   "owner": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+   "rentEpoch": 18446744073709552000,
+   "space": 1112
+  },
+  "9v2bZjjz981ojybxtem7LdMb7aiygeVx4nLjtydyztvG": {
+   "data": [
+    "F7f4N2DYrGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAxqR+jQMAAYhNxqAYtk8FslHHH3ZGwHSDDH1alDpPwfy+hjrkHvl+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 1934884,
+   "owner": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+   "rentEpoch": 18446744073709552000,
+   "space": 150
+  },
+  "4YJzRdpQ3tA5KFus1oBEoY2EZyS4t8ufjuszniKAYHcC": null,
+  "7zj4VGLUkj31tHHhJePNJ1b8SushnGzq6xAkpr67jyGY": null,
+  "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama": {
+   "data": [
+    "8ZptBBGxbbz/AADQcvDbc4uWTXGa3TfrHWQrGDaprww3pdd7M8Bp4I/49EJ4RfbE+zkGXuTlfeqeP5K/2sbXWiXoUil+iDKYJ4y9BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEY4utnH0Y+XcSnFrNSpsX5U/HMjqYFsmDHa8Xb1Sp09m6bpbsJj8H7D94+L2uWaKgzBliJy1T2CNzWZJHK8IcfS1hRgogbwsj6wIX1UYIXANThTVZRFUPqYOnK1B2HMFwz8FbpDQQAAApaHGJWsouxuKX9HKZGcf5ipj8sdoKz0Rzn8bWIFOHJAAABud3/////////////////AAAAAAAAAAAAALrdAwAAAAAARWkeAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 217946404,
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "rentEpoch": 18446744073709552000,
+   "space": 301
+  },
+  "4ScohuMYLXGHQq2URGPEwZxQZWc891z22y8XbdvvpJA3": {
+   "data": [
+    "F7f4N2DYrGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAxqR+jQMAAQ==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 1231920,
+   "owner": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+   "rentEpoch": 18446744073709552000,
+   "space": 49
+  },
+  "3cJFcriC7J66gquCxjgAbiTGFj6oteABSDYPtmusYtgE": null,
+  "DKeZZYGzzXgCpRTyNtgR8Fcda1qJWshFjL38sHee3eDJ": null,
+  "Fmp82WuFTm4hBLcHUdiHtbqoFWaRJyhEfmnUAEknskKz": null,
+  "E1UgAxT5DMpGt4VgUBGiZKjxzgSyUrEcba6Wdupm2e24": null,
+  "12efUK22PMmh7JL9seyNcj5omxGfb6PKTmeexpJMbhfw": null,
+  "BLkBSE96kQys7SrMioKxeMiVbeo4Ckk2Y4n1JphKxYnv": {
+   "data": [
+    "owkvHzRVxTEAUjFlaNS+7SMBAAAAAAAAAEcQ6moAAAAAIiDpaAAAAAD3tOVWmAAAAAAAAAAAAAAA97TlVpgAAAAAAAAAAAAAAADWEX4DAAAAAAAAAAAAAAAAuGTZRQAAAAAAAAAAAAAAAAAAAB3LXE/OAAAAzwkFUDsBAAD69x0gAAAAAI1fPxIAAAAAAABgUhA1rIYgAAAAAAAAAAW+eCTyRUvYaSVlhVatQEpgEsgxe8666vCXz7uBqoyzxvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWFZWaeo+jvEPkzrqmQ30UhmwFsKI6Xcw/7rOl6vWiKRXDtjYYo22zphb3+IHUBA/nPPP7sLhvNViNh9RRp8y19kAAAAAAAAAAArzr1SuAdfbsTHquvyWaxNliZiuob5rjecPdlqLopqk/8hGZj9pZQqSIAXcAHcE1/jzd5XCkrDeatjpHm3VtQ7qFGvcwuUXfdff/bfURhQ9BJtAEUP07ge20ryE5rP5QQfBb54JPJFS9hpJWWFVq1ASmASyDF7zrrq8JfPu4GqjLPG+nrzvtutOj1l82qryXQxsbvkwtL24OR8pgIDRS9dYQwAAAAsAYD0AwAAuGTZRQAAAAAAAAAAAAAAANYRfgMAAAAAAAAAAAAAAIBRAQABAAAAAAAAAAEAAAAAAAAAAIhSanQAAABQrgIAAAAAAAEA6HZIFwAAAAIAAAB0s/sY+c9DLvLz+hCe6A+IR2POG7xjvYmFnWlQZdBFh5mTxcumOqiuYxxViaAtzh5CiJ8AXuj+BPrNrONd/Zko1P5qtXFIi8z/ks0UnMyeK/Y8tQb02xKnAHhX3UIPY5we1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAyDF7zrrq8JfPu4GqjLPG+nrzvtutOj1l82qryXQxsbvkwtL24OR8pgIDRS9dYQwAAAAsAYD0AwAAuGTZRQAAAAAAAAAAAAAAANYRfgMAAAAAAAAAAAAAAIBRAQABAAAAAAAAAAEAAAAAAAAAAIhSanQAAADgngIAAAAAAAEA6HZIFwAAAAIAAAB0s/sY+c9DLvLz+hCe6A+IR2POG7xjvYmFnWlQZdBFh5mTxcumOqiuYxxViaAtzh5CiJ8AXuj+BPrNrONd/Zko1P5qtXFIi8z/ks0UnMyeK/Y8tQb02xKnAHhX3UIPY5we1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 9277680,
+   "owner": "FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq",
+   "rentEpoch": 18446744073709552000,
+   "space": 1264
+  },
+  "ALscAMJLVUP4bJJxd4EXdqzMBXM4hQRzVXqdWbzVUnsX": null,
+  "GmGiKyKMDmEr1EBMah2yyxCC8umwWmG3Kzxm59aEJsBK": null,
+  "E57PNJeDDQ2XnsLkUfWJUKRyTL5d5gq5Sy1E7XvFZFET": null,
+  "DLa8925DKx9qt1iHk1r75FbgEiZyNjiqXkfygVDabYrV": null,
+  "BDUDgi56pYCnLHYywxWPiisk6vgbvQWZm9Bk1DA3uXJg": null,
+  "nZpxrECwT2QAVo5MR4CtCYxGMVPepw7HZ2qo4iceVQN": null,
+  "BPAM9R9iXRUBi9VAQB3Z1u3NUvqabdW7qNSyzdtM33CS": {
+   "data": [
+    "9+3j9dfD3kYzBAAAAAAAAPoCBgkBAIDGpH6NAwAAeMX7UdECAONwDj7pzwMAwVN3sO8VAAAAeMX7UdECACgT2aomPgAAKhPZqiY+AAArQrlHKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMt96XjRzxngtu/t03R0TzqBrmFo2jO9Qo/QnyPc5HsEv76UoyW8/kSO/XTQhGtcPshtjskAzEmFgU9mvfUhN3AZ0QPns1C5KByauJvXKFdxBi4pOJOyJBAOLtbSa43XkTlQT+g0eoyI49SYRwSe1w6z3okRJyV21ml+67yAsd+lEkBiIJm7xZ7UUC7LBwH9bNqYUQR3jZ3SXSM1nk8fO6iQamwqqhXkHjhSXXmlGd42ftcLZicqvjJzHkRDQ/XmxMv+dgnGLV+n0+YJXJeQ+0ne8+hbaiRMvTexmw2j3iq8BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2829560,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 429
+  },
+  "5aBH535rESkhjVb2nEaMPfyjiTw3uK57vE6c5uhZHjPY": {
+   "data": [
+    "9+3j9dfD3kYPBAAAAAAAAPoCBggBAIDGpH6NAwAAeMX7UdECAB+LDj7pzwMAfqpqXQAAAAAAeMX7UdECAEBLrAgBAAAAPUusCAEAAAAEH88AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFHg74bXj0RNAHXQkbT4m9JKn3O3AZNwnG3zyaEmgj8lNF5467uId8T+hDkEHLNibXaPT5YpV3S7SudH4Btb6sbXBwJMi5m6pvHB363ABxPG5ldOoEzqZfc9yUgdSKnbaB+ilDhQP2leR9FZqlX/Trj+HPmo0Zv/BPXkRnfqatQoMh6A/Zi1XfmAo4d1aalnvmv1Uun9IbVd66aahnj3Z9IMlHJWiDPd/DyuPPwxroASJqCXfChQ7uObgpJwJl43qgxjC5yhMInMScgfjG4vYP1nZH/aCZ4Ubtc7HJgwyuFIDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2829560,
+   "owner": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+   "rentEpoch": 18446744073709552000,
+   "space": 429
+  },
+  "6MLs2YGCSErjU6jUha6CxkjctoFcSdAc8syvmxHeAn2S": {
+   "data": [
+    "1eAF0WJFd1wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/YA0q8SYd6Avez4Eu0Y3F/vOm1SJYsIVcGxf4Scf9oqWfMBMaZNzQA1KhCiGgc9rVRKwx7AZFroPc02qmb76v4ablyc+TTtU6u4KS/aVs0psNsXk8Ef+hKiOEnlE3FJmfHVXlmF4h3syouM46i4iv8V8DwQ19uaxorQYXQnmEvP8Z5skJIQC9Ray4qtfQYEwD7YBHFlv7nUQb7bSKlcegCAxqR+jQMABAAAAAAAAAAAAAAAAAAAABSFSwAAAAAAAAAAAAAAAAAAAAAAAAAAAEyInCE3Ps8AAAAAAAAAAABD5bYbAAAAAAAAAAAAAAAAAAAAAAAAAAAUhUsAAAAAAAAAAAAAAAAAE6VNAQAAAAAAAAAAAAAAAAAAAAAAAAAAWd4AAAAAAAAAAAEAAAAAABQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2804160,
+   "owner": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+   "rentEpoch": 18446744073709552000,
+   "space": 424
+  },
+  "9JYXGyrm82yVfG4gRkUGSSbBS12xSFSfdiyExDS7vWLQ": {
+   "data": [
+    "1eAF0WJFd1wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAbH9zcp+4YTt7lXtzn3abMHytrN8SXN/gQWnrwNTNaXMc4Z5nogAleKOa0yqm4QDRuLzpPYXY5N/F6Xp5dNQ5sgOBmj7QCDT22SqpA0U4c702Viynh4p8+35w0iUonHjkEKi/Cj3Ge/BT8KNFRO0gyI4jE1a6JHDfx2eurXkZoyUjmby6FPJZDdlEz755CH+lMpo0EqiU3QoABadH8lDynXgq4TjPvwAAGAOUnxQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOpu19icFj8FAAAAAAAAAABODOVqAAAAAAABAAEDAAAAAAAAAAAAAACmPZosAAAAAAAAAAAAAAAAH8nYzgAAAABwFuVqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAABQAAAAAAAAA3z7ZNGIAAADeJI8KAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2804160,
+   "owner": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+   "rentEpoch": 18446744073709552000,
+   "space": 424
+  },
+  "8MgnhTkmiAH38v7g9hgjBxPFphNekCroBUcSeL117BG2": {
+   "data": [
+    "1eAF0WJFd1wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2M51woCyJZhRKP0tnQY/b+5TTQxf81bpscOZK7CEE3gA6c0CLrOm39Kh32CBAT7bv7kolxZx7zxIZ+sLR+Xnww+hFOQ+ZJmBb4e95CAU8ZeKPeNqYlhcPuBc+jr5MlOhdcS/QUtZ/7gPgwVWPHo+GH4YhivopaYNDKDIiG2Q5CKaAft3tVYEfQcNgVriM7Z0h8tpXlsNjL/xnyEbGcUYmhVVyFcQPAAAjfNXYA8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPg4HVAnbhgIAAAAAAAAAAAdPbIaAAAAAAABAAEDAAAAAAAAAAAAAAAiAuxCAAAAAAAAAAAAAAAA5v7+IgEAAADrUqxqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAABQAAAAAAAAAU86vwB4AAABlaN8HAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "base64"
+   ],
+   "executable": false,
+   "lamports": 2804160,
+   "owner": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+   "rentEpoch": 18446744073709552000,
+   "space": 424
+  }
+ }
+}

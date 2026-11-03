@@ -1,10 +1,13 @@
 // node --test scripts/live-checks/market-data-evm.test.mjs: the live check replays recorded answers
-// (market-data-evm.answers.json). good: apps/helper at d8f408e run on a Mac against the real GeckoTerminal and Base
-// providers, with every RPC answer the maker re-read got: PASS. bad_not_deployed: the deployed helper before this card,
+// (market-data-evm.answers.json). good: apps/helper on card/market-data-evm-lists-fold (15:09Z) run on a Mac against the
+// real GeckoTerminal and Base providers, with every RPC answer the maker re-read got: PASS. bad_not_deployed: the deployed helper before this card,
 // 404: FAIL. Made from the good answer: a tagged row's pad swapped for another table pad (wrong tag), an untagged row from
-// no listed factory given a tag, a row missing a frozen field, a pad no table row has: each FAIL. good_robinhood: the same
-// helper with Robinhood served (13:58Z): PASS; a wrong tag and a Base pad on a Robinhood row: FAIL.
+// no listed factory given a tag, a row missing a frozen field, a pad no table row has: each FAIL. good_robinhood: the
+// helper's Robinhood lists on card/helper-launchpad-origin (17:04Z, Pons v1 in the table): PASS; a wrong tag and a Base pad on a Robinhood row: FAIL. A tagged row served
+// untagged and not named unsettled (the deployed a0f19f5's Paper): FAIL; `unsettled` missing, naming a tagged token or
+// over half the tokens: FAIL.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -23,6 +26,7 @@ const blockReads = (a) => {
   const byNumber = new Map();
   const latest = [];
   for (const r of a.rpc) {
+    if (r.request === undefined) continue; // recorded by its sha256: not a block read
     const reqs = Array.isArray(r.request) ? r.request : [r.request];
     const ans = Array.isArray(r.answer) ? r.answer : [r.answer];
     for (const q of reqs) {
@@ -54,7 +58,8 @@ const replay = (a, chain = "base") => {
     assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
     return new Response(a.answer.body, { status: a.answer.status, headers: a.answer.headers });
   }
-  const same = (r) => r.url === url && JSON.stringify(r.request) === init.body;
+  const sha = createHash("sha256").update(init.body).digest("hex");
+  const same = (r) => r.url === url && (r.request === undefined ? r.request_sha256 === sha : JSON.stringify(r.request) === init.body);
   const i = a.rpc.findIndex((r, k) => !used.has(k) && same(r));
   const hit = i >= 0 ? (used.add(i), a.rpc[i]) : a.rpc.findLast(same);
   assert.ok(hit, `unrecorded RPC request to ${url}`);
@@ -64,13 +69,13 @@ const replay = (a, chain = "base") => {
 const run = async (a, chain = "base") => {
   const r = await read(chain, undefined, replay(a, chain));
   r.readAt = a.answer.readAt; // the recorded read's own time, for the freshness windows
-  let lists = {};
+  let body = {};
   try {
-    lists = JSON.parse(r.body)?.lists ?? {};
+    body = JSON.parse(r.body) ?? {};
   } catch {
-    lists = {};
+    body = {};
   }
-  const makers = await rereadMakers(chain, sample(lists), replay(a, chain), [], Date.parse(a.answer.readAt));
+  const makers = await rereadMakers(chain, sample(body.lists ?? {}, body.unsettled), replay(a, chain), [], Date.parse(a.answer.readAt));
   return judge(chain, r, makers);
 };
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
@@ -142,4 +147,21 @@ test("good_robinhood: the local helper's Robinhood lists and their makers re-rea
   // depends on the head each read saw, so that case is replayed on Base above (the judge is the same for both chains)
   const zora = await run(edit((s) => (s.lists.new[0].launchpad = "zora"), g), "robinhood");
   assert.equal(zora.ok, false, "a Base pad on a Robinhood row");
+});
+
+test("unsettled: a tagged row served untagged and not named unsettled (Paper's shape at a0f19f5, null where the chain names clanker): FAIL; the same row named unsettled is said, not failed; no unsettled list, a tagged token in it, or over half the tokens in it: FAIL", async () => {
+  const s0 = JSON.parse(A.good.answer.body);
+  const t = sample(s0.lists, s0.unsettled).find((r) => typeof r.launchpad === "string");
+  const dropped = await run(edit((s) => each(s, t.token, (x) => (x.launchpad = null))));
+  assert.equal(dropped.ok, false);
+  assert.ok(bad(dropped).some((l) => l.includes(t.token) && l.includes("tagged null") && l.includes(`name "${t.launchpad}"`)), bad(dropped).join("\n"));
+  const named = await run(edit((s) => (each(s, t.token, (x) => (x.launchpad = null)), s.unsettled.push(t.token))));
+  assert.ok(!bad(named).some((l) => l.includes(t.token)), "a row named unsettled is not compared");
+  const none = await run(edit((s) => delete s.unsettled));
+  assert.equal(none.ok, false);
+  assert.ok(bad(none).some((l) => l.startsWith("BAD unsettled")));
+  const taggedIn = await run(edit((s) => s.unsettled.push(t.token)));
+  assert.ok(bad(taggedIn).some((l) => l.startsWith("BAD unsettled")), "a tagged token named unsettled");
+  const most = await run(edit((s) => (s.unsettled = [...new Set(["new", "trending_5m", "trending_1h"].flatMap((k) => s.lists[k].map((r) => (r.launchpad = null, r.token))))].filter((x, i, a) => a.indexOf(x) === i), s.lists.trending = s.lists.trending_1h)));
+  assert.ok(bad(most).some((l) => l.startsWith("BAD unsettled")), "every token unsettled");
 });

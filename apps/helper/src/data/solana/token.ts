@@ -19,8 +19,9 @@
 // Display only: nothing here feeds a signature (the device reads the mint and the pools itself before it signs). Every
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
-import { address, dec, pumpCurveAddress, pumpCurveBps, toRow, type Row } from "./lists.ts";
-import { geckoBudget, type GeckoBudget } from "../gecko.ts";
+import { address, dec, toRow, type Row } from "./lists.ts";
+import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -37,8 +38,9 @@ export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
 export const CANDLES_FRESH_MS = 60_000;
 export const POOL_FRESH_MS = 600_000;
-/** L-05: GeckoTerminal's public API, about 10 calls a minute; the server shares one budget with the EVM lists (../gecko.ts). */
-export const GT_PER_MIN = 10;
+/** L-05: GeckoTerminal's public API, as measured (../gecko.ts GT_LIMIT_PER_MIN); the server shares one budget with the
+ *  EVM lists, which yield to the token page. */
+export const GT_PER_MIN = GT_LIMIT_PER_MIN;
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. One search at most every
  *  JUP_GAP_MS: with the lists' 3 calls per 12 s that is at most 30 a minute, half the keyed free bucket (L-01: 1 RPS,
@@ -151,20 +153,24 @@ export function jupiterPool(jup: Record<string, unknown>): string | null {
 }
 
 /** The TokenPage from a mint, the token's Row (Discover's, or made from Jupiter's search row), the pool Jupiter names
- *  and the curve progress (null when the curve account is not one). */
-export function toPage(mint: Mint, base: Row, jupPool: string | null, curveBps: number | null, chainAtMs: number, jupAtMs: number): TokenPage {
+ *  and the token's launch as read on chain (origin.ts; null for none, undefined when not read). The launch names the
+ *  row's launchpad: a Discover row keeps its own (read on chain by the lists, with Jupiter's config) when this read
+ *  finds none; a row from Jupiter's search never keeps Jupiter's tag alone. */
+export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number): TokenPage {
   const row: Row = { ...base };
-  if (row.curve_bps === null && curveBps !== null) row.curve_bps = curveBps;
+  row.launchpad = origin?.pad ?? (listed ? base.launchpad : null);
+  const curveBps = origin?.curveBps ?? null;
+  if (curveBps !== null) row.curve_bps = curveBps;
   // the chain's own reads win over Jupiter's for the authorities (D-S12)
   row.mint_auth = mint.mintAuth;
   row.freeze_auth = mint.freezeAuth;
   const chain = <T>(v: T | null): Field<T> => ({ v, src: "chain", as_of_ms: chainAtMs });
   const jupiter = <T>(v: T | null): Field<T> => ({ v, src: "jupiter", as_of_ms: jupAtMs });
   const none: Field<never> = { v: null, src: "none", as_of_ms: chainAtMs };
-  const onCurve = row.launchpad !== null && curveBps !== null && curveBps < 10_000;
+  const onCurve = origin != null && curveBps !== null && curveBps < 10_000;
   const created = row.created_s as number | null;
-  // the pool the token trades in: the curve account while on its curve, else the pool Jupiter names, when it does
-  const pool = onCurve ? pumpCurveAddress(row.token as string) : jupPool;
+  // the pool the token trades in: its launchpad's pool while on its curve, else the pool Jupiter names, when it does
+  const pool = onCurve ? origin.pool : jupPool;
   return {
     row,
     decimals: mint.decimals,
@@ -395,13 +401,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   }
 
   /** The mint account at a slot, or null when it is not a mint. */
-  async function mintAt(mint: string, curveToo: boolean, client?: string) {
-    const keys = curveToo ? [mint, pumpCurveAddress(mint)] : [mint];
+  async function mintAt(mint: string, client?: string) {
+    const keys = [mint];
     const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client);
     const value = result.value;
     const slot = obj(result.context).slot;
     if (!Array.isArray(value) || value.length !== keys.length || !Number.isSafeInteger(slot)) throw new Upstream();
-    return { mint: toMint(value[0], slot as number), curve: curveToo ? pumpCurveBps(value[1]) : null, at: now() };
+    return { mint: toMint(value[0], slot as number), at: now() };
   }
 
   // Discover's rows (D-S6 reads Jupiter only for tokens off the lists): indexed once per snapshot
@@ -432,9 +438,20 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return row === null ? null : { row, at: j.at };
   }
 
+  // each token's launch (origin.ts), kept as the lists keep theirs; every read is on the asking caller's share
+  const origins = createOrigins(rpcAccounts(rpc, false));
+
   const page = cached(PAGE_FRESH_MS, now, async (mint, client) => {
     const listed = await listedRow(mint);
-    const [m, j] = await Promise.all([mintAt(mint, true, client), listed === null ? jupiter(mint) : null]);
+    // the launch: read once per token, its curve each page read, on the caller's share (origin.ts)
+    const launch = (hint: Hint | undefined, createdS: unknown) =>
+      origins.refresh([{ mint, hint, createdS: Number.isSafeInteger(createdS) ? (createdS as number) : null }], now(), rpcAccounts(rpc, false, client)).then(() => origins.get(mint));
+    const [m, j, early] = await Promise.all([
+      mintAt(mint, client),
+      listed === null ? jupiter(mint) : null,
+      // a Discover row's launch is the lists'; this read finds its pool (the config Jupiter names is not in a row)
+      listed === null ? undefined : launch({ tag: listed.row.launchpad as string | null, config: null, graduated: null }, listed.row.created_s),
+    ]);
     if (m.mint === null) return NOT_FOUND;
     let base: Row | null = listed?.row ?? null;
     let at = listed?.at ?? 0;
@@ -446,12 +463,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       pool = jupiterPool(j.row);
     }
     if (base === null || base.token !== mint) return NOT_FOUND;
-    const p = toPage(m.mint, base, pool, m.curve, m.at, at);
+    const origin = j === null ? early : await launch(hintsOf([j.row]).get(mint), base.created_s);
+    const p = toPage(m.mint, base, pool, origin, listed !== null, m.at, at);
     return { status: 200, body: JSON.stringify(p), src: "jupiter", asOfMs: Math.min(m.at, at) };
   });
 
   const holders = cached(HOLDERS_FRESH_MS, now, async (mint, client) => {
-    const m = await mintAt(mint, false, client);
+    const m = await mintAt(mint, client);
     if (m.mint === null) return NOT_FOUND;
     try {
       if (deps.holdersRpc === undefined) throw new Upstream();
@@ -478,17 +496,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   });
 
   // GeckoTerminal: at most GT_PER_MIN calls a minute, shared by every token, in the "pages" lane of the server's one
-  // budget (../gecko.ts) when it passes one; a 429 pauses it. A refused call is a throttle naming the wait to the
-  // budget's next free call or the pause's end (card helper-abuse-limits)
-  const gt = deps.gecko ?? geckoBudget(now, {}, GT_PER_MIN);
+  // budget (../gecko.ts) when it passes one, where the lists yield to it; a 429 pauses it. A refused call is a throttle
+  // naming the wait to the budget's next free call or the pause's end (card helper-abuse-limits)
+  const gt = deps.gecko ?? geckoBudget(now, GT_PER_MIN);
   async function gecko(path: string): Promise<unknown> {
     if (!gt.take("pages")) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()));
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
-      const ra = Number(r.headers.get("retry-after"));
-      const until = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
-      gt.pause(until);
-      throw new Throttled(secondsUntil(until, now()));
+      throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()));
     }
     if (r.status === 404) return null;
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) throw new Upstream();

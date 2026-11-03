@@ -8,9 +8,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
-import { geckoBudget } from "../gecko.ts";
+import { geckoBudget, WINDOW_MS } from "../gecko.ts";
 import {
-  blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, LIST_MS, LISTS_PER_MIN, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, SETTLE_MS, STALE_MS, toRows,
+  blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, LIST_MS, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, SETTLE_MS, STALE_MS, toRows,
 } from "./lists.ts";
 
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
@@ -21,7 +21,7 @@ const GT: Record<string, string> = {
 };
 type Case = { address: string; symbol: string; created_s: number; range: [number, number]; pad: string | null; answers: unknown[][]; code_before?: string };
 type Call = { url: string; method: string; params: unknown[]; result?: unknown; error?: unknown };
-const EARLIER = JSON.parse(fx("maker-earlier-base.json")) as { recorded_at: string; cases: { symbol: string; address: string; created_s: number; pad: string | null }[]; calls: Call[] };
+const EARLIER = JSON.parse(fx("maker-earlier-base.json")) as { recorded_at: string; paper_recorded_at: string; cases: { symbol: string; address: string; created_s: number; pad: string | null }[]; calls: Call[] };
 const MAKERS = JSON.parse(fx("maker-logs-base.json")) as { recorded_at: string; cases: Case[] };
 const NOW = Date.parse(MAKERS.recorded_at);
 
@@ -201,10 +201,18 @@ test("recorded Robinhood makers: at least two live tokens per pad (each creation
 test("an older token with a new pool: its creation block found from its code on chain, then its maker read there (two Clanker tokens tagged, Aerodrome's token none)", async () => {
   const { fetch } = recorded();
   for (const c of EARLIER.cases) {
-    const got = await readMakers("base", fetch, [{ token: c.address, createdS: c.created_s }], Date.parse(EARLIER.recorded_at));
+    const got = await readMakers("base", fetch, [{ token: c.address, createdS: c.created_s }], Date.parse(EARLIER.paper_recorded_at));
     assert.equal(got.get(c.address), c.pad, `${c.symbol}`);
   }
-  assert.deepEqual(EARLIER.cases.map((c) => c.pad), ["clanker", "clanker", null]);
+  assert.deepEqual(EARLIER.cases.map((c) => c.pad), ["clanker", "clanker", null, "clanker"]);
+});
+
+test("every older token one read asks about is searched in that read, not two of them (Paper, a Clanker v4 token with a new Aerodrome pool, was served untagged live)", async () => {
+  const { fetch } = recorded();
+  const got = await readMakers("base", fetch, EARLIER.cases.map((c) => ({ token: c.address, createdS: c.created_s })), Date.parse(EARLIER.paper_recorded_at));
+  for (const c of EARLIER.cases) assert.equal(got.get(c.address), c.pad, `${c.symbol}`);
+  const paper = EARLIER.cases.find((c) => c.symbol === "Paper")!;
+  assert.deepEqual([paper.address, paper.pad], ["0x2fd3f789fe25984295c8fa032be2485c5c7e4276", "clanker"]);
 });
 
 test("padOf refuses what is not a creation event of a table row: another emitter, another topic0, the token elsewhere; two pads is no answer", () => {
@@ -243,13 +251,22 @@ test("two providers must answer and agree: one failing is covered by the third, 
   assert.equal(fresh.size, 0, "none is not settled within SETTLE_MS of the pool");
 });
 
-test("the lists: tagged rows, the GeckoTerminal lane at LISTS_PER_MIN, the read once per LIST_MS; 503 when GeckoTerminal never answered or the read is past STALE_MS", async () => {
+test("the lists: tagged rows, the tokens not read yet named in unsettled, the lists read once per LIST_MS within the lane's yield; 503 when GeckoTerminal never answered or the read is past STALE_MS", async () => {
   let now = NOW;
   const r = recorded();
-  const gecko = geckoBudget(() => now, { lists: LISTS_PER_MIN, pages: 10 - LISTS_PER_MIN });
+  const gecko = geckoBudget(() => now);
+  const first = createEvmLists("base", gecko, { fetch: r.fetch, now: () => now });
+  await first.tick();
+  const s0 = JSON.parse((await first.get()).body);
+  const rows0 = [...s0.lists.new, ...s0.lists.trending_5m, ...s0.lists.trending_1h] as { token: string; launchpad: unknown }[];
+  assert.ok(s0.unsettled.length > 0, "after one tick some makers are not read yet");
+  for (const t of s0.unsettled) assert.ok(rows0.some((x) => x.token === t), "unsettled names listed tokens");
+  for (const x of rows0) if (s0.unsettled.includes(x.token)) assert.equal(x.launchpad, null, "a token not read yet carries no tag");
+  now += WINDOW_MS; // the window clears for the lists read below
   const l = createEvmLists("base", gecko, { fetch: r.fetch, now: () => now });
   for (let i = 0; i < 6; i++) await l.tick(); // makers are read MAKER_PER_TICK tokens a tick
   const a = await l.get();
+  assert.ok(JSON.parse(a.body).unsettled.length < s0.unsettled.length, "unsettled shrinks as makers are read");
   assert.equal(a.status, 200);
   const s = JSON.parse(a.body);
   assert.equal(s.chain, "base");
@@ -258,11 +275,12 @@ test("the lists: tagged rows, the GeckoTerminal lane at LISTS_PER_MIN, the read 
   const tagged = [...s.lists.new, ...s.lists.trending_5m, ...s.lists.trending_1h].filter((x: { launchpad: unknown }) => x.launchpad !== null);
   assert.ok(tagged.length >= 5, `the recorded lists' launchpad tokens are tagged: ${tagged.length}`);
   for (const t of tagged) assert.equal(MAKERS.cases.find((c) => c.address === t.token)?.pad, t.launchpad, `${t.symbol}`);
-  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 3, "the three lists once while within LIST_MS");
-  now += LIST_MS;
+  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 6, "each list once per LIST_MS (the first and this one)");
+  now += WINDOW_MS;
   await l.tick();
-  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 6);
-  assert.equal(gecko.take("lists"), false, "the lane's 3 a minute are spent");
+  assert.equal(r.calls.filter((u) => u.startsWith(GT_BASE)).length, 9);
+  assert.equal(gecko.take("lists"), false, "the lists leave PAGE_RESERVE free");
+  assert.equal(gecko.take("pages"), true, "which a page finds");
 
   // GeckoTerminal fails from now on: the last read serves until STALE_MS, then 503, never a stale list as fresh
   let down = createEvmLists("base", geckoBudget(() => now), { fetch: recorded({ gt: 503 }).fetch, now: () => now });

@@ -7,7 +7,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
-import { geckoBudget } from "../gecko.ts";
+import { geckoBudget, PAGE_RESERVE, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
@@ -34,6 +34,11 @@ function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown
       if (opts.down) return { status: 503, body: '{"error":{"code":"upstream"}}' };
       if (r.method === "getTokenLargestAccounts") return opts.largest === undefined ? { status: 503, body: '{"error":{"code":"upstream"}}' } : { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.largest }) };
       const keys = r.params[0] as string[];
+      if ((r.params[1] as { encoding?: string }).encoding === "base64") {
+        // the launch read (origin.ts): each recorded token's pump.fun curve account where it is asked, else none
+        const curves = new Map(Object.keys(FX.tokens).map((m) => [pumpCurveAddress(m), FX.tokens[m].accounts.result.value[1]]));
+        return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value: keys.map((k) => (opts.accounts ? null : (curves.get(k) ?? null))) } }) };
+      }
       if (keys.length === 2 && keys[1] === pumpCurveAddress(keys[0]!)) {
         const rec = FX.tokens[keys[0]!]?.accounts ?? { jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value: [null, null] } };
         return { status: 200, body: JSON.stringify(opts.accounts ? opts.accounts(keys[0]!) : rec) };
@@ -41,7 +46,10 @@ function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown
       if (keys.length === 1) {
         const rec = FX.tokens[keys[0]!]?.accounts;
         const v = rec ? { ...rec, result: { ...rec.result, value: [rec.result.value[0]] } } : { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [null] } };
-        return { status: 200, body: JSON.stringify(opts.accounts ? opts.accounts(keys[0]!) : v) };
+        // an `accounts` answer is recorded for the mint and its curve: the mint read takes its first account
+        const o = opts.accounts?.(keys[0]!) as { result?: { value?: unknown[] } } | undefined;
+        const one = o?.result?.value ? { ...o, result: { ...o.result, value: o.result.value.slice(0, 1) } } : o;
+        return { status: 200, body: JSON.stringify(opts.accounts ? one : v) };
       }
       return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.owners }) };
     },
@@ -101,11 +109,11 @@ test("fold 6 (re-check 4 P5b): the token page's chain reads draw the share of th
   const spy = { handle: (c: string, ct: string | undefined, body: string, client?: string) => (seen.push(client), rpc.handle(c, ct, body)) };
   const t = createSolanaToken(fakeProxy(), spy, { now: () => NOW });
   assert.equal((await t.page(PUMP, "198.51.100.9")).status, 200);
-  assert.deepEqual(seen, ["198.51.100.9"], "the mint read carried the caller");
+  assert.deepEqual(seen, ["198.51.100.9", "198.51.100.9"], "the mint read and the launch read carried the caller");
   assert.equal((await t.page(PUMP, "198.51.100.10")).status, 200);
-  assert.equal(seen.length, 1, "a cache hit reaches no provider and draws nothing");
+  assert.equal(seen.length, 2, "a cache hit reaches no provider and draws nothing");
   await t.holders(PUMP, "198.51.100.11");
-  assert.deepEqual(seen.slice(1), ["198.51.100.11"], "the holders' mint read carries its caller too");
+  assert.deepEqual(seen.slice(2), ["198.51.100.11"], "the holders' mint read carries its caller too");
 });
 
 test("page: a Token-2022 mint off any curve, in 06b's TokenPage fields, the chain's authorities and fee, Jupiter's row", async () => {
@@ -381,8 +389,8 @@ test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal and ans
   assert.equal(g.urls.length, GT_PER_MIN);
   assert.equal(ok, GT_PER_MIN - 1, "one token read, then bars until the minute's calls are spent");
   const full = await t.candles(CURVE, "1m", 1793620800 - 21 * 86_400, 10);
-  assert.deepEqual([full.status, JSON.parse(full.body), full.retryAfterS], [429, { error: { code: "rate_limited" } }, 60], "the queue's first call frees in 60 s");
-  now += 61_000;
+  assert.deepEqual([full.status, JSON.parse(full.body), full.retryAfterS], [429, { error: { code: "rate_limited" } }, WINDOW_MS / 1000], "the queue's first call frees in WINDOW_MS, the wait named exactly");
+  now += WINDOW_MS + 1_000;
   const limited = fakeGecko({ status: 429, headers: { "retry-after": "30" } });
   const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: limited.fetch });
   const first = await t2.candles(CURVE, "1m", null, 10);
@@ -392,20 +400,19 @@ test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal and ans
   assert.equal(limited.urls.length, 1, "paused after the 429");
 });
 
-test("candles: the server's one GeckoTerminal budget holds the token page to its lane, the EVM lists' calls counting against the minute", async () => {
+test("candles: the server's one GeckoTerminal budget: the page takes what the lists left, and past the minute a throttle naming the wait to its oldest call's minute", async () => {
   const g = fakeGecko();
   const now = NOW;
-  const shared = geckoBudget(() => now, { lists: 3, pages: 7 });
-  for (let i = 0; i < 3; i++) assert.equal(shared.take("lists"), true);
+  const shared = geckoBudget(() => now);
+  for (let i = 0; i < GT_PER_MIN - PAGE_RESERVE; i++) assert.equal(shared.take("lists"), true);
+  assert.equal(shared.take("lists"), false, "the lists leave PAGE_RESERVE free");
   const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: g.fetch, gecko: shared });
   const tfs = ["1m", "5m", "15m", "1h", "4h", "1d"];
-  for (let i = 0; i < 20; i++) await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10);
-  assert.equal(g.urls.length, 7, "the pages lane's 7, never the whole 10");
-  assert.equal(shared.take("lists"), false, "and the minute's 10 are spent");
+  for (let i = 0; i < 6; i++) await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10);
+  assert.equal(g.urls.length, PAGE_RESERVE, "the page's calls: the reserve the lists left");
   const over = await t.candles(CURVE, "1d", 1793620800 - 40 * 86_400, 10);
-  assert.deepEqual([over.status, over.retryAfterS], [429, 60], "a call past the lane is a throttle naming the wait to its oldest call's minute");
+  assert.deepEqual([over.status, over.retryAfterS], [429, WINDOW_MS / 1000], "a call past the window is a throttle naming the exact wait to its oldest call leaving it");
 });
-
 test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 429 with a wait, not 503", async () => {
   let gt = 0;
   const proxy = { handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) };
@@ -507,4 +514,30 @@ test("the routes refuse: another method 405; no, two or another chain, no or two
     const r = await call("GET", q);
     assert.equal(r.status, 404, q);
   }
+});
+
+// card helper-launchpad-origin: the page's launchpad and pool are the chain's, on the launch reads recorded 2026-11-03
+// 16:49Z (fixtures/solana-origins.json, origin.test.ts)
+test("page: a LaunchLab token on its curve trades in its LaunchLab pool, read on chain; a token Jupiter tags with no launch on chain is untagged", async () => {
+  const OX = JSON.parse(readFileSync(new URL("./fixtures/solana-origins.json", import.meta.url), "utf8")) as { tokens: { case: string; mint: string; origin: { pad: string; pool: string; curveBps: number | null } | null; jupiter: Record<string, unknown> }[]; accounts: Record<string, unknown> };
+  const mintAcct = FX.tokens[PUMP].accounts.result.value[0];
+  const rpc = {
+    async handle(_c: string, _t: string | undefined, body: string) {
+      const r = JSON.parse(body) as RpcCall;
+      const keys = r.params[0] as string[];
+      const base64 = (r.params[1] as { encoding?: string }).encoding === "base64";
+      const value = base64 ? keys.map((k) => OX.accounts[k] ?? null) : keys.map(() => mintAcct);
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value } }) };
+    },
+  };
+  const ll = OX.tokens.find((t) => t.case === "raydium-launchlab" && t.origin!.curveBps! < 10_000)!;
+  const md = OX.tokens.find((t) => t.jupiter.launchpad === "metadao")!;
+  const t = createSolanaToken(fakeProxy({ search: (m) => OX.tokens.filter((x) => x.mint === m).map((x) => x.jupiter) }), rpc, { now: () => NOW });
+  const p = JSON.parse((await t.page(ll.mint)).body);
+  assert.equal(p.row.launchpad, "raydium-launchlab");
+  assert.equal(p.row.curve_bps, ll.origin!.curveBps);
+  assert.equal(p.pool, ll.origin!.pool, "on its curve: the LaunchLab pool");
+  assert.equal(p.risk.lp.v.class, "curve");
+  const q = JSON.parse((await t.page(md.mint)).body);
+  assert.equal(q.row.launchpad, null, "Jupiter's metadao tag with no launch read on chain");
 });

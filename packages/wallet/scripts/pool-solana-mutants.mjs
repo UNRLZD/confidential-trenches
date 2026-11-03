@@ -49,13 +49,13 @@ const M = [
   [S, "slot = Math.min(slot, at);", "slot = Math.max(slot === Number.MAX_SAFE_INTEGER ? 0 : slot, at);", T, "S4"],
   [S, "for (let i = Math.max(1, start); i < l.length; i++)", "for (let i = start + 1; i < l.length; i++)", T, "S5"],
   [S, "if (next[tree]!.length > held[tree]!.length) held[tree] = next[tree]!;", "held[tree] = next[tree]!;", T, "S6"],
-  [R, "if (m.has(x.pubkey)) throw", "if (false) throw", T, "restore refuses"],
+  [R, "if (keys.has(x.pubkey)) throw", "if (false) throw", T, "restore refuses"],
   [R, "x.account?.owner !== program || ", "", T, "restore refuses"],
   [R, "a.stateLeaves.forEach((c, k) => {\n    if (leafAt.has(c)) throw", "a.stateLeaves.forEach((c, k) => {\n    if (false) throw", T, "R4"],
-  [R, "if (m.value === 0n || m.nonce === 0n || ", "if (", T, "restore refuses"],
-  [R, "for (const [key, d] of reads[1]![i].marks) {", "for (const [key, d] of [] as [string, string][]) {", T, "RV5"],
-  [R, "if (base64.decode(d[0]).length !== size) throw", "if (false) throw", T, "restore refuses"],
-  [R, "const slot = Math.max(...reads.flatMap((r) => [r[0].slot, r[1].slot]));", "const slot = Math.min(...reads.flatMap((r) => [r[0].slot, r[1].slot]));", T, "RV7"],
+  [R, "if (m.value === 0n || m.nonce === 0n || ", "if (", T, "sol-marks-scale fold 1 R11"],
+  [R, "for (const [key, d] of marks[1][i]) {", "for (const [key, d] of [] as [string, string][]) {", T, "RV5"],
+  [R, "if (bytes.length !== size) throw", "if (false) throw", T, "restore refuses"],
+  [R, "const slot = Math.max(...calls.flat(2).map((c) => c.slot));", "const slot = Math.min(...calls.flat(2).map((c) => c.slot));", T, "RV7"],
   [R, "if (m.value === 0n || m.nonce === 0n || m.nonce > BigInt(a.labelLeaves.length)) throw", "if (false) throw", T, "restore refuses"],
   [R, "if (a.labelLeaves[Number(m.nonce - 1n)] !== label) throw", "if (false) throw", T, "restore refuses"],
   [R, "if (at === undefined) throw", "if (false) throw", T, "restore refuses"],
@@ -70,12 +70,43 @@ const M = [
   // card sol-restore-race, review round 4: the first read's answers kept for the never-closed rule (G7); fold 7: the
   // earlier answer checked against the new one (G4, solana-restore.ts:101), told apart by an equal slot
   [R, "  solanaMarksGaps(calls, first.calls);\n", "", T, "fold 6 \\(G7"],
-  [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold 7 \\(G4"],
+  [R, "          lacks(i, x, j, y);\n", "", T, "fold 7 \\(G4"],
   // fold 8: the merged marks carried into the next round (M7): without them the restore never walks
   [R, "    marks = again;\n", "", T, "N1 race"],
   // fold 10: the release number read from a spent mark, and compared across reads
   [R, " || have.number !== w.number)) throw", ")) throw", T, "fold 10 \\(number"],
   [R, "number: new DataView(d.buffer, d.byteOffset, d.length).getUint32(8, true) }", "number: 0 }", T, "fold 10 \\(number"],
+  // card sol-marks-scale: the marks in buckets of 256 counters, each bucket's answer checked, the never-closed rule per bucket
+  [R, "if (c < BigInt(first) || c >> 8n !== BigInt(b)) throw", "if (c < BigInt(first)) throw", T, "sol-marks-scale: a mark outside the bucket"],
+  [R, "if (c < BigInt(first) || c >> 8n !== BigInt(b)) throw", "if (c >> 8n !== BigInt(b)) throw", T, "restore refuses two RPCs whose marks differ"],
+  [R, "stopped[k] = last.open;", "stopped[k] = true;", T, "sol-marks-scale: a pool of 20,000"],
+  [R, "open: keys.size < SOL_MARK_BUCKET - (b === 0 ? first : 0), keys", "open: keys.size < SOL_MARK_BUCKET, keys", T, "sol-marks-scale: a pool of 20,000"],
+  [R, "w = Math.min(2 * w, SOL_MARK_WAVE)", "w = 1", T, "sol-marks-scale: a pool of 20,000"],
+  [R, " || (y.open && y.bucket < x.bucket)", "", T, "sol-marks-scale: a short bucket speaks"],
+  [R, "if (y.slot < x.slot || !(y.bucket === x.bucket || (y.open && y.bucket < x.bucket))) return;", "if (y.slot < x.slot) return;", T, "sol-marks-scale: a pool of 20,000"],
+  [R, "const a = (await solanaLagRetry(() => rpc(\"getProgramAccounts\", [program, { commitment: \"finalized\", encoding: \"base64\", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]), lagWait, stop.signal))", "const a = (await rpc(\"getProgramAccounts\", [program, { commitment: \"finalized\", encoding: \"base64\", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters }]))", T, "sol-marks-scale: a bucket whose node lags"],
+  // fold 1 (the Opus review): S1 a zeroed record passed over, S2 both RPCs wave by wave with the stopped one's lowest bucket
+  // not full read again at the other's slot and one stop for every read, S3 a counter is one mark's, S4 the settle's
+  // spent marks only
+  [R, "        if (bytes.subarray(0, 8).every((v) => v === 0)) continue;\n", "", T, "sol-marks-scale fold 1 RV-B1"],
+  [R, "if (bytes.subarray(0, 8).every((v) => v === 0)) continue;", "if (bytes.subarray(0, 8).some((v) => v === 0)) continue;", T, "sol-marks-scale fold 1 RV-B1"],
+  [R, "if (owner !== undefined && owner !== x.pubkey) throw", "if (false) throw", T, "sol-marks-scale fold 1 RV-F"],
+  [R, "if (have !== undefined && have !== d[0]) throw new Error(`rpc ${k}: mark ${x.pubkey}: two answers differ`);", "", T, "sol-marks-scale fold 1 S3"],
+  [R, "return [await bucket(k, low[k]!, Math.max(min, top(k === 0 ? 1 : 0)))];", "return [await bucket(k, low[k]!, min)];", T, "sol-marks-scale fold 1 RV-C2"],
+  [R, "return [await bucket(k, low[k]!, Math.max(min, top(k === 0 ? 1 : 0)))];", "return [await bucket(k, next[k]! - 1, Math.max(min, top(k === 0 ? 1 : 0)))];", T, "sol-marks-scale: a short bucket speaks"],
+  [R, "        while (full[k].has(low[k]!)) low[k]!++;\n", "", T, "sol-marks-scale: a short bucket speaks"],
+  [R, "        if (stopped[k] && !last.open) next[k] = low[k]!;\n", "", T, "sol-marks-scale fold 1 S2: a stopped RPC"],
+  [R, "      solanaMarksGaps(calls, add);\n", "", T, "sol-marks-scale: one RPC missing a mark"],
+  [R, "    stop.abort(e);\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
+  [R, "  signal?.addEventListener(\"abort\", onAbort, { once: true });\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
+  [R, "lagWait, stop.signal))", "lagWait))", T, "sol-marks-scale fold 1 S2: a throw"],
+  [R, "    signal?.removeEventListener(\"abort\", onAbort);\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
+  [R, "  signal?.throwIfAborted(); // a signal aborted already never fires its event\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
+  [R, "a.lagWait, \"spent\");", "a.lagWait);", T, "sol-marks-scale fold 1 S4"],
+  [R, "(only === \"spent\" ? [0] : [0, 1])", "[0, 1]", T, "sol-marks-scale fold 1 S4"],
+  // card pool-sol-mark-tag: the bucket's memcmp without the tag (the old filter), and a record without the tag taken
+  [R, "const high = new Uint8Array(width);", "const high = new Uint8Array(width - 1);", T, "sol-marks-scale fold 1 RV-B3"],
+  [R, "if (bytes[size - 1] !== SOL_MARK_TAG) throw", "if (false) throw", T, "card pool-sol-mark-tag: a record"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];

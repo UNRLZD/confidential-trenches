@@ -51,6 +51,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SIGNPAGE_IFRAME_ATTRIBUTES } from "../../packages/kit/src/index.ts";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
+import { kitTakesState } from "../signpage-state.mjs";
 
 const KEY = "signpage-shell";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -76,16 +77,17 @@ const KEYS = ["release", "api", "signed_in", "code_saved", "vault_balance", "wal
 // ------------------------------------------------------------------------------------------------ the verdict
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const sameKeys = (v, keys) => isObj(v) && JSON.stringify(Object.keys(v).sort()) === JSON.stringify([...keys].sort());
-export const exactState = (s) =>
-  isObj(s) &&
-  (sameKeys(s, KEYS) || (s.signed_in === true && sameKeys(s, [...KEYS, "way"]))) &&
-  typeof s.release === "string" && s.api === 1 && typeof s.signed_in === "boolean" && typeof s.code_saved === "boolean" &&
-  typeof s.vault_balance === "string" && ["wallets", "positions", "orders", "held", "ops"].every((k) => Array.isArray(s[k])) &&
-  (!Object.hasOwn(s, "way") || ["passkey", "words", "wallet"].includes(s.way));
+// A state is exact when the kit's own client takes it (scripts/signpage-state.mjs: the kit's state schema, never a
+// hand copy of its keys) and, signed out, it holds exactly the signed-out keys: no way and no pools (packages/signpage/
+// src/pools.ts withPools adds pools to a signed-in state only)
+export const exactState = (s) => isObj(s) && kitTakesState(s) && (s.signed_in === true || sameKeys(s, KEYS));
 const signedOut = (s) =>
-  exactState(s) && !Object.hasOwn(s, "way") && s.signed_in === false && s.code_saved === false && s.vault_balance === "0" &&
+  exactState(s) && sameKeys(s, KEYS) && s.signed_in === false && s.code_saved === false && s.vault_balance === "0" &&
   ["wallets", "positions", "orders", "held", "ops"].every((k) => s[k].length === 0);
-const show = (s) => (isObj(s) ? JSON.stringify({ signed_in: s.signed_in, ...(Object.hasOwn(s, "way") ? { way: s.way } : {}), code_saved: s.code_saved }) : "none");
+const show = (s) =>
+  isObj(s)
+    ? JSON.stringify({ signed_in: s.signed_in, ...(Object.hasOwn(s, "way") ? { way: s.way } : {}), code_saved: s.code_saved, ...(Object.hasOwn(s, "pools") ? { pools: Array.isArray(s.pools) ? s.pools.length : s.pools } : {}) })
+    : "none";
 const isEvent = (d) => isObj(d) && d.v === 1 && d.type === "state" && !Object.hasOwn(d, "id") && sameKeys(d, ["v", "type", "state"]);
 const isAnswer = (d) => isObj(d) && d.v === 1 && typeof d.id === "string" && d.ok === true && sameKeys(d, ["v", "id", "ok", "result"]);
 const isRefusal = (d) => isObj(d) && d.v === 1 && typeof d.id === "string" && d.ok === false && sameKeys(d, ["v", "id", "ok", "error"]);

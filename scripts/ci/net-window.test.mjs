@@ -30,6 +30,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-venues-pin.mjs",
   "scripts/live-checks/helper-abuse-limits.mjs",
   "scripts/live-checks/helper-host-health.mjs",
+  "scripts/live-checks/helper-launchpad-origin.mjs",
   "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
@@ -70,6 +71,7 @@ export const KEEP = {
   "scripts/webkit-harness/self-test.mjs": "drives index.mjs's loopback harness; Node opens none to a remote host",
   "scripts/ci/verify-gate.mjs": "reads git history only, no network",
   "scripts/ci/kit-reach.mjs": "reads the tree only, no network",
+  "scripts/ci/no-network.mjs": "a preload that refuses every connection but this machine's; it opens none",
   "scripts/perf-table.mjs": "reads files only, no network",
 };
 

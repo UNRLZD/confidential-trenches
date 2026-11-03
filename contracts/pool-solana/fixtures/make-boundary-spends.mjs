@@ -49,6 +49,8 @@ const le = (x, n) => {
   for (let i = 0, v = BigInt(x); i < n; i++, v >>= 8n) b[i] = Number(v & 0xffn);
   return b;
 };
+// every mark's last byte (src/state.rs MARK_TAG)
+const MARK_TAG = Uint8Array.of(1);
 const fieldOf = (...parts) => BigInt("0x" + hex(keccak_256(cat(...parts)))) % P;
 const testField = (tag) => fieldOf(enc("pool-sol-core/" + tag));
 
@@ -135,8 +137,8 @@ async function spend(name, n, withdrawn, stateLeaves, labelLeaves, number) {
       new_commitment: b(publicSignals[0]),
       nullifier_hash: b(publicSignals[1]),
       withdrawn: String(withdrawn),
-      // the spent mark's 12 bytes after this release (M355 (3), M376): withdrawnValue u64 LE ‖ the release's number u32 LE
-      spent_mark: hex(cat(le(withdrawn, 8), le(number, 4))),
+      // the spent mark's 13 bytes after this release (M355 (3), M376): withdrawnValue u64 LE ‖ the release's number u32 LE ‖ the tag 1
+      spent_mark: hex(cat(le(withdrawn, 8), le(number, 4), MARK_TAG)),
       state_root_index: stateLeaves.length - 1,
       state_depth: sp.depth,
       label_root_index: labelLeaves.length - 1,
@@ -162,8 +164,8 @@ const out = {
     "Deposits and real withdraw proofs that carry both trees of the Solana pool across a page boundary, for svm-tests/tests/release.rs. Test notes only, never money.",
     "Made by contracts/pool-solana/fixtures/make-boundary-spends.mjs (snarkjs 0.7.5 with packages/kit/zk/withdraw.wasm and withdraw.zkey; snarkjs groth16.verify passes each). Same program, keys and context fields as release-spends.json.",
   ],
-  // mark: the precommitment mark's 16 bytes after the deposit (M353), value u64 LE ‖ nonce u64 LE
-  deposits: notes.map((x, i) => ({ value: String(x.value), precommitment: hex(be32(x.precommitment)), mark: hex(cat(le(x.value, 8), le(BigInt(i + 1), 8))) })),
+  // mark: the precommitment mark's 17 bytes after the deposit (M353), value u64 LE ‖ nonce u64 LE ‖ the tag 1
+  deposits: notes.map((x, i) => ({ value: String(x.value), precommitment: hex(be32(x.precommitment)), mark: hex(cat(le(x.value, 8), le(BigInt(i + 1), 8), MARK_TAG)) })),
   // the root at each index around the boundary, from the off-chain trees
   state_roots: { 1023: rootOf(state0), 1024: rootOf(state0.concat(one.change)), 1025: rootOf(state1) },
   label_roots: { 1023: rootOf(labels0), 1024: rootOf(labels1) },

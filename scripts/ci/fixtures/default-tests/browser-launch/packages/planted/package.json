@@ -1,0 +1,1 @@
+{ "name": "planted", "private": true, "scripts": { "test": "node --test launch.mjs" } }

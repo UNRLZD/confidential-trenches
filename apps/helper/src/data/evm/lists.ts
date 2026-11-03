@@ -3,9 +3,10 @@
 // factory made the token (owner 3 Nov 10:11Z), read on chain.
 //
 // Lists: GeckoTerminal's keyless `networks/<net>/new_pools` and `trending_pools?duration=5m|1h` (D-E2, M:2315; D-E6
-// names the same networks), page 1 each (20 pools), with the pools' base tokens included. GeckoTerminal allows 10
-// calls a minute per caller (../gecko.ts), shared with the Solana token page's candles, so each chain's three lists
-// are read together once per LIST_MS in the "lists" lane, capped at LISTS_PER_MIN per chain.
+// names the same networks), page 1 each (20 pools), with the pools' base tokens included. GeckoTerminal answers one
+// address a few calls a minute (../gecko.ts), shared with the Solana token page's candles, which go first: each tick
+// reads the stalest list older than LIST_MS, one call at a time while the "lists" lane yields a call, so the lists
+// slow down while pages are opened and answer 503 only past STALE_MS.
 //
 // Launchpad (the maker): the block the token's pool was made in, then on two RPC providers one `eth_getLogs` over that
 // block and the one before it, filtered to the chain's FACTORIES and their creation events; the row's launchpad is the
@@ -20,27 +21,33 @@
 // and token word match the table exactly.
 import { gzipSync } from "node:zlib";
 import { dec, LIST_MAX, ROW_FIELDS, text, type ListsAnswer, type Row } from "../solana/lists.ts";
-import type { GeckoBudget } from "../gecko.ts";
+import { throttledUntil, type GeckoBudget } from "../gecko.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
-export type EvmSnapshot = { chain: EvmChain; lists: Record<"new" | "trending" | "trending_5m" | "trending_1h" | "graduating", Row[]>; as_of_ms: number };
+/** `unsettled`: the listed tokens whose maker is not read yet; their rows' launchpad null means "not read yet", every
+ *  other row's null means no listed factory made the token. Not a row field: the frozen rows are unchanged. */
+export type EvmSnapshot = { chain: EvmChain; lists: Record<"new" | "trending" | "trending_5m" | "trending_1h" | "graduating", Row[]>; as_of_ms: number; unsettled: string[] };
 
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** GeckoTerminal's network id per chain (read 2026-11-03 11:25Z: `networks/base/new_pools` and `networks/robinhood/new_pools`, 20 pools each). */
 export const GT_NETWORK: Readonly<Record<EvmChain, string>> = { base: "base", robinhood: "robinhood" };
+export const LIST_KEYS = ["new", "trending_5m", "trending_1h"] as const;
+type ListKey = (typeof LIST_KEYS)[number];
 export const GT_READS = {
   new: "new_pools?include=base_token&page=1",
   trending_5m: "trending_pools?include=base_token&duration=5m&page=1",
   trending_1h: "trending_pools?include=base_token&duration=1h&page=1",
 } as const;
-/** Each chain's three lists are read together once a minute: 3 calls a minute per chain from GeckoTerminal's 10. */
+/** A list is read again once its last read is this old, when the lists lane yields a call. */
 export const LIST_MS = 60_000;
-export const LISTS_PER_MIN = 3;
+/** A list this old, or never read, is read even while pages are being opened (still leaving a page one call), so it
+ *  never reaches STALE_MS and a helper started while token pages are open still serves its lists. */
+export const LIST_URGENT_MS = 240_000;
 /** The snapshot is rebuilt on the Solana lists' cadence (D-S2's 12 s): makers not settled yet are read again. */
 export const TICK_MS = 12_000;
 /** A snapshot whose oldest list read is older than this answers 503, never a stale list passed as fresh. */
-export const STALE_MS = 2 * LIST_MS;
+export const STALE_MS = 300_000;
 /** A pool younger than this whose block shows no creation event is read again, since a provider may not hold its logs yet. */
 export const SETTLE_MS = 60_000;
 export const MAKER_MAX = 20_000;
@@ -98,6 +105,7 @@ const VIRTUALS_GRADUATED = "0x381d54fa425631e6266af114239150fae1d5db67bb65b4fa9e
 const VIRTUALS_PERSONA = "0xf9d151d23a5253296eb20ab40959cf48828ea2732d337416716e302ed83ca658"; // NewPersona(uint256 virtualId,address token,address dao,address tba,address veToken,address lp)
 const FLAUNCH_POOL = "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be94088bf5"; // PoolCreated(bytes32 indexed _poolId,address _memecoin,address _memecoinTreasury,uint256 _tokenId,bool _currencyFlipped,uint256 _flaunchFee,(string,string,string,uint256,address,uint24,uint256,bytes,bytes,address) _params)
 const PONS_LAUNCHED = "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607"; // TokenLaunched(address indexed token,address indexed curve,address indexed deployer,address pairToken,uint256 launchConfigId,uint256 graduationThreshold)
+const PONS_V1_LAUNCHED = "0xdb51ea9ad51ab453a65a4cb7e60c3cb378c9501bb002609f8f97778fb6c4235a"; // TokenLaunched(address indexed token,address indexed deployer,address indexed dexFactory,address pairToken,address pool,uint256 dexId,uint256 launchConfigId,uint256 positionId,uint256 restrictionsEndBlock,uint256 initialBuyAmount)
 const BAGS_CREATED = "0x643b3b606052cbadac2f906ad0b462da99eda2a1d4f824d315d7f6edd3e4cced"; // TokenCreated(address indexed token,address indexed curve,address indexed creator,address feeShare,address partner,bytes32 poolId,string name,string symbol,string metadataURI)
 
 /** The launchpads' factories per chain; each address's cite is on its line. A pad with no row on a chain is one whose
@@ -139,6 +147,9 @@ export const FACTORIES: Readonly<Record<EvmChain, readonly Factory[]>> = {
     { pad: "doppler", address: "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862", topic0: DOPPLER_CREATE, at: { word: 0 }, shared: true },
     // Pons v2: Sourcify chain 4663 [PonsV2LaunchFactory] (no Pons-own page found)
     { pad: "pons", address: "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", topic0: PONS_LAUNCHED, at: { topic: 1 } },
+    // Pons v1: Sourcify chain 4663 [PonsLaunchFactory] (read 2026-11-03 17:00Z; no Pons-own page found); it made YOLO
+    // 0x62c71cd34a52c30d894419cbcc55db2afa8032ea, on the Robinhood lists that minute
+    { pad: "pons", address: "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb", topic0: PONS_V1_LAUNCHED, at: { topic: 1 } },
     // docs.bags.fm/robinhood/overview.md: "BagsFactory | 0xe8Cc4431adF8b5A847C113EF0c6af9043219Cb37" (a proxy; its EIP-1967 slot read 2026-11-03 13:41Z names
     // implementation 0x7dfa0131f6c8626f199a2e33e49dfb5660e6ef1c, Sourcify [BagsFactory], whose TokenCreated adds `partner`: every one of the
     // factory's 4449 creation logs on chain carries this topic0, none the older implementation 0x46aD6f53's)
@@ -471,8 +482,9 @@ async function padsAt(chain: EvmChain, doFetch: Fetch, asks: readonly { token: s
   return out;
 }
 
-/** Tokens per tick whose creation block is searched (EARLIER_READS_MAX block reads each, at most). */
-export const EARLIER_PER_TICK = 2;
+/** Creation-block searches run at once (EARLIER_READS_MAX block reads each, at most); every older token a tick asks
+ *  about is searched in that tick, so none waits behind newer tokens with a null that means "not read yet". */
+export const EARLIER_PARALLEL = 3;
 export const EARLIER_READS_MAX = 120;
 
 /**
@@ -537,17 +549,20 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
     else out.set(a.token, x);
   }
   // none at the pool: a token with no code before its pool was made there, so none; an older token's creation block is
-  // searched, a few a tick (the rest are read again next tick)
+  // searched, EARLIER_PARALLEL at a time
   const had = await hadCode(chain, doFetch, none.map((a) => ({ token: a.token, at: a.range[0] - 1 })));
   const older = none.filter((a, i) => {
     if (had[i] === false) out.set(a.token, null);
     return had[i] === true;
   });
   const earlier: { token: string; range: [number, number] }[] = [];
-  for (const a of older.slice(0, EARLIER_PER_TICK)) {
-    const b = await codeBlock(chain, a.token, a.range[0], doFetch);
-    if (b === null) out.set(a.token, null);
-    else if (b !== undefined) earlier.push({ token: a.token, range: [b, b] });
+  for (let i = 0; i < older.length; i += EARLIER_PARALLEL) {
+    const part = older.slice(i, i + EARLIER_PARALLEL);
+    const found = await Promise.all(part.map((a) => codeBlock(chain, a.token, a.range[0], doFetch)));
+    for (const [k, b] of found.entries()) {
+      if (b === null) out.set(part[k]!.token, null);
+      else if (b !== undefined) earlier.push({ token: part[k]!.token, range: [b, b] });
+    }
   }
   const second = await padsAt(chain, doFetch, earlier);
   for (const e of earlier) if (second.has(e.token)) out.set(e.token, second.get(e.token)!);
@@ -568,17 +583,16 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   const makers = new Map<string, string | null>();
   const known = new Map<number, number>(); // block times the Robinhood search has read
   const tries = new Map<string, number>(); // maker reads that settled nothing, per token
-  let read: { new: Read; trending_5m: Read; trending_1h: Read } | null = null;
+  const reads: Partial<Record<ListKey, Read>> = {};
   let last: (ListsAnswer & { asOfMs: number }) | null = null;
   let running: Promise<void> | null = null;
 
-  async function gt(path: string): Promise<Read | null> {
-    if (!gecko.take("lists")) return null;
+  async function gt(path: string, urgent: boolean): Promise<Read | null> {
+    if (!gecko.take("lists", urgent)) return null;
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
-        const ra = Number(r.headers.get("retry-after"));
-        gecko.pause(now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000));
+        throttledUntil(gecko, r.headers.get("retry-after"), now());
         await r.body?.cancel();
         return null;
       }
@@ -596,20 +610,29 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     }
   }
 
+  const all = (): { new: Read; trending_5m: Read; trending_1h: Read } | null =>
+    reads.new && reads.trending_5m && reads.trending_1h ? { new: reads.new, trending_5m: reads.trending_5m, trending_1h: reads.trending_1h } : null;
+
   function build() {
+    const read = all();
     if (read === null) return;
     const tag = (rows: Row[]) => rows.map((r) => ({ ...r, launchpad: makers.get(r.token as string) ?? null }));
     const asOf = Math.min(read.new.at, read.trending_5m.at, read.trending_1h.at);
     const lists = { new: tag(read.new.rows), trending: tag(read.trending_1h.rows), trending_5m: tag(read.trending_5m.rows), trending_1h: tag(read.trending_1h.rows), graduating: [] as Row[] };
-    const body = JSON.stringify({ chain, lists, as_of_ms: asOf } satisfies EvmSnapshot);
+    const unsettled = [...new Set([read.new, read.trending_5m, read.trending_1h].flatMap((r) => r.rows.map((x) => x.token as string)))].filter((t) => !makers.has(t));
+    const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled } satisfies EvmSnapshot);
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
   }
 
   async function tick(): Promise<void> {
-    if (read === null || now() - Math.min(read.new.at, read.trending_5m.at, read.trending_1h.at) >= LIST_MS) {
-      const [n, t5, t1] = await Promise.all([gt(GT_READS.new), gt(GT_READS.trending_5m), gt(GT_READS.trending_1h)]);
-      if (n !== null && t5 !== null && t1 !== null) read = { new: n, trending_5m: t5, trending_1h: t1 };
+    // the stalest list first (a missing one before any), one call at a time while the lists lane yields one
+    const age = (k: ListKey) => (reads[k] === undefined ? Infinity : now() - reads[k]!.at);
+    for (const k of LIST_KEYS.filter((x) => age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
+      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS);
+      if (r === null) break;
+      reads[k] = r;
     }
+    const read = all();
     if (read === null) return;
     const wanted = new Map<string, number>();
     for (const r of [read.new, read.trending_5m, read.trending_1h]) for (const [t, s] of r.created) if (!makers.has(t) && s >= 0) wanted.set(t, s);

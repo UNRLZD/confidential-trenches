@@ -1,5 +1,8 @@
 // Every command and path README.md names runs or exists: a judge or a coding agent who copies one gets it to run.
 //   node scripts/ci/readme-commands.mjs [README.md]      (exit 1 and one line per problem)
+//   node scripts/ci/readme-commands.mjs --agent-steps [README.md]
+//       prints the commands of the "For AI agents and scripts" section, one per line, exactly as README.md writes them
+//       (card readme-fresh-run: scripts/ci/readme-fresh-run.mjs runs these on a clean machine, never a copy of them)
 //
 // What it reads, decided from what README.md writes:
 // - Commands: each inline code span and each line of a fenced block, split at `&&`, `||`, `;` and `|`. A piece that
@@ -25,7 +28,7 @@ const ARG_FLAGS = new Set(["--dir", "-C", "--filter", "-F", "--workspace-root", 
 const unquote = (w) => w.replace(/^(['"])(.*)\1$/, "$2");
 const placeholder = (w) => /[<>$]/.test(w);
 
-function workspacePackages(root) {
+export function workspacePackages(root) {
   const ws = path.join(root, "pnpm-workspace.yaml");
   if (!existsSync(ws)) return [];
   const globs = [...readFileSync(ws, "utf8").matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((m) => m[1]);
@@ -113,9 +116,46 @@ export function problems(text, root) {
   return out;
 }
 
+export const AGENT_HEADING = /^#{2,4}\s+For AI agents and scripts\s*$/;
+
+// The commands of the first fenced block under the "For AI agents and scripts" heading, one per line, as written. A
+// blank line and a `#` comment line are left out. Throws when the heading, its block or a command in it is missing.
+export function agentSteps(text) {
+  const lines = text.split(/\r?\n/);
+  const at = lines.findIndex((l) => AGENT_HEADING.test(l));
+  if (at < 0) throw new Error('README has no "For AI agents and scripts" heading');
+  const level = /^#+/.exec(lines[at])[0].length;
+  let fence = null;
+  for (const line of lines.slice(at + 1)) {
+    if (fence === null) {
+      const h = /^(#+)\s/.exec(line);
+      if (h && h[1].length <= level) break; // the next section: no block under this heading
+      if (/^\s*```/.test(line)) fence = [];
+      continue;
+    }
+    if (/^\s*```/.test(line)) {
+      if (!fence.length) throw new Error("the AI-agent block in README holds no command");
+      return fence;
+    }
+    if (line.trim() && !line.trim().startsWith("#")) fence.push(line.trim());
+  }
+  throw new Error("README has no fenced block under its \"For AI agents and scripts\" heading");
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-  const file = process.argv[2] ?? path.join(root, "README.md");
+  const args = process.argv.slice(2);
+  const steps = args.includes("--agent-steps");
+  const file = args.find((a) => !a.startsWith("--")) ?? path.join(root, "README.md");
+  if (steps) {
+    try {
+      console.log(agentSteps(readFileSync(file, "utf8")).join("\n"));
+    } catch (e) {
+      console.error(e.message);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
   const found = problems(readFileSync(file, "utf8"), root);
   for (const p of found) console.log(p);
   console.log(found.length ? `${found.length} problem(s)` : "every command and path README.md names runs or exists");

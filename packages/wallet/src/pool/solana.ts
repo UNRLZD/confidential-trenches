@@ -21,9 +21,9 @@
 //   Every one of them is public at the tap (the release's data carries them), so none may differ between users.
 // - The epoch fee, "never sign on a server's word" (M355 (2)): the device computes it itself, once per epoch, from the
 //   Rent sysvar and the base fee read on two RPCs that must agree: the kit's solanaPoolReleaseCost (the spent mark's
-//   rent(12), the change note's 72-byte entry, two signatures), 1,086,960 lamports at mainnet rent, rounded up to the
+//   rent(13), the change note's 72-byte entry, two signatures), 1,092,040 lamports at mainnet rent, rounded up to the
 //   100,000 step, plus two steps, the kit's solanaPoolFee: 1,300,000 at mainnet rent. W's priority budget is that less
-//   the cost and the page reserve (solanaPoolPriorityBudget, M356 (5)), 212,325. The kit holds the one definition the
+//   the cost and the page reserve (solanaPoolPriorityBudget, M356 (5)), 207,245. The kit holds the one definition the
 //   helper imports too (M356 (6)). The helper's
 //   answer must be exactly that fee, or bind refuses: a fee the helper could pick per request would mark one user. The
 //   base fee is read with a fixed message whose two signers are the pool and the fee payer (M355 (1)): no read names W.
