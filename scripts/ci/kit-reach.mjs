@@ -51,6 +51,12 @@ import ts from "typescript";
 
 const INSIDE = /^(packages|contracts)(\/|$)/;
 const KIT_ENTRY = /^packages\/kit\/(src\/index(\.ts)?|dist\/index(\.js|\.d\.ts)?)$/;
+// packages/exit, the exit tool, is Blindfill held as an app is (.dependency-cruiser.cjs, exit-kit-entries-only): its files
+// are read as a file outside is, and from them a reach may also land in their own folder or the kit's ./core
+// (packages/kit/src/core.ts keeps it for packages/), and name the kit by "<kit>/core".
+const HELD = /^packages\/exit(\/|$)/;
+const KIT_CORE = /^packages\/kit\/(src\/core(\.ts)?|dist\/core(\.js|\.d\.ts)?)$/;
+const skipped = (f) => INSIDE.test(f) && !HELD.test(f);
 const SCRIPT = { ".js": ts.ScriptKind.JS, ".cjs": ts.ScriptKind.JS, ".mjs": ts.ScriptKind.JS, ".jsx": ts.ScriptKind.JSX, ".ts": ts.ScriptKind.TS, ".cts": ts.ScriptKind.TS, ".mts": ts.ScriptKind.TS, ".tsx": ts.ScriptKind.TSX };
 const STYLE = /\.(css|scss|sass|less|pcss|styl)$/;
 const LINE_COMMENT_STYLE = /\.(scss|sass|less|styl)$/;
@@ -66,6 +72,7 @@ export function lands(file, s, glob = false) {
   const p = path.startsWith("/") ? posix.normalize(path).slice(1) : posix.join(posix.dirname(file), path); // a browser reads "/../x" as "/x"
   const [first, ...rest] = p.split("/");
   if (glob && GLOB_CHARS.test(first) && (rest.length || first.includes("**"))) return p;
+  if (HELD.test(file) && (HELD.test(p) || KIT_CORE.test(p))) return null;
   return INSIDE.test(p) && !KIT_ENTRY.test(p) ? p.replace(/\/$/, "") : null;
 }
 
@@ -300,8 +307,10 @@ export function reaches(file, text, names = [], kitName = null) {
     // a page's "/" value: from the repo root, and from the page's folder (a dev server's root)
     const p = lands(file, s, glob) ?? (both && s.startsWith("/") ? lands(file, `.${s}`) : null);
     if (p) out.push([lineAt(at), `"${s}" reaches ${p}`]);
-    for (const n of names)
+    for (const n of names) {
+      if (HELD.test(file) && n === kitName && s === `${n}/core`) continue;
       if (s.startsWith(`${n}/`) || (s === n && n !== kitName)) out.push([lineAt(at), `"${s}" names ${n}${n === kitName ? " past its entry" : ""}`]);
+    }
   }
   return out.sort((a, b) => a[0] - b[0]);
 }
@@ -329,7 +338,7 @@ export function kitReach(root) {
       refusals.push(`${f}: a node_modules path in git`);
       continue;
     }
-    if (INSIDE.test(f)) continue;
+    if (skipped(f)) continue;
     // a file that cannot be read is refused by its name, and the others are still read
     try {
       const st = lstatSync(`${root}/${f}`, { throwIfNoEntry: false });
@@ -361,5 +370,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   }
   for (const x of r.refusals) console.error(`kit-reach: REFUSED: ${x}`);
   if (r.refusals.length) process.exit(1);
-  console.log(`kit-reach: OK (${r.read} code file(s) outside packages/ and contracts/ read)`);
+  console.log(`kit-reach: OK (${r.read} code file(s) outside packages/ and contracts/, and in packages/exit/, read)`);
 }

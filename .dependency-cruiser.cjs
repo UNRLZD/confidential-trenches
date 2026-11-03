@@ -7,8 +7,13 @@
 // Worker URL, import.meta.glob, require.resolve, an import() whose path is not a plain string, a JSDoc import, a CSS
 // @import or url(), a committed node_modules, a symlink) is scripts/ci/kit-reach.mjs's, the second step of
 // check:imports.
+// packages/exit, the exit tool, is Blindfill held as an app is, so it can do nothing an app cannot: from it an import
+// may land in its own folder or in the kit's two exports (the public entry, and ./core, which packages/kit/src/core.ts
+// keeps for packages/), and nowhere else in packages/, contracts/ or apps/.
 const KIT_ENTRY = "^packages/kit/(dist/index\\.(js|d\\.ts)|src/index\\.ts)$";
+const KIT_CORE = "^packages/kit/(dist/core\\.(js|d\\.ts)|src/core\\.ts)$";
 const OUTSIDE = "^(packages|contracts)/";
+const EXIT = "^packages/exit/";
 
 module.exports = {
   forbidden: [
@@ -22,6 +27,18 @@ module.exports = {
       name: "imports-must-resolve",
       severity: "error",
       from: { pathNot: OUTSIDE },
+      to: { couldNotResolve: true },
+    },
+    {
+      name: "exit-kit-entries-only",
+      severity: "error",
+      from: { path: EXIT },
+      to: { path: "^(packages|contracts|apps)/", pathNot: `${KIT_ENTRY}|${KIT_CORE}|${EXIT}` },
+    },
+    {
+      name: "exit-imports-must-resolve",
+      severity: "error",
+      from: { path: EXIT },
       to: { couldNotResolve: true },
     },
   ],
