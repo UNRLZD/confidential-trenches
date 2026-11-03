@@ -86,8 +86,8 @@ test("a row missing, a row added or another block on one RPC stops the tool", as
 test("only the release's pair is read: two hosts of one operator, another provider or one RPC twice is refused", async () => {
   const named = (url: string, rec = A) => ({ ...replayRpc(rec), name: url });
   const refused = (e: unknown) => e instanceof ExitRpcRefused;
-  // FastNEAR's two testnet hosts are one operator
-  await assert.rejects(exitReadPages({ network: "testnet", rpcs: [named("https://test.rpc.fastnear.com"), named("https://rpc.testnet.near.org")] }), refused);
+  // FastNEAR's two testnet hosts are one operator, so the pair is refused
+  await assert.rejects(exitReadPages({ network: "testnet", rpcs: [named("https://test.rpc.fastnear.com"), named("https://rpc.testnet.near.org")] }), refused); // near-rpc-operators: one operator (planted, refused)
   await assert.rejects(exitReadPages({ network: "testnet", rpcs: [named("https://rpc.example.org"), replayRpc(B)] }), refused);
   await assert.rejects(exitReadPages({ network: "testnet", rpcs: [replayRpc(A), named(A.url)] }), refused);
   // mainnet's pair on testnet, and testnet's on mainnet
