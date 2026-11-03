@@ -89,6 +89,10 @@ export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   robinhood: [],
 };
 
+/** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
+ *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
+const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://base.gateway.tenderly.co": 4 };
+
 /** Blocks read again every tick, and so the blocks an agreed head must be ahead of a settled block. Base's sequencer can
  *  reorg a few unsafe blocks; its `safe` head trails by about 40 s (proofs/evm-safe-lag, 20 blocks), so 10 re-read blocks
  *  are enough for the reorgs seen and the live tape stays within seconds. */
@@ -248,7 +252,7 @@ export function decodeSwap(pool: Pool, l: Log): Omit<Swap, "t"> | null {
 type Call = { method: string; params: unknown[] };
 type Reply = { ok: true; result: unknown } | { ok: false; wait: number };
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }> }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; gecko?: GeckoBudget; rpcs?: readonly string[]; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number }) {
   if (chain !== "base") throw new Error("swaps: only Base is served");
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
@@ -258,7 +262,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
   async function batchTo(url: string, calls: Call[]): Promise<Reply[] | null> {
-    const max = BATCH_MAX[url] ?? 10;
+    const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
     const got = await Promise.all(parts.map((part) => one(url, part)));
@@ -427,13 +431,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     const top = [...count].filter(([a]) => a !== V.poolManager).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, CANDIDATES_MAX).map(([a]) => a);
     const cands: Pool[] = [];
-    // v2, v3 and Slipstream pools: the factory and the two tokens, read at the agreed block
-    const reads = await callsAgreed(head.n, top.flatMap((a) => [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: a, data }))));
-    top.forEach((a, i) => {
-      const [f, t0, t1] = [wordAddr(reads[3 * i]), wordAddr(reads[3 * i + 1]), wordAddr(reads[3 * i + 2])];
+    // v2, v3 and Slipstream pools: the factory of each address, then the two tokens of those of a listed venue, read at
+    // the agreed block
+    const factories = await callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory })));
+    const ofVenue = top.filter((_, i) => {
+      const f = wordAddr(factories[i]);
+      return f !== null && (f === V.aerodromeV2 || f === V.uniswapV3 || (V.slipstream as readonly string[]).includes(f));
+    });
+    const pairs = await callsAgreed(head.n, ofVenue.flatMap((a) => [SEL.token0, SEL.token1].map((data) => ({ to: a, data }))));
+    ofVenue.forEach((a, i) => {
+      const [f, t0, t1] = [wordAddr(factories[top.indexOf(a)]), wordAddr(pairs[2 * i]), wordAddr(pairs[2 * i + 1])];
       if (f === null || t0 === null || t1 === null) return;
       const isV2 = f === V.aerodromeV2;
-      if (!isV2 && f !== V.uniswapV3 && !(V.slipstream as readonly string[]).includes(f)) return;
       const tokenIs0 = t0 === token;
       if (!tokenIs0 && t1 !== token) return;
       const other = tokenIs0 ? t1 : t0;
@@ -579,7 +588,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
   let timer: ReturnType<typeof setInterval> | null = null;
   function ensureTimer(): void {
-    if (timer !== null) return;
+    if (timer !== null || deps.tickMs === 0) return; // tickMs 0: no timer, the caller ticks (tests)
     timer = setInterval(() => {
       if (books.size === 0) {
         clearInterval(timer!);
@@ -587,7 +596,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         return;
       }
       void start();
-    }, TICK_MS);
+    }, deps.tickMs ?? TICK_MS);
     timer.unref();
   }
 
