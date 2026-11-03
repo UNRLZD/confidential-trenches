@@ -19,7 +19,9 @@ const GT: Record<string, string> = {
   [`${GT_BASE}/networks/base/${GT_READS.trending_5m}`]: fx("gt-base-trending-5m.json"),
   [`${GT_BASE}/networks/base/${GT_READS.trending_1h}`]: fx("gt-base-trending-1h.json"),
 };
-type Case = { address: string; symbol: string; created_s: number; range: [number, number]; pad: string | null; answers: unknown[][] };
+type Case = { address: string; symbol: string; created_s: number; range: [number, number]; pad: string | null; answers: unknown[][]; code_before?: string };
+type Call = { url: string; method: string; params: unknown[]; result?: unknown; error?: unknown };
+const EARLIER = JSON.parse(fx("maker-earlier-base.json")) as { recorded_at: string; cases: { symbol: string; address: string; created_s: number; pad: string | null }[]; calls: Call[] };
 const MAKERS = JSON.parse(fx("maker-logs-base.json")) as { recorded_at: string; cases: Case[] };
 const NOW = Date.parse(MAKERS.recorded_at);
 
@@ -40,9 +42,21 @@ function recorded(opts: { gt?: number; rpcFails?: number[]; tamper?: (which: num
     const reqs = JSON.parse(String(init.body)) as { id: number; params: [{ toBlock: string; fromBlock: string; address: string[]; topics: string[][] }] }[];
     assert.ok(reqs.length <= (BATCH_MAX[url] ?? 10), `${url}: a batch within its cap`);
     const out = reqs.map((r) => {
+      const q = r as unknown as { id: number; method: string; params: unknown[] };
+      if (q.method !== "eth_getLogs") {
+        // eth_getCode: whether the token had code before its pool, as recorded, or the creation-block search's reads
+        const before = MAKERS.cases.find((c) => q.method === "eth_getCode" && c.address === q.params[0] && `0x${(c.range[0] - 1).toString(16)}` === q.params[1] && c.code_before !== undefined);
+        if (before && which === 0) return { jsonrpc: "2.0", id: q.id, result: before.code_before };
+        const e = EARLIER.calls.find((c) => c.url === url && c.method === q.method && JSON.stringify(c.params) === JSON.stringify(q.params));
+        return e === undefined ? { jsonrpc: "2.0", id: q.id, error: { code: -32000, message: "not recorded" } } : { jsonrpc: "2.0", id: q.id, ...(e.error !== undefined ? { error: e.error } : { result: e.result }) };
+      }
       const [from, to] = [parseInt(r.params[0].fromBlock, 16), parseInt(r.params[0].toBlock, 16)];
       const c = MAKERS.cases.find((x) => x.range[0] === from && x.range[1] === to);
-      assert.ok(c, `unrecorded range ${from}-${to}`);
+      if (c === undefined) {
+        const e = EARLIER.calls.find((x) => x.url === url && x.method === "eth_getLogs" && JSON.stringify(x.params) === JSON.stringify(q.params));
+        assert.ok(e, `unrecorded range ${from}-${to}`);
+        return { jsonrpc: "2.0", id: q.id, ...(e.error !== undefined ? { error: e.error } : { result: e.result }) };
+      }
       const k = makerFilters("base", ...c.range).findIndex((f) => JSON.stringify(f) === JSON.stringify(r.params[0]));
       assert.ok(k >= 0, "the filter is one of the table's");
       const logs = c.answers[which]![k];
@@ -138,7 +152,23 @@ test("recorded makers: at least two live tokens per Base pad come out with that 
   assert.ok(MAKERS.cases.some((c) => c.pad === null), "a recorded token from an unknown factory");
   const { fetch } = recorded();
   const got = await readMakers("base", fetch, MAKERS.cases.map((c) => ({ token: c.address, createdS: c.created_s })), NOW);
-  for (const c of MAKERS.cases) assert.equal(got.get(c.address), c.pad, `${c.symbol} ${c.address}`);
+  for (const c of MAKERS.cases) {
+    if (c.pad !== null) assert.equal(got.get(c.address), c.pad, `${c.symbol} ${c.address}`);
+    // none at its pool block: settled none when it had no code before its pool, else not settled until its creation
+    // block is searched (those reads are recorded for three tokens below)
+    else if (c.code_before === "0x") assert.equal(got.get(c.address), null, `${c.symbol}: made at its pool, by no listed factory`);
+    else assert.ok(!got.has(c.address) || got.get(c.address) === null, `${c.symbol}: never a pad`);
+  }
+  assert.ok(MAKERS.cases.some((c) => c.pad === null && c.code_before === "0x" && got.get(c.address) === null), "a token no listed factory made gets none");
+});
+
+test("an older token with a new pool: its creation block found from its code on chain, then its maker read there (two Clanker tokens tagged, Aerodrome's token none)", async () => {
+  const { fetch } = recorded();
+  for (const c of EARLIER.cases) {
+    const got = await readMakers("base", fetch, [{ token: c.address, createdS: c.created_s }], Date.parse(EARLIER.recorded_at));
+    assert.equal(got.get(c.address), c.pad, `${c.symbol}`);
+  }
+  assert.deepEqual(EARLIER.cases.map((c) => c.pad), ["clanker", "clanker", null]);
 });
 
 test("padOf refuses what is not a creation event of a table row: another emitter, another topic0, the token elsewhere; two pads is no answer", () => {
@@ -171,7 +201,7 @@ test("two providers must answer and agree: one failing is covered by the third, 
   for (const which of [0, 1]) assert.equal((await readMakers("base", recorded({ rpcFails: [which] }).fetch, ask, NOW)).get(c.address), c.pad, `provider ${which} down`);
   for (const down of [[0, 1], [0, 2], [1, 2]]) assert.equal((await readMakers("base", recorded({ rpcFails: down }).fetch, ask, NOW)).size, 0, `providers ${down} down: one answers`);
   assert.equal((await readMakers("base", recorded({ tamper: (w, logs) => (w === 1 ? [] : logs) }).fetch, ask, NOW)).size, 0, "one provider shows no creation event: the two differ");
-  const n = MAKERS.cases.find((x) => x.pad === null)!;
+  const n = MAKERS.cases.find((x) => x.pad === null && x.code_before === "0x")!;
   assert.equal((await readMakers("base", recorded().fetch, [{ token: n.address, createdS: n.created_s }], NOW)).get(n.address), null, "settled as none once old enough");
   const fresh = await readMakers("base", recorded().fetch, [{ token: n.address, createdS: n.created_s }], n.created_s * 1000 + SETTLE_MS - 1_000);
   assert.equal(fresh.size, 0, "none is not settled within SETTLE_MS of the pool");

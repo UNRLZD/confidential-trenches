@@ -440,7 +440,75 @@ async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; p
   }
 }
 
-/** The makers of these tokens on both providers: a pad, null for none (settled), or absent when not settled yet. */
+/** The pad each token's creation logs over its block range name on two providers that answer and agree (the third
+ *  asked for a token one of the first two could not answer); a token is absent when that does not hold. */
+async function padsAt(chain: EvmChain, doFetch: Fetch, asks: readonly { token: string; range: [number, number] }[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  if (asks.length === 0) return out;
+  const per = makerFilters(chain, 0, 0).length;
+  const calls = asks.flatMap((a) => makerFilters(chain, ...a.range).map((f) => ({ method: "eth_getLogs", params: [f] })));
+  const [u0, u1, u2] = MAKER_RPCS[chain];
+  const pads = (got: unknown[]) => asks.map((a, i) => padOf(chain, a.token, joinLogs(got.slice(i * per, (i + 1) * per))));
+  const [p, q] = (await Promise.all([batch(doFetch, u0, calls), batch(doFetch, u1, calls)])).map(pads) as [(string | null | undefined)[], (string | null | undefined)[]];
+  const short = asks.flatMap((_, i) => (p[i] === undefined || q[i] === undefined ? [i] : []));
+  const r = new Map<number, string | null | undefined>();
+  if (short.length > 0) {
+    const got = await batch(doFetch, u2, short.flatMap((i) => calls.slice(i * per, (i + 1) * per)));
+    short.forEach((i, k) => r.set(i, padOf(chain, asks[i]!.token, joinLogs(got.slice(k * per, (k + 1) * per)))));
+  }
+  asks.forEach((a, i) => {
+    const answered = [p[i], q[i], r.get(i)].filter((x) => x !== undefined);
+    if (answered.length >= 2 && answered.every((x) => x === answered[0])) out.set(a.token, answered[0] as string | null);
+  });
+  return out;
+}
+
+/** Tokens per tick whose creation block is searched (EARLIER_READS_MAX block reads each, at most). */
+export const EARLIER_PER_TICK = 2;
+export const EARLIER_READS_MAX = 120;
+
+/**
+ * The block a token's code first appears in, when that is before block `before` (a token whose pool came later, as a
+ * new pool of an old token does): null when it has no code at `before` - 1 (made at its pool), undefined when the
+ * reads fail. Searched on the chain's first provider (it serves old state), in rounds of 10 `eth_getCode` reads across
+ * the interval. Base only: Robinhood's providers serve no old state.
+ */
+export async function codeBlock(chain: EvmChain, token: string, before: number, doFetch: Fetch): Promise<number | null | undefined> {
+  const url = MAKER_RPCS[chain][0];
+  const code = async (ns: number[]): Promise<(boolean | undefined)[]> =>
+    (await batch(doFetch, url, ns.map((n) => ({ method: "eth_getCode", params: [token, `0x${n.toString(16)}`] })))).map((c) => (typeof c === "string" && /^0x([0-9a-f]{2})*$/i.test(c) ? c !== "0x" : undefined));
+  const [first] = await code([before - 1]);
+  if (first === undefined) return undefined;
+  if (!first) return null;
+  return search(code, before - 1);
+}
+
+/** Whether each token had code at block `at[i]` (one batch on the chain's first provider); undefined where a read failed. */
+export async function hadCode(chain: EvmChain, doFetch: Fetch, asks: readonly { token: string; at: number }[]): Promise<(boolean | undefined)[]> {
+  const got = await batch(doFetch, MAKER_RPCS[chain][0], asks.map((a) => ({ method: "eth_getCode", params: [a.token, `0x${a.at.toString(16)}`] })));
+  return got.map((c) => (typeof c === "string" && /^0x([0-9a-f]{2})*$/i.test(c) ? c !== "0x" : undefined));
+}
+
+async function search(code: (ns: number[]) => Promise<(boolean | undefined)[]>, withCode: number): Promise<number | undefined> {
+  let lo = 0; // no code
+  let hi = withCode; // code
+  for (let reads = 1; hi - lo > 1; ) {
+    const ns = [...new Set(Array.from({ length: 10 }, (_, k) => lo + Math.max(1, Math.floor(((k + 1) * (hi - lo)) / 11))))].filter((n) => n > lo && n < hi);
+    if (reads + ns.length > EARLIER_READS_MAX) return undefined;
+    reads += ns.length;
+    const got = await code(ns);
+    if (got.some((x) => x === undefined)) return undefined;
+    // code never goes away for these tokens; the first block with code bounds hi, the last without bounds lo
+    for (const [k, has] of got.entries()) {
+      if (has && ns[k]! < hi) hi = ns[k]!;
+      if (!has && ns[k]! > lo && ns[k]! < hi) lo = ns[k]!;
+    }
+  }
+  return hi;
+}
+
+/** The makers of these tokens: a pad, null for none (settled), or absent when not settled yet. A token whose pool
+ *  block shows no creation event and whose code is older is read again at the block its code appeared in. */
 export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readonly { token: string; createdS: number }[], nowMs: number, known?: Map<number, number>): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
   if (FACTORIES[chain].length === 0) {
@@ -451,27 +519,30 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
   const ranges: ([number, number] | null)[] = [];
   for (const w of wanted) ranges.push(await blockRange(chain, w.createdS, doFetch, known)); // one at a time, each from the last's blocks
   const asks = wanted.flatMap((w, i) => (ranges[i] === null ? [] : [{ ...w, range: ranges[i]! }]));
-  if (asks.length === 0) return out;
-  const per = makerFilters(chain, 0, 0).length;
-  const calls = asks.flatMap((a) => makerFilters(chain, ...a.range).map((f) => ({ method: "eth_getLogs", params: [f] })));
-  const [u0, u1, u2] = MAKER_RPCS[chain];
-  const pads = (got: unknown[]) => asks.map((a, i) => padOf(chain, a.token, joinLogs(got.slice(i * per, (i + 1) * per))));
-  const [p, q] = (await Promise.all([batch(doFetch, u0, calls), batch(doFetch, u1, calls)])).map(pads) as [(string | null | undefined)[], (string | null | undefined)[]];
-  // the third provider, for the tokens one of the first two could not answer
-  const short = asks.flatMap((_, i) => (p[i] === undefined || q[i] === undefined ? [i] : []));
-  const r = new Map<number, string | null | undefined>();
-  if (short.length > 0) {
-    const got = await batch(doFetch, u2, short.flatMap((i) => calls.slice(i * per, (i + 1) * per)));
-    short.forEach((i, k) => r.set(i, padOf(chain, asks[i]!.token, joinLogs(got.slice(k * per, (k + 1) * per)))));
+  const first = await padsAt(chain, doFetch, asks);
+  const none: (typeof asks)[number][] = [];
+  for (const a of asks) {
+    const x = first.get(a.token);
+    if (x === undefined) continue; // read again later
+    if (x === null && nowMs / 1000 - a.createdS < SETTLE_MS / 1000) continue; // too new to call it none
+    if (x === null && BLOCK_CLOCK[chain] !== null) none.push(a);
+    else out.set(a.token, x);
   }
-  asks.forEach((a, i) => {
-    const answered = [p[i], q[i], r.get(i)].filter((x) => x !== undefined);
-    // two providers that answered, and none that differs; else read again later
-    if (answered.length < 2 || answered.some((x) => x !== answered[0])) return;
-    const x = answered[0] as string | null;
-    if (x === null && nowMs / 1000 - a.createdS < SETTLE_MS / 1000) return; // too new to call it none
-    out.set(a.token, x);
+  // none at the pool: a token with no code before its pool was made there, so none; an older token's creation block is
+  // searched, a few a tick (the rest are read again next tick)
+  const had = await hadCode(chain, doFetch, none.map((a) => ({ token: a.token, at: a.range[0] - 1 })));
+  const older = none.filter((a, i) => {
+    if (had[i] === false) out.set(a.token, null);
+    return had[i] === true;
   });
+  const earlier: { token: string; range: [number, number] }[] = [];
+  for (const a of older.slice(0, EARLIER_PER_TICK)) {
+    const b = await codeBlock(chain, a.token, a.range[0], doFetch);
+    if (b === null) out.set(a.token, null);
+    else if (b !== undefined) earlier.push({ token: a.token, range: [b, b] });
+  }
+  const second = await padsAt(chain, doFetch, earlier);
+  for (const e of earlier) if (second.has(e.token)) out.set(e.token, second.get(e.token)!);
   return out;
 }
 
