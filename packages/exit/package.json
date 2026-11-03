@@ -1,0 +1,15 @@
+{
+  "name": "@blindfill/exit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/rpc.ts src/setup.ts scripts/record-pages.ts test/rpc.test.ts test/setup.test.ts test/replay.ts"
+  },
+  "dependencies": {
+    "@blindfill/kit": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1"
+  }
+}
