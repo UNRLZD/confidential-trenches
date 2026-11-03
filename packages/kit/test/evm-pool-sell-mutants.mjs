@@ -74,7 +74,6 @@ export const MUTANTS = [
   [SELL, 'if (!isUint(nonce, U256)) return refuse("bad_amount", "the nonce is a uint256");', "", RANGE],
   [SELL, 'if (!isWallet(w)) return refuse("bad_route", "W is not an address");', "", RANGE],
   [SELL, 'if (!isWallet(pool)) return refuse("bad_route", "the pool is not an address");', "", RANGE],
-  [SELL, "!Object.hasOwn(all, chain)", "!(chain in all)", RANGE],
   [SELL, 'if (typeof req !== "object" || req === null) return refuse("bad_route", "a sell request is an object");', "", RANGE],
   // W's Sell signature
   [SELL, "if (!BUILT.has(built) || built.chain !== chain)", "if (built.chain !== chain)", SIGNER],

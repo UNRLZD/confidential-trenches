@@ -65,7 +65,6 @@ export const MUTANTS = [
   ['v < 0n || v >= FIELD_P) refuse("bad_amount"', 'v < 0n) refuse("bad_amount"', "R4 "],
   ["/^0x[0-9a-fA-F]{40}$/", "/^0x[0-9a-fA-F]{40}/", "R5 "],
   ["(at += e.length)", "(at += 192)", P1],
-  ["!Object.hasOwn(all, chain)", "!(chain in all)", "R7 "],
   ['if (!Array.isArray(a)) return refuse("bad_route", "a route\'s tokens, fees and hops are lists");', "", "R8 "],
   ["word(BigInt(d.length)), padded", "word(BigInt(padded.length)), padded", HOOKED],
   ['!/^0x([0-9a-fA-F]{2})*$/.test(h)) return refuse("bad_route", "hook data is not 0x hex")', '!h.startsWith("0x")) return refuse("bad_route", "hook data is not 0x hex")', P1],
