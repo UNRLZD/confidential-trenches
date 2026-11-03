@@ -19,7 +19,6 @@ const INFO2 = "INFO-2";
 const SHAPE = "a route of the wrong shape";
 const BUILD = "the buy takes minOut above 0";
 const VECTOR = "W's Buy signature equals cast's EIP-712 signature";
-const FIELDS = "W's signatures bind each field";
 const SIGS = "W's signatures are 65 bytes";
 const KEY = "only a 32-byte key signs";
 const P1 = "P1 ";
@@ -83,9 +82,9 @@ export const MUTANTS = [
   ['if (typeof route !== "object" || route === null) return refuse("bad_route", "a route is an object");', "", "F5 "],
   ["if (!Number.isSafeInteger(n) || n > COPY_MAX)", "if (!Number.isSafeInteger(n))", "R8 "],
   ["const chainId = venueOf(buy.chain).chainId;", "const chainId = 8453;", VECTOR],
-  ['if (typeof proof !== "object" || proof === null) return refuse("bad_amount", "the proof\'s values are an object");', "", "F2 "],
+  ['if (typeof proof !== "object" || proof === null) return refuse("bad_amount", "the proof\'s values are an object");', "", KEY],
   ["Object.freeze({ chain, adapter, data: toHex(data), minOut, token })", "({ chain, adapter, data: toHex(data), minOut, token })", "F2b "],
-  ["const p = { nullifier: proof.nullifier, context: proof.context, value: proof.value };", "const p = proof;", FIELDS],
+  ["const p = { nullifier: proof.nullifier, context: proof.context, value: proof.value };", "const p = proof;", "F4b "],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`

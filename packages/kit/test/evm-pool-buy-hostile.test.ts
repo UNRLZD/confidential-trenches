@@ -175,6 +175,15 @@ test("F4 the route is read once: a getter cannot show the checks one middle toke
   assert.equal(built.data, evmPoolBuild("base", ADAPTER, v4(ZERO, hop(USDC), hop(X)), 1n, X).data);
 });
 
+test("F4b the proof's values are read once: a getter cannot show the checks one value and the digest another", () => {
+  const built = evmPoolBuild("base", ADAPTER, v4(ZERO, hop(X)), 1n, X);
+  let reads = 0;
+  const proof = { nullifier: PROOF.nullifier, context: PROOF.context, get value() { return reads++ === 0 ? 1n : 2n; } };
+  const sig = evmPoolSignBuy(W_KEY, "base", POOL, built, proof);
+  assert.equal(reads, 1);
+  assert.equal(hex(sig), hex(evmPoolSignBuy(W_KEY, "base", POOL, built, { ...PROOF, value: 1n })));
+});
+
 test("F5 a null or non-object hop or route is refused with the builder's own error, never a TypeError", () => {
   const c = (r: unknown) => code(() => evmPoolRouteData("base", r as EvmRoute));
   assert.equal(c({ venue: "uniswap-v4", currencyIn: ZERO, hops: [null] }), "bad_route");
