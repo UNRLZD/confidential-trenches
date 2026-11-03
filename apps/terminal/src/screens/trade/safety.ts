@@ -20,7 +20,7 @@ export interface Cell {
   id: WordId;
   /** The value as drawn: data, or empty when it is an icon alone (the authorities and honeypot) or a word. */
   text: string;
-  /** The value when it is one of the owner's words (the LP class `Curve`). */
+  /** The value when it is a signed word (the LP class `Curve`). */
   word?: WordId;
   icon: Icon | null;
   tone: Tone;
