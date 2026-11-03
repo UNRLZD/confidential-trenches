@@ -4,7 +4,7 @@
 // asks for: a provider that lies, a quoter that reports a partial fill as complete, a hook that keeps more, a standard
 // pool better than the route. test/evm-quote-attacks.test.ts holds the review's attacks on a modelled chain;
 // test/evm-quote-mutants.mjs removes each check and runs the test named for it.
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import * as kit from "../src/index.ts";
@@ -270,12 +270,18 @@ test("Q7 only a quote the device made builds a buy, and only within 30 s, and W 
   const q = await quote("base-ok");
   const at = Number(q.block.timestamp) * 1000;
   const ADAPTER = "0x0000000000000000000000000000000000000001";
-  assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q }, at), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
-  assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q, minOut: 1n }, at), (e: unknown) => e instanceof EvmQuoteError);
-  // the device's quote passes to the pinned builder, which refuses Base until pool-evm-deploy pins its adapters
-  assert.throws(() => evmPoolBuildQuoted(ADAPTER, q, at), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_deployed");
-  // 31 s after its block, the same quote builds nothing
-  assert.throws(() => evmPoolBuildQuoted(ADAPTER, q, at + 31_000), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
+  const clock = mock.method(Date, "now", () => at);
+  try {
+    assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q }), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
+    assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q, minOut: 1n }), (e: unknown) => e instanceof EvmQuoteError);
+    // the device's quote passes to the pinned builder, which refuses Base until pool-evm-deploy pins its adapters
+    assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_deployed");
+    // 31 s after its block, the same quote builds nothing
+    clock.mock.mockImplementation(() => at + 31_000);
+    assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
+  } finally {
+    clock.mock.restore();
+  }
   assert.ok(Object.isFrozen(q) && Object.isFrozen(q.route) && Object.isFrozen(q.block));
   // W signs no buy built another way: here the pinned builder W's own build would call, on a testnet it pins
   const venues = evmPoolVenues();

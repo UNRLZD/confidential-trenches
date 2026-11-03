@@ -45,9 +45,10 @@ export function evmPoolSignBuy(secretKey: Uint8Array, chain: EvmPoolChain, pool:
 /** The buy a device quote holds (checks/evm/quote.ts evmPoolBuyQuote): its chain, route, token and minOut, through
  *  `adapter`, the chain's pinned adapter for the route's venue. Only a quote evmPoolBuyQuote returned is built, so W
  *  signs a buy only at a minOut from the device's own reads (card evm-pool-buy-quote). */
-export function evmPoolBuildQuoted(adapter: string, quote: EvmPoolBuyQuote, nowMs: number = Date.now()): EvmPoolBuy {
+export function evmPoolBuildQuoted(adapter: string, quote: EvmPoolBuyQuote): EvmPoolBuy {
   if (!evmIsDeviceQuote(quote)) throw new EvmQuoteError("bad_request", "a buy is built only from a quote evmPoolBuyQuote returned");
-  // a quote whose block is more than 30 s behind the device's clock builds nothing (`nowMs`: the clock, for tests)
+  // a quote whose block is more than 30 s behind the device's clock builds nothing; no caller sets the clock
+  const nowMs = Date.now();
   if (!Number.isFinite(nowMs) || nowMs - Number(quote.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) {
     throw new EvmQuoteError("stale_quote", "the quote's block is more than 30 s old");
   }
