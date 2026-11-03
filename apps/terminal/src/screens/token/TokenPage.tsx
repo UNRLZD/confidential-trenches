@@ -153,8 +153,8 @@ function Legend({ sym, tf, bars, at, precision, phone }: { sym: string; tf: Char
 /** The price chart (S7.2's chart panel): the timeframes, then the plot. The plot keeps its size in every state, so a
  *  read landing moves nothing (BAR-10 CLS): the skeleton while loading, the candles with the price axis, the volume pane
  *  and the crosshair when ready, `No trades` when the helper holds no bars, `Offline` and Retry on a failed read.
- *  CoinGecko's label shows while any drawn bar is GeckoTerminal's. The library draws only once the plot is on screen
- *  (the page holds both layouts; one is display: none). */
+ *  CoinGecko's label shows while any drawn bar is GeckoTerminal's (none over no bars). The library draws only once the
+ *  plot is on screen (the page holds both layouts; one is display: none). */
 function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const drawn = useRef<Drawn | null>(null);
@@ -202,7 +202,7 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
             <button type="button" className="tkp-retry" onClick={c.retry}>{WORDS.retry.text}</button>
           </span>
         )}
-        {(c.data.status === "ready" || c.data.status === "empty") && c.data.gecko && <span className="tkp-vendor" data-testid="chart-vendor"><W id="gecko" /></span>}
+        {ready?.gecko && <span className="tkp-vendor" data-testid="chart-vendor"><W id="gecko" /></span>}
       </div>
       {phone && tfs}
     </section>

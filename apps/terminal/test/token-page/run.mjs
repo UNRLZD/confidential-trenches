@@ -231,7 +231,7 @@ try {
           check(ch.bars === String(CANDLE_COUNT), `${tag}: the chart drew ${ch.bars} bars, want ${CANDLE_COUNT}`);
           check(ch.canvases > 0, `${tag}: no canvas in the chart`);
         }
-        check(ch.vendor === ((want === "ready" || want === "empty") && s.candles !== "chain"), `${tag}: CoinGecko's label ${ch.vendor ? "shown" : "not shown"}`);
+        check(ch.vendor === (want === "ready" && s.candles !== "chain"), `${tag}: CoinGecko's label ${ch.vendor ? "shown" : "not shown"}`);
         check(ch.h >= (phone ? 299 : 300) && ch.w > 300, `${tag}: the plot is ${Math.round(ch.w)}x${Math.round(ch.h)}`);
         if (s.top === "pool") plots.set(w.name, [...(plots.get(w.name) ?? []), `${s.id}:${Math.round(ch.w)}x${Math.round(ch.h)}`]);
         if (phone) {
