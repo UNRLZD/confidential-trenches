@@ -125,7 +125,7 @@ export const MUTANTS = [
   [SIMPLE, "'Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)'", "'Buy(address token,bytes data,uint256 minOut,address adapter,uint256 nullifier,uint256 context,uint256 value)'", "test_buyLandsAndWHoldsMinOut"],
   [SIMPLE, "keccak256(_buy.data),", "keccak256(abi.encode(_buy.data)),", "test_buyLandsAndWHoldsMinOut"],
   [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.newCommitmentHash(), _proof.context(), _proof.withdrawnValue())", "test_aWithdrawsSignatureIsRefusedAsABuy"],
-  [PP, "_v := byte(0, mload(add(_signature, 0x60)))", "_v := 27", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  [PP, "_v := byte(0, mload(add(_signature, 0x60)))", "_v := 27", "test_signaturesWithVOf27And28BothLand"],
   [PP, "_r := mload(add(_signature, 0x20))\n      _s := mload(add(_signature, 0x40))", "_s := mload(add(_signature, 0x20))\n      _r := mload(add(_signature, 0x40))", "test_buyLandsAndWHoldsMinOut"],
   [SIMPLE, "_release(_withdrawal, _proof, _fee, _data, _buyDigest(_buy, _proof), _signature)", "_release(_withdrawal, _proof, _fee, _data, _typedDigest(keccak256(abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue()))), _signature)", "test_aWithdrawsSignatureIsRefusedAsABuy"],
   [PP, "if (_encoded.length != 192) revert InvalidRelayData();", "if (_encoded.length < 192) revert InvalidRelayData();", "test_trailingRelayDataIsRefused"],

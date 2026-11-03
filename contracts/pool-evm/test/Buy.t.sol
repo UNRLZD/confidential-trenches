@@ -583,6 +583,24 @@ contract BuyTest is BuyBase {
     _buy('local.buy', 0, _fixtureBuy(), _fixtureSig());
   }
 
+  /// W's signatures land with v of 27 and of 28: the pool reads v from the signature, whichever it is
+  function test_signaturesWithVOf27And28BothLand() public {
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    bool[2] memory _seen;
+    uint256 _snap = vm.snapshotState();
+    for (uint256 _m = 1; _m <= 40 && !(_seen[0] && _seen[1]); ++_m) {
+      _b.minOut = _m;
+      bytes memory _sig = _signed(_b, 'local.buy');
+      uint8 _v = uint8(_sig[64]);
+      if (_seen[_v - 27]) continue;
+      _seen[_v - 27] = true;
+      _buy('local.buy', 0, _b, _sig);
+      assertTrue(pool.nullifierHashes(_proof('local.buy').pubSignals[1]), 'landed');
+      vm.revertToState(_snap);
+    }
+    assertTrue(_seen[0] && _seen[1], 'both v values were tried');
+  }
+
   /// A 64-byte EIP-2098 compact signature is refused: only 65 bytes
   function test_R_compactSignatureIsRefused() public {
     bytes memory _sig = _fixtureSig();
