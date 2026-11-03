@@ -27,21 +27,23 @@
 //!   (`InvalidPoolState`).
 //! - Row 10: Groth16 verify of the 8 signals (`InvalidProof`).
 //! - Row 11: the spent mark `["spent", existingNullifierHash]` must not exist (`NullifierAlreadySpent`); it is made, its
-//!   rent from the fee payer.
+//!   rent from the fee payer, and holds withdrawnValue u64 LE (`SPENT_MARK_LEN`, M355 (3)): public in the release
+//!   already, it lets a restore from the 12 words know each spent note's change from the marks alone. Tag 2 and tag 3
+//!   both write it here.
 //! - Row 12: newCommitmentHash into the state tree, even when the change is 0, its page entry's rent from the fee payer.
 //! - Row 8, tag 3 (src/buy.rs): the tip at most tip_cap (`TipOverCap`), and `relay_fee + tip` at most withdrawnValue
 //!   (`InvalidWithdrawalAmount`); tag 2's tip is 0.
 //! - Row 13: the pool pays `withdrawnValue - relay_fee - tip` to W, `relay_fee` to the fee payer and, for tag 3, `tip` to
 //!   the tip account; `spent += withdrawnValue`.
 //!
-//! Rent: the fee payer pays the spent mark (an empty account's minimum) and the change note's page entry (72 bytes),
+//! Rent: the fee payer pays the spent mark (8 bytes) and the change note's page entry (72 bytes),
 //! and the transaction fee. The relay fee the device signs for covers them; the cap in the proof bounds it (row 8).
 
 use crate::context::{context_of, scope_of, ContextFields};
 use crate::deposit::push;
 use crate::error::PoolError;
 use crate::field;
-use crate::state::{self, Pool, SPENT_SEED, TREE_LABEL, TREE_STATE};
+use crate::state::{self, Pool, SPENT_MARK_LEN, SPENT_SEED, TREE_LABEL, TREE_STATE};
 use crate::tree::MAX_TREE_DEPTH;
 use crate::verifier::{verify_withdraw, PROOF_LEN};
 use crate::MAX_RELAY_FEE_BPS;
@@ -214,10 +216,10 @@ pub(crate) fn settle<'a>(
         return Err(PoolError::InvalidWithdrawalAmount.into());
     }
     // row 8. The fee payer's cost per release, at mainnet rent (read on two RPCs, 2 Nov 2026: 650,240 lamports for an
-    // empty account, 5,080 per byte): the spent mark 650,240 + the change entry 72 x 5,080 = 365,760 + the base fee of
-    // two signatures 10,000 = 1,026,000 lamports. The one release in 1,024 whose change opens a page pays the page
-    // account (16 + 72 bytes) instead of the entry: 650,240 + 1,097,280 + 10,000 = 1,757,520. A cap below that leaves
-    // the relayer short; the program does not hold a floor, since rent can change and the device sets the cap.
+    // empty account, 5,080 per byte): the spent mark of 8 bytes 690,880 + the change entry 72 x 5,080 = 365,760 + the
+    // base fee of two signatures 10,000 = 1,066,640 lamports (M355 (3)). The one release in 1,024 whose change opens a
+    // page pays the page account (16 + 72 bytes) instead of the entry: 690,880 + 1,097,280 + 10,000 = 1,798,160. A
+    // cap below that leaves the relayer short; the program does not hold a floor, since rent can change and the device sets the cap.
     if r.relay_fee > r.relay_fee_cap {
         return Err(PoolError::RelayFeeOverCap.into());
     }
@@ -247,7 +249,9 @@ pub(crate) fn settle<'a>(
     ];
     verify_withdraw(&r.proof, &signals)?;
     // row 11
-    state::put_mark(program_id, fee_payer, spent_mark, system, SPENT_SEED, &r.nullifier_hash, PoolError::NullifierAlreadySpent)?;
+    state::put_mark_of(program_id, fee_payer, spent_mark, system, SPENT_SEED, &r.nullifier_hash, SPENT_MARK_LEN, PoolError::NullifierAlreadySpent)?;
+    // the record a restore reads: this release's withdrawnValue
+    spent_mark.try_borrow_mut_data()?[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());
     // row 12
     push(program_id, fee_payer, state_page, system, TREE_STATE, &mut pool.state, &r.new_commitment)?;
     // row 13: the pool owns its account, so it moves lamports out directly; row 9 keeps its rent untouched

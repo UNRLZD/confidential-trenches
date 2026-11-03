@@ -1,0 +1,50 @@
+{
+  "chain": "robinhood-testnet",
+  "chainId": 46630,
+  "dryRun": false,
+  "at": "2026-11-03T05:04:19.470Z",
+  "deployer": "0x096d73f23063dd9d3af3eb441f1da525cb0685a2",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "109320100000000",
+  "build": "solc 0.8.28 (contracts/pool-evm/foundry.toml), forge Version: 1.7.1-Homebrew",
+  "contracts": {
+    "WithdrawalVerifier": {
+      "address": "0x4bc4718854f43d2b10335ae5ac9fe2a8c7d72016"
+    },
+    "PrivacyPoolSimple": {
+      "address": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"
+    },
+    "UniswapV4Adapter": {
+      "address": "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797"
+    },
+    "SellDelegate": {
+      "address": "0x0ec8c6627939624aeaac3b2f0276136e6e289e23"
+    }
+  },
+  "txs": [
+    {
+      "step": "deploy WithdrawalVerifier",
+      "hash": "0x00baca733e1232a031cd0f2d62b0c6cceb70e5676be8d055d75d30115b7b8a56",
+      "contract": "WithdrawalVerifier"
+    },
+    {
+      "step": "deploy PrivacyPoolSimple",
+      "hash": "0x32169e3cd8f365ae90a10f43eca8f1cc32953ee9bc60e3d6cd2f3253ae3cba23",
+      "contract": "PrivacyPoolSimple"
+    },
+    {
+      "step": "deploy UniswapV4Adapter",
+      "hash": "0xfa9dee2d45f9754b926d5ab09458621bfd8cd66133a381254b9ab36ca208fb85",
+      "contract": "UniswapV4Adapter"
+    },
+    {
+      "step": "deploy SellDelegate",
+      "hash": "0x329af87381617d36dda098b6195cf419480ceca3fdb873334f1b86c2ab6b58ac",
+      "contract": "SellDelegate"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0x81585a01cd96a49040cf4afa1f3061d50ad415871363c4d9fb46ede5f4417089"
+    }
+  ]
+}
