@@ -1,4 +1,4 @@
-// Removes each of src/trade/evm/sell.ts's checks (and the router list in buy.ts's venue list), one at a time, and runs
+// Removes each of src/trade/evm/sell-unpinned.ts's checks (and the router list in buy-unpinned.ts's venue list), one at a time, and runs
 // the test named for it in test/evm-pool-sell.test.ts: each named test passes on the code as it is and fails on every
 // mutant. The file is changed in place and put back after each mutant (and checked to be back); exits 1 when a named
 // test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
@@ -8,8 +8,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const SELL = fileURLToPath(new URL("../src/trade/evm/sell.ts", import.meta.url));
-const BUY = fileURLToPath(new URL("../src/trade/evm/buy.ts", import.meta.url));
+const SELL = fileURLToPath(new URL("../src/trade/evm/sell-unpinned.ts", import.meta.url));
+const BUY = fileURLToPath(new URL("../src/trade/evm/buy-unpinned.ts", import.meta.url));
 const TEST = fileURLToPath(new URL("./evm-pool-sell.test.ts", import.meta.url));
 
 const CAST = "the swap data equals cast calldata";
@@ -25,6 +25,10 @@ const SIGS = "W's Sell signatures are 65 bytes";
 const AUTHIN = "W's authorization takes a delegate";
 const ONCE = "the request and its route are read once";
 const FROZEN = "the router lists are frozen";
+const REVIEW = "checks the review's mutants passed";
+const FIXTURE = "the fork fixture is the kit's own output";
+const PINPOOL = "M370 a pinned sell";
+const PINAUTH = "M370 W's authorization";
 
 // [file, text, replacement, the test that must fail]
 export const MUTANTS = [
@@ -60,7 +64,7 @@ export const MUTANTS = [
   [SELL, "|| deadline > BigInt(t + EVM_POOL_SELL_DEADLINE_MAX_S)) {", ") {", DEADLINE],
   [SELL, 'if (typeof deadline !== "bigint" ||', "if (", DEADLINE],
   [SELL, "export const EVM_POOL_SELL_DEADLINE_MAX_S = 600;", "export const EVM_POOL_SELL_DEADLINE_MAX_S = 3600;", DEADLINE],
-  [SELL, "const t = now === undefined ? Math.floor(Date.now() / 1000) : now;", "const t = now === undefined ? Date.now() : now;", DEADLINE],
+  [SELL, "const t = Math.floor(Date.now() / 1000);", "const t = Date.now();", DEADLINE],
   // the fee cap, the amounts, the addresses, the chain
   [SELL, "feeCap === 0n || feeCap >= minOut", "feeCap >= minOut", FEE],
   [SELL, "feeCap === 0n || feeCap >= minOut", "feeCap === 0n || feeCap > minOut", FEE],
@@ -84,7 +88,7 @@ export const MUTANTS = [
   [SELL, "keccak_256(fromHex(built.data))", "keccak_256(utf8(built.data))", CAST],
   [SELL, "out[64] = 27 + rec[0]!;", "out[64] = rec[0]!;", SIGS],
   [SELL, '{ prehash: false, lowS: true, format: "recovered" });\n  // noble', '{ prehash: false, lowS: false, format: "recovered" });\n  // noble', SIGS],
-  [SELL, "const { w, token, amount, target, route, minOut, pool, precommitment, feeCap, deadline, nonce, now } = req;", "const { w, token, amount, route, minOut, pool, precommitment, feeCap, deadline, nonce, now } = req;\n  const target = req.target;\n  void req.target;", ONCE],
+  [SELL, "const { w, token, amount, target, route, minOut, pool, precommitment, feeCap, deadline, nonce } = req;", "const { w, token, amount, route, minOut, pool, precommitment, feeCap, deadline, nonce } = req;\n  const target = req.target;\n  void req.target;", ONCE],
   // W's authorization
   [SELL, "const items = concat(rlpUint(BigInt(chainId)),", "const items = concat(rlpUint(0n),", AUTH],
   [SELL, "keccak_256(concat(Uint8Array.of(0x05, 0xc0 + items.length), items))", "keccak_256(concat(Uint8Array.of(0x04, 0xc0 + items.length), items))", AUTH],
@@ -93,6 +97,21 @@ export const MUTANTS = [
   [SELL, "if (!isUint(nonce, U64 - 1n))", "if (!isUint(nonce, U64))", AUTHIN],
   [SELL, 'if (!isWallet(delegate)) return refuse("bad_route", "the delegate is not an address");', "", AUTHIN],
   [SELL, 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: true, format: "recovered" });', 'const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: false, format: "recovered" });', AUTHIN],
+  // the review's (8fd535f): checks its mutants passed
+  [SELL, "|| (x as number) < 0 ||", "||", REVIEW],
+  [SELL, "if (!Number.isSafeInteger(n) || n > COPY_MAX)", "if (!Number.isSafeInteger(n))", REVIEW],
+  [SELL, 'if (typeof chain !== "string" || !Object.hasOwn(all, chain))', "if (!Object.hasOwn(all, chain))", REVIEW],
+  [SELL, "if (!isWallet(token) || lower(token)", "if (!isAddress(token) || lower(token)", REVIEW],
+  [SELL, "for (let i = 1; i < path.length; i++)", "for (let i = 2; i < path.length; i++)", REVIEW],
+  // the pins (M370): the chain's pool for a sell, its sell delegate for W's authorization
+  [SELL, 'if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);', "", PINPOOL],
+  [SELL, "return evmPoolBuildSellUnpinned(chain, { ...req, pool });", "return evmPoolBuildSellUnpinned(chain, { pool, ...req });", PINPOOL],
+  [SELL, 'if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool to sign a sell into yet`);', "", PINPOOL],
+  [SELL, 'if (BUILT.has(built) && lower(built.pool) !== lower(pool)) return refuse("not_pinned", `the sell\'s pool is not ${chain}\'s pinned pool`);', "", PINPOOL],
+  [SELL, 'if (delegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);', "", PINAUTH],
+  [SELL, 'if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");', "", PINPOOL],
+  // the fork fixture is the kit's output
+  [SELL, "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });", "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)).replace(/.$/, \"0\") });", FIXTURE],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`

@@ -1,4 +1,4 @@
-// Removes each of src/trade/evm/buy.ts's checks, one at a time, and runs the test named for it in
+// Removes each of src/trade/evm/buy-unpinned.ts's checks, one at a time, and runs the test named for it in
 // test/evm-pool-buy.test.ts or test/evm-pool-buy-hostile.test.ts: each named test passes on the code as it is and fails
 // on every mutant. The file is changed in place and put back after each mutant (and checked to be back); exits 1 when a
 // named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in the file
@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const SRC = fileURLToPath(new URL("../src/trade/evm/buy.ts", import.meta.url));
+const SRC = fileURLToPath(new URL("../src/trade/evm/buy-unpinned.ts", import.meta.url));
 const TESTS = ["./evm-pool-buy.test.ts", "./evm-pool-buy-hostile.test.ts"].map((f) => fileURLToPath(new URL(f, import.meta.url)));
 
 const ROUTES = "each fork test's route builds";
@@ -91,6 +91,15 @@ export const MUTANTS = [
   ['middles: Object.freeze(["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"])', 'middles: (["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"])', "V1 "],
   ["Object.freeze({ chain, adapter, data: toHex(data), minOut, token })", "({ chain, adapter, data: toHex(data), minOut, token })", "F2b "],
   ["const p = { nullifier: proof.nullifier, context: proof.context, value: proof.value };", "const p = proof;", "F4b "],
+  // the pins (M370): the chain's adapter for the route's venue, the chain's pool, a buy through a pinned adapter
+  ['if (pin === undefined) return refuse("not_deployed", `${chain} has no pinned ${r.venue} adapter yet`);', "", "M370 a pinned build"],
+  ['if (!samePin(adapter, pin)) return refuse("not_pinned", `the adapter is not ${chain}\'s pinned ${r.venue} adapter`);', "", "M370 a pinned build"],
+  ['const pin = r.venue === "uniswap-v3" ? v.adapters?.v3 : v.adapters?.v4;', 'const pin = r.venue === "uniswap-v3" ? v.adapters?.v4 : v.adapters?.v3;', "M370 a pinned build"],
+  ["return evmPoolBuildUnpinned(chain, adapter, r, minOut, token);", "return evmPoolBuildUnpinned(chain, adapter, route, minOut, token);", "M370 a pinned build"],
+  ['if (v.pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);', "", "M370 a pinned signature"],
+  ['if (!samePin(pool, v.pool)) return refuse("not_pinned", `the pool is not ${chain}\'s pinned pool`);', "", "M370 a pinned signature"],
+  ["if (BUILT.has(built) && !((a?.v3 !== undefined && samePin(built.adapter, a.v3)) || (a?.v4 !== undefined && samePin(built.adapter, a.v4)))) {", "if (false) {", "M370 a pinned signature"],
+  ['if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");', "", "M370 a pinned build"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`

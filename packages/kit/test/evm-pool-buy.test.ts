@@ -15,13 +15,14 @@ import {
   EVM_POOL_MAX_HOPS,
   evmPoolVenues,
   EvmPoolBuyError,
-  evmPoolBuild,
   evmPoolRouteData,
-  evmPoolSignBuy,
   type EvmPoolChain,
   type EvmRoute,
   type EvmV4Hop,
 } from "../src/index.ts";
+// the checks, the encoding and the digest, through the unpinned builder and signer (no pool or adapter is pinned yet);
+// the pinned ones the index exports are tested in evm-pool-buy-hostile.test.ts
+import { evmPoolBuildUnpinned as evmPoolBuild, evmPoolSignBuyUnpinned as evmPoolSignBuy } from "../src/trade/evm/buy-unpinned.ts";
 
 const fixture = (f: string) => JSON.parse(readFileSync(new URL(`../../../contracts/pool-evm/test/fixtures/${f}`, import.meta.url), "utf8"));
 const ROUTES = fixture("kit-routes.json");

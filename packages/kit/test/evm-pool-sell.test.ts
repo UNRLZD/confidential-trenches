@@ -3,7 +3,7 @@
 // typed data under {Blindfill, 1, chainId, verifyingContract W} and `cast wallet sign-auth <delegate> --chain <id>
 // --nonce <n>`, each with the Hardhat mnemonic's index 0 (`sells` is the Sell's token field), and sign-auth at RLP's
 // nonce edges. A refusal test per check.
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -12,18 +12,19 @@ import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
+import { EVM_POOL_SELL_DEADLINE_MAX_S, EVM_POOL_SELL_DEADLINE_MIN_S, EvmPoolSellError, evmPoolVenues, type EvmPoolChain, type EvmV3Route } from "../src/index.ts";
+// the checks, the encoding and the digests, through the unpinned builders (no pool or delegate is pinned yet); the
+// pinned functions the index exports are tested below with a pinned venue list of the test's own
 import {
-  EVM_POOL_SELL_DEADLINE_MAX_S,
-  EVM_POOL_SELL_DEADLINE_MIN_S,
-  EvmPoolSellError,
-  evmPoolBuildSell,
-  evmPoolSignSell,
-  evmPoolSignSellAuthorization,
-  evmPoolVenues,
-  type EvmPoolChain,
-  type EvmPoolSellRequest,
-  type EvmV3Route,
-} from "../src/index.ts";
+  evmPoolBuildSellUnpinned as evmPoolBuildSell,
+  evmPoolSignSellAuthorizationUnpinned as evmPoolSignSellAuthorization,
+  evmPoolSignSellUnpinned as evmPoolSignSell,
+  pinnedBuildSell,
+  pinnedSignSell,
+  pinnedSignSellAuthorization,
+  type EvmPoolSellUnpinnedRequest as EvmPoolSellRequest,
+} from "../src/trade/evm/sell-unpinned.ts";
+import { forkSells } from "./make-kit-sells.ts";
 
 const CAST = JSON.parse(readFileSync(new URL("./evm-pool-sell.cast.json", import.meta.url), "utf8"));
 const hex = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
@@ -66,6 +67,16 @@ const USDG = R.middles[0]!;
 const X = "0xF111111111111111111111111111111111111111";
 const Y = "0x2222222222222222222222222222222222222222";
 const NOW = 1_800_000_000;
+// the device's clock, mocked (the kit reads Date.now(), never a caller's now): NOW unless a test moves it
+mock.timers.enable({ apis: ["Date"], now: NOW * 1000 });
+const at = <T>(sec: number, f: () => T): T => {
+  mock.timers.setTime(sec * 1000);
+  try {
+    return f();
+  } finally {
+    mock.timers.setTime(NOW * 1000);
+  }
+};
 const v3 = (tokens: string[], fees: number[] = tokens.slice(1).map(() => 500)): EvmV3Route => ({ venue: "uniswap-v3", tokens, fees });
 /** A good Base sell of X through USDC, with `o` over it. */
 const req = (o: Partial<EvmPoolSellRequest> = {}): EvmPoolSellRequest => ({
@@ -80,7 +91,6 @@ const req = (o: Partial<EvmPoolSellRequest> = {}): EvmPoolSellRequest => ({
   feeCap: 5n * 10n ** 14n,
   deadline: BigInt(NOW + 300),
   nonce: 0n,
-  now: NOW,
   ...o,
 });
 const fromCast = (t: any): [EvmPoolChain, EvmPoolSellRequest] => [
@@ -97,7 +107,6 @@ const fromCast = (t: any): [EvmPoolChain, EvmPoolSellRequest] => [
     feeCap: BigInt(t.feeCap),
     deadline: BigInt(t.deadline),
     nonce: BigInt(t.nonce),
-    now: Number(t.deadline) - 300,
   },
 ];
 
@@ -119,7 +128,7 @@ const big = (b: Uint8Array) => (b.length === 0 ? 0n : BigInt(hex(b)));
 test("the swap data equals cast calldata and W's Sell signature equals cast's EIP-712 signature, on Base and Robinhood", () => {
   for (const [name, t] of Object.entries(CAST.sells) as [string, any][]) {
     const [chain, r] = fromCast(t);
-    const built = evmPoolBuildSell(chain, r);
+    const built = at(Number(t.deadline) - 300, () => evmPoolBuildSell(chain, r));
     assert.equal(built.data, t.data, name);
     assert.equal(evmPoolVenues()[chain].chainId, t.chainId, name);
     assert.equal(hex(evmPoolSignSell(W_KEY, chain, built)), t.sellSignature, name);
@@ -207,12 +216,12 @@ test("the deadline is unix seconds, 60 to 600 seconds past now", () => {
   assert.equal(c(BigInt(NOW - 1)), "bad_deadline");
   assert.equal(c(BigInt(NOW + 300) * 1000n), "bad_deadline"); // milliseconds
   assert.equal(c(NOW + 300), "bad_deadline"); // a number, not a bigint
-  assert.equal(code(() => evmPoolBuildSell("base", req({ now: 1.5 }))), "bad_deadline");
-  assert.equal(code(() => evmPoolBuildSell("base", req({ now: -1 }))), "bad_deadline");
-  // left out, now is the device's clock: a deadline two minutes from the clock is taken, one at NOW + 300 (2027) is not
-  const { now: _, ...noNow } = req();
-  assert.equal(code(() => evmPoolBuildSell("base", { ...noNow, deadline: BigInt(Math.floor(Date.now() / 1000) + 120) })), "built");
-  assert.equal(code(() => evmPoolBuildSell("base", noNow)), "bad_deadline");
+  // a caller's now has no way in: a request carrying one in milliseconds, with a deadline in milliseconds, is refused
+  assert.equal(code(() => evmPoolBuildSell("base", { ...req(), now: NOW * 1000, deadline: BigInt(NOW * 1000 + 300) } as EvmPoolSellRequest)), "bad_deadline");
+  // the clock is the device's, in seconds: the same deadline is refused once the clock passes it, taken while it is near
+  assert.equal(at(NOW + 250, () => c(BigInt(NOW + 300))), "bad_deadline");
+  assert.equal(at(NOW - 299, () => c(BigInt(NOW + 300))), "built");
+  assert.equal(at(NOW - 301, () => c(BigInt(NOW + 300))), "bad_deadline");
 });
 
 test("the fee cap is above 0 and under minOut", () => {
@@ -296,12 +305,12 @@ test("a stuck sell is replaced by signing again with the same nonce and a new de
   const first = evmPoolBuildSell("base", req({ nonce: 3n, deadline: BigInt(NOW + 120) }));
   // the deadline passed with the sell unsent: build and sign again at the new now, same nonce, so only one can land
   const later = NOW + 200;
-  assert.equal(code(() => evmPoolBuildSell("base", req({ nonce: 3n, deadline: BigInt(NOW + 120), now: later }))), "bad_deadline");
-  const again = evmPoolBuildSell("base", req({ nonce: 3n, deadline: BigInt(later + 120), now: later }));
+  assert.equal(at(later, () => code(() => evmPoolBuildSell("base", req({ nonce: 3n, deadline: BigInt(NOW + 120) })))), "bad_deadline");
+  const again = at(later, () => evmPoolBuildSell("base", req({ nonce: 3n, deadline: BigInt(later + 120) })));
   assert.equal(again.nonce, first.nonce);
   assert.notEqual(hex(evmPoolSignSell(W_KEY, "base", again)), hex(evmPoolSignSell(W_KEY, "base", first)));
   // the pool refuses a precommitment a second time: a fresh one, signed again, is a different Sell
-  const fresh = evmPoolBuildSell("base", req({ nonce: 3n, deadline: BigInt(later + 120), now: later, precommitment: 0x5e12n }));
+  const fresh = at(later, () => evmPoolBuildSell("base", req({ nonce: 3n, deadline: BigInt(later + 120), precommitment: 0x5e12n })));
   assert.equal(fresh.precommitment, 0x5e12n);
   assert.notEqual(hex(evmPoolSignSell(W_KEY, "base", fresh)), hex(evmPoolSignSell(W_KEY, "base", again)));
 });
@@ -326,4 +335,76 @@ test("the router lists are frozen with the rest of the venue list, and the kit e
   assert.throws(() => void (v.robinhood!.routers[0] = Y), TypeError);
   assert.equal(code(() => evmPoolBuildSell("base", req({ target: Y }))), "bad_target");
   assert.deepEqual(Object.keys(kit).filter((k) => /^evmPool/.test(k)).sort(), ["evmPoolBuild", "evmPoolBuildSell", "evmPoolRouteData", "evmPoolSignBuy", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolVenues"]);
+});
+
+test("the fork fixture is the kit's own output: forkSells() equals contracts/pool-evm/test/fixtures/kit-sells.json", () => {
+  const fixture = JSON.parse(readFileSync(new URL("../../../contracts/pool-evm/test/fixtures/kit-sells.json", import.meta.url), "utf8"));
+  assert.deepEqual(forkSells(at), fixture);
+});
+
+test("checks the review's mutants passed: a negative fee, an over-long list, a non-string chain, the zero token, the first duplicate hop", () => {
+  const c = (o: Partial<EvmPoolSellRequest>, chain: unknown = "base") => code(() => evmPoolBuildSell(chain as EvmPoolChain, req(o)));
+  assert.equal(c({ route: v3([X, B.weth], [-1]) }), "bad_route");
+  assert.equal(c({ route: v3([X, USDC, B.weth], [500, -500]) }), "bad_route");
+  let reads = 0;
+  const huge = new Proxy(new Array(1_000_000), {
+    get(t, k, r) {
+      if (typeof k === "string" && /^\d+$/.test(k)) reads++;
+      return Reflect.get(t, k, r);
+    },
+  });
+  assert.equal(c({ route: { venue: "uniswap-v3", tokens: huge, fees: [500] } as unknown as EvmV3Route }), "bad_route");
+  assert.equal(reads, 0, "no item of an over-long list is read");
+  assert.equal(c({}, { toString: () => "base" }), "bad_route");
+  assert.equal(c({}, ["base"]), "bad_route");
+  assert.equal(c({ token: "0x0000000000000000000000000000000000000000", route: v3(["0x0000000000000000000000000000000000000000", B.weth]) }), "bad_route");
+  assert.equal(c({ token: USDC, route: v3([USDC, USDC, B.weth]) }), "bad_route");
+  assert.equal(c({ token: USDC, route: v3([USDC, B.weth]) }), "built");
+});
+
+// ------------------------------------------------------------------ M370: the pinned pool and sell delegate
+
+const PIN_POOL = "0x00000000000000000000000000000000b1f1f00a";
+const PIN_DELEGATE = "0x000000000000000000000000000000000000de1e";
+const PINNED = Object.freeze({
+  base: Object.freeze({ ...B, pool: PIN_POOL, sellDelegate: PIN_DELEGATE }),
+  robinhood: Object.freeze({ ...R, pool: PIN_POOL, sellDelegate: PIN_DELEGATE }),
+});
+const { pool: _pool, ...pinnedReq } = req();
+
+test("M370 today no pool or sell delegate is pinned: the kit's evmPoolBuildSell, evmPoolSignSell and evmPoolSignSellAuthorization refuse not_deployed", () => {
+  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
+    const v = evmPoolVenues()[chain];
+    assert.equal(v.pool, undefined);
+    assert.equal(v.sellDelegate, undefined);
+    const r = { ...pinnedReq, target: v.routers[0]!, route: v3([X, v.weth]) };
+    assert.equal(code(() => kit.evmPoolBuildSell(chain, r)), "not_deployed", chain);
+    assert.equal(code(() => kit.evmPoolSignSell(W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_deployed", chain);
+    assert.equal(code(() => kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n)), "not_deployed", chain);
+  }
+});
+
+test("M370 a pinned sell pays only into the chain's pinned pool", () => {
+  // a pool the caller names is not read: the pin is the pool
+  const built = pinnedBuildSell(PINNED, "base", { ...pinnedReq, pool: "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD0" } as typeof pinnedReq);
+  assert.equal(built.pool, PIN_POOL);
+  assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", evmPoolBuildSell("base", req({ pool: "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD0" })))), "not_pinned");
+  assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", { ...built })), "not_built");
+  assert.equal(hex(pinnedSignSell(PINNED, W_KEY, "base", built)), hex(evmPoolSignSell(W_KEY, "base", built)));
+  const noPool = Object.freeze({ ...PINNED, base: Object.freeze({ ...B, sellDelegate: PIN_DELEGATE }) });
+  assert.equal(code(() => pinnedBuildSell(noPool, "base", pinnedReq)), "not_deployed");
+  assert.equal(code(() => pinnedSignSell(noPool, W_KEY, "base", built)), "not_deployed");
+  assert.equal(code(() => pinnedBuildSell(PINNED, "ethereum" as EvmPoolChain, pinnedReq)), "bad_route");
+  assert.equal(code(() => pinnedBuildSell(PINNED, "base", null as unknown as typeof pinnedReq)), "bad_route");
+});
+
+test("M370 W's authorization names only the chain's pinned sell delegate", () => {
+  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
+    const a = pinnedSignSellAuthorization(PINNED, W_KEY, chain, 5n);
+    assert.equal(a.address, PIN_DELEGATE);
+    assert.deepEqual(a, evmPoolSignSellAuthorization(W_KEY, chain, PIN_DELEGATE, 5n));
+  }
+  const noDelegate = Object.freeze({ ...PINNED, robinhood: Object.freeze({ ...R, pool: PIN_POOL }) });
+  assert.equal(code(() => pinnedSignSellAuthorization(noDelegate, W_KEY, "robinhood", 0n)), "not_deployed");
+  assert.equal(code(() => pinnedSignSellAuthorization(PINNED, W_KEY, "ethereum" as EvmPoolChain, 0n)), "bad_route");
 });
