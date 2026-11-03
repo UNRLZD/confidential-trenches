@@ -94,6 +94,19 @@ test("B2 a send that reverted on chain is never sent again in its epoch: one sen
   assert.equal(sends(a).length, 2);
 });
 
+test("a revert first seen by a later epoch's proof is held against the epoch that reverted: the new proof is sent", async () => {
+  const a: Calls = [];
+  let t = NOW;
+  const s = make(a, { reverted: true }, [], () => t);
+  assert.equal(code(await s.carry(req())), "ok");
+  t = EPOCH + 70_000;
+  assert.equal(code(await s.carry(req(calldata(), EPOCH + 60_000))), "ok", "the re-proved release in the next epoch");
+  const before = a.length;
+  assert.equal(code(await s.carry(req())), "reverted", "the first epoch's proof: refused");
+  assert.equal(a.length, before, "with no RPC call");
+  assert.equal(sends(a).length, 2);
+});
+
 test("B4 two repeats racing after a revert: both answer reverted, the nullifier is sent once", async () => {
   const a: Calls = [];
   const s = make(a, { reverted: true });
