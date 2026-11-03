@@ -3,20 +3,26 @@
 //! wasm at TOKEN. Runs only with `--features sandbox`, through tests/harness/run.sh
 //! (`contracts/vault/tests/harness/run.sh --test s17`); a plain `cargo test` builds this file empty.
 //!
-//! The test build: the vault's own code with the Cargo feature `test-on-payout-out-of-gas`, whose `on_payout` logs
-//! `OUT_OF_GAS_BUILD_MARK` (src/payout.rs) and then burns gas until it runs out. run.sh builds it beside the release
-//! build and names it in `VAULT_OOG_WASM`. It stands for a callback whose static gas a NEAR re-pricing outgrew.
+//! The test build: the vault's own code with the Cargo feature `test-on-payout-out-of-gas`, whose `on_payout` does all
+//! its work (the record rewritten, `totals` raised, the `payout` event logged), then logs `OUT_OF_GAS_BUILD_MARK`
+//! (src/payout.rs) and burns gas until it runs out: the gas runs out last, as it would for a callback whose static a
+//! NEAR re-pricing outgrew. run.sh builds it beside the release build and names it in `VAULT_OOG_WASM`.
 //!
 //! From the six deposits of tests/fixtures/withdraw-spends.json and two proofs of tests/fixtures/settle-spends.json,
 //! two payouts that fail, relayed: `fee_bounces` (the fee recipient not registered on the token) and
 //! `recipient_bounces` (the recipient not registered). Each runs twice per token, in a fresh sandbox each time:
 //! 1. the release build (`VAULT_WASM`): each callback lands `refund_pending`; its gas burnt is the measured burn, and
 //!    the static `GAS_ON_PAYOUT_TGAS` must be at least six times the largest burn. Both numbers are printed.
-//! 2. the test build: each callback fails with "Exceeded the prepaid gas", logging the mark. The state it leaves is the
-//!    residual 2.5.4 names: the spend stays `in_flight` with `refund_value` 0 and no refund leaf, `totals.returned`
-//!    stays 0, the bounced parts sit in the vault's token balance with no note, `settle` is refused with
-//!    `SpendInFlight` and changes nothing, and a stranger cannot run `on_payout` (`#[private]`), so nothing moves the
-//!    record on.
+//! 2. the test build: each callback fails with "Exceeded the prepaid gas", its logs exactly the `payout` event and the
+//!    mark (NEAR keeps a failed receipt's logs). NEAR drops the writes it made, so the state is the residual 2.5.4
+//!    names: the spend stays `in_flight` with `refund_value` 0 and no refund leaf, `totals.returned` stays 0, the
+//!    bounced parts sit in the vault's token balance with no note, `settle` is refused with `SpendInFlight` and changes
+//!    nothing, and a stranger cannot run `on_payout` (`#[private]`), so nothing moves the record on. The logged event
+//!    misleads no one: every reader takes the spend's status from the `spends` view, never from an event
+//!    (packages/kit/src/vault/shapes.ts l.357-358: events count only from successful receipts;
+//!    packages/wallet/src/notes/restore.ts l.309; apps/helper/src/withdraw/send.ts l.407).
+//! 3. the top-up 2.5.4 names (a storage re-pricing is met by anyone's plain Transfer to the vault): a stranger's
+//!    Transfer raises the vault's NEAR by exactly its amount, with the state, the storage use and `keys: []` unchanged.
 //!
 //! And the refusal: contracts/vault/scripts/deploy.mjs `deployProblems` (the same rules every deploy and the vault's
 //! live check apply) refuses the real test build (`testBuild`) and passes the release build.
@@ -73,6 +79,14 @@ fn args(name: &str) -> Value {
 
 fn nullifier(name: &str) -> String {
     args(name)["public_signals"][1].as_str().unwrap().to_string()
+}
+
+/// The `payout` event line the callback of `name` logs (src/events.rs, the kit's frozen shape).
+fn payout_event(name: &str, delivered: u128, returned: u128) -> String {
+    format!(
+        r#"EVENT_JSON:{{"standard":"blindfill-vault","version":"1.0.0","event":"payout","data":[{{"nullifier_hash":"{}","delivered":"{delivered}","returned":"{returned}"}}]}}"#,
+        nullifier(name)
+    )
 }
 
 /// Row 14's requirement for a spend whose payer and recipient ids have these lengths, when no tree grows a level.
@@ -192,14 +206,13 @@ async fn out_of_gas(kind: TokenKind) -> R<()> {
     let stranger = h.account("stranger", 50).await?;
     let outcomes = pay_both(&h, &relayer, &alice).await?;
     let fixture = json_of(DEPOSITS);
-    for ((name, _, _), o) in PAYOUTS.iter().zip(&outcomes) {
+    for ((name, bounced, delivered), o) in PAYOUTS.iter().zip(&outcomes) {
         let cb = callback(&h, o, name)?;
         let f = cb.failure().ok_or_else(|| format!("{name}: the test build's callback did not fail: {}", cb.line()))?;
         assert!(f.contains(OUT_OF_GAS), "{name}: the callback failed, but not out of gas: {f}");
-        assert!(cb.logs.iter().any(|l| l == MARK), "{name}: the failed callback is not the test build's: {:?}", cb.logs);
-        assert!(!cb.logs.iter().any(|l| l.contains("\"event\":\"payout\"")), "{name}: a payout event: {:?}", cb.logs);
-        println!("{kind:?} test build: {name}'s on_payout burnt {:.3} Tgas and ran out of gas", cb.gas_burnt as f64 / TGAS);
-        assert!(cb.gas_burnt >= Gas::from_tgas(STATIC_TGAS).as_gas(), "{name}: ran out under its static: {}", cb.line());
+        // the callback did all its work (its event is logged) before the gas ran out: what follows proves NEAR dropped it
+        assert_eq!(cb.logs, [payout_event(name, *delivered, *bounced), MARK.to_string()], "{name}: the failed callback's logs");
+        println!("{kind:?} test build: {name}'s on_payout burnt {:.3} Tgas and ran out of gas after logging {:?}", cb.gas_burnt as f64 / TGAS, cb.logs);
     }
     // the state left, read after every receipt is final: NEAR runs no failed callback again
     h.wait_final(&h.vault).await?;
@@ -238,7 +251,6 @@ async fn out_of_gas(kind: TokenKind) -> R<()> {
         println!("{kind:?} test build: settle {name} refused: {}", r.line());
     }
     // no one else can run the callback: on_payout is #[private]
-    let before = snapshot(&h).await?;
     let (name, bounced, delivered) = PAYOUTS[1];
     let o = h
         .call_outcome(&stranger, &h.vault, "on_payout", json!({"spend_index": 1, "to_recipient": bounced.to_string(), "fee": delivered.to_string()}), NearToken::from_yoctonear(0), Gas::from_tgas(100))
@@ -246,8 +258,24 @@ async fn out_of_gas(kind: TokenKind) -> R<()> {
     let r = o.calls_exactly(&h.vault, "on_payout", 1)?[0];
     let f = r.failure().ok_or_else(|| format!("a stranger ran on_payout: {}", r.line()))?;
     assert!(f.contains("is private"), "{name}: a stranger's on_payout: {f}");
-    assert_eq!(snapshot(&h).await?, before, "a stranger's on_payout changed the vault");
-    assert_eq!(spend_row(&h, name).await?["status"], "in_flight");
+
+    // the top-up: anyone's plain Transfer raises the vault's NEAR by exactly its amount and changes nothing else
+    let top_up = NearToken::from_millinear(250);
+    let (before, near0, keys0) = (snapshot(&h).await?, h.near_balance(&h.vault).await?, h.access_keys(&h.vault, "final").await?);
+    assert!(keys0.is_empty(), "the vault has keys: {keys0:?}");
+    let t = stranger.transfer_near(&h.vault, top_up).await?;
+    assert!(t.is_success(), "the top-up failed: {t:?}");
+    let tx = t.outcome().transaction_hash.to_string();
+    let v = h.rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": tx, "sender_account_id": stranger.id(), "wait_until": "FINAL"})).await?;
+    assert!(v["result"]["final_execution_status"] == "FINAL", "the top-up is not final: {v}");
+    let near1 = h.near_balance(&h.vault).await?;
+    assert_eq!(near1 - near0, top_up.as_yoctonear(), "the vault's NEAR did not rise by exactly the top-up");
+    assert_eq!(snapshot(&h).await?, before, "the top-up changed the vault's state, storage use or token balance");
+    assert_eq!(h.access_keys(&h.vault, "final").await?, Vec::<Value>::new(), "the vault has keys after the top-up");
+    println!(
+        "{kind:?} test build: top-up: a stranger's Transfer of {} yocto raised the vault's NEAR from {near0} to {near1}, exactly; state, storage use and keys [] unchanged",
+        top_up.as_yoctonear()
+    );
     println!("{kind:?} test build: VT-S17 holds\n{}", h.gas_table());
     Ok(())
 }

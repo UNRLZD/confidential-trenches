@@ -35,21 +35,6 @@ use crate::{Status, Vault, VaultExt};
 use near_sdk::json_types::U128;
 use near_sdk::{env, near, Gas};
 
-/// VT-S17's test build only (Cargo feature `test-on-payout-out-of-gas`, tests/s17.rs): `on_payout` logs this, then
-/// burns gas until it runs out, as a callback whose static a NEAR re-pricing outgrew would (2.5.4, "What is left").
-/// The text is in that build's bytes and in no other's: scripts/live-checks/vault-skeleton.mjs `wasmProblems` refuses
-/// it (`testBuild`), so scripts/deploy.mjs never deploys that build and the vault's live check fails it on chain.
-#[cfg(feature = "test-on-payout-out-of-gas")]
-pub const OUT_OF_GAS_BUILD_MARK: &str = "blindfill-vault test build: on_payout runs out of gas";
-
-/// VT-S17's test build only: log the mark, then hash until the gas runs out (`sha256` always returns 32 bytes, so the
-/// loop ends only there). Nothing before it writes, so the receipt fails with no change.
-#[cfg(feature = "test-on-payout-out-of-gas")]
-fn run_out_of_gas() {
-    env::log_str(OUT_OF_GAS_BUILD_MARK);
-    while !env::sha256(OUT_OF_GAS_BUILD_MARK.as_bytes()).is_empty() {}
-}
-
 /// The gas the pre-check keeps for the vault's own work, on top of the statics it hands on (2.5.2).
 pub const GAS_OWN_WORK_TGAS: u64 = 100;
 
@@ -144,8 +129,6 @@ impl Vault {
     /// 2.5.4: what each payout part delivered. The vault's own promise is its only caller (`#[private]`).
     #[private]
     pub fn on_payout(&mut self, spend_index: u64, to_recipient: U128, fee: U128) {
-        #[cfg(feature = "test-on-payout-out-of-gas")]
-        run_out_of_gas();
         // the count, then each result by name: any panic here comes before any read of state or write
         let (recipient_ran, fee_ran) = promise::payout_results(fee.0);
         let (delivered, returned) = outcome(to_recipient.0, fee.0, recipient_ran, fee_ran);
@@ -159,7 +142,29 @@ impl Vault {
         self.spends.replace(spend_index, &s);
         self.totals.returned = U128(total);
         Event::Payout { nullifier_hash: &s.nullifier_hash, delivered, returned }.emit();
+        #[cfg(feature = "test-on-payout-out-of-gas")]
+        run_out_of_gas();
     }
+}
+
+// VT-S17's test build only, placed after every line of the release build's code so that a build without the feature
+// keeps every panic location (overflow checks name file and line) and its bytes stay those of the code before it.
+
+/// VT-S17's test build only (Cargo feature `test-on-payout-out-of-gas`, tests/s17.rs): `on_payout` does all its work,
+/// logs this, then burns gas until it runs out, as a callback whose static a NEAR re-pricing outgrew would (2.5.4,
+/// "What is left"). The text is in that build's bytes and in no other's: scripts/live-checks/vault-skeleton.mjs
+/// `wasmProblems` refuses it (`testBuild`), so scripts/deploy.mjs never deploys that build and the vault's live check
+/// fails it on chain.
+#[cfg(feature = "test-on-payout-out-of-gas")]
+pub const OUT_OF_GAS_BUILD_MARK: &str = "blindfill-vault test build: on_payout runs out of gas";
+
+/// VT-S17's test build only, called last in `on_payout`, after the record is rewritten and the `payout` event logged:
+/// log the mark, then hash until the gas runs out (`sha256` always returns 32 bytes, so the loop ends only there). The
+/// receipt fails, so NEAR drops every write it made and keeps its logs.
+#[cfg(feature = "test-on-payout-out-of-gas")]
+fn run_out_of_gas() {
+    env::log_str(OUT_OF_GAS_BUILD_MARK);
+    while !env::sha256(OUT_OF_GAS_BUILD_MARK.as_bytes()).is_empty() {}
 }
 
 #[cfg(test)]
