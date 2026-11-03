@@ -29,7 +29,7 @@ export const WORDS = {
   retry: ok("Retry", "owner-words-pass (app-signpage-client)"),
   loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S7.1 skeleton: the page's accessible name only (never drawn); as Discover's"),
   offline: ok("Offline", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.5 [draft copy: Offline], as Discover's error state"),
-  noToken: ok("No token", "owner 1 Nov 16:45Z, keep; drafted from card app-token-page: the empty state (no fixture or token by that name)"),
+  noToken: ok("No token", "owner 1 Nov 16:45Z, keep; drafted from card app-token-page: the empty state (no token to draw)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

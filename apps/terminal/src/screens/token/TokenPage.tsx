@@ -1,10 +1,8 @@
-import { useMemo, useState } from "react";
-import { useLocation } from "react-router";
+import { useState } from "react";
 import { Avatar } from "../market/Avatar.tsx";
-import { FIXTURE_NOW_MS } from "./fixtures.ts";
 import { tokenView } from "./model.ts";
 import type { Curve, TokenView } from "./model.ts";
-import { tokenData } from "./source.ts";
+import { useTopToken } from "./source.ts";
 import type { TokenData } from "./source.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
@@ -28,6 +26,9 @@ const TFS = ["1m", "5m", "15m", "1H", "4H", "1D"] as const;
 const QUICK = [10, 25, 50, 100] as const;
 
 const Sk = ({ w, h }: { w: number | string; h: number }) => <span className="tkp-sk" style={{ width: w, height: h }} />;
+/** A skeleton the height of the value it stands for: one line of that value's own font, so the strip keeps its height
+ *  when the read lands (BAR-10 CLS). */
+const SkLine = ({ cls, w }: { cls: string; w: number }) => <span className={`${cls} tkp-sk`} style={{ width: w }} aria-hidden="true">{"\u00a0"}</span>;
 
 /** The curve's value and, only on a curve, its bar (R5 U.about tk-curve). */
 function CurveValue({ c }: { c: Curve }) {
@@ -47,7 +48,7 @@ function Tile({ label, value, dir, k }: { label: WordId; value: string | null; d
   return (
     <div className="tkp-tile" data-k={k}>
       <span className="tkp-lbl"><W id={label} /></span>
-      {value === null ? <Sk w={64} h={15} /> : <span className="tkp-val" data-dir={dir}>{value}</span>}
+      {value === null ? <SkLine cls="tkp-val" w={64} /> : <span className="tkp-val" data-dir={dir}>{value}</span>}
     </div>
   );
 }
@@ -56,7 +57,7 @@ function CurveTile({ v, phone }: { v: TokenView | null; phone?: boolean }) {
   return (
     <div className={phone ? "tkp-mtile" : "tkp-tile"} data-k="curve">
       <span className="tkp-lbl"><W id="curve" /></span>
-      {v === null ? <Sk w={64} h={15} /> : <CurveValue c={v.curve} />}
+      {v === null ? (phone ? <Sk w={64} h={15} /> : <SkLine cls="tkp-val" w={64} />) : <CurveValue c={v.curve} />}
     </div>
   );
 }
@@ -107,7 +108,7 @@ function Desktop({ v }: { v: TokenView | null }) {
           <div className="tkp-strip">
             <div className="tkp-mc">
               <span className="tkp-lbl"><W id="mc" /></span>
-              {v ? <span className="tkp-mcval">{v.mc}</span> : <Sk w={120} h={26} />}
+              {v ? <span className="tkp-mcval">{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
             </div>
             <Tile k="price" label="price" value={s(v?.price)} />
             <Tile k="change" label="change" value={s(v?.chg.text)} dir={v?.chg.dir} />
@@ -199,10 +200,8 @@ export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: nu
   );
 }
 
-/** The token route: the page on the fixture source (source.ts) until the market data read lands. */
+/** The token route: the top Trending token, read from the helper (source.ts). */
 export function TokenRoute() {
-  const { search } = useLocation();
-  const [reads, setReads] = useState(0);
-  const data = useMemo(() => tokenData(search), [search, reads]);
-  return <TokenPage data={data} nowMs={FIXTURE_NOW_MS} onRetry={() => setReads((n) => n + 1)} />;
+  const { data, nowMs, retry } = useTopToken();
+  return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
 }

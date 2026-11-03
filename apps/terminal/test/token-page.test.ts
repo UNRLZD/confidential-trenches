@@ -1,15 +1,15 @@
 // The token page shell on fixtures (card app-token-page; A2.2, app.md:1435 at research 3c95759): the fixtures hold
 // only 06b Row fields, the header's numbers (price, market cap, volume, liquidity, holders, age, the 24h change) at
 // their edge values, the curve rule (J19, app.md:552-555: a bar only for a token still on a launchpad curve, the dash
-// and no bar for any other), the fixture source's states, and the route map that draws the page at its route.
+// and no bar for any other), and the route map that draws the page at its route. Where the route's data comes from is
+// test/no-test-token.test.ts.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ROW_FIELDS, ROW_REQUIRED } from "../src/screens/discover/fields.ts";
 import type { MarketRow } from "../src/screens/discover/fields.ts";
-import { FIXTURE_NOW_MS, TOKENS } from "../src/screens/token/fixtures.ts";
+import { FIXTURE_NOW_MS, TOKENS } from "./token-page/fixtures.ts";
 import { change24, curve, tokenView } from "../src/screens/token/model.ts";
-import { tokenData } from "../src/screens/token/source.ts";
 import { DRAFTS, WORDS } from "../src/screens/token/words.ts";
 
 const base = TOKENS.curve!;
@@ -103,16 +103,6 @@ test("curve rule on the fixtures: the curve token has a bar; graduated, listed a
     assert.equal(v.curve.text, "—", k);
   }
   assert.equal(tokenView(TOKENS.listed!, FIXTURE_NOW_MS).launchpad, null);
-});
-
-test("fixture source: a token by name, the three states as labels, an unknown name is empty", () => {
-  assert.deepEqual(tokenData(""), { status: "ready", row: TOKENS.curve });
-  assert.deepEqual(tokenData("?fx=listed"), { status: "ready", row: TOKENS.listed });
-  assert.deepEqual(tokenData("?fx=loading"), { status: "loading" });
-  assert.deepEqual(tokenData("?fx=error"), { status: "error" });
-  assert.deepEqual(tokenData("?fx=empty"), { status: "empty" });
-  assert.deepEqual(tokenData("?fx=nope"), { status: "empty" });
-  assert.deepEqual(tokenData("?fx=__proto__"), { status: "empty" });
 });
 
 test("words: every word has its source, and no draft is left (owner 1 Nov 16:45Z, keep)", () => {
