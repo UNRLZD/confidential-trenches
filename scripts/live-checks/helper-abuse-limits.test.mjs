@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { API_BURST_MAX, BURST_MAX, HEALTH, judge, PROBE, read } from "./helper-abuse-limits.mjs";
+import { API_BATCH, API_BURST_MAX, BURST_MAX, HEALTH, judge, POOL_BATCH, PROBE, read } from "./helper-abuse-limits.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-abuse-limits.answers.json"), "utf8"));
@@ -68,4 +68,48 @@ test("each burst stops at its most with no 429", async () => {
   const api = (await read("https://api.confidential.unrealized.trade", q.fetchFn, q.sleep)).api;
   assert.equal(api.statuses.length, API_BURST_MAX);
   assert.equal(api.after, null);
+});
+
+// A helper as the card built it, on a clock: each client's sliding 10 s window (30 on the pool route, 120 on the rest),
+// a 429 naming the wait to the window's oldest request leaving it, with CORS. Every request arrives at the clock and
+// moves it a round trip on when answered; requests in flight together arrive together; the check's sleep moves it too.
+function slowHelper(rttMs) {
+  let t = 0;
+  const seen = { [PROBE]: [], [HEALTH]: [] };
+  const cap = { [PROBE]: 30, [HEALTH]: 120 };
+  const fetchFn = async (url) => {
+    const at = new URL(url).pathname + new URL(url).search;
+    const arrived = t;
+    const w = seen[at];
+    while (w.length > 0 && arrived - w[0] >= 10_000) w.shift();
+    let r;
+    if (w.length >= cap[at]) {
+      const wait = Math.max(1, Math.ceil((w[0] + 10_000 - arrived) / 1000));
+      r = new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { "retry-after": String(wait), "access-control-allow-origin": "https://confidential.unrealized.trade", "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After", vary: "Origin", "content-type": "application/json" } });
+    } else {
+      w.push(arrived);
+      r = new Response(at === PROBE ? '{"error":{"code":"not_found"}}' : "{}", { status: at === PROBE ? 404 : 200, headers: { "content-type": "application/json" } });
+    }
+    await new Promise((ok) => setImmediate(ok));
+    t = Math.max(t, arrived + rttMs);
+    return r;
+  };
+  return { fetchFn, sleep: async (ms) => void (t += ms) };
+}
+
+test("a helper 250 ms and 1 s a round trip away: each burst still meets its 429 in its first batch, and the contract holds (one request at a time at 250 ms never meets the api's 120 in a window)", async () => {
+  for (const rtt of [250, 1_000]) {
+    const h = slowHelper(rtt);
+    const got = await read("https://api.confidential.unrealized.trade", h.fetchFn, h.sleep);
+    const v = judge(got);
+    assert.equal(v.ok, true, `${rtt} ms:\n${v.lines.join("\n")}`);
+    assert.deepEqual([got.pool.statuses.length, got.api.statuses.length], [POOL_BATCH, API_BATCH], `${rtt} ms: one batch each`);
+    assert.deepEqual([got.pool.statuses.filter((s) => s === 429).length, got.api.statuses.filter((s) => s === 429).length], [1, 1]);
+  }
+});
+
+test("recorded good_deployed (the deployed helper at 3bf53c0, about 250 ms a round trip from the Mac, read with parallel batches): PASS", async () => {
+  const r = replay(A.good_deployed);
+  const v = judge(await read("https://api.confidential.unrealized.trade", r.fetchFn, r.sleep));
+  assert.equal(v.ok, true, v.lines.join("\n"));
 });
