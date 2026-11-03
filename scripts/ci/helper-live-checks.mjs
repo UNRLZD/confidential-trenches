@@ -16,6 +16,7 @@ export const LIVE_CHECKS = [
   "market-data-solana-lists",
   "market-data-solana-token",
   "market-data-evm",
+  "index-evm-swaps",
   "relayer-withdraw-send",
   "relayer-withdraw-fee",
 ];
