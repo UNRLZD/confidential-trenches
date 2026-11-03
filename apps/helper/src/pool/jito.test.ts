@@ -134,3 +134,14 @@ test("M369 (M1): a first send waits at most JITO_QUEUE_MAX_MS for a second; past
   assert.equal(e.seen.length, 8, "nothing sent");
   assert.equal(JITO_QUEUE_MAX_MS, 2_000);
 });
+
+test("M369 (M1): by default each region takes one request a second (Jito's keyless limit): the ninth first send at once waits a second", async () => {
+  const e = ok();
+  const j = jitoSender({ fetch: e.fetch });
+  const t0 = performance.now();
+  const r = await Promise.all(Array.from({ length: 9 }, () => j.send("AA==", SIG)));
+  assert.ok(r.every((x) => x.kind === "ok"));
+  const waited = e.seen[8]!.at - t0;
+  assert.ok(waited >= 990 && waited < 1_500, `the ninth waited ${Math.round(waited)} ms`);
+  assert.equal(e.seen[8]!.host, e.seen[0]!.host, "the region whose second ended first");
+});

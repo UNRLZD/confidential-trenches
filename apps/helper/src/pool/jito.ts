@@ -73,7 +73,6 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
   const clock = () => performance.now(); // monotonic: a wall clock set back never books a second twice
   /** Per region: when its next second starts (no request before it). */
   const free = regions.map(() => -Infinity);
-  let next = 0;
 
   // M369 (L1): only a thrown fetch, a timeout or an oversized answer is transport; every HTTP answer is the region's
   // word: 429, 5xx or a rate-limit error is busy (the next region), anything else not the signature is refused.
@@ -111,18 +110,14 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
 
   return {
     async send(b64, signature) {
-      const start = next;
-      next = (next + 1) % regions.length;
       const tried = new Set<number>();
       let transportOnly = true;
       let last = "";
       while (tried.size < regions.length) {
-        // the untried region whose next second comes first; a tie goes in turn from this send's start
+        // the untried region whose next second comes first: sends spread over the regions, the least recently used
+        // first (a tie, regions never used, goes in list order)
         let at = -1;
-        for (let k = 0; k < regions.length; k++) {
-          const i = (start + k) % regions.length;
-          if (!tried.has(i) && (at < 0 || free[i]! < free[at]!)) at = i;
-        }
+        for (let i = 0; i < regions.length; i++) if (!tried.has(i) && (at < 0 || free[i]! < free[at]!)) at = i;
         tried.add(at);
         const now = clock();
         const go = Math.max(now, free[at]!);

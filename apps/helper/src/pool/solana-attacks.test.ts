@@ -378,14 +378,14 @@ test("M362 (4): a mainnet tag 3 goes bundle-only to a block engine and is rebroa
   assert.equal(REGIONS.length, 8);
 });
 
-test("M362 (4): a 429 from one region goes to the next; sends start at the next region each time", async () => {
+test("M362 (4): a 429 from one region goes to the next; each send starts at the region least recently used", async () => {
   const engine = blockEngine((host) => (host.startsWith("amsterdam.") ? "429" : "ok"));
   const s = mainnet({ engine, end: "filled" });
   assert.equal(code(await s.carry(body(tipped()))), "ok");
   assert.deepEqual(engine.seen.map((x) => x.host.split(".")[0]), ["amsterdam", "dublin"]);
   assert.equal(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(77) } })))), "ok");
-  // the next send starts one region further on, at the first region no send has used yet (its second comes first)
-  assert.deepEqual(engine.seen.slice(2).map((x) => x.host.split(".")[0]), ["frankfurt"], "the next send starts further on");
+  // the next send starts at the first region no send has used yet (its second comes first), then the next
+  assert.deepEqual(engine.seen.slice(2).map((x) => x.host.split(".")[0]), ["frankfurt"], "the next send starts at an unused region");
   assert.equal(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(78) } })))), "ok");
   assert.deepEqual(engine.seen.slice(3).map((x) => x.host.split(".")[0]), ["london"]);
   const rate = blockEngine((host) => (host.startsWith("amsterdam.") ? "rate_error" : "ok"));
