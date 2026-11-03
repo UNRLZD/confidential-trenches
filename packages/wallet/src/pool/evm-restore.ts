@@ -34,8 +34,12 @@
 // - Only the pool pair may refuse the whole restore. The notes never wait on a W: a W whose read fails (a lag that
 //   stays, a lie, a provider's cap no page can meet, as a stranger's Transfer spam to a public W can force) is listed
 //   with tokens null and its error, and a Transfer pair that fails its check (another chain, or the restore's block
-//   not held) leaves every W so, with no Transfer log taken; the notes stand. An error keeps a provider's words cut to
-//   its code (as ./buy-wallets.ts does), since a provider may echo the request, and so the W.
+//   not held) leaves every W so, with no Transfer log taken; the notes stand. A W's error keeps none of a provider's
+//   words, since a provider may echo the request, and so the W: they are cut to their JSON-RPC code or HTTP status,
+//   and any other the kit's client puts in its words (an error with no number code, an answer's id, a body not JSON) to
+//   "the call failed", as ./buy-wallets.ts does; the device's own words are kept. A W that fails while the pool pair no
+//   longer holds the restore's block is a reorg under the restore: the pool pair's lag refuses it, never the orphaned
+//   block's notes with the W blamed.
 // - The pool read: a lag (an RPC behind the other) is a retry, EVM_LAG_TRIES rounds at most, then refused; a lie is
 //   refused at once. A newest agreed block more than an epoch behind the higher RPC's latest time is a lag: the lower
 //   of two latest blocks is the anchor, so an RPC stuck behind would otherwise give an old restore as a whole one.
@@ -164,7 +168,10 @@ const cutError = (e: unknown): string => {
   const code = /RPC error (-?\d+)/i.exec(m)?.[1];
   if (code !== undefined) return `rpc error ${code}`;
   const http = /\bHTTP (\d{3})\b/.exec(m)?.[1];
-  return http !== undefined ? `http ${http}` : m;
+  if (http !== undefined) return `http ${http}`;
+  // the kit client's other words that carry a provider's text (solanaJsonRpc): an error with no number code or an
+  // answer's id, also inside a lag's words (./evm.ts readLogs' head lag), and a body not JSON
+  return e instanceof SyntaxError || /RPC error|answer id/.test(m) ? "the call failed" : m;
 };
 
 const randomIndex = (n: number): number => {
@@ -221,6 +228,8 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     [order[i], order[x]] = [order[x]!, order[i]!];
   }
   const wallets: EvmRestoredWallet[] = spends.map((s) => ({ note: s.note, w: s.w, tokens: null }));
+  // a W read that fails while the pool pair no longer holds the anchor: a reorg under the restore, the pool pair's lag
+  const poolHolds = () => evmHoldsAnchor(a.rpcs, chainId, r.anchor, a.signal);
   // the Transfer RPCs on the pool's chain and at the restore's block before any W is named to them; a pair that fails
   // leaves every W unread with its error, never the notes
   let pairError: string | null = null;
@@ -229,6 +238,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
       await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal), sleep, a.signal);
     } catch (e) {
       a.signal?.throwIfAborted();
+      await poolHolds();
       pairError = `the Transfer RPCs: ${cutError(e)}`;
     }
   }
@@ -243,6 +253,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
       wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();
     } catch (e) {
       a.signal?.throwIfAborted();
+      await poolHolds();
       wallets[k]!.error = cutError(e);
     }
   }

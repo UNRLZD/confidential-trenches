@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { VaultTree, vaultLabelOf } from "@blindfill/kit";
+import { solanaJsonRpc, VaultTree, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey } from "../src/notes/store.ts";
@@ -340,6 +340,87 @@ test("an unread W's error keeps a provider's words cut to their code: a provider
   const w0 = r.wallets.find((w) => w.w === W0)!;
   assert.equal(w0.error, "rpc error -32000");
   assert.ok(!JSON.stringify(r.wallets.map((w) => w.error ?? "")).includes(W0.slice(2)));
+});
+
+type Body = { id: string; method: string; params: unknown[] };
+const namesW = (b: Body, W0: string) => b.method === "eth_getLogs" && (b.params[0] as { address?: string }).address === undefined && (b.params[0] as { topics: string[] }).topics[2] === addrTopic(W0);
+/** A provider through the kit's own JSON-RPC client (solanaJsonRpc): the mock chain's answers, except what `bad` gives. */
+const viaKitClient = (url: string, mock: EvmRpc, bad: (b: Body) => Response | undefined): EvmRpc =>
+  solanaJsonRpc(url, {
+    fetch: async (_u, init) => {
+      const b = JSON.parse(init.body as string) as Body;
+      const r = bad(b);
+      if (r) return r;
+      try {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: await mock(b.method, b.params) }));
+      } catch (e) {
+        const m = /RPC error (-?\d+): (.*)/s.exec((e as Error).message);
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: Number(m?.[1] ?? -32000), message: m?.[2] ?? String(e) } }));
+      }
+    },
+  });
+const json = (o: unknown) => new Response(JSON.stringify(o));
+/** The restore with one Transfer provider answering every read that names W0 with `bad`. */
+async function w0ErrorThroughKit(bad: (b: Body, W0: string) => Response) {
+  const { world, W0 } = seeded();
+  const wr: [EvmRpc, EvmRpc] = [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), (b) => (namesW(b, W0) ? bad(b, W0) : undefined))];
+  const r = await restore(pair(world, world), wr);
+  assert.equal(r.notes.length, 10, "every note returned");
+  const w0 = r.wallets.find((w) => w.w === W0)!;
+  assert.equal(w0.tokens, null);
+  return { error: w0.error!, W0 };
+}
+
+{
+  const filterOf = (b: Body) => (b.params[0] as { topics: string[] }).topics[2];
+  const cases: [string, (b: Body, W0: string) => Response, string][] = [
+    ["K0 an integer code (cut to it)", (b) => json({ jsonrpc: "2.0", id: b.id, error: { code: -32000, message: `bad filter ${filterOf(b)}` } }), "rpc error -32000"],
+    ["K1 no code", (b) => json({ jsonrpc: "2.0", id: b.id, error: { message: `bad filter ${filterOf(b)}` } }), "the call failed"],
+    ["K2 a string code", (b) => json({ jsonrpc: "2.0", id: b.id, error: { code: "SERVER_ERROR", message: `bad filter ${filterOf(b)}` } }), "the call failed"],
+    ["K3 an id that echoes the request", (b) => json({ jsonrpc: "2.0", id: { echo: b.params }, result: [] }), "the call failed"],
+    ["K4 a 200 body that is not JSON", (_, W0) => new Response(`x${W0.slice(2)} not found`), "the call failed"],
+    ["K5 a head lag with a string code, past the lag budget", (b) => json({ jsonrpc: "2.0", id: b.id, error: { code: "x", message: `block range extends beyond current head block: ${filterOf(b)}` } }), "the call failed"],
+    ["K6 an HTTP status", () => new Response(`no ${"x"}`, { status: 503 }), "http 503"],
+  ];
+  for (const [name, bad, want] of cases)
+    test(`an unread W's error through the kit's client carries none of a provider's text: ${name}`, async () => {
+      const { error, W0 } = await w0ErrorThroughKit(bad);
+      assert.ok(!error.toLowerCase().includes(W0.slice(2, 10)), `the error carries W: ${error}`);
+      assert.equal(error, want);
+    });
+}
+
+test("a Transfer pair's failed check keeps none of a provider's text: cut to its code, or 'the call failed'", async () => {
+  const { world } = seeded();
+  const say = "provider-text-0123456789";
+  for (const [error, want] of [[{ code: -32001, message: say }, "the Transfer RPCs: rpc error -32001"], [{ message: say }, "the Transfer RPCs: the call failed"]] as const) {
+    const bad = (b: Body) => (b.method === "eth_chainId" ? json({ jsonrpc: "2.0", id: b.id, error }) : undefined);
+    const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), bad)]);
+    assert.equal(r.notes.length, 10, "every note returned");
+    for (const w of r.wallets) {
+      assert.equal(w.tokens, null);
+      assert.equal(w.error, want);
+    }
+  }
+});
+
+test("the newest block reorgs between the pool read and the Transfer pair's check: the pool pair's lag, never the orphaned block's notes with the Transfer pair blamed", async () => {
+  const { world } = seeded();
+  let moved = false;
+  const live: World = { ...world, hashOf: (n) => (moved && n === 100 ? h32("reorged 100") : world.hashOf(n)) };
+  const [c, dd] = wpair(live);
+  const trip = Object.assign((m: string, p: readonly unknown[]) => ((moved = true), c(m, p)), { url: "https://c.example" });
+  await assert.rejects(restore(pair(live, live), [trip, dd]), (e) => e instanceof EvmLagError && /does not hold block 100/.test(e.message));
+});
+
+test("the newest block reorgs while a W's Transfer logs are read: the pool pair's lag, never the orphaned block's notes with that W unread", async () => {
+  const { world, W0 } = seeded();
+  world.xfers.push({ block: 100, token: TX, from: STRANGER, to: W0 }); // a log of the anchor block, so the read sees it move
+  let moved = false;
+  const live: World = { ...world, hashOf: (n) => (moved && n === 100 ? h32("reorged 100") : world.hashOf(n)) };
+  const [c, dd] = wpair(live);
+  const trip = Object.assign((m: string, p: readonly unknown[]) => (m === "eth_getLogs" && (moved = true), c(m, p)), { url: "https://c.example" });
+  await assert.rejects(restore(pair(live, live), [trip, dd]), (e) => e instanceof EvmLagError && /does not hold block 100/.test(e.message));
 });
 
 test("a stranger's Transfer spam to a public W past every page a provider takes leaves that W unread and every note restored", async () => {
