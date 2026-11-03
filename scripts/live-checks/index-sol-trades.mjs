@@ -17,7 +17,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { fromLogs, poolMints, PUMP_AMM } from "../../apps/helper/src/data/solana/decode.ts";
+import { fromLogs, poolMints, PUMP_AMM, USDC, WSOL } from "../../apps/helper/src/data/solana/decode.ts";
 
 const KEY = "index-sol-trades";
 export const BASE = "https://api.confidential.unrealized.trade";
@@ -121,11 +121,17 @@ async function get(base, path, fetchFn) {
   return { atMs: t0, answeredMs: Date.now(), status: r.status, headers: Object.fromEntries(r.headers), body };
 }
 
-/** A PumpSwap pool's base mint, read on the public RPC (the pool account its program owns), or null. */
+/** The quotes the helper prices a trade in (trades.ts): a curve or pool quoted in another token (a tokenized stock, say)
+ *  has no dollar value there, so its trade is not one this check can time. */
+const PRICED = [WSOL, USDC];
+
+/** A PumpSwap pool's base mint when its quote is priced, read on the public RPC (the pool account its program owns), or
+ *  null. */
 async function poolBase(pool) {
   const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [pool, { encoding: "base64" }] }), signal: AbortSignal.timeout(10_000) });
   const v = (await r.json()).result?.value;
-  return v?.owner === PUMP_AMM ? poolMints(Buffer.from(v.data[0], "base64"))?.base ?? null : null;
+  const m = v?.owner === PUMP_AMM ? poolMints(Buffer.from(v.data[0], "base64")) : null;
+  return m && PRICED.includes(m.quote) ? m.base : null;
 }
 
 /** The first trade of `open` tokens the public websocket sends, decoded from its venue's event. */
@@ -151,7 +157,7 @@ function watchOnce(open, ws) {
       // a curve trade names its mint; a PumpSwap trade is the token's only when its pool's base mint is the token (a
       // route through several pools mentions the token in a transaction that also trades others)
       const trades = fromLogs(v.logs).trades;
-      const curve = trades.find((x) => x.mint === coin);
+      const curve = trades.find((x) => x.mint === coin && x.venue === "pump" && PRICED.includes(x.quoteMint));
       if (curve !== undefined) return done(curve);
       for (const x of trades.filter((x) => x.venue === "pumpswap")) {
         void poolBase(x.pool).then((base) => base === coin && done(x)).catch(() => undefined);
@@ -172,13 +178,14 @@ export async function read(base = BASE, fetchFn = fetch, ws = WS) {
   for (const t of tokens) first[t] = await get(base, TRADES_PATH(t), fetchFn);
   const open = tokens.filter((t) => first[t].status === 200);
   if (open.length === 0) return { base, coin: tokens[0] ?? null, fresh: null, polls: tokens.length ? [first[tokens[0]]] : [], candles: null };
-  // the public websocket refuses a connection now and then: three tries
+  // the public websocket refuses a connection now and then (several in a row from one address): five tries, 2 s apart
   let fresh;
   for (let attempt = 1; fresh === undefined; attempt++) {
     try {
       fresh = await watchOnce(open, ws);
     } catch (e) {
-      if (attempt === 3 || !/websocket error/.test(e.message)) throw e;
+      if (attempt === 5 || !/websocket error/.test(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, 2_000));
     }
   }
   const polls = [];
