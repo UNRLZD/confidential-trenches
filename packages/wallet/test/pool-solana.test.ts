@@ -1321,6 +1321,11 @@ test("fold 6 (T1): one RPC pages a deposit short (its marks honest, its slot at 
     assert.equal(mine.out, "refused: restore: the pages hold 3 state and 3 label leaves for 4 deposits and 0 releases", liar);
     assert.equal(other.out, mine.out, liar);
   }
+  // the label tree alone short (its state pages whole)
+  const labelPage = solanaPageOf(PROGRAM, 1, 0);
+  const labelShort = (i: number): Chain => { const c = full(i); return { ...c, accounts: new Map(c.accounts).set(labelPage, short(i).accounts.get(labelPage)!) }; };
+  const outs = await Promise.all([SEED, SEED_OTHER].map((seed64) => outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: [perRpc("https://a.example", full, full, []), perRpc("https://b.example", full, labelShort, [])], gap: 4 }))));
+  assert.deepEqual(outs, Array(2).fill("refused: restore: the pages hold 4 state and 3 label leaves for 4 deposits and 0 releases"));
 });
 
 test("fold 6 (T2): one RPC pages without the change leaf of the user's release (its marks honest): refused on the owner's device and on another alike", { timeout: 20_000 }, async () => {
