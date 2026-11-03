@@ -292,7 +292,7 @@ function pinsOf(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: Evm
 export function pinnedBuildSell(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain, req: EvmPoolSellRequest): EvmPoolSell {
   const pool = pinsOf(venues, chain).pool;
   if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);
-  if (typeof req !== "object" || req === null) return refuse("bad_route", "a sell request is an object");
+  // a request that is not an object copies to { pool } alone, which the unpinned builder refuses (bad_route)
   return evmPoolBuildSellUnpinned(chain, { ...req, pool });
 }
 
