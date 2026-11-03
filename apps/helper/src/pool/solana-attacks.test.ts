@@ -10,7 +10,7 @@ import {
   SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_JITO_TIP_ACCOUNTS,
-  SOLANA_POOL_STEP_PROGRAMS,
+  solanaPoolStepPrograms,
   SOLANA_SYSTEM_PROGRAM,
   SOLANA_TOKEN_2022_PROGRAM,
   solanaCompileV0,
@@ -153,7 +153,7 @@ const code = (a: PoolSendAnswer) => ("error" in a.body ? a.body.error.code : "ok
 
 test("A1: a tag 3 inner instruction invoking a program off the kit's list is refused before any read (inner_program)", async () => {
   assert.equal(verdict(wire({ inner: ATTACKER })), "inner_program");
-  for (const p of SOLANA_POOL_STEP_PROGRAMS) assert.equal(verdict(wire({ inner: p })), "ok", p);
+  for (const p of solanaPoolStepPrograms()) assert.equal(verdict(wire({ inner: p })), "ok", p);
   const calls: Calls = [];
   assert.equal(code(await sender({ a: calls }).carry(body(wire({ inner: ATTACKER })))), "inner_program");
   assert.deepEqual(calls, []);

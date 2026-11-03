@@ -24,7 +24,7 @@
 //                       to guess, so the priority fee would be unbounded by what the helper priced);
 //   deadline_near       the release's deadline is under now plus the kit's SOLANA_POOL_SEND_MARGIN_MS (M356 (1)): a send
 //                       that cannot land before it would only be a paid failure;
-//   inner_program       a tag 3 inner instruction invokes a program off the kit's SOLANA_POOL_STEP_PROGRAMS (helper
+//   inner_program       a tag 3 inner instruction invokes a program off the kit's solanaPoolStepPrograms() (helper
 //                       policy, M356 (1): a program W chose could fail on chain after passing the simulation);
 //   tip_low             mainnet only: a tag 3 whose Jito tip is under SOLANA_JITO_TIP_MIN (1,000 lamports), or whose tip
 //                       account (account 8) is not a Jito tip account named in the message itself (./jito.ts: "When
@@ -49,7 +49,7 @@ import {
   SOLANA_KEYLESS_PATH_INTERVAL_MS,
   SOLANA_MAX_TX_BYTES,
   SOLANA_POOL_SEND_MARGIN_MS,
-  SOLANA_POOL_STEP_PROGRAMS,
+  solanaPoolStepPrograms,
   SOLANA_POOL_TAG3_MAX_INNER,
   SOLANA_POOL_TAG_RELEASE,
   SOLANA_POOL_TAG_RELEASE_AND_BUY,
@@ -247,7 +247,7 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   }
   // tag 3's inner programs, by their message index; a static one is checked now, a loaded one after its table's read
   const innerProgramIndexes = p.innerPrograms.map((i) => pix.accounts[i]!);
-  if (innerProgramIndexes.some((i) => i < m.staticKeys.length && !SOLANA_POOL_STEP_PROGRAMS.includes(m.staticKeys[i]!))) return no("inner_program", "an inner instruction invokes a program off the kit's list");
+  if (innerProgramIndexes.some((i) => i < m.staticKeys.length && !solanaPoolStepPrograms().includes(m.staticKeys[i]!))) return no("inner_program", "an inner instruction invokes a program off the kit's list");
   const checked: SolanaPoolChecked = { tag: p.tag, wire, messageBytes: tx.messageBytes, w, relayFee: p.relayFee, deadlineMs: p.deadlineMs, nullifier: p.nullifier, message: m, poolIndex: pix.accounts[0]!, innerProgramIndexes };
   return { ok: true, tx: checked };
 }
@@ -273,7 +273,7 @@ export function checkSolanaPoolKeys(tx: SolanaPoolChecked, cfg: { pool: string }
     return { ok: false, code: "bad_table", detail: (e as Error).message };
   }
   if (keys[tx.poolIndex] !== cfg.pool) return { ok: false, code: "not_pool", detail: "another pool" };
-  if (tx.innerProgramIndexes.some((i) => !SOLANA_POOL_STEP_PROGRAMS.includes(keys[i]!))) return { ok: false, code: "inner_program", detail: "an inner instruction invokes a program off the kit's list" };
+  if (tx.innerProgramIndexes.some((i) => !solanaPoolStepPrograms().includes(keys[i]!))) return { ok: false, code: "inner_program", detail: "an inner instruction invokes a program off the kit's list" };
   return { ok: true };
 }
 

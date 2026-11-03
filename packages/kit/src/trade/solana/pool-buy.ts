@@ -341,15 +341,12 @@ const transfer = (from: string, to: string, lamports: bigint): SolanaApiInstruct
  * token programs). Token-2022 is only an account of the ATA create, never invoked directly: a direct Token-2022 transfer
  * runs its mint's transfer hook, a program the mint's owner chose, which can fail on chain after the simulation passed
  * (M362 (1)). The one list the helper carries (M356 (1)): the pool program stays open to any venue and relayer.
- * Pure: an app that never reads it (the signing page) bundles none of it (build-app.mjs --check).
+ * Frozen, and made on first use, never at load: the kit's index reaches the signing page's bundle, which keeps any
+ * top-level call (build-app.mjs --check).
  */
-export const SOLANA_POOL_STEP_PROGRAMS: readonly string[] = /* @__PURE__ */ Object.freeze([
-  SOLANA_PUMP_PROGRAM,
-  SOLANA_PUMP_AMM_PROGRAM,
-  SOLANA_TOKEN_PROGRAM,
-  SOLANA_ATA_PROGRAM,
-  SOLANA_SYSTEM_PROGRAM,
-]);
+let stepPrograms: readonly string[] | undefined;
+export const solanaPoolStepPrograms = (): readonly string[] =>
+  (stepPrograms ??= Object.freeze([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SYSTEM_PROGRAM]));
 
 /** What W does with its chunk, in order: its token account, the wrap (PumpSwap), the buy, the unwrap (PumpSwap). */
 export function solanaPoolBuySteps(venue: SolanaPoolBuyVenue, wallet: string, spend: bigint, minOut: bigint): SolanaApiInstruction[] {
