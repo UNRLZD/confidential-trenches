@@ -43,8 +43,8 @@ export type EvmPoolVenue = {
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
   readonly quoters?: Readonly<{ v3?: string; v4?: string }>;
-  /** A route starts from the native asset whenever a native v4 pool exists (the chain's WETH is behind an upgradeable
-   *  proxy). */
+  /** A route starts from the native asset whenever a native v4 pool exists and its route quotes at least as much as the
+   *  WETH route (the chain's WETH is behind an upgradeable proxy). */
   readonly nativeFirst?: boolean;
   /** The two RPC providers the device's quote reads (different hosts), and how many blocks their heads may differ. */
   readonly providers?: readonly [string, string];
@@ -97,7 +97,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       ]),
       // V4Quoter.poolManager() on both providers (2026-11-03 19:36Z). base-rpc.publicnode.com serves eth_getLogs over
       // 50,000 blocks a request and about 1M blocks back (3M back: "Archive requests require a personal token");
-      // mainnet.base.org only about 100 (read 19:37Z)
+      // mainnet.base.org only about 100 (read 19:37Z). publicnode answered every request with HTTP 200 and no error at
+      // 4, 8, 12, 16, 20 and 30 requests at once, twice each, and at 40 (two cold scans at once), three times
+      // (2026-11-03 20:11-20:24Z): 20, one cold scan's every span at once, takes no 429
       poolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
       scan: bare({ url: "https://base-rpc.publicnode.com", span: 50_000, depth: 1_000_000, parallel: 20 }),
     }),

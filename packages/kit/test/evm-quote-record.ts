@@ -54,7 +54,9 @@ export const CASES: [string, EvmPoolBuyQuoteRequest, string][] = [
   ["base-unknown-hook", { chain: "base", token: HOOKED_COIN, amountIn: 10n ** 15n, slippageBps: 300, route: v4(ZERO, HOOKED_COIN, 0, 60, HOOK) }, "no_reference"],
   ["robinhood-ok", { chain: "robinhood", token: USDG, amountIn: 10n ** 15n, slippageBps: 100, route: v4(ZERO, USDG, 100, 1) }, "ok"],
   ["robinhood-weth-v4", { chain: "robinhood", token: USDG, amountIn: 10n ** 15n, slippageBps: 100, route: v4(RH_WETH, USDG, 500, 10) }, "native_first"],
-  ["robinhood-weth-v3", { chain: "robinhood", token: USDG, amountIn: 10n ** 15n, slippageBps: 100, route: v3([RH_WETH, USDG], [100]) }, "native_first"],
+  // WETH's v3 0.01% pool and the native v4 0.01% pool sit within 0.01% of each other: the recording (2026-11-03 20:00Z)
+  // had the WETH route ahead (2286491 against 2286422), so it is bought; a new recording may find native ahead
+  ["robinhood-weth-v3", { chain: "robinhood", token: USDG, amountIn: 10n ** 15n, slippageBps: 100, route: v3([RH_WETH, USDG], [100]) }, "ok"],
 ];
 
 type Exchange = { calls: readonly EvmRpcCall[]; answers: readonly unknown[] };

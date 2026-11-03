@@ -239,24 +239,35 @@ test("Q5 a helper route below the device's standard-pool reference refuses", asy
   });
 });
 
-test("Q6 the Robinhood native-first rule picks native", async () => {
-  for (const name of ["robinhood-weth-v4", "robinhood-weth-v3"]) {
-    assert.equal(F[name]!.outcome.code, "native_first");
-    await assert.rejects(quote(name), (e: unknown) => {
-      assert.ok(e instanceof EvmQuoteError && e.code === "native_first", String(e));
-      const r = e.reference?.route;
-      assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === ZERO, "the device's own route starts native");
-      return true;
-    });
-  }
-  // a WETH pool planted as the best on both providers: where a native pool exists the reference is still native
-  const wethBest = plant((r) => (r.venue === "v3" && r.to.length === 1 ? out(r.amount * 10n ** 9n) : undefined));
-  await assert.rejects(quote("robinhood-weth-v3", wethBest, wethBest), (e: unknown) => {
+test("Q6 the Robinhood native-first rule picks native when it quotes at least as much", async () => {
+  // recorded: the WETH v4 route quotes below the native route, so it refuses and names the native route
+  assert.equal(F["robinhood-weth-v4"]!.outcome.code, "native_first");
+  await assert.rejects(quote("robinhood-weth-v4"), (e: unknown) => {
     assert.ok(e instanceof EvmQuoteError && e.code === "native_first", String(e));
     const r = e.reference?.route;
-    assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === ZERO, JSON.stringify(r));
+    assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === ZERO, "the device's own route starts native");
     return true;
   });
+  // recorded: at its block the WETH v3 route quotes strictly more than every native route, so it is bought
+  assert.equal(F["robinhood-weth-v3"]!.outcome.code, "ok");
+  const v3 = await quote("robinhood-weth-v3");
+  assert.deepEqual(v3.route, request("robinhood-weth-v3").route);
+  // the WETH route planted at x on both providers, against the recorded native routes at the same block
+  const at = (x: bigint) => plant((r) => (same(r, "robinhood-weth-v3") ? out(r.amount === request("robinhood-weth-v3").amountIn ? x : 2n * x) : undefined));
+  let native = 0n;
+  await assert.rejects(quote("robinhood-weth-v3", at(1n), at(1n)), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "native_first", String(e));
+    native = e.reference!.amountOut;
+    return true;
+  });
+  assert.ok(native > 0n && native < v3.amountOut, `the native route ${native} quotes less than the WETH route ${v3.amountOut}`);
+  // equal to the best native route: native_first; one unit more: bought through WETH
+  await refused(quote("robinhood-weth-v3", at(native), at(native)), "native_first");
+  assert.equal((await quote("robinhood-weth-v3", at(native + 1n), at(native + 1n))).amountOut, native + 1n);
+  // a WETH pool planted as strictly better than every native route on both providers: the WETH route is bought
+  const wethBest = plant((r) => (r.venue === "v3" && r.to.length === 1 ? out(r.amount * 10n ** 9n) : undefined));
+  const viaWeth = await quote("robinhood-weth-v3", wethBest, wethBest);
+  assert.deepEqual(viaWeth.route, request("robinhood-weth-v3").route, "bought through the WETH route");
   // the native route quotes
   const q = await quote("robinhood-ok");
   assert.ok(q.route.venue === "uniswap-v4" && q.route.currencyIn === ZERO);
