@@ -9,7 +9,7 @@
 #   4. a second resume of it: its pool exists, so init is skipped;
 #   5. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps.
 # After each, the funder must hold 0. Outputs go to contracts/pool-solana/out/dry-run/ (ignored by git).
-#   scripts/heavy.sh pool-sol-deploy -- bash contracts/pool-solana/scripts/dry-run.sh
+#   bash contracts/pool-solana/scripts/dry-run.sh   (with solana-test-validator, the solana CLI and cargo-build-sbf on PATH)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT="$ROOT/contracts/pool-solana/out/dry-run"

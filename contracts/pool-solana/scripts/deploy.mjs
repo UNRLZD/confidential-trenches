@@ -30,8 +30,8 @@
 //     never printed or kept; the precommitment is public). The mark and both page leaves are read back and checked:
 //     the label leaf against keccak256(scope, nonce) mod p, the state leaf against Poseidon(value, label,
 //     precommitment).
-//  7. Always, in a finally: the funder's bulk is swept to --return first, in one transfer (heavy.sh stops a job with
-//     TERM, then KILL 10 s later), keeping CLEANUP_RESERVE for the closes; then any buffer the funder still owns and a
+//  7. Always, in a finally: the funder's bulk is swept to --return first, in one transfer (a job runner may stop the run
+//     with TERM, then KILL 10 s later), keeping CLEANUP_RESERVE for the closes; then any buffer the funder still owns and a
 //     program it can still upgrade (read at confirmed) are closed with their rent to --return; then the rest is swept
 //     (retried). Every sweep's signature is printed. The keys are removed only after the reads in step 3.
 //  8. Waits for every transaction to be finalized, writes the deployment record (scripts/live-checks/pool-sol-deploy.
