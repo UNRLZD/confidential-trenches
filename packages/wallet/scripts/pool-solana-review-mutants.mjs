@@ -36,7 +36,7 @@ const M = [
   ["B9", K, `if (rents[0]!.lamportsPerByte !== rents[1]!.lamportsPerByte || rents[0]!.factor !== rents[1]!.factor) throw`, `if (false) throw`],
   ["B10", S, `if (feePayer === pool) throw`, `if (false) throw`],
   ["B11", S, `if (solanaSameProvider(rpcs[0], rpcs[1])) throw`, `if (false) throw`],
-  ["B12", S, `return { context: solanaContextOf(request, scope), feeCap: fee, request };`, `return { context: solanaContextOf({ ...request, feePayer: f.fee_payer }, scope), feeCap: fee, request };`],
+  ["B12", S, `return { context: solanaContextOf(request, scope), feeCap: fee, request };`, `return { context: solanaContextOf({ ...request, feePayer: f.fee_payer }, scope), feeCap: fee, request };`, "equivalent: bind refuses an answer whose fee_payer is not feePayer (src/pool/solana.ts:472) before it builds the request, so both contexts are one"],
   // restore
   ["R1", R, `if (have !== undefined && have !== d) throw`, `if (false) throw`],
   ["R2", R, `if (m.has(x.pubkey)) throw`, `if (false) throw`],
@@ -52,7 +52,9 @@ const M = [
   ["R12", R, `if (withdrawn === 0n || withdrawn > leaf.value) throw`, `if (false) throw`],
 ];
 let killed = 0;
-for (const [id, f, find, repl] of M) {
+const run = M.filter((m) => m[4] === undefined);
+for (const [id, f, find, repl, equivalent] of M) {
+  if (equivalent !== undefined) { console.log(`${id} EQUIVALENT: ${equivalent.replace(/^equivalent: /, "")}`); continue; }
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`${id} NOT ONCE: ${find.slice(0, 80)}`); continue; }
   writeFileSync(f, src.replace(find, repl));
@@ -64,5 +66,5 @@ for (const [id, f, find, repl] of M) {
   if (k) killed++;
   console.log(`${id} ${r.hung ? "HUNG" : k ? "KILLED" : "SURVIVED"} fail=${r.fail} ${k ? names.join(" | ") : ""}`);
 }
-console.log(`${killed}/${M.length} killed`);
-if (killed !== M.length) process.exitCode = 1;
+console.log(`${killed}/${run.length} killed (${M.length - run.length} equivalent)`);
+if (killed !== run.length) process.exitCode = 1;
