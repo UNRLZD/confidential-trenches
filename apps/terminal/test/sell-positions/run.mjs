@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -170,8 +171,7 @@ async function measure(page, w) {
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     for (const [name, f, tapIt, ms, want, label, amount, presets, quick] of STATES) {
@@ -323,4 +323,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} shots, the double taps, 100%, All, Initials, the typed percent and Share${PLANT ? ` (planted: ${PLANT})` : ""}`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots, the double taps, 100%, All, Initials, the typed percent and Share at 390 and 1440${PLANT ? ` (planted: ${PLANT}: a planted fault passed)` : ""}`);
+console.log(`PASS ${n} shots, the double taps, 100%, All, Initials, the typed percent and Share at 390 and 1440${PLANT ? ` (planted: ${PLANT}: a planted fault passed)` : ""} on ${browserLabel(browser)}`);

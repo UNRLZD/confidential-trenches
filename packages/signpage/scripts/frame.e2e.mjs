@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { browserLabel, launchBrowser } from "../../../scripts/browsers.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
@@ -37,8 +37,8 @@ async function framed(browser, parent, signHeaders) {
   return { loaded: frameUrl === SIGN, frameUrl, refused };
 }
 
-const browser = await chromium.launch();
-const version = browser.version();
+const browser = await launchBrowser("chromium");
+const label = browserLabel(browser);
 const cases = [
   ["recorded headers, framed from APP_HOST", APP, recorded, true],
   ["recorded headers, framed from https://example.com", STRANGER, recorded, false],
@@ -54,5 +54,5 @@ for (const [name, parent, headers, wantLoaded] of cases) {
   for (const m of r.refused) console.log(`    Chromium: ${m}`);
 }
 await browser.close();
-console.log(`frame.e2e: ${ok ? "PASS" : "FAIL"} (Chromium ${version})`);
+console.log(`frame.e2e: ${ok ? "PASS" : "FAIL"} (${label})`);
 process.exit(ok ? 0 : 1);

@@ -31,6 +31,7 @@ For the longer read, see [docs/architecture.md](docs/architecture.md) and [docs/
 | The terminal's screens | `apps/terminal/src/` | React on Vite |
 | The helper server | `apps/helper/src/` | Node; deploy files in `apps/helper/deploy/` |
 | A CI gate | `scripts/ci/` | Each gate has a `*.test.mjs` with planted failures |
+| A test browser | `scripts/browsers.mjs` | The only place a browser starts: the installed Google Chrome with its sandbox on, held by `scripts/ci/browser-launch.mjs` |
 | A live check | `scripts/live-checks/` | One per change, see below |
 | The performance table | `perf/runs/*.json` | `scripts/perf-table.mjs` writes the table from these |
 | CI | `.github/workflows/ci.yml` | Five required jobs |

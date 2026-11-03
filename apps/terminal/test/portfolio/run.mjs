@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -115,8 +116,7 @@ const toSegments = (page) => page.evaluate(() => { const s = document.querySelec
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 let n = 0;
 try {
   for (const w of WIDTHS) {
@@ -244,4 +244,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} shots, the bars and the taps`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots (${STATES.length} states over 390/1440), BAR-10 per shot, the S10 and S14 row bars and the taps${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+console.log(`PASS ${n} shots (${STATES.length} states over 390/1440), BAR-10 per shot, the S10 and S14 row bars and the taps${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

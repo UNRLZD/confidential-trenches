@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { browserLabel, launchBrowser } from "../../../scripts/browsers.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const SRC = process.env.STORE_SRC ?? join(PKG, "src/store/index.ts");
@@ -51,7 +51,7 @@ const check = (name, pass, detail) => {
   console.log(`${pass ? "ok " : "BAD"} ${name}: ${detail}`);
 };
 
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 try {
   // 1. kill the tab between "counter reserved" and "account used"
   {
@@ -130,9 +130,9 @@ try {
     await ctx.close();
   }
 } finally {
-  console.log(`Chromium ${browser.version()}, store ${SRC === join(PKG, "src/store/index.ts") ? "src/store/index.ts" : SRC}`);
+  console.log(`${browserLabel(browser)}, store ${SRC === join(PKG, "src/store/index.ts") ? "src/store/index.ts" : SRC}`);
   await browser.close();
 }
 const ok = results.length === 4 && results.every(Boolean);
-console.log(`store.e2e: ${ok ? "PASS" : "FAIL"}`);
+console.log(`store.e2e: ${ok ? "PASS" : "FAIL"} (${browserLabel(browser)})`);
 process.exit(ok ? 0 : 1);

@@ -184,19 +184,46 @@ jobs:
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
+      # Every browser the checks start is the installed Google Chrome with its sandbox on (scripts/browsers.mjs, held by
+      # scripts/ci/browser-launch.mjs), never Playwright's bundled Chromium, which is pinned to the Playwright release and
+      # runs with the sandbox off unless told otherwise. The runner image's own Chrome is updated only when the image is
+      # (20261026 holds 156.0.8078.47; actions/runner-images Ubuntu2404-Readme.md, read 2026-11-03 14:24Z), so this step
+      # puts Google's current stable on it from Google's apt repository: the repository's key must be the one with
+      # fingerprint EB4C 1BFD 4F04 2F6D DDCC EC91 7721 F63B D38B 4796 (the key at dl.google.com/linux/linux_signing_key.pub,
+      # fingerprint read with gpg 2026-11-03 14:31Z; it verifies the repository's InRelease), and apt checks every package against it. apt reads only this one source (Dir::Etc::sourcelist),
+      # so the image's own Google entry cannot clash with it. The .deb's postinst loads its AppArmor profile
+      # (opt/google/chrome/apparmor.d/google-chrome-stable, "userns,") when the machine has AppArmor 4, which is what lets
+      # Chrome's sandbox make a user namespace on Ubuntu 24.04. The floor is the Chrome release that fixed the four
+      # renderer CVEs listed 2026-11-02 (156.0.8078.73). The last line runs scripts/browsers.mjs, which starts that Chrome and
+      # reads, for each renderer, its own command line and the kernel's seccomp mode (2 = the sandbox's filter is on),
+      # plus the AppArmor profile Chrome runs under: the step fails when a renderer has no filter.
+      - name: Google Chrome stable, and its sandbox comes up
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/google-signing-key.pub" https://dl.google.com/linux/linux_signing_key.pub
+          fpr="$(gpg --show-keys --with-colons "$RUNNER_TEMP/google-signing-key.pub" | awk -F: '$1 == "fpr" { print $10; exit }')"
+          test "$fpr" = EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796 || { echo "Google's signing key is $fpr"; exit 1; }
+          gpg --dearmor --yes -o "$RUNNER_TEMP/google-chrome.gpg" "$RUNNER_TEMP/google-signing-key.pub"
+          sudo install -m 0644 "$RUNNER_TEMP/google-chrome.gpg" /usr/share/keyrings/google-chrome-ci.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-ci.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > "$RUNNER_TEMP/google-chrome.list"
+          APT=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/google-chrome.list" -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo apt-get "${APT[@]}" update
+          sudo apt-get "${APT[@]}" install -y google-chrome-stable
+          version="$(dpkg-query -W -f='${Version}' google-chrome-stable)"
+          echo "google-chrome-stable $version"
+          dpkg --compare-versions "$version" ge 156.0.8078.73 || { echo "older than 156.0.8078.73, the release that fixed the listed renderer CVEs"; exit 1; }
+          echo "kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
+          ls -l /etc/apparmor.d/google-chrome-stable /etc/apparmor.d/chrome 2>&1 || true
+          node scripts/browsers.mjs
       # The terminal runs inside SIGN_HOST's shell: a top-level visit to APP_HOST lands on SIGN_HOST with the path kept,
       # and the framed terminal reads the shell's state with no hop (the live check app-in-shell in --harness mode, in
       # Chromium). Left to hand runs, a stale stand-in once failed on main unseen for hours. The same step runs BAR-10
       # (no text under 11 px, no phone tap box under 44 px) with the deployed app-shell check's own rules on the build,
       # inside the shell, every routed path (test/bar10/run.mjs).
       - name: the terminal's browser runs (in-shell, and BAR-10 on every routed path)
-        run: |
-          pnpm --filter terminal exec playwright install --with-deps chromium
-          pnpm --filter terminal run test:e2e
+        run: pnpm --filter terminal run test:e2e
       # The kit's one call in headless Chromium: the real prover worker under SIGN_HOST's own headers proves the fixture's
       # leaves, snarkjs accepts each proof, and a changed leaf or worker answer is refused (vault-prover-e2e; card
-      # signpage-prover-host). The Chromium is the one the step above installs: the kit and the terminal pin the same
-      # Playwright.
+      # signpage-prover-host). The browser is the Chrome the step above installs.
       - name: the prover in Chromium (KIT_PROVER_E2E)
         run: KIT_PROVER_E2E=1 node --test packages/kit/test/prove-e2e.test.ts
       - name: the vault's scripts' own tests

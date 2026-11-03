@@ -38,9 +38,9 @@ import "../net-window.mjs";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { browserLabel, launchBrowser } from "../browsers.mjs";
 
 const KEY = "signpage-signin-kinds";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -167,11 +167,8 @@ export function judge(rec) {
 }
 
 // ------------------------------------------------------------------------------------------------ the probe
-const playwright = () => createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
-
 async function launch({ harness, site }) {
-  const { chromium } = playwright();
-  if (!harness) return { browser: await chromium.launch(), close: async () => {} };
+  if (!harness) return { browser: await launchBrowser("chromium"), close: async () => {} };
   const { makeCert } = await import("../../apps/terminal/test/harness/certs.mjs");
   const { startServer } = await import("../../apps/terminal/test/harness/server.mjs");
   const { buildSignpage } = await import("../../apps/terminal/test/harness/harness.mjs");
@@ -182,7 +179,7 @@ async function launch({ harness, site }) {
   const cert = makeCert([SIGN_HOST, APP_HOST]);
   const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root }, [APP_HOST]: { root: app, spa: true } } });
   const map = [SIGN_HOST, APP_HOST].map((h) => `MAP ${h} 127.0.0.1:${server.port}`).join(", ");
-  const browser = await chromium.launch({ args: [`--host-resolver-rules=${map}, MAP * ~NOTFOUND`, `--ignore-certificate-errors-spki-list=${cert.spki}`] });
+  const browser = await launchBrowser("chromium", { args: [`--host-resolver-rules=${map}, MAP * ~NOTFOUND`, `--ignore-certificate-errors-spki-list=${cert.spki}`] });
   return {
     browser,
     close: async () => {
@@ -359,6 +356,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
   const errors = [];
   const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, noPrf: {}, wallet: {}, twoTabs: {}, broken: {}, errors };
   const h = await launch({ harness, site });
+  record.browser = browserLabel(h.browser);
   try {
     // prf run
     {
@@ -495,7 +493,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const { pass, lines } = judge(record);
     for (const l of lines) console.log(l);
     for (const e of record.errors) console.log(`    ${e}`);
-    console.log(`${KEY}: ${pass ? "PASS" : "FAIL"}`);
+    console.log(`${KEY}: ${pass ? "PASS" : "FAIL"} (${record.browser})`);
     process.exit(pass ? 0 : 1);
   } catch (e) {
     console.error(`${KEY}: error: ${e?.message ?? e}`);
