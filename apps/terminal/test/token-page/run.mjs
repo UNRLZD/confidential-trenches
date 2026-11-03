@@ -160,6 +160,23 @@ try {
         check((await f.locator(".tkp-bottom").count()) === 0, `${tag}: the bottom bar shows with no token`);
       }
       if (drawn && s.state === "error") {
+        if (phone) {
+          // BAR-10 (app.md:1108), measured as app-shell.mjs measures it: the box, or an absolute ::before/::after hit box
+          const tap = await f.$eval(".tkp-retry", (b) => {
+            const r = b.getBoundingClientRect();
+            let w = r.width;
+            let h = r.height;
+            for (const ps of ["::before", "::after"]) {
+              const cs = getComputedStyle(b, ps);
+              if (cs.content && cs.content !== "none" && cs.position === "absolute") {
+                w = Math.max(w, parseFloat(cs.width) || 0);
+                h = Math.max(h, parseFloat(cs.height) || 0);
+              }
+            }
+            return { w, h };
+          });
+          check(tap.w >= 43.5 && tap.h >= 43.5, `${tag}: the Retry tap target is ${Math.round(tap.w)}x${Math.round(tap.h)}, under 44 x 44`);
+        }
         const before = calls.lists;
         await f.locator(".tkp-retry").click();
         const back = await f.locator(sel).waitFor({ timeout: 5_000 }).then(() => true, () => false);

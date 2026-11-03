@@ -21,7 +21,9 @@
 
 /* the error and empty labels */
 .tkp-msg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-2); font-size: 13px; }
-.tkp-retry { height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-1); font: 500 13px var(--font-ui); cursor: pointer; }
+.tkp-retry { position: relative; height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-1); font: 500 13px var(--font-ui); cursor: pointer; }
+/* BAR-10: the tap box is at least 44 x 44, the button stays as drawn (an invisible hit box, as Discover's Retry) */
+.tkp-retry::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 
 /* desktop: the main column (header over chart) beside the trade box's place */
 .tkp-desk { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 8px; padding: 0 8px 8px; }
