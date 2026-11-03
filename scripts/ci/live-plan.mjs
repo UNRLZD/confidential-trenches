@@ -3,6 +3,7 @@
 //   app     apps/terminal/scripts/deploy.mjs      LIVE_CHECKS and liveRuns (the network a testnet build names)
 //   sign    packages/signpage/scripts/deploy.mjs  LIVE_CHECKS and liveRuns
 //   helper  scripts/ci/helper-live-checks.mjs     LIVE_CHECKS, liveRuns and SKIPPED (the helper deploys from its server)
+// each read by running the file with --live-runs, which prints its list as JSON (listOf).
 // One matrix entry for each run of each check, so each is its own parallel job. A check the runner cannot run (SKIPPED:
 // it needs a secret or an account the release has not named) is listed with its reason, run nowhere and never counted a
 // pass. An entry says whether its job needs Chrome (the check reaches scripts/browsers.mjs through its imports) and
@@ -11,9 +12,10 @@
 // Prints the plan as JSON; under GitHub Actions it also sets the step outputs matrix, count and skipped and writes the
 // run's summary. --verify reads what the host reports of its commit and fails when it is not the commit asked for.
 import "../net-window.mjs";
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const HOSTS = {
@@ -46,6 +48,24 @@ export function enginesFor(args) {
 }
 
 /**
+ * What a host's list says, read by running the list's own file: { checks, skipped, runs: { key: [run] } }. A file outside
+ * packages/ may not import one inside it (check:imports), and a deploy script stays where it is, so each file prints its
+ * list with `--live-runs` and the plan reads that, whatever the file's folder.
+ */
+export function listOf(host, root, { commit, network }) {
+  const r = spawnSync(process.execPath, [path.join(root, HOSTS[host]), "--live-runs", "--network", network, "--commit", commit], { cwd: root, encoding: "utf8", maxBuffer: 1 << 20 });
+  if (r.status !== 0) throw new Error(`${HOSTS[host]} --live-runs: ${(r.stderr || r.error?.message || `exit ${r.status}`).trim().split("\n").at(-1)}`);
+  let list;
+  try {
+    list = JSON.parse(r.stdout);
+  } catch {
+    throw new Error(`${HOSTS[host]} --live-runs printed no JSON list`);
+  }
+  if (!Array.isArray(list.checks) || !list.checks.length) throw new Error(`${HOSTS[host]} lists no live check`);
+  return { checks: list.checks, skipped: list.skipped ?? {}, runs: list.runs ?? {} };
+}
+
+/**
  * The plan for `host` at `commit`: { host, commit, include: [{ id, key, args, name, chrome, engines }], skipped: [{ key,
  * reason, detail }] }. Throws on a check that has no file, or a name or run that is not what a job can take.
  */
@@ -53,17 +73,16 @@ export async function planFor(host, { commit, network = "mainnet", root = ROOT }
   if (!HOSTS[host]) throw new Error(`host must be one of ${Object.keys(HOSTS).join(", ")}, not ${host}`);
   if (!SHA.test(commit ?? "")) throw new Error(`commit must be a full 40-hex sha, not ${commit}`);
   if (!["mainnet", "testnet"].includes(network)) throw new Error(`network must be mainnet or testnet, not ${network}`);
-  const mod = await import(pathToFileURL(path.join(root, HOSTS[host])).href);
-  if (!Array.isArray(mod.LIVE_CHECKS) || !mod.LIVE_CHECKS.length) throw new Error(`${HOSTS[host]} lists no live check`);
+  const mod = listOf(host, root, { commit, network });
   const include = [];
   const skipped = [];
-  for (const key of mod.LIVE_CHECKS) {
+  for (const key of mod.checks) {
     if (!KEY.test(key) || !existsSync(path.join(root, "scripts/live-checks", `${key}.mjs`))) throw new Error(`${HOSTS[host]} lists ${key}, which is no file in scripts/live-checks`);
-    if (mod.SKIPPED?.[key]) {
-      skipped.push({ key, ...mod.SKIPPED[key] });
+    if (mod.skipped[key]) {
+      skipped.push({ key, ...mod.skipped[key] });
       continue;
     }
-    const runs = mod.liveRuns(key, { network, commit });
+    const runs = mod.runs[key] ?? [];
     if (!runs.length) throw new Error(`${HOSTS[host]} gives ${key} no run`);
     runs.forEach((run, i) => {
       const prefix = `scripts/live-checks/${key}.mjs`;

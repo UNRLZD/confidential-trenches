@@ -94,7 +94,8 @@ function serve(dir) {
     const file = path.join(dir, p === "/" ? "index.html" : p);
     if (!file.startsWith(dir)) return res.writeHead(403).end();
     try {
-      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(readFileSync(file));
+      const body = readFileSync(file); // read before the headers go: a missing file is a 404, never a second write
+      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(body);
     } catch {
       res.writeHead(404).end();
     }

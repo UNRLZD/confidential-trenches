@@ -31,6 +31,9 @@ export const liveRuns = (k, { network = "mainnet" } = {}) => [liveRun(k, network
 /** The commands a deploy prints for the live run on GitHub's runners (card ci-live-runners); a testnet build says so. */
 export const liveCommands = (sha, network = "mainnet") => [`next: gh workflow run live.yml -f host=app -f commit=${sha}${network === "mainnet" ? "" : ` -f network=${network}`}`, "then: gh run watch --exit-status"];
 
+/** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs [--network n] [--commit sha]`). */
+export const liveList = (opts = {}) => ({ checks: LIVE_CHECKS, skipped: {}, runs: Object.fromEntries(LIVE_CHECKS.map((k) => [k, liveRuns(k, opts)])) });
+
 export function deploy(argv, env = process.env, run = spawnSync) {
   const dryRun = argv.includes("--dry-run");
   const rest = argv.filter((a) => a !== "--dry-run");
@@ -56,6 +59,11 @@ export function deploy(argv, env = process.env, run = spawnSync) {
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] === "--live-runs") {
+    const a = process.argv.slice(3);
+    console.log(JSON.stringify(liveList({ network: a.includes("--network") ? a[a.indexOf("--network") + 1] : "mainnet" })));
+    process.exit(0);
+  }
   const r = deploy(process.argv.slice(2));
   for (const l of r.out ?? []) console.log(`deploy: ${l}`);
   for (const l of r.err ?? []) console.error(`deploy: ${l}`);

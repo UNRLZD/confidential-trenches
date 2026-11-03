@@ -40,6 +40,8 @@ export const LIVE_ARGS = {
 export const liveRuns = (k) => [LIVE_ARGS[k] ?? ""].flat().map((a) => `scripts/live-checks/${k}.mjs${a ? ` ${a}` : ""}`);
 /** The command a deploy prints for the live run on GitHub's runners (card ci-live-runners). */
 export const liveCommands = (sha) => [`next: gh workflow run live.yml -f host=sign -f commit=${sha}`, "then: gh run watch --exit-status"];
+/** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs`). */
+export const liveList = () => ({ checks: LIVE_CHECKS, skipped: {}, runs: Object.fromEntries(LIVE_CHECKS.map((k) => [k, liveRuns(k)])) });
 export const PROJECT = "confidential-trenches-sign";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves SIGN_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
@@ -173,6 +175,10 @@ export function deploy(argv, env = process.env, run = spawnSync, pkg = PKG) {
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] === "--live-runs") {
+    console.log(JSON.stringify(liveList()));
+    process.exit(0);
+  }
   const r = deploy(process.argv.slice(2));
   for (const l of r.out ?? []) console.log(`deploy: ${l}`);
   for (const l of r.err ?? []) console.error(`deploy: ${l}`);

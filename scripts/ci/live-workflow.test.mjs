@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
-import { HOSTS, ROOT, commitProblem, enginesFor, planFor, reachesLauncher } from "./live-plan.mjs";
+import { HOSTS, ROOT, commitProblem, enginesFor, listOf, planFor, reachesLauncher } from "./live-plan.mjs";
 
 const LIVE = readFileSync(path.join(ROOT, ".github/workflows/live.yml"), "utf8");
 const CHROME = readFileSync(path.join(ROOT, ".github/actions/chrome/action.yml"), "utf8");
@@ -65,6 +65,9 @@ test("planted: a step that installs Playwright's own Chromium is refused", () =>
   assert.ok(has(liveProblems(LIVE.replace("--with-deps $ENGINES", "--with-deps chromium firefox")), /installs Playwright's own Chromium/));
 });
 
+// a list file that prints `checks` with --live-runs, as the real ones do
+const listFile = (checks) => `console.log(JSON.stringify({ checks: ${JSON.stringify(checks)}, runs: Object.fromEntries(${JSON.stringify(checks)}.map((k) => [k, ["scripts/live-checks/" + k + ".mjs"]])) }));\n`;
+
 // a copy of the repository files the plan reads, to plant a failure in
 function fixture(edit) {
   const root = mkdtempSync(path.join(tmpdir(), "live-plan-"));
@@ -74,13 +77,13 @@ function fixture(edit) {
   }
   mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
   for (const k of ["helper-host-health", "helper-rpc-proxy", "market-data-evm"]) for (const e of [".mjs", ".test.mjs", ".answers.json"]) cpSync(path.join(ROOT, "scripts/live-checks", k + e), path.join(root, "scripts/live-checks", k + e));
-  writeFileSync(path.join(root, "scripts/ci/helper-live-checks.mjs"), `export const LIVE_CHECKS = ["helper-host-health", "helper-rpc-proxy", "market-data-evm"]; export const SKIPPED = {}; export const liveRuns = (k) => ["scripts/live-checks/" + k + ".mjs"];\n`);
+  writeFileSync(path.join(root, "scripts/ci/helper-live-checks.mjs"), listFile(["helper-host-health", "helper-rpc-proxy", "market-data-evm"]));
   edit(root);
   return root;
 }
 
 test("planted: a deploy that lists a check with no file, a check without its test, a check that reads the environment", async () => {
-  const gone = fixture((r) => writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), `export const LIVE_CHECKS = ["no-such-check"]; export const liveRuns = (k) => ["scripts/live-checks/" + k + ".mjs"];\n`));
+  const gone = fixture((r) => writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), listFile(["no-such-check"])));
   const noTest = fixture((r) => rmSync(path.join(r, "scripts/live-checks/helper-rpc-proxy.test.mjs")));
   const env = fixture((r) => writeFileSync(path.join(r, "scripts/live-checks/helper-rpc-proxy.mjs"), "const k = process.env.ONECLICK_JWT;\n"));
   try {
@@ -94,15 +97,13 @@ test("planted: a deploy that lists a check with no file, a check without its tes
 });
 
 test("the plan reads each deploy's own list: every check it prints runs, as its own job, or is listed skipped", async () => {
-  const app = await import("../../apps/terminal/scripts/deploy.mjs");
-  const sign = await import("../../packages/signpage/scripts/deploy.mjs");
-  const helper = await import("../../scripts/ci/helper-live-checks.mjs");
-  for (const [host, mod] of [["app", app], ["sign", sign], ["helper", helper]]) {
+  for (const host of Object.keys(HOSTS)) {
+    const list = listOf(host, ROOT, { commit: COMMIT, network: "mainnet" });
     const plan = await planFor(host, { commit: COMMIT });
-    const skipped = Object.keys(mod.SKIPPED ?? {});
-    assert.deepEqual([...new Set(plan.include.map((e) => e.key))].sort(), mod.LIVE_CHECKS.filter((k) => !skipped.includes(k)).sort(), host);
+    const skipped = Object.keys(list.skipped);
+    assert.deepEqual([...new Set(plan.include.map((e) => e.key))].sort(), list.checks.filter((k) => !skipped.includes(k)).sort(), host);
     assert.deepEqual(plan.skipped.map((s) => s.key).sort(), skipped.sort(), host);
-    assert.deepEqual(plan.include.map((e) => `scripts/live-checks/${e.key}.mjs${e.args ? ` ${e.args}` : ""}`).sort(), mod.LIVE_CHECKS.filter((k) => !skipped.includes(k)).flatMap((k) => mod.liveRuns(k, { commit: COMMIT })).sort(), host);
+    assert.deepEqual(plan.include.map((e) => `scripts/live-checks/${e.key}.mjs${e.args ? ` ${e.args}` : ""}`).sort(), list.checks.filter((k) => !skipped.includes(k)).flatMap((k) => list.runs[k]).sort(), host);
     assert.equal(new Set(plan.include.map((e) => e.id)).size, plan.include.length, `${host}: ids are unique`);
   }
 });
@@ -112,13 +113,13 @@ test("the signing page's ten checks (signpage-shell runs four ways) and every ap
   assert.equal(new Set(sign.include.map((e) => e.key)).size, 10);
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
-  assert.equal(app.include.length, (await import("../../apps/terminal/scripts/deploy.mjs")).LIVE_CHECKS.length, "each app check is one job");
+  assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
   assert.ok(app.include.some((e) => e.key === "app-verify-mount" && e.args === "--network mainnet"));
   assert.ok((await planFor("app", { commit: COMMIT, network: "testnet" })).include.some((e) => e.args === "--network testnet"));
 });
 
 test("the helper's skipped checks are the ones the runner cannot run, with the reason the check itself gives", async () => {
-  const { SKIPPED } = await import("../../scripts/ci/helper-live-checks.mjs");
+  const { SKIPPED } = await import("./helper-live-checks.mjs");
   const proxy = await import("../live-checks/helper-proxy.mjs");
   const fee = await import("../live-checks/relayer-withdraw-fee.mjs");
   assert.equal(SKIPPED["helper-proxy"].reason, "needs-secret");

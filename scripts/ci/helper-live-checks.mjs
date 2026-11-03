@@ -34,3 +34,11 @@ export const SKIPPED = {
 };
 
 export const liveRuns = (k, { commit = "{commit}" } = {}) => [`scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k].replaceAll("{commit}", commit)}` : ""}`];
+
+/** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs --commit <sha>`). */
+export const liveList = (opts = {}) => ({ checks: LIVE_CHECKS, skipped: SKIPPED, runs: Object.fromEntries(LIVE_CHECKS.map((k) => [k, liveRuns(k, opts)])) });
+
+if (process.argv[2] === "--live-runs" && import.meta.main) {
+  const a = process.argv.slice(3);
+  console.log(JSON.stringify(liveList({ commit: a.includes("--commit") ? a[a.indexOf("--commit") + 1] : undefined })));
+}
