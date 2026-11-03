@@ -11,7 +11,13 @@
 // /assets/zk/<sha256>.<ext> (vault.md V2's end state) with copyServed below, which refuses any whose size or sha256
 // is not its pin, and the licence texts beside them to /licenses/ (the worker's header names /licenses/GPL-3.0.txt).
 //   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html, public/prover-worker.js and public/prover-thread.js
-//   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the committed files differ from a fresh build
+//   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the committed files differ from a fresh build,
+//     or the fresh bundle carries a test path (bundleModuleProblems)
+// No test path marks a wallet as armed (card signpage-pool-kinds, carried from signpage-solana-trade): only a test writes an
+// arm record into a signing state, in its own fake store. The release build holds that: the bundle's module list has no
+// test file, test helper or test-only package, and no source module in it writes a wallet into READY (an arm record is
+// READY only from the device's own arming withdrawal, which no bundled module makes today; settleArm and moveArmRecord
+// only move a READY record on).
 import { createHash } from "node:crypto";
 import { constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -90,7 +96,7 @@ export async function bundle(pkg = PKG) {
   const { build } = await import("vite");
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-app-"));
   try {
-    await build({
+    const res = await build({
       configFile: false,
       root: pkg,
       logLevel: "warn",
@@ -109,10 +115,37 @@ export async function bundle(pkg = PKG) {
       },
     });
     const js = readFileSync(join(out, "app.js"));
-    return { js, html: page(sha384(js)), worker: proverWorkerSource(), thread: proverThreadSource() };
+    const chunk = [res].flat().flatMap((r) => r.output).find((o) => o.type === "chunk");
+    const modules = chunk ? [...chunk.moduleIds] : [];
+    return { js, html: page(sha384(js)), worker: proverWorkerSource(), thread: proverThreadSource(), modules };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
+}
+
+/** A test file, a test helper, or Node's own test runner, by module id. */
+const TEST_PATH = /(^|[\\/])(test|tests|__tests__|fixtures)[\\/]|\.(test|spec|e2e)\.[cm]?[jt]sx?$|^node:test$/;
+/** The package's dev-only packages (its devDependencies: the fake store, the browser driver, the bundler...): none of
+ *  them may be in the bundle, by module id. */
+const DEV_ONLY = Object.keys(JSON.parse(readFileSync(join(dirname(dirname(fileURLToPath(import.meta.url))), "package.json"), "utf8")).devDependencies ?? {});
+const devOnly = (id) => DEV_ONLY.some((name) => id.split(/[\\/]/).join("/").includes(`/node_modules/${name}/`));
+/** A source line that puts a wallet into READY: an arm record made armed (`state: "READY"`, `to: "READY"`). */
+const ARMS = /\b(state|to)\s*:\s*["']READY["']/;
+
+/**
+ * Problems with a bundle's module list: a module on a test path, or a source module (outside node_modules) whose text
+ * puts a wallet into READY. `read` gives a module's source text (the file on disk for a real build).
+ */
+export function bundleModuleProblems(modules, read = (id) => readFileSync(id.split("?")[0], "utf8")) {
+  const p = [];
+  if (!modules.length) p.push("the bundle's module list is empty: the build gave none to check");
+  for (const id of modules) {
+    if (TEST_PATH.test(id) || devOnly(id)) p.push(`the bundle carries a test path: ${id}`);
+    else if (!/[\\/]node_modules[\\/]/.test(id) && !id.startsWith("\0") && /\.[cm]?[jt]sx?$/.test(id.split("?")[0]) && ARMS.test(read(id))) {
+      p.push(`the bundle carries a module that puts a wallet into READY: ${id}`);
+    }
+  }
+  return p;
 }
 
 /** Problems with the committed files (in `committed`, the package by default) against a fresh build (empty = they match). */
@@ -135,6 +168,7 @@ export async function check(pkg = PKG, committed = pkg) {
     thread = readFileSync(join(committed, THREAD));
   } catch {}
   if (!thread || !thread.equals(fresh.thread)) p.push(`${THREAD} is not the kit's prover thread build: run node packages/signpage/scripts/build-app.mjs`);
+  p.push(...bundleModuleProblems(fresh.modules));
   return p;
 }
 

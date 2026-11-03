@@ -280,6 +280,22 @@ test("reload: answered first, then the top window reloads", async () => {
   assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: bad.id, ok: false, error: { code: "not_allowed" } });
 });
 
+test("reload waits for a running trade to settle (the review's reload finding): answered first, reloaded only after", async () => {
+  const d = fakeDom();
+  let settle!: () => void;
+  const running = new Promise<void>((r) => (settle = r));
+  mountShell(d.doc, { state: () => signedOutState(), settle: () => running });
+  const win = d.frames()[0]!.contentWindow;
+  const m = { v: 1, id: crypto.randomUUID(), type: "reload" };
+  d.send(m, win);
+  await flush();
+  assert.deepEqual(d.posted.at(-1)!.msg, { v: 1, id: m.id, ok: true, result: {} });
+  assert.equal(d.calls.reload, 0, "no reload while the trade runs");
+  settle();
+  await flush();
+  assert.equal(d.calls.reload, 1);
+});
+
 test("a kind the host answers (signin.open): its answer goes to the frame before its then() opens the layer", async () => {
   const d = fakeDom();
   let sh: ReturnType<typeof mountShell> | null = null;

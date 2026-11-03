@@ -259,3 +259,25 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   assert.ok(third.body?.includes(U(rec3.index)));
   other.close();
 });
+
+test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so each is refused not_allowed and nothing is fetched", async () => {
+  for (const data of [
+    { type: "pool.deposit", chain: "solana", amount: "1" },
+    { type: "pool.buy", chain: "base", token: "0xF111111111111111111111111111111111111111", amount: "1", slippage_bps: 100 },
+    { type: "pool.sell", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "1", slippage_bps: 100 },
+    { type: "pool.withdraw", chain: "robinhood" },
+  ]) {
+    const id = crypto.randomUUID();
+    const from = asked.length;
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
+    win.dispatchEvent(e);
+    let a: { ok?: boolean; error?: { code: string } } | undefined;
+    for (let t = 0; t < 500 && !a; t++) {
+      a = posted.find((m) => m.id === id) as typeof a;
+      if (!a) await new Promise((ok) => setTimeout(ok, 10));
+    }
+    assert.deepEqual([data.type, a?.ok, a?.error?.code], [data.type, false, "not_allowed"]);
+    assert.equal(asked.length, from, `${data.type} fetched nothing`);
+  }
+});
