@@ -88,8 +88,9 @@ const notes = Array.from({ length: PAGE + 1 }, (_, i) => {
 const zk = (f) => join(kit, "zk", f);
 const vkey = JSON.parse(readFileSync(zk("withdraw.vkey"), "utf8"));
 
-/** A proof spending note `n` for `withdrawn`, against the trees of `stateLeaves` and `labelLeaves`; and its change. */
-async function spend(name, n, withdrawn, stateLeaves, labelLeaves) {
+/** A proof spending note `n` for `withdrawn`, against the trees of `stateLeaves` and `labelLeaves`, landing as release
+ * `number` (M376); and its change. */
+async function spend(name, n, withdrawn, stateLeaves, labelLeaves, number) {
   const note = notes[n];
   const salt = keccak_256(enc("pool-sol-core/salt/" + name)).slice(0, 16);
   const context = fieldOf(PROGRAM, pool, W, FEE_PAYER, le(RELAY_FEE_CAP, 8), le(TIP_CAP, 8), le(DEADLINE_MS, 8), salt, be32(scope));
@@ -134,8 +135,8 @@ async function spend(name, n, withdrawn, stateLeaves, labelLeaves) {
       new_commitment: b(publicSignals[0]),
       nullifier_hash: b(publicSignals[1]),
       withdrawn: String(withdrawn),
-      // the spent mark's 8 bytes after this release (M355 (3)): withdrawnValue u64 LE
-      spent_mark: hex(le(withdrawn, 8)),
+      // the spent mark's 12 bytes after this release (M355 (3), M376): withdrawnValue u64 LE ‖ the release's number u32 LE
+      spent_mark: hex(cat(le(withdrawn, 8), le(number, 4))),
       state_root_index: stateLeaves.length - 1,
       state_depth: sp.depth,
       label_root_index: labelLeaves.length - 1,
@@ -150,10 +151,10 @@ async function spend(name, n, withdrawn, stateLeaves, labelLeaves) {
 const firstPage = notes.slice(0, PAGE);
 const state0 = firstPage.map((x) => x.commitment);
 const labels0 = firstPage.map((x) => x.label);
-const one = await spend("boundary_change", 0, 15_000_000n, state0, labels0);
+const one = await spend("boundary_change", 0, 15_000_000n, state0, labels0, 0);
 const state1 = [...state0, one.change, notes[PAGE].commitment];
 const labels1 = [...labels0, notes[PAGE].label];
-const two = await spend("boundary_roots", PAGE, 12_000_000n, state1, labels1);
+const two = await spend("boundary_roots", PAGE, 12_000_000n, state1, labels1, 1);
 const rootOf = (leaves) => hex(be32(new VaultTree(leaves).root));
 
 const out = {

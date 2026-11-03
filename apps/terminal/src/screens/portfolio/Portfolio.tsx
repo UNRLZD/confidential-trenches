@@ -5,8 +5,8 @@ import { Avatar } from "../market/Avatar.tsx";
 import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
 import { ExitIc, Ic } from "./icons.tsx";
-import { activity, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, stats, units, usd } from "./model.ts";
-import type { ClosedRow, Range, Row, Stats, Totals } from "./model.ts";
+import { activity, amount, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, stats, units, usd } from "./model.ts";
+import type { ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals } from "./model.ts";
 import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
@@ -87,7 +87,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
     <div className="pf" data-screen="portfolio" data-state={pf.view} data-states={stateList} data-offline={pf.offline || undefined}>
       <div className="pfd">
         <div className="pfh">
-          <Equity src={src} t={pf.totals} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} />
+          <Equity src={src} t={pf.totals} pools={pf.pools} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} />
           <Calendar closed={closed} now={now} loading={loading} />
           <HowYouTrade st={st} fees={src.data.fees} loading={loading} />
         </div>
@@ -150,7 +150,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
       </div>
 
       <div className="pfm">
-        <PhoneTop src={src} t={pf.totals} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} />
+        <PhoneTop src={src} t={pf.totals} pools={pf.pools} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} />
         <div className="sticky">
           <div className="msegs" role="tablist">
             <button type="button" role="tab" className={`t ${ui.pane === "positions" ? "on" : ""}`} data-control="seg-positions" onClick={() => setUi({ pane: "positions" })}><W id="positions" />{pf.rows.length > 0 && <span className="n">{pf.rows.length}</span>}</button>
@@ -181,6 +181,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
 interface HeadProps {
   src: PortfolioSource;
   t: Totals | null;
+  pools: Pools;
   loading: boolean;
   offline: boolean;
   rows: Row[];
@@ -189,7 +190,7 @@ interface HeadProps {
   now: number;
 }
 
-function Equity({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps) {
+function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
   const change = t && pts.length ? t.total - pts[0]![1] : null;
   const v = (c: bigint | null, plus = true): ReactNode => (loading ? <Sk w={80} h={16} /> : c === null || !t ? DASH : <span className={sgn(c)}>{usd(c, plus)}</span>);
@@ -213,6 +214,7 @@ function Equity({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps) {
         <div className="eqbrk">
           <div className="eqh"><W id="whereItIs" /></div>
           <Where t={t} loading={loading} />
+          <PoolRows p={pools} />
         </div>
         <div className="eqch">
           <div className="ctl">
@@ -260,6 +262,44 @@ function Where({ t, loading, phone }: { t: Totals | null; loading: boolean; phon
         <div className="pvvr"><span className="pvv num">{usd(tot)}</span></div>
         <Strip lit={tot > 0n ? 40 : 0} col="var(--acc)" />
       </div>
+    </div>
+  );
+}
+
+// Chain names are names, drawn as data.
+const CHAIN_NAME = { solana: "Solana", base: "Base", robinhood: "Robinhood", near: "NEAR" } as const;
+
+/** Each chain's pool (card balances-per-chain, v2 A1), in its own asset: the private balance from the device's own
+ *  notes ("12.5 SOL"), the part ready to buy (a proof made) and the rest still being proved, in the same unit. No dollar
+ *  figure: a SOL or ETH pool has none until a price read exists. No proof queue running: Ready and Pending are dashes,
+ *  never 0. data-pools names the view, each row its chain, asset and base units, for the checks. */
+function PoolRows({ p, phone }: { p: Pools; phone?: boolean }) {
+  const cols = p.view === "rows" || p.view === "unread" || p.view === "loading";
+  const amt = (r: PoolRow, c: bigint | null, cls = ""): ReactNode => (c === null ? DASH : <span className={cls}>{amount(c, r.decimals)}</span>);
+  return (
+    <div className={`pools${phone ? " ph" : ""}`} data-pools={p.view}>
+      <span className="plk"><W id="privateBalance" /></span>
+      {cols ? (
+        <><span /><span className="plc"><W id="balance" /></span><span className="plc"><W id="ready" /></span><span className="plc"><W id="pending" /></span></>
+      ) : (
+        <span className="plst" data-pools-state={p.view}>{p.view === "offline" ? <W id="offline" /> : <W id="noBalance" />}</span>
+      )}
+      {p.view === "loading" &&
+        [0, 1].map((i) => (
+          <div className="plr" key={i}><Sk w={64} h={12} /><Sk w={56} h={12} /><Sk w={48} h={12} /><Sk w={48} h={12} /></div>
+        ))}
+      {p.view === "unread" && (
+        <div className="plr" data-pool="unread"><span className="t3">{"—"}</span><span className="num">{DASH}</span><span className="num">{DASH}</span><span className="num">{DASH}</span></div>
+      )}
+      {p.view === "rows" &&
+        p.rows.map((r) => (
+          <div className="plr" key={r.chain} data-pool={r.chain} data-asset={r.asset} data-balance={r.balance.toString()} data-ready={r.ready === null ? "none" : r.ready.toString()} data-pending={r.pending === null ? "none" : r.pending.toString()}>
+            <span className="ell">{CHAIN_NAME[r.chain]}</span>
+            <span className="num">{amount(r.balance, r.decimals)} <span className="t3">{r.asset}</span></span>
+            <span className="num">{amt(r, r.ready, r.ready ? "gain" : "")}</span>
+            <span className="num t2">{amt(r, r.pending)}</span>
+          </div>
+        ))}
     </div>
   );
 }
@@ -507,7 +547,7 @@ function Plate() {
 
 // ------------------------------------------------------------------------------------------------------------ phone
 
-function PhoneTop({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps) {
+function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
   const v = (c: bigint | null): ReactNode => (loading ? <Sk w={70} h={18} /> : c === null || !t ? "—" : <span className={sgn(c)}>{usd(c, true)}</span>);
   return (
@@ -533,6 +573,7 @@ function PhoneTop({ src, t, loading, offline, rows, ui, setUi, now }: HeadProps)
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>
         <Where t={t} loading={loading} phone />
+        <PoolRows p={pools} phone />
       </div>
     </div>
   );

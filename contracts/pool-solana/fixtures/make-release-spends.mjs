@@ -101,8 +101,9 @@ function contextOf(p, recipient, feePayer, salt) {
   return fieldOf(p.program, p.pool.address, recipient, feePayer, le(RELAY_FEE_CAP, 8), le(TIP_CAP, 8), le(DEADLINE_MS, 8), salt, be32(p.scope));
 }
 
-/** A proof spending note `n` of pool `p` for `withdrawn`, against the trees of `stateLeaves` and the first `labels`. */
-async function spend(name, p, n, withdrawn, stateLeaves, labels, recipient = W) {
+/** A proof spending note `n` of pool `p` for `withdrawn`, against the trees of `stateLeaves` and the first `labels`;
+ * `number` is the release's number when the tests land it (the count of releases before it in that pool, M376). */
+async function spend(name, p, n, withdrawn, stateLeaves, labels, number, recipient = W) {
   const note = p.notes[n];
   const salt = keccak_256(enc("pool-sol-core/salt/" + name)).slice(0, 16);
   const context = contextOf(p, recipient, FEE_PAYER, salt);
@@ -149,8 +150,8 @@ async function spend(name, p, n, withdrawn, stateLeaves, labels, recipient = W) 
     new_commitment: b(publicSignals[0]),
     nullifier_hash: b(publicSignals[1]),
     withdrawn: String(withdrawn),
-    // the spent mark's 8 bytes after this release (M355 (3)): withdrawnValue u64 LE
-    spent_mark: hex(le(withdrawn, 8)),
+    // the spent mark's 12 bytes after this release (M355 (3), M376): withdrawnValue u64 LE ‖ the release's number u32 LE
+    spent_mark: hex(cat(le(withdrawn, 8), le(number, 4))),
     state_root_index: stateLeaves.length - 1,
     state_depth: sp.depth,
     label_root_index: labels - 1,
@@ -161,13 +162,15 @@ async function spend(name, p, n, withdrawn, stateLeaves, labels, recipient = W) 
 }
 
 const six = main.notes.map((x) => x.commitment);
-const release = await spend("release", main, 0, 15_000_000n, six, 6);
+const release = await spend("release", main, 0, 15_000_000n, six, 6, 0);
 // against the roots of the first 4 deposits, while the pool has had 6 deposits and one change note
-const oldRoot = await spend("old_root", main, 3, 30_000_000n, six.slice(0, 4), 4);
+const oldRoot = await spend("old_root", main, 3, 30_000_000n, six.slice(0, 4), 4, 1);
 // a second proof of note 1's nullifier, with another amount
-const sameNullifier = await spend("same_nullifier", main, 0, 10_000_000n, six, 6);
+const sameNullifier = await spend("same_nullifier", main, 0, 10_000_000n, six, 6, 0);
 // a proof made against the other pool's trees: its roots are roots this pool never had
-const otherPool = await spend("other_pool", other, 1, 10_000_000n, other.notes.map((x) => x.commitment), 6);
+const otherPool = await spend("other_pool", other, 1, 10_000_000n, other.notes.map((x) => x.commitment), 6, 0);
+// note 3, the third release to land after "release" and "old_root" (M376: release numbers 0, 1, 2)
+const third = await spend("third", main, 2, 25_000_000n, six, 6, 2);
 
 const out = {
   notes: [
@@ -198,7 +201,7 @@ const out = {
   state_roots: six.map((_, i) => hex(be32(new VaultTree(six.slice(0, i + 1)).root))),
   label_roots: main.notes.map((_, i) => hex(be32(new VaultTree(main.notes.slice(0, i + 1).map((x) => x.label)).root))),
   other_pool: { pool: hex(other.pool.address), deposits: other.notes.map((x) => ({ value: String(x.value), precommitment: hex(be32(x.precommitment)) })) },
-  spends: [release, oldRoot, sameNullifier, otherPool],
+  spends: [release, oldRoot, sameNullifier, otherPool, third],
 };
 writeFileSync(join(here, "release-spends.json"), JSON.stringify(out, null, 2) + "\n");
 console.error("wrote release-spends.json");

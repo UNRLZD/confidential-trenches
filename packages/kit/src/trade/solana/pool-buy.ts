@@ -549,6 +549,13 @@ const randomIndex = (n: number): number => {
 const TOKEN_ACCOUNT_SIZE = 165;
 export const SOLANA_POOL_VOLUME_ACCOUNT_SIZE = { "pump-curve": 137, pumpswap: 137 } as const;
 
+/** A per-venue constant of `kind`: an own key only, so a kind outside the two venues names none, even when a polluted
+ *  page's Object.prototype has one (the review of evm-pool-sell-tx 8d8675d). */
+function perVenue<T>(table: Readonly<Record<SolanaPoolVenue, T>>, kind: unknown): T {
+  if (typeof kind !== "string" || !Object.hasOwn(table, kind)) throw new Error(`no such venue ${typeof kind === "string" ? kind.slice(0, 40) : typeof kind}`);
+  return table[kind as SolanaPoolVenue];
+}
+
 /**
  * What W's chunk must cover, in lamports, on today's rent (every account counted as made new, which only raises W's
  * balance when one already exists):
@@ -559,7 +566,7 @@ export const SOLANA_POOL_VOLUME_ACCOUNT_SIZE = { "pump-curve": 137, pumpswap: 13
  */
 export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "spend" | "tip">, rent: SolanaRent): { chunk: bigint; peak: bigint; left: bigint; problem: string | null } {
   const chunk = release.withdrawnValue - release.relayFee - req.tip;
-  const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venue.kind]) +
+  const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + solanaRentMin(rent, perVenue(SOLANA_POOL_VOLUME_ACCOUNT_SIZE, venue.kind)) +
     (venue.kind === "pumpswap" && venue.cashback ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const peak = kept + (venue.kind === "pumpswap" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const left = chunk - kept;
@@ -572,11 +579,12 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
   return { chunk, peak, left, problem };
 }
 
-/** M352/M353/M355: the fee payer's cost of one release, from the device's own rent read: the spent mark, which records
- * withdrawnValue in 8 bytes (rent(8)), the change note's 72-byte page entry and two signatures (5,000 each). 1,066,640
- * lamports at 5,080 a byte. The one definition of the Solana fee rules (M356 (6)): the wallet and the helper import
- * this cost, the fee, the priority budget and the send margin from here. */
-export const SOLANA_POOL_SPENT_MARK_LEN = 8;
+/** M352/M353/M355/M376: the fee payer's cost of one release, from the device's own rent read: the spent mark, which
+ * records withdrawnValue u64 and the release's number u32 in 12 bytes (rent(12)), the change note's 72-byte page entry
+ * and two signatures (5,000 each). 1,086,960 lamports at 5,080 a byte. The one definition of the Solana fee rules (M356
+ * (6)): the wallet and the helper import this cost, the fee, the priority budget and the send margin from here, and
+ * the wallet's restore the spent mark's length. */
+export const SOLANA_POOL_SPENT_MARK_LEN = 12;
 export const solanaPoolReleaseCost = (rent: SolanaRent): bigint =>
   solanaRentMin(rent, SOLANA_POOL_SPENT_MARK_LEN) + 72n * rent.lamportsPerByte * rent.factor + 10_000n;
 /** The epoch relay fee's step, and the headroom over the cost (M353): two steps. */
@@ -597,7 +605,7 @@ export const solanaPoolPageReserve = (rent: SolanaRent): bigint => {
   return (open + n - 1n) / n;
 };
 /** M356 (5): what a release may spend on priority (CU limit x price / 1e6, lamports): the relay fee less the cost and
- * the page reserve. 232,645 at 5,080 a byte and the epoch fee 1,300,000. */
+ * the page reserve. 212,325 at 5,080 a byte and the epoch fee 1,300,000. */
 export const solanaPoolPriorityBudget = (rent: SolanaRent, relayFee: bigint = solanaPoolFee(rent)): bigint =>
   relayFee - solanaPoolReleaseCost(rent) - solanaPoolPageReserve(rent);
 /** M356 (1): the Solana send margin. A deadline under now + 90 s is refused by the device and the helper; 90 s is
@@ -610,8 +618,8 @@ export const SOLANA_POOL_SEND_MARGIN_MS = 90_000n;
  */
 export function solanaPoolPriorityProblem(release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: Pick<SolanaPoolBuyRequest, "cuPrice">, rent: SolanaRent): string | null {
   const room = solanaPoolPriorityBudget(rent, release.relayFee);
-  const priority = BigInt(SOLANA_POOL_BUY_CU[venue.kind]) * req.cuPrice;
-  return room < 0n || priority > room * 1_000_000n ? `the priority fee (${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)} and the page reserve ${solanaPoolPageReserve(rent)}` : null;
+  const priority = BigInt(perVenue(SOLANA_POOL_BUY_CU, venue.kind)) * req.cuPrice;
+  return room < 0n || priority > room * 1_000_000n ? `the priority fee (${perVenue(SOLANA_POOL_BUY_CU, venue.kind)} CU at ${req.cuPrice} micro-lamports) is more than the relay fee ${release.relayFee} leaves after the release's cost ${solanaPoolReleaseCost(rent)} and the page reserve ${solanaPoolPageReserve(rent)}` : null;
 }
 
 function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, rent: SolanaRent): void {
@@ -675,7 +683,7 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   if (steps.some((x) => barred.has(x.program) || x.accounts.some((a) => barred.has(a.key)))) throw new Error("a step names the pool, its accounts or the fee payer");
   const data = solanaEncodePoolTag3({ ...release, proof: solanaCompressPoolProof(release.proof) }, true, req.tip, inner);
   return [
-    ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(SOLANA_POOL_BUY_CU[venue.kind])]),
+    ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(perVenue(SOLANA_POOL_BUY_CU, venue.kind))]),
     ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [3, ...u64le(req.cuPrice)]),
     ix(cfg.program, outer, data),
   ];
@@ -692,7 +700,7 @@ export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRel
   wire[0] = 2;
   wire.set(message, 129);
   if (wire.length > SOLANA_MAX_TX_BYTES) throw new Error(`too_large: ${wire.length} bytes > ${SOLANA_MAX_TX_BYTES}`);
-  return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit: SOLANA_POOL_BUY_CU[venue.kind], instructions };
+  return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit: perVenue(SOLANA_POOL_BUY_CU, venue.kind), instructions };
 }
 
 // ------------------------------------------------------------------------------------------------- the reads
@@ -937,7 +945,7 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   // FEE: the priority fee fits in what the relay fee leaves after the release's cost (the helper's fee_below_cost)
   const fee = solanaPoolPriorityProblem(release, venue, req, reads.rent);
   if (fee) { fail("FEE", fee); return done(); }
-  pass("FEE", `priority ${SOLANA_POOL_BUY_CU[venue.kind]} CU at ${req.cuPrice} within relay fee ${release.relayFee} less cost ${solanaPoolReleaseCost(reads.rent)}`);
+  pass("FEE", `priority ${perVenue(SOLANA_POOL_BUY_CU, venue.kind)} CU at ${req.cuPrice} within relay fee ${release.relayFee} less cost ${solanaPoolReleaseCost(reads.rent)}`);
   const got = m.instructions.map((x) => ({ program: keys[x.programIndex]?.key ?? "?", accounts: x.accounts.map((i) => keys[i] ?? { key: "?", signer: false, writable: false }), data: x.data }));
   // the tip account the message names (tag 3's ninth account); the rebuild holds it to the baked Jito accounts
   const tipTo = req.tip > 0n ? got[2]?.accounts[8]?.key ?? null : null;

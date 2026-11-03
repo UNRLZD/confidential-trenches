@@ -1,6 +1,6 @@
 // node packages/wallet/scripts/pool-solana-mutants.mjs (card notes-per-pool-sol): plants one mutant at a time in the card's source, runs the named test, expects it to fail, puts the source back.
 import { readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { runMutant, runTests } from "./mutant-run.mjs";
 import { fileURLToPath } from "node:url";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/solana.ts`, R = `${W}/src/pool/solana-restore.ts`;
@@ -51,7 +51,7 @@ const M = [
   [S, "if (next[tree]!.length > held[tree]!.length) held[tree] = next[tree]!;", "held[tree] = next[tree]!;", T, "S6"],
   [R, "if (m.has(x.pubkey)) throw", "if (false) throw", T, "restore refuses"],
   [R, "x.account?.owner !== program || ", "", T, "restore refuses"],
-  [R, "if (leafAt.has(c)) throw", "if (false) throw", T, "R4"],
+  [R, "a.stateLeaves.forEach((c, k) => {\n    if (leafAt.has(c)) throw", "a.stateLeaves.forEach((c, k) => {\n    if (false) throw", T, "R4"],
   [R, "if (m.value === 0n || m.nonce === 0n || ", "if (", T, "restore refuses"],
   [R, "for (const [key, d] of reads[1]![i].marks) {", "for (const [key, d] of [] as [string, string][]) {", T, "RV5"],
   [R, "if (base64.decode(d[0]).length !== size) throw", "if (false) throw", T, "restore refuses"],
@@ -59,29 +59,57 @@ const M = [
   [R, "if (m.value === 0n || m.nonce === 0n || m.nonce > BigInt(a.labelLeaves.length)) throw", "if (false) throw", T, "restore refuses"],
   [R, "if (a.labelLeaves[Number(m.nonce - 1n)] !== label) throw", "if (false) throw", T, "restore refuses"],
   [R, "if (at === undefined) throw", "if (false) throw", T, "restore refuses"],
-  [R, "if (withdrawn === 0n || withdrawn > note.leaf.value) throw", "if (false) throw", T, "restore refuses"],
-  [R, "const cValue = note.leaf.value - withdrawn;", "const cValue = 0n;", T, "R5"],
+  [R, "if (withdrawn === 0n || withdrawn > leaf.value) throw", "if (false) throw", T, "restore refuses"],
+  [R, "const cValue = leaf.value - withdrawn;", "const cValue = 0n;", T, "R5"],
   [R, "const j = ref.kind === \"change\" ? ref.j + 1 : 0;", "const j = ref.kind === \"change\" ? ref.j : 0;", T, "R5"],
   [R, "    asDeposit({ kind: \"move\", l, j });\n", "", T, "RV6"],
   [R, "    seconds({ id: \"V\", l, j });\n", "", T, "RV6"],
   [R, "    seconds({ id: \"A\", l, j });\n", "", T, "RV6"],
   [R, "      seconds({ id: \"R\", c, l, j });\n", "", T, "RV6"],
   [R, "    w.secretKey.fill(0);\n", "", "test/pool-zeroing.test.ts", "solanaRestore zeroes"],
+  // card sol-restore-race, review round 4: the first read's answers kept for the never-closed rule (G7); fold 7: the
+  // earlier answer checked against the new one (G4, solana-restore.ts:101), told apart by an equal slot
+  [R, "  solanaMarksGaps(calls, first.calls);\n", "", T, "fold 6 \\(G7"],
+  [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold 7 \\(G4"],
+  // fold 8: the merged marks carried into the next round (M7): without them the restore never walks
+  [R, "    marks = again;\n", "", T, "N1 race"],
+  // fold 10: the release number read from a spent mark, and compared across reads
+  [R, " || have.number !== w.number)) throw", ")) throw", T, "fold 10 \\(number"],
+  [R, "number: new DataView(d.buffer, d.byteOffset, d.length).getUint32(8, true) }", "number: 0 }", T, "fold 10 \\(number"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];
+// The unmutated run, timed once per test file: it must pass, and its time sets the cap (three times it, plus the longest
+// per-test timeout, 60 s), so a run past the cap hangs and a run that fails at a test's own timeout does not.
+const cap = new Map();
+for (const file of new Set(M.map((m) => m[3]))) {
+  const t0 = Date.now();
+  const r = runTests([file], { cwd: W, timeoutMs: 600_000 });
+  if (r.hung || r.status !== 0) throw new Error(`the unmutated ${file} does not pass`);
+  cap.set(file, 3 * (Date.now() - t0) + 60_000);
+  console.log(`unmutated ${file}: ${Date.now() - t0} ms, cap ${cap.get(file)} ms`);
+}
 let ok = 0;
-for (const [f, find, repl, file, pat] of M) {
+const hung = [], cancelled = [], equivalent = [];
+for (const [f, find, repl, file, pat, why] of M) {
+  // an equivalent mutant (no test can tell it apart: its reason given) is listed, never run or counted
+  if (why !== undefined) { equivalent.push(`[${pat}] ${find.slice(0, 70)}: ${why}`); continue; }
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
   writeFileSync(f, src.replace(find, repl));
-  const r = spawnSync("node", ["--test", `--test-name-pattern=${pat}`, file], { cwd: W, encoding: "utf8", timeout: 120_000 });
+  const r = runMutant([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: cap.get(file) });
   writeFileSync(f, src);
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
-  if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${pass} fail ${fail}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
+  // HUNG: past the cap, killed by the runner; CANCELLED: only tests stopped at their own timeout, on two runs; both listed
+  // apart, never a kill
+  const at = `[${pat}] ${f.split("/").pop()}: ${find.slice(0, 70)}`;
+  if (r.verdict === "hung") { hung.push(at); continue; }
+  if (r.verdict === "cancelled") { cancelled.push(at); continue; }
+  if (r.verdict === "killed") ok++;
+  console.log(`${r.verdict === "killed" ? "KILLED" : "SURVIVED"} [${pat}] pass ${r.pass} fail ${r.fail} runs ${r.runs}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
 }
-console.log(`${ok}/${M.length} killed`);
-if (ok !== M.length) process.exitCode = 1;
+for (const h of hung) console.log(`HUNG ${h}`);
+for (const c of cancelled) console.log(`CANCELLED ${c}`);
+for (const e of equivalent) console.log(`EQUIVALENT ${e}`);
+const runs = M.length - equivalent.length;
+console.log(`${ok}/${runs - hung.length - cancelled.length} killed; ${hung.length} hung, ${cancelled.length} cancelled only (not counted); ${equivalent.length} equivalent`);
+if (ok !== runs) process.exitCode = 1;

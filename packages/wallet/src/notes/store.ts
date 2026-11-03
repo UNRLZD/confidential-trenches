@@ -367,6 +367,29 @@ function parentOf(child: NoteRef, scope: bigint, all: NoteRecord[]): NoteRecord 
   return hits[0];
 }
 
+/**
+ * The notes as the note store's list() would give them, read only (card balances-per-chain: the signing page's state
+ * read, run on every state ask). Each record is read through the wallet store's own get and checked as the note store
+ * checks it (checkRecord). It takes no Web Lock and writes nothing: the finishing the note store does on open, get, list
+ * and move (settle above) is left to it. It reads the same truth: a parent whose change or refund note is stored reads
+ * SPENT, in memory only, as settle would write it, so a page killed between the two writes never counts the money
+ * twice. A dead tab's HELD note is read as it is: HELD and UNSPENT both count in a balance, and only the note store frees.
+ */
+export async function readNotes(store: Pick<WalletStore, "get" | "keys">): Promise<NoteRecord[]> {
+  const all: NoteRecord[] = [];
+  for (const k of await store.keys("notes")) {
+    const r = await store.get("notes", k);
+    if (r !== undefined) all.push(checkRecord(k, r)); // a key gone since keys(): a sign out mid-read
+  }
+  const parents = new Set(all.flatMap((n) => (n.parent === undefined ? [] : [n.parent])));
+  return all.map((n) => {
+    if (!parents.has(n.id) || n.state === "SPENT") return n;
+    // settle's put(p, "SPENT"): no tab, no deadline, no attempt
+    const { tab: _tab, deadlineMs: _deadline, attempt: _attempt, ...spent } = n;
+    return { ...spent, state: "SPENT" };
+  });
+}
+
 // ---------- the store ----------
 export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions = {}): Promise<NoteStore> {
   const locks = opts.locks === undefined ? (globalThis.navigator?.locks ?? null) : opts.locks;
