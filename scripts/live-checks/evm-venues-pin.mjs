@@ -1,0 +1,113 @@
+#!/usr/bin/env node
+// Live check of card evm-venues-pin: the kit pins, per EVM testnet, the contracts pool-evm-deploy deployed, and each pin
+// holds that code on chain. For every chain of the kit's venue list (evmPoolVenues(), through the kit's public entry)
+// that has a deployment record (pool-evm-deploy.<chain>.json):
+//   - the pins are the record's: the pool is PrivacyPoolSimple, the v3 and v4 adapters UniswapV3Adapter and
+//     UniswapV4Adapter (a record without one, a venue without that pin), the sell delegate SellDelegate;
+//   - the chain's WETH and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the v3 router, or none);
+//   - on the chain's two RPCs of two operators (the money gate's), each answering the chain's id: at the newest block
+//     both have (the lower of their two eth_blockNumber answers, so no archive read is needed), each pin's code is the
+//     same on both and is the build's (pool-evm-deploy.build.json: the same length and, with the immutables' bytes
+//     zeroed, the same keccak256); WETH's and each router's code hash is the one CHAINS pins.
+//   node scripts/live-checks/evm-venues-pin.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
+// --record writes every RPC answer read to <file>, for the test's replay (evm-venues-pin.answers.json).
+import "../net-window.mjs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { BUILD, CHAINS, deploymentFile, keccak, operatorProblems, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
+
+const KEY = "evm-venues-pin";
+const lower = (a) => (typeof a === "string" ? a.toLowerCase() : a);
+// each pin and the deployed contract it names
+const PINS = [
+  ["pool", (v) => v.pool, "PrivacyPoolSimple"],
+  ["v3 adapter", (v) => v.adapters?.v3, "UniswapV3Adapter"],
+  ["v4 adapter", (v) => v.adapters?.v4, "UniswapV4Adapter"],
+  ["sell delegate", (v) => v.sellDelegate, "SellDelegate"],
+];
+
+/** The chains of the kit's venue list that pool-evm-deploy has a record for, with that record */
+export function deployed(venues = evmPoolVenues(), read = (c) => (existsSync(deploymentFile(c)) ? JSON.parse(readFileSync(deploymentFile(c), "utf8")) : null)) {
+  return Object.keys(CHAINS).filter((c) => Object.hasOwn(venues, c)).map((c) => [c, read(c)]).filter(([, d]) => d !== null);
+}
+
+export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs = CHAINS[chain].rpcs, sleep }) {
+  const lines = [];
+  let ok = true;
+  const say = (pass, text) => {
+    ok &&= pass;
+    lines.push(`${pass ? "PASS" : "FAIL"} ${text}`);
+  };
+  const c = CHAINS[chain];
+  // the pins against the record, and the chain's WETH and routers against pool-evm-deploy's
+  say(venue.chainId === Number(BigInt(c.chainId)), `the venue's chain id ${venue.chainId} is ${chain}'s ${BigInt(c.chainId)}`);
+  const want = [];
+  for (const [role, get, name] of PINS) {
+    const pin = get(venue);
+    const rec = d.contracts?.[name]?.address;
+    say(lower(pin) === lower(rec), `the ${role} pin ${pin ?? "(none)"} is the record's ${name} ${rec ?? "(none)"}`);
+    if (pin !== undefined && lower(pin) === lower(rec)) want.push([role, pin, name]);
+  }
+  say(lower(venue.weth) === lower(c.weth.address), `WETH ${venue.weth} is pool-evm-deploy's ${c.weth.address}`);
+  const routers = c.router ? [lower(c.router.address)] : [];
+  say(JSON.stringify(venue.routers.map(lower)) === JSON.stringify(routers), `the routers ${JSON.stringify(venue.routers)} are pool-evm-deploy's ${JSON.stringify(routers)}`);
+  for (const p of operatorProblems(rpcs, { chain })) say(false, p);
+  // the RPCs: the chain's id, then the newest block both have
+  const two = rpcs.slice(0, 2);
+  const heads = [];
+  for (const u of two) {
+    try {
+      const id = await rpc(fetchFn, u, "eth_chainId", [], sleep);
+      say(lower(id) === c.chainId, `chain id ${id} is ${chain}'s ${c.chainId} on ${u}`);
+      heads.push(BigInt(await rpc(fetchFn, u, "eth_blockNumber", [], sleep)));
+    } catch (e) {
+      say(false, `read ${u}: ${String(e.message).split("\n")[0]}`);
+    }
+  }
+  if (heads.length < 2) return { ok: false, lines };
+  const block = "0x" + (heads[0] < heads[1] ? heads[0] : heads[1]).toString(16);
+  const codeAt = async (addr) => {
+    const out = [];
+    for (const u of two) out.push(await rpc(fetchFn, u, "eth_getCode", [addr, block], sleep));
+    return out;
+  };
+  try {
+    for (const [role, pin, name] of want) {
+      const [a, b] = await codeAt(pin);
+      const build = BUILD.contracts[name];
+      const r = runtimeOf(a, build.immutables);
+      say(a === b && a !== "0x", `the ${role} ${pin}: the same code on both RPCs at block ${BigInt(block)} (${(a.length - 2) / 2} bytes)`);
+      say(r.length === build.length && r.masked === build.masked, `the ${role} ${pin} is the build's ${name}: length ${r.length}, keccak256 with the immutables zeroed ${r.masked}`);
+    }
+    for (const [what, addr, hash] of [["WETH", c.weth.address, c.weth.codehash], ...(c.router ? [["the router", c.router.address, c.router.codehash]] : [])]) {
+      const [a, b] = await codeAt(addr);
+      say(a === b && keccak(a) === hash, `${what} ${addr}: code hash ${keccak(a)} on both RPCs at block ${BigInt(block)} is the pinned ${hash}`);
+    }
+  } catch (e) {
+    say(false, `read: ${String(e.message).split("\n")[0]}`);
+  }
+  return { ok, lines };
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
+  try {
+    const chains = deployed();
+    if (chains.length === 0) throw new Error("no pinned chain has a deployment record");
+    const rec = recorder();
+    let ok = true;
+    for (const [chain, d] of chains) {
+      const r = await check({ chain, venue: evmPoolVenues()[chain], deployment: d, fetchFn: opt("--record") ? rec.fetchFn : fetch });
+      for (const l of r.lines) console.log(`live-check ${KEY} ${chain}: ${l}`);
+      ok &&= r.ok;
+    }
+    if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify({ chains: chains.map(([c]) => c), good: rec.answers }) + "\n");
+    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
+    process.exit(ok ? 0 : 1);
+  } catch (e) {
+    console.error(`live-check ${KEY}: ERROR: ${String(e.message).split("\n")[0]}`);
+    process.exit(2);
+  }
+}

@@ -11,7 +11,7 @@ import { hmac } from "@noble/hashes/hmac.js";
 import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { fileURLToPath } from "node:url";
-import { evmPoolVenues, type EvmPoolChain, type EvmPoolVenue } from "../src/trade/evm/buy-unpinned.ts";
+import { evmPoolVenues, type EvmPoolVenue } from "../src/trade/evm/buy-unpinned.ts";
 import { pinnedBuildSell, pinnedSignSell, pinnedSignSellAuthorization } from "../src/trade/evm/sell-unpinned.ts";
 const hex = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
 const N = secp256k1.Point.CURVE().n;
@@ -42,7 +42,7 @@ const VENUES = Object.freeze({ base: pinned(evmPoolVenues().base), robinhood: pi
 export function forkSells(at: <T>(sec: number, f: () => T) => T): Record<string, unknown> {
 const out: Record<string, unknown> = {};
 const W_KEY = key();
-for (const [chain, f] of Object.entries(FORK) as [EvmPoolChain, (typeof FORK)[EvmPoolChain]][]) {
+for (const [chain, f] of Object.entries(FORK) as [keyof typeof FORK, (typeof FORK)[keyof typeof FORK]][]) {
   const v = evmPoolVenues()[chain];
   const minOut = (f.quote * 99n) / 100n;
   const built = at(f.ts, () => pinnedBuildSell(VENUES, chain, {

@@ -1,5 +1,5 @@
 // Removes each of src/trade/evm/buy-unpinned.ts's checks, one at a time, and runs the test named for it in
-// test/evm-pool-buy.test.ts or test/evm-pool-buy-hostile.test.ts: each named test passes on the code as it is and fails
+// test/evm-pool-buy.test.ts, test/evm-pool-buy-hostile.test.ts or test/evm-venues-pin.test.ts: each named test passes on the code as it is and fails
 // on every mutant. The file is changed in place and put back after each mutant (and checked to be back); exits 1 when a
 // named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in the file
 // exactly once. R1-R14 are the evm-pool-buy-tx review's mutants (R10 moved with the digest's data check, now the hook
@@ -10,9 +10,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL("../src/trade/evm/buy-unpinned.ts", import.meta.url));
-const TESTS = ["./evm-pool-buy.test.ts", "./evm-pool-buy-hostile.test.ts"].map((f) => fileURLToPath(new URL(f, import.meta.url)));
+const TESTS = ["./evm-pool-buy.test.ts", "./evm-pool-buy-hostile.test.ts", "./evm-venues-pin.test.ts"].map((f) => fileURLToPath(new URL(f, import.meta.url)));
 
 const ROUTES = "each fork test's route builds";
+const PINS = "the testnet chains' pins are";
+const BUYPIN = "a buy builds only through";
+const SELLPIN = "a sell pays only into";
 const HOOKED = "a hooked hop with hook data";
 const INFO1 = "INFO-1";
 const INFO2 = "INFO-2";
@@ -110,6 +113,21 @@ export const MUTANTS = [
   ['v3: ownPin(adapters, "v3")', "v3: (adapters as { v3?: string } | undefined)?.v3", "M370 a polluted Object.prototype names no adapter"],
   ['v4: ownPin(adapters, "v4")', "v4: (adapters as { v4?: string } | undefined)?.v4", "M370 a polluted Object.prototype names no adapter"],
   ['if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");', "", "M370 a pinned build"],
+  // the testnet pins (card evm-venues-pin): each one changed is refused by the kit's own build or signature
+  ['pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5"', 'pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe6"', BUYPIN],
+  ['v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"', 'v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5646"', BUYPIN],
+  ['v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1"', 'v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb2"', BUYPIN],
+  ['sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88"', 'sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef89"', SELLPIN],
+  ['pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"', 'pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d6"', BUYPIN],
+  ['adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', 'adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669798" })', BUYPIN],
+  ['adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', 'adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', BUYPIN],
+  ['sellDelegate: "0x0ec8c6627939624aeaac3b2f0276136e6e289e23"', 'sellDelegate: "0x0ec8c6627939624aeaac3b2f0276136e6e289e24"', SELLPIN],
+  ["chainId: 84532,", "chainId: 8453,", PINS],
+  ["chainId: 46630,", "chainId: 4663,", PINS],
+  ['routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"])', 'routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc5"])', PINS],
+  ["routers: Object.freeze([]),", 'routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),', SELLPIN],
+  ['    "base-sepolia": bare({', '    "base-sepolia": ({', PINS],
+  ['adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"', 'adapters: ({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"', PINS],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`
