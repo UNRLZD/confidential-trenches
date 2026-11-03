@@ -134,6 +134,41 @@ test("a state with one more key, or a message of another kind, fails", () => {
   assert.equal(judge(b).ok, false);
 });
 
+// release9.chromium.<width>: the deployed SIGN_HOST at release-9 (pools in every signed-in state, packages/signpage/src/
+// pools.ts withPools), live on Chromium: PASS. The same records replay FAIL on the check before this fix, whose hand
+// copy of the state's keys knew no pools.
+const signedInStates = (rec) =>
+  rec.messages.flatMap((m) => (m.data?.type === "state" ? [m.data.state] : m.data?.ok === true && m.data.result?.signed_in !== undefined ? [m.data.result] : []))
+    .filter((x) => x.signed_in === true);
+for (const width of Object.keys(WIDTHS)) {
+  test(`recorded live run on release-9 at ${width} width, pools in its signed-in states: PASS`, () => {
+    const rec = ANSWERS.release9.chromium[width];
+    assert.match(rec.source, /^live https:\/\/sign\.confidential\.unrealized\.trade/);
+    const r = judge(rec);
+    assert.equal(r.ok, true, r.lines.join("\n"));
+    const ins = signedInStates(rec);
+    assert.ok(ins.length >= 3 && ins.every((x) => Array.isArray(x.pools)), "every signed-in state holds pools");
+  });
+}
+
+test("release-9: a signed-in state with a key the kit does not know, a pool the kit refuses, or pools signed out: FAIL", () => {
+  const signedInAnswer = (a) => a.messages.find((m) => m.data?.ok === true && m.data.result?.signed_in === true && Array.isArray(m.data.result.pools));
+  const unknown = clone(ANSWERS.release9.chromium.phone);
+  signedInAnswer(unknown).data.result.extra = 1;
+  assert.equal(judge(unknown).ok, false);
+  assert.ok(judge(unknown).lines.some((l) => l.startsWith("BAD every message is ready")), judge(unknown).lines.join("\n"));
+  const refused = clone(ANSWERS.release9.chromium.phone);
+  signedInAnswer(refused).data.result.pools = [{ chain: "solana", asset: "ETH", balance: "1" }];
+  assert.equal(judge(refused).ok, false);
+  assert.ok(judge(refused).lines.some((l) => l.startsWith("BAD every message is ready")));
+  const out = clone(ANSWERS.release9.chromium.phone);
+  const first = out.messages.find((m) => m.data?.id === out.steps.first.id);
+  first.data.result.pools = [];
+  const lines = judge(out).lines;
+  assert.ok(lines.some((l) => l.startsWith("BAD the first state answer is exactly the signed-out state")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.startsWith("BAD every message is ready")));
+});
+
 test("the shell's layer left open over the frame after the sign-in fails", () => {
   const a = clone(GOOD);
   a.steps.words.top.layerHidden = false;
