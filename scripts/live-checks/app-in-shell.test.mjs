@@ -120,3 +120,42 @@ test("every engine and width has all five run kinds on the harness; a live recor
   live.runs = live.runs.filter((x) => x.kind === "signed");
   assert.equal(judge(live).ok, true, judge(live).lines.join("\n"));
 });
+
+// The harness answers the helper's two reads the token route makes (card app-no-test-token): the lists and the token
+// read come from recorded live answers, so / draws a real token there and the page under test never reaches the
+// network; a mint the recordings do not hold answers 404 (a helper answer), never an aborted load.
+test("harness: GET /v1/market/lists and /v1/market/token are answered from the recorded live answers; the top Trending token reads 200", async () => {
+  const { mkdtempSync, copyFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { harnessRoute } = await import("./app-in-shell.mjs");
+  const { columnRows } = await import("../../apps/terminal/src/screens/discover/model.ts");
+  const dir = mkdtempSync(path.join(tmpdir(), "app-in-shell-harness-"));
+  copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
+  try {
+    const route = await harnessRoute(dir, "signed");
+    const ask = async (url) => {
+      let out = null;
+      await route({ request: () => ({ url: () => url }), fulfill: async (a) => void (out = { kind: "fulfill", ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
+      return out;
+    };
+    const lists = await ask("https://api.confidential.unrealized.trade/v1/market/lists?chain=solana");
+    assert.equal(lists.kind, "fulfill");
+    assert.equal(lists.status, 200);
+    assert.equal(lists.headers["access-control-allow-origin"], APP_HOST);
+    const snap = JSON.parse(lists.body);
+    const top = columnRows(snap, "trending")[0];
+    assert.ok(top, "the harness's lists hold a Trending token");
+    const tok = await ask(`https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=${top.token}`);
+    assert.equal(tok.kind, "fulfill");
+    assert.equal(tok.status, 200);
+    assert.equal(tok.headers["access-control-allow-origin"], APP_HOST);
+    const row = JSON.parse(tok.body).row;
+    assert.equal(row.token, top.token);
+    assert.equal(row.chain, "solana");
+    const other = await ask("https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=So11111111111111111111111111111111111111112");
+    assert.equal(other.kind, "fulfill");
+    assert.equal(other.status, 404);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

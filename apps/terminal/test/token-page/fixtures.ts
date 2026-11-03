@@ -2,8 +2,9 @@
 // freezes no market field list, packages/kit/src/helper/v1.ts `HelperMarketAnswer = unknown`). Made up, not a read:
 // one token per case the page draws differently. `curve` is still on its launchpad's curve, `pool` left it for a pool,
 // `listed` has no launchpad (any token with a pool, J3 and J19, app.md:302, :552), and `edges` lacks every optional
-// field and carries the longest text. The page draws them until the market data read lands (its own card).
-import type { MarketRow } from "../discover/fields.ts";
+// field and carries the longest text. Test only: the page's unit test (test/token-page.test.ts) and its run
+// (run.mjs), which answers them as the helper would; nothing under src/ imports this file (test/no-test-token.test.ts).
+import type { MarketRow } from "../../src/screens/discover/fields.ts";
 
 /** The clock the fixtures' ages are drawn against, so every shot is the same: 2026-11-01 12:00:00Z. */
 export const FIXTURE_NOW_MS = Date.UTC(2026, 10, 1, 12, 0, 0);
