@@ -1,0 +1,58 @@
+{
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "dryRun": false,
+  "at": "2026-11-03T05:02:50.570Z",
+  "deployer": "0x3ea67bf9899305cc02f36c8b68c805dcc6319e94",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "66861841654853",
+  "build": "solc 0.8.28 (contracts/pool-evm/foundry.toml), forge Version: 1.7.1-Homebrew",
+  "contracts": {
+    "WithdrawalVerifier": {
+      "address": "0x8ff8fe1bd39d95faccada211acd8b3ea15bef730"
+    },
+    "PrivacyPoolSimple": {
+      "address": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5"
+    },
+    "UniswapV4Adapter": {
+      "address": "0x706b3f75e80be70494d1414b85788462bfeb7eb1"
+    },
+    "UniswapV3Adapter": {
+      "address": "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"
+    },
+    "SellDelegate": {
+      "address": "0x23ad5aabcc139650597f8dc79e9def8bd817ef88"
+    }
+  },
+  "txs": [
+    {
+      "step": "deploy WithdrawalVerifier",
+      "hash": "0x81afdd86bf9414e88e41994a9a7bbb34edf3027cf355a803c9d65662a8d0595a",
+      "contract": "WithdrawalVerifier"
+    },
+    {
+      "step": "deploy PrivacyPoolSimple",
+      "hash": "0x388b62ddca5ba87084edb814e5290f097be2ff9b4ecb1dec69b5f2c567cb163a",
+      "contract": "PrivacyPoolSimple"
+    },
+    {
+      "step": "deploy UniswapV4Adapter",
+      "hash": "0x7d41a32a29ab0d83f5c1925d921ef4bdfa085fa0e21a99dc5a8aa9d88e7b4b3d",
+      "contract": "UniswapV4Adapter"
+    },
+    {
+      "step": "deploy UniswapV3Adapter",
+      "hash": "0x15fb103bd8b7e7b50ddb094cfe723fde897a819590460a78071259d45fe7cab3",
+      "contract": "UniswapV3Adapter"
+    },
+    {
+      "step": "deploy SellDelegate",
+      "hash": "0x61695b636dc7377c00c1a60bfd179f745df593f3d6b68ed46744ccc284a4f2c7",
+      "contract": "SellDelegate"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0x68517c1364e8bc5e6362fa722056d85eccbbfe9769c63b5f9181d17cc1fde3fe"
+    }
+  ]
+}
