@@ -8,7 +8,8 @@
 // - Which notes: a pool's SPENT notes, and its RESERVED ones too: a RESERVED note's proof has left the device, so its
 //   release may have paid W already. A HELD note's proof never left, so its W has nothing. The notes come from the
 //   pool's restore (Solana: ./solana-restore.ts, called by solanaRestoreWallets below) or from the store (spentNotesOf).
-//   Two notes that give one W stop that pool: a W serves one note, and a W shared would link two buys.
+//   Two notes that give one W, in one pool or across pools (one pool given twice), stop the later pool: a W serves one
+//   note, and is listed once.
 // - Where holdings are read: through the helper's POST /v1/rpc/{chain}, its keyed provider (the kit's solanaHelperRpc;
 //   the same route for base and robinhood), on one reader. No read from the device names a W: a public provider would
 //   learn the user's whole set of wallets by IP, and the free ones cannot serve these reads anyway (getTokenAccountsByOwner
@@ -19,15 +20,18 @@
 //   block is read ("latest": Robinhood serves no finalized state) and every call names its hash (EIP-1898).
 // - Holdings: native plus tokens. Solana: lamports, and every account W owns under the Token program and Token-2022,
 //   decoded from its own bytes (the asked program's, owned by W, a pubkey seen once across both programs); a frozen
-//   account flags its mint. EVM: wei, and balanceOf(W) for each token on the list given; a token whose call reverts or
-//   that has no code is listed unreadable. Every other answer not in the asked shape stops that pool.
+//   account flags its mint. EVM: wei, and balanceOf(W) for each token on the list given; a token whose call reverts
+//   (JSON-RPC code 3) or that has no code ("0x") is listed unreadable. Any other error (a block a lagging backend lacks,
+//   a limit) or answer not in the asked shape stops that pool, so it is read again.
+// - Pacing: the Solana reader runs in the kit's provider queue (solanaPacedRpc), so a restore of many Ws keeps to the
+//   provider's limit. The kit has no EVM queue; the EVM reader makes 2 + T calls a W, one after another.
 // - One failure never hides the rest: a pool that fails reports its error and the others still list.
 // - Privacy: every request names one W and nothing else of the user's: no batch, no call carries two Ws. The Ws of every
 //   pool are read one after another in a random order, never in the notes' order.
 // - Errors carry a wallet's index in its pool, never a note's ref, label, W or path; an RPC's error is cut to its code.
 // - Not here: a full EVM restore from the 12 words alone (the EVM pool's notes, and W's tokens found from its Transfer
 //   logs) is card notes-per-pool-evm; until then the EVM side takes its spent notes as input.
-import { HELPER_FETCH_INIT, HELPER_V1_PREFIX, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaDecodeTokenAccount, solanaHelperRpc, solanaJsonRpc, type SolanaRpc } from "@blindfill/kit";
+import { HELPER_FETCH_INIT, HELPER_V1_PREFIX, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaDecodeTokenAccount, solanaHelperRpc, solanaJsonRpc, solanaPacedRpc, SOLANA_KEYLESS_RPC_LIMIT, type SolanaRpc, type SolanaRpcLimit } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { freshWallet, toChecksum } from "../derive/index.ts";
 import type { NoteRef } from "../notes/secrets.ts";
@@ -67,6 +71,10 @@ export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: 
 
 /** A Solana W's three reads are made again at the highest slot at most this many times before a refusal. */
 export const SOL_HOLDINGS_ROUNDS = 4;
+/** Solana's JSON-RPC code for a minContextSlot the node has not reached. */
+const MIN_CONTEXT_SLOT_NOT_REACHED = "-32016";
+/** The JSON-RPC code of an eth_call that reverted ("execution reverted"); every other error is the provider's. */
+const EXECUTION_REVERTED = "3";
 
 /** The store's notes of one pool (its scope) whose W a release may have paid: SPENT and RESERVED, in leaf order. */
 export async function spentNotesOf(store: NoteStore, scope: bigint): Promise<SpentNote[]> {
@@ -91,17 +99,18 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
   const failed = new Map<number, string>();
   const found: (BuyWallet | undefined)[][] = pools.map(() => []);
   const jobs: { p: number; k: number; address: string }[] = [];
+  const seen = new Map<string, [number, number]>(); // a W -> its pool and wallet index, across every pool
   pools.forEach((p, pi) => {
     try {
       if (p.reader?.chain !== p.chain || typeof p.reader.read !== "function") throw new Error(`the reader is not of chain ${p.chain}`);
-      const seen = new Map<string, number>();
       p.spent.forEach((s, k) => {
         const j = jOf(s.ref);
         const w = freshWallet(seed64, p.chain, s.label, j);
         w.secretKey.fill(0);
-        const key = w.address.toLowerCase();
-        if (seen.has(key)) throw new Error(`wallet ${k}: its W is wallet ${seen.get(key)}'s`);
-        seen.set(key, k);
+        const key = `${p.chain}/${w.address.toLowerCase()}`;
+        const had = seen.get(key);
+        if (had !== undefined) throw new Error(`wallet ${k}: its W is ${had[0] === pi ? "" : `pool ${had[0]} `}wallet ${had[1]}'s`);
+        seen.set(key, [pi, k]);
         found[pi]!.push({ pool: p.id, chain: p.chain, note: refKey(s.ref), l: s.label, j, path: w.path, address: w.address, holdings: { native: 0n, tokens: new Map(), unreadable: [] } });
         jobs.push({ p: pi, k, address: w.address });
       });
@@ -199,7 +208,12 @@ export function solanaHoldingsReader(rpc: SolanaRpc): HoldingsReader {
         if (slots.every((s) => s === top)) break;
         if (round >= SOL_HOLDINGS_ROUNDS) throw new Error(`its reads met at no one slot in ${SOL_HOLDINGS_ROUNDS} rounds`);
         signal?.throwIfAborted();
-        r = await once(top);
+        try {
+          r = await once(top);
+        } catch (e) {
+          // a backend behind the slot asked refuses with -32016: that round failed, the next asks again
+          if (!(e instanceof RpcFailed && e.code === MIN_CONTEXT_SLOT_NOT_REACHED)) throw e;
+        }
       }
       const keys = new Set<string>();
       const tokens = new Map<string, TokenHolding>();
@@ -214,8 +228,11 @@ export function solanaHoldingsReader(rpc: SolanaRpc): HoldingsReader {
   };
 }
 
-/** The Solana reader on the helper's keyed provider (POST /v1/rpc/solana). */
-export const solanaHelperHoldings = (origin: string): HoldingsReader => solanaHoldingsReader(solanaHelperRpc(origin));
+/** The Solana reader on the helper's keyed provider (POST /v1/rpc/solana), paced in the kit's provider queue
+ * (solanaPacedRpc) at `limit`: by default SOLANA_KEYLESS_RPC_LIMIT, the published limit of the helper's fallback
+ * upstream (api.mainnet-beta.solana.com), since a 429 there pauses the helper's Solana route for every device. */
+export const solanaHelperHoldings = (origin: string, limit: SolanaRpcLimit = SOLANA_KEYLESS_RPC_LIMIT): HoldingsReader =>
+  solanaHoldingsReader(solanaPacedRpc(solanaHelperRpc(origin), limit));
 
 /** A Solana pool's restored notes to its buys' Ws: its spends must be exactly its SPENT notes, each at jOf(ref). */
 export function solanaSpentNotes(r: { notes: readonly SolanaRestoredNote[]; spends: readonly SolanaRestoredSpend[] }): SpentNote[] {
@@ -262,7 +279,9 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[]): Hold
         try {
           r = await call(rpc, "eth_call", [{ to: t, data: BALANCE_OF + w.slice(2).padStart(64, "0") }, at]);
         } catch (e) {
-          if (e instanceof RpcFailed && e.code !== undefined) { unreadable.push(t); continue; } // reverted: the provider answered
+          // reverted: the token's own answer. Any other error (a block a lagging backend lacks, a limit, an internal
+          // error) is the provider's, and fails the pool so it is read again.
+          if (e instanceof RpcFailed && e.code === EXECUTION_REVERTED) { unreadable.push(t); continue; }
           throw e;
         }
         if (r === "0x") { unreadable.push(t); continue; } // no code at this address on this chain

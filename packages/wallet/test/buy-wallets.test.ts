@@ -363,3 +363,65 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
   assert.deepEqual(calls, ["packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
 });
+
+// ---------- fold 2 ----------
+test("EVM: only a revert (code 3) or no code makes a token unreadable; a lagging, limited or failing provider's error fails the pool", async () => {
+  const at = (code: number): Edit => (m, o) => { if (m === "eth_call") throw new Error(`RPC error ${code}: some text`); return o; };
+  const run = (e: Edit) => buyWallets(SEED, [{ id: "base", chain: "evm", spent: [{ ref: { kind: "deposit", s: EVM_SCOPE, i: 0 }, label: L }], reader: evmReader(evmChain(), e, [USDC]) }]);
+  for (const code of [-32000, -32001, -32005, -32603]) assert.deepEqual((await run(at(code))).failed, [{ pool: "base", error: `wallet 0: eth_call: rpc error ${code}` }], `code ${code}`);
+  const r = await run(at(3));
+  assert.deepEqual([r.failed, r.wallets[0]!.holdings.unreadable], [[], [USDC]]);
+});
+
+test("Solana: a re-read a backend refuses with -32016 is a failed round, and the next round reads again", async () => {
+  // round 1: getBalance at 100, the token reads at 101; round 2 (min 101): getBalance answers -32016; round 3: all at 101
+  let n = 0;
+  const c: SolChain = { slot: 101, at: () => solState() };
+  const e: Edit = (m, o, p) => {
+    const min = (p[p.length - 1] as { minContextSlot?: number }).minContextSlot;
+    n++;
+    if (min === undefined && m === "getBalance") return { ...(o as object), context: { slot: 100 } };
+    if (min !== undefined && m === "getBalance" && n <= 6) throw new Error("RPC error -32016: Minimum context slot has not been reached");
+    return o;
+  };
+  log.length = 0;
+  const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c, e) }]);
+  assert.deepEqual(r.failed, []);
+  assert.equal(r.wallets[0]!.holdings.native, 5_000_000n);
+  assert.equal(log.length, 9, "three rounds of three");
+  // a backend that never catches up: the bound, then the refusal
+  const never: Edit = (m, o, p) => {
+    const min = (p[p.length - 1] as { minContextSlot?: number }).minContextSlot;
+    if (min === undefined && m === "getBalance") return { ...(o as object), context: { slot: 100 } };
+    if (min !== undefined) throw new Error("RPC error -32016: Minimum context slot has not been reached");
+    return o;
+  };
+  const f = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c, never) }]);
+  assert.deepEqual(f.failed, [{ pool: "sol", error: `wallet 0: its reads met at no one slot in ${SOL_HOLDINGS_ROUNDS} rounds` }]);
+});
+
+test("the helper's Solana reader is paced in the kit's provider queue: a burst of Ws is spread over the limit's window", async () => {
+  const starts: number[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (_u: string | URL | Request, init?: RequestInit) => {
+    starts.push(Date.now());
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: { context: { slot: 1 }, value: q.method === "getBalance" ? 0 : [] } }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const reader = solanaHelperHoldings("https://api.example", { windowMs: 400, total: 3, perMethod: 3 });
+    const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }, { ref: { kind: "change", l: L, j: 0 }, label: L }], reader }]);
+    assert.deepEqual(r.failed, []);
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.equal(starts.length, 6);
+  assert.ok(starts[3]! - starts[0]! >= 390, `the second W's reads wait for the window: ${starts[3]! - starts[0]!} ms`);
+});
+
+test("one pool given twice: its W is listed once, and the later pool is refused", async () => {
+  const p: BuyPool = { id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader() };
+  const r = await buyWallets(SEED, [p, { ...p, id: "sol-again" }]);
+  assert.deepEqual(r.wallets.map((w) => w.pool), ["sol"]);
+  assert.deepEqual(r.failed, [{ pool: "sol-again", error: "wallet 0: its W is pool 0 wallet 0's" }]);
+});
