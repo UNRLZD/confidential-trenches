@@ -56,6 +56,15 @@ export const RPC_CLIENT_MAX = 16;
  * number of RPC_BUDGET_SOLANA, or none (two numbers: no limit per method).
  */
 export const RPC_METHOD_MAX = 40;
+/**
+ * Requests per 10 s kept on each chain (its total and each method's) for the helper's own reads that serve every
+ * user, which only those reads may draw, whatever RPC_BUDGET_<CHAIN> says. Solana: Discover's curve reads, one
+ * getMultipleAccounts per 100 pump.fun mints (data/solana/lists.ts l.338), of at most 300 rows (three Jupiter lists of
+ * limit=100, READS), once per FRESH_MS 12 s refresh: 3 in any 10 s. The other chains: no own reads through here (the
+ * token watches and the pool senders read their own providers), so 0. The token page's reads are not in it: they are
+ * one per token a caller opens, so they stop at the total less this, as callers do.
+ */
+export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0 };
 /** Each chain's budget unless RPC_BUDGET_<CHAIN> says; only Solana's public endpoint publishes a limit per method. */
 export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?: number }>> = {
   solana: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
@@ -171,11 +180,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const upstreams = readUpstreams(env);
-  const limits = Object.fromEntries(RPC_CHAINS.map((ch) => [ch, budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true })])) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
+  const limits = Object.fromEntries(RPC_CHAINS.map((ch) => [ch, { ...budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE[ch] }), reserve: RPC_RESERVE[ch] }])) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
   const budget = upstreamBudget((key) => {
     const [ch, method] = key.split(" ") as [RpcChain, string | undefined];
-    return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity };
+    return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity, reserve: RPC_RESERVE[ch] };
   }, now);
 
   async function readAnswer(r: Response): Promise<string | undefined> {
@@ -194,9 +203,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /**
    * One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body, `client`
    * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
-   * page) pass none: they draw from the provider's total, never a caller's share.
+   * page) pass none: they draw from the provider's total, never a caller's share; `reserved` marks the ones RPC_RESERVE
+   * holds room for (Discover's), which alone may draw it.
    */
-  async function handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<Answer> {
+  async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
     if (Buffer.byteLength(body) > RPC_BODY_MAX) return error(413, "too_large");
@@ -232,7 +242,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const reqs = (Array.isArray(out) ? out : [out]) as { method: string }[];
     const draws: [string, number][] = [[c, reqs.length]];
     if (limits[c].perMethod !== undefined) for (const r of reqs) draws.push([`${c} ${r.method}`, 1]);
-    const wait = budget.takeEach(draws, client);
+    const wait = budget.takeEach(draws, client, false, reserved);
     if (wait > 0) return throttled(wait);
     const up = upstreams[c];
     let r: Response;

@@ -325,8 +325,8 @@ export function snapshot(read: { new: Row[]; trending_5m: Row[]; trending_1h: Ro
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string): Promise<Answer> };
-type Rpc = { handle(chain: string, contentType: string | undefined, body: string): Promise<{ status: number; body: string }> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
+type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved?: boolean): Promise<{ status: number; body: string }> };
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
 export type ListsAnswer = { status: number; body: string; gzip?: Buffer; asOfMs?: number; retryAfterS?: number };
 
@@ -339,7 +339,7 @@ export async function readPumpCurves(rpc: Rpc, mints: readonly string[]): Promis
     const part = mints.slice(i, i + 100);
     const keys = part.map(pumpCurveAddress);
     try {
-      const a = await rpc.handle("solana", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [keys, { encoding: "base64", commitment: "confirmed" }] }));
+      const a = await rpc.handle("solana", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [keys, { encoding: "base64", commitment: "confirmed" }] }), undefined, true); // rpc.ts RPC_RESERVE
       if (a.status !== 200) continue;
       const value = obj(obj(JSON.parse(a.body)).result).value;
       if (!Array.isArray(value) || value.length !== part.length) continue;
@@ -363,7 +363,7 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
   let running: Promise<ListsAnswer> | null = null;
 
   async function read(path: string): Promise<{ rows: Row[]; at: number } | null> {
-    const a = await proxy.handle("jupiter", path, "limit=100", "");
+    const a = await proxy.handle("jupiter", path, "limit=100", "", undefined, true); // proxy.ts PROXY_RESERVE
     if (a.status === 429) throw new Throttled(retryAfterOf(a.headers));
     if (a.status !== 200) return null;
     const at = Date.parse(a.headers["X-Fetched-At"] ?? "");

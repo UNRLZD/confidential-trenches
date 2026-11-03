@@ -68,21 +68,27 @@ plain_value() {
 }
 
 # Whether VALUE is one the helper's start takes for budget NAME (src/limits/limits.ts budgetFromEnv; empty: the
-# default): "<total>,<per client>" with the share under the total; for RPC_BUDGET_* the share at least a full batch
-# (RPC_BATCH_MAX, 10) and an optional third number, one method's limit, from 10 to the total.
+# default): "<total>,<per client>" with the share under the total less the helper's own-read reserve (src/rpc/rpc.ts
+# RPC_RESERVE: Solana 3; src/proxy/proxy.ts PROXY_RESERVE: Jupiter 34; every other 0); for RPC_BUDGET_* the share at
+# least a full batch (RPC_BATCH_MAX, 10) and an optional third number, one method's limit, from 10 plus the reserve to
+# the total.
 budget_ok() {
-  local name="$1" v="$2" n='[123456789][0123456789]{0,6}'
+  local name="$1" v="$2" n='[123456789][0123456789]{0,6}' reserve=0
   [[ -z "$v" ]] && return 0
+  case "$name" in
+    RPC_BUDGET_SOLANA) reserve=3 ;;
+    PROXY_BUDGET_JUPITER) reserve=34 ;;
+  esac
   if [[ "$name" == RPC_BUDGET_* ]]; then
     local re="^($n),($n)(,($n))?\$"
     [[ "$v" =~ $re ]] || return 1
     local total="${BASH_REMATCH[1]}" share="${BASH_REMATCH[2]}" method="${BASH_REMATCH[4]}"
-    ((share < total && share >= 10)) || return 1
-    [[ -z "$method" ]] || ((method >= 10 && method <= total))
+    ((share < total - reserve && share >= 10)) || return 1
+    [[ -z "$method" ]] || ((method >= 10 + reserve && method <= total))
   else
     local re="^($n),($n)\$"
     [[ "$v" =~ $re ]] || return 1
-    ((BASH_REMATCH[2] < BASH_REMATCH[1]))
+    ((BASH_REMATCH[2] < BASH_REMATCH[1] - reserve))
   fi
 }
 

@@ -48,11 +48,21 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   (packages/signpage/src/rules/deposit-quote.ts l.119, packages/wallet/src/deposit/quote.ts l.67), and one again.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
-  jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS },
-  relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS },
-  lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS },
-  oneclick: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS },
+  jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34 },
+  relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0 },
+  lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0 },
+  oneclick: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0 },
 };
+/**
+ * Requests kept in each vendor's total for the helper's own reads that serve every user, which only those reads may
+ * draw, whatever PROXY_BUDGET_<VENDOR> says. Jupiter: token search at most one per JUP_GAP_MS 4 s, 15 a minute
+ * (data/solana/token.ts), and Discover's three lists once per FRESH_MS 12 s, 3 x 5 = 15 a minute (data/solana/lists.ts
+ * READS), 30 a minute. The budget counts a draw until the end of its second plus the minute (limits.ts upstreamBudget),
+ * so a counted minute spans up to 61 whole seconds: search 16 (0, 4, .., 60) and lists 6 refreshes x 3 = 18, so 34.
+ * Callers get 26 of Free's 60 and 566 of a Developer key's 600. Relay, LI.FI and 1Click: the helper reads none on its
+ * own, so 0.
+ */
+export const PROXY_RESERVE: Readonly<Record<VendorName, number>> = { jupiter: 34, relay: 0, lifi: 0, oneclick: 0 };
 /** The environment variable naming a vendor's budget, "<total per minute>,<per client per 10 s>". */
 export const proxyBudgetEnv = (vendor: VendorName): string => `PROXY_BUDGET_${vendor.toUpperCase()}`;
 export const CACHE_ENTRIES = 256;
@@ -116,7 +126,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const keys = readKeys(env);
   const forms = keyForms(keys);
-  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v]), windowMs: VENDOR_WINDOW_MS }])) as Record<VendorName, BudgetLimits>;
+  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v] }])) as Record<VendorName, BudgetLimits>;
   const budget = upstreamBudget((v) => limits[v as VendorName], now);
   const cache = new Map<string, Read & { expires: number }>();
   let cacheBytes = 0;
@@ -156,7 +166,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     return Buffer.concat(chunks).toString("utf8");
   }
 
-  async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string): Promise<Read | ProxyAnswer> {
+  async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string, reserved: boolean): Promise<Read | ProxyAnswer> {
     for (let attempt = 0; ; attempt++) {
       // the vendor's reset holds every call to it
       const held = budget.heldFor(name);
@@ -184,7 +194,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           if (attempt === 0 && wait <= WAIT_MAX_MS) {
             await sleep(wait);
             // the retry reaches the vendor again, so it draws from the total too
-            const again = budget.take(name, undefined);
+            const again = budget.take(name, undefined, 1, false, reserved);
             if (again > 0) return throttled(again);
             continue;
           }
@@ -211,9 +221,10 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   /**
    * One proxied call: `vendor` and `path` as the caller wrote them, `rawQuery` the text after "?" (or ""), `body` the
    * request body, `client` the caller's address (../limits/limits.ts clientOf). The helper's own reads (Discover's
-   * lists, the token page) pass none: they draw from the vendor's total, never a caller's share.
+   * lists, the token page) pass none: they draw from the vendor's total, never a caller's share; `reserved` marks the
+   * ones PROXY_RESERVE holds room for, which alone may draw it.
    */
-  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string): Promise<ProxyAnswer> {
+  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved = false): Promise<ProxyAnswer> {
     if (!Object.hasOwn(VENDORS, vendor)) return error(404, "not_found");
     const name = vendor as VendorName;
     const v = VENDORS[name];
@@ -224,7 +235,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
     // a draw on the vendor's budget for every call that may reach it, the helper's own too; a cache hit or a call joining
     // one in flight reaches nothing, so it counts in the caller's share alone
-    const draw = (shareOnly = false): number => budget.take(name, client, 1, shareOnly);
+    const draw = (shareOnly = false): number => budget.take(name, client, 1, shareOnly, reserved);
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
@@ -241,7 +252,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         const wait = draw(p !== undefined);
         if (wait > 0) return source(throttled(wait));
         if (!p) {
-          p = call(name, v, up, path, qs, "").then((read) => {
+          p = call(name, v, up, path, qs, "", reserved).then((read) => {
             if ("fetchedAt" in read && read.status === 200) remember(id, read, up.cacheMs!);
             return read;
           });
@@ -253,7 +264,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     } else {
       const wait = draw();
       if (wait > 0) return source(throttled(wait));
-      out = await call(name, v, up, path, qs, up.method === "POST" ? body : "");
+      out = await call(name, v, up, path, qs, up.method === "POST" ? body : "", reserved);
     }
     if (!("fetchedAt" in out)) return source(out);
     return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body });

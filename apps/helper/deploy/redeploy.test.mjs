@@ -11,6 +11,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { budgetFromEnv } from "../src/limits/limits.ts";
 import { RPC_BATCH_MAX } from "../src/rpc/methods.ts";
+import { RPC_RESERVE } from "../src/rpc/rpc.ts";
+import { PROXY_RESERVE } from "../src/proxy/proxy.ts";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "redeploy.sh");
 const REL = "apps/helper/deploy/redeploy.sh";
@@ -175,20 +177,43 @@ test("a HELPER_RELEASE or HELPER_COMMIT line not in the plain form, or written t
   }
 });
 
+// the rule as the helper's start applies it, each name with its own-read reserve
+const rules = {
+  RPC_BUDGET_SOLANA: { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE.solana },
+  RPC_BUDGET_BASE: { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE.base },
+  PROXY_BUDGET_JUPITER: { reserve: PROXY_RESERVE.jupiter },
+  PROXY_BUDGET_RELAY: { reserve: PROXY_RESERVE.relay },
+};
+const helperTakes = (name, v) => {
+  try {
+    budgetFromEnv({ [name]: v }, name, { total: 1, perClient: 0 }, rules[name]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const values = ["", "100,16", "100,10", "100,9", "100,5", "16,16", "4,2", "2,1", "100,16,40", "100,16,10", "100,16,9", "100,16,12", "100,16,13", "100,16,100", "100,16,101", "100,16,", "100,16,40,1",
+  "12,10", "13,10", "14,10", "34,1", "35,1", "36,1", "60,4", "38,4", "39,4", "600,4", "50,2", "3,2",
+  "0,0", "05,4", "1e3,1", "-1,1", " 100,16", "100,16 ", "100;16", "１００,１６", "9999999,10", "10000000,10", "lots", `${SECRET},1`, "'100,16'"];
+// The drift check (fold 5): redeploy.sh's budget_ok, run on its own, agrees with budgetFromEnv for every name with a
+// reserve and one without, on every value.
+test("budget_ok in redeploy.sh takes exactly the values budgetFromEnv takes, each name with its own-read reserve", () => {
+  const text = readFileSync(SCRIPT, "utf8");
+  const fn = /^budget_ok\(\) \{\n[\s\S]*?\n\}\n/m.exec(text)?.[0];
+  assert.ok(fn, "budget_ok is in the script");
+  let checked = 0;
+  for (const name of Object.keys(rules))
+    for (const v of values) {
+      const r = spawnSync("bash", ["-c", `set -euo pipefail\n${fn}\nbudget_ok "$1" "$2"`, "budget_ok", name, v], { encoding: "utf8" });
+      assert.equal(r.status === 0, helperTakes(name, v), `${name}=${JSON.stringify(v)}: bash ${r.status === 0 ? "takes" : "refuses"} it, the helper ${helperTakes(name, v) ? "takes" : "refuses"} it`);
+      checked++;
+    }
+  assert.ok(checked >= 4 * 40, `checked ${checked}`);
+});
+
 // re-check finding 4: a budget value the helper's start refuses (budgetFromEnv, exit 2) would leave the container
 // restarting; the redeploy refuses it first, with the same rule, naming the variable only, with nothing changed.
 test("a budget variable the helper would refuse, in deploy/.env or in the shell, stops the redeploy with nothing changed; the rule is budgetFromEnv's", () => {
-  const rpcRules = { minShare: RPC_BATCH_MAX, perMethod: true };
-  const helperTakes = (name, v) => {
-    try {
-      budgetFromEnv({ [name]: v }, name, { total: 1, perClient: 0 }, name.startsWith("RPC_") ? rpcRules : {});
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const values = ["", "100,16", "100,10", "100,9", "100,5", "16,16", "4,2", "2,1", "100,16,40", "100,16,10", "100,16,9", "100,16,100", "100,16,101", "100,16,", "100,16,40,1",
-    "0,0", "05,4", "1e3,1", "-1,1", " 100,16", "100,16 ", "100;16", "１００,１６", "9999999,10", "10000000,10", "lots", `${SECRET},1`, "'100,16'"];
   const s = server();
   try {
     let refused = 0;
@@ -221,7 +246,7 @@ test("a budget variable the helper would refuse, in deploy/.env or in the shell,
     const r = s.run(s.B);
     assert.notEqual(r.status, 0, r.out);
     assert.match(r.out, /RPC_BUDGET_BASE in deploy\/\.env is not one plain RPC_BUDGET_BASE=<value> line; nothing changed/);
-    const taken = values.filter((v) => helperTakes("RPC_BUDGET_SOLANA", v)).length + values.filter((v) => helperTakes("PROXY_BUDGET_JUPITER", v)).length;
+    const taken = ["RPC_BUDGET_SOLANA", "PROXY_BUDGET_JUPITER"].reduce((k, name) => k + values.filter((v) => helperTakes(name, v)).length, 0);
     assert.equal(s.docker().length, 2 * taken, "compose ran only for the values the helper takes");
   } finally {
     s.done();

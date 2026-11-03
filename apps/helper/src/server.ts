@@ -151,7 +151,7 @@ export function handler(
   lists: Lists = createSolanaLists(proxy, rpc),
   fee: Fee = feeQuoterFromEnv(process.env),
   withdraw: WithdrawSender = withdrawSenderFromEnv(process.env, fee, statusesOf(watches)),
-  token: Token = solanaTokenFromEnv(process.env, proxy, lists),
+  token: Token = solanaTokenFromEnv(process.env, proxy, lists, rpc),
   bind: BindSender = bindSenderFromEnv(process.env, watches),
   release: number | null = releaseOf(process.env),
   pools: ReadonlyMap<string, SolanaPoolSender> = solanaPoolSendersFromEnv(process.env),
@@ -443,12 +443,13 @@ export function handler(
 }
 
 /**
- * The token page's reads: their own RPC client on the same Solana provider (they draw from no caller's share of the
- * device's /v1/rpc/solana budget), and holders on SOLANA_HOLDERS_RPC_URL when set (src/data/solana/token.ts).
+ * The token page's reads: the helper's one RPC client, so they draw from the same Solana provider's one budget as every
+ * caller (no caller's share; a second client would be a second budget on one provider, and together they could pass
+ * its limit), and holders on SOLANA_HOLDERS_RPC_URL when set (src/data/solana/token.ts).
  */
-export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists): Token {
+export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc): Token {
   const holders = env.SOLANA_HOLDERS_RPC_URL;
-  return createSolanaToken(proxy, createRpc(env), {
+  return createSolanaToken(proxy, rpc, {
     listed: lists.get,
     holdersRpc: holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }),
   });

@@ -138,6 +138,23 @@ test("upstreamBudget: takeEach draws on every key or on none; one key full refus
   assert.ok(b.take("solana x", "c") > 0, "x's three are spent");
 });
 
+test("upstreamBudget fold 5: draws not reserved stop at the total less the reserve; reserved ones use the whole total and never take callers' part", () => {
+  let t = 11_000_000;
+  const b = upstreamBudget(() => ({ total: 10, perClient: 100, windowMs: 60_000, reserve: 4 }), () => t);
+  for (let i = 0; i < 6; i++) assert.equal(b.take("v", "dev"), 0, `caller draw ${i + 1}`);
+  assert.ok(b.take("v", "dev2") > 0, "callers stop at 10 - 4");
+  assert.ok(b.take("v", undefined) > 0, "an own read not marked reserved stops with them");
+  for (let i = 0; i < 4; i++) assert.equal(b.take("v", undefined, 1, false, true), 0, `reserved read ${i + 1}`);
+  assert.ok(b.take("v", undefined, 1, false, true) > 0, "the whole total is spent");
+  t += 61_000;
+  for (let i = 0; i < 4; i++) assert.equal(b.take("v", undefined, 1, false, true), 0, "reserved reads first");
+  for (let i = 0; i < 6; i++) assert.equal(b.take("v", "dev"), 0, `the reserved reads left callers their 6 (${i + 1})`);
+  assert.ok(b.take("v", "dev") > 0);
+  assert.throws(() => budgetFromEnv({ X: "34,1" }, "X", { total: 60, perClient: 4 }, { reserve: 34 }), /X must be/, "no room for callers");
+  assert.deepEqual(budgetFromEnv({ X: "36,1" }, "X", { total: 60, perClient: 4 }, { reserve: 34 }), { total: 36, perClient: 1 });
+  assert.throws(() => budgetFromEnv({ X: "100,16,12" }, "X", { total: 1, perClient: 0 }, { minShare: 10, perMethod: true, reserve: 3 }), /X must be/, "a method's limit leaves a full batch past the reserve");
+});
+
 test("budgetFromEnv rules: a share under `minShare` (a batch's size) and a method's limit outside minShare..total stop the start, naming the variable only (re-check env)", () => {
   const fb = { total: 100, perClient: 16, perMethod: 40 };
   const rules = { minShare: 10, perMethod: true };

@@ -377,9 +377,9 @@ test("each chain's budget is RPC_BUDGET_<CHAIN> when set (\"<total>,<per client>
     for (let i = 0; i < 13; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "a");
     assert.equal(calls, 12, "the share from the environment");
     for (let i = 0; i < 13; i++) await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "b");
-    assert.equal(calls, 20, "the total from the environment (two numbers: no limit per method)");
+    assert.equal(calls, 17, "the total from the environment less Solana's own-read reserve of 3 (two numbers: no limit per method)");
     for (let i = 0; i < RPC_CLIENT_MAX + 1; i++) await r.handle("base", JSON_T, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), "a");
-    assert.equal(calls, 20 + RPC_CLIENT_MAX, "another chain keeps the default");
+    assert.equal(calls, 17 + RPC_CLIENT_MAX, "another chain keeps the default");
   })();
 });
 
@@ -432,13 +432,29 @@ test("re-check F-D solana: under the public endpoint's limits (100 a 10 s, 40 a 
   assert.ok(served > 0, "the busy method is served up to its limit");
 });
 
+test("fold 5: Solana keeps RPC_RESERVE (3 a 10 s) on the chain and on each method for Discover's own reads; callers and unreserved own reads stop short of it", async () => {
+  let calls = 0;
+  const t = 1_800_000_000_000;
+  const f = (async () => (calls++, new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } }))) as never;
+  const gma = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [[]] });
+  const r = createRpc({}, { now: () => t, fetch: f });
+  let served = 0;
+  for (let a = 0; a < 10; a++) for (let i = 0; i < RPC_CLIENT_MAX; i++) if ((await r.handle("solana", JSON_T, gma, `198.51.100.${a}`)).status === 200) served++;
+  assert.equal(served, 40 - 3, "callers get the method's 40 less the reserve");
+  assert.equal((await r.handle("solana", JSON_T, gma)).status, 429, "an own read not reserved (the token page's) stops with callers");
+  for (let i = 0; i < 3; i++) assert.equal((await r.handle("solana", JSON_T, gma, undefined, true)).status, 200, `Discover's read ${i + 1}`);
+  assert.equal((await r.handle("solana", JSON_T, gma, undefined, true)).status, 429, "the method's 40 is the limit");
+  assert.equal(calls, 40);
+  assert.throws(() => createRpc({ RPC_BUDGET_SOLANA: "100,16,12" }), (e: Error) => e.message.startsWith("RPC_BUDGET_SOLANA must be"), "a method's limit must leave a batch past the reserve");
+});
+
 test("re-check F-D: the helper's own reads (no caller) draw from the chain's total, so with callers they never take it past the provider's limit", async () => {
   let calls = 0;
   let t = 1_800_000_000_000;
   const f = (async () => (calls++, new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: 1 }), { status: 200, headers: { "content-type": "application/json" } }))) as never;
   const r = createRpc({ RPC_BUDGET_SOLANA: "20,12" }, { now: () => t, fetch: f });
-  for (let i = 0; i < 20; i++) assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()))).status, 200, `own read ${i + 1}`);
-  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()))).status, 429, "the 21st own read in 10 s waits");
+  for (let i = 0; i < 20; i++) assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), undefined, true)).status, 200, `own read ${i + 1}`);
+  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), undefined, true)).status, 429, "the 21st own read in 10 s waits");
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "device")).status, 429, "and so does a device: the total is spent");
   assert.equal(calls, 20);
   t += 11_000;

@@ -257,7 +257,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string): Promise<Answer> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string): Promise<{ status: number; headers?: Record<string, string>; body: string }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
@@ -355,7 +355,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     let at = now();
     let wait = 0;
     try {
-      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "");
+      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true); // proxy.ts PROXY_RESERVE
       if (a.status === 429) wait = retryAfterOf(a.headers);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
