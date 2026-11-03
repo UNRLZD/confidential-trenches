@@ -67,20 +67,40 @@ const M = [
   [R, "    seconds({ id: \"A\", l, j });\n", "", T, "RV6"],
   [R, "      seconds({ id: \"R\", c, l, j });\n", "", T, "RV6"],
   [R, "    w.secretKey.fill(0);\n", "", "test/pool-zeroing.test.ts", "solanaRestore zeroes"],
+  // card sol-restore-race, review round 4: the first read's answers kept for the never-closed rule (G7); G4 is equivalent
+  [R, "  solanaMarksGaps(calls, first.calls);\n", "", T, "fold 6 \\(G7"],
+  [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold", "equivalent: within one read line 96 checks both ways (the loop runs i both ways); an earlier answer of rpc j is at or below every slot read since (each read is at or past the merged marks' slot), so line 95 fires only at an equal slot, where the mark is new to the union, the restore reads again, and j's next read must hold it or line 96 refuses: the walked set and every device's outcome are unchanged"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];
+// The unmutated run, timed once per test file: it must pass, and its time sets the cap (three times it, plus the longest
+// per-test timeout, 60 s), so a run past the cap hangs and a run that fails at a test's own timeout does not.
+const cap = new Map();
+for (const file of new Set(M.map((m) => m[3]))) {
+  const t0 = Date.now();
+  const r = runTests([file], { cwd: W, timeoutMs: 600_000 });
+  if (r.hung || r.status !== 0) throw new Error(`the unmutated ${file} does not pass`);
+  cap.set(file, 3 * (Date.now() - t0) + 60_000);
+  console.log(`unmutated ${file}: ${Date.now() - t0} ms, cap ${cap.get(file)} ms`);
+}
 let ok = 0;
-for (const [f, find, repl, file, pat] of M) {
+const hung = [], equivalent = [];
+for (const [f, find, repl, file, pat, why] of M) {
+  // an equivalent mutant (no test can tell it apart: its reason given) is listed, never run or counted
+  if (why !== undefined) { equivalent.push(`[${pat}] ${find.slice(0, 70)}: ${why}`); continue; }
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
   writeFileSync(f, src.replace(find, repl));
-  const r = runTests([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: 120_000 });
+  const r = runTests([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: cap.get(file) });
   writeFileSync(f, src);
-  // HUNG: only the planted tests run (the name pattern), so the one that hangs is the planted one: killed
-  const killed = r.hung || (r.status !== 0 && r.fail > 0);
+  // HUNG: past the cap, killed by the runner; listed apart, never a kill
+  if (r.hung) { hung.push(`[${pat}] ${f.split("/").pop()}: ${find.slice(0, 70)}`); continue; }
+  const killed = r.status !== 0 && r.fail > 0;
   if (killed) ok++;
-  console.log(`${r.hung ? "HUNG" : killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${r.pass} fail ${r.fail}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${r.pass} fail ${r.fail}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
 }
-console.log(`${ok}/${M.length} killed`);
-if (ok !== M.length) process.exitCode = 1;
+for (const h of hung) console.log(`HUNG ${h}`);
+for (const e of equivalent) console.log(`EQUIVALENT ${e}`);
+const runs = M.length - equivalent.length;
+console.log(`${ok}/${runs - hung.length} killed; ${hung.length} hung (not counted); ${equivalent.length} equivalent`);
+if (ok !== runs) process.exitCode = 1;
