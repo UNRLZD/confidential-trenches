@@ -233,7 +233,8 @@ export interface SignpageState {
    * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC (12.5 SOL
    * is "12.5"). `asset` is the pool's, set by the device from the pool's kind; its decimals are POOL_ASSET_DECIMALS's
    * alone. `ready` is how much of it is ready to buy (chunks with a proof ready); absent while no proof
-   * queue runs, never "0" in its place. Absent when the page is signed out or the notes could not be read.
+   * queue runs, never "0" in its place. Absent when the page is signed out or the notes could not be read. Totals
+   * only, never a note; the app sees them each time the store changes, so two in a row can show one note's value.
    */
   pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string }[];
   wallets: { chain: Chain; address: string; role: "fresh" | "hop"; size: string; state: WalletState }[];

@@ -4,9 +4,9 @@
 // checked against its kind's params before it is built, so a field its kind does not allow is never sent.
 // The types these schemas mirror are messages.ts's; the test checks one valid and several invalid values per kind.
 
-import { CHAINS } from "../orders/record.ts";
-import { POOL_ASSETS, SIGNPAGE_KINDS } from "./messages.ts";
-import type { SignpageKind } from "./messages.ts";
+import { CHAINS, type Chain } from "../orders/record.ts";
+import { POOL_ASSET_DECIMALS, POOL_ASSETS, SIGNPAGE_KINDS } from "./messages.ts";
+import type { PoolAsset, SignpageKind } from "./messages.ts";
 
 /** A check of one value. */
 export type SignpageSchema = (v: unknown) => boolean;
@@ -145,9 +145,29 @@ const op = (kind: SignpageSchema, stages: readonly string[], extra: Record<strin
   obj({ id: str, kind, stage: oneOf(stages), txs }, extra);
 const errorCode: SignpageSchema = (v) => typeof v === "string" && /^[a-z0-9_.-]{1,64}$/.test(v);
 
+/** The asset each chain's pool holds: the Solana pool wrapped SOL, the EVM pools native ETH, the NEAR vault USDC. */
+const POOL_CHAIN_ASSET: Readonly<Record<Chain, PoolAsset>> = Object.freeze({ solana: "SOL", base: "ETH", robinhood: "ETH", near: "USDC" });
+/** A dec string in base units at `d` decimals, or null when it has more fraction digits than `d`. */
+const unitsAt = (s: string, d: number): bigint | null => {
+  const [w, f = ""] = s.split(".");
+  return f.length > d ? null : BigInt(w! + f.padEnd(d, "0"));
+};
 /** The private balance per chain's pool: each entry exact, its asset one of POOL_ASSETS (no decimals key: they come
- * from POOL_ASSET_DECIMALS only), one entry per chain (a chain twice is refused). */
-const poolList = arr(obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec }));
+ * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
+ * asset has decimals, its ready at most its balance, one entry per chain (a chain twice is refused). */
+const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec });
+const poolFits: SignpageSchema = (v) => {
+  if (!poolEntry(v)) return false;
+  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string };
+  if (POOL_CHAIN_ASSET[p.chain] !== p.asset) return false;
+  const d = POOL_ASSET_DECIMALS[p.asset];
+  const balance = unitsAt(p.balance, d);
+  if (balance === null) return false;
+  if (p.ready === undefined) return true;
+  const ready = unitsAt(p.ready, d);
+  return ready !== null && ready <= balance;
+};
+const poolList = arr(poolFits);
 const pools: SignpageSchema = (v) =>
   poolList(v) && new Set((v as { chain: unknown }[]).map((p) => p.chain)).size === (v as unknown[]).length;
 

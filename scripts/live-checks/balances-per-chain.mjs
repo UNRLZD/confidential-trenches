@@ -75,13 +75,13 @@ export function judge(rec) {
       }
       const bal = base(p.balance, p.asset);
       say(x.asset === p.asset && x.balance === bal, `${n}: ${p.chain} balance ${x.balance} base units of ${x.asset}, want ${bal} of ${p.asset}`);
-      say(new RegExp(`^[0-9][0-9.,]*[KMB]? ${p.asset}$`).test(x.text[1] ?? "") && !x.text.some((t) => t.includes("$")), `${n}: ${p.chain} drawn ${JSON.stringify(x.text.slice(1))}: the balance in ${p.asset}, no dollar figure`);
+      say(new RegExp(`^<?[0-9][0-9.,]*[KMB]? ${p.asset}$`).test(x.text[1] ?? "") && !x.text.some((t) => t.includes("$")), `${n}: ${p.chain} drawn ${JSON.stringify(x.text.slice(1))}: the balance in ${p.asset}, no dollar figure`);
       if (p.ready === undefined) {
         say(x.ready === "none" && x.pending === "none" && x.text[2] === "—" && x.text[3] === "—", `${n}: ${p.chain} sends no ready: Ready ${JSON.stringify(x.text[2])} and Pending ${JSON.stringify(x.text[3])} (${x.ready}, ${x.pending}), want dashes, never 0`);
       } else {
         const rd = base(p.ready, p.asset);
         const pd = (BigInt(bal) - BigInt(rd)).toString();
-        say(x.ready === rd && x.pending === pd && /^[0-9]/.test(x.text[2] ?? "") && /^[0-9]/.test(x.text[3] ?? ""), `${n}: ${p.chain} ready ${x.ready} and pending ${x.pending} drawn ${JSON.stringify(x.text[2])} and ${JSON.stringify(x.text[3])}, want ${rd} and ${pd} as numbers`);
+        say(x.ready === rd && x.pending === pd && /^<?[0-9]/.test(x.text[2] ?? "") && /^<?[0-9]/.test(x.text[3] ?? ""), `${n}: ${p.chain} ready ${x.ready} and pending ${x.pending} drawn ${JSON.stringify(x.text[2])} and ${JSON.stringify(x.text[3])}, want ${rd} and ${pd} as numbers`);
       }
     }
     const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.errors ?? []).map((e) => `console ${e}`)];

@@ -248,7 +248,9 @@ export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[],
 
 export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
   // Cash: the vault's USDC, each pool held in USDC and the READY wallets, each source counted once. A SOL or ETH pool
-  // has no dollar value until a price read exists, so it never joins Cash: no dollar figure is invented.
+  // has no dollar value until a price read exists, so it never joins Cash: no dollar figure is invented. The vault's
+  // USDC is vault_balance alone: the signing page's pool table never holds the vault's scope (packages/signpage
+  // test/pools.test.ts), so a USDC pool is other money and the vault's USDC never counts twice.
   let cash = cents(s.vault_balance) ?? 0n;
   for (const p of s.pools ?? []) if (p.asset === "USDC") cash += cents(p.balance) ?? 0n;
   let onWay = 0n;
@@ -289,8 +291,10 @@ export function baseUnits(s: string, d: number): bigint | null {
   return BigInt(m[1]! + ((m[2] ?? "") + "0".repeat(d)).slice(0, d));
 }
 
-/** Base units at `d` decimals, short and rounded down, at most 8 characters: up to 6 decimals below 1 ("0.001",
- *  "0.000123"), up to 4 below 1,000 ("12.5"), then K, M and B with up to 2 ("12.5K", "1.25M"). Never summed. */
+/** Base units at `d` decimals, short and rounded down: up to 6 decimals below 1 ("0.001", "0.000123"), up to 4 below
+ *  1,000 ("12.5"), then K, M and B with up to 2 ("12.5K", "1.25M"). A nonzero amount under the smallest digit drawn
+ *  reads "<0.000001" (at the asset's decimals when fewer), never "0". At most 9 characters up to 999.99B; past that
+ *  the column widens, never clips. Never summed. */
 export function amount(base: bigint, d: number): string {
   const one = 10n ** BigInt(d);
   const show = (v: bigint, unit: bigint, dp: number, k: string): string => {
@@ -299,7 +303,11 @@ export function amount(base: bigint, d: number): string {
     const frac = dp ? f.toString().padStart(dp, "0").replace(/0+$/, "") : "";
     return `${w}${frac ? `.${frac}` : ""}${k}`;
   };
-  if (base < one) return show(base, one, Math.min(6, d), "");
+  if (base < one) {
+    const dp = Math.min(6, d);
+    const s = show(base, one, dp, "");
+    return s === "0" && base > 0n ? (dp === 0 ? "<1" : `<0.${"0".repeat(dp - 1)}1`) : s;
+  }
   if (base < 1000n * one) return show(base, one, Math.min(4, d), "");
   if (base < 1_000_000n * one) return show(base, 1000n * one, 2, "K");
   if (base < 1_000_000_000n * one) return show(base, 1_000_000n * one, 2, "M");

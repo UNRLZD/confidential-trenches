@@ -12,6 +12,8 @@ import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
 import { signedOutState } from "../src/api.ts";
 import { PAGE_POOLS, withPools } from "../src/pools.ts";
 import { ANSWER_ROOM, pickOps, stateOf } from "../src/state.ts";
+import { vaultScope } from "../src/withdraw/checks.ts";
+import { NEAR_NETWORKS, type NearNetwork } from "../../kit/src/near/networks.ts";
 
 const SOL: BalancePool = { id: "sol:p", chain: "solana", scope: 11n, asset: "SOL" };
 const BASE: BalancePool = { id: "evm:p", chain: "base", scope: 22n, asset: "ETH" };
@@ -83,6 +85,41 @@ test("a state whose ops already fill the answer cap: the oldest ops give way to 
   assert.ok(out.ops.length < full.ops.length && out.ops.length > 0);
   assert.equal(out.ops.at(-1)!.id, full.ops.at(-1)!.id, "the newest op stays");
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(out), true);
+});
+
+test("no ops to give and a held list that fills the cap to within 2 bytes: the state without pools, under the cap", async () => {
+  const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
+  const cap = SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM;
+  const entry = (i: number, n: number) => ({ id: `h${String(i).padStart(5, "0")}${"x".repeat(n)}`, asset: "usdc", amount: "1" });
+  const held: SignpageState["held"] = [];
+  while (bytes({ ...SIGNED_IN, held }) < cap - 2 - 900) held.push(entry(held.length, 500));
+  // two last entries take the rest (an id is at most 512 characters), so the state leaves exactly 2 bytes of the cap
+  held.push(entry(held.length, 0), entry(held.length + 1, 0));
+  let rest = cap - 2 - bytes({ ...SIGNED_IN, held });
+  const a = Math.min(500, rest);
+  held[held.length - 2] = entry(held.length - 2, a);
+  rest -= a;
+  held[held.length - 1] = entry(held.length - 1, rest);
+  const full: SignpageState = { ...SIGNED_IN, held };
+  assert.equal(bytes(full), cap - 2, "the held list fills the cap to within 2 bytes");
+  assert.equal(full.ops.length, 0);
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(full), true, "the full state is a valid answer");
+  const THIRD: BalancePool = { id: "evm:r", chain: "robinhood", scope: 33n, asset: "ETH" };
+  const out = await withPools(full, async () => [note("a", SOL.scope, 12_500_000_000n)], [SOL, BASE, THIRD]);
+  assert.ok(bytes(out) <= cap, `${bytes(out)} bytes over the cap ${cap}`);
+  assert.equal(Object.hasOwn(out, "pools"), false, "no room: the state goes without pools");
+  assert.deepEqual(out, full, "the state as it was");
+});
+
+test("the page's pool table never holds the vault's scope: the vault's USDC is vault_balance alone, never counted twice", () => {
+  // every network the page knows; one with no vault yet (mainnet until the freeze) has no scope to hold
+  for (const net of Object.keys(NEAR_NETWORKS) as NearNetwork[]) {
+    const scope = vaultScope(net);
+    if (scope === null) continue;
+    assert.equal(PAGE_POOLS.some((p) => p.scope === scope), false, `PAGE_POOLS holds the ${net} vault's scope`);
+  }
+  // the vault is NEAR's private balance: no NEAR pool sits beside it
+  assert.equal(PAGE_POOLS.some((p) => p.chain === "near"), false, "PAGE_POOLS holds a NEAR pool beside the vault");
 });
 
 test("the page's pool table is empty while no pool is pinned on mainnet: a mainnet pin must be added to it", () => {

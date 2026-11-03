@@ -294,18 +294,22 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
 test("pools: amounts in the asset's own units, short and rounded down, never a dollar figure", () => {
   assert.equal(amount(12_500_000_000n, 9), "12.5");
   assert.equal(amount(250_000_000_000_000_000n, 18), "0.25");
-  // the EVM ladder's smallest rung, 0.001 ETH, and dust below it, never "0"
+  // the 0.001 ETH rung, a small amount, and dust under the smallest digit drawn: "<0.000001", never "0"
   assert.equal(amount(1_000_000_000_000_000n, 18), "0.001");
   assert.equal(amount(123_456_789_000_000n, 18), "0.000123");
+  assert.equal(amount(123_456_789_000n, 18), "<0.000001");
+  assert.equal(amount(1n, 9), "<0.000001");
+  assert.equal(amount(999n, 9), "<0.000001");
+  assert.equal(amount(1_000n, 9), "0.000001");
   assert.equal(amount(999_999_999_999n, 9), "999.9999");
   assert.equal(amount(12_500_500_000_000n, 9), "12.5K");
   assert.equal(amount(1_250_000_500_000_000n, 9), "1.25M");
   assert.equal(amount(3_200_000_000_000_000_000n, 9), "3.2B");
   assert.equal(amount(0n, 9), "0");
   assert.equal(amount(12_500_000n, 6), "12.5");
-  // up to 999.99B of the asset, past any asset's whole supply (SOL, ETH and USDC all under 100B); the column widens past that, never clips
-
-  for (const v of [1n, 999_999_999n, 999_999_999_999n, 999_999_999_999_999n, 999_999_999_999n * 10n ** 9n]) assert.ok(amount(v, 9).length <= 8, amount(v, 9));
+  // at most 9 characters up to 999.99B of the asset, past any asset's whole supply (SOL, ETH and USDC all under 100B);
+  // the column widens past that, never clips
+  for (const v of [1n, 999_999_999n, 999_999_999_999n, 999_999_999_999_999n, 999_999_999_999n * 10n ** 9n]) assert.ok(amount(v, 9).length <= 9, amount(v, 9));
   assert.ok(!amount(12_500_000_000n, 9).includes("$"));
 });
 
@@ -326,7 +330,7 @@ test("cash: the vault and the ready wallets in dollars; a SOL or ETH pool never 
   assert.equal(t.cash, 8318n);
   assert.equal(t.total, t.cash + t.onWay + t.inPos);
   // a USDC pool is dollars: it joins Cash once, and the same amount in the vault is a second source, never merged
-  const same = portfolio(snap({ ...base, vault_balance: "50", wallets: [], pools: [{ chain: "solana", asset: "USDC", balance: "50", ready: "50" }] }), data(), NOW).totals!;
+  const same = portfolio(snap({ ...base, vault_balance: "50", wallets: [], pools: [{ chain: "near", asset: "USDC", balance: "50", ready: "50" }] }), data(), NOW).totals!;
   assert.equal(same.cash, 10000n);
   assert.equal(same.total, 10000n);
 });

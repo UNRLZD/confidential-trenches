@@ -533,12 +533,26 @@ test("state.pools: the private balance per chain's pool is optional; each entry 
   assert.equal(ok({ ...STATE, pools }), true, "a valid pools answer passes");
   assert.equal(ok({ ...STATE, pools: [] }), true, "an empty pool table passes");
   assert.equal(S.signpageStateEventSchema({ v: 1, type: "state", state: { ...STATE, pools } }), true, "and as a state event");
-  for (const asset of ["SOL", "ETH", "USDC"]) assert.equal(ok({ ...STATE, pools: [{ chain: "solana", asset, balance: "1" }] }), true, asset);
+  for (const [chain, asset] of [["solana", "SOL"], ["base", "ETH"], ["robinhood", "ETH"], ["near", "USDC"]]) assert.equal(ok({ ...STATE, pools: [{ chain, asset, balance: "1" }] }), true, `${asset} on ${chain}`);
+  // amounts at the asset's full decimals pass, and a ready equal to the balance
+  assert.equal(ok({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "0.000000001", ready: "0.000000001" }] }), true, "SOL at 9 decimals");
+  assert.equal(ok({ ...STATE, pools: [{ chain: "base", asset: "ETH", balance: "0.000000000000000001" }] }), true, "ETH at 18 decimals");
+  assert.equal(ok({ ...STATE, pools: [{ chain: "near", asset: "USDC", balance: "12.000001", ready: "12" }] }), true, "USDC at 6 decimals");
   assert.deepEqual([...MSG.POOL_ASSETS], ["SOL", "ETH", "USDC"]);
   assert.deepEqual({ ...MSG.POOL_ASSET_DECIMALS }, { SOL: 9, ETH: 18, USDC: 6 });
   assert.equal(Object.isFrozen(MSG.POOL_ASSETS) && Object.isFrozen(MSG.POOL_ASSET_DECIMALS), true, "the asset table is frozen");
   const bad = {
     "an unknown asset BTC": [{ chain: "solana", asset: "BTC", balance: "1" }],
+    "ETH on solana": [{ chain: "solana", asset: "ETH", balance: "1" }],
+    "USDC on solana": [{ chain: "solana", asset: "USDC", balance: "1" }],
+    "SOL on base": [{ chain: "base", asset: "SOL", balance: "1" }],
+    "USDC on robinhood": [{ chain: "robinhood", asset: "USDC", balance: "1" }],
+    "ETH on near": [{ chain: "near", asset: "ETH", balance: "1" }],
+    "a SOL balance past 9 decimals": [{ chain: "solana", asset: "SOL", balance: "0.0000000001" }],
+    "a USDC balance past 6 decimals": [{ chain: "near", asset: "USDC", balance: "1.0000001" }],
+    "an ETH ready past 18 decimals": [{ chain: "base", asset: "ETH", balance: "1", ready: "0.0000000000000000001" }],
+    "a ready over the balance": [{ chain: "solana", asset: "SOL", balance: "12.5", ready: "12.500000001" }],
+    "a ready over a zero balance": [{ chain: "near", asset: "USDC", balance: "0", ready: "1" }],
     "an asset in lower case": [{ chain: "solana", asset: "sol", balance: "1" }],
     "an empty asset": [{ chain: "solana", asset: "", balance: "1" }],
     "no asset": [{ chain: "solana", balance: "1" }],
@@ -557,7 +571,7 @@ test("state.pools: the private balance per chain's pool is optional; each entry 
     "a chain twice": [
       { chain: "solana", asset: "SOL", balance: "1" },
       { chain: "base", asset: "ETH", balance: "2" },
-      { chain: "solana", asset: "USDC", balance: "3" },
+      { chain: "solana", asset: "SOL", balance: "3" },
     ],
     "not an array": { chain: "solana", asset: "SOL", balance: "1" },
   };
