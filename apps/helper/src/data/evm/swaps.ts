@@ -743,32 +743,47 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return true;
   }
 
-  /** One book's read up to the agreed head: its pool's swaps (and the ETH price's) from where it is settled. */
-  async function readBook(e: Entry, urls: readonly string[], head: { n: number; t: number }): Promise<boolean> {
+  /** One book's read up to the agreed head: its pool's swaps from where it is settled, folded in once `refReady` says
+   *  the ETH price is read to the same block (an ETH-quoted book; read at the same time, so a tick is one round). */
+  async function readBook(e: Entry, urls: readonly string[], head: { n: number; t: number }, refReady: Promise<boolean>): Promise<boolean> {
     const first = e.book.settledTo < 0 && e.readAt === null;
     const from = first ? head.n - V.cold + 1 : e.book.settledTo + 1;
     // one tick reads at most the cold window, or CHUNKS_MAX spans past it; the rest is read the next tick
     const to = Math.min(head.n, from + Math.max(V.cold, CHUNKS_MAX * V.span) - 1);
     if (from > to) return true;
     const logs = await agreedRange(urls, (lo, hi) => swapFilter(e.pool, lo, hi, chain), from, to);
-    return logs != null && apply(e, from, to, head.n, logs);
+    if (logs == null || (e.pool.quote.kind === "eth" && !(await refReady))) return false;
+    return apply(e, from, to, head.n, logs);
   }
 
   let running: Promise<void> | null = null;
+  /** The timer fired while a tick ran: the next starts as soon as it ends, never a skipped period. */
+  let again = false;
   async function tick(): Promise<void> {
     for (const [t, e] of books) if (now() - e.touched > IDLE_MS) books.delete(t);
     if (books.size === 0) return;
     const head = await agreedHead();
     if (head === null) return;
-    // an ETH-quoted book is read only once the ETH price is read to the same block, so no swap is priced by an older price
+    // the ETH price and the books are read at once; an ETH-quoted book is folded in only once the ETH price is read to
+    // the same block, so no swap is priced by an older price (a tick of three rounds one after another outlasted 1 s)
     const needRef = [...books.values()].some((e) => e.pool.quote.kind === "eth");
-    const refOk = !needRef || (await readRef(head.with, head.n));
+    const refReady = needRef ? readRef(head.with, head.n).catch(() => false) : Promise.resolve(true);
     // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks
-    const due = [...books.values()].filter((e) => e.pool.quote.kind !== "eth" || refOk);
-    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head).catch(() => false)));
+    const due = [...books.values()];
+    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
+    await refReady;
   }
   function start(): Promise<void> {
-    if (!running) running = tick().catch(() => undefined).finally(() => (running = null));
+    if (!running)
+      running = tick()
+        .catch(() => undefined)
+        .finally(() => {
+          running = null;
+          if (again) {
+            again = false;
+            void start();
+          }
+        });
     return running;
   }
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -780,7 +795,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         timer = null;
         return;
       }
-      void start();
+      if (running !== null) again = true;
+      else void start();
     }, deps.tickMs ?? TICK_MS);
     timer.unref();
   }
