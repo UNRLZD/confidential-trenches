@@ -6,7 +6,9 @@
 // - another tab's sign out and sign-in: a quote asked as the resync starts waits for the resync's naming (resyncing).
 // - state.pools (card balances-per-chain): the shell's state carries the balance of this page's own notes per chain of
 //   the page's pool table, which a second hook gives one pool of this test's scope (mainnet has none yet); a note that
-//   lands is counted in the next state. The framed side is test/main-framed-pools.test.ts.
+//   lands is counted in the next state. The state read never writes: pageNotes reads with the wallet's readNotes and
+//   never opens the note store (whose open and list free a dead tab's notes and finish a parent); a third hook records
+//   who calls each of the two. The framed side is test/main-framed-pools.test.ts.
 // The release names no vault on the page's network yet (vaultScope is null on mainnet), so a load hook makes checks.ts's
 // vaultScope answer this test's scope; nothing else of main.ts or its imports is changed. The helper is a fetch that
 // records each request and answers 503, so a quote that reached it answers "down" and carries U in its body.
@@ -18,7 +20,6 @@ import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { depositId, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
-import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SOL_USDC } from "./oneclick-mock.ts";
@@ -26,20 +27,33 @@ import { SOL_USDC } from "./oneclick-mock.ts";
 const SCOPE = 4242n;
 const ANCHOR = "export function vaultScope(network: NearNetwork): bigint | null {";
 const TABLE = "export const PAGE_POOLS: readonly BalancePool[] = Object.freeze([]);";
+// each call of the note store's openNoteStore and readNotes, with the stack it was called from
+const calls: { name: string; stack: string }[] = ((globalThis as { __ctNoteCalls?: unknown }).__ctNoteCalls = []) as never;
+const record = (src: string, name: string): string => {
+  const anchor = `export async function ${name}(`;
+  if (!src.includes(anchor)) return src; // not there: never called, which the test then reads
+  return `${src.replace(anchor, `async function ${name}__recorded(`)}
+export async function ${name}(...a) { globalThis.__ctNoteCalls.push({ name: "${name}", stack: String(new Error().stack) }); return ${name}__recorded(...a); }
+`;
+};
 registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pools.ts")) {
       const src = String(r.source);
       if (!src.includes(TABLE)) throw new Error("pools.ts: PAGE_POOLS's line moved; update this test's hook");
-      return { ...r, source: src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: ${SCOPE}n, one: 1000000n }]);`) };
+      return { ...r, source: src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: ${SCOPE}n, asset: "USDC" }]);`) };
     }
+    if (url.endsWith("/wallet/src/notes/store.ts")) return { ...r, source: record(record(String(r.source), "openNoteStore"), "readNotes") };
     if (!url.endsWith("/src/withdraw/checks.ts")) return r;
     const src = String(r.source);
     if (!src.includes(ANCHOR)) throw new Error("checks.ts: vaultScope's line moved; update this test's hook");
     return { ...r, source: src.replace(ANCHOR, `${ANCHOR}\n  if (network === "mainnet") return ${SCOPE}n;`) };
   },
 });
+
+// after the hooks, so the note store module is the recorded one (a static import would load it first)
+const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 
 // the published 7f..7f entropy vector (BIP-39's)
 const ENTROPY = () => new Uint8Array(16).fill(0x7f);
@@ -206,12 +220,16 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   // state.pools: an INCOMING note has no value yet; once it lands (UNSPENT, its leaf) the next state counts it
   const s0 = await askState();
   assert.equal(s0.signed_in, true);
-  assert.deepEqual(s0.pools, [{ chain: "near", balance: "0" }], "the shell's state carries no pools of the page's notes");
+  const fromPageNotes = (name: string) => calls.filter((c) => c.name === name && /\bpageNotes\b/.test(c.stack));
+  assert.equal(fromPageNotes("openNoteStore").length, 0, "pageNotes opened the note store, which writes on open and list");
+  assert.ok(fromPageNotes("readNotes").length > 0, "pageNotes did not read with readNotes");
+  assert.deepEqual(s0.pools, [{ chain: "near", asset: "USDC", balance: "0" }], "the shell's state carries no pools of the page's notes");
   const n2 = await openNoteStore(other);
   const p1 = planned1[0]!;
   await n2.move(p1.id, "INCOMING", "UNSPENT", { leaf: { value: 25_000_000n, label: 77n, commitment: noteCommitment(25_000_000n, 77n, p1.precommitment), leafIndex: 0n } });
   n2.close();
-  assert.deepEqual((await askState()).pools, [{ chain: "near", balance: "25" }]);
+  assert.deepEqual((await askState()).pools, [{ chain: "near", asset: "USDC", balance: "25" }]);
+  assert.equal(fromPageNotes("openNoteStore").length, 0, "pageNotes opened the note store");
 
   // 3. another tab signs out and signs in again: the store starts over (no record), the page resyncs and names; a quote
   // asked as the resync starts waits for that naming

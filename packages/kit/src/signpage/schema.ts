@@ -5,7 +5,7 @@
 // The types these schemas mirror are messages.ts's; the test checks one valid and several invalid values per kind.
 
 import { CHAINS } from "../orders/record.ts";
-import { SIGNPAGE_KINDS } from "./messages.ts";
+import { POOL_ASSETS, SIGNPAGE_KINDS } from "./messages.ts";
 import type { SignpageKind } from "./messages.ts";
 
 /** A check of one value. */
@@ -145,8 +145,9 @@ const op = (kind: SignpageSchema, stages: readonly string[], extra: Record<strin
   obj({ id: str, kind, stage: oneOf(stages), txs }, extra);
 const errorCode: SignpageSchema = (v) => typeof v === "string" && /^[a-z0-9_.-]{1,64}$/.test(v);
 
-/** The private balance per chain's pool: each entry exact, one entry per chain (a chain twice is refused). */
-const poolList = arr(obj({ chain, balance: dec }, { ready: dec }));
+/** The private balance per chain's pool: each entry exact, its asset one of POOL_ASSETS (no decimals key: they come
+ * from POOL_ASSET_DECIMALS only), one entry per chain (a chain twice is refused). */
+const poolList = arr(obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec }));
 const pools: SignpageSchema = (v) =>
   poolList(v) && new Set((v as { chain: unknown }[]).map((p) => p.chain)).size === (v as unknown[]).length;
 
