@@ -101,9 +101,11 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      not through W, moves nothing. test/HostileSell.t.sol holds the Opus review's hostile cases (review of c2a8da2).
      Gas. Forge counts none of the 25,000 that EIP-7702 charges for each authorization of an empty account, and forge
      1.8.6 reports gas before refunds while 1.7.1 reports it after. So the gas limit to plan for is the 1.8.6 figure
-     plus 25,000, and the cost paid is at most the 1.7.1 figure plus 25,000. A sell, Uniswap v3 one hop through
-     SwapRouter02, W's authorization in the same transaction, the pool's trees empty (test/SellFork.t.sol):
-       chain       1.8.6    plan (+25,000)    1.7.1    paid at most (+25,000)
+     plus 25,000, and the L2 execution gas paid is at most the 1.7.1 figure plus 25,000; Robinhood's gasUsed adds its
+     parent-chain posting gas and Base charges its L1 data fee on top, so the gas limit and the fee cap come from
+     eth_estimateGas and the chain's fee reads. A sell, Uniswap v3 one hop through SwapRouter02, W's authorization in
+     the same transaction, the pool's trees empty (test/SellFork.t.sol):
+       chain       1.8.6    plan (+25,000)    1.7.1    L2 execution, at most (+25,000)
        Base        507,127  532,127           462,527  487,527
        Robinhood   556,763  581,763           512,163  537,163
      The deposit inserts into both trees, so each level of depth adds about 41,078 (test/Sell.t.sol
