@@ -282,7 +282,10 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     return amount;
   };
   const one = (to: string, d: string, overridden: Set<string>): bigint | null =>
-    to.toLowerCase() === PM || to.toLowerCase() === RH_PM ? (d.startsWith("1e2eaeaf") ? (slots.get(d.slice(8)) ?? 0n) : null) : quote(d, overridden);
+    to.toLowerCase() === PM || to.toLowerCase() === RH_PM
+      ? d.startsWith("1e2eaeaf") ? (slots.get(d.slice(8)) ?? 0n) : null
+      : d.startsWith("3850c7bd") || d.startsWith("1a686502") ? null // no v3 pool in the model
+        : quote(d, overridden);
   return async (calls) =>
     calls.map((c, id) => {
       if (c.method === "eth_getBlockByNumber") return { jsonrpc: "2.0", id, result: head("0x" + headNo.toString(16)) };
@@ -472,11 +475,14 @@ test("S2 one scan-provider head ahead of the chain hides the scanned real pool, 
   assert.deepEqual(later, below, "a later quote with an honest scan provider");
 });
 
+// the model's slot0 (a sqrtPrice of 2^100) with the liquidity a test sets
+const DEEP_PRICE = (1n << 100n) | (5n << 160n);
 const ZORA = "0x1111111111166b7fe7bd91427724b487980afc69"; // stand-in for ZORA on Base (the model does not depend on it)
 const ZORA_HOOK = "0x0469a4bd3724dc86c9542f4694c976da13c450c0"; // pinned Zora hook
 test("S3 a Zora coin whose real pool pairs with ZORA: a seeded native pool is its own reference, though the scan found the real pool", async () => {
   const token = "0x00000000000000000000000000000000000a55a5";
-  const realZora: ModelPool = { key: keyOf(token, ZORA, 0x800000, 200, ZORA_HOOK), give: (a) => a };
+  // the real pool holds far more of the token than the seeded one
+  const realZora: ModelPool = { key: keyOf(token, ZORA, 0x800000, 200, ZORA_HOOK), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] };
   const v = await quoteOn([seeded(token), realZora], token, seededRoute(token), scanner(5_000_000, [{ key: realZora.key, at: 4_500_000 }]));
   assert.equal(v.accepted, false, "a tenth of the price, with the token's real pool in the scan");
 });
@@ -484,7 +490,7 @@ test("S3 a Zora coin whose real pool pairs with ZORA: a seeded native pool is it
 const RH_X = "0x4a0e650000000000000000000000000000005eea"; // stand-in for the coordinator's 0x4a0e65…5eea
 test("S3b on Robinhood a Doppler /8 token paired with another currency: a seeded native pool is its own reference", async () => {
   const token = "0x00000000000000000000000000000000000a66a6";
-  const realX: ModelPool = { key: keyOf(token, RH_X, 0x800000, 8, "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544"), give: (a) => a };
+  const realX: ModelPool = { key: keyOf(token, RH_X, 0x800000, 8, "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544"), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] };
   const v = await quoteOn([seeded(token), realX], token, seededRoute(token), scanner(5_000_000, [{ key: realX.key, at: 4_500_000 }]), undefined, "robinhood");
   assert.equal(v.accepted, false, "a tenth of the price, with the token's real pool in the scan");
 });
@@ -560,22 +566,51 @@ test("L1 a token whose pool has an unpinned hook that takes a fee is bought thro
   assert.deepEqual([q.hook?.hookless, q.hook?.take, q.hook?.takeBps], [AMOUNT, AMOUNT / 10n, 1000]);
 });
 
-test("S3d a token with more held pools of other currencies than the device prices is refused no_reference", async () => {
-  const token = "0x00000000000000000000000000000000000ad1ad";
-  const best: ModelPool = { key: keyOf(token, NATIVE, 10000, 200, NATIVE), give: (a) => 10n * a };
+// a buy from the token's standard 1% native pool, the best route, against pools of other currencies
+const D_TOKEN = "0x00000000000000000000000000000000000ad1ad";
+const dBest: ModelPool = { key: keyOf(D_TOKEN, NATIVE, 10000, 200, NATIVE), give: (a) => 10n * a };
+const dRoute: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: D_TOKEN, fee: 10000, tickSpacing: 200, hooks: NATIVE, hookData: "0x" }] };
+/** A pool of D_TOKEN with the currency 0x…e000+i at liquidity `l`, priced through a standard pool from the native asset
+ *  unless `leg` is false. */
+const dOther = (i: number, l: bigint, leg = true): ModelPool[] => {
+  const x = "0x" + (0xe000 + i).toString(16).padStart(40, "0");
+  return [{ key: keyOf(D_TOKEN, x, 3000, 60, NATIVE), give: (a) => a / 2n, state: [DEEP_PRICE, l] }, ...(leg ? [{ key: keyOf(x, NATIVE, 3000, 60, NATIVE), give: (a: bigint) => a }] : [])];
+};
+const dQuote = (others: ModelPool[][]) => {
+  const pools = [dBest, ...others.flat()];
+  return quoteOn(pools, D_TOKEN, dRoute, undefined, others.map((o) => o[0]!.key));
+};
+
+test("D1 a pool of the token holding dust, with a currency that has no native pool, does not block the buy", async () => {
+  assert.equal((await dQuote([dOther(0, 1n, false)])).accepted, true);
+  // the same pool holding more of the token than the route's own pool refuses
+  assert.deepEqual(await dQuote([dOther(0, 10n ** 24n, false)]), { accepted: false, code: "no_reference" });
+});
+
+test("D2 nine pools of other currencies: the deepest are priced, and a shallow one left unpriced does not block", async () => {
+  // the shallow one is listed first: only the depth order leaves it unpriced
+  const v = await dQuote([dOther(0, 1n), ...Array.from({ length: 8 }, (_, i) => dOther(i + 1, 10n ** 24n))]);
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+});
+
+test("D3 nine deep pools of other currencies: the ninth, left unpriced and deeper than the route's pool, refuses", async () => {
+  assert.deepEqual(await dQuote(Array.from({ length: 9 }, (_, i) => dOther(i, 10n ** 24n))), { accepted: false, code: "no_reference" });
+  assert.equal((await dQuote(Array.from({ length: 8 }, (_, i) => dOther(i, 10n ** 24n)))).accepted, true, "8 are priced");
+});
+
+test("D4 depth is the token's side of each pool: L x 2^96 / sqrtPrice as currency0, L x sqrtPrice / 2^96 as currency1", async () => {
+  // the token below the other currency (currency0): sqrtPrice 2^100 gives L / 16 of it; the route's native pool, where
+  // the token is currency1, holds L x 16
+  const token = "0x00000000000000000000000000000000000000a0";
+  const best: ModelPool = { key: keyOf(token, NATIVE, 10000, 200, NATIVE), give: (a) => 10n * a }; // 1e20 x 16
+  const x = "0x000000000000000000000000000000000000e000";
   const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 10000, tickSpacing: 200, hooks: NATIVE, hookData: "0x" }] };
-  // n pools of the token with n currencies, each priced through a standard pool from the native asset
-  const others = (n: number) =>
-    Array.from({ length: n }, (_, i) => "0x" + (0xe000 + i).toString(16).padStart(40, "0")).flatMap((x): ModelPool[] => [
-      { key: keyOf(x, NATIVE, 3000, 60, NATIVE), give: (a) => a },
-      { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a },
-    ]);
-  const on = (n: number) => {
-    const pools = [best, ...others(n)];
-    return quoteOn(pools, token, route, undefined, pools.slice(1).filter((p) => p.key.currency0 === token || p.key.currency1 === token).map((p) => p.key));
+  const on = (l: bigint) => {
+    const other: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, l] };
+    return quoteOn([best, other], token, route, undefined, [other.key]);
   };
-  assert.equal((await on(8)).accepted, true, "8 are priced");
-  assert.deepEqual(await on(9), { accepted: false, code: "no_reference" });
+  assert.equal((await on(10n ** 22n)).accepted, true, "1e22 / 16 is below 1e20 x 16");
+  assert.deepEqual(await on(10n ** 23n), { accepted: false, code: "no_reference" }, "1e23 / 16 is above it");
 });
 
 test("S1e a pool the PoolManager holds whose hook is the V4Quoter is dropped: its override would replace the quoter", async () => {

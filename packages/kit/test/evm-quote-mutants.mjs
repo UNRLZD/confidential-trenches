@@ -42,7 +42,7 @@ export const MUTANTS = [
   [QUOTE, 'if (q2 === null && route.venue === "uniswap-v3") return refuse(', "if (false) return refuse(", R, "R8 "],
   [QUOTE, "return a !== null && a > 0n && (b === null ? !v3 : b > a);", "return a !== null && a > 0n && (b === null ? true : b > a);", Q, "Q3 "],
   [QUOTE, "return a !== null && a > 0n && (b === null ? !v3 : b > a);", "return a !== null && a > 0n && (b === null ? !v3 : true);", Q, "Q3 "],
-  [QUOTE, '(fills(c, c.route.venue === "uniswap-v3") ?', "(fills(c) ?", Q, "Q3 "],
+  [QUOTE, 'fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route', "fills(c) ? [{ route: c.route", Q, "Q3 "],
   // the device's own reference: every standard route through every listed middle on both venues, and the pinned
   // launchpad pools
   [QUOTE, "  if (q < reference.amountOut) {", "  if (false) {", Q, "Q5 "],
@@ -75,16 +75,22 @@ export const MUTANTS = [
   [QUOTE, "  return { pools, commit };", "  commit();\n  return { pools, commit };", R, "S2b "],
   // review of 5452011: no override for a pool the PoolManager does not hold, one hook per override, never an address
   // the reads call; the route's own pools are not R; pools of other currencies priced through them, bounded
-  [QUOTE, "const later = held.filter((f) => f.quotes.length === 0);", "const later = found.filter((f) => f.quotes.length === 0);", R, "S1c "],
+  [QUOTE, "...held.filter((f) => f.quotes.length === 0 && !isOther(f))", "...found.filter((f) => f.quotes.length === 0 && !isOther(f))", R, "S1c "],
   [QUOTE, "groups.set(r.group, [...(groups.get(r.group) ?? []), i]);", 'groups.set("one", [...(groups.get("one") ?? []), i]);', R, "S1c "],
   [QUOTE, "if (seen.has(id) || v.called.has(k.hooks) ||", "if (seen.has(id) ||", R, "S1e "],
   [QUOTE, "if (hooks.some((h) => v.called.has(h) || h === lower(token))) return refuse(", "if (false) return refuse(", R, "S1d "],
   [QUOTE, '...v.routers, own("v3"), own("v4"), pin("poolManager")', '...v.routers, own("v3"), pin("poolManager")', R, "S1e "],
   [QUOTE, '  for (const k of route.venue === "uniswap-v4" ? hopKeys(route) : []) seen.add(poolId(k));', "", R, "L1 "],
   [QUOTE, "  if (c0 !== t && c1 !== t) return null;", "  if (![c0, c1].includes(NATIVE) || (c0 !== t && c1 !== t)) return null;", R, "S3 "],
-  [QUOTE, "if (priced.length === 0 && f.other !== NATIVE && f.other !== lower(v.weth)) {", "if (false) {", R, "S3 "],
+  [QUOTE, "if (priced.length === 0 && isOther(f)) unpriced.push(f);", "", R, "S3 "],
   [QUOTE, "for (const c of priced) filled.push(", 'for (const c of priced.filter((c) => c.route.venue !== "uniswap-v4" || c.route.hops.length === 1)) filled.push(', R, "S3c "],
-  [QUOTE, "if (others.length > EVM_QUOTE_MAX_OTHER) {", "if (false) {", R, "S3d "],
+  [QUOTE, "...others.slice(0, EVM_QUOTE_MAX_OTHER)]", "...others]", R, "D3 "],
+  // the depth rule: an unpriced pool of another currency blocks only when it holds more of the token than R's pool
+  [QUOTE, "depth(stateOf(f))! > r", "depth(stateOf(f))! < r", R, "D1 "],
+  [QUOTE, "return a > b ? -1 : a < b ? 1 : 0;", "return a > b ? 1 : a < b ? -1 : 0;", R, "D2 "],
+  [QUOTE, "if (reference !== null && unpriced.length > 0) {", "if (false) {", R, "D1 "],
+  [QUOTE, "return token0 ? (l * Q96) / p : (l * p) / Q96;", "return token0 ? (l * p) / Q96 : (l * Q96) / p;", R, "D4 "],
+  [QUOTE, "if (found.some((f) => f.other !== NATIVE && f.other !== lower(v.weth))) {", "if (false) {", R, "D1 "],
   // the hook's take, and minOut from the route the hook runs in
   [QUOTE, "const take = h === null ? null : h > q ? h - q : 0n;", "const take = h === null ? null : h - q;", Q, "Q4 "],
   [QUOTE, "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / h)", "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / q)", Q, "Q4 "],
