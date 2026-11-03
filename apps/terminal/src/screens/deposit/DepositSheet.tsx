@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 import { useLocation } from "react-router";
 import { ROUTES } from "../../routes/routes.ts";
 import { Icon } from "../signin/Icon.tsx";
-import { balanceCents, usd as usdCents } from "../signin/model.ts";
+import { useBalance } from "../portfolio/source.tsx";
+import { usd as usdCents } from "../signin/model.ts";
 import { ADDRESS_STATES, countdown, elapsed, getAddressOn, HELD_STATES, parseAmount, sheetState, usd } from "./model.ts";
 import type { Answer, DryQuote, SheetState } from "./model.ts";
 import { useDepositSource, useNow } from "./source.tsx";
@@ -31,6 +32,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   const src = useDepositSource();
   const { pathname } = useLocation();
   const state = src.snapshot.state;
+  const balance = useBalance(src.snapshot) ?? 0n;
   const asset = src.assets?.[0] ?? null;
   const [amount, setAmount] = useState(() => src.start?.amount ?? "");
   const [dry, setDry] = useState<Answer<DryQuote>>(src.assets?.length === 0 ? { kind: "refused", code: "not_available" } : { kind: "idle" });
@@ -74,7 +76,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
 
   const view = { route: ROUTES.find((r) => r.path === pathname)?.id ?? "discover", sheet: SHEET_ID, fields: { amount } };
   const heldId = status?.held_id ?? "";
-  const cents = state ? balanceCents(state) : 0n;
+  const cents = balance;
 
   let body: ReactNode;
   let foot: ReactNode = null;

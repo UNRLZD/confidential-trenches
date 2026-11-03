@@ -30,25 +30,15 @@ export function usd(cents: bigint): string {
 }
 
 /**
- * The balance (CH-001): the vault's notes plus the READY fresh wallets plus the positions. A position counts at its
- * cost here; its market value joins when the positions card brings prices.
- */
-export function balanceCents(s: SignpageState): bigint {
-  let c = toCents(s.vault_balance);
-  for (const w of s.wallets) if (w.state === "READY") c += toCents(w.size);
-  for (const p of s.positions) c += toCents(p.cost);
-  return c;
-}
-
-/**
  * The header. Before the first `state` the skeleton shows (never "Sign in" for a user who is signed in); a signing page
  * that is down with no state known shows Sign in, whose sheet then has its options off; a stale state keeps showing.
  */
-export function headerModel(snap: SignpageClientSnapshot): HeaderModel {
+export function headerModel(snap: SignpageClientSnapshot, balance: bigint | null = null): HeaderModel {
   const s = snap.state;
   if (!s) return { kind: snap.status === "connecting" ? "loading" : "out", cents: 0n, backupDot: false, way: null };
   if (!s.signed_in) return { kind: "out", cents: 0n, backupDot: false, way: null };
-  const cents = balanceCents(s);
+  // the balance is the one number (portfolio balanceOf, CH-001): this model never sums one of its own
+  const cents = balance ?? 0n;
   return { kind: cents === 0n ? "empty" : "balance", cents, backupDot: !s.code_saved, way: s.way ?? null };
 }
 
@@ -74,11 +64,11 @@ export interface RestoreModel {
 }
 
 /** The latest restore operation in `state`, as S19, or null when there is none. */
-export function restoreModel(s: SignpageState | null): RestoreModel | null {
+export function restoreModel(s: SignpageState | null, balance: bigint | null = null): RestoreModel | null {
   if (!s?.signed_in) return null;
   const op = s.ops.findLast((o) => o.kind === "restore");
   if (!op || op.kind !== "restore") return null;
-  const cents = balanceCents(s);
+  const cents = balance ?? 0n;
   if (op.stage === "stalled") return { id: op.id, kind: "offline", cents };
   if (op.stage !== "done") return { id: op.id, kind: "scanning", cents };
   const found = cents > 0n || s.positions.length > 0 || s.held.length > 0 || s.orders.length > 0;

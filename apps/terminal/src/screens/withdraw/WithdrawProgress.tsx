@@ -5,7 +5,8 @@ import { ROUTES } from "../../routes/routes.ts";
 import { usd } from "../deposit/model.ts";
 import { HopLine } from "../signin/HopLine.tsx";
 import { Icon } from "../signin/Icon.tsx";
-import { balanceCents, usd as usdCents } from "../signin/model.ts";
+import { useBalance } from "../portfolio/source.tsx";
+import { usd as usdCents } from "../signin/model.ts";
 import { close, current, EMPTY, observe, txLink } from "./model.ts";
 import type { Watch, WithdrawView } from "./model.ts";
 import { useNow, useWithdrawSource } from "./source.tsx";
@@ -41,6 +42,7 @@ export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
   const src = useWithdrawSource();
   const { pathname } = useLocation();
   const state = src.snapshot.state;
+  const balance = useBalance(src.snapshot) ?? 0n;
   const ops = state?.ops;
   const [watch, setWatch] = useState<Watch>(EMPTY);
   const { now: clock } = src;
@@ -98,7 +100,7 @@ export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
       <aside className="dep-box" aria-labelledby="wdr-seg-on">
         <div className="grab"><i /></div>
         <div className="dhd">
-          <span className="bal num">{usdCents(state ? balanceCents(state) : 0n)}</span>
+          <span className="bal num">{usdCents(balance)}</span>
           <button type="button" className="dep-x" aria-label={WORDS.close.text} onClick={done}>
             <Icon name="x" size={14} stroke={1.4} />
           </button>
