@@ -2,7 +2,7 @@
 // test/evm-pool-buy.test.ts: each named test passes on the code as it is and fails on every mutant. The file is changed
 // in place and put back after each mutant (and checked to be back); exits 1 when a named test passes on its mutant,
 // fails on the code as it is, or a mutant's text is not in the file exactly once.
-//   node packages/kit/test/evm-pool-buy-mutants.mjs     (a heavy job: run it through the box)
+//   node packages/kit/test/evm-pool-buy-mutants.mjs     (a heavy job: run it on a machine with spare cores)
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
