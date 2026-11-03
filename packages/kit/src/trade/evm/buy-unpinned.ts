@@ -25,7 +25,7 @@
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
-export type EvmPoolChain = "base" | "robinhood";
+export type EvmPoolChain = "base" | "robinhood" | "base-sepolia" | "robinhood-testnet";
 
 /** One chain's venue: chain id, WETH (a route's only wrapped start), the middle tokens a route may pass through, and
  *  the routers a sell may call (sell.ts). */
@@ -34,8 +34,9 @@ export type EvmPoolVenue = {
   readonly weth: string;
   readonly middles: readonly string[];
   readonly routers: readonly string[];
-  /** The pins (M370), set by pool-evm-deploy once the contracts are deployed; none today. The pool every buy and sell
-   *  of the chain goes through, the buy adapters per venue, and the delegate W's EIP-7702 authorization names. */
+  /** The pins (M370): the pool every buy and sell of the chain goes through, the buy adapters per venue, and the
+   *  delegate W's EIP-7702 authorization names; a chain with none refuses not_deployed. Set from pool-evm-deploy's
+   *  records (card evm-venues-pin): the testnets have theirs, the mainnets none until their deploy. */
   readonly pool?: string;
   readonly adapters?: Readonly<{ v3?: string; v4?: string }>;
   readonly sellDelegate?: string;
@@ -48,6 +49,8 @@ export type EvmPoolVenue = {
  *  no prototype, so no read of the list reaches Object.prototype, which a polluted page could fill with a pool, an
  *  adapter or a delegate (the review of 8d8675d); the adapters pool-evm-deploy adds get the same `bare`. */
 const bare = <T extends object>(o: T): Readonly<T> => Object.freeze(Object.assign(Object.create(null) as T, o));
+/** A venue list the pinned functions read (evmPoolVenues(), or a test's): a chain it does not have is refused. */
+export type EvmPoolVenueList = Readonly<Partial<Record<EvmPoolChain, EvmPoolVenue>>>;
 let venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>> | undefined;
 export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
   (venues ??= bare({
@@ -66,6 +69,30 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Uniswap v3 SwapRouter02 (test/SellFork.t.sol, BuyFork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com
       // and robinhood.drpc.org: the same 24,498 bytes, codehash 0x6f36c378…b25dc (2026-11-03)
       routers: Object.freeze(["0xCaf681a66D020601342297493863E78C959E5cb2"]),
+    }),
+    // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
+    // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
+    // (pool-evm-deploy.build.json). No middle is listed, so a route is WETH and the token only.
+    "base-sepolia": bare({
+      chainId: 84532,
+      weth: "0x4200000000000000000000000000000000000006",
+      middles: Object.freeze([]),
+      // Uniswap v3 SwapRouter02, the v3 adapter's router (scripts/live-checks/pool-evm-deploy.mjs CHAINS: its code hash
+      // read on sepolia.base.org and base-sepolia-rpc.publicnode.com)
+      routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),
+      pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+      adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1" }),
+      sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88",
+    }),
+    "robinhood-testnet": bare({
+      chainId: 46630,
+      weth: "0x7943e237c7f95da44e0301572d358911207852fa", // behind an upgradeable proxy (pool-evm-deploy.mjs CHAINS, M365)
+      middles: Object.freeze([]),
+      // no Uniswap v3 on Robinhood testnet (M365): no v3 adapter and no router, so no sell is built there
+      routers: Object.freeze([]),
+      pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+      adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" }),
+      sellDelegate: "0x0ec8c6627939624aeaac3b2f0276136e6e289e23",
     }),
   }));
 
@@ -310,7 +337,7 @@ function ownPin(o: unknown, k: string): string | undefined {
 }
 
 /** The pins of `chain` in `venues` (also sell-unpinned.ts's): only the list's own keys, each read once. */
-export function venuePins(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain): { pool: string | undefined; v3: string | undefined; v4: string | undefined; sellDelegate: string | undefined } {
+export function venuePins(venues: EvmPoolVenueList, chain: EvmPoolChain): { pool: string | undefined; v3: string | undefined; v4: string | undefined; sellDelegate: string | undefined } {
   if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");
   const v = venues[chain];
   const adapters = typeof v === "object" && v !== null && Object.hasOwn(v, "adapters") ? v.adapters : undefined;
@@ -319,7 +346,7 @@ export function venuePins(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, 
 const samePin = (a: unknown, pin: string) => typeof a === "string" && lower(a) === lower(pin);
 
 /** evmPoolBuildUnpinned through the chain's pinned adapter for the route's venue only. */
-export function pinnedBuild(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string): EvmPoolBuy {
+export function pinnedBuild(venues: EvmPoolVenueList, chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string): EvmPoolBuy {
   const v = venuePins(venues, chain);
   const r = copyRoute(route);
   const pin = r.venue === "uniswap-v3" ? v.v3 : v.v4;
@@ -329,7 +356,7 @@ export function pinnedBuild(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>
 }
 
 /** evmPoolSignBuyUnpinned into the chain's pinned pool only, of a buy through a pinned adapter. */
-export function pinnedSignBuy(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, secretKey: Uint8Array, chain: EvmPoolChain, pool: string, built: EvmPoolBuy, proof: EvmPoolProofBinding): Uint8Array {
+export function pinnedSignBuy(venues: EvmPoolVenueList, secretKey: Uint8Array, chain: EvmPoolChain, pool: string, built: EvmPoolBuy, proof: EvmPoolProofBinding): Uint8Array {
   const v = venuePins(venues, chain);
   if (v.pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);
   if (!samePin(pool, v.pool)) return refuse("not_pinned", `the pool is not ${chain}'s pinned pool`);

@@ -168,6 +168,24 @@ export function operatorProblems(rpcs, d) {
   return ops.size < 2 ? [`only ${ops.size} known ${d.chain} operator(s) in ${two.join(", ")}; want two`] : [];
 }
 
+/** Each contract's getters on the record's chain: [signature, the word it must return]; the words its immutables hold
+ * (also scripts/live-checks/evm-venues-pin.mjs's) */
+export function gettersOf(d) {
+  const chain = CHAINS[d.chain];
+  const at = (name) => String(d.contracts?.[name]?.address ?? "").toLowerCase();
+  return {
+    WithdrawalVerifier: [],
+    PrivacyPoolSimple: [
+      ["ASSET()", addrWord(NATIVE_ASSET)],
+      ["WITHDRAWAL_VERIFIER()", addrWord(at("WithdrawalVerifier"))],
+      ["SCOPE()", "0x" + word(scopeOf(at("PrivacyPoolSimple"), chain.chainId, NATIVE_ASSET))],
+    ],
+    UniswapV4Adapter: [["POOL_MANAGER()", addrWord(chain.poolManager.address)], ["WETH()", addrWord(chain.weth.address)]],
+    UniswapV3Adapter: [["ROUTER()", addrWord(chain.router?.address ?? "0x")]],
+    SellDelegate: [["WETH()", addrWord(chain.weth.address)]],
+  };
+}
+
 export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = sleepMs }) {
   const lines = [];
   let ok = true;
@@ -187,20 +205,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep = slee
   const names = Object.keys(d.contracts ?? {});
   say(names.length === chain.contracts.length && chain.contracts.every((n) => /^0x[0-9a-f]{40}$/.test(at(n))),
     `the record names ${chain.contracts.join(", ")} on ${d.chain}: ${names.join(", ") || "none"}`);
-  const verifier = at("WithdrawalVerifier");
-  const pool = at("PrivacyPoolSimple");
-  // each contract's getters: [signature, the word it must return]
-  const getters = {
-    WithdrawalVerifier: [],
-    PrivacyPoolSimple: [
-      ["ASSET()", addrWord(NATIVE_ASSET)],
-      ["WITHDRAWAL_VERIFIER()", addrWord(verifier)],
-      ["SCOPE()", "0x" + word(scopeOf(pool, chain.chainId, NATIVE_ASSET))],
-    ],
-    UniswapV4Adapter: [["POOL_MANAGER()", addrWord(chain.poolManager.address)], ["WETH()", addrWord(chain.weth.address)]],
-    UniswapV3Adapter: [["ROUTER()", addrWord(chain.router?.address ?? "0x")]],
-    SellDelegate: [["WETH()", addrWord(chain.weth.address)]],
-  };
+  const getters = gettersOf(d);
   const txs = d.txs ?? [];
   say(txs.length > 0, `the record lists the run's transactions: ${txs.length}`);
   for (const url of rpcs.slice(0, 2)) {

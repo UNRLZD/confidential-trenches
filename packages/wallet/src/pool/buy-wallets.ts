@@ -16,7 +16,9 @@
 //   refused, no Solana, no finalized EVM state). Holdings are shown, never signed on, so one reader is enough; every
 //   read that gates a signature keeps two providers, as elsewhere.
 // - One state per read: on Solana getBalance and both getTokenAccountsByOwner answers must share one context.slot, read
-//   again with minContextSlot at the highest until they do, at most SOL_HOLDINGS_ROUNDS times, then refused. On EVM one
+//   again with minContextSlot at the highest until they do, at most SOL_HOLDINGS_ROUNDS times, then refused. A backend
+//   behind the slot asked (-32016) is asked again a slot later, within the budget every Solana read has (./solana.ts
+//   SOL_LAG_SLOTS, card sol-restore-race): a wait for the chain, never a failed round. On EVM one
 //   block is read ("latest": Robinhood serves no finalized state) and every call names its hash (EIP-1898).
 // - Holdings: native plus tokens. Solana: lamports, and every account W owns under the Token program and Token-2022,
 //   decoded from its own bytes (the asked program's, owned by W, a pubkey seen once across both programs); a frozen
@@ -43,6 +45,7 @@ import type { NoteRef } from "../notes/secrets.ts";
 import { refKey, type NoteStore } from "../notes/store.ts";
 import { jOf } from "./queue.ts";
 import { solanaRestoreNotes, type SolanaRestoredNote, type SolanaRestoredSpend } from "./solana-restore.ts";
+import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "./solana.ts";
 
 /** The chains whose pools pay a buy's W today. */
 export type BuyChain = "sol" | "evm";
@@ -283,11 +286,12 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
     async read(address, signal) {
       const once = (min?: number) => Promise.all([balance(address, min), accounts(address, SOLANA_TOKEN_PROGRAM, min), accounts(address, SOLANA_TOKEN_2022_PROGRAM, min)] as const);
       // Each round reads all three at the highest slot seen (none in the first). A round fails when they answer at
-      // different slots, when a backend behind the slot asked refuses with -32016, or on the helper's 429 (after its
-      // wait); the next round asks again, and SOL_HOLDINGS_ROUNDS failed rounds are a refusal.
+      // different slots, or on the helper's 429 (after its wait); the next round asks again, and SOL_HOLDINGS_ROUNDS
+      // failed rounds are a refusal. A backend behind the slot asked (-32016) is asked again a slot later, SOL_LAG_SLOTS
+      // waits at most, as every Solana read of the wallet (./solana.ts solanaLagRetry): it waits for the chain.
       let r: Awaited<ReturnType<typeof once>> | undefined;
       let min: number | undefined;
-      for (let round = 1; ; round++) {
+      for (let round = 1, lags = 0; ; ) {
         signal?.throwIfAborted();
         let why = "met at no one slot";
         try {
@@ -297,10 +301,15 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
           if (slots.every((s) => s === top)) break;
           min = top;
         } catch (e) {
-          if (is429(e)) why = "drew the helper's 429";
-          else if (!(min !== undefined && e instanceof RpcFailed && e.code === MIN_CONTEXT_SLOT_NOT_REACHED)) throw e;
+          if (min !== undefined && e instanceof RpcFailed && e.code === MIN_CONTEXT_SLOT_NOT_REACHED) {
+            if (++lags > SOL_LAG_SLOTS) throw e;
+            await sleep(SOL_LAG_WAIT_MS);
+            continue;
+          }
+          if (!is429(e)) throw e;
+          why = "drew the helper's 429";
         }
-        if (round >= SOL_HOLDINGS_ROUNDS) throw new Error(`its reads ${why} in ${SOL_HOLDINGS_ROUNDS} rounds`);
+        if (round++ >= SOL_HOLDINGS_ROUNDS) throw new Error(`its reads ${why} in ${SOL_HOLDINGS_ROUNDS} rounds`);
         if (why !== "met at no one slot") await sleep(wait429());
       }
       if (r === undefined) throw new Error("no read");
