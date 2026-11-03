@@ -88,15 +88,15 @@ test("a buy builds only through the chain's pinned adapter for its venue, and W 
 });
 
 test("a sell pays only into the chain's pinned pool, and W's authorization names only its pinned sell delegate", () => {
-  for (const { chain, chainId } of TESTNETS) {
+  for (const { chain, chainId, routers } of TESTNETS) {
     const c = chain as EvmPoolChain;
     const v = evmPoolVenues()[c];
     const r = record(chain);
     const req = {
-      w: W, token: X, amount: 10n ** 18n, target: v.routers[0] ?? OTHER, route: { venue: "uniswap-v3" as const, tokens: [X, v.weth], fees: [500] },
+      w: W, token: X, amount: 10n ** 18n, target: routers[0] ?? "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4", route: { venue: "uniswap-v3" as const, tokens: [X, v.weth], fees: [500] },
       minOut: 10n ** 15n, precommitment: 0x5e11n, feeCap: 10n ** 14n, deadline: BigInt(NOW + 300), nonce: 0n,
     };
-    if (v.routers.length > 0) {
+    if (routers.length > 0) {
       // a pool the caller sneaks in is not read: the pin is the pool
       const built = kit.evmPoolBuildSell(c, { ...req, pool: OTHER } as typeof req);
       assert.equal(lower(built.pool), lower(r.PrivacyPoolSimple!.address), chain);
