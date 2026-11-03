@@ -72,7 +72,12 @@ import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pag
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
-import { releaseTradeDeps, tradeKind } from "./trade.ts";
+import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
+import { poolKinds } from "./pool-kinds.ts";
+import type { PoolChain } from "./rules/pool.ts";
+import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
+import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
+import { solanaHelperRpc, solanaJsonRpc } from "../../kit/src/trade/solana/send.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
@@ -143,9 +148,20 @@ else {
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
       buy: trades,
+      // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
+      // network pins (none yet: every one refused not_allowed, no read made); a sell's decimals read on two providers
+      ...poolKinds({
+        pinned: poolPinned,
+        rpcs: (chain) => (chain === "solana" ? [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] : null),
+      }),
     },
   });
   shell.layer.append(root);
+}
+
+// Whether this page's network (mainnet) pins the chain's pool: the wallet's own tables, empty until the pools deploy.
+function poolPinned(chain: PoolChain): boolean {
+  return chain === "solana" ? SOL_POOLS.mainnet !== undefined : EVM_POOLS[chain] !== undefined;
 }
 
 // The account's open kinds (src/pages/open.ts): refused unless the page's state takes them; else the answer goes first,

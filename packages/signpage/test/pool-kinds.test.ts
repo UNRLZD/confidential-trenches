@@ -1,0 +1,115 @@
+// The pool kinds' wiring (src/pool-kinds.ts): no pool pinned, every kind refused with no read; Base and Robinhood
+// refuse a deposit and a withdraw whatever the pins; a sell's decimals come from the device's two reads of the token,
+// never from the app; a request that passed is handed to its flow, and with no flow it is refused.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { ERC20_DECIMALS, poolKinds, readTokenDecimals, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
+import { SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
+import type { PoolAsk, PoolChain } from "../src/rules/pool.ts";
+
+const SOL_TOKEN = "So11111111111111111111111111111111111111112";
+const EVM_TOKEN = "0xF111111111111111111111111111111111111111";
+const ctx = { id: "r1", sha: "00", progress: () => {} };
+const mint = (dec: number) => {
+  const d = new Uint8Array(82);
+  d[44] = dec;
+  d[45] = 1;
+  return { context: { slot: 1 }, value: { owner: SOLANA_TOKEN_PROGRAM, data: [Buffer.from(d).toString("base64"), "base64"] } };
+};
+const word = (n: number) => "0x" + n.toString(16).padStart(64, "0");
+
+/** Providers that answer as given and log every call. */
+function providers(answer: (method: string, params: readonly unknown[]) => unknown) {
+  const calls: [string, readonly unknown[]][] = [];
+  const rpc: PoolRpc = async (method, params) => {
+    calls.push([method, params]);
+    return answer(method, params);
+  };
+  return { calls, pair: [rpc, rpc] as const };
+}
+const settle = async (a: unknown) => {
+  const d = a as { after?: Promise<unknown>; answer?: () => unknown };
+  if (d.after) {
+    await d.after;
+    return d.answer!();
+  }
+  return a;
+};
+
+test("no pool pinned (the page's mainnet today): every pool kind is refused not_allowed and no provider is asked", async () => {
+  const { calls, pair } = providers(() => mint(6));
+  const flows: PoolAsk[] = [];
+  const k = poolKinds({ pinned: () => false, rpcs: () => pair, flow: (ask) => (flows.push(ask), { error: "not_allowed" }) });
+  for (const chain of ["solana", "base", "robinhood"] as const) {
+    assert.deepEqual(k["pool.deposit"]({ chain, amount: "1" }, ctx), { error: "not_allowed" });
+    assert.deepEqual(k["pool.buy"]({ chain, token: chain === "solana" ? SOL_TOKEN : EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx), { error: "not_allowed" });
+    assert.deepEqual(await settle(k["pool.sell"]({ chain, token: chain === "solana" ? SOL_TOKEN : EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
+    assert.deepEqual(k["pool.withdraw"]({ chain }, ctx), { error: "not_allowed" });
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(flows.length, 0);
+});
+
+test("Base and Robinhood refuse a pool.deposit and a pool.withdraw even with their pool pinned; Solana's go to the flow", async () => {
+  const flows: PoolAsk[] = [];
+  const deps: PoolKindsDeps = { pinned: () => true, rpcs: () => null, flow: (ask) => (flows.push(ask), { error: "busy" }) };
+  const k = poolKinds(deps);
+  for (const chain of ["base", "robinhood"] as const) {
+    assert.deepEqual(k["pool.deposit"]({ chain, amount: "1" }, ctx), { error: "not_allowed" });
+    assert.deepEqual(k["pool.withdraw"]({ chain }, ctx), { error: "not_allowed" });
+  }
+  assert.equal(flows.length, 0);
+  assert.deepEqual(k["pool.deposit"]({ chain: "solana", amount: "1.5" }, ctx), { error: "busy" });
+  assert.deepEqual(k["pool.withdraw"]({ chain: "solana" }, ctx), { error: "busy" });
+  assert.deepEqual(k["pool.buy"]({ chain: "base", token: EVM_TOKEN, amount: "19", slippage_bps: 100 }, ctx), { error: "busy" });
+  assert.deepEqual(flows.map((a) => [a.kind, a.chain, a.amount, a.decimals]), [
+    ["pool.deposit", "solana", 1_500_000_000n, 9],
+    ["pool.withdraw", "solana", 0n, 9],
+    ["pool.buy", "base", 19n * 10n ** 18n, 18],
+  ]);
+  // a bad request never reaches a flow
+  assert.deepEqual(k["pool.buy"]({ chain: "solana", token: EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx), { error: "not_allowed" });
+  assert.equal(flows.length, 3);
+});
+
+test("a pinned pool with no flow yet refuses a request that passed its checks: never half run", () => {
+  const k = poolKinds({ pinned: () => true, rpcs: () => null });
+  assert.deepEqual(k["pool.deposit"]({ chain: "solana", amount: "1" }, ctx), { error: "not_allowed" });
+});
+
+test("a sell's decimals are the token's, read on two providers by the device: the mint on Solana, decimals() on EVM", async () => {
+  const flows: PoolAsk[] = [];
+  const sol = providers(() => mint(6));
+  const evm = providers(() => word(18));
+  const deps: PoolKindsDeps = { pinned: () => true, rpcs: (c: PoolChain) => (c === "solana" ? sol.pair : evm.pair), flow: (ask) => (flows.push(ask), { error: "busy" }) };
+  const k = poolKinds(deps);
+  assert.deepEqual(await settle(k["pool.sell"]({ chain: "solana", token: SOL_TOKEN, amount: "2.5", slippage_bps: 100 }, ctx)), { error: "busy" });
+  assert.deepEqual(await settle(k["pool.sell"]({ chain: "base", token: EVM_TOKEN, amount: "100", slippage_bps: 100 }, ctx)), { error: "busy" });
+  assert.deepEqual(flows.map((a) => [a.chain, a.amount, a.decimals]), [["solana", 2_500_000n, 6], ["base", 100n * 10n ** 18n, 18]]);
+  assert.deepEqual(sol.calls, [
+    ["getAccountInfo", [SOL_TOKEN, { encoding: "base64", commitment: "confirmed" }]],
+    ["getAccountInfo", [SOL_TOKEN, { encoding: "base64", commitment: "confirmed" }]],
+  ]);
+  assert.deepEqual(evm.calls, [
+    ["eth_call", [{ to: EVM_TOKEN, data: ERC20_DECIMALS }, "latest"]],
+    ["eth_call", [{ to: EVM_TOKEN, data: ERC20_DECIMALS }, "latest"]],
+  ]);
+  // an amount finer than the token's decimals, two providers that disagree, a provider that fails, or no providers: refused
+  assert.deepEqual(await settle(k["pool.sell"]({ chain: "solana", token: SOL_TOKEN, amount: "0.0000001", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
+  let n = 0;
+  const split = providers(() => mint(n++ === 0 ? 6 : 9));
+  assert.deepEqual(await settle(poolKinds({ ...deps, rpcs: () => split.pair })["pool.sell"]({ chain: "solana", token: SOL_TOKEN, amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
+  const down: PoolRpc = async () => {
+    throw new Error("down");
+  };
+  assert.deepEqual(await settle(poolKinds({ ...deps, rpcs: () => [down, down] })["pool.sell"]({ chain: "base", token: EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
+  assert.deepEqual(await settle(poolKinds({ ...deps, rpcs: () => null })["pool.sell"]({ chain: "base", token: EVM_TOKEN, amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" });
+  assert.equal(flows.length, 2);
+});
+
+test("readTokenDecimals asks each provider once, for the token's address only", async () => {
+  const p = providers(() => word(6));
+  assert.deepEqual(await readTokenDecimals("robinhood", EVM_TOKEN, p.pair), [word(6), word(6)]);
+  assert.equal(p.calls.length, 2);
+  assert.ok(p.calls.every(([, params]) => JSON.stringify(params) === JSON.stringify([{ to: EVM_TOKEN, data: "0x313ce567" }, "latest"])));
+});
