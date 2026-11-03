@@ -138,9 +138,13 @@ export const MUTANTS = [
   [SIMPLE, "bytes memory _signature\n  ) external nonReentrant {", "bytes memory _signature\n  ) external {", "test_R_feeRecipientCannotReenterBuy"],
   // the sell delegate (card pool-evm-sell): each check of a sell, W's signature and each field it binds, the nonce at
   // its ERC-7201 slot, the approval, the unwrap, minOut, the fee and the deposit
-  [SELL, "if (_entered) revert Reentrancy();", "", "test_aTargetCannotReenter"],
-  [SELL, "    _entered = true;\n", "", "test_aTargetCannotReenter"],
-  [SELL, "    _entered = false;\n", "", "test_twoSellsInOneTransactionBothLand"],
+  [SELL, "if (_guard()) revert Reentrancy();", "", "test_aTargetCannotReenter"],
+  [SELL, "    _setGuard(true);\n", "", "test_aTargetCannotReenter"],
+  [SELL, "    _setGuard(false);\n", "", "test_twoSellsInOneTransactionBothLand"],
+  // the Opus review of c2a8da2 (test/HostileSell.t.sol): the guard back at transient slot 0, and the cap paid in
+  // place of the fee the sender named
+  [SELL, "SELL_GUARD = 0x440bd9ccab75449a1500e3c92e1ea82c77befa0047a75538597e7e92c1806400;", "SELL_GUARD = 0x0000000000000000000000000000000000000000000000000000000000000000;", "test_R_aModuleGuardAtSlot0DoesNotCollide"],
+  [SELL, "msg.sender.call{value: _fee}('')", "msg.sender.call{value: _sell.feeCap}('')", "test_R_theSenderGetsTheFeeItNamesNotTheCap"],
   [SELL, "if (block.timestamp > _sell.deadline) revert DeadlineExpired();", "", "test_anExpiredDeadlineIsRefused"],
   [SELL, "if (block.timestamp > _sell.deadline)", "if (block.timestamp >= _sell.deadline)", "test_anExpiredDeadlineIsRefused"],
   [SELL, "if (_fee > _sell.feeCap) revert FeeOverCap();", "", "test_aSellFeeOverTheCapIsRefused"],

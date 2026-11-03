@@ -54,6 +54,9 @@ contract SellDelegate {
 
   /// @notice keccak256(abi.encode(uint256(keccak256('blindfill.sell')) - 1)) & ~bytes32(uint256(0xff))
   bytes32 internal constant SELL_STORAGE = 0xd19ce3d034be62269d1d8903d496806b7944251c1f2a9fe8014ceeba63edbd00;
+  /// @notice The reentrancy guard's transient slot in W's account, ERC-7201 for 'blindfill.sell.guard' (as
+  ///         OpenZeppelin's ReentrancyGuardTransient keeps its own), so no other code W runs meets it at slot 0
+  bytes32 internal constant SELL_GUARD = 0x440bd9ccab75449a1500e3c92e1ea82c77befa0047a75538597e7e92c1806400;
 
   bytes32 internal constant DOMAIN_TYPEHASH =
     keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)');
@@ -67,9 +70,6 @@ contract SellDelegate {
 
   /// @notice The chain's WETH, which a sale may pay W in
   IWETH public immutable WETH;
-
-  /// @notice Set while a sell runs, in W's transient storage
-  bool private transient _entered;
 
   error InvalidSignature();
   error InvalidNonce();
@@ -109,8 +109,8 @@ contract SellDelegate {
     uint256 _fee,
     bytes calldata _signature
   ) external returns (uint256 _commitment) {
-    if (_entered) revert Reentrancy();
-    _entered = true;
+    if (_guard()) revert Reentrancy();
+    _setGuard(true);
 
     if (block.timestamp > _sell.deadline) revert DeadlineExpired();
     if (_fee > _sell.feeCap) revert FeeOverCap();
@@ -144,7 +144,7 @@ contract SellDelegate {
     }
     _commitment = IPoolDeposit(_sell.pool).deposit{value: _gained - _fee}(_gained - _fee, _sell.precommitment);
 
-    _entered = false;
+    _setGuard(false);
   }
 
   /**
@@ -197,6 +197,26 @@ contract SellDelegate {
   function _approve(address _token, address _spender, uint256 _value) internal {
     (bool _ok, bytes memory _ret) = _token.call(abi.encodeCall(IERC20Sell.approve, (_spender, _value)));
     if (!_ok || (_ret.length != 0 && !abi.decode(_ret, (bool)))) revert ApproveFailed();
+  }
+
+  /**
+   * @notice Whether a sell runs: W's transient storage at SELL_GUARD
+   * @return _on True while a sell runs
+   */
+  function _guard() internal view returns (bool _on) {
+    assembly ("memory-safe") {
+      _on := tload(SELL_GUARD)
+    }
+  }
+
+  /**
+   * @notice Sets or clears the guard
+   * @param _on True while a sell runs
+   */
+  function _setGuard(bool _on) internal {
+    assembly ("memory-safe") {
+      tstore(SELL_GUARD, _on)
+    }
   }
 
   /**
