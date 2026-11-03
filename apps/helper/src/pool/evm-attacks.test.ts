@@ -216,7 +216,7 @@ test("B1 an epoch outside [now - life, now] or a past deadline is refused before
   assert.notEqual(await s.fee(far), null, "the epoch now is read");
 });
 
-test("the send queue holds at most EVM_QUEUE_MAX waiting; past it 503 busy", async () => {
+test("the send queue holds at most EVM_QUEUE_MAX waiting; past it 429 rate_limited with a wait (card helper-abuse-limits: the helper's own budget is never a 503)", async () => {
   const a: Calls = [];
   const s = make(a, { hang: "eth_chainId" });
   // one running (its chain id read never answers), then QUEUE_MAX waiting behind it
@@ -227,18 +227,28 @@ test("the send queue holds at most EVM_QUEUE_MAX waiting; past it 503 busy", asy
   assert.equal(a.filter((x) => x.method === "eth_chainId").length, 1, "only the first is running");
   const hung = { status: 0, body: { error: { code: "hung" } } };
   const over = await Promise.race([s.carry(req(calldata({ nullifier: 9999n }))), new Promise<typeof hung>((r) => setTimeout(() => r(hung), 500))]);
-  assert.equal(code(over), "busy");
-  assert.equal(over.status, 503);
+  assert.equal(code(over), "rate_limited");
+  assert.equal(over.status, 429);
+  assert.equal((over as { retryAfterS?: number }).retryAfterS, evm.EVM_BUSY_RETRY_S);
   assert.equal(evm.EVM_QUEUE_MAX, QUEUE_MAX);
 });
 
-test("a provider's transport error or HTTP 429 is 503 upstream; an execution revert stays 422 simulation_failed", async () => {
+test("a provider's transport error is 503 upstream; its HTTP 429 or rate-limit error is 429 rate_limited with a wait (card helper-abuse-limits), on every read and the send; an execution revert stays 422 simulation_failed", async () => {
   for (const [method, msg, want] of [
-    ["eth_estimateGas", "HTTP 429", "upstream"],
+    ["eth_estimateGas", "HTTP 429", "rate_limited"],
     ["eth_estimateGas", "fetch failed", "upstream"],
-    ["eth_call", "HTTP 429", "upstream"],
+    ["eth_call", "HTTP 429", "rate_limited"],
+    ["eth_call", "RPC error -32016: rate limit exceeded", "rate_limited"],
+    ["eth_getCode", "HTTP 429", "rate_limited"],
+    ["eth_chainId", "HTTP 429", "rate_limited"],
+    ["eth_getBlockByNumber", "HTTP 429", "rate_limited"],
+    ["eth_sendRawTransaction", "HTTP 429", "rate_limited"],
     ["eth_call", "The operation was aborted due to timeout", "upstream"],
-    ["eth_call", "RPC error -32005: limit exceeded", "upstream"],
+    ["eth_call", "RPC error -32005: project ID request rate exceeded", "rate_limited"], // EIP-1474 limit exceeded
+    ["eth_estimateGas", "RPC error -32005: daily request count exceeded, request rate limited", "rate_limited"],
+    ["eth_call", "RPC error -32002: resource unavailable", "upstream"], // any other -320xx stays a failure
+    ["eth_estimateGas", "RPC error -32004: method not supported", "upstream"],
+    ["eth_call", "RPC error -320050: not the code", "upstream"],
     ["eth_getCode", "HTTP 503", "upstream"],
     ["eth_call", "RPC error 3: execution reverted: 0x8b1c4b0b", "simulation_failed"],
     ["eth_estimateGas", "RPC error 3: execution reverted", "simulation_failed"],
@@ -249,8 +259,9 @@ test("a provider's transport error or HTTP 429 is 503 upstream; an execution rev
     const a: Calls = [];
     const x = await make(a, { fail: { [method]: msg } }).carry(req());
     assert.equal(code(x), want, `${method} ${msg}`);
-    assert.equal(x.status, want === "upstream" ? 503 : 422);
-    assert.equal(sends(a).length, 0);
+    assert.equal(x.status, want === "upstream" ? 503 : want === "rate_limited" ? 429 : 422);
+    assert.equal(x.retryAfterS, want === "rate_limited" ? 1 : undefined, "a throttle names its wait");
+    if (method !== "eth_sendRawTransaction") assert.equal(sends(a).length, 0);
   }
 });
 
@@ -270,4 +281,21 @@ test("E12 the relay bytes' length word changed is bad_shape, before any RPC call
     assert.equal(a.length + b.length, 0);
   }
   assert.equal(EVM_FEE_STEP, 10n ** 13n);
+});
+
+// card helper-abuse-limits, M374 (5) on this route too: the queue is shared by every caller, so one client holds at
+// most EVM_IN_FLIGHT_MAX requests open in it (at be4b353 one client could fill all EVM_QUEUE_MAX places)
+test("one client holds at most EVM_IN_FLIGHT_MAX requests open, repeats included; the next is 429 in_flight with a wait; another client still queues", async () => {
+  const a: Calls = [];
+  const s = make(a, { hang: "eth_chainId" });
+  const x = (n: bigint) => s.carry(req(calldata({ nullifier: n })), "x");
+  void x(7001n);
+  void x(7002n);
+  await new Promise((r) => setTimeout(r, 20));
+  const hung = { status: 0, body: { error: { code: "hung" } } };
+  const third = await Promise.race([x(7001n), new Promise<typeof hung>((r) => setTimeout(() => r(hung), 300))]);
+  assert.deepEqual([third.status, code(third), (third as { retryAfterS?: number }).retryAfterS], [429, "in_flight", evm.EVM_BUSY_RETRY_S]);
+  const other = await Promise.race([s.carry(req(calldata({ nullifier: 7003n })), "y"), new Promise<typeof hung>((r) => setTimeout(() => r(hung), 100))]);
+  assert.equal(code(other), "hung", "another client's request is held in the queue, not refused");
+  assert.equal(evm.EVM_IN_FLIGHT_MAX, 2);
 });

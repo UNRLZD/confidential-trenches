@@ -74,6 +74,7 @@ export interface RowView {
   /** The ring and its pill: a curve's percent (cut down), POOL when listed, the dash when the stage is unknown. */
   stage: { pill: string; fill: number; curve: boolean };
   launchpad: string | null;
+  chain: string;
 }
 
 /** A row's drawn values for a window: its change, volume, and buys and sells. */
@@ -108,5 +109,6 @@ export function rowView(r: MarketRow, win: Win, nowMs: number): RowView {
     snipers: { text: typeof r.snipers_bps === "number" ? `${Math.round(r.snipers_bps / 100)}%` : DASH, level: level(r.snipers_bps, "snipers") },
     stage,
     launchpad: r.launchpad,
+    chain: r.chain,
   };
 }

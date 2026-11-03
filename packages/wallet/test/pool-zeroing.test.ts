@@ -26,6 +26,7 @@ const { openProofQueue } = await import("../src/pool/queue.ts");
 const { closeVaults, SEED, SCOPE, signalsProver, vaultWith } = await import("./withdraw-fixture.ts");
 const { solanaRestore, solanaMarkOf } = await import("../src/pool/solana-restore.ts");
 const { buyWallets, solanaSpentNotes } = await import("../src/pool/buy-wallets.ts");
+const { evmRestore } = await import("../src/pool/evm-restore.ts");
 const { noteSecrets, noteCommitment } = await import("../src/notes/secrets.ts");
 const { vaultLabelOf } = await import("@blindfill/kit");
 const { keccak_256 } = await import("@noble/hashes/sha3.js");
@@ -94,4 +95,30 @@ test("solanaRestore zeroes each spent note's W secret key once it has the addres
   assert.deepEqual(ws.map((w) => w.address), [r.spends[0]!.w]);
   assert.equal(calls.length - at, 1, "one W derived per spent note");
   assert.ok(zero(calls[at]!.out.secretKey), "buyWallets leaves W's secret key in memory");
+});
+
+test("evmRestore zeroes each spent note's W secret key once it has the address, a release paid elsewhere too (card notes-restore-evm)", () => {
+  const scope = 7n;
+  const dep = { kind: "deposit", s: scope, i: 0 } as const;
+  const P = noteSecrets(SEED, dep).precommitment;
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const cP = noteSecrets(SEED, { kind: "change", l: label, j: 0 }).precommitment;
+  const base = { blockHash: `0x${"11".repeat(32)}`, logIndex: 0n, bytes: "", label: null, precommitment: null, nullifier: null, recipient: null as string | null, token: null };
+  const events = [
+    { ...base, block: 1n, kind: "deposit" as const, state: noteCommitment(10_000_000n, label, P), label, value: 10_000_000n, precommitment: P },
+    { ...base, block: 2n, kind: "withdraw" as const, state: noteCommitment(0n, label, cP), value: 10_000_000n, nullifier: noteSecrets(SEED, dep).nullifierHash, recipient: "0x0000000000000000000000000000000000005555" },
+  ];
+  // a release that paid another address: one W derived and zeroed, no refusal, the release listed elsewhere
+  const first = calls.length;
+  const o = evmRestore({ seed64: SEED, scope, events, gap: 2 });
+  assert.deepEqual([o.spends.length, o.elsewhere.length], [0, 1]);
+  assert.equal(calls.length - first, 1);
+  const w = calls[first]!.out as unknown as { secretKey: Uint8Array; address: string };
+  assert.ok(zero(w.secretKey), "W's secret key is left in memory for a release paid elsewhere");
+  events[1]!.recipient = w.address.toLowerCase();
+  const at = calls.length;
+  const r = evmRestore({ seed64: SEED, scope, events, gap: 2 });
+  assert.equal(r.spends.length, 1);
+  assert.equal(calls.length - at, 1, "one W derived, for the one spent note");
+  assert.ok(zero(calls[at]!.out.secretKey), "W's secret key is left in memory");
 });
