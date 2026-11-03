@@ -112,6 +112,8 @@ test("a route of the wrong shape is refused", () => {
   bad("base", v4(ZERO));
   bad("base", v4(ZERO, ...Array.from({ length: EVM_POOL_MAX_HOPS + 1 }, () => hop(USDC)).slice(0, -1), hop(X)));
   assert.equal(code(() => evmPoolRouteData("base", v4(ZERO, ...Array.from({ length: EVM_POOL_MAX_HOPS - 1 }, () => hop(USDC)), hop(X)))), "built");
+  bad("base", v3([B.weth, ...Array.from({ length: EVM_POOL_MAX_HOPS }, () => USDC), X]));
+  assert.equal(code(() => evmPoolRouteData("base", v3([B.weth, ...Array.from({ length: EVM_POOL_MAX_HOPS - 1 }, () => USDC), X]))), "built");
   bad("base", v3([USDC, X])); // a v3 route starts at WETH
   bad("base", v3([B.weth]));
   bad("base", v3([B.weth, X], [500, 500]));
