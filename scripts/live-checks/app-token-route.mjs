@@ -18,10 +18,10 @@
 // helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "../browsers.mjs";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 
 const KEY = "app-token-route";
@@ -108,8 +108,6 @@ const MEASURE = () => {
 };
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
-  // playwright is the terminal's dev dependency (apps/terminal/package.json)
-  const { chromium } = createRequire(new URL("../../apps/terminal/package.json", import.meta.url))("playwright");
   mkdirSync(shots, { recursive: true });
   const lr = await fetch(LISTS_URL, { headers: { origin: APP_HOST } });
   const lb = await lr.json().catch(() => null);
@@ -122,7 +120,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "signed");
   }
-  const browser = await chromium.launch();
+  const browser = await launchBrowser("chromium");
   const rec = { source: build ? `harness: the build ${build} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), lists, loads: [] };
   try {
     for (const [i, w] of LOADS.entries()) {

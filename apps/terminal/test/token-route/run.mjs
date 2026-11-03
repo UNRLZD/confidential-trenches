@@ -18,6 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 
 const HELPER = "https://api.confidential.unrealized.trade";
@@ -63,8 +64,7 @@ async function build() {
 
 const dir = await build();
 const route = await harnessRoute(dir, "signed");
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 
 async function context(w, scheme, reads, broken, errors) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: scheme, reducedMotion: "reduce" });
@@ -313,4 +313,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} runs`);
   process.exit(1);
 }
-console.log(`PASS ${n} runs (390 and 1440; dark and light for the row clicks, new tabs, hover and focus; deep links, not found, error) from the built app inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+console.log(`PASS ${n} runs (390 and 1440; dark and light for the row clicks, new tabs, hover and focus; deep links, not found, error) from the built app inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
