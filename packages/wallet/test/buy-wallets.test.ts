@@ -360,9 +360,12 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   const derivation = /@scure\/bip32|\bHDKey\b|"ed25519 seed"|\bslip10Ed25519\s*\(|\bwalletPath\s*\(|derivePath|ed25519-hd-key|micro-key-producer/;
   const hits = files.filter((f) => derivation.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length));
   assert.deepEqual(hits, ["packages/wallet/src/derive/keys.ts"]);
-  // every W a pool pays comes from freshWallet, called where the queue proves and where a restore lists it
+  // every W a pool pays comes from freshWallet, called where the queue proves, where a restore lists it, and where an
+  // armed W signs a buy (arming/records.ts solanaArmedSigner: it derives W_{sol,l,j} of the arm record, refuses unless
+  // the address is the record's, signs the one message and zeroes the key, test/arm-key-zero.test.ts). The other
+  // callers zero W's key at once and export no signer, so the signer derives W itself rather than through a pass-through.
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
+  assert.deepEqual(calls, ["packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
 });
 
 // ---------- fold 2 ----------
