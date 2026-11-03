@@ -1,10 +1,8 @@
-import { useMemo, useState } from "react";
-import { useLocation } from "react-router";
+import { useState } from "react";
 import { Avatar } from "../market/Avatar.tsx";
-import { FIXTURE_NOW_MS } from "./fixtures.ts";
 import { tokenView } from "./model.ts";
 import type { Curve, TokenView } from "./model.ts";
-import { tokenData } from "./source.ts";
+import { useTopToken } from "./source.ts";
 import type { TokenData } from "./source.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
@@ -201,10 +199,8 @@ export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: nu
   );
 }
 
-/** The token route: the page on the fixture source (source.ts) until the market data read lands. */
+/** The token route: the top Trending token, read from the helper (source.ts). */
 export function TokenRoute() {
-  const { search } = useLocation();
-  const [reads, setReads] = useState(0);
-  const data = useMemo(() => tokenData(search), [search, reads]);
-  return <TokenPage data={data} nowMs={FIXTURE_NOW_MS} onRetry={() => setReads((n) => n + 1)} />;
+  const { data, nowMs, retry } = useTopToken();
+  return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
 }
