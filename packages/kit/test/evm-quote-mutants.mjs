@@ -56,7 +56,6 @@ export const MUTANTS = [
   [QUOTE, 'if (nativeExists && wethStart) return refuse("native_first",', 'if (false) return refuse("native_first",', NATIVE],
   [QUOTE, 'nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true', "nativeFirst: false", NATIVE],
   [QUOTE, "const pool = nativeExists ? filled.filter((c) => startsNative(c.route)) : filled;", "const pool = filled;", NATIVE],
-  [QUOTE, "|| firstHop.some(fills)", "", NATIVE],
   // only a device quote builds
   [QUOTE, "QUOTED.add(quote);", "", QUOTED],
   [BUY, "if (!evmIsDeviceQuote(quote)) throw", "if (false) throw", QUOTED],

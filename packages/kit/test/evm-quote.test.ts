@@ -203,6 +203,14 @@ test("Q6 the Robinhood native-first rule picks native", async () => {
       return true;
     });
   }
+  // a WETH pool planted as the best on both providers: where a native pool exists the reference is still native
+  const wethBest = both(read(2, () => withOut({ ok: true, data: W(0n) + W(0n) }, 10n ** 12n)), read(3, () => withOut({ ok: true, data: W(0n) + W(0n) }, 2n * 10n ** 12n)));
+  await assert.rejects(quote("robinhood-weth-v3", wethBest, wethBest), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "native_first", String(e));
+    const r = e.reference?.route;
+    assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === "0x0000000000000000000000000000000000000000", JSON.stringify(r));
+    return true;
+  });
   // the native route quotes
   const q = await quote("robinhood-ok");
   assert.ok(q.route.venue === "uniswap-v4" && q.route.currencyIn === "0x0000000000000000000000000000000000000000");
