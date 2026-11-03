@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
 import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog } from "../../../test/evm-swaps/robinhood.ts";
-import { decodeRef, decodeSwap, TOPIC, VENUES, type Pool } from "./swaps.ts";
+import { decodeRef, decodeSwap, ROBINHOOD_VENUES, TOPIC, VENUES, type Pool } from "./swaps.ts";
 
 function rebuild(pool: Pool, upTo: number) {
   const src = pool === POOL_CURVE ? REC.logs.curve : REC.logs.v4;
@@ -103,11 +103,13 @@ test("a Pons token's main pool is its curve, named by the factory's own record (
   const inWindow = whole.tape(50).filter((t) => t.block > REC.lastHead - VENUES.robinhood.cold);
   assert.ok(inWindow.length > 0, "the window holds curve trades");
   assert.deepEqual(tape.trades.map((t: { tx: string; usd: string }) => [t.tx, t.usd]), inWindow.map((t) => [t.tx, t.usd]));
-  // a token no factory recorded and with no pool: not found, never a guess
+  // a listed token no factory recorded and with no pool: an empty tape from our own reads, never a guess and never a 404
   const t = open(chain, undefined, { pools: new Map() });
   const none = await t.trades(`0x${"34".repeat(20)}`, 10);
   t.stop();
-  assert.equal(none.status, 404);
+  assert.equal(none.status, 200, none.body);
+  assert.deepEqual(JSON.parse(none.body).trades, []);
+  assert.equal(JSON.parse(none.body).src, "chain");
 });
 
 test("block times: a provider that logs blockTimestamp 0x0 (as rpc.mainnet.chain.robinhood.com does) is outvoted by the two that agree; two that log none serve nothing", async () => {
@@ -139,4 +141,24 @@ test("block times: a provider that logs blockTimestamp 0x0 (as rpc.mainnet.chain
   const rb = await b.trades(CURVE_TOKEN, 50);
   b.stop();
   assert.equal(rb.status, 503, "times that go back: nothing served");
+});
+
+test("a Pons record the providers fail to answer is no answer (503, read again), never kept as no pool: the next ask finds the curve", async () => {
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  let failing = true;
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const calls = JSON.parse(String(init.body)) as { id: number; method: string; params: { to?: string }[] }[];
+    if (failing && calls.some((c) => c.method === "eth_call" && c.params[0]?.to === ROBINHOOD_VENUES.ponsV2))
+      return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, error: { code: -32000, message: "execution timeout" } }))), { status: 200 });
+    return chain.fetch(url, init);
+  };
+  const s = open(chain, undefined, { fetch, pools: new Map() });
+  const first = await s.trades(CURVE_TOKEN, 50);
+  failing = false;
+  const next = await s.trades(CURVE_TOKEN, 50);
+  s.stop();
+  assert.equal(first.status, 503, first.body);
+  assert.equal(next.status, 200, next.body);
+  assert.ok(JSON.parse(next.body).trades.length > 0, "the curve's trades are served");
 });
