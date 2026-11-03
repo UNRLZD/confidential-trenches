@@ -4,6 +4,9 @@
 // included). The worker file is answered with that policy and also its own (W:880), as Pages joins two matching rules,
 // so it runs under both at once. Run through the heavy-job script:
 //   node packages/kit/test/prover/chromium.e2e.mjs          exit 0 when all three cases hold, 1 otherwise
+//   ... chromium.e2e.mjs --http1                             the same over plain HTTP/1.1 (by default HTTP/2 over TLS
+//                                                            with a throwaway self-signed certificate, as SIGN_HOST's
+//                                                            production host serves it; fold 1 of signpage-prover-threads)
 // Cases:
 //   good      the fixed withdraw input (withdraw.input.json, proofs/g1-phone-prover/vectors at research ffcba5e) is
 //             proved in the worker; snarkjs 0.7.5's groth16.verify here, with the pinned withdraw.vkey, accepts it, and
@@ -12,10 +15,11 @@
 //   one-byte  withdraw.zkey is served with one byte changed: the worker refuses it at load, so no prove is ever posted.
 //   app-host  the worker without 'wasm-unsafe-eval' (APP_HOST's policy, M304 D-8): no proof is made.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { createSecureServer } from "node:http2";
 import { cpus, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,10 +76,27 @@ async function site() {
   return { files, worker };
 }
 
+const HTTP1 = process.argv.includes("--http1");
+
+/** A throwaway self-signed certificate for 127.0.0.1, its folder removed whatever openssl did. */
+function tlsCreds() {
+  const tls = mkdtempSync(join(tmpdir(), "kit-prover-tls-"));
+  try {
+    const [key, cert] = [join(tls, "key.pem"), join(tls, "cert.pem")];
+    const r = spawnSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`openssl: exit ${r.status}: ${(r.stderr || "").trim().split("\n").at(-1)}`);
+    return { key: readFileSync(key), cert: readFileSync(cert) };
+  } finally {
+    rmSync(tls, { recursive: true, force: true });
+  }
+}
+const creds = HTTP1 ? null : tlsCreds();
+
 function serve(files, headers, { flipZkey = false, workerCsp = [WORKER_CSP], threadFailsAt = 0 } = {}) {
   let threadAsks = 0; // the requests for the thread file so far
   const zkeyPath = `/assets/zk/${ZK_SETUP_FILES["withdraw.zkey"].sha256}.zkey`;
-  const server = createServer((req, res) => {
+  const handler = (req, res) => {
+    server.httpVersions.add(req.httpVersion);
     const path = new URL(req.url, "http://x").pathname;
     const f = files.get(path);
     for (const [k, v] of headers) res.setHeader(k, v);
@@ -95,24 +116,27 @@ function serve(files, headers, { flipZkey = false, workerCsp = [WORKER_CSP], thr
       res.setHeader("Content-Security-Policy", [site, THREAD_CSP]);
     }
     res.writeHead(200, { "Content-Type": f.type, "Content-Length": body.length, "Cache-Control": "no-store" }).end(body);
-  });
+  };
+  const server = HTTP1 ? createServer(handler) : createSecureServer(creds, handler);
+  server.httpVersions = new Set();
   return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok(server)));
 }
 
 async function runCase(browser, files, headers, input, opts) {
   const server = await serve(files, headers, opts);
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: !HTTP1 });
   const page = await ctx.newPage();
   const console_ = [];
   page.on("console", (m) => console_.push(m.text()));
   page.on("pageerror", (e) => console_.push(`pageerror ${e.message}`));
   page.on("requestfailed", (r) => console_.push(`requestfailed ${new URL(r.url()).pathname} ${r.failure()?.errorText}`));
   try {
-    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    await page.goto(`${HTTP1 ? "http" : "https"}://127.0.0.1:${server.address().port}/`);
     // page.js is a classic script in <head>, so it has run by load
     if (!(await page.evaluate(() => !!window.__kitProver))) throw new Error(`page.js did not run: ${console_.join(" | ")}`);
     const out = await page.evaluate((i) => window.__kitProver.run(i), input);
     out.console = console_;
+    out.http = [...server.httpVersions];
     return out;
   } finally {
     await ctx.close();
@@ -139,7 +163,7 @@ const check = (name, f) => {
   }
 };
 try {
-  console.log(JSON.stringify({ chromium: browser.version(), cpu: cpus()[0]?.model, host: execFileSync("uname", ["-sm"]).toString().trim(), worker: { bytes: worker.bytes, sha256: worker.sha256 } }));
+  console.log(JSON.stringify({ http: HTTP1 ? "1.1" : "2", chromium: browser.version(), cpu: cpus()[0]?.model, host: execFileSync("uname", ["-sm"]).toString().trim(), worker: { bytes: worker.bytes, sha256: worker.sha256 } }));
 
   const good = await runCase(browser, files, headers, input);
   const verified = good.result ? await snarkjs.groth16.verify(vkey, good.result.publicSignals, good.result.proof) : false;
