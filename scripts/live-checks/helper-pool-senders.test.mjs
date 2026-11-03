@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/helper-pool-senders.test.mjs: the live check replays recorded runs
 // (helper-pool-senders.answers.json). good: apps/helper at this card with a devnet pool set: PASS. bad: the same helper
 // with no pool set, as the deployed helper is before this card: FAIL. Made from the good run: a planted transaction
-// carried, two callers given two fees, a fee under the worst cost or off its step, another pool answered: each FAIL.
+// carried, two callers given two fees, a fee other than the kit's for the rent read (2,000,000 for both callers, M362
+// (2)), rent reads missing or disagreeing, another pool answered: each FAIL.
 // The planted transactions are checked against the helper's own checks, so the check plants what the route reads.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -9,8 +10,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
-import { solanaPoolPriorityBudget, solanaPoolReleaseCost } from "../../packages/kit/src/index.ts";
-import { b58decode, b58encode, COST_MIN, judge, plant, PLANTS, read } from "./helper-pool-senders.mjs";
+import { solanaDecodeTransaction, solanaPoolPriorityBudget } from "../../packages/kit/src/index.ts";
+import { b58decode, b58encode, judge, kitFee, plant, PLANTS, read, RENT_RPCS } from "./helper-pool-senders.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-pool-senders.answers.json"), "utf8"));
@@ -38,36 +39,74 @@ test("made from the good run: a planted transaction carried, two fees, a fee und
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "1000000" })))).ok, false);
   assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "2000001" })))).ok, false);
   assert.equal(judge({ ...g, pool: "11111111111111111111111111111111" }).ok, false);
+  // M362 (2): a fee on its step and above the cost, the same for both callers, but not the kit's for the rent read
+  const two = judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "2000000" }))));
+  assert.equal(two.ok, false);
+  assert.ok(bad(two).some((l) => l.includes('fee "2000000"') && l.includes("the kit's fee for the rent read 1300000")), bad(two).join("\n"));
+  assert.equal(judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee: "1100000" })))).ok, false);
+  // the rent reads: missing, one only, from other RPCs, or disagreeing
+  assert.equal(judge({ ...g, rent: undefined }).ok, false);
+  assert.equal(judge({ ...g, rent: g.rent.slice(0, 1) }).ok, false);
+  assert.equal(judge({ ...g, rent: [g.rent[1], g.rent[0]] }).ok, false);
+  const r17 = Buffer.alloc(17);
+  r17.writeBigUInt64LE(3_480n, 0);
+  r17.writeDoubleLE(1, 8);
+  r17[16] = 50;
+  const other = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: { owner: "Sysvar1111111111111111111111111111111111111", data: [r17.toString("base64"), "base64"] } } });
+  assert.equal(judge({ ...g, rent: [g.rent[0], { ...g.rent[1], body: other }] }).ok, false, "the two RPCs disagree");
   for (const [asked] of PLANTS) {
     assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.asked !== asked) }).ok, false, `${asked} missing`);
     assert.equal(judge(edit(g, asked, (x) => ({ ...x, status: 200, body: '{"signature":"x"}' }))).ok, false, `${asked} carried`);
   }
-  assert.equal(COST_MIN, solanaPoolReleaseCost({ lamportsPerByte: 5_080n, factor: 1n }), "the check's floor is the kit's release cost at mainnet rent");
 });
 
 test("plant() builds what the helper's checks read: each plant gets its own code from the bytes alone, as is: ok", () => {
   const f = JSON.parse(A.good.reads[0].body);
-  const cfg = { program: f.program, pool: f.pool, feePayer: f.fee_payer };
+  const kit = kitFee(A.good, f.cluster);
+  assert.ok(kit);
   const fee = BigInt(f.fee);
+  assert.equal(fee, kit.fee);
+  const budget = solanaPoolPriorityBudget(kit.rent, fee);
+  assert.equal(kit.budget, budget);
+  const cfg = { program: f.program, pool: f.pool, feePayer: f.fee_payer, budget };
   const nowMs = 1_800_000_000_000;
   const at = (wire) => {
-    const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee, budget: solanaPoolPriorityBudget({ lamportsPerByte: 5_080n, factor: 1n }, fee), nowMs });
+    const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee, budget, nowMs });
     return c.ok ? "ok" : c.code;
   };
   for (const [asked, code] of PLANTS) assert.equal(at(asked === "fee_off" ? plant({ ...cfg, relayFee: fee + 100_000n, nowMs }) : plant({ ...cfg, relayFee: fee, kind: asked, nowMs })), code, asked);
   assert.equal(at(plant({ ...cfg, relayFee: fee, nowMs })), "ok");
   assert.equal(b58encode(b58decode(f.pool)), f.pool);
+  // M362 (4): fee_below_cost's priority is exactly the budget plus one lamport, so a helper whose budget lost even the
+  // page reserve (budget + 715) would carry it and fail the check; at the budget itself the helper carries it
+  const pr = (wire) => {
+    const m = solanaDecodeTransaction(new Uint8Array(wire)).message;
+    const ixs = m.instructions.filter((i) => m.staticKeys[i.programIndex] === "ComputeBudget111111111111111111111111111111");
+    const limit = ixs.find((i) => i.data[0] === 2);
+    const price = ixs.find((i) => i.data[0] === 3);
+    const l = BigInt(Buffer.from(limit.data).readUInt32LE(1));
+    const p = Buffer.from(price.data).readBigUInt64LE(1);
+    return (p * l + 999_999n) / 1_000_000n;
+  };
+  assert.equal(pr(plant({ ...cfg, relayFee: fee, kind: "fee_below_cost", nowMs })), budget + 1n);
+  assert.equal(at(plant({ ...cfg, budget: budget - 1n, relayFee: fee, kind: "fee_below_cost", nowMs })), "ok", "a priority of exactly the budget is carried");
+  const looser = checkSolanaPoolTx(new Uint8Array(plant({ ...cfg, relayFee: fee, kind: "fee_below_cost", nowMs })), { ...cfg, fee, budget: budget + 715n, nowMs });
+  assert.equal(looser.ok, true, "a budget without the page reserve would let the plant through, so the check catches it");
 });
 
 test("read() asks the fee twice and plants two transactions for the pool (replayed helper)", async () => {
   const asked = [];
   const fetchFn = async (url, init) => {
     const u = new URL(url);
-    asked.push(`${init.method ?? "GET"} ${u.pathname}`);
+    const rent = A.good.rent.find((x) => x.url === url);
+    asked.push(rent ? `rent ${url}` : `${init.method ?? "GET"} ${u.pathname}`);
+    if (rent) return new Response(rent.body, { status: rent.status });
     const r = u.pathname === "/v1/pool/fee" ? A.good.reads[0] : A.good.reads.find((x) => x.asked === "changed");
     return new Response(r.body, { status: r.status, headers: r.headers });
   };
   const run = await read("http://h.invalid", A.good.pool, fetchFn);
-  assert.deepEqual(asked, ["GET /v1/pool/fee", "GET /v1/pool/fee", ...PLANTS.map(() => "POST /v1/pool/solana/send")]);
+  const cluster = JSON.parse(A.good.reads[0].body).cluster;
+  assert.deepEqual(asked, ["GET /v1/pool/fee", "GET /v1/pool/fee", ...RENT_RPCS[cluster].map((u) => `rent ${u}`), ...PLANTS.map(() => "POST /v1/pool/solana/send")]);
   assert.deepEqual(run.reads.map((x) => x.asked), ["fee", "fee", ...PLANTS.map(([a]) => a)]);
+  assert.equal(run.rent.length, 2);
 });

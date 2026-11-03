@@ -8,14 +8,17 @@
 //   - "extra_instruction": the release, then a transfer out of the fee payer;
 //   - "fee_payer_named": a tag 3 whose inner instruction names the fee payer (the pool instruction's account 2);
 //   - "fee_payer_account": the release naming the fee payer as another pool account (its spent mark) too;
-//   - "fee_below_cost": the release with a priority fee (1,400,000 CU at a price) over what the fee leaves;
+//   - "fee_below_cost": the release with a priority fee of exactly one lamport over the kit's budget for the fee
+//     (solanaPoolPriorityBudget at the rent read below: 1,000,000 CU at budget + 1 micro-lamports a CU);
+//   - "no_cu_limit": the release with a compute unit price and no compute unit limit;
 //   - "inner_program": a tag 3 whose inner instruction invokes a program off the kit's list;
 //   - "deadline_near": the release with a deadline one second away (under now plus 90 s).
 // Each is refused before any read or send (apps/helper/src/pool/solana.ts checks them on the bytes alone), so the check
-// never moves money. It passes only when:
-//   - the fee answers 200 with exactly the kit's 10 fields, the pool and program asked, a fee_payer address, a 60 s
-//     epoch with its start on the grid, a fee on its 100,000-lamport step and at least a release's worst cost
-//     (1,066,640 lamports, the kit's solanaPoolReleaseCost at mainnet rent, M355 (3)), and the same fee for both callers;
+// never moves money. It also reads the Rent sysvar on two public RPCs of the fee answer's cluster (RENT_RPCS). It passes
+// only when:
+//   - the fee answers 200 with exactly the kit's 9 fields, the pool and program asked, a fee_payer address, a 60 s
+//     epoch with its start on the grid, and for both callers exactly the kit's solanaPoolFee for the rent both RPCs read
+//     (M362 (2): every device refuses any other fee, so a helper publishing another one breaks every release);
 //   - every planted transaction answers 422 with its own code (PLANTS);
 //   - every answer carries a full-sha X-Helper-Commit, and APP_HOST is echoed only to the read that sent it.
 //   node scripts/live-checks/helper-pool-senders.mjs --pool <address> [--base <url>] [--record <file>]
@@ -23,11 +26,17 @@
 import "../net-window.mjs";
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
 
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 const FIELDS = ["chain", "cluster", "program", "pool", "fee_payer", "epoch_ms", "epoch_start_ms", "fee", "step"];
-export const COST_MIN = 1_066_640n; // the kit's solanaPoolReleaseCost at mainnet rent (M355 (3))
+/** Two keyless RPCs per cluster the Rent sysvar is read on (both answered 2026-11-03 02:22Z). */
+export const RENT_RPCS = {
+  mainnet: ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"],
+  devnet: ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
+};
+const RENT_SYSVAR = "SysvarRent111111111111111111111111111111111";
 /** Each planted transaction and the refusal it must get. */
 export const PLANTS = [
   ["changed", "bad_signature"],
@@ -36,6 +45,7 @@ export const PLANTS = [
   ["fee_payer_named", "fee_payer_named"],
   ["fee_payer_account", "fee_payer_named"],
   ["fee_below_cost", "fee_below_cost"],
+  ["no_cu_limit", "no_cu_limit"],
   ["inner_program", "inner_program"],
   ["deadline_near", "deadline_near"],
 ];
@@ -52,11 +62,36 @@ const json = (t) => {
   }
 };
 
-/** The check on one recorded run: { pool, reads: [{ asked, origin, status, headers, body }] }. */
+/** The rent one recorded getAccountInfo answer holds, or null. */
+function rentOf(r) {
+  const v = json(r?.body ?? "")?.result?.value;
+  if (r?.status !== 200 || typeof v?.owner !== "string" || !Array.isArray(v?.data) || v.data[1] !== "base64" || typeof v.data[0] !== "string") return null;
+  try {
+    return solanaRentOf({ owner: v.owner, data: new Uint8Array(Buffer.from(v.data[0], "base64")) });
+  } catch {
+    return null;
+  }
+}
+
+/** The kit's fee for the rent both recorded RPC reads give, or null when they are not two agreeing reads of the cluster's pair. */
+export function kitFee(run, cluster) {
+  const urls = RENT_RPCS[cluster];
+  const reads = run.rent ?? [];
+  if (!urls || reads.length !== 2 || reads[0].url !== urls[0] || reads[1].url !== urls[1]) return null;
+  const [a, b] = reads.map(rentOf);
+  if (!a || !b || a.lamportsPerByte !== b.lamportsPerByte || a.factor !== b.factor) return null;
+  const fee = solanaPoolFee(a);
+  return { rent: a, fee, budget: solanaPoolPriorityBudget(a, fee) };
+}
+
+/** The check on one recorded run: { pool, rent: [{ url, status, body }] x2, reads: [{ asked, origin, status, headers, body }] }. */
 export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const fees = run.reads.filter((r) => r.asked === "fee");
+  const cluster = json(fees[0]?.body ?? "")?.cluster;
+  const kit = kitFee(run, cluster);
+  say(kit !== null, `the Rent sysvar on ${show(RENT_RPCS[cluster])} (cluster ${show(cluster)}): ${kit ? `${kit.rent.lamportsPerByte} a byte, factor ${kit.rent.factor}, the kit's fee ${kit.fee}` : "not two agreeing reads"}`);
   say(fees.length === 2, `two fee reads (${fees.length})`);
   const values = [];
   for (const r of fees) {
@@ -68,7 +103,7 @@ export function judge(run) {
     say(b?.chain === "solana" && b?.pool === run.pool && B58.test(b?.program ?? "") && B58.test(b?.fee_payer ?? ""), `${tag} pool ${show(b?.pool)} (asked ${run.pool}), program ${show(b?.program)}, fee payer ${show(b?.fee_payer)}`);
     say(b?.epoch_ms === 60_000 && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms % 60_000 === 0, `${tag} epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
     const fee = typeof b?.fee === "string" && DEC.test(b.fee) ? BigInt(b.fee) : null;
-    say(fee !== null && b?.step === STEP.toString() && fee % STEP === 0n && fee >= COST_MIN, `${tag} fee ${show(b?.fee)} on its step ${show(b?.step)}, at least a release cost ${COST_MIN}`);
+    say(fee !== null && b?.step === STEP.toString() && kit !== null && fee === kit.fee && b?.cluster === cluster, `${tag} fee ${show(b?.fee)} on its step ${show(b?.step)}, the kit's fee for the rent read ${kit?.fee ?? "none"}`);
     values.push(b?.fee);
   }
   say(values.length === 2 && values[0] === values[1], `the same fee for both callers: ${show(values)}`);
@@ -132,10 +167,12 @@ const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
  * compute unit limit, before nothing; its accounts the pool, W, the fee payer and throwaway keys (it is refused before
  * the program ever reads them). Slot 0 empty. `kind` plants one fault: "changed" (a relay fee byte changed after W
  * signed), "extra_instruction" (a transfer out of the fee payer after the release), "fee_payer_named" (tag 3, its inner
- * instruction names account 2), "fee_payer_account" (the fee payer as the spent mark too), "fee_below_cost" (1,400,000 CU priced over the fee), "inner_program" (tag 3, its inner
- * instruction invokes a throwaway program), "deadline_near" (a deadline 1 s away); "ok" plants none.
+ * instruction names account 2), "fee_payer_account" (the fee payer as the spent mark too), "fee_below_cost" (a priority
+ * fee of `budget` + 1 lamports: 1,000,000 CU at budget + 1 micro-lamports a CU), "no_cu_limit" (a compute unit price
+ * and no limit), "inner_program" (tag 3, its inner instruction invokes a throwaway program), "deadline_near" (a
+ * deadline 1 s away); "ok" plants none.
  */
-export function plant({ program, pool, feePayer, relayFee, kind = "ok", nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey }) {
+export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "ok", nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey }) {
   const wPub = createPublicKey(w).export({ format: "der", type: "spki" }).subarray(-32);
   const other = () => createPublicKey(generateKeyPairSync("ed25519").privateKey).export({ format: "der", type: "spki" }).subarray(-32);
   const [mark, page, tip, root, label, foreign] = [other(), other(), other(), other(), other(), other()];
@@ -162,9 +199,11 @@ export function plant({ program, pool, feePayer, relayFee, kind = "ok", nowMs = 
     ? Buffer.concat([Buffer.from([3, 0]), Buffer.alloc(256, 7), fields, u64(0n), Buffer.from([1, 9, innerAccounts.length, ...innerAccounts, transfer.length, 0]), transfer])
     : Buffer.concat([Buffer.from([2]), Buffer.alloc(256, 7), fields]);
   const ix = (programIndex, accs, d) => Buffer.from([programIndex, ...compact(accs.length), ...accs, ...compact(d.length), ...d]);
+  if (kind === "fee_below_cost" && budget <= 0n) throw new Error("fee_below_cost needs the budget");
   const ixs = [
-    ix(10, [], Buffer.concat([Buffer.from([2]), u32(kind === "fee_below_cost" ? 1_400_000 : 400_000)])),
-    ...(kind === "fee_below_cost" ? [ix(10, [], Buffer.concat([Buffer.from([3]), u64(((relayFee * 2n) * 1_000_000n) / 1_400_000n)]))] : []),
+    ...(kind === "no_cu_limit" ? [] : [ix(10, [], Buffer.concat([Buffer.from([2]), u32(kind === "fee_below_cost" ? 1_000_000 : 400_000)]))]),
+    ...(kind === "fee_below_cost" ? [ix(10, [], Buffer.concat([Buffer.from([3]), u64(budget + 1n)]))] : []), // priority = price x 1,000,000 / 10^6
+    ...(kind === "no_cu_limit" ? [ix(10, [], Buffer.concat([Buffer.from([3]), u64(1_000n)]))] : []),
     ix(9, accounts, data),
     ...(kind === "extra_instruction" ? [ix(8, [0, 3], transfer)] : []),
   ];
@@ -195,13 +234,26 @@ export async function read(base, pool, fetchFn = fetch) {
   const feeUrl = `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`;
   const f = await get("fee", true, feeUrl);
   await get("fee", false, feeUrl);
-  if (typeof f?.fee === "string" && DEC.test(f.fee) && B58.test(f.program ?? "") && B58.test(f.fee_payer ?? "")) {
-    const cfg = { program: f.program, pool, feePayer: f.fee_payer };
+  // the Rent sysvar on the cluster's two RPCs, as the device reads it, for the kit's fee and priority budget
+  const rent = [];
+  for (const url of RENT_RPCS[f?.cluster] ?? []) {
+    const r = await fetchFn(url, {
+      method: "POST",
+      redirect: "error",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }] }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    rent.push({ url, readAt: new Date().toISOString(), status: r.status, body: (await r.text()).slice(0, 2_000) });
+  }
+  const kit = kitFee({ rent }, f?.cluster);
+  if (kit && typeof f?.fee === "string" && DEC.test(f.fee) && B58.test(f.program ?? "") && B58.test(f.fee_payer ?? "")) {
+    const cfg = { program: f.program, pool, feePayer: f.fee_payer, budget: kit.budget };
     const post = (asked, wire) =>
       get(asked, true, `${base}/v1/pool/solana/send`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool, tx: wire.toString("base64") }) });
     for (const [asked] of PLANTS) await post(asked, asked === "fee_off" ? plant({ ...cfg, relayFee: BigInt(f.fee) + STEP }) : plant({ ...cfg, relayFee: BigInt(f.fee), kind: asked }));
   }
-  return { pool, reads };
+  return { pool, rent, reads };
 }
 
 if (import.meta.main) {
