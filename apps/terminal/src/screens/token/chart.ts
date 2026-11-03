@@ -72,6 +72,8 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
   if (pane) chart.setPaneOptions({ id: pane, height: phone ? 88 : 110, dragEnabled: false });
   // the newest bar close to the price axis, as R5 draws it
   chart.setOffsetRightDistance(phone ? 16 : 40);
+  // the price range starts under the legend (its rows: two on desktop, three on the phone), in px
+  chart.overrideYAxis({ paneId: "candle_pane", gap: { top: phone ? 80 : 44, bottom: 0.1 } });
   chart.subscribeAction("onCrosshairChange", (d) => {
     const k = (d as { kLineData?: KLineData } | undefined)?.kLineData;
     if (k) onBar(k);
