@@ -147,4 +147,8 @@ test("throttleOf: a provider read that threw for a throttle names 1 s; any other
   assert.equal(throttleOf(new Error("HTTP 503")), 0);
   assert.equal(throttleOf(new Error("blockhash not found")), 0);
   assert.equal(throttleOf(undefined), 0);
+  // EIP-1474's -32005 is a throttle on an EVM chain only, and no other -320xx is
+  assert.equal(throttleOf(new Error("RPC error -32005: project ID request rate exceeded"), true), 1);
+  assert.equal(throttleOf(new Error("RPC error -32005: Node is behind by 42 slots")), 0);
+  for (const m of ["RPC error -32002: resource unavailable", "RPC error -32004: method not supported", "RPC error -320050: x", "x RPC error -32005: y"]) assert.equal(throttleOf(new Error(m), true), 0, m);
 });

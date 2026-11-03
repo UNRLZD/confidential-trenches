@@ -27,7 +27,7 @@
 //                    the device re-proves at a newer epoch's fee (M356 (2));
 //   rate_limited (429) EVM_QUEUE_MAX sends are already waiting (Retry-After EVM_BUSY_RETRY_S; card helper-abuse-limits:
 //                    the helper's own budget is a wait, never a 503); or a provider throttled a read or the send (its
-//                    HTTP 429, a rate-limit error; Retry-After 1, limits.ts throttleOf);
+//                    HTTP 429, a rate-limit error, EIP-1474's -32005; Retry-After 1, limits.ts throttleOf);
 //   in_flight (429)  this client already holds EVM_IN_FLIGHT_MAX requests open (M374 (5) on this route too: one client
 //                    cannot fill the shared queue); Retry-After EVM_BUSY_RETRY_S;
 //   upstream (503)   a read could not be made (a transport error, an HTTP status but 429, another JSON-RPC error),
@@ -250,7 +250,7 @@ export function evmPoolSender(
   // a provider call that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
   // upstream (card helper-abuse-limits: a 503 never means "wait")
   const unread = (e: unknown): PoolEvmAnswer => {
-    const wait = throttleOf(e);
+    const wait = throttleOf(e, true);
     return wait > 0 ? { ...no(429, "rate_limited"), retryAfterS: wait } : no(503, "upstream");
   };
   const chain = (): Promise<bigint> => {
@@ -389,7 +389,7 @@ export function evmPoolSender(
     const { raw, hash } = signEvmTx({ chainId: id, nonce, maxPriorityFeePerGas, maxFeePerGas, gas, to: pool, data: bytes }, cfg.senderKey);
     const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);
     const why = sent.flatMap((s) => (s.status === "rejected" ? [s.reason as unknown] : []));
-    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e) > 0) ?? why[0]);
+    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     nextNonce = nonce + 1n;
     return { status: 200, body: { hash } };
   }

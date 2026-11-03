@@ -49,10 +49,18 @@ export function throttled(retryAfterS: number, code = "rate_limited"): { status:
 }
 
 /** A provider read that threw for a throttle (the kit's RPC clients throw "HTTP 429"; a JSON-RPC error naming a rate
- * limit): the wait to name, 1 s, as a thrown error carries no reset; 0 for any other failure. */
-export function throttleOf(e: unknown): number {
-  return /\bHTTP 429\b|rate.?limit|too many requests/i.test(String((e as Error | undefined)?.message ?? e)) ? 1 : 0;
+ * limit; on an EVM chain, `evm`, also EVM_LIMIT_CODE): the wait to name, 1 s, as a thrown error carries no reset; 0 for
+ * any other failure. Never -32005 off EVM: Solana's -32005 is a node behind, not a throttle. */
+export function throttleOf(e: unknown, evm = false): number {
+  const m = String((e as Error | undefined)?.message ?? e);
+  return /\bHTTP 429\b|rate.?limit|too many requests/i.test(m) || (evm && new RegExp(`^RPC error ${EVM_LIMIT_CODE}\\b`).test(m)) ? 1 : 0;
 }
+
+/** EIP-1474's "Limit exceeded" code, which the major EVM providers answer for a rate or request-count limit: Infura's
+ * error table, "-32005 | Limit exceeded | The request exceeds your request limit.", and its rate-limited example,
+ * {"code": -32005, "message": "project ID request rate exceeded"} (docs.infura.io/reference/ethereum/json-rpc-methods,
+ * read 2026-11-03 09:16Z). Any other -320xx stays a provider failure. */
+export const EVM_LIMIT_CODE = -32005;
 
 /** A read behind a cached answer was throttled (its upstream's 429, the helper's own budget, a paused queue): the
  * cache answers 429 with `retryAfterS` instead of 503 when it has nothing good to serve. */

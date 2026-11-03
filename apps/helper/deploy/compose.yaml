@@ -36,6 +36,12 @@ services:
       RPC_BUDGET_BASE: ${RPC_BUDGET_BASE:-}
       RPC_BUDGET_ROBINHOOD: ${RPC_BUDGET_ROBINHOOD:-}
       RPC_BUDGET_NEAR: ${RPC_BUDGET_NEAR:-}
+      # each vendor's budget per 10 s, "<total>,<per client>" (src/proxy/proxy.ts; empty: the vendor's published limit
+      # for a starting key); set it to the key's plan
+      PROXY_BUDGET_JUPITER: ${PROXY_BUDGET_JUPITER:-}
+      PROXY_BUDGET_RELAY: ${PROXY_BUDGET_RELAY:-}
+      PROXY_BUDGET_LIFI: ${PROXY_BUDGET_LIFI:-}
+      PROXY_BUDGET_ONECLICK: ${PROXY_BUDGET_ONECLICK:-}
       WITHDRAW_RELAYER_MAINNET: ${WITHDRAW_RELAYER_MAINNET:-}
       WITHDRAW_FEE_RECIPIENT_MAINNET: ${WITHDRAW_FEE_RECIPIENT_MAINNET:-}
       WITHDRAW_RELAYER_TESTNET: ${WITHDRAW_RELAYER_TESTNET:-}

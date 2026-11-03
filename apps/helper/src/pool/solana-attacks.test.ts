@@ -782,7 +782,8 @@ test("review R-S3: a pool provider's 429 on the simulation answers 429 rate_limi
   assert.deepEqual([a.status, code(a), a.retryAfterS !== undefined], [429, "rate_limited", true], `got ${a.status} ${code(a)}`);
 });
 test("a pool provider's throttle on the epoch's rent read is 429 rate_limited with a wait too; any other failed read stays 503 upstream", async () => {
-  for (const [msg, want] of [["HTTP 429", 429], ["RPC error -32429: rate limit reached", 429], ["HTTP 503", 503], ["fetch failed", 503]] as const) {
+  // Solana's -32005 is a node behind (no EVM limit code here): a failure, not a wait
+  for (const [msg, want] of [["HTTP 429", 429], ["RPC error -32429: rate limit reached", 429], ["HTTP 503", 503], ["fetch failed", 503], ["RPC error -32005: Node is behind by 42 slots", 503]] as const) {
     const s = solanaPoolSender(
       { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
       { providers: [stub([]), stub([])], now: () => NOW, readRent: async () => { throw new Error(msg); }, send: () => { throw new Error("not reached"); } },

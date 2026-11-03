@@ -4,7 +4,7 @@
  *
  *   HELPER_COMMIT=<40 hex> [PORT=8080] [JUPITER_API_KEY=..] [RELAY_API_KEY=..] [LIFI_API_KEY=..] [ONECLICK_JWT=..]
  *     [SOLANA_RPC_URL=..] [SOLANA_HOLDERS_RPC_URL=..] [BASE_RPC_URL=..] [ROBINHOOD_RPC_URL=..] [NEAR_RPC_URL=..] [NEAR_RPC_URL_B=..]
- *     [RPC_BUDGET_<CHAIN>=<total>,<per client>]
+ *     [RPC_BUDGET_<CHAIN>=<total>,<per client>] [PROXY_BUDGET_<VENDOR>=<total>,<per client>]
  *     [NEAR_TESTNET_RPC_URL=..] [NEAR_TESTNET_RPC_URL_B=..] [WITHDRAW_RELAYER_MAINNET=.. WITHDRAW_FEE_RECIPIENT_MAINNET=..]
  *     [WITHDRAW_RELAYER_TESTNET=.. WITHDRAW_FEE_RECIPIENT_TESTNET=..] [WITHDRAW_VAULT_<NET>=.. WITHDRAW_RELAYER_KEYS_<NET>=..]
  *     [BIND_VAULT_<NET>=.. BIND_RELAYER_<NET>=.. BIND_RELAYER_KEY_<NET>=.. BIND_MARGIN_K=..] [HELPER_RELEASE=.. HELPER_STORE_DIR=..]
@@ -80,7 +80,7 @@ export const POOL_RATE_MAX = 30;
 export const API_RATE_MAX = 120;
 /** Requests one client makes per limit window to the RPC route, and apart to the proxy route, counted before the body
  * is read, a refused request and a cache hit included [design: 120 per 10 s, as API_RATE_MAX: above every share a
- * device draws there (RPC_CLIENT_MAX a chain, PROXY_CLIENT_MAX a vendor), so an honest device meets its share first,
+ * device draws there (RPC_CLIENT_MAX a chain, a vendor's PROXY_BUDGETS share), so an honest device meets its share first,
  * while the bodies one client makes the helper read and parse stay bounded]. */
 export const UPSTREAM_ROUTE_MAX = 120;
 const METHODS: readonly string[] = HELPER_CORS.allowMethods;

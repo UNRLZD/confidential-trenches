@@ -244,7 +244,11 @@ test("a provider's transport error is 503 upstream; its HTTP 429 or rate-limit e
     ["eth_getBlockByNumber", "HTTP 429", "rate_limited"],
     ["eth_sendRawTransaction", "HTTP 429", "rate_limited"],
     ["eth_call", "The operation was aborted due to timeout", "upstream"],
-    ["eth_call", "RPC error -32005: limit exceeded", "upstream"],
+    ["eth_call", "RPC error -32005: project ID request rate exceeded", "rate_limited"], // EIP-1474 limit exceeded
+    ["eth_estimateGas", "RPC error -32005: daily request count exceeded, request rate limited", "rate_limited"],
+    ["eth_call", "RPC error -32002: resource unavailable", "upstream"], // any other -320xx stays a failure
+    ["eth_estimateGas", "RPC error -32004: method not supported", "upstream"],
+    ["eth_call", "RPC error -320050: not the code", "upstream"],
     ["eth_getCode", "HTTP 503", "upstream"],
     ["eth_call", "RPC error 3: execution reverted: 0x8b1c4b0b", "simulation_failed"],
     ["eth_estimateGas", "RPC error 3: execution reverted", "simulation_failed"],

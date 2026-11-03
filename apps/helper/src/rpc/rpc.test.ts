@@ -308,6 +308,31 @@ test("end state 2: no single caller can trigger a hold by itself, because the pe
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "honest")).status, 200, "an honest caller is served");
 });
 
+test("an EVM provider's -32005 (EIP-1474 limit exceeded) is its throttle: 429 with its backoff and the chain held; any other -320xx, and -32005 on Solana or NEAR, passes through", async () => {
+  let t = 1_800_000_000_000;
+  let calls = 0;
+  let answer: unknown = null;
+  const r = createRpc({}, { now: () => t, fetch: (async () => (calls++, new Response(JSON.stringify(answer), { status: 200, headers: { "content-type": "application/json" } }))) as never });
+  const evm = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] });
+  answer = { jsonrpc: "2.0", id: 1, error: { code: -32005, message: "project ID request rate exceeded", data: { backoff_seconds: 3 } } };
+  const a = await r.handle("base", JSON_T, evm, "x");
+  assert.deepEqual([a.status, a.headers?.["Retry-After"], JSON.parse(a.body)], [429, "3", { error: { code: "rate_limited" } }], "the code only, the backoff named");
+  answer = { jsonrpc: "2.0", id: 1, result: "0x1" };
+  assert.equal((await r.handle("base", JSON_T, evm, "y")).status, 429, "the chain is held for every caller");
+  assert.equal(calls, 1);
+  t += 3_000;
+  assert.equal((await r.handle("base", JSON_T, evm, "y")).status, 200, "at the backoff's end");
+  // a batch with one -32005 in it; no backoff named: 1 s
+  answer = [{ jsonrpc: "2.0", id: 1, result: "0x1" }, { jsonrpc: "2.0", id: 2, error: { code: -32005, message: "limit exceeded" } }];
+  const b = await r.handle("robinhood", JSON_T, JSON.stringify([{ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, { jsonrpc: "2.0", id: 2, method: "eth_blockNumber", params: [] }]), "x");
+  assert.deepEqual([b.status, b.headers?.["Retry-After"]], [429, "1"]);
+  for (const [chain, body, code] of [["base", evm, -32002], ["base", evm, -32603], ["solana", JSON.stringify(getBalance()), -32005]] as const) {
+    answer = { jsonrpc: "2.0", id: 1, error: { code, message: "x" } };
+    const c = await r.handle(chain, JSON_T, body, "z");
+    assert.deepEqual([c.status, JSON.parse(c.body).error.code], [200, code], `${chain} ${code} is the provider's answer`);
+  }
+});
+
 test("review F-A: a batch draws its size, so the provider sees at most RPC_CLIENT_MAX calls per client and RPC_CHAIN_MAX per chain a window", async () => {
   let calls = 0;
   let t = 1_800_000_000_000;

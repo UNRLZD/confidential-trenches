@@ -6,7 +6,11 @@ import { test } from "node:test";
 import * as proxyModule from "./proxy.ts";
 import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
-const { PROXY_CLIENT_MAX, PROXY_VENDOR_MAX } = proxyModule as unknown as { PROXY_CLIENT_MAX: number; PROXY_VENDOR_MAX: number };
+const { PROXY_BUDGETS, proxyBudgetEnv } = proxyModule as unknown as { PROXY_BUDGETS: Record<string, { total: number; perClient: number }>; proxyBudgetEnv: (v: string) => string };
+// the mechanism tests run on an explicit budget, so they read the same whatever the defaults are
+const PROXY_VENDOR_MAX = 300;
+const PROXY_CLIENT_MAX = 60;
+const WIDE = { PROXY_BUDGET_JUPITER: `${PROXY_VENDOR_MAX},${PROXY_CLIENT_MAX}` };
 import { VENDOR_NAMES, VENDORS } from "./vendors.ts";
 
 const ENV = {
@@ -209,10 +213,10 @@ test("429: the vendor is held until its reset (at most a minute); a short reset 
   assert.ok(WAIT_MAX_MS < 30_000);
 });
 
-test("each vendor is one budget callers draw from fairly: a heavy caller is throttled at PROXY_CLIENT_MAX while an honest one still goes; a cache hit counts in the caller's share only", async () => {
+test("each vendor is one budget callers draw from fairly: a heavy caller is throttled at its share while an honest one still goes; a cache hit counts in the caller's share only", async () => {
   const c = clock();
   const f = vendor(() => json({ ok: 1 }));
-  const p = createProxy(ENV, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: c.sleep });
+  const p = createProxy({ ...ENV, ...WIDE }, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: c.sleep });
   for (let i = 0; i < PROXY_CLIENT_MAX; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "heavy")).status, 200);
   const h = await p.handle("jupiter", "/swap/v2/build", "n=x", "", "heavy");
   assert.equal(h.status, 429);
@@ -241,11 +245,68 @@ test("review F-C2: one address reading a cached proxy list 1000 times in one win
   let t = 1_800_000_000_000;
   let up = 0;
   const big = JSON.stringify({ tokens: "x".repeat(250_000) });
-  const p = createProxy({}, { now: () => (t += 1), fetch: async () => (up++, new Response(big, { status: 200, headers: { "content-type": "application/json" } })) });
+  const p = createProxy(WIDE, { now: () => (t += 1), fetch: async () => (up++, new Response(big, { status: 200, headers: { "content-type": "application/json" } })) });
   let throttled = 0;
   for (let i = 0; i < 1000; i++) if ((await p.handle("jupiter", "/tokens/v2/toptrending/1h", "", "", "203.0.113.67")).status === 429) throttled++;
   assert.ok(throttled >= 1000 - PROXY_CLIENT_MAX, `${throttled} of 1000 cached reads throttled`);
   assert.equal(up, 1, "one vendor call");
+});
+
+test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per client>\"), else its published limit's; a bad value stops the start naming the variable", async () => {
+  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 5, perClient: 4 }, relay: { total: 8, perClient: 2 }, lifi: { total: 16, perClient: 2 }, oneclick: { total: 8, perClient: 2 } });
+  for (const v of VENDOR_NAMES) assert.ok(PROXY_BUDGETS[v]!.perClient < PROXY_BUDGETS[v]!.total, v);
+  assert.equal(proxyBudgetEnv("oneclick"), "PROXY_BUDGET_ONECLICK");
+  assert.throws(() => createProxy({ PROXY_BUDGET_RELAY: "8,8" }), /^Error: PROXY_BUDGET_RELAY must be/);
+  assert.throws(() => createProxy({ PROXY_BUDGET_LIFI: "secret-ish" }), (e: Error) => !e.message.includes("secret-ish"));
+  let t = 1_800_000_000_000;
+  const f = vendor(() => json({ ok: 1 }));
+  const p = createProxy({ PROXY_BUDGET_RELAY: "3,2" }, { fetch: f.fetch, now: () => (t += 1) });
+  for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "a");
+  assert.equal(f.seen.length, 2, "the share from the environment");
+  for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "b");
+  assert.equal(f.seen.length, 3, "the total from the environment");
+  for (let i = 0; i < 5; i++) await p.handle("jupiter", "/swap/v2/build", "", "", "a");
+  assert.equal(f.seen.length, 3 + PROXY_BUDGETS.jupiter!.perClient, "another vendor keeps its default");
+});
+
+// review F-D on the proxy: a vendor that keeps its published per-minute limit on a 60-second sliding window (the
+// helper's own Jupiter reads drawn too), and addresses at their full share until an honest first-time caller is
+// refused. At 06a656f's design budget (300 a window, 60 a caller) one or two addresses make the vendor throttle, which
+// holds the vendor for everyone; at the published defaults the vendor never throttles and it takes total / share.
+test("review F-D (proxy): at each vendor's published limit, no set of callers can make the vendor throttle; more addresses than today are needed to refuse an honest caller", async () => {
+  const PER_MIN = { jupiter: 60, relay: 50, lifi: 100, oneclick: 50 } as const;
+  const run = async (v: keyof typeof PER_MIN, env: Record<string, string>) => {
+    let t = 1_800_000_000_000;
+    const calls: number[] = [];
+    let throttledByVendor = 0;
+    const f = async () => {
+      while (calls.length > 0 && t - calls[0]! >= 60_000) calls.shift();
+      if (calls.length >= PER_MIN[v]) return (throttledByVendor++, json({ e: "slow" }, 429, { "retry-after": "60" }));
+      calls.push(t);
+      return json({ ok: 1 });
+    };
+    const p = createProxy(env, { fetch: f, now: () => (t += 1), sleep: async () => {} });
+    const path = { jupiter: "/swap/v2/build", relay: "/quote/v2", lifi: "/v1/quote", oneclick: "/v0/quote" }[v];
+    const body = v === "relay" || v === "oneclick" ? "{}" : "";
+    // the helper's own Jupiter reads: 30 a minute (data/solana/token.ts JUP_GAP_MS), here 5 in this window
+    if (v === "jupiter") for (let i = 0; i < 5; i++) await p.handle(v, "/tokens/v2/search", `query=${i}`, "");
+    let n = 0;
+    for (; n < 50; n++) {
+      for (let i = 0; i < 200; i++) if ((await p.handle(v, path, `a=${i}`, body, `198.51.100.${n}`)).status !== 200) break;
+      if ((await p.handle(v, path, "h=1", body, `192.0.2.${n}`)).status !== 200) break; // a first-time caller each round
+    }
+    return { addresses: n + 1, throttledByVendor };
+  };
+  for (const v of VENDOR_NAMES) {
+    const today = await run(v, { [proxyBudgetEnv(v)]: "300,60" });
+    const now = await run(v, {});
+    assert.ok(today.throttledByVendor > 0, `${v} at 06a656f's budget: the vendor throttled, so it was held for everyone`);
+    assert.equal(now.throttledByVendor, 0, `${v}: the vendor never throttled`);
+    // each round an address takes its share and the honest caller one: refused once the rounds pass the total
+    assert.equal(now.addresses, Math.floor(PROXY_BUDGETS[v]!.total / (PROXY_BUDGETS[v]!.perClient + 1)) + 1, v);
+    console.log(`  [F-D proxy] ${v}: ${now.addresses} addresses at the published default, ${today.addresses} at 06a656f's budget`);
+    assert.ok(now.addresses > today.addresses, `${v}: ${now.addresses} addresses, today ${today.addresses}`);
+  }
 });
 
 test("reset headers: seconds, an epoch in s or ms, an HTTP date; none means 1 s", () => {

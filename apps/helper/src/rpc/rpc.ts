@@ -25,7 +25,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
+import { budgetFromEnv, EVM_LIMIT_CODE, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 
 export const RPC_ANSWER_MAX = 4 * 1024 * 1024; // a getMultipleAccounts of 100 accounts or an eth_getLogs page fits
@@ -47,6 +47,21 @@ export const RPC_CHAIN_MAX = 100;
  * keyed provider's larger RPC_BUDGET_<CHAIN> serves.
  */
 export const RPC_CLIENT_MAX = 16;
+/** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
+const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
+/** The whole seconds an EVM provider's -32005 in `answer` (one answer or a batch) asks to wait, 1 to RETRY_AFTER_MAX_S;
+ * 0 when there is none or the chain is not EVM. */
+function evmLimited(chain: RpcChain, answer: unknown): number {
+  if (!EVM_CHAINS.has(chain)) return 0;
+  let wait = 0;
+  for (const a of Array.isArray(answer) ? answer : [answer]) {
+    const e = (a as { error?: { code?: unknown; data?: { backoff_seconds?: unknown } } } | null)?.error;
+    if (e?.code !== EVM_LIMIT_CODE) continue;
+    const s = Number(e.data?.backoff_seconds);
+    wait = Math.max(wait, Number.isFinite(s) && s > 0 ? Math.min(Math.ceil(s), RETRY_AFTER_MAX_S) : 1);
+  }
+  return wait;
+}
 /** The environment variable naming a chain's budget, "<total>,<per client>" per 10 s. */
 export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase()}`;
 const ID_MAX = 128;
@@ -219,10 +234,18 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM();
     if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return UPSTREAM();
+    let answer: unknown;
     try {
-      JSON.parse(text);
+      answer = JSON.parse(text);
     } catch {
       return UPSTREAM();
+    }
+    // an EVM provider's -32005 (limits.ts EVM_LIMIT_CODE) in any answer is its throttle, as its 429 is: the chain is held
+    // for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
+    const limited = evmLimited(c, answer);
+    if (limited > 0) {
+      budget.hold(c, now() + limited * 1000);
+      return throttled(budget.heldFor(c));
     }
     const b = Buffer.from(text, "utf8");
     if (up.forms.some((f) => b.includes(f))) return UPSTREAM();
