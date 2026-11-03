@@ -20,6 +20,7 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, dec, pumpCurveAddress, pumpCurveBps, toRow, type Row } from "./lists.ts";
+import { geckoBudget, type GeckoBudget } from "../gecko.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -35,7 +36,7 @@ export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
 export const CANDLES_FRESH_MS = 60_000;
 export const POOL_FRESH_MS = 600_000;
-/** L-05: GeckoTerminal's public API, about 10 calls a minute. */
+/** L-05: GeckoTerminal's public API, about 10 calls a minute; the server shares one budget with the EVM lists (../gecko.ts). */
 export const GT_PER_MIN = 10;
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. One search at most every
@@ -314,7 +315,7 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
 /** `holdersRpc` is the provider holders' getTokenLargestAccounts goes to (D-S11: a keyed one, the only kind that
  *  answers it); with none, holders is Jupiter's fallback and the shared RPC path never sees the call, since a provider's
  *  429 on it would pause that path for the device's own reads and sends. */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc } = {}) {
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
 
@@ -467,18 +468,15 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
   });
 
-  // GeckoTerminal: one queue of at most GT_PER_MIN calls a minute, shared by every token; a 429 pauses it
-  const gtCalls: number[] = [];
-  let gtPausedUntil = 0;
+  // GeckoTerminal: at most GT_PER_MIN calls a minute, shared by every token, in the "pages" lane of the server's one
+  // budget (../gecko.ts) when it passes one; a 429 pauses it
+  const gt = deps.gecko ?? geckoBudget(now, {}, GT_PER_MIN);
   async function gecko(path: string): Promise<unknown> {
-    const t = now();
-    while (gtCalls.length > 0 && t - gtCalls[0]! >= 60_000) gtCalls.shift();
-    if (t < gtPausedUntil || gtCalls.length >= GT_PER_MIN) throw new Upstream();
-    gtCalls.push(t);
+    if (!gt.take("pages")) throw new Upstream();
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
       const ra = Number(r.headers.get("retry-after"));
-      gtPausedUntil = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
+      gt.pause(now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000));
       throw new Upstream();
     }
     if (r.status === 404) return null;

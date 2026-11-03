@@ -7,6 +7,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
+import { geckoBudget } from "../gecko.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
   CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
@@ -350,6 +351,18 @@ test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal; at mos
   assert.equal((await t2.candles(CURVE, "1m", null, 10)).status, 503);
   assert.equal((await t2.candles(CURVE, "5m", null, 10)).status, 503);
   assert.equal(limited.urls.length, 1, "paused after the 429");
+});
+
+test("candles: the server's one GeckoTerminal budget holds the token page to its lane, the EVM lists' calls counting against the minute", async () => {
+  const g = fakeGecko();
+  const now = NOW;
+  const shared = geckoBudget(() => now, { lists: 3, pages: 7 });
+  for (let i = 0; i < 3; i++) assert.equal(shared.take("lists"), true);
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: g.fetch, gecko: shared });
+  const tfs = ["1m", "5m", "15m", "1h", "4h", "1d"];
+  for (let i = 0; i < 20; i++) await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10);
+  assert.equal(g.urls.length, 7, "the pages lane's 7, never the whole 10");
+  assert.equal(shared.take("lists"), false, "and the minute's 10 are spent");
 });
 
 test("toCandles: bars off the grid, from the future, with a zero, negative or non-finite price, or low above high are dropped", () => {
