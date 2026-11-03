@@ -154,9 +154,11 @@ try {
       await page.keyboard.press("Shift+Tab");
       await page.keyboard.press("Tab");
       const ring = await firstA.evaluate((e) => (e === document.activeElement ? { style: getComputedStyle(e).outlineStyle, width: getComputedStyle(e).outlineWidth, color: getComputedStyle(e).outlineColor, off: getComputedStyle(e).outlineOffset } : null));
-      // 2 px in layout px; the desktop draws layout px at --fit-zoom (shell/fit.ts), so 1440 shows 2 x 0.75 = 1.5 px or less
+      // 2 px in layout px; the desktop draws layout px at --fit-zoom (shell/fit.ts) and the engine snaps an outline to whole
+      // device pixels, so at 1440 (zoom 0.75, dpr 1) it reads 1 device px = 1.3333 px: the width is 1 or 2 device px, the offset its negative
       const zoom = await f.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--fit-zoom")) || 1);
-      check(ring?.style === "solid" && Math.abs(parseFloat(ring.width) - 2 * zoom) < 0.02 && ring.color === "rgb(91, 140, 255)" && Math.abs(parseFloat(ring.off) + 2 * zoom) < 0.02, `${tag}: the focused row's ring ${JSON.stringify(ring)} at zoom ${zoom}, want 2px x zoom inside, rgb(91, 140, 255)`);
+      const dev = ring ? (parseFloat(ring.width) * zoom * w.deviceScaleFactor) : 0;
+      check(ring?.style === "solid" && Math.abs(dev - Math.round(dev)) < 0.02 && Math.round(dev) >= 1 && Math.round(dev) <= 2 * w.deviceScaleFactor && ring.color === "rgb(91, 140, 255)" && Math.abs(parseFloat(ring.off) + parseFloat(ring.width)) < 0.02, `${tag}: the focused row's ring ${JSON.stringify(ring)} at zoom ${zoom}: want a solid blue ring of whole device pixels, drawn inside`);
       await shot(page, `discover-focus-${w.name}-${scheme}`);
 
       // ---- a click on a row draws that token's page
