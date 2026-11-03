@@ -184,7 +184,7 @@ test("a deploy's live runs name every live check that reads SIGN_HOST, and its s
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
-  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-withdraw-form", "wallet-passkey-prf"]);
+  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "signpage-pool-kinds", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-solana-trade", "signpage-withdraw-form", "wallet-passkey-prf"]);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   // the release check reads SIGN_HOST alone, against this commit's build
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host sign"), `the success line does not run signpage-release on SIGN_HOST alone: ${out}`);

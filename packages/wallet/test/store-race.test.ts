@@ -275,3 +275,20 @@ test("with no Web Locks, sign out, insertSeed and setCodeSaved refuse: never unl
   assert.equal(await s.get("meta", "seed"), undefined);
   s.close();
 });
+
+test("update is a compare-and-set: two tabs changing one record at once both land, none is lost", async (t) => {
+  const idb = new IDBFactory();
+  const a = await openWalletStore({ indexedDB: idb });
+  const b = await openWalletStore({ indexedDB: idb });
+  // closed whatever the asserts say, so a failing compare-and-set ends the file instead of holding it open
+  t.after(() => {
+    a.close();
+    b.close();
+  });
+  await a.put("wallets", "sol:1:0", { txs: [] as string[] });
+  const add = (s: WalletStore, x: string) => s.update("wallets", "sol:1:0", (v) => ({ txs: [...(v as { txs: string[] }).txs, x] }));
+  await Promise.all([add(a, "a1"), add(b, "b1"), add(a, "a2"), add(b, "b2"), add(a, "a3")]);
+  assert.deepEqual(((await a.get("wallets", "sol:1:0")) as { txs: string[] }).txs.slice().sort(), ["a1", "a2", "a3", "b1", "b2"]);
+  assert.equal(await a.update("wallets", "sol:1:0", () => undefined), undefined, "no change: nothing written");
+  assert.equal(await a.update("wallets", "sol:9:9", (v) => (v === undefined ? undefined : v)), undefined, "an absent record stays absent");
+});

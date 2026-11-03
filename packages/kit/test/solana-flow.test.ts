@@ -129,12 +129,13 @@ test("the request is checked before anything is read", async () => {
   await assert.rejects(runSolanaTrade({ side: "buy", token: TOKEN, slippageBps: 1, wallets: [W1, "x"], legs: [leg] }, deps()), /user's wallet addresses/);
 });
 
-test("the blockhash is read at finalized on both providers, and the older read is used", async () => {
+test("the blockhash is read at finalized on both providers: the older read's hash, with the higher lastValidBlockHeight", async () => {
   const a = reads(2_000);
   const b = reads(1_990);
   const bh = await readSolanaBlockhashBoth([a, b]);
   assert.equal(bh.slot, 1_990);
-  assert.equal(bh.lastValidBlockHeight, 2_140);
+  assert.equal(bh.blockhash, key(1_990 % 200));
+  assert.equal(bh.lastValidBlockHeight, 2_150, "the higher of the two: one provider's lowered answer never shortens the window the signer records");
   for (const p of [a, b]) assert.deepEqual(p.calls.map((c) => [c.method, c.params]), [["getLatestBlockhash", [{ commitment: "finalized" }]]]);
   await assert.rejects(readSolanaBlockhashBoth([a, provider(() => new Error("down"))]));
 });

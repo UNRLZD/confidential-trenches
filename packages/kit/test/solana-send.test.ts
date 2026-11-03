@@ -15,6 +15,8 @@ import {
   dryRunSolanaSet,
   sendSolanaSet,
   solanaHelperRpc,
+  readSolanaTxEnd,
+  solanaDeadOn,
   solanaJsonRpc,
   solanaSendPaths,
   type SolanaRpc,
@@ -1405,3 +1407,62 @@ test("a pause between the queue letting a call go and the call going out never l
   assert.ok(at[2]! - at[0]! >= 200, `the third call reached the provider ${(at[2]! - at[0]!).toFixed(1)} ms after the first, inside the 200 ms window`);
 });
 
+// a provider for a tx signed in an earlier session: its finalized bank (slot, height), the blockhash's verdict at
+// processed and its bank's slot, and the status read with its bank's slot; `landsAfter` lands the tx once that method was asked
+function endProvider(o: { slot: number; height: number; valid: boolean; validSlot?: number; status: "ok" | "err" | "pending" | null; statusSlot?: number; landsAfter?: string }): SolanaRpc & { asked: string[] } {
+  const asked: string[] = [];
+  const rpc = async (method: string, params: readonly unknown[]) => {
+    asked.push(method);
+    if (method === "getLatestBlockhash") {
+      assert.deepEqual(params, [{ commitment: "finalized" }]);
+      return { context: { slot: o.slot }, value: { blockhash: "F".repeat(43), lastValidBlockHeight: o.height + 150 } };
+    }
+    if (method === "isBlockhashValid") {
+      assert.deepEqual(params[1], { commitment: "processed" });
+      return { context: { slot: o.validSlot ?? o.slot + 2 }, value: o.valid };
+    }
+    assert.equal(method, "getSignatureStatuses");
+    assert.deepEqual(params[1], { searchTransactionHistory: true });
+    const landed = o.landsAfter ? asked.includes(o.landsAfter) : o.status !== null;
+    const st = landed ? (o.status ?? "ok") : null;
+    return { context: { slot: o.statusSlot ?? o.slot + 3 }, value: [st === null ? null : { confirmationStatus: st === "pending" ? "processed" : "finalized", err: st === "err" ? { InstructionError: [0, "x"] } : null, slot: o.slot - 5 }] };
+  };
+  return Object.assign(rpc, { asked });
+}
+const TX_END = { signature: "5".repeat(88), blockhash: "B".repeat(43), lastValidBlockHeight: 1_000 };
+
+test("solanaDeadOn: past the height, the hash no longer valid, and a history read with no status from a bank at or past both", () => {
+  const ok = { landed: false, anchor: { slot: 50, height: 1_001 }, invalidAt: 52, histNone: 53 };
+  assert.equal(solanaDeadOn(ok, 1_000), true);
+  assert.equal(solanaDeadOn({ ...ok, anchor: { slot: 50, height: 1_000 } }, 1_000), false, "at the height, not past it");
+  assert.equal(solanaDeadOn({ ...ok, landed: true }, 1_000), false);
+  assert.equal(solanaDeadOn({ ...ok, invalidAt: undefined }, 1_000), false, "the hash not read invalid");
+  assert.equal(solanaDeadOn({ ...ok, histNone: 49 }, 1_000), false, "a status read from a bank below the anchor's");
+  assert.equal(solanaDeadOn({ ...ok, histNone: 51 }, 1_000), false, "a status read from a bank below the validity read's");
+  assert.equal(solanaDeadOn({ ...ok, anchor: null }, 1_000), false);
+  assert.equal(solanaDeadOn(ok, Number.NaN), false);
+});
+
+test("readSolanaTxEnd: expired only when A4 holds on both providers", async () => {
+  const dead = () => endProvider({ slot: 50, height: 1_001, valid: false, status: null });
+  assert.equal(await readSolanaTxEnd([dead(), dead()], TX_END), "expired");
+  const a = dead();
+  await readSolanaTxEnd([a, dead()], TX_END);
+  assert.deepEqual(a.asked, ["getLatestBlockhash", "isBlockhashValid", "getSignatureStatuses"], "the bank, the hash, then the status");
+  assert.equal(await readSolanaTxEnd([endProvider({ slot: 50, height: 1_001, valid: true, status: null }), dead()], TX_END), "unknown", "B lowered lastValidBlockHeight; A reads the hash still valid");
+  assert.equal(await readSolanaTxEnd([dead(), endProvider({ slot: 50, height: 1_000, valid: false, status: null })], TX_END), "unknown", "one provider's height not past");
+  assert.equal(await readSolanaTxEnd([dead(), endProvider({ slot: 50, height: 1_001, valid: false, status: null, statusSlot: 49 })], TX_END), "unknown", "a lagging node: its status read from a bank below its height read's");
+  const late = () => endProvider({ slot: 50, height: 1_001, valid: false, status: "ok", landsAfter: "getLatestBlockhash" });
+  assert.equal(await readSolanaTxEnd([late(), late()], TX_END), "filled", "landed after the first look: the status read after the height finds it");
+  const err = () => endProvider({ slot: 50, height: 1_001, valid: false, status: "err" });
+  assert.equal(await readSolanaTxEnd([err(), err()], TX_END), "failed");
+  assert.equal(await readSolanaTxEnd([err(), dead()], TX_END), "unknown", "one provider's err alone frees nothing");
+  assert.equal(await readSolanaTxEnd([endProvider({ slot: 50, height: 1_001, valid: false, status: "ok" }), dead()], TX_END), "unknown", "one provider's ok alone fills nothing");
+  const pending = () => endProvider({ slot: 50, height: 1_001, valid: false, status: "pending" });
+  assert.equal(await readSolanaTxEnd([pending(), pending()], TX_END), "unknown", "a processed-only status is a status, not none");
+  const behind = () => endProvider({ slot: 1_000, height: 5_000, valid: false, validSlot: 900, status: null, statusSlot: 1_001 });
+  assert.equal(await readSolanaTxEnd([behind(), behind()], { ...TX_END, lastValidBlockHeight: 10 }), "unknown", "an invalid read from a bank behind the provider's finalized anchor counts for nothing");
+  assert.equal(await readSolanaTxEnd([dead(), endProvider({ slot: 50, height: 1_001, valid: false, validSlot: 49, status: null })], TX_END), "unknown", "one provider's invalid read one slot behind its anchor");
+  const down: SolanaRpc = async () => { throw new Error("HTTP 503"); };
+  assert.equal(await readSolanaTxEnd([dead(), down], TX_END), "unknown");
+});

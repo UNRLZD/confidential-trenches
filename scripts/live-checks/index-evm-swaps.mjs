@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Live check of card index-evm-swaps: a Base token's candles and trade tape come from the helper's own chain reads
+// Live check of cards index-evm-swaps and index-evm-swaps-2: a Base or Robinhood token's candles and trade tape come
+// from the helper's own chain reads
 // (apps/helper/src/data/evm/swaps.ts, candles.ts), and the chain agrees with them. It reads one listed Base token at
 // HELPER_HOST with Origin APP_HOST (--token for a given one; otherwise the first token of the Base Discover lists whose
 // candles answer 200):
@@ -18,28 +19,39 @@
 //     every sampled receipt shares;
 //   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 12 blocks (24 s) behind the
 //     providers' newest, is on the tape.
-//   node scripts/live-checks/index-evm-swaps.mjs [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
+// On Robinhood (--chain robinhood), which has no fixed block clock, a trade's time must be its block's own time and the
+// providers' newest block's time within 20 s of the read, each block time read on two providers that agree; its swaps
+// include the Pons v2 curve's CurveBuy and CurveSell, and its pool's logs are read in the 100-block spans its keyless
+// providers take.
+// With no --chain it checks both chains and passes only when both pass (the deployed helper's run).
+//   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BLOCK_CLOCK } from "../../apps/helper/src/data/evm/lists.ts";
-import { BASE_VENUES, SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
+import { SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "index-evm-swaps";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 export const SAMPLE = 5;
-export const MARGIN_BLOCKS = 12;
+/** Blocks behind the providers' newest a swap must be on the tape by: 24 s on Base, 6 s on Robinhood. */
+export const MARGIN = { base: 12, robinhood: 60 };
+export const MARGIN_BLOCKS = MARGIN.base;
+/** The most blocks one pool-log read asks (the chain's keyless providers' widest), and how far back the read goes. */
+const SPAN = { base: 1000, robinhood: 100 };
+const BACK = { base: 1000, robinhood: 1000 };
+const LAG = { base: 10, robinhood: 50 };
 const CLOCK = BLOCK_CLOCK.base;
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
 const DEC = /^\d+(\.\d+)?$/;
 const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
-const SWAP_TOPICS = [TOPIC.swap2, TOPIC.swap3, TOPIC.swap4];
-export const CANDLES_PATH = (t) => `/v1/market/candles?chain=base&token=${t}&tf=1m&limit=60`;
-export const TRADES_PATH = (t) => `/v1/market/trades?chain=base&token=${t}&limit=50`;
-const LISTS_PATH = "/v1/market/lists?chain=base";
+const SWAP_TOPICS = [TOPIC.swap2, TOPIC.swap3, TOPIC.swap4, TOPIC.curveBuy, TOPIC.curveSell];
+export const CANDLES_PATH = (t, net = "base") => `/v1/market/candles?chain=${net}&token=${t}&tf=1m&limit=60`;
+export const TRADES_PATH = (t, net = "base") => `/v1/market/trades?chain=${net}&token=${t}&limit=50`;
+const LISTS_PATH = (net) => `/v1/market/lists?chain=${net}`;
 
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -86,20 +98,23 @@ export function units(amt, decimals) {
 const isAmount = (data, want) => /^0x[0-9a-f]{64}$/.test(data ?? "") && BigInt(data) === want;
 const topicAddr = (t) => (typeof t === "string" && /^0x0{24}[0-9a-f]{40}$/.test(t) ? `0x${t.slice(26)}` : null);
 /** The pool key of a Swap log: its emitter, and for the PoolManager the pool id. */
-const poolKey = (l) => (l.address === BASE_VENUES.poolManager ? `${l.address}:${l.topics[1]}` : l.address);
+const poolKey = (l, net = "base") => (l.address === VENUES[net].poolManager ? `${l.address}:${l.topics[1]}` : l.address);
 
 /**
  * The check on one run: { base, coin, readAt, reads: { candles, trades }, chain }, where chain is what `read` took from
  * the providers: { heads: [n..], decimals, receipts: { [tx]: receipt | null }, poolLogs: { key, from, to, logs } | null }.
  */
 export function judge(run) {
+  const net = run.net ?? "base";
+  // a block's time: Base's clock; Robinhood's own, read on two agreeing providers (run.chain.blockTimes)
+  const timeOf = (n) => (net === "base" ? blockTime(n) : run.chain?.blockTimes?.[n] ?? null);
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const readAt = Date.parse(run.readAt);
   const parsed = {};
   for (const [k, fault, path, source] of [
-    ["candles", candlesFault, CANDLES_PATH(run.coin), ["chain", "chain,geckoterminal"]],
-    ["trades", tradesFault, TRADES_PATH(run.coin), ["chain"]],
+    ["candles", candlesFault, CANDLES_PATH(run.coin, net), ["chain", "chain,geckoterminal"]],
+    ["trades", tradesFault, TRADES_PATH(run.coin, net), ["chain"]],
   ]) {
     const r = run.reads?.[k] ?? { status: 0, headers: {}, body: "" };
     const h = r.headers ?? {};
@@ -125,9 +140,9 @@ export function judge(run) {
 
   const c = run.chain ?? {};
   const heads = Array.isArray(c.heads) ? c.heads : [];
-  say(heads.length === 2 && heads.every(Number.isSafeInteger) && Math.abs(heads[0] - heads[1]) <= 10, `the chain: two providers' newest blocks ${show(heads)}`);
+  say(heads.length === 2 && heads.every(Number.isSafeInteger) && Math.abs(heads[0] - heads[1]) <= LAG[net], `the chain: two providers' newest blocks ${show(heads)}`);
   const head = Math.min(...heads);
-  say(c.heads?.every((n) => Math.abs(blockTime(n) - readAt / 1000) <= 20), `the providers' newest block is on Base's clock and within 20 s of the read`);
+  say(c.heads?.every((n) => Number.isSafeInteger(timeOf(n)) && Math.abs(timeOf(n) - readAt / 1000) <= 20), `the providers' newest block's time${net === "base" ? " is on Base's clock and" : ", read on two providers,"} within 20 s of the read`);
   say(Number.isSafeInteger(c.decimals), `token decimals read on chain: ${show(c.decimals)}`);
   const sample = trades.trades.slice(0, SAMPLE);
   const keys = [];
@@ -141,10 +156,10 @@ export function judge(run) {
     }
     say(r.status === "0x1", `${name}: the receipt succeeded`);
     const n = Number.parseInt(r.blockNumber, 16);
-    say(Number.isSafeInteger(n) && blockTime(n) * 1000 === t.t_ms, `${name}: in block ${n}, whose Base clock time ${blockTime(n)} is the trade's ${t.t_ms / 1000}`);
+    say(Number.isSafeInteger(n) && Number.isSafeInteger(timeOf(n)) && timeOf(n) * 1000 === t.t_ms, `${name}: in block ${n}, whose ${net === "base" ? "Base clock time" : "time on two providers"} ${show(Number.isSafeInteger(n) ? timeOf(n) : null)} is the trade's ${t.t_ms / 1000}`);
     say(t.trader === r.from, `${name}: sent by ${show(t.trader)}, the receipt's sender ${show(r.from)}`);
     const swaps = (r.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0]));
-    keys.push(new Set(swaps.map(poolKey)));
+    keys.push(new Set(swaps.map((l) => poolKey(l, net))));
     const want = Number.isSafeInteger(c.decimals) ? units(t.amt, c.decimals) : null;
     const moves = (r.logs ?? []).filter((l) => l.address === run.coin && l.topics?.[0] === TOPIC.transfer && l.topics.length === 3 && want !== null && isAmount(l.data, want));
     t.moves = moves.map((l) => [topicAddr(l.topics[1]), topicAddr(l.topics[2])]);
@@ -165,16 +180,21 @@ export function judge(run) {
 
   // no swap missing
   const pl = c.poolLogs;
-  const oldestBlock = blockOf(trades.trades.at(-1).t_ms / 1000);
-  const last = head - MARGIN_BLOCKS;
-  say(isObj(pl) && pl.key === pool && pl.to === last && pl.from <= oldestBlock && Array.isArray(pl.logs), `the pool's Swap logs read on two agreeing providers over blocks ${show(pl?.from)} to ${show(pl?.to)}`);
-  if (isObj(pl) && Array.isArray(pl.logs)) {
+  // the oldest trade's block: on Base its clock's. On Robinhood the read goes BACK blocks behind (its time read on two
+  // providers) and each log carries its block's time, so a swap is due when its time is after the oldest trade's
+  const oldestT = trades.trades.at(-1).t_ms;
+  const oldestBlock = net === "base" ? blockOf(oldestT / 1000) : Infinity;
+  const last = head - MARGIN[net];
+  const timed = net === "base" || (isObj(pl) && Number.isSafeInteger(timeOf(pl.from)) && Array.isArray(pl.logs) && pl.logs.every((l) => Number.isSafeInteger(l.t)));
+  say(isObj(pl) && pl.key === pool && pl.to === last && pl.from <= oldestBlock && Array.isArray(pl.logs) && timed, `the pool's Swap logs read on two agreeing providers over blocks ${show(pl?.from)} to ${show(pl?.to)}${net === "base" ? "" : `, from ${show(timeOf(pl?.from))} s, every log with its block time`}`);
+  if (isObj(pl) && Array.isArray(pl.logs) && timed) {
     const onTape = new Set(trades.trades.map((t) => t.tx));
-    const from = Math.max(pl.from, oldestBlock + 1); // the oldest trade's block may hold more swaps than the tape
-    const due = [...new Set(pl.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= from && Number.parseInt(l.blockNumber, 16) <= last).map((l) => l.transactionHash))];
+    const from = Math.max(pl.from, net === "base" ? oldestBlock + 1 : pl.from); // the oldest trade's block may hold more swaps than the tape
+    const inWindow = (l) => Number.parseInt(l.blockNumber, 16) >= from && Number.parseInt(l.blockNumber, 16) <= last && (net === "base" || l.t * 1000 > oldestT);
+    const due = [...new Set(pl.logs.filter(inWindow).map((l) => l.transactionHash))];
     const missing = due.filter((t) => !onTape.has(t));
     // the tape is full (50) when it covers fewer than 50 swaps on the window: a full tape's oldest rows are cut, not missing
-    say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
+    say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}${net === "base" ? "" : ` after the oldest trade's time`}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ") || l.startsWith("-- ")), lines };
 }
@@ -215,24 +235,31 @@ async function agreed(method, params, fetchFn, rpcs = SWAP_RPCS.base, pick = (x)
   return got.length === 2 && got[0] === got[1] ? JSON.parse(got[0]) : null;
 }
 
-export async function read(base = BASE, token, fetchFn = fetch, rpcs = SWAP_RPCS.base) {
+export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "base") {
+  rpcs ??= SWAP_RPCS[net];
   const readAt = new Date().toISOString();
   let candidates = token === undefined ? [] : [token];
   if (token === undefined) {
-    const l = await get(base, LISTS_PATH, fetchFn);
+    const l = await get(base, LISTS_PATH(net), fetchFn);
     const snap = JSON.parse(l.body);
     candidates = [...new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token)))];
   }
   let reads;
   for (const t of candidates.slice(0, 12)) {
-    const candles = await get(base, CANDLES_PATH(t), fetchFn);
+    const candles = await get(base, CANDLES_PATH(t, net), fetchFn);
     if (candles.status !== 200) continue;
-    reads = { token: t, candles, trades: await get(base, TRADES_PATH(t), fetchFn) };
+    reads = { token: t, candles, trades: await get(base, TRADES_PATH(t, net), fetchFn) };
     break;
   }
-  if (reads === undefined) return { base, coin: candidates[0] ?? null, readAt, reads: {}, chain: {} };
+  const at = net === "base" ? {} : { net };
+  if (reads === undefined) {
+    // the first candidate's answers, so a run that found none shows why
+    const t0 = candidates[0];
+    const r = t0 === undefined ? {} : { candles: await get(base, CANDLES_PATH(t0, net), fetchFn), trades: await get(base, TRADES_PATH(t0, net), fetchFn) };
+    return { base, ...at, coin: t0 ?? null, readAt, reads: r, chain: {} };
+  }
   const t = reads.token;
-  const run = { base, coin: t, readAt, reads: { candles: reads.candles, trades: reads.trades }, chain: {} };
+  const run = { base, ...at, coin: t, readAt, reads: { candles: reads.candles, trades: reads.trades }, chain: {} };
   let tape;
   try {
     tape = JSON.parse(reads.trades.body).trades.slice(0, SAMPLE);
@@ -251,18 +278,36 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs = SWAP_RPCS
   run.chain.receipts = {};
   for (const tr of tape) run.chain.receipts[tr.tx] = await agreed("eth_getTransactionReceipt", [tr.tx], fetchFn, rpcs, receiptOf);
   // the pool: the Swap-log key every sampled receipt holds, then its logs over the blocks the tape covers
-  const keys = tape.map((tr) => new Set((run.chain.receipts[tr.tx]?.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0])).map(poolKey)));
+  const keys = tape.map((tr) => new Set((run.chain.receipts[tr.tx]?.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0])).map((l) => poolKey(l, net))));
   const pool = keys.length === 0 ? undefined : [...keys[0]].find((k) => keys.every((s) => s.has(k)));
   run.chain.poolLogs = null;
   if (pool !== undefined && heads.length === 2) {
-    const last = Math.min(...heads) - MARGIN_BLOCKS;
+    const last = Math.min(...heads) - MARGIN[net];
     const [address, id] = pool.split(":");
-    const oldest = blockOf(JSON.parse(reads.trades.body).trades.at(-1).t_ms / 1000);
-    const from = Math.max(oldest - 1, last - 1000);
-    const topic0 = (run.chain.receipts[tape[0].tx].logs ?? []).find((l) => poolKey(l) === pool).topics[0];
-    const topics = id === undefined ? [topic0] : [TOPIC.swap4, id];
-    const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(from), toBlock: hex(last) }], fetchFn, rpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex })));
-    if (Array.isArray(logs)) run.chain.poolLogs = { key: pool, from, to: last, logs: logs.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash })) };
+    const oldest = net === "base" ? blockOf(JSON.parse(reads.trades.body).trades.at(-1).t_ms / 1000) : -Infinity;
+    const from = Math.max(oldest - 1, last - BACK[net]);
+    const topic0 = (run.chain.receipts[tape[0].tx].logs ?? []).find((l) => poolKey(l, net) === pool).topics[0];
+    const topics = id === undefined ? [topic0 === TOPIC.curveBuy || topic0 === TOPIC.curveSell ? [TOPIC.curveBuy, TOPIC.curveSell] : topic0] : [TOPIC.swap4, id];
+    const all = [];
+    for (let lo = from; lo <= last; lo += SPAN[net]) {
+      const logs = await agreed("eth_getLogs", [{ address, topics, fromBlock: hex(lo), toBlock: hex(Math.min(last, lo + SPAN[net] - 1)) }], fetchFn, rpcs, (ls) => ls.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, logIndex: l.logIndex, ...(net === "base" ? {} : { t: Number.parseInt(l.blockTimestamp, 16) }) })));
+      if (!Array.isArray(logs)) {
+        all.length = 0;
+        all.push(null);
+        break;
+      }
+      all.push(...logs);
+    }
+    if (!all.includes(null)) run.chain.poolLogs = { key: pool, from, to: last, logs: all.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, ...(net === "base" ? {} : { t: l.t }) })) };
+  }
+  if (net !== "base") {
+    // the block times the check needs: the heads', the sampled trades', and the pool read's first block
+    const ns = new Set([...heads, ...Object.values(run.chain.receipts).filter(isObj).map((r) => Number.parseInt(r.blockNumber, 16)), ...(run.chain.poolLogs ? [run.chain.poolLogs.from] : [])]);
+    run.chain.blockTimes = {};
+    for (const n of ns) {
+      const ts = await agreed("eth_getBlockByNumber", [hex(n), false], fetchFn, rpcs, (b) => b.timestamp);
+      if (typeof ts === "string") run.chain.blockTimes[n] = Number.parseInt(ts, 16);
+    }
   }
   return run;
 }
@@ -277,19 +322,27 @@ if (import.meta.main) {
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
     const base = opt("--base", BASE);
-    const run = await read(base, opt("--token"));
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-    const { ok, lines } = judge(run);
-    for (const l of lines) console.log(l);
-    console.log(`first reads (${run.coin}): candles ${run.reads.candles?.ms} ms, trades ${run.reads.trades?.ms} ms`);
-    const n = Number(opt("--speed", "0"));
-    if (n > 0 && run.coin) {
-      const ms = [];
-      for (let i = 0; i < n; i++) ms.push((await get(base, CANDLES_PATH(run.coin), fetch)).ms);
-      console.log(`speed: ${n} candle reads, p50 ${pct(ms, 50)} ms, p95 ${pct(ms, 95)} ms, max ${Math.max(...ms)} ms`);
+    // no --chain: both chains, as the deployed helper's runs ask it (scripts/ci/helper-live-checks.mjs passes no args)
+    const nets = a.includes("--chain") ? [opt("--chain")] : ["base", "robinhood"];
+    if (!nets.every((n) => ["base", "robinhood"].includes(n))) throw new Error(`--chain ${nets}: base or robinhood`);
+    if (nets.length > 1 && opt("--token")) throw new Error("--token needs --chain");
+    let all = true;
+    for (const net of nets) {
+      const run = await read(base, opt("--token"), fetch, undefined, net);
+      if (opt("--record")) writeFileSync(nets.length > 1 ? opt("--record").replace(/(\.json)?$/, `.${net}.json`) : opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
+      const { ok, lines } = judge(run);
+      for (const l of lines) console.log(`${nets.length > 1 ? `[${net}] ` : ""}${l}`);
+      console.log(`first reads (${net} ${run.coin}): candles ${run.reads.candles?.ms} ms, trades ${run.reads.trades?.ms} ms`);
+      const n = Number(opt("--speed", "0"));
+      if (n > 0 && run.coin) {
+        const ms = [];
+        for (let i = 0; i < n; i++) ms.push((await get(base, CANDLES_PATH(run.coin, net), fetch)).ms);
+        console.log(`speed (${net}): ${n} candle reads, p50 ${pct(ms, 50)} ms, p95 ${pct(ms, 95)} ms, max ${Math.max(...ms)} ms`);
+      }
+      all &&= ok;
     }
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${run.base})`);
-    process.exit(ok ? 0 : 1);
+    console.log(`live-check ${KEY}: ${all ? "PASS" : "FAIL"} (${base}, ${nets.join(" and ")})`);
+    process.exit(all ? 0 : 1);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);

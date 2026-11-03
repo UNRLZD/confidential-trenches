@@ -55,5 +55,9 @@ export const FIXTURES = {
   state: { params: {}, result: STATE },
   nav: { params: { path: "/token/solana/So11111111111111111111111111111111111111112?tab=trades" }, result: {} },
   reload: { params: {}, result: {} },
+  "pool.deposit": { params: { chain: "solana", amount: "1.5" }, result: { stage: "sent", txs: [{ chain: "solana", hash: "5ig" }] } },
+  "pool.buy": { params: { chain: "base", token: "0xF111111111111111111111111111111111111111", amount: "0.01", slippage_bps: 300 }, result: { stage: "sent", txs: [] } },
+  "pool.sell": { params: { chain: "solana", token: "Tok", amount: "25", slippage_bps: 300 }, result: { stage: "filled", txs: [] } },
+  "pool.withdraw": { params: { return_key: "withdraw", chain: "robinhood" }, result: { pending: true } },
 } satisfies { [K in SignpageKind]: { params: SignpageParams[K]; result: SignpageResults[K] } };
 

@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { KLineData } from "klinecharts";
 import { useParams } from "react-router";
 import { parseTokenRoute } from "../../routes/routes.ts";
 import type { MarketChain } from "../discover/fields.ts";
+import { DASH, price, usd } from "../discover/format.ts";
 import { Avatar } from "../market/Avatar.tsx";
 import { useSigninSheet } from "../signin/source.tsx";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { TradeBox } from "../trade/TradeBox.tsx";
+import { CHART_TFS, DEFAULT_TF, loadCandles } from "./candles.ts";
+import type { Bar, CandleData, ChartTf } from "./candles.ts";
+import { drawBars, mountChart, unmountChart } from "./chart.ts";
+import type { Drawn } from "./chart.ts";
 import { tokenView } from "./model.ts";
 import type { Curve, TokenView } from "./model.ts";
 import { useToken, useTopToken } from "./source.ts";
@@ -32,8 +38,6 @@ function W({ id }: { id: WordId }) {
   return w.draft ? <span data-draft-copy={w.text}>{w.text}</span> : <>{w.text}</>;
 }
 
-/** Timeframes R5 draws (token.js TF_LABEL; token-390.html mt-tfs); 15m is the default (BRF v2.0.5, M157). */
-const TFS = ["1m", "5m", "15m", "1H", "4H", "1D"] as const;
 const QUICK = [10, 25, 50, 100] as const;
 
 /** A skeleton the height of the value it stands for: one line of that value's own font, so the strip keeps its height
@@ -74,19 +78,132 @@ function CurveTile({ v, phone }: { v: TokenView | null; phone?: boolean }) {
   );
 }
 
-function Chart({ loading, phone }: { loading: boolean; phone?: boolean }) {
-  const [tf, setTf] = useState<(typeof TFS)[number]>("15m");
+/** R5's legend timeframe (token.js TF_LEGEND): 15m reads `15`, 1H `1H`. */
+const TF_LEGEND: Record<ChartTf, string> = { "1m": "1", "5m": "5", "15m": "15", "1H": "1H", "4H": "4H", "1D": "1D" };
+const MINUS = "\u2212";
+
+/** The chart's candle read, one per page (the desktop and the phone draw the same): `token` null while the token read
+ *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. */
+function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf): { data: CandleData; retry: () => void } {
+  const [data, setData] = useState<CandleData>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (chain === null || token === null) return;
+    let live = true;
+    setData({ status: "loading" });
+    void loadCandles(chain, token, tf).then((d) => live && setData(d));
+    return () => {
+      live = false;
+    };
+  }, [chain, token, tf, attempt]);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  return { data, retry };
+}
+
+/** The shared chart state the desktop and the phone draw. */
+interface ChartState {
+  sym: string | null;
+  tf: ChartTf;
+  onTf: (t: ChartTf) => void;
+  data: CandleData;
+  retry: () => void;
+}
+
+/** R5's legend (token.js U.legend): the bar under the crosshair, else the newest; its colour is its close against the
+ *  bar before it. On the phone only the close and the change (R5 unrlzd.css .cp-lgKv[data-ohl]). */
+function Legend({ sym, tf, bars, at, precision, phone }: { sym: string; tf: ChartTf; bars: readonly Bar[]; at: KLineData | null; precision: number; phone?: boolean }) {
+  let i = bars.length - 1;
+  if (at) {
+    const j = bars.findIndex((b) => b.timestamp === at.timestamp);
+    if (j >= 0) i = j;
+  }
+  const k = bars[i]!;
+  const prev = bars[i - 1] ?? k;
+  const dir = k.close >= prev.close ? "up" : "down";
+  const p = (x: number) => price(x.toFixed(precision));
+  const d = k.close - prev.close;
+  const pc = prev.close ? (d / prev.close) * 100 : 0;
+  const ch = `${d >= 0 ? "+" : MINUS}${p(Math.abs(d))} (${pc >= 0 ? "+" : MINUS}${Math.abs(pc).toFixed(2)}%)`;
+  const kv = (id: "lgO" | "lgH" | "lgL" | "lgC", x: number) => (
+    <span className="tkp-lgkv" data-k={id}>
+      <W id={id} /> <span data-dir={dir}>{p(x)}</span>
+    </span>
+  );
+  return (
+    <div className="tkp-legend" data-testid="chart-legend">
+      <span className="tkp-lgrow">
+        <span className="tkp-lghead">
+          {sym} · {TF_LEGEND[tf]} · <W id="lgVenue" />
+        </span>
+        {!phone && kv("lgO", k.open)}
+        {!phone && kv("lgH", k.high)}
+        {!phone && kv("lgL", k.low)}
+        {kv("lgC", k.close)}
+        <span className="tkp-lgkv" data-dir={dir}>{ch}</span>
+      </span>
+      <span className="tkp-lgrow">
+        <span className="tkp-lgkv">
+          <W id="vol" /> <span data-dir={dir}>{k.volume > 0 ? usd(k.volume.toFixed(2)) : DASH}</span>
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** The price chart (S7.2's chart panel): the timeframes, then the plot. The plot keeps its size in every state, so a
+ *  read landing moves nothing (BAR-10 CLS): the skeleton while loading, the candles with the price axis, the volume pane
+ *  and the crosshair when ready, `No data` when the helper holds no bars, `Offline` and Retry on a failed read.
+ *  CoinGecko's label shows while any drawn bar is GeckoTerminal's (none over no bars). The library draws only once the
+ *  plot is on screen (the page holds both layouts; one is display: none). */
+function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
+  const host = useRef<HTMLDivElement>(null);
+  const drawn = useRef<Drawn | null>(null);
+  const [shown, setShown] = useState(false);
+  const [at, setAt] = useState<KLineData | null>(null);
+  const ready = c.data.status === "ready" ? c.data : null;
+  useEffect(() => {
+    const el = host.current!;
+    const ro = new ResizeObserver(() => setShown(el.clientWidth > 0 && el.clientHeight > 0));
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      if (drawn.current) unmountChart(el);
+      drawn.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    const el = host.current!;
+    if (!shown || ready === null) return;
+    drawn.current ??= mountChart(el, phone === true, setAt);
+    if (drawn.current === null) return;
+    drawBars(drawn.current, c.sym ?? "", ready.tf, ready.bars, ready.precision);
+    el.dataset.bars = String(drawn.current.chart.getDataList().length);
+    setAt(null);
+  }, [shown, ready]);
   const tfs = (
     <div className={phone ? "tkp-tfs tkp-tfs-ph" : "tkp-tfs"}>
-      {TFS.map((t) => (
-        <button key={t} type="button" className="tkp-tf" aria-pressed={t === tf} onClick={() => setTf(t)}>{t}</button>
+      {CHART_TFS.map((t) => (
+        <button key={t} type="button" className="tkp-tf" aria-pressed={t === c.tf} onClick={() => c.onTf(t)}>{t}</button>
       ))}
     </div>
   );
+  const s = c.data.status;
   return (
-    <section className="tkp-chart" data-slot="chart" aria-label={WORDS.chart.text}>
+    <section className="tkp-chart" data-slot="chart" data-chart={s} aria-label={WORDS.chart.text}>
       {!phone && tfs}
-      <div className="tkp-plot">{loading && <span className="tkp-sk tkp-plotsk" />}</div>
+      <div className="tkp-plot" data-drawn={ready !== null} onMouseLeave={() => setAt(null)}>
+        <div className="tkp-kc" ref={host} data-testid="chart-canvas" />
+        {ready && c.sym && <Legend sym={c.sym} tf={ready.tf} bars={ready.bars} at={at} precision={ready.precision} phone={phone} />}
+        {s === "loading" && <span className="tkp-sk tkp-plotsk" />}
+        {s === "empty" && <span className="tkp-plotmsg"><W id="noData" /></span>}
+        {s === "error" && (
+          <span className="tkp-plotmsg">
+            <W id="offline" />
+            <button type="button" className="tkp-retry" onClick={c.retry}>{WORDS.retry.text}</button>
+          </span>
+        )}
+        {ready?.gecko && <span className="tkp-vendor" data-testid="chart-vendor"><W id="gecko" /></span>}
+      </div>
       {phone && tfs}
     </section>
   );
@@ -104,7 +221,7 @@ function Ticket({ r }: { r: Ready }) {
   return <TradeBox chain={row.chain} token={row.token} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} />} />;
 }
 
-function Desktop({ v, r }: { v: TokenView | null; r: Ready | null }) {
+function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
   const s = (x: string | undefined) => (v === null ? null : x!);
   return (
     <div className="tkp-desk">
@@ -142,7 +259,7 @@ function Desktop({ v, r }: { v: TokenView | null; r: Ready | null }) {
             <CurveTile v={v} />
           </div>
         </header>
-        <Chart loading={v === null} />
+        <Chart c={c} />
       </div>
       <aside className="tkp-trade" data-slot="trade">
         {r ? <Ticket r={r} /> : <span className="tkp-sk tkp-tradesk" />}
@@ -184,7 +301,7 @@ function TradeSheet({ v, r, onClose }: { v: TokenView; r: Ready; onClose: () => 
   );
 }
 
-function Phone({ v, r }: { v: TokenView | null; r: Ready | null }) {
+function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
   const [sheet, setSheet] = useState(false);
   const open = () => setSheet(true);
   const close = useCallback(() => setSheet(false), []);
@@ -212,7 +329,7 @@ function Phone({ v, r }: { v: TokenView | null; r: Ready | null }) {
           <SkMeta w={240} />
         )}
       </div>
-      <Chart loading={v === null} phone />
+      <Chart c={c} phone />
       <div className="tkp-mtiles">
         {(["mc", "curve", "liq", "vol", "holders"] as const).map((k) =>
           k === "curve" ? (
@@ -247,6 +364,9 @@ function Phone({ v, r }: { v: TokenView | null; r: Ready | null }) {
 
 /** S7. `nowMs` is the clock the age is drawn against; `onRetry` asks the caller to read again. */
 export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: number; onRetry: () => void }) {
+  const row = data.status === "ready" ? data.row : null;
+  const [tf, setTf] = useState<ChartTf>(DEFAULT_TF);
+  const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf);
   if (data.status === "error" || data.status === "empty")
     return (
       <section className="tkp tkp-msg" data-token-page={data.status}>
@@ -256,10 +376,11 @@ export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: nu
     );
   const v = data.status === "ready" ? tokenView(data.row, nowMs) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
+  const c: ChartState = { sym: v?.symbol ?? null, tf, onTf: setTf, data: candles, retry };
   return (
     <section className="tkp" data-token-page={data.status} data-token={v?.token} aria-busy={v === null} aria-label={v === null ? WORDS.loading.text : undefined}>
-      <Desktop v={v} r={ready} />
-      <Phone v={v} r={ready} />
+      <Desktop v={v} r={ready} c={c} />
+      <Phone v={v} r={ready} c={c} />
     </section>
   );
 }
