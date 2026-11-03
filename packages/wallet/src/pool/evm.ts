@@ -452,9 +452,13 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       const ids = await both(rpcs, async (rpc, k) => qty(await rpc("eth_chainId", []), `rpc ${k} eth_chainId`), signal);
       if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${a.pin.network}'s ${chainId}`);
     }
+    // a finalized anchor at or below what is held (a pool just deployed, or an RPC's finalized behind another's) is
+    // consistent: the cache stays where it is and the tail is read from past it
     const fin = await anchorAt(EVM_POOL_TAG, signal);
-    if (fin.number < heldTo) return lag(`the ${EVM_POOL_TAG} block ${fin.number} is below the ${heldTo} already read`);
     const anchor = await anchorAt(EVM_NEWEST_TAG, signal);
+    // a newest anchor below what is held is behind a block already final, or the pool's deploy block: a retry, never
+    // the views check, where a held leaf above the anchor would read as a lie
+    if (anchor.number < heldTo) return lag(`the newest agreed block ${anchor.number} is below the ${heldTo} already read`);
     if (anchor.number < fin.number) return lag(`the newest agreed block ${anchor.number} is below the ${EVM_POOL_TAG} ${fin.number}`);
     // the views first: a pruning node keeps only recent state
     if (!checked && (await agreed(VIEWS.SCOPE, anchor.hash, "SCOPE()", signal)) !== scope) throw new Error(`SCOPE(): not the scope of ${pool} on ${a.pin.network}`);
@@ -488,8 +492,10 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       : null;
     if (wrong !== null) await refuse(wrong);
     checked = true;
-    held = events.filter((e) => e.block <= fin.number);
-    heldTo = fin.number;
+    // the cache only ever rises
+    const top = fin.number > heldTo ? fin.number : heldTo;
+    held = events.filter((e) => e.block <= top);
+    heldTo = top;
     return { anchor, events, stateTree, labelTree };
   }
 

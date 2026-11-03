@@ -494,3 +494,50 @@ test("a reorg one RPC sees first is a retry too; the same differing logs with no
   await assert.rejects(sync(pair(c, c, {}, { logs: (l) => l.slice(0, -1) }), async () => void w2.push(1)).trees(after(97)), /the two RPCs differ at log 4/);
   assert.deepEqual(w2, []);
 });
+
+// ---- the cache's floor: the deploy block and what is already final ----
+
+test("a pool deployed above the finalized block reads at once, with no wait", async () => {
+  const c = chain([...deps(PP, [96, 97])]); // head 100, finalized 90
+  const waits: number[] = [];
+  const t = await evmTreeSync({ rpcs: pair(c, c), pin: { ...PIN, fromBlock: 95n }, sleep: async (ms) => void waits.push(ms) }).trees(after(98));
+  assert.equal(t.stateTree.size, 2);
+  assert.deepEqual(waits, []);
+});
+
+test("a newest agreed block below the deploy block retries, then reads once it passes it", async () => {
+  const c = chain([...deps(PP, [96, 97])]);
+  const waits: number[] = [];
+  const t = await evmTreeSync({ rpcs: pair(c, c, {}, { latest: (k) => (k === 0 ? 92 : 100) }), pin: { ...PIN, fromBlock: 95n }, sleep: async (ms) => void waits.push(ms) }).trees(after(98));
+  assert.equal(t.stateTree.size, 2);
+  assert.deepEqual(waits, [2000]);
+});
+
+test("one RPC behind what is already cached (its finalized and latest below it) retries, never a lie", async () => {
+  const c = C3();
+  c.events.push({ block: 88, kind: "dep", leaf: 1234n, label: 4321n });
+  let finB = 90, latB = (_: number) => 100;
+  const waits: number[] = [];
+  const s = evmTreeSync({ rpcs: pair(c, c, {}, { finalized: () => finB, latest: (k) => latB(k) }), pin: PIN, sleep: async (ms) => void waits.push(ms) });
+  assert.equal((await s.trees(after(89))).stateTree.size, 5); // the cache is at 90, the leaf at 88 in it
+  // RPC b's finalized stays at 80; its latest is 85 for one read
+  finB = 80;
+  latB = (k) => (k === 1 ? 85 : 100);
+  assert.equal((await s.trees(after(89))).stateTree.size, 5);
+  assert.deepEqual(waits, [2000]);
+});
+
+test("the cache never goes down: a finalized block below it leaves it where it is", async () => {
+  const c = C3();
+  c.events.push({ block: 85, kind: "dep", leaf: 1234n, label: 4321n });
+  let finB = 90;
+  const la: string[] = [];
+  const s = sync(pair(c, c, { log: la }, { finalized: () => finB }));
+  await s.trees(after(86));
+  finB = 80;
+  for (let i = 0; i < 2; i++) {
+    la.length = 0;
+    assert.equal((await s.trees(after(86))).stateTree.size, 5);
+    assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]), ["0x5b"], `read ${i}: from 91`);
+  }
+});
