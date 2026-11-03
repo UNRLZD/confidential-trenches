@@ -261,3 +261,9 @@ test("Q9 a provider error or a malformed answer refuses", async () => {
   };
   await refused(evmPoolBuyQuote(request("base-ok"), [replay(F["base-ok"]!.exchanges[0]), down]), "rpc_error");
 });
+
+test("Q10 a quote too small for a minimum above 0 refuses", async () => {
+  // the hooked token has no standard pool, so only the route's own quote is read: 1 unit, which 3% slippage floors to 0
+  const one = both(read(0, (x) => withOut(x, 1n)), read(1, (x) => withOut(x, 2n)));
+  await refused(quote("base-hook", one, one), "no_quote");
+});
