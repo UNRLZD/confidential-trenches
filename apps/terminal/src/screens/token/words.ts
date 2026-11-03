@@ -38,7 +38,7 @@ export const WORDS = {
   lgC: ok("C", "R5 token.js U.legend cp-lgKv"),
   lgVenue: ok("UNRLZD", "R5 token.js U.legend cp-lgHead (`SYM · 15 · UNRLZD`)"),
   gecko: ok("Powered by CoinGecko", "09-design-brief CN-110 (the fixed label, no words around it; owner round 16 words-r4, M160 O1) and R5 token.js U.chartPanel ct-vendor; CoinGecko API terms 4.4"),
-  noTrades: { text: "No trades", source: "card app-token-chart: the chart's empty state (the helper holds no bars for this token and timeframe)", draft: true },
+  noData: ok("No data", "owner 3 Nov 20:26Z, picked; card app-token-chart: the chart's empty state (the helper holds no bars for this token and timeframe)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
