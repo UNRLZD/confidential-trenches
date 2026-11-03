@@ -10,6 +10,7 @@
 //   node scripts/ci/live-plan.mjs <app|sign|helper> <40-hex commit> [--network mainnet|testnet] [--verify]
 // Prints the plan as JSON; under GitHub Actions it also sets the step outputs matrix, count and skipped and writes the
 // run's summary. --verify reads what the host reports of its commit and fails when it is not the commit asked for.
+import "../net-window.mjs";
 import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
