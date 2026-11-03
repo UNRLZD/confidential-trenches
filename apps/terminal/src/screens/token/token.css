@@ -48,7 +48,9 @@
 .tkp-tf[aria-pressed="true"] { background: var(--bg-raised); color: var(--text-1); }
 .tkp-plot { position: relative; flex: 1; min-height: 0; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 63px, #161616 63px, #161616 64px); }
 .tkp-plotsk { position: absolute; inset: 14px 62px 20px 12px; }
-.tkp-trade { min-height: 0; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; }
+/* the trade column: the box (its own panel, with the safety grid under it) scrolls inside the column, so the page never moves */
+.tkp-trade { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.tkp-tradesk { width: 100%; height: 100%; border-radius: 14px; }
 .tkp-phone { display: none; }
 
 /* phone: hero, chart, tiles, and the bottom bar above the shell's tab bar */
@@ -88,4 +90,16 @@
   .tkp-buylbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tkp-sell { background: rgba(var(--sell-rgb), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--sell-rgb), 0.28); color: var(--sell); }
   .tkp-buy { background: var(--acc); color: #04140b; box-shadow: 0 10px 30px rgba(var(--acc-rgb), 0.18); }
+  /* the trade sheet (R5 token-390.html .ms-*, the shape of Portfolio's .msheet): above the bar and the tab bar, under the sign-in sheet */
+  .tkp-sheet { position: fixed; inset: 0; z-index: 90; }
+  .tkp-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); }
+  .tkp-sheetbox { position: absolute; left: 0; right: 0; bottom: 0; max-height: 92%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; background: var(--m-ink-panel); border-radius: 26px 26px 0 0; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07); padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .tkp-sheetbox::-webkit-scrollbar { display: none; }
+  .tkp-grab { position: sticky; top: 0; z-index: 2; display: flex; justify-content: center; align-items: center; width: 100%; height: 44px; padding: 0; border: 0; background: var(--m-ink-panel); cursor: pointer; }
+  .tkp-grab i { display: block; width: 38px; height: 4px; border-radius: 2px; background: var(--border-active); }
+  .tkp-shead { display: flex; align-items: center; gap: 12px; padding: 0 16px 8px; }
+  .tkp-stitle { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .tkp-ssym { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tkp-sprice { font: 13px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); }
+  .tkp-sheetbox .trb { border: 0; border-radius: 0; background: transparent; padding: 4px 16px 12px; }
 }
