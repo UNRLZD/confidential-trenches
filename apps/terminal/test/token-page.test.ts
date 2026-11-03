@@ -138,7 +138,7 @@ test("curve rule on the fixtures: the curve token has a bar; graduated, listed a
   assert.equal(tokenView(TOKENS.listed!, FIXTURE_NOW_MS).launchpad, null);
 });
 
-test("words: every word has its source, and no draft is left (owner 1 Nov 16:45Z, keep)", () => {
+test("words: every word has its source, and no draft is left (owner 1 Nov 16:45Z, keep; the chart's empty state owner 3 Nov 20:26Z)", () => {
   assert.deepEqual([...DRAFTS], []);
   for (const w of Object.values(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0);
 });

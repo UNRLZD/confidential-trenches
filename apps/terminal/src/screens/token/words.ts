@@ -30,6 +30,15 @@ export const WORDS = {
   loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S7.1 skeleton: the page's accessible name only (never drawn); as Discover's"),
   offline: ok("Offline", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.5 [draft copy: Offline], as Discover's error state"),
   noToken: ok("No token", "owner 1 Nov 16:45Z, keep; drafted from card app-token-page: the empty state (no token to draw)"),
+  // the chart (card app-token-chart): R5's legend (token.js U.legend: `SYM · 15 · UNRLZD O … H … L … C … change`, then
+  // `Vol …`), CoinGecko's fixed label (CN-110), and the chart's empty state
+  lgO: ok("O", "R5 token.js U.legend cp-lgKv"),
+  lgH: ok("H", "R5 token.js U.legend cp-lgKv"),
+  lgL: ok("L", "R5 token.js U.legend cp-lgKv"),
+  lgC: ok("C", "R5 token.js U.legend cp-lgKv"),
+  lgVenue: ok("UNRLZD", "R5 token.js U.legend cp-lgHead (`SYM · 15 · UNRLZD`)"),
+  gecko: ok("Powered by CoinGecko", "09-design-brief CN-110 (the fixed label, no words around it; owner round 16 words-r4, M160 O1) and R5 token.js U.chartPanel ct-vendor; CoinGecko API terms 4.4"),
+  noData: ok("No data", "owner 3 Nov 20:26Z, picked; card app-token-chart: the chart's empty state (the helper holds no bars for this token and timeframe)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
