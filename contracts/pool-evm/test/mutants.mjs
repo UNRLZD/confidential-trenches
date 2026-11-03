@@ -16,6 +16,7 @@ const ST = "src/State.sol";
 const SIMPLE = "src/PrivacyPoolSimple.sol";
 const VERIFIER = "src/verifiers/WithdrawalVerifier.sol";
 const ADAPTER = "src/adapters/UniswapV3Adapter.sol";
+const SELL = "src/SellDelegate.sol";
 // lib/forge-std's submodule commit (v1.9.7), fetched into the copy when the checkout has no submodule files
 const FORGE_STD = "77041d2ce690e692d6e03cc812b57d1ddaa4d505";
 
@@ -135,6 +136,65 @@ export const MUTANTS = [
   [PP, "if (_fee > _data.feeCap) revert FeeOverCap();", "if (_fee >= _data.feeCap) revert FeeOverCap();", "test_buyLandsAndWHoldsMinOut"],
   [PP, "return ecrecover(_digest, _v, _r, _s);", "return ecrecover(_digest, _v < 27 ? _v + 27 : _v, _r, _s);", "test_R_vOtherThan27Or28IsRefused"],
   [SIMPLE, "bytes memory _signature\n  ) external nonReentrant {", "bytes memory _signature\n  ) external {", "test_R_feeRecipientCannotReenterBuy"],
+  // the sell delegate (card pool-evm-sell): each check of a sell, W's signature and each field it binds, the nonce at
+  // its ERC-7201 slot, the approval, the unwrap, minOut, the fee and the deposit
+  [SELL, "if (_entered) revert Reentrancy();", "", "test_aTargetCannotReenter"],
+  [SELL, "    _entered = true;\n", "", "test_aTargetCannotReenter"],
+  [SELL, "    _entered = false;\n", "", "test_twoSellsInOneTransactionBothLand"],
+  [SELL, "if (block.timestamp > _sell.deadline) revert DeadlineExpired();", "", "test_anExpiredDeadlineIsRefused"],
+  [SELL, "if (block.timestamp > _sell.deadline)", "if (block.timestamp >= _sell.deadline)", "test_anExpiredDeadlineIsRefused"],
+  [SELL, "if (_fee > _sell.feeCap) revert FeeOverCap();", "", "test_aSellFeeOverTheCapIsRefused"],
+  [SELL, "if (_fee > _sell.feeCap)", "if (_fee >= _sell.feeCap)", "test_aSellFeeOverTheCapIsRefused"],
+  [SELL, "if (_sell.minOut == 0) revert InvalidMinOut();", "", "test_aSellZeroMinOutIsRefused"],
+  [SELL, "if (_signer(_sellDigest(_sell), _signature) != address(this)) revert InvalidSignature();", "", "test_aSellWrongSignerIsRefused"],
+  [SELL, "if (_signer(_sellDigest(_sell), _signature) != address(this)) revert InvalidSignature();", "", "test_changedCalldataIsRefused"],
+  [SELL, "if (_signer(_sellDigest(_sell), _signature) != address(this)) revert InvalidSignature();", "", "test_aThirdPartyCallingTheDelegateMovesNothing"],
+  [SELL, "if (_sell.nonce != $.nonce) revert InvalidNonce();", "", "test_aReplayedNonceIsRefused"],
+  [SELL, "if (_sell.nonce != $.nonce) revert InvalidNonce();", "", "test_noncesRunInTurn"],
+  [SELL, "    $.nonce = _sell.nonce + 1;\n", "", "test_aReplayedNonceIsRefused"],
+  [SELL, "$.nonce = _sell.nonce + 1;", "$.nonce = _sell.nonce + 2;", "test_noncesRunInTurn"],
+  [SELL, "SELL_STORAGE = 0xd19ce3d034be62269d1d8903d496806b7944251c1f2a9fe8014ceeba63edbd00;", "SELL_STORAGE = 0xd19ce3d034be62269d1d8903d496806b7944251c1f2a9fe8014ceeba63edbd01;", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "_approve(_sell.token, _sell.target, _sell.amount);", "_approve(_sell.token, _sell.target, type(uint256).max);", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "if (IERC20Sell(_sell.token).allowance(address(this), _sell.target) != 0) revert LeftoverApproval();", "", "test_aLeftoverApprovalIsRefused"],
+  [SELL, "if (IERC20Sell(_sell.token).allowance(address(this), _sell.target) != 0) revert LeftoverApproval();", "", "test_aForkLeftoverApprovalFails"],
+  [SELL, "if (!_ok || (_ret.length != 0 && !abi.decode(_ret, (bool)))) revert ApproveFailed();", "", "test_aTokenThatRefusesTheApprovalIsRefused"],
+  [SELL, "(_ret.length != 0 && !abi.decode(_ret, (bool)))", "!abi.decode(_ret, (bool))", "test_aTokenWhoseApproveReturnsNothingSells"],
+  [SELL, "    if (!_ok) {\n      assembly", "    if (false) {\n      assembly", "test_aTargetsRevertIsPassedOn"],
+  [SELL, "uint256 _eth = address(this).balance;", "uint256 _eth = 0;", "test_whatWAlreadyHoldsDoesNotCount"],
+  [SELL, "uint256 _weth = WETH.balanceOf(address(this));", "uint256 _weth = 0;", "test_whatWAlreadyHoldsDoesNotCount"],
+  [SELL, "if (_wethGained != 0) WETH.withdraw(_wethGained);", "", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "  receive() external payable {}\n", "", "test_aSellPaidInEtherLands"],
+  [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_aShortOutputIsRefused"],
+  [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_aShortOutputInEtherIsRefused"],
+  [SELL, "if (_gained < _sell.minOut) revert MinOutNotMet();", "", "test_aForkShortOutputFails"],
+  [SELL, "if (_gained < _sell.minOut)", "if (_gained + 1 < _sell.minOut)", "test_aShortOutputIsRefused"],
+  [SELL, "if (!_sent) revert FailedToSendNativeAsset();", "", "test_aSenderThatRefusesEtherRevertsTheSell"],
+  [SELL, "    if (_fee != 0) {\n", "    if (true) {\n", "test_aSenderThatRefusesEtherRevertsTheSell"],
+  [SELL, "msg.sender.call{value: _fee}('')", "block.coinbase.call{value: _fee}('')", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "deposit{value: _gained - _fee}(_gained - _fee, _sell.precommitment)", "deposit{value: _gained}(_gained, _sell.precommitment)", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "(_gained - _fee, _sell.precommitment)", "(_gained - _fee, uint256(1))", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "if (_signature.length != 65) revert InvalidSignature();", "", "test_aSellSignatureWithATrailingByteIsRefused"],
+  [SELL, "if (uint256(_s) > HALF_N) revert InvalidSignature();", "", "test_aSellHighSSignatureIsRefused"],
+  [SELL, "uint8 _v = uint8(_signature[64]);", "uint8 _v = 27;", "test_sellSignaturesWithVOf27And28BothLand"],
+  [SELL, "bytes32 _r = bytes32(_signature[0:32]);\n    bytes32 _s = bytes32(_signature[32:64]);", "bytes32 _s = bytes32(_signature[0:32]);\n    bytes32 _r = bytes32(_signature[32:64]);", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "return ecrecover(_digest, _v, _r, _s);", "return ecrecover(_digest, _v < 27 ? _v + 27 : _v, _r, _s);", "test_aVOtherThan27Or28IsRefused"],
+  [SELL, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, uint256(8453), address(this))", "test_anotherChainsSellSignatureIsRefused"],
+  [SELL, "VERSION_HASH, block.chainid, address(this))", "VERSION_HASH, block.chainid, address(0))", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "NAME_HASH = keccak256('Blindfill');", "NAME_HASH = keccak256('Blindfill sell');", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "VERSION_HASH = keccak256('1');", "VERSION_HASH = keccak256('2');", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')", "keccak256('EIP712Domain(string name,uint256 chainId,address verifyingContract)')", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "'Sell(address token,uint256 amount,", "'Sell(uint256 amount,address token,", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "abi.encodePacked(hex'1901', _domain, _struct)", "abi.encodePacked(_domain, _struct)", "test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee"],
+  [SELL, "        _sell.token,\n", "        address(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.amount,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.target,\n", "        address(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        keccak256(_sell.data),\n", "        bytes32(0),\n", "test_changedCalldataIsRefused"],
+  [SELL, "        _sell.minOut,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.pool,\n", "        address(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.precommitment,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.feeCap,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.deadline,\n", "        uint256(0),\n", "test_eachChangedFieldIsRefused"],
+  [SELL, "        _sell.nonce\n      )", "        uint256(0)\n      )", "test_eachChangedFieldIsRefused"],
 ];
 
 // keccak256 of the withdrawal verifier's deployed code as `dir` builds it

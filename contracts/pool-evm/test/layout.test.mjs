@@ -9,8 +9,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const inspect = (what) =>
-  JSON.parse(execFileSync("forge", ["inspect", "PrivacyPoolSimple", what, "--json"], { cwd: ROOT, encoding: "utf8" }));
+const inspect = (what, contract = "PrivacyPoolSimple") =>
+  JSON.parse(execFileSync("forge", ["inspect", contract, what, "--json"], { cwd: ROOT, encoding: "utf8" }));
 
 test("the pool's storage is exactly the listed slots", () => {
   const got = inspect("storageLayout").storage.map((s) => `${s.slot} ${s.label}`);
@@ -37,4 +37,17 @@ test("the pool's ABI is exactly the listed functions; only deposit takes value",
   ]);
   const writes = fns.filter((f) => f.stateMutability !== "view" && f.stateMutability !== "pure").map((f) => `${f.name} ${f.stateMutability}`);
   assert.deepEqual(writes.sort(), ["buy nonpayable", "deposit payable", "withdraw nonpayable"]);
+});
+
+// The sell delegate (card pool-evm-sell) runs in W's account: it declares no storage slot at all (W's sell nonce sits at
+// its ERC-7201 slot, test/Sell.t.sol), and its ABI is exactly WETH, nonce, sell and a receive for the sale's ether.
+test("the sell delegate declares no storage", () => {
+  assert.deepEqual(inspect("storageLayout", "SellDelegate").storage, []);
+});
+
+test("the sell delegate's ABI is exactly the listed functions and a receive; only sell writes", () => {
+  const abi = inspect("abi", "SellDelegate");
+  assert.deepEqual(abi.filter((e) => e.type === "receive" || e.type === "fallback").map((e) => e.type), ["receive"]);
+  const fns = abi.filter((e) => e.type === "function");
+  assert.deepEqual(fns.map((f) => `${f.name} ${f.stateMutability}`).sort(), ["WETH view", "nonce view", "sell nonpayable"]);
 });
