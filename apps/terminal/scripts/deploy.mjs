@@ -22,10 +22,17 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 // and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
 // fail this deploy)
 export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-no-test-token", "app-launchpad-badges", "app-token-route", "app-harness-signin-e2e", "app-verify-mount", "signpage-release"];
-export const LIVE_ARGS = { "app-harness-signin-e2e": "--host app", "signpage-release": "--host app" };
+export const LIVE_ARGS = { "app-in-shell": "--engines chromium,firefox,webkit", "app-harness-signin-e2e": "--host app", "signpage-release": "--host app" };
 // app-verify-mount reads the network the build names: a testnet build's _headers carries the testnet pair (build/network.mjs)
 export const networkOfBuild = (dir) => (readFileSync(join(dir, "_headers"), "utf8").includes(TESTNET_RPCS) ? "testnet" : "mainnet");
 export const liveRun = (k, network = "mainnet") => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}${k === "app-verify-mount" ? ` --network ${network}` : ""}`;
+/** The runs of one check, each as `liveRun` writes it: live.yml runs each as its own job. */
+export const liveRuns = (k, { network = "mainnet" } = {}) => [liveRun(k, network)];
+/** The commands a deploy prints for the live run on GitHub's runners (card ci-live-runners); a testnet build says so. */
+export const liveCommands = (sha, network = "mainnet") => [`next: gh workflow run live.yml -f host=app -f commit=${sha}${network === "mainnet" ? "" : ` -f network=${network}`}`, "then: gh run watch --exit-status"];
+
+/** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs [--network n] [--commit sha]`). */
+export const liveList = (opts = {}) => ({ checks: LIVE_CHECKS, skipped: {}, runs: Object.fromEntries(LIVE_CHECKS.map((k) => [k, liveRuns(k, opts)])) });
 
 export function deploy(argv, env = process.env, run = spawnSync) {
   const dryRun = argv.includes("--dry-run");
@@ -48,10 +55,15 @@ export function deploy(argv, env = process.env, run = spawnSync) {
     stdio: "inherit",
   });
   if (r.status !== 0) return { code: 1, err: [`wrangler pages deploy failed (exit ${r.status ?? r.signal})`] };
-  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}; run ${LIVE_CHECKS.map((k) => liveRun(k, networkOfBuild(dir))).join(", ")} next`] };
+  return { code: 0, out: [`deployed ${dir} to ${PROJECT} on ${BRANCH}${dirty ? " from a tree with uncommitted changes in apps/terminal: the live checks read the commit's own build, not yours" : ""}`, ...liveCommands(sha || "$(git rev-parse HEAD)", networkOfBuild(dir))] };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] === "--live-runs") {
+    const a = process.argv.slice(3);
+    console.log(JSON.stringify(liveList({ network: a.includes("--network") ? a[a.indexOf("--network") + 1] : "mainnet" })));
+    process.exit(0);
+  }
   const r = deploy(process.argv.slice(2));
   for (const l of r.out ?? []) console.log(`deploy: ${l}`);
   for (const l of r.err ?? []) console.error(`deploy: ${l}`);

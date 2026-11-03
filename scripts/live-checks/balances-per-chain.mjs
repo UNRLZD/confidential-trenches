@@ -23,12 +23,12 @@
 // --record writes what the run read, so the check's test can replay it through judge().
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { POOL_ASSET_DECIMALS } from "../../packages/kit/src/index.ts";
 import { APP_HOST, harnessRoute, shellHeaders, SIGN_HOST } from "./app-in-shell.mjs";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "balances-per-chain";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -179,10 +179,9 @@ async function runOne(browser, w, shots, handler) {
 
 export async function collect({ build, shots }) {
   mkdirSync(shots, { recursive: true });
-  const pw = createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
-  const browser = await pw.chromium.launch();
+  const browser = await launchBrowser("chromium");
   const handler = await route(build);
-  const rec = { at: new Date().toISOString(), source: build ? `harness, terminal build ${path.relative(REPO, build) || build}` : `live ${APP_HOST}`, answer: ANSWER, runs: [] };
+  const rec = { at: new Date().toISOString(), browser: browser.version(), source: build ? `harness, terminal build ${path.relative(REPO, build) || build}` : `live ${APP_HOST}`, answer: ANSWER, runs: [] };
   try {
     for (const w of WIDTHS) rec.runs.push(await runOne(browser, w, shots, handler));
   } finally {
@@ -204,7 +203,7 @@ async function main() {
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
   const r = judge(rec);
   for (const l of r.lines) console.log(l);
-  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, shots ${shots})`);
+  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chrome ${rec.browser}, shots ${shots})`);
   process.exit(r.ok ? 0 : 1);
 }
 

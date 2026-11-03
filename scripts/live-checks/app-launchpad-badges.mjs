@@ -16,11 +16,11 @@
 // --record writes what the run read, so the check's test can replay it through judge(). A row is recorded by its `addr`
 // (the token id): an id under a "token" key reads to gitleaks as a secret.
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAINS, NO_LOGO, PADS } from "../../apps/terminal/src/screens/market/pads.ts";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-launchpad-badges";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -131,10 +131,8 @@ export const READ = ({ scope, column }) => {
 };
 
 export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), prepare = null } = {}) {
-  // playwright is the terminal's dev dependency (apps/terminal/package.json)
-  const { chromium } = createRequire(new URL("../../apps/terminal/package.json", import.meta.url))("playwright");
   mkdirSync(shots, { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await launchBrowser("chromium");
   const rec = { url, at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) {

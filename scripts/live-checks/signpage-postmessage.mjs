@@ -31,10 +31,10 @@
 import "../net-window.mjs";
 import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -329,8 +329,7 @@ async function main() {
   const local = args.includes("--local");
   const given = local && opt("--local") && !opt("--local").startsWith("--") ? path.resolve(opt("--local")) : null;
   const dir = local ? (given ?? build()) : null;
-  const { chromium } = createRequire(path.join(REPO, "packages/signpage/package.json"))("playwright");
-  const browser = await chromium.launch();
+  const browser = await launchBrowser("chromium");
   let rec;
   try {
     rec = local
@@ -345,7 +344,7 @@ async function main() {
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 1)}\n`);
   const r = judge(rec, pin);
   for (const l of r.lines) console.log(l);
-  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chromium ${rec.browser}, ${rec.at})`);
+  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chrome ${rec.browser}, ${rec.at})`);
   process.exit(r.ok ? 0 : 1);
 }
 

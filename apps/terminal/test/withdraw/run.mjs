@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -65,7 +66,8 @@ function serve(dir) {
     const file = path.join(dir, p === "/" ? "index.html" : p);
     if (!file.startsWith(dir)) return res.writeHead(403).end();
     try {
-      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(readFileSync(file));
+      const body = readFileSync(file); // read before the headers go: a missing file is a 404, never a second write
+      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(body);
     } catch {
       res.writeHead(404).end();
     }
@@ -98,8 +100,7 @@ async function open(browser, w, f, run = 0) {
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     const boxes = {};
@@ -200,4 +201,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} shots, BAR-05, BAR-11 and the taps`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots (${STATES.length} fixtures x 390/1440), BAR-10 per shot, BAR-05/AS-03, BAR-11 and the taps${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+console.log(`PASS ${n} shots (${STATES.length} fixtures x 390/1440), BAR-10 per shot, BAR-05/AS-03, BAR-11 and the taps${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

@@ -18,6 +18,7 @@ export const CHANGED = [
   "contracts/vault/scripts/deploy.mjs",
   "contracts/vault/scripts/testnet-t04.mjs",
   "contracts/vault/scripts/testnet-usdc.mjs",
+  "scripts/ci/live-plan.mjs",
   "scripts/ci/money-gate.mjs",
   "scripts/live-checks/app-harness-signin-e2e.mjs",
   "scripts/live-checks/app-host-gate.mjs",

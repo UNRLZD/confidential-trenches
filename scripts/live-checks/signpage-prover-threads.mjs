@@ -30,6 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expected, gateBuild, openBrowser, PINS, policies, siteServer, WORKER_PATH, zkPath } from "./signpage-prover-host.mjs";
 import { APP, CSP as SITE_CSP, SIGN } from "./signpage-skeleton.mjs";
+import { browserLabel } from "../browsers.mjs";
 
 const KEY = "signpage-prover-threads";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -236,7 +237,7 @@ async function readPage(serve, engine, proofs) {
     out.violations = await page.evaluate(() => window.__pt.violations);
     out.console = consoleLines; // for the reader; the judge reads none of it
     out.workerScripts = workerScripts; // every script on SIGN_HOST but the page's app.js, and every data: or blob: one
-    return { browser: `${engine} ${browser.version()} (Playwright)`, page: out };
+    return { browser: browserLabel(browser), page: out };
   } finally {
     await close();
   }

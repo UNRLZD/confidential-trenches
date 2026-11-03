@@ -31,11 +31,11 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-verify-mount";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -307,9 +307,8 @@ export async function collect({ shots, route = null, network, source, beforeReop
   const { VERIFY_RELEASES } = await import("../../apps/terminal/src/screens/verify/release.ts");
   const release = VERIFY_RELEASES[network];
   if (!release) throw new Error(`network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);
-  const pw = createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
   if (shots) mkdirSync(shots, { recursive: true });
-  const browser = await pw.chromium.launch();
+  const browser = await launchBrowser("chromium");
   try {
     const runs = [];
     for (const w of WIDTHS) runs.push(await runOne({ browser, w, shots, route, beforeReopen, duringReopen }));
@@ -347,7 +346,7 @@ async function main() {
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
   const r = judge(rec);
   for (const l of r.lines) console.log(l);
-  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chromium ${rec.browser}, shots ${shots})`);
+  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chrome ${rec.browser}, shots ${shots})`);
   process.exit(r.ok ? 0 : 1);
 }
 

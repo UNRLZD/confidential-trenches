@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = dirname(dirname(HERE));
@@ -47,8 +48,7 @@ const states = (VAULT, TOKEN) => [
   ["ready", "alice.near", "9.88", { state: "ready" }],
 ];
 
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 const lines = [];
 const say = (ok, t) => lines.push(`${ok ? "ok " : "BAD"} ${t}`);
 for (const [wname, width, height] of [["390", 390, 844], ["1440", 1440, 900]]) {
@@ -99,5 +99,5 @@ for (const [wname, width, height] of [["390", 390, 844], ["1440", 1440, 900]]) {
 await browser.close();
 for (const l of lines) console.log(l);
 const pass = lines.every((l) => l.startsWith("ok "));
-console.log(`withdraw-screens: ${pass ? "PASS" : "FAIL"}${SHOTS ? ` (shots in ${SHOTS})` : ""}`);
+console.log(`withdraw-screens: ${pass ? "PASS" : "FAIL"}${SHOTS ? ` (shots in ${SHOTS})` : ""} on ${browserLabel(browser)}`);
 process.exit(pass ? 0 : 1);
