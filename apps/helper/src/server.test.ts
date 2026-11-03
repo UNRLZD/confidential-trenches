@@ -619,7 +619,7 @@ test("a throttle behind a read answers the same 429 contract, never 503: the mar
   const lists = { get: limitedRead } as never;
   const token = { page: limitedRead, holders: limitedRead, candles: limitedRead } as never;
   // the NEAR client names a provider's 429 by its status, whatever its body, and the fee's read carries it
-  const near = nearRpc("https://near.invalid", (async () => new Response("", { status: 429 })) as never);
+  const near = nearRpc("https://provider-a.example", (async () => new Response("", { status: 429 })) as never);
   const refused = await agreedBlock([near, near], Date.now).then(() => null, (e: unknown) => e);
   assert.ok(refused instanceof FeeReadRefused && throttleOf(refused) === 1, String(refused));
   const fee: FeeQuoter = { networkOf: () => "mainnet", quote: async () => { throw refused; }, reads: () => ({ feeMin: async () => 0n }) };
