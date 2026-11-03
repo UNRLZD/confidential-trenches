@@ -88,9 +88,9 @@ test("solanaRestore zeroes each spent note's W secret key once it has the addres
   assert.equal(made.length, 1, "one W derived, for the one spent note");
   assert.ok(zero(made[0]!.out.secretKey), "W's secret key is left in memory");
   // the restore of the buys' wallets (card wallet-per-buy) lists that W from this restore, and zeroes its key too
-  const reader = (name: string) => ({ chain: "sol" as const, name, read: async () => ({ native: 0n, tokens: new Map<string, bigint>() }) });
+  const reader = { chain: "sol" as const, read: async () => ({ native: 0n, tokens: new Map(), unreadable: [] }) };
   const at = calls.length;
-  const ws = await buyWallets(SEED, [{ id: program, chain: "sol", spent: solanaSpentNotes(r), readers: [reader("a"), reader("b")] }]);
+  const ws = (await buyWallets(SEED, [{ id: program, chain: "sol", spent: solanaSpentNotes(r), reader }])).wallets;
   assert.deepEqual(ws.map((w) => w.address), [r.spends[0]!.w]);
   assert.equal(calls.length - at, 1, "one W derived per spent note");
   assert.ok(zero(calls[at]!.out.secretKey), "buyWallets leaves W's secret key in memory");
