@@ -579,11 +579,12 @@ export function solanaPoolBuyFunds(release: SolanaPoolRelease, venue: SolanaPool
   return { chunk, peak, left, problem };
 }
 
-/** M352/M353/M355: the fee payer's cost of one release, from the device's own rent read: the spent mark, which records
- * withdrawnValue in 8 bytes (rent(8)), the change note's 72-byte page entry and two signatures (5,000 each). 1,066,640
- * lamports at 5,080 a byte. The one definition of the Solana fee rules (M356 (6)): the wallet and the helper import
- * this cost, the fee, the priority budget and the send margin from here. */
-export const SOLANA_POOL_SPENT_MARK_LEN = 8;
+/** M352/M353/M355/M376: the fee payer's cost of one release, from the device's own rent read: the spent mark, which
+ * records withdrawnValue u64 and the release's number u32 in 12 bytes (rent(12)), the change note's 72-byte page entry
+ * and two signatures (5,000 each). 1,086,960 lamports at 5,080 a byte. The one definition of the Solana fee rules (M356
+ * (6)): the wallet and the helper import this cost, the fee, the priority budget and the send margin from here, and
+ * the wallet's restore the spent mark's length. */
+export const SOLANA_POOL_SPENT_MARK_LEN = 12;
 export const solanaPoolReleaseCost = (rent: SolanaRent): bigint =>
   solanaRentMin(rent, SOLANA_POOL_SPENT_MARK_LEN) + 72n * rent.lamportsPerByte * rent.factor + 10_000n;
 /** The epoch relay fee's step, and the headroom over the cost (M353): two steps. */
@@ -604,7 +605,7 @@ export const solanaPoolPageReserve = (rent: SolanaRent): bigint => {
   return (open + n - 1n) / n;
 };
 /** M356 (5): what a release may spend on priority (CU limit x price / 1e6, lamports): the relay fee less the cost and
- * the page reserve. 232,645 at 5,080 a byte and the epoch fee 1,300,000. */
+ * the page reserve. 212,325 at 5,080 a byte and the epoch fee 1,300,000. */
 export const solanaPoolPriorityBudget = (rent: SolanaRent, relayFee: bigint = solanaPoolFee(rent)): bigint =>
   relayFee - solanaPoolReleaseCost(rent) - solanaPoolPageReserve(rent);
 /** M356 (1): the Solana send margin. A deadline under now + 90 s is refused by the device and the helper; 90 s is
