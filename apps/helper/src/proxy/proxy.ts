@@ -8,9 +8,10 @@
 // What reaches the caller: the vendor's status and JSON body, with X-Helper-Source and X-Fetched-At. A vendor that is
 // down, slow, refusing our key, or answering anything but JSON within the size cap answers 503 upstream, so the device
 // falls back to its public path (H2.3). Throttling (card helper-abuse-limits, ../limits/limits.ts): each vendor is one
-// budget every caller draws from, PROXY_BUDGETS (or PROXY_BUDGET_<VENDOR>) requests a window and no caller more than
-// its share of them (a cache hit counts in the caller's share only, as it reaches no vendor); a draw past either answers
-// 429 rate_limited with the seconds to the window's end. A vendor's own 429 holds that vendor until the reset it named (at most a
+// budget every call that reaches it draws from, the helper's own reads and a retry included, PROXY_BUDGETS (or
+// PROXY_BUDGET_<VENDOR>) requests in any minute, and no caller more than its share of them a 10 s window (a cache hit
+// or a call joining one in flight counts in the caller's share only, as it reaches no vendor); a draw past either
+// answers 429 rate_limited with the seconds until it would go ahead. A vendor's own 429 holds that vendor until the reset it named (at most a
 // minute): the helper is its one client, so every caller drawing on it, the helper's own reads included, answers 429
 // with the seconds left and nothing reaches the vendor. A reset of at most WAIT_MAX_MS is waited out once by the
 // request that met it.
@@ -24,30 +25,35 @@ export const QUERY_MAX = 4_096;
 export const ANSWER_MAX = 4 * 1024 * 1024; // a trending list is ~250 KB (D-S3); a build or quote a few KB
 export const TIMEOUT_MS = 8_000;
 export const WAIT_MAX_MS = 1_000;
+/** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
+export const VENDOR_WINDOW_MS = 60_000;
 /**
- * Each vendor's budget per 10 s window, unless PROXY_BUDGET_<VENDOR> ("<total>,<per client>") names its plan's. The
- * total is the vendor's published limit for the key a plan starts with, a sixth of its per-minute figure, so no window
- * of callers can make the vendor throttle us; the share is what one device asks of that vendor in a window.
+ * Each vendor's budget, unless PROXY_BUDGET_<VENDOR> ("<total>,<per client>") names its plan's: the total is the
+ * vendor's published limit a minute for the key a plan starts with, counted over a sliding minute and drawn by every
+ * call that reaches the vendor, the helper's own reads included, so no stretch of the vendor's window ever holds more;
+ * the share is what one device asks of that vendor in a 10 s window.
  * - jupiter: "Free | 1 | 60" requests a second and a minute, on a 60-second sliding window, Swap, Price and Token
- *   requests in one bucket (developers.jup.ag/docs/api-rate-limit, read 2026-11-03 09:15Z): 10 a window, less the
- *   helper's own token reads, at most 30 a minute (data/solana/token.ts JUP_GAP_MS), so 5. Share 4: a device's one
- *   trade asks /swap/v2/build at most four times, a capped build and its uncapped retry (packages/kit/src/trade/solana/
- *   build.ts l.243-246), twice when the route's floor needs a rebuild (packages/kit/src/trade/solana/flow.ts l.318, l.325).
+ *   requests in one bucket (developers.jup.ag/docs/api-rate-limit, read 2026-11-03 09:15Z): 60. The helper's own reads
+ *   draw from it: token search at most one per JUP_GAP_MS 4 s, at most 15 a minute (data/solana/token.ts), and
+ *   Discover's three lists once per 12 s refresh through a 10 s cache (data/solana/lists.ts), about 15 a minute; 30 of
+ *   the 60 at most, the rest for devices. Share 4: a device's one trade asks /swap/v2/build at most four times, a capped
+ *   build and its uncapped retry (packages/kit/src/trade/solana/build.ts l.243-246), twice when the route's floor needs
+ *   a rebuild (packages/kit/src/trade/solana/flow.ts l.318, l.325).
  * - relay: "`/quote` | 50 requests per minute" for a self-serve key, other endpoints 200 (docs.relay.link/references/
- *   api/api-keys, read 09:15Z): 8. Share 2: no kit call yet; a tap's hop is one quote and one status.
+ *   api/api-keys, read 09:15Z): 50, the quote's. Share 2: no kit call yet; a tap's hop is one quote and one status.
  * - lifi: keys "currently default to **100 requests per minute**" (docs.li.fi/api-reference/rate-limits, read 09:15Z):
- *   16. Share 2: no kit call yet; the fallback route is one quote and one status.
+ *   100. Share 2: no kit call yet; the fallback route is one quote and one status.
  * - oneclick: no limit published (docs.near-intents.org 1click-api/authentication, read 09:16Z), so the most
- *   conservative published one above, Relay's 50 a minute: 8. Share 2: a deposit asks one quote per tap
+ *   conservative published one above, Relay's 50 a minute: 50. Share 2: a deposit asks one quote per tap
  *   (packages/signpage/src/rules/deposit-quote.ts l.119, packages/wallet/src/deposit/quote.ts l.67), and one again.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
-  jupiter: { total: 5, perClient: 4 },
-  relay: { total: 8, perClient: 2 },
-  lifi: { total: 16, perClient: 2 },
-  oneclick: { total: 8, perClient: 2 },
+  jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS },
+  relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS },
+  lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS },
+  oneclick: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS },
 };
-/** The environment variable naming a vendor's budget, "<total>,<per client>" per 10 s. */
+/** The environment variable naming a vendor's budget, "<total per minute>,<per client per 10 s>". */
 export const proxyBudgetEnv = (vendor: VendorName): string => `PROXY_BUDGET_${vendor.toUpperCase()}`;
 export const CACHE_ENTRIES = 256;
 export const CACHE_BYTES = 32 * 1024 * 1024;
@@ -110,7 +116,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const keys = readKeys(env);
   const forms = keyForms(keys);
-  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v])])) as Record<VendorName, BudgetLimits>;
+  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v]), windowMs: VENDOR_WINDOW_MS }])) as Record<VendorName, BudgetLimits>;
   const budget = upstreamBudget((v) => limits[v as VendorName], now);
   const cache = new Map<string, Read & { expires: number }>();
   let cacheBytes = 0;
@@ -177,6 +183,9 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           budget.hold(name, now() + (wait <= WAIT_MAX_MS ? wait : upstreamRetryAfterS(r.headers, now()) * 1000));
           if (attempt === 0 && wait <= WAIT_MAX_MS) {
             await sleep(wait);
+            // the retry reaches the vendor again, so it draws from the total too
+            const again = budget.take(name, undefined);
+            if (again > 0) return throttled(again);
             continue;
           }
           return throttled(Math.max(budget.heldFor(name), 1));
@@ -202,7 +211,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   /**
    * One proxied call: `vendor` and `path` as the caller wrote them, `rawQuery` the text after "?" (or ""), `body` the
    * request body, `client` the caller's address (../limits/limits.ts clientOf). The helper's own reads (Discover's
-   * lists, the token page) pass none and draw from no caller's share.
+   * lists, the token page) pass none: they draw from the vendor's total, never a caller's share.
    */
   async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string): Promise<ProxyAnswer> {
     if (!Object.hasOwn(VENDORS, vendor)) return error(404, "not_found");
@@ -213,9 +222,9 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     const up = v.paths[path]!;
     if (Buffer.byteLength(body) > PROXY_BODY_MAX) return source(error(413, "too_large"));
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
-    // a draw on the vendor's budget for every call that may reach it; a cache hit reaches nothing, so it counts in the
-    // caller's share alone
-    const draw = (shareOnly = false): number => (client === undefined ? 0 : budget.take(name, client, 1, shareOnly));
+    // a draw on the vendor's budget for every call that may reach it, the helper's own too; a cache hit or a call joining
+    // one in flight reaches nothing, so it counts in the caller's share alone
+    const draw = (shareOnly = false): number => budget.take(name, client, 1, shareOnly);
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
@@ -228,9 +237,9 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         if (wait > 0) return source(throttled(wait));
         out = hit;
       } else {
-        const wait = draw();
-        if (wait > 0) return source(throttled(wait));
         let p = inflight.get(id);
+        const wait = draw(p !== undefined);
+        if (wait > 0) return source(throttled(wait));
         if (!p) {
           p = call(name, v, up, path, qs, "").then((read) => {
             if ("fetchedAt" in read && read.status === 200) remember(id, read, up.cacheMs!);

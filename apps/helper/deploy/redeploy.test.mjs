@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { budgetFromEnv } from "../src/limits/limits.ts";
+import { RPC_BATCH_MAX } from "../src/rpc/methods.ts";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "redeploy.sh");
 const REL = "apps/helper/deploy/redeploy.sh";
@@ -45,21 +47,22 @@ function server() {
   const log = path.join(dir, "docker.log");
   writeFileSync(path.join(bin, "docker"), `#!/bin/sh\necho "$PWD|$*|$HELPER_COMMIT|$HELPER_RELEASE" >> "${log}"\n`, { mode: 0o755 });
   const env = path.join(root, "apps/helper/deploy/.env");
-  const run = (...args) => {
+  const runWith = (shell, ...args) => {
     const r = spawnSync(path.join(root, REL), args, {
       encoding: "utf8",
       // a stray HELPER_COMMIT and HELPER_RELEASE in the operator's shell must not reach compose
-      env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, REDEPLOY_REMOTE: `file://${remote}`, HELPER_COMMIT: "f".repeat(40), HELPER_RELEASE: "77" },
+      env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, REDEPLOY_REMOTE: `file://${remote}`, HELPER_COMMIT: "f".repeat(40), HELPER_RELEASE: "77", ...shell },
     });
     return { status: r.status, out: r.stdout + r.stderr };
   };
+  const run = (...args) => runWith({}, ...args);
   const docker = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
   const head = () => git(root, "rev-parse", "HEAD");
   const values = () => {
     const t = readFileSync(env, "utf8");
     return { commit: /^HELPER_COMMIT=(.*)$/m.exec(t)?.[1], release: /^HELPER_RELEASE=(.*)$/m.exec(t)?.[1] };
   };
-  return { dir, root, A, B, env, run, docker, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, root, A, B, env, git, run, runWith, docker, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const mode = (f) => statSync(f).mode & 0o777;
@@ -167,6 +170,59 @@ test("a HELPER_RELEASE or HELPER_COMMIT line not in the plain form, or written t
       assert.equal(s.head(), s.A, `${name}: the checkout did not move`);
       assert.deepEqual(s.docker(), [], `${name}: compose did not run`);
     }
+  } finally {
+    s.done();
+  }
+});
+
+// re-check finding 4: a budget value the helper's start refuses (budgetFromEnv, exit 2) would leave the container
+// restarting; the redeploy refuses it first, with the same rule, naming the variable only, with nothing changed.
+test("a budget variable the helper would refuse, in deploy/.env or in the shell, stops the redeploy with nothing changed; the rule is budgetFromEnv's", () => {
+  const rpcRules = { minShare: RPC_BATCH_MAX, perMethod: true };
+  const helperTakes = (name, v) => {
+    try {
+      budgetFromEnv({ [name]: v }, name, { total: 1, perClient: 0 }, name.startsWith("RPC_") ? rpcRules : {});
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const values = ["", "100,16", "100,10", "100,9", "100,5", "16,16", "4,2", "2,1", "100,16,40", "100,16,10", "100,16,9", "100,16,100", "100,16,101", "100,16,", "100,16,40,1",
+    "0,0", "05,4", "1e3,1", "-1,1", " 100,16", "100,16 ", "100;16", "１００,１６", "9999999,10", "10000000,10", "lots", `${SECRET},1`, "'100,16'"];
+  const s = server();
+  try {
+    let refused = 0;
+    for (const name of ["RPC_BUDGET_SOLANA", "PROXY_BUDGET_JUPITER"]) {
+      for (const v of values) {
+        const takes = helperTakes(name, v);
+        for (const where of ["env", "shell"]) {
+          const body = where === "env" ? `KEY=${SECRET}\nHELPER_RELEASE=3\nHELPER_COMMIT=${s.A}\n${name}=${v}\n` : `KEY=${SECRET}\nHELPER_RELEASE=3\nHELPER_COMMIT=${s.A}\n`;
+          writeFileSync(s.env, body, { mode: 0o600 });
+          const r = s.runWith(where === "shell" ? { [name]: v } : {}, s.B);
+          const label = `${name}=${JSON.stringify(v)} in the ${where}`;
+          if (takes) {
+            assert.equal(r.status, 0, `${label}: the helper takes it, so must the redeploy: ${r.out}`);
+            s.git(s.root, "checkout", "-q", "--detach", s.A); // back to A for the next case
+            continue;
+          }
+          refused++;
+          assert.notEqual(r.status, 0, `${label}: ${r.out}`);
+          assert.match(r.out, new RegExp(`redeploy: ${name} in (this shell|deploy/\\.env) is not a budget the helper takes; nothing changed`), label);
+          if (v.trim() !== "") assert.ok(!r.out.includes(v.trim()), `${label}: the value is never printed`);
+          assert.ok(!r.out.includes(SECRET), label);
+          assert.equal(readFileSync(s.env, "utf8"), body, `${label}: the .env is unchanged`);
+          assert.equal(s.head(), s.A, `${label}: the checkout did not move`);
+        }
+      }
+    }
+    assert.ok(refused >= 40, `refused ${refused}`);
+    // a budget line not in the plain form is refused the same way
+    writeFileSync(s.env, `HELPER_RELEASE=3\nexport RPC_BUDGET_BASE=100,16\n`, { mode: 0o600 });
+    const r = s.run(s.B);
+    assert.notEqual(r.status, 0, r.out);
+    assert.match(r.out, /RPC_BUDGET_BASE in deploy\/\.env is not one plain RPC_BUDGET_BASE=<value> line; nothing changed/);
+    const taken = values.filter((v) => helperTakes("RPC_BUDGET_SOLANA", v)).length + values.filter((v) => helperTakes("PROXY_BUDGET_JUPITER", v)).length;
+    assert.equal(s.docker().length, 2 * taken, "compose ran only for the values the helper takes");
   } finally {
     s.done();
   }

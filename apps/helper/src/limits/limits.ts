@@ -114,22 +114,28 @@ export function clientWindow(max: number, now: () => number = Date.now, windowMs
   };
 }
 
-/** One key's limits: its provider takes `total` requests a window from every caller together, and one caller draws
- * at most `perClient` of them (perClient < total). */
-export type BudgetLimits = { total: number; perClient: number };
+/** One key's limits: its provider takes `total` requests from every caller together in any `windowMs` (a sliding
+ * window, the provider's own: 10 s for a chain's RPC, a minute for a vendor; unset, the budget's window), and one
+ * caller draws at most `perClient` of them per fixed LIMIT_WINDOW_MS window (perClient under total; Infinity: no share). */
+export type BudgetLimits = { total: number; perClient: number; windowMs?: number };
 
 /**
- * A shared upstream budget per key (a chain's RPC provider, a vendor). Every caller draws from the key's `total`
- * requests a window and no caller more than its `perClient` share, so no single caller can make the provider throttle
- * us (the share is sized under the provider's own limit) and an honest caller still draws while one is throttled.
- * take(key, client, n) draws n requests at once (a batch is n calls to the provider); `shareOnly` counts them in the
- * caller's share alone (a cache hit, which reaches no provider). When the provider throttles anyway, hold(key, untilMs)
- * stops every draw on the key until its reset: the helper is the provider's one client, so it waits out what the
- * provider named, and every caller is told the seconds left. A refused draw names the seconds to the window's end.
+ * A shared upstream budget per key (a chain's RPC provider, one RPC method on it, a vendor). Every call that reaches
+ * the provider draws from the key's `total`, the helper's own reads included (they pass no client), counted over a
+ * sliding window as long as the provider's plus a second, so no stretch of the provider's window ever holds more than
+ * the total we sent; a caller draws at most its `perClient` share per fixed window, so an honest caller still draws
+ * while one is throttled. takeEach([[key, n], ...], client) draws on every key at once or on none (a batch is n calls
+ * to the provider, one per method key too); `shareOnly` counts them in the caller's share alone (a cache hit or a call
+ * joining one in flight, which reach no provider). When the provider throttles anyway, hold(key, untilMs) stops every
+ * draw on the key until its reset: the helper is the provider's one client, so it waits out what the provider named,
+ * and every caller is told the seconds left. A refused draw names the seconds until it would go ahead.
  */
 export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () => number = Date.now, windowMs = LIMIT_WINDOW_MS, clients = LIMIT_CLIENTS) {
   let window = -1;
-  const keys = new Map<string, { total: number; counts: Map<string, number> }>();
+  /** Per key and client: the share drawn in the current fixed window. */
+  const shares = new Map<string, Map<string, number>>();
+  /** Per key: [second, requests sent in it], oldest first, kept while the provider's window may still count them. */
+  const sent = new Map<string, [number, number][]>();
   /** Per key (never a client): when the provider's own reset ends. */
   const heldUntil = new Map<string, number>();
   const heldFor = (key: string, t: number): number => {
@@ -138,28 +144,65 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
       heldUntil.delete(key);
       return 0;
     }
-    return Math.min(Math.max(Math.ceil((until - t) / 1000), 1), RETRY_AFTER_MAX_S);
+    return secondsUntil(until, t);
   };
-  return {
-    take(key: string, client: string, n = 1, shareOnly = false): Take {
-      const t = now();
-      const held = heldFor(key, t);
-      if (held > 0) return held;
-      const w = Math.floor(t / windowMs);
-      if (w !== window) {
-        window = w;
-        keys.clear();
+  /** The seconds until `n` more fit under the key's total (0: they fit now). A request sent in second s may still be in
+   * the provider's window until the end of second s + W, W its window in seconds. */
+  const totalWait = (key: string, n: number, t: number, lim: BudgetLimits): number => {
+    const w = Math.ceil((lim.windowMs ?? windowMs) / 1000);
+    const sec = Math.floor(t / 1000);
+    const q = sent.get(key) ?? [];
+    while (q.length > 0 && q[0]![0] < sec - w) q.shift();
+    let used = 0;
+    for (const [, c] of q) used += c;
+    if (used + n <= lim.total) return 0;
+    if (n > lim.total) return RETRY_AFTER_MAX_S;
+    for (const [s, c] of q) {
+      used -= c;
+      if (used + n <= lim.total) return secondsUntil((s + w + 1) * 1000, t);
+    }
+    return RETRY_AFTER_MAX_S;
+  };
+  function takeEach(draws: readonly (readonly [string, number])[], client?: string, shareOnly = false): Take {
+    const t = now();
+    const want = new Map<string, number>();
+    for (const [key, n] of draws) want.set(key, (want.get(key) ?? 0) + n);
+    let wait = 0;
+    for (const key of want.keys()) wait = Math.max(wait, heldFor(key, t));
+    if (wait > 0) return wait;
+    const w = Math.floor(t / windowMs);
+    if (w !== window) {
+      window = w;
+      shares.clear();
+    }
+    for (const [key, n] of want) {
+      const lim = limitsOf(key);
+      if (client !== undefined && Number.isFinite(lim.perClient) && (shares.get(key)?.get(client) ?? 0) + n > lim.perClient) wait = Math.max(wait, toWindowEnd(t, windowMs));
+      if (!shareOnly) wait = Math.max(wait, totalWait(key, n, t, lim));
+    }
+    if (wait > 0) return wait;
+    const sec = Math.floor(t / 1000);
+    for (const [key, n] of want) {
+      if (client !== undefined && Number.isFinite(limitsOf(key).perClient)) {
+        let k = shares.get(key);
+        if (k === undefined) shares.set(key, (k = new Map()));
+        const c = k.get(client) ?? 0;
+        if (c === 0 && k.size >= clients) k.delete(k.keys().next().value as string);
+        k.set(client, c + n);
       }
-      const { total, perClient } = limitsOf(key);
-      let k = keys.get(key);
-      if (k === undefined) keys.set(key, (k = { total: 0, counts: new Map() }));
-      const c = k.counts.get(client) ?? 0;
-      if (c + n > perClient || (!shareOnly && k.total + n > total)) return toWindowEnd(t, windowMs);
-      if (c === 0 && k.counts.size >= clients) k.counts.delete(k.counts.keys().next().value as string);
-      k.counts.set(client, c + n);
-      if (!shareOnly) k.total += n;
-      return 0;
-    },
+      if (shareOnly) continue;
+      let q = sent.get(key);
+      if (q === undefined) sent.set(key, (q = []));
+      const last = q[q.length - 1];
+      if (last !== undefined && last[0] === sec) last[1] += n;
+      else q.push([sec, n]);
+    }
+    return 0;
+  }
+  return {
+    takeEach,
+    /** One key: n requests for `client` (undefined: the helper's own read, which draws from the total only). */
+    take: (key: string, client: string | undefined, n = 1, shareOnly = false): Take => takeEach([[key, n]], client, shareOnly),
     /** The seconds every draw on `key` must still wait for the provider's reset; 0 when none. */
     heldFor: (key: string): Take => heldFor(key, now()),
     /** The provider throttled: no draw on `key` until `untilMs`, held to at most RETRY_AFTER_MAX_S from now. */
@@ -170,14 +213,26 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   };
 }
 
-/** `RPC_BUDGET_<CHAIN>`-style limits: "<total>,<perClient>" requests per LIMIT_WINDOW_MS, whole numbers, perClient
- * under total; unset: `fallback`. A start with any other value stops, naming the variable, never the value. */
-export function budgetFromEnv(env: Record<string, string | undefined>, name: string, fallback: BudgetLimits): BudgetLimits {
+/** Rules a budget variable may add: the least share (`minShare`, a batch's size where a call can be one), and a third
+ * number, the most one RPC method may draw of the total (`perMethod`, at least `minShare`, at most the total). */
+export type BudgetRules = { minShare?: number; perMethod?: boolean };
+
+/** `RPC_BUDGET_<CHAIN>`-style limits: "<total>,<perClient>" (or with `perMethod`, "<total>,<perClient>[,<perMethod>]"),
+ * whole numbers, perClient at least `minShare` and under total; unset: `fallback`. A start with any other value stops,
+ * naming the variable, never the value. */
+export function budgetFromEnv(env: Record<string, string | undefined>, name: string, fallback: BudgetLimits & { perMethod?: number }, rules: BudgetRules = {}): BudgetLimits & { perMethod?: number } {
   const v = env[name];
   if (v === undefined || v === "") return fallback;
-  const m = /^([1-9][0-9]{0,6}),([1-9][0-9]{0,6})$/.exec(v);
-  if (!m || !(Number(m[2]) < Number(m[1]))) throw new Error(`${name} must be "<total>,<per client>" per 10 s, whole numbers, the share under the total`);
-  return { total: Number(m[1]), perClient: Number(m[2]) };
+  const min = rules.minShare ?? 1;
+  const m = (rules.perMethod ? /^([1-9][0-9]{0,6}),([1-9][0-9]{0,6})(?:,([1-9][0-9]{0,6}))?$/ : /^([1-9][0-9]{0,6}),([1-9][0-9]{0,6})$/).exec(v);
+  const total = Number(m?.[1]);
+  const perClient = Number(m?.[2]);
+  const perMethod = m?.[3] === undefined ? undefined : Number(m[3]);
+  if (!m || !(perClient < total) || perClient < min || (perMethod !== undefined && !(perMethod >= min && perMethod <= total))) {
+    const form = rules.perMethod ? `"<total>,<per client>[,<per method>]"` : `"<total>,<per client>"`;
+    throw new Error(`${name} must be ${form}, whole numbers, the share at least ${min} and under the total${rules.perMethod ? ", a method's at least " + min + " and at most the total" : ""}`);
+  }
+  return perMethod === undefined ? { total, perClient } : { total, perClient, perMethod };
 }
 
 /**

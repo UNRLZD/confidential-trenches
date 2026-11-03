@@ -10,11 +10,12 @@
 // What reaches the caller: the provider's status and JSON body. A provider that is down, slow, refusing our key (401,
 // 403), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its own URL's key in any
 // form answers 503 upstream, so the device falls back to its own providers (H2.3).
-// Throttling (card helper-abuse-limits, ../limits/limits.ts): each chain's provider is one budget every caller draws
-// from (RPC_BUDGET_<CHAIN>, default RPC_CHAIN_MAX requests a window, no caller more than RPC_CLIENT_MAX of them, a
-// batch drawing one per request in it). The share sits under the provider's own limit, so no single caller can make
-// the provider throttle us; a draw past the share or the total answers 429 rate_limited with the seconds to the
-// window's end. If the provider throttles anyway (its 429), the helper, its one client, holds the chain until the reset
+// Throttling (card helper-abuse-limits, ../limits/limits.ts): each chain's provider is one budget every call draws
+// from, the helper's own reads included (RPC_BUDGET_<CHAIN>, default RPC_CHAIN_MAX requests in any 10 s, no caller
+// more than RPC_CLIENT_MAX of them a window, a batch drawing one per request in it), and where the provider also limits
+// one method (Solana's public endpoint, RPC_METHOD_MAX), each method a budget of its own drawn in the same step. The
+// totals sit at the provider's own limits, so no set of callers can make the provider throttle us; a draw past a share
+// or a total answers 429 rate_limited with the seconds until it would go ahead. If the provider throttles anyway (its 429), the helper, its one client, holds the chain until the reset
 // it named (at most a minute): every draw on that chain, the helper's own reads included, answers 429 with the seconds
 // left and nothing reaches the provider. A 503 is never a wait.
 //
@@ -47,6 +48,21 @@ export const RPC_CHAIN_MAX = 100;
  * keyed provider's larger RPC_BUDGET_<CHAIN> serves.
  */
 export const RPC_CLIENT_MAX = 16;
+/**
+ * Requests of one method the public Solana endpoint takes in 10 s from every caller together: "Maximum number of
+ * requests per 10 seconds per IP for a single RPC: 40" (clusters.mdx:154, the same "Mainnet rate limits" list as
+ * RPC_CHAIN_MAX). Without it three callers at their share of one method (3 x 16 getSignatureStatuses) make the
+ * endpoint throttle, and its reset holds the chain for every caller. A keyed provider names its own as the third
+ * number of RPC_BUDGET_SOLANA, or none (two numbers: no limit per method).
+ */
+export const RPC_METHOD_MAX = 40;
+/** Each chain's budget unless RPC_BUDGET_<CHAIN> says; only Solana's public endpoint publishes a limit per method. */
+export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?: number }>> = {
+  solana: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
+  base: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+  robinhood: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+  near: { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX },
+};
 /** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
 const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
 /** The whole seconds an EVM provider's -32005 in `answer` (one answer or a batch) asks to wait, 1 to RETRY_AFTER_MAX_S;
@@ -62,7 +78,8 @@ function evmLimited(chain: RpcChain, answer: unknown): number {
   }
   return wait;
 }
-/** The environment variable naming a chain's budget, "<total>,<per client>" per 10 s. */
+/** The environment variable naming a chain's budget, "<total>,<per client>[,<per method>]" per 10 s; the share at
+ * least RPC_BATCH_MAX, so a full batch can be served, and a method's at least that and at most the total. */
 export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase()}`;
 const ID_MAX = 128;
 
@@ -154,8 +171,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const upstreams = readUpstreams(env);
-  const limits = Object.fromEntries(RPC_CHAINS.map((ch) => [ch, budgetFromEnv(env, rpcBudgetEnv(ch), { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX })])) as Record<RpcChain, BudgetLimits>;
-  const budget = upstreamBudget((ch) => limits[ch as RpcChain], now);
+  const limits = Object.fromEntries(RPC_CHAINS.map((ch) => [ch, budgetFromEnv(env, rpcBudgetEnv(ch), RPC_BUDGETS[ch], { minShare: RPC_BATCH_MAX, perMethod: true })])) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
+  // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
+  const budget = upstreamBudget((key) => {
+    const [ch, method] = key.split(" ") as [RpcChain, string | undefined];
+    return method === undefined ? limits[ch] : { total: limits[ch].perMethod!, perClient: Infinity };
+  }, now);
 
   async function readAnswer(r: Response): Promise<string | undefined> {
     if (Number(r.headers.get("content-length") ?? "0") > RPC_ANSWER_MAX) return undefined;
@@ -173,7 +194,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /**
    * One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body, `client`
    * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
-   * page) pass none and draw from no caller's share.
+   * page) pass none: they draw from the provider's total, never a caller's share.
    */
   async function handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
@@ -204,14 +225,15 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return REFUSED(); // nesting too deep to write back
     }
 
-    // the provider's reset holds every caller, the helper's own reads too; then a caller draws its share, a batch one
-    // per request in it
+    // the provider's reset holds every caller, the helper's own reads too; then the call draws on the chain's total (a
+    // caller's share too) and each method's, a batch one per request in it, all or none
     const held = budget.heldFor(c);
     if (held > 0) return throttled(held);
-    if (client !== undefined) {
-      const wait = budget.take(c, client, Array.isArray(out) ? out.length : 1);
-      if (wait > 0) return throttled(wait);
-    }
+    const reqs = (Array.isArray(out) ? out : [out]) as { method: string }[];
+    const draws: [string, number][] = [[c, reqs.length]];
+    if (limits[c].perMethod !== undefined) for (const r of reqs) draws.push([`${c} ${r.method}`, 1]);
+    const wait = budget.takeEach(draws, client);
+    if (wait > 0) return throttled(wait);
     const up = upstreams[c];
     let r: Response;
     let text: string | undefined;

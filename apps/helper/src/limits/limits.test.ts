@@ -45,9 +45,9 @@ test("upstreamBudget: one heavy caller is throttled at its share while an honest
   for (let i = 0; i < 4; i++) b.take("solana", "second");
   assert.equal(b.take("solana", "third"), 0, "the tenth draw");
   const w = b.take("solana", "fourth");
-  assert.ok(w >= 1 && w <= 10, "past the total, the wait to the window's end");
+  assert.ok(w >= 1 && w <= 11, "past the total, the wait until the oldest draws leave the provider's window (10 s and a second)");
   c.jump(w * 1000);
-  assert.equal(b.take("solana", "heavy"), 0, "the next window draws again");
+  assert.equal(b.take("solana", "heavy"), 0, "once they have left, a draw goes ahead again");
 });
 
 test("upstreamBudget: a batch of n draws n in one step, checked whole against the share and the total (review F-A)", () => {
@@ -85,6 +85,69 @@ test("upstreamBudget: hold(key) stops every caller's draw on that key until the 
   assert.equal(b.heldFor("solana"), RETRY_AFTER_MAX_S, "a provider's hour is held to a minute");
   c.jump(RETRY_AFTER_MAX_S * 1000);
   assert.equal(b.heldFor("solana"), 0);
+});
+
+test("upstreamBudget: the total is counted over the provider's own sliding window, so no stretch of it ever holds more than the total, the fixed windows' edges included (re-check F-D)", () => {
+  // a vendor's minute: 60 a sliding minute; callers at a 10 s share of 4, 40 addresses drawing as fast as they may
+  let t = 7_000_000;
+  const b = upstreamBudget(() => ({ total: 60, perClient: 4, windowMs: 60_000 }), () => t);
+  const sent: number[] = [];
+  for (; t < 7_000_000 + 300_000; t += 250) for (let a = 0; a < 40; a++) if (b.take("jupiter", `a${a}`) === 0) sent.push(t);
+  let worst = 0;
+  for (let i = 0, j = 0; i < sent.length; i++) {
+    while (sent[i]! - sent[j]! >= 60_000) j++;
+    worst = Math.max(worst, i - j + 1);
+  }
+  assert.equal(worst, 60, `the most sent in any 60 s: ${worst}`);
+  assert.ok(sent.length >= 60 * 4, `the budget is used, not starved: ${sent.length} in 5 min`);
+});
+
+test("upstreamBudget: a refused total names the seconds until the oldest draws leave the window, and is then right", () => {
+  let t = 8_000_000;
+  const b = upstreamBudget(() => ({ total: 3, perClient: 3, windowMs: 60_000 }), () => t);
+  assert.equal(b.take("v", "a"), 0);
+  t += 20_000;
+  assert.equal(b.take("v", "b", 2), 0);
+  const w = b.take("v", "c");
+  assert.equal(w, 41, "the first draw (second 8000) leaves at the end of second 8060");
+  t += (w - 1) * 1000;
+  assert.ok(b.take("v", "c") > 0, "a second early is still refused");
+  t += 1000;
+  assert.equal(b.take("v", "c"), 0, "on time it goes ahead");
+});
+
+test("upstreamBudget: the helper's own read (no client) draws from the total and from no share; a share-only one draws nothing (re-check F-D)", () => {
+  let t = 9_000_000;
+  const b = upstreamBudget(() => ({ total: 5, perClient: 2, windowMs: 60_000 }), () => t);
+  for (let i = 0; i < 5; i++) assert.equal(b.take("jupiter", undefined), 0, `own read ${i + 1}, past a caller's share`);
+  assert.ok(b.take("jupiter", "device") > 0, "own reads spent the vendor's total: a device waits");
+  assert.ok(b.take("jupiter", undefined) > 0, "and so does the next own read");
+  t += 10_000;
+  assert.ok(b.take("jupiter", undefined) > 0, "a new 10 s window frees no total: the vendor's minute still holds them");
+  assert.equal(b.take("jupiter", undefined, 1, true), 0, "a share-only own read reaches no vendor and draws nothing");
+});
+
+test("upstreamBudget: takeEach draws on every key or on none; one key full refuses the whole draw (re-check F-D solana)", () => {
+  let t = 10_000_000;
+  const b = upstreamBudget((k) => (k === "solana" ? { total: 100, perClient: 16 } : { total: 3, perClient: Infinity }), () => t);
+  assert.equal(b.takeEach([["solana", 3], ["solana getSignatureStatuses", 3]], "a"), 0);
+  assert.ok(b.takeEach([["solana", 1], ["solana getSignatureStatuses", 1]], "b") > 0, "the method's total is spent");
+  assert.equal(b.takeEach([["solana", 14], ["solana getBalance", 3]], "a") > 0, true, "past the caller's share of the chain: refused whole");
+  assert.equal(b.takeEach([["solana", 3], ["solana getBalance", 3]], "b"), 0, "nothing of the refused draws was counted: b's share and getBalance's total are whole");
+  assert.equal(b.takeEach([["solana", 2], ["solana x", 1], ["solana x", 1], ["solana x", 1]], "c"), 0, "one key named three times draws three");
+  assert.ok(b.take("solana x", "c") > 0, "x's three are spent");
+});
+
+test("budgetFromEnv rules: a share under `minShare` (a batch's size) and a method's limit outside minShare..total stop the start, naming the variable only (re-check env)", () => {
+  const fb = { total: 100, perClient: 16, perMethod: 40 };
+  const rules = { minShare: 10, perMethod: true };
+  assert.deepEqual(budgetFromEnv({}, "RPC_BUDGET_SOLANA", fb, rules), fb);
+  assert.deepEqual(budgetFromEnv({ RPC_BUDGET_SOLANA: "500,50" }, "RPC_BUDGET_SOLANA", fb, rules), { total: 500, perClient: 50 }, "two numbers: no limit per method");
+  assert.deepEqual(budgetFromEnv({ RPC_BUDGET_SOLANA: "100,10,10" }, "RPC_BUDGET_SOLANA", fb, rules), { total: 100, perClient: 10, perMethod: 10 });
+  assert.deepEqual(budgetFromEnv({ RPC_BUDGET_SOLANA: "100,16,100" }, "RPC_BUDGET_SOLANA", fb, rules), { total: 100, perClient: 16, perMethod: 100 });
+  for (const bad of ["100,5", "100,9", "100,16,9", "100,16,101", "100,16,0", "100,16,", "100,16,40,1", "100,16, 40", "100,16,04"])
+    assert.throws(() => budgetFromEnv({ RPC_BUDGET_SOLANA: bad }, "RPC_BUDGET_SOLANA", fb, rules), (e: Error) => /^RPC_BUDGET_SOLANA must be/.test(e.message) && !e.message.includes(bad), bad);
+  assert.throws(() => budgetFromEnv({ X: "100,16,40" }, "X", fb), /X must be/, "a third number only where the rules allow one");
 });
 
 test("budgetFromEnv: \"<total>,<per client>\" with the share under the total, else a start stops naming the variable only", () => {

@@ -253,7 +253,8 @@ test("review F-C2: one address reading a cached proxy list 1000 times in one win
 });
 
 test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per client>\"), else its published limit's; a bad value stops the start naming the variable", async () => {
-  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 5, perClient: 4 }, relay: { total: 8, perClient: 2 }, lifi: { total: 16, perClient: 2 }, oneclick: { total: 8, perClient: 2 } });
+  const M = 60_000; // every vendor's limit is a minute's
+  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M }, relay: { total: 50, perClient: 2, windowMs: M }, lifi: { total: 100, perClient: 2, windowMs: M }, oneclick: { total: 50, perClient: 2, windowMs: M } });
   for (const v of VENDOR_NAMES) assert.ok(PROXY_BUDGETS[v]!.perClient < PROXY_BUDGETS[v]!.total, v);
   assert.equal(proxyBudgetEnv("oneclick"), "PROXY_BUDGET_ONECLICK");
   assert.throws(() => createProxy({ PROXY_BUDGET_RELAY: "8,8" }), /^Error: PROXY_BUDGET_RELAY must be/);
@@ -288,25 +289,84 @@ test("review F-D (proxy): at each vendor's published limit, no set of callers ca
     const p = createProxy(env, { fetch: f, now: () => (t += 1), sleep: async () => {} });
     const path = { jupiter: "/swap/v2/build", relay: "/quote/v2", lifi: "/v1/quote", oneclick: "/v0/quote" }[v];
     const body = v === "relay" || v === "oneclick" ? "{}" : "";
-    // the helper's own Jupiter reads: 30 a minute (data/solana/token.ts JUP_GAP_MS), here 5 in this window
-    if (v === "jupiter") for (let i = 0; i < 5; i++) await p.handle(v, "/tokens/v2/search", `query=${i}`, "");
+    // the helper's own Jupiter reads (search at most 15 a minute, Discover's lists about 15), here 5, drawn from the total
+    const own = v === "jupiter" ? 5 : 0;
+    for (let i = 0; i < own; i++) await p.handle(v, "/tokens/v2/search", `query=${i}`, "");
     let n = 0;
     for (; n < 50; n++) {
       for (let i = 0; i < 200; i++) if ((await p.handle(v, path, `a=${i}`, body, `198.51.100.${n}`)).status !== 200) break;
       if ((await p.handle(v, path, "h=1", body, `192.0.2.${n}`)).status !== 200) break; // a first-time caller each round
     }
-    return { addresses: n + 1, throttledByVendor };
+    return { addresses: n + 1, throttledByVendor, own };
   };
   for (const v of VENDOR_NAMES) {
     const today = await run(v, { [proxyBudgetEnv(v)]: "300,60" });
     const now = await run(v, {});
     assert.ok(today.throttledByVendor > 0, `${v} at 06a656f's budget: the vendor throttled, so it was held for everyone`);
     assert.equal(now.throttledByVendor, 0, `${v}: the vendor never throttled`);
-    // each round an address takes its share and the honest caller one: refused once the rounds pass the total
-    assert.equal(now.addresses, Math.floor(PROXY_BUDGETS[v]!.total / (PROXY_BUDGETS[v]!.perClient + 1)) + 1, v);
+    // each round an address takes its share and the honest caller one: refused once the rounds pass what the helper's
+    // own reads left of the total
+    assert.equal(now.addresses, Math.floor((PROXY_BUDGETS[v]!.total - now.own) / (PROXY_BUDGETS[v]!.perClient + 1)) + 1, v);
     console.log(`  [F-D proxy] ${v}: ${now.addresses} addresses at the published default, ${today.addresses} at 06a656f's budget`);
     assert.ok(now.addresses > today.addresses, `${v}: ${now.addresses} addresses, today ${today.addresses}`);
   }
+});
+
+// re-check F-D (sustained): Jupiter Free (60 a sliding minute) for three minutes, addresses drawing the whole budget
+// at the last ms of each 10 s window and the first of the next (the most a sliding minute can hold under fixed windows),
+// with the helper's own Jupiter reads as deployed: Discover's three lists every 12 s through the 10 s cache
+// (data/solana/lists.ts) and one token search every 4 s (data/solana/token.ts JUP_GAP_MS).
+test("re-check F-D (sustained): at Jupiter Free's 60 a sliding minute, the helper's own reads and every caller together never make Jupiter throttle", async () => {
+  let t = 1_800_000_000_000;
+  const T0 = t;
+  const calls: number[] = [];
+  let refused = 0;
+  let peak = 0;
+  const f = async () => {
+    while (calls.length > 0 && t - calls[0]! >= 60_000) calls.shift();
+    if (calls.length >= 60) return (refused++, new Response("slow", { status: 429 }));
+    calls.push(t);
+    peak = Math.max(peak, calls.length);
+    return json({ ok: 1 });
+  };
+  const p = createProxy({}, { now: () => t, fetch: f, sleep: async (ms) => void (t += ms) });
+  let q = 0;
+  let own = 0;
+  for (let ms = 0; ms < 180_000; ms += 1) {
+    t = T0 + ms;
+    if (ms === 9_999 || (ms >= 10_000 && ms % 10_000 === 0))
+      for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) await p.handle("jupiter", "/swap/v2/build", `q=${q++}`, "", `198.51.100.${a}`);
+    if (ms % 12_000 === 0) for (const l of ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"]) if ((await p.handle("jupiter", l, "limit=100", "")).status === 200) own++;
+    if (ms % 4_000 === 0 && (await p.handle("jupiter", "/tokens/v2/search", `query=m${ms}`, "")).status === 200) own++;
+  }
+  console.log(`  [F-D sustained] jupiter Free 3 min, 20 addresses at full draw + own reads: vendor peak ${peak}/60 s, vendor 429s ${refused}, own reads served ${own}`);
+  assert.equal(refused, 0, "Jupiter never answered 429");
+  assert.ok(peak <= 60 && peak >= 55, `the plan is used, never passed: peak ${peak}`);
+});
+
+test("re-check F-D: a retry after a vendor's short reset reaches the vendor again, so it draws from the total too", async () => {
+  const c = clock();
+  const f = vendor((_c, n) => (n === 1 ? json({ e: "slow" }, 429, { "retry-after": "0" }) : json({ ok: 1 })));
+  const p = createProxy({ PROXY_BUDGET_RELAY: "2,1" }, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "a")).status, 200, "served by the retry");
+  assert.equal(f.seen.length, 2);
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "b")).status, 429, "the call and its retry spent the total of 2");
+  assert.equal(f.seen.length, 2, "nothing past the total reached the vendor");
+});
+
+test("re-check F-D: a call joining one in flight reaches no vendor, so it draws only the caller's share", async () => {
+  const c = clock();
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const f = vendor(async () => (await gate, json({ list: [] })));
+  const p = createProxy({ PROXY_BUDGET_JUPITER: "2,1" }, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  const a = p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", "a");
+  const b = p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", "b");
+  release();
+  assert.deepEqual([(await a).status, (await b).status], [200, 200]);
+  assert.equal(f.seen.length, 1, "one vendor call for both");
+  assert.equal((await p.handle("jupiter", "/tokens/v2/toptrending/1h", "limit=100", "", "c")).status, 200, "the total's second draw is still there");
+  assert.equal(f.seen.length, 2);
 });
 
 test("reset headers: seconds, an epoch in s or ms, an HTTP date; none means 1 s", () => {
