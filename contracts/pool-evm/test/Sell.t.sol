@@ -332,9 +332,13 @@ contract SellTest is SellBase {
     SellDelegate.Sell memory _s = _good();
     bytes memory _sig = _signed(_s);
     // the same swap paying out to another address
-    _s.data = abi.encodeCall(MockRouter.swap, (token, AMOUNT, OUT, false, address(0xBAD)));
+    SellDelegate.Sell memory _c = _good();
+    _c.data = abi.encodeCall(MockRouter.swap, (token, AMOUNT, OUT, false, address(0xBAD)));
     vm.expectRevert(SellDelegate.InvalidSignature.selector);
+    _send(_c, FEE, _sig);
+    // the calldata as signed lands
     _send(_s, FEE, _sig);
+    assertEq(SENDER.balance, FEE);
   }
 
   /// Each field W signs, changed after signing, is refused; the sell as signed then lands
