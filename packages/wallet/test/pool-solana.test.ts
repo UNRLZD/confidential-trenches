@@ -1049,21 +1049,23 @@ test("fold 3 (Q2a): a pool busy at every read on both RPCs reaches the fallback;
 
 test("fold 3 (Q2b): one RPC that adds a mark of its own making to every read never brings a quiet pool to the fallback: own and foreign read the same, then a refusal", { timeout: 60_000 }, async () => {
   const honest = (x: readonly [bigint, bigint]) => memo((i) => depositsChain([...OURS, ...(i > SOL_RESTORE_QUIET_ROUNDS ? [x] : [])], 700 + i));
-  const run = async (x: readonly [bigint, bigint], junk: boolean) => {
+  const run = async (x: readonly [bigint, bigint], junk: "a" | "b" | null) => {
     const log: string[] = [];
     const h = honest(x);
-    const out = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [perRpc("https://a.example", h, h, log), perRpc("https://b.example", junk ? withJunk(h) : h, h, log)], gap: 4 }).then(() => "restored", (e: Error) => `refused: ${e.message}`);
+    const out = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [perRpc("https://a.example", junk === "a" ? withJunk(h) : h, h, log), perRpc("https://b.example", junk === "b" ? withJunk(h) : h, h, log)], gap: 4 }).then(() => "restored", (e: Error) => `refused: ${e.message}`);
     return { log, out };
   };
-  const ownJ = await run(U(1), true);
-  const otherJ = await run(FOREIGN(99), true);
-  assert.deepEqual(ownJ.log, otherJ.log);
-  assert.match(ownJ.out, /one RPC alone gave new marks/);
-  assert.equal(otherJ.out, ownJ.out);
-  assert.equal(ownJ.log.filter((x) => x.endsWith("getProgramAccounts")).length, 4 * (1 + SOL_RESTORE_LONE_ROUNDS + 2), "the first read, the lone rounds, the busy round 9, and round 10's lone read that ends it");
+  for (const liar of ["a", "b"] as const) {
+    const ownJ = await run(U(1), liar);
+    const otherJ = await run(FOREIGN(99), liar);
+    assert.deepEqual(ownJ.log, otherJ.log, liar);
+    assert.match(ownJ.out, /one RPC alone gave new marks/, liar);
+    assert.equal(otherJ.out, ownJ.out, liar);
+    assert.equal(ownJ.log.filter((x) => x.endsWith("getProgramAccounts")).length, 4 * (1 + SOL_RESTORE_LONE_ROUNDS + 2), "the first read, the lone rounds, the busy round 9, and round 10's lone read that ends it");
+  }
   // honest RPCs on the same quiet pool: no leak, and the restore holds
-  const ownQ = await run(U(1), false);
-  const otherQ = await run(FOREIGN(99), false);
+  const ownQ = await run(U(1), null);
+  const otherQ = await run(FOREIGN(99), null);
   assert.deepEqual(ownQ.log, otherQ.log);
   assert.deepEqual([ownQ.out, otherQ.out], ["restored", "restored"]);
 });
@@ -1120,4 +1122,17 @@ test("fold 3 (L1): an abort during a lag wait stops the read: no RPC call after 
   await assert.rejects(solanaMarks([lagMarks, rpc(chain, { ...MAINNET, url: "https://b.example" })], PROGRAM, ctl2.signal, undefined, async () => ctl2.abort()), { name: "AbortError" });
   await new Promise((ok) => setTimeout(ok, 20));
   assert.equal(after2, 0);
+});
+
+test("fold 3: a round whose new marks are spent marks both RPCs give is busy (a pool busy with releases reaches the fallback, never the lone refusal)", { timeout: 60_000 }, async () => {
+  const log: { m: string }[] = [];
+  const releases = memo((i) => {
+    const c = depositsChain(OURS, 700 + i);
+    const marks = new Map(c.marks!);
+    for (let k = 1; k <= i; k++) marks.set(solanaMarkOf(PROGRAM, "spent", BigInt(770_000 + k)), spentData(1n)); // other users' releases
+    return { ...c, marks };
+  });
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: movingPair(releases, 4, log as never), gap: 4 });
+  assert.equal(gpaCalls(log), 4 * (SOL_RESTORE_QUIET_ROUNDS + 2), "the quiet rounds, then the fallback's one walk");
+  assert.equal(js(r), js(await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(releases(0), releases(0)), gap: 4 })));
 });

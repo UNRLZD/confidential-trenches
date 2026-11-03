@@ -270,8 +270,8 @@ export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: strin
     const read = await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots, a.lagWait);
     const again = solanaMarksUnion(marks, read);
     const fresh = [...again.spent.keys(), ...again.pre.keys()].filter((key) => !marks.spent.has(key) && !marks.pre.has(key));
-    // the public rule, until the fallback's first walk: read again while there are new marks
-    if (fresh.length > 0 && walks === 0) {
+    // the public rule: read again while there are new marks, until the busy rounds pass SOL_RESTORE_QUIET_ROUNDS
+    if (fresh.length > 0) {
       if (fresh.some((key) => read.by[0].has(key) && read.by[1].has(key))) busy++;
       else if (++lone > SOL_RESTORE_LONE_ROUNDS) throw new Error(`restore: one RPC alone gave new marks in ${lone} reads; try again`);
       if (busy <= SOL_RESTORE_QUIET_ROUNDS) {
