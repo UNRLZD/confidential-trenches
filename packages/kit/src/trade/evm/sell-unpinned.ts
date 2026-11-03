@@ -24,7 +24,7 @@
 // precommitment by signing again with a fresh one.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_MAX_HOPS, evmPoolVenues, venuePins, type EvmPoolChain, type EvmPoolVenue, type EvmV3Route } from "./buy-unpinned.ts";
+import { EVM_POOL_MAX_HOPS, evmPoolVenues, venuePins, type EvmPoolChain, type EvmPoolVenueList, type EvmV3Route } from "./buy-unpinned.ts";
 
 /** A sell's deadline, seconds past now: at least the helper's send margin (apps/helper pool/evm.ts
  *  EVM_POOL_SEND_MARGIN_MS, 60 s, card helper-pool-senders: a send needs time to be mined before the deadline), at
@@ -284,13 +284,13 @@ export function evmPoolSignSellAuthorizationUnpinned(secretKey: Uint8Array, chai
 // the chain's pinned sell delegate: a helper that names its own would take them (the review of 8fd535f).
 
 /** The pins of `chain` in `venues` (buy-unpinned.ts's venuePins: own keys only), refused as a sell's error. */
-function pinsOf(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain): ReturnType<typeof venuePins> {
+function pinsOf(venues: EvmPoolVenueList, chain: EvmPoolChain): ReturnType<typeof venuePins> {
   if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");
   return venuePins(venues, chain);
 }
 
 /** evmPoolBuildSellUnpinned into the chain's pinned pool. */
-export function pinnedBuildSell(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, chain: EvmPoolChain, req: EvmPoolSellRequest): EvmPoolSell {
+export function pinnedBuildSell(venues: EvmPoolVenueList, chain: EvmPoolChain, req: EvmPoolSellRequest): EvmPoolSell {
   const pool = pinsOf(venues, chain).pool;
   if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);
   // a request that is not an object copies to { pool } alone, which the unpinned builder refuses (bad_route)
@@ -298,7 +298,7 @@ export function pinnedBuildSell(venues: Readonly<Record<EvmPoolChain, EvmPoolVen
 }
 
 /** evmPoolSignSellUnpinned of a sell into the chain's pinned pool only. */
-export function pinnedSignSell(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, secretKey: Uint8Array, chain: EvmPoolChain, built: EvmPoolSell): Uint8Array {
+export function pinnedSignSell(venues: EvmPoolVenueList, secretKey: Uint8Array, chain: EvmPoolChain, built: EvmPoolSell): Uint8Array {
   const pool = pinsOf(venues, chain).pool;
   if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool to sign a sell into yet`);
   // a sell the builder did not return is left to the unpinned signer, which refuses it (not_built)
@@ -307,7 +307,7 @@ export function pinnedSignSell(venues: Readonly<Record<EvmPoolChain, EvmPoolVenu
 }
 
 /** evmPoolSignSellAuthorizationUnpinned of the chain's pinned sell delegate only. */
-export function pinnedSignSellAuthorization(venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>>, secretKey: Uint8Array, chain: EvmPoolChain, nonce: bigint): EvmPoolSellAuthorization {
+export function pinnedSignSellAuthorization(venues: EvmPoolVenueList, secretKey: Uint8Array, chain: EvmPoolChain, nonce: bigint): EvmPoolSellAuthorization {
   const delegate = pinsOf(venues, chain).sellDelegate;
   if (delegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);
   return evmPoolSignSellAuthorizationUnpinned(secretKey, chain, delegate, nonce);
