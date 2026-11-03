@@ -107,12 +107,12 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's ten checks and the app's nine are the plans' (the sign host's signpage-shell runs four ways)", async () => {
+test("the signing page's ten checks (signpage-shell runs four ways) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
   assert.equal(new Set(sign.include.map((e) => e.key)).size, 10);
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
-  assert.equal(app.include.length, 9);
+  assert.equal(app.include.length, (await import("../../apps/terminal/scripts/deploy.mjs")).LIVE_CHECKS.length, "each app check is one job");
   assert.ok(app.include.some((e) => e.key === "app-verify-mount" && e.args === "--network mainnet"));
   assert.ok((await planFor("app", { commit: COMMIT, network: "testnet" })).include.some((e) => e.args === "--network testnet"));
 });
