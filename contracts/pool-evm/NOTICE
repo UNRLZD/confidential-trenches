@@ -99,7 +99,8 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      A sell, Uniswap v3 one hop through SwapRouter02, W's authorization in the same transaction, the pool's trees
      empty (test/SellFork.t.sol): Base 507,305 gas on 1.8.6 (plan) and 462,705 on 1.7.1; Robinhood 556,941 on 1.8.6
      (plan) and 512,341 on 1.7.1. The deposit inserts into both trees, about 41,078 gas a level of depth
-     (test/Sell.t.sol test_gasSellMockRouterDepth0 and Depth32: 442,528 and 1,757,038 on 1.7.1).
+     (test/Sell.t.sol test_gasSellMockRouterDepth0 and Depth32: 502,228 and 1,816,738 on 1.8.6, 442,528 and
+     1,757,038 on 1.7.1).
 
 Gas, each pool call its own transaction (isolate = true in foundry.toml), so a figure is what a sender pays: the
 21,000 base, calldata and cold reads included. The kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH.
