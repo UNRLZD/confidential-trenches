@@ -393,7 +393,7 @@ test("M362 (4): a 429 from one region goes to the next; each send starts at the 
   assert.equal(rate.seen.length, 2, "a JSON-RPC rate-limit answer counts as busy too");
 });
 
-test("M362 (4): the plain send only when every region fails on transport; busy or refused everywhere sends nothing (503)", async () => {
+test("M362 (4): the plain send only when every region fails on transport; busy or refused everywhere sends nothing (a 5xx or a refusal 503, a throttle 429)", async () => {
   const engine = blockEngine(() => "throw");
   const paths: string[][] = [];
   assert.equal(code(await mainnet({ engine, paths, end: "filled" }).carry(body(tipped()))), "ok");
@@ -411,7 +411,8 @@ test("M362 (4): the plain send only when every region fails on transport; busy o
   const mixed = blockEngine((host) => (host.startsWith("tokyo.") ? "429" : "throw"));
   const p1: string[][] = [];
   const a = await mainnet({ engine: mixed, paths: p1 }).carry(body(tipped()));
-  assert.deepEqual([a.status, code(a)], [503, "upstream"], "one region busy: not every region failed on transport");
+  // card helper-abuse-limits: a region's 429 is a throttle, so the answer is 429 with a wait (still nothing plain)
+  assert.deepEqual([a.status, code(a), a.retryAfterS], [429, "rate_limited", 1], "one region throttled: not every region failed on transport");
   assert.deepEqual(p1, []);
   const refused = blockEngine(() => "rpc_error");
   const p2: string[][] = [];
@@ -544,7 +545,10 @@ test("M369 (M1): a client has at most two mainnet tag 3 carries waiting for thei
   const c = await s.carry(body(n(3)), "x");
   assert.deepEqual([c.status, code(c)], [429, "in_flight"]);
   assert.equal(engine.seen.length, 2, "the third sent nothing");
-  assert.ok(await pending(s.carry(body(n(1)), "x")), "a repeat of a carry in flight is no new carry: it waits for the first answer");
+  // M374 (5): a repeat of a carry in flight holds a request open too, so it counts: x already holds two
+  const rx = await s.carry(body(n(1)), "x");
+  assert.deepEqual([rx.status, code(rx), rx.retryAfterS], [429, "in_flight", 2], "a repeat from a client at its limit is refused");
+  assert.ok(await pending(s.carry(body(n(1)), "z")), "a repeat from a client under its limit waits for the first answer");
   const y = s.carry(body(n(4)), "y");
   await sleep(20);
   assert.equal(engine.seen.length, 3, "another client goes on");
@@ -653,7 +657,7 @@ test("M374 (1): a block engine's words never reach the caller: the 503 says only
   }
   // busy everywhere (rate-limit words): the same
   const busy: JitoFetch = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32097, message: `Rate limit exceeded ${"5".repeat(88)}` } }));
-  assert.deepEqual((await mainnet({ engine: { fetchFn: busy } }).carry(body(tipped()), "c")).body, { error: { code: "upstream" } });
+  assert.deepEqual((await mainnet({ engine: { fetchFn: busy } }).carry(body(tipped()), "c")).body, { error: { code: "rate_limited" } });
   // and the ends without a fill: their codes alone
   for (const end of ["expired", "unknown"] as const) {
     const a = await mainnet({ engine: blockEngine(() => "ok"), done: (x) => Promise.resolve({ txs: [{ signature: x.sig, state: end, sends: [] }] }) }).carry(body(tipped()), "c");
@@ -685,4 +689,118 @@ test("G4: a held unknown end frees the note at the release's deadline", async ()
   t = NOW + 270_000; // the first release's deadline
   const b = await s.carry(body(tipped({ r: { deadlineMs: BigInt(NOW + 470_000) } })), "c");
   assert.equal(engine.seen.length, 2, `past the deadline the note is sent again (answer ${code(b)})`);
+});
+
+// card helper-abuse-limits, M374 (5): the limit counts held requests, not carries. At be4b353 a repeat of a carry in
+// flight bypassed it, so one client could hold any number of requests open on one carry.
+test("M374 (5): repeats of one carry from one client hold at most POOL_JITO_IN_FLIGHT_MAX requests open; the next is 429 in_flight with a wait", async () => {
+  const engine = blockEngine(() => "ok");
+  const ds: { sig: string; d: ReturnType<typeof deferred> }[] = [];
+  const s = mainnet({ engine, done: (x) => { const d = deferred(); ds.push({ sig: x.sig, d }); return d.p; } });
+  const w = tipped({ r: { existingNullifierHash: f32(240) } });
+  const first = s.carry(body(w), "x");
+  await sleep(20);
+  const again = s.carry(body(w), "x");
+  assert.ok(await pending(again), "the second held request: within the limit");
+  const third = await Promise.race([s.carry(body(w), "x"), sleep(200).then(() => null)]);
+  assert.ok(third !== null, "the third is answered at once, not held");
+  assert.deepEqual([third!.status, code(third!), third!.retryAfterS], [429, "in_flight", 2]);
+  assert.equal(engine.seen.length, 1, "one send for the carry");
+  ds[0]!.d.resolve({ txs: [{ signature: ds[0]!.sig, state: "filled", sends: [] }] });
+  assert.equal(code(await first), "ok");
+  assert.equal(code(await again), "ok");
+  assert.equal(code(await s.carry(body(w), "x")), "ok", "once the fill answers, the client's places are free");
+});
+
+// card helper-abuse-limits, M374 (4): a nullifier whose last send expired (never landed) goes again only into a block
+// engine second that is free now (queue limit 0), so re-sends of unlanded notes never queue ahead of fresh sends. The
+// pacer runs at 1 s on its real monotonic clock, which moves.
+test("M374 (4): an expired nullifier's re-send goes only into a free second, else 429 rate_limited unsent; a fresh send in the same moment queues and goes", async () => {
+  const engine = blockEngine(() => "ok");
+  const expiredOnce = new Set<string>();
+  const s = mainnet({
+    engine,
+    intervalMs: 1_000,
+    done: (x) => {
+      // the first send of nullifier 250 never lands; everything else fills
+      const nf = Buffer.from(x.wire).includes(Buffer.from(f32(250))) && !expiredOnce.has("250");
+      if (nf) expiredOnce.add("250");
+      return Promise.resolve({ txs: [{ signature: x.sig, state: nf ? "expired" : "filled", sends: [] }] });
+    },
+  });
+  const old = tipped({ r: { existingNullifierHash: f32(250) } });
+  const e = await s.carry(body(old), "a");
+  assert.deepEqual([e.status, code(e)], [503, "not_landed"], "the first send expired");
+  // seven fresh sends take the other seven regions' seconds: every region is booked for the next second
+  const fresh = await Promise.all(Array.from({ length: 7 }, (_, i) => s.carry(body(tipped({ r: { existingNullifierHash: f32(251 + i) } })), `f${i}`)));
+  for (const f of fresh) assert.equal(code(f), "ok");
+  assert.equal(engine.seen.length, 8);
+  const re = await s.carry(body(old), "a");
+  assert.deepEqual([re.status, code(re), re.retryAfterS], [429, "rate_limited", 1], "the re-send found no free second");
+  assert.equal(engine.seen.length, 8, "and sent nothing");
+  assert.deepEqual(re.body, { error: { code: "rate_limited" } }, "the code only");
+  const next = await s.carry(body(tipped({ r: { existingNullifierHash: f32(260) } })), "b");
+  assert.equal(code(next), "ok", "a fresh send queues for the next second and goes");
+  await sleep(1_050);
+  assert.equal(code(await s.carry(body(old), "a")), "ok", "in a free second the re-send goes");
+});
+
+// card helper-abuse-limits, the review's probes (R-S1 to R-S4)
+// R-S1: a carry whose send throws (a rejection, not an answer) frees the client's held place.
+test("review R-S1: a mainnet tag 3 whose block-engine send rejects frees its held place (no leak until restart)", async () => {
+  const boom = { send: async () => { throw new Error("boom"); }, rebroadcast: async () => ({ kind: "refused" as const, detail: "" }) };
+  const s = solanaPoolSender(
+    { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    { providers: [stub([]), stub([])], now: () => NOW, readRent: async () => MAINNET, jito: boom as never, send: () => { throw new Error("unused"); } },
+  );
+  for (let i = 0; i < 5; i++) {
+    const r = await s.carry(body(tipped({ r: { existingNullifierHash: f32(100 + i) } })), "x").then((a) => a, (e: Error) => ({ status: -1, body: { error: { code: e.message } } }) as never);
+    assert.notEqual(code(r as PoolSendAnswer), "in_flight", `carry ${i}: a rejected carry left its place held`);
+  }
+});
+// R-S2: the kit's send throwing synchronously (a set that fails its own checks) frees the held place too.
+test("review R-S2: a mainnet tag 3 whose sendSolanaSet throws synchronously frees its held place", async () => {
+  const engine = blockEngine(() => "ok");
+  const s = solanaPoolSender(
+    { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    { providers: [stub([]), stub([])], now: () => NOW, readRent: async () => MAINNET, jito: jitoSender({ fetch: engine.fetchFn, timeoutMs: 1_000, intervalMs: 0 }), send: () => { throw new Error("the set fails its own checks"); } },
+  );
+  for (let i = 0; i < 5; i++) {
+    const r = await s.carry(body(tipped({ r: { existingNullifierHash: f32(110 + i) } })), "x").then((a) => a, (e: Error) => ({ status: -1, body: { error: { code: "threw:" + e.message } } }) as never);
+    assert.notEqual(code(r as PoolSendAnswer), "in_flight", `carry ${i}: a throwing send left its place held`);
+  }
+});
+// R-S3: end state 1 on the pool route: the pool provider's own 429 (what the kit's solanaJsonRpc throws: "HTTP 429")
+// is an upstream throttle, so it should answer 429 with a Retry-After; it answers 503 upstream (fatal for the device).
+test("review R-S3: a pool provider's 429 on the simulation answers 429 rate_limited with a wait (end state 1)", async () => {
+  const throttling: SolanaRpc = Object.assign(async () => { throw new Error("HTTP 429"); }, { url: "https://stub.invalid/429" });
+  const s = solanaPoolSender(
+    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    { providers: [throttling, stub([])], now: () => NOW, readRent: async () => MAINNET, send: () => { throw new Error("not reached"); } },
+  );
+  const a = await s.carry(body(wire()), "x");
+  assert.deepEqual([a.status, code(a), a.retryAfterS !== undefined], [429, "rate_limited", true], `got ${a.status} ${code(a)}`);
+});
+test("a pool provider's throttle on the epoch's rent read is 429 rate_limited with a wait too; any other failed read stays 503 upstream", async () => {
+  // Solana's -32005 is a node behind (no EVM limit code here): a failure, not a wait
+  for (const [msg, want] of [["HTTP 429", 429], ["RPC error -32429: rate limit reached", 429], ["HTTP 503", 503], ["fetch failed", 503], ["RPC error -32005: Node is behind by 42 slots", 503]] as const) {
+    const s = solanaPoolSender(
+      { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+      { providers: [stub([]), stub([])], now: () => NOW, readRent: async () => { throw new Error(msg); }, send: () => { throw new Error("not reached"); } },
+    );
+    const a = await s.carry(body(wire()), "x");
+    assert.deepEqual([a.status, code(a), a.retryAfterS], want === 429 ? [429, "rate_limited", 1] : [503, "upstream", undefined], msg);
+  }
+});
+// R-S4: jito send(queueMaxMs 0) never waits, and a 5xx alone is never "throttled".
+test("review R-S4: send with queue limit 0 answers at once when every second is booked; all-5xx is busy, not throttled", async () => {
+  const j = jitoSender({ regions: ["https://a.invalid/x", "https://b.invalid/x"], fetch: async (u, i) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "SIG" }), { status: 200 }), timeoutMs: 500, intervalMs: 5_000 });
+  assert.equal((await j.send("AA==", "SIG")).kind, "ok");
+  assert.equal((await j.send("AA==", "SIG")).kind, "ok");
+  const t0 = performance.now();
+  const r = await j.send("AA==", "SIG", 0);
+  assert.ok(performance.now() - t0 < 50, "no wait");
+  assert.deepEqual(r, { kind: "busy", detail: "every region's next second is booked", throttled: true });
+  const j5 = jitoSender({ regions: ["https://a.invalid/x", "https://b.invalid/x"], fetch: async () => new Response("", { status: 502 }), timeoutMs: 500, intervalMs: 0 });
+  assert.deepEqual(await j5.send("AA==", "SIG", 0), { kind: "busy", detail: "HTTP 502", throttled: false });
 });
