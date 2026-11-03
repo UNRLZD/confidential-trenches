@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const RPCS = { near: ["n1", "n2"], "near-testnet": ["t1", "t2"], solana: ["s1", "s2"], "solana-devnet": ["d1", "d2"], base: ["b1", "b2"], robinhood: ["r1", "r2"] };
+const RPCS = { near: ["n1", "n2"], "near-testnet": ["t1", "t2"], solana: ["s1", "s2"], "solana-devnet": ["d1", "d2"], base: ["b1", "b2"], robinhood: ["r1", "r2"], "base-sepolia": ["e1", "e2"], "robinhood-testnet": ["h1", "h2"] };
 const BASE_TX = "0x" + "ab".repeat(32);
 const NEAR_TX = "Bv7hjXuDcC9WePLNbq3qntubUKqDR8x8dvgJSSH7mk8o";
 const SOL_TX = "2z6qyzLaN9dV3SUaNyCGXm4zPQTQ61vuJJnTvbn3vzPkZNwQ8KJhCEETJeN7vtM9y5BeuGDxCDwrkfAHKUc6rZDw";
@@ -23,8 +23,10 @@ function stub(answer) {
 }
 const NOV2 = Date.parse("2026-11-02T00:00:00Z") / 1000; // seconds
 const OCT1 = Date.parse("2026-10-01T00:00:00Z") / 1000;
+// the EVM test networks' stub RPCs answer their own chain ids: Base Sepolia 84532, Robinhood testnet 46630
+const STUB_CHAIN_ID = { e1: "0x14a34", e2: "0x14a34", h1: "0xb626", h2: "0xb626" };
 const chainAnswers = (t) => (url, method) => {
-  if (method === "eth_chainId") return { result: url.startsWith("b") ? "0x2105" : "0x1237" };
+  if (method === "eth_chainId") return { result: STUB_CHAIN_ID[url] ?? (url.startsWith("b") ? "0x2105" : "0x1237") };
   if (method === "eth_getTransactionReceipt") return { result: { status: "0x1", blockNumber: "0x10" } };
   if (method === "eth_getBlockByNumber") return { result: { timestamp: "0x" + t.toString(16) } };
   if (method === "getTransaction") return { result: { meta: { err: null }, blockTime: t } };
@@ -694,6 +696,65 @@ test('a devnet signature written as "Tx: solana" is refused on the mainnet RPCs,
   assert.deepEqual((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), split, RPCS)).refusals, []);
   assert.match(parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: solana-devnet ${NEAR_TX}\n`, "demo").problems.join(), /bad solana-devnet hash/);
 });
+
+// Card money-gate-evm-testnets: Base Sepolia and Robinhood's testnet read back on their own RPCs, with the same EVM
+// reads (chain id, receipt status, block time against FLOOR) as Base and Robinhood, and never real-money proof.
+for (const [chain, [u1, u2], mainnet, [m1, m2]] of [
+  ["base-sepolia", ["e1", "e2"], "base", ["b1", "b2"]],
+  ["robinhood-testnet", ["h1", "h2"], "robinhood", ["r1", "r2"]],
+]) {
+  const one = `Money path: yes\nTx: ${chain} ${BASE_TX}\n`;
+  test(`a ${chain} tx reads ok on both of its RPCs, on no other chain's, and is never real-money proof`, async () => {
+    const seen = urlsOf(good);
+    const r = await moneyGate(rec(one), seen.fetchFn, RPCS);
+    assert.deepEqual(r.refusals, []);
+    assert.deepEqual(r.read, [u1, u2].map((u) => `${chain} ${BASE_TX} ok on ${u} (testnet, not real-money proof)`));
+    assert.deepEqual([...seen.urls].sort(), [u1, u2]);
+    assert.ok(REAL_RPCS[chain].length >= 2);
+    for (const u of REAL_RPCS[chain]) for (const c of Object.keys(REAL_RPCS)) if (c !== chain) assert.ok(!REAL_RPCS[c].includes(u), `${u} is also ${c}'s`);
+    const only = parseLive(`CARD demo / live: PASS\n${one}`, "demo");
+    assert.deepEqual([only.problems, only.txs.length, only.real], [[], 1, []]);
+    const mixed = parseLive(`CARD demo / live: PASS\n${one}Tx: ${mainnet} 0x${"cd".repeat(32)}\n`, "demo");
+    assert.deepEqual(mixed.real.map((t) => t.chain), [mainnet]);
+  });
+
+  test(`a ${chain} tx failed, missing or old on one of its RPCs is refused`, async () => {
+    const on = (url, answer) => stub((u, method) => (u === url && method === "eth_getTransactionReceipt" ? answer : chainAnswers(NOV2)(u, method)));
+    assert.match((await moneyGate(rec(one), on(u2, { result: { status: "0x0", blockNumber: "0x10" } }), RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: ok on ${u1}, failed on ${u2}$`));
+    assert.match((await moneyGate(rec(one), on(u1, { result: null }), RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: missing on ${u1}, ok on ${u2}$`));
+    const old = stub((u, method) => chainAnswers(u === u1 ? OCT1 : NOV2)(u, method));
+    const r = await moneyGate(rec(one), old, RPCS);
+    assert.match(r.refusals.join("\n"), new RegExp(`${chain} \\S+: old: 2026-10-01T00:00:00\\.000Z is before 2026-11-01T00:00:00\\.000Z on ${u1}, ok on ${u2}$`));
+    assert.deepEqual(r.read, [`${chain} ${BASE_TX} ok on ${u2} (testnet, not real-money proof)`]);
+  });
+
+  test(`a ${chain} RPC that answers another chain id is refused, and a ${mainnet} RPC that answers ${chain}'s`, async () => {
+    const id = (u) => chainAnswers(NOV2)(u, "eth_chainId").result;
+    // one of the testnet's RPCs answers the mainnet's chain id (a mainnet host listed as a testnet one)
+    const asMainnet = stub((u, method) => (u === u2 && method === "eth_chainId" ? { result: id(m1) } : chainAnswers(NOV2)(u, method)));
+    assert.match((await moneyGate(rec(one), asMainnet, RPCS)).refusals.join("\n"), new RegExp(`ok on ${u1}, wrong chain \\(${id(m1)}\\) on ${u2}$`));
+    // and the reverse: a mainnet RPC that answers the testnet's chain id
+    const asTestnet = stub((u, method) => (u === m1 && method === "eth_chainId" ? { result: id(u1) } : chainAnswers(NOV2)(u, method)));
+    assert.match((await moneyGate(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), asTestnet, RPCS)).refusals.join("\n"), new RegExp(`wrong chain \\(${id(u1)}\\) on ${m1}, ok on ${m2}$`));
+  });
+
+  test(`a ${chain} hash in any other shape is refused`, () => {
+    for (const h of [BASE_TX.toUpperCase().replace("0X", "0x"), BASE_TX.slice(0, -2), `${BASE_TX}ab`, BASE_TX.slice(2), SOL_TX, NEAR_TX])
+      assert.match(parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: ${chain} ${h}\n`, "demo").problems.join(), new RegExp(`bad ${chain} hash: ${h}$`), h);
+  });
+
+  test(`a ${chain} tx written as "Tx: ${mainnet}" is refused on ${mainnet}'s RPCs, and a ${mainnet} tx written as "Tx: ${chain}" on ${chain}'s`, async () => {
+    // only the RPCs in `knows` hold the tx; every other one answers its own chain id and no receipt, as an EVM RPC does
+    // for a hash it never saw
+    const only = (knows) => stub((u, method) => (method === "eth_getTransactionReceipt" && !knows.includes(u) ? { result: null } : chainAnswers(NOV2)(u, method)));
+    const testnetTx = only([u1, u2]);
+    assert.match((await moneyGate(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), testnetTx, RPCS)).refusals.join("\n"), new RegExp(`${mainnet} \\S+: missing on ${m1}, missing on ${m2}$`));
+    assert.deepEqual((await moneyGate(rec(one), testnetTx, RPCS)).refusals, []);
+    const mainnetTx = only([m1, m2]);
+    assert.match((await moneyGate(rec(one), mainnetTx, RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: missing on ${u1}, missing on ${u2}$`));
+    assert.deepEqual((await moneyGate(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), mainnetTx, RPCS)).refusals, []);
+  });
+}
 
 test("a near-testnet record keeps the tx-word rule and needs its signer", () => {
   const head = `CARD demo / live: PASS\nMoney path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`;
