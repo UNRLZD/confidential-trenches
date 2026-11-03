@@ -11,6 +11,13 @@
 //   past the higher of the marks' slots (./solana.ts solanaTreeSync leaves), so every deposit and release a mark
 //   records has its leaves in them. The device derives its own marks' addresses and looks them up
 //   here; a read per mark (a note's own address) would tell the RPC which notes are one user's, so none is made.
+// - A mark that lands while the pages are read (card sol-restore-race, review N1): after the pages, the marks are read
+//   again on each RPC at or past the highest slot that RPC answered its pages at (minContextSlot, and the answer's own
+//   slot checked), and merged into the first read by the same union rule. A spend or deposit whose leaves are in the
+//   pages has its mark in that read. When a new mark is one the walk looked up, the pages are read again past the new
+//   marks and the walk is redone; a new mark the walk never looked up (another user's, or past the walk's gap) changes
+//   nothing the walk found, so a busy pool never forces a round. After SOL_RESTORE_ROUNDS walks whose looked-up marks
+//   still grew, the restore stops with a refusal, never a loop without end.
 // - A deposit from its mark: label = keccak256(scope ‖ nonce) mod p, which must be the label tree's leaf nonce - 1, and
 //   commitment = Poseidon(value, label, precommitment), which must be a leaf of the state tree; else the restore stops.
 // - The walk: deposit indices lane by lane until RESTORE_GAP misses in a row (../notes/restore.ts walkLane), each
@@ -51,13 +58,19 @@ export type SolanaMarks = { spent: ReadonlyMap<string, bigint>; pre: ReadonlyMap
 export const SOL_SPENT_MARK_LEN = 8;
 export const SOL_PRE_MARK_LEN = 16;
 
-/** Every mark of the pool, the union of two RPCs' whole-set reads; a key both hold with different bytes is refused. */
-export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal): Promise<SolanaMarks> {
+/**
+ * Every mark of the pool, the union of two RPCs' whole-set reads; a key both hold with different bytes is refused.
+ * minSlots: RPC k answers at or past minSlots[k] (minContextSlot), and an answer below it is refused.
+ */
+export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal, minSlots?: readonly [number, number]): Promise<SolanaMarks> {
   checkSolanaRpcs(rpcs);
+  if (minSlots !== undefined && !(Array.isArray(minSlots) && minSlots.length === 2 && minSlots.every((x) => Number.isSafeInteger(x) && x >= 0))) throw new Error("minSlots: two slots");
   const read = async (rpc: SolanaRpc, k: number, size: number): Promise<{ marks: Map<string, string>; slot: number }> => {
-    const a = (await rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: size }] }])) as { context?: { slot?: unknown }; value?: unknown };
+    const min = minSlots?.[k] ?? 0;
+    const a = (await rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters: [{ dataSize: size }] }])) as { context?: { slot?: unknown }; value?: unknown };
     const slot = a?.context?.slot;
     if (!Number.isSafeInteger(slot) || (slot as number) < 0 || !Array.isArray(a.value)) throw new Error(`rpc ${k}: getProgramAccounts: not a list with its context`);
+    if ((slot as number) < min) throw new Error(`rpc ${k}: getProgramAccounts: answered at slot ${slot as number}, below ${min}`);
     const m = new Map<string, string>();
     for (const x of a.value as { pubkey?: unknown; account?: { owner?: unknown; data?: unknown } }[]) {
       const d = x?.account?.data;
@@ -176,9 +189,57 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
   return { notes, spends };
 }
 
-/** Restore of the Solana pool from the 12 words: the marks, then the pages, on two RPCs; then solanaRestore. */
+/** Walks whose looked-up marks may still grow before the restore refuses: each extra one needs a spend or deposit of
+ * the user's own to land during the read before it. */
+export const SOL_RESTORE_ROUNDS = 4;
+
+/** Two reads of the marks as one: the union, a key both hold with different values refused, the higher slot. */
+export function solanaMarksUnion(x: SolanaMarks, y: SolanaMarks): SolanaMarks {
+  const spent = new Map(x.spent);
+  for (const [key, w] of y.spent) {
+    const have = spent.get(key);
+    if (have !== undefined && have !== w) throw new Error(`mark ${key}: two reads differ`);
+    spent.set(key, w);
+  }
+  const pre = new Map(x.pre);
+  for (const [key, m] of y.pre) {
+    const have = pre.get(key);
+    if (have !== undefined && (have.value !== m.value || have.nonce !== m.nonce)) throw new Error(`mark ${key}: two reads differ`);
+    pre.set(key, m);
+  }
+  return { spent, pre, slot: Math.max(x.slot, y.slot) };
+}
+
+// A map that records every key looked up in it: the marks a walk asked for.
+class Looked<V> extends Map<string, V> {
+  readonly asked: Set<string>;
+  constructor(m: ReadonlyMap<string, V>, asked: Set<string>) {
+    super(m);
+    this.asked = asked;
+  }
+  override get(key: string): V | undefined {
+    this.asked.add(key);
+    return super.get(key);
+  }
+}
+
+/**
+ * Restore of the Solana pool from the 12 words: the marks, then the pages, on two RPCs; then solanaRestore; then the marks
+ * again past each RPC's pages, and again the pages and the walk while a mark the walk looked up is new (bounded).
+ */
 export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number }) {
-  const marks = await solanaMarks(a.rpcs, a.program, a.signal);
-  const leaves = await solanaTreeSync(a.rpcs, a.program).leaves(marks.slot, a.signal);
-  return solanaRestore({ seed64: a.seed64, program: a.program, scope: solanaPoolOf(a.program).scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+  const sync = solanaTreeSync(a.rpcs, a.program);
+  const scope = solanaPoolOf(a.program).scope;
+  let marks = await solanaMarks(a.rpcs, a.program, a.signal);
+  for (let round = 1; ; round++) {
+    const leaves = await sync.leaves(marks.slot, a.signal);
+    const asked = new Set<string>();
+    const seen: SolanaMarks = { spent: new Looked(marks.spent, asked), pre: new Looked(marks.pre, asked), slot: marks.slot };
+    const out = solanaRestore({ seed64: a.seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks: seen, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+    const again = solanaMarksUnion(marks, await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots));
+    const grew = [...again.spent.keys(), ...again.pre.keys()].some((key) => asked.has(key) && !marks.spent.has(key) && !marks.pre.has(key));
+    if (!grew) return out;
+    if (round >= SOL_RESTORE_ROUNDS) throw new Error(`restore: the user's own marks still grew after ${SOL_RESTORE_ROUNDS} reads; try again`);
+    marks = again;
+  }
 }
