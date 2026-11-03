@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, copyServed, SERVED, sha384 } from "./build-app.mjs";
+import { bundle, bundleModuleProblems, check, copyServed, SERVED, sha384 } from "./build-app.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
@@ -127,4 +127,22 @@ test("copyServed refuses a setup file whose size or sha256 is not its pin, and w
     rmSync(d, { recursive: true, force: true });
     rmSync(src, { recursive: true, force: true });
   }
+});
+
+test("no test path marks a wallet as armed: the shipped bundle's modules hold no test file, helper or package, and none puts a wallet into READY", async () => {
+  const { modules } = await bundle();
+  assert.ok(modules.some((m) => m.endsWith("wallet/src/arming/records.ts")), "the arm records are in the bundle, so the check reads them");
+  assert.deepEqual(bundleModuleProblems(modules), []);
+});
+
+test("planted: a test file, a fixture, a test-only package, Node's test runner, a module that arms a wallet, or no module list fails the release build", () => {
+  const src = (text) => () => text;
+  const clean = "/r/packages/signpage/src/trade.ts";
+  for (const id of ["/r/packages/signpage/test/trade.test.ts", "/r/packages/kit/test/fixtures/solana-pool-buy.json.ts", "/r/packages/signpage/src/arm.test.ts", "/r/node_modules/.pnpm/fake-indexeddb@6.2.6/node_modules/fake-indexeddb/build/esm/index.js", "node:test"]) {
+    assert.match(bundleModuleProblems([clean, id], src("")).join("\n"), /carries a test path/, id);
+  }
+  assert.match(bundleModuleProblems([clean, "/r/packages/signpage/src/arm-hook.ts"], (id) => (id === clean ? "" : 'await store.put("wallets", { ...rec, state: "READY" });')).join("\n"), /puts a wallet into READY: \/r\/packages\/signpage\/src\/arm-hook\.ts/);
+  assert.match(bundleModuleProblems([clean], src("moveArmRecord(s, k, 'ARMING', to: 'READY')")).join("\n"), /puts a wallet into READY/);
+  assert.deepEqual(bundleModuleProblems([clean], src('settleArm(store, key, op, { from: "READY", to: "IN_POSITION" })')), [], "moving a READY wallet on is not arming one");
+  assert.match(bundleModuleProblems([]).join("\n"), /module list is empty/);
 });
