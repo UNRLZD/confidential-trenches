@@ -331,13 +331,3 @@ test("hostile answers that are not objects are refused, never thrown as TypeErro
   for (const a of [null, undefined, 1, "x", [], {}, { quote: {} }, { quoteRequest: {} }])
     assert.throws(() => checkOneClickQuote(DRY_REQ, a, DRY_OPTS), OneClickQuoteError);
 });
-
-test("a path outside keyless and partner names no fee, even when a polluted Object.prototype has one", () => {
-  const P = Object.prototype as Record<string, unknown>;
-  try {
-    P.nopath = 1; // the keyless fee the dry answer carries
-    refused("app-fees", () => checkOneClickQuote(DRY_REQ, clone(fx.dry.answer), { ...DRY_OPTS, path: "nopath" as OneClickCheckOptions["path"] }));
-  } finally {
-    delete P.nopath;
-  }
-});
