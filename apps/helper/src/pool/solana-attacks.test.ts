@@ -633,3 +633,56 @@ test("M369 (M1): sixteen carries rebroadcasting never keep an honest first send 
     for (const l of loops) clearInterval(l);
   }
 });
+
+// ------------------------------------------------------------------------------------------------ M374
+// M374 (1): the 503 once passed a block engine's error text through (120 characters), enough for the fee payer's
+// signature (88) before the send is decided. A block engine that answers with the signature it was sent in its error.
+test("M374 (1): a block engine's words never reach the caller: the 503 says only its code", async () => {
+  for (const status of [400, 200]) {
+    let sig = "";
+    const fetchFn: JitoFetch = async (_u, init) => {
+      const w = Buffer.from(JSON.parse(String(init.body)).params[0], "base64");
+      sig = base58(w.subarray(1, 65));
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: `${sig} ${"z".repeat(70)}` } }), { status });
+    };
+    const a = await mainnet({ engine: { fetchFn } }).carry(body(tipped()), "c");
+    assert.ok(sig.length >= 64, "the engine saw the signed transaction");
+    assert.equal(a.status, 503);
+    assert.deepEqual(a.body, { error: { code: "upstream" } }, "nothing but the code");
+    assert.ok(!JSON.stringify(a.body).includes(sig.slice(0, 20)));
+  }
+  // busy everywhere (rate-limit words): the same
+  const busy: JitoFetch = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32097, message: `Rate limit exceeded ${"5".repeat(88)}` } }));
+  assert.deepEqual((await mainnet({ engine: { fetchFn: busy } }).carry(body(tipped()), "c")).body, { error: { code: "upstream" } });
+  // and the ends without a fill: their codes alone
+  for (const end of ["expired", "unknown"] as const) {
+    const a = await mainnet({ engine: blockEngine(() => "ok"), done: (x) => Promise.resolve({ txs: [{ signature: x.sig, state: end, sends: [] }] }) }).carry(body(tipped()), "c");
+    assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed" } }], end);
+  }
+});
+
+// The review's G1 (fold 4, R4c and R4d): a mainnet tag 2 answers at once and is not the cap's. Three tag 2 carries from
+// one client at once, their sends undecided: each answers 200 with its signature now.
+test("G1: mainnet tag 2 carries answer at once, three from one client together, while their sends are undecided", async () => {
+  const s = mainnet({ engine: blockEngine(() => "ok"), done: () => new Promise(() => {}) });
+  const ps = [0, 1, 2].map((i) => s.carry(body(wire({ r: { existingNullifierHash: f32(240 + i) } })), "x"));
+  await sleep(20);
+  for (const p of ps) assert.ok(!(await pending(p)), "answered before the decision");
+  for (const p of ps) assert.equal(code(await p), "ok");
+});
+
+// The review's G4 (fold 4, R4i): an unknown end is held to the release's deadline and no longer: past it, a new release
+// of the same note (a later deadline) is sent.
+test("G4: a held unknown end frees the note at the release's deadline", async () => {
+  let t = NOW;
+  const engine = blockEngine(() => "ok");
+  const s = mainnet({ engine, now: () => t, done: (x) => Promise.resolve({ txs: [{ signature: x.sig, state: "unknown", sends: [] }] }) });
+  const a = await s.carry(body(tipped()), "c");
+  assert.deepEqual([a.status, code(a)], [503, "not_landed"]);
+  t = NOW + 200_000; // before the first release's deadline: held, unsent
+  assert.equal(code(await s.carry(body(tipped({ r: { deadlineMs: BigInt(NOW + 470_000) } })), "c")), "not_landed");
+  assert.equal(engine.seen.length, 1);
+  t = NOW + 270_000; // the first release's deadline
+  const b = await s.carry(body(tipped({ r: { deadlineMs: BigInt(NOW + 470_000) } })), "c");
+  assert.equal(engine.seen.length, 2, `past the deadline the note is sent again (answer ${code(b)})`);
+});

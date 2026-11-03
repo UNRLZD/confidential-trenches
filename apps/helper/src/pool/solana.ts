@@ -39,7 +39,9 @@
 //   in_flight (429)     mainnet tag 3: this client already has POOL_JITO_IN_FLIGHT_MAX carries waiting for their fill
 //                       (M369 (M1): the block engines' seconds are shared by every caller);
 //   not_landed          mainnet tag 3: the send ended without a fill: expired (503; never landed, the nullifier is free
-//                       again), unknown (503; held to the release's deadline) or failed (422; failed_this_epoch after).
+//                       again), unknown (503; held to the release's deadline) or failed (422, detail "failed";
+//                       failed_this_epoch after).
+// A 503 says only its code: no text from a block engine or an RPC reaches the caller (M374 (1)).
 // The send (M362 (4)): on mainnet a tag 3 goes to Jito bundle-only (./jito.ts), so one that fails on chain never lands
 // and the fee payer pays nothing for it; only when every block engine fails on transport does it go out as a plain send,
 // under M356 (1)'s one paid failure per nullifier per epoch. A tag 2 (its one on-chain failure is the note spent
@@ -544,7 +546,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         // second, to the region that took it only (./jito.ts), its pacer shared by every carry rebroadcasting there
         const sig = base58(signed.wire.subarray(1, 65));
         const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig);
-        if (j.kind === "busy" || j.kind === "refused") return no(503, "upstream", `block engine ${j.kind}: ${j.detail}`);
+        // M374 (1): the code only. A block engine's words never reach the caller: they could carry the fee payer's
+        // signature before the send is decided (M369 (H1))
+        if (j.kind === "busy" || j.kind === "refused") return no(503, "upstream");
         if (j.kind === "ok") {
           const region = j.region;
           through = [
@@ -585,8 +589,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           bounded(failedIn, nf, epochStartOf(now()));
           return no(422, "not_landed", "failed");
         }
-        if (state === "expired") return no(503, "not_landed", "expired"); // never landed: once frees the nullifier
-        const unknown = no(503, "not_landed", "unknown");
+        if (state === "expired") return no(503, "not_landed"); // never landed: once frees the nullifier
+        const unknown = no(503, "not_landed");
         bounded(heldUntil, nf, { entry: undefined, answer: unknown, deadline: Number(tx.deadlineMs) });
         return unknown;
       }

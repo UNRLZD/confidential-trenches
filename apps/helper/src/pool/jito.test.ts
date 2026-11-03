@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SOLANA_JITO_TIP_MIN } from "@blindfill/kit";
-import { JITO_QUEUE_MAX_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES } from "./jito.ts";
+import { JITO_QUEUE_MAX_MS, JITO_TIMEOUT_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES } from "./jito.ts";
 
 const SIG = "5".repeat(88);
 const answer = (body: string, status = 200) => async () => new Response(body, { status });
@@ -144,4 +144,45 @@ test("M369 (M1): by default each region takes one request a second (Jito's keyle
   const waited = e.seen[8]!.at - t0;
   assert.ok(waited >= 990 && waited < 1_500, `the ninth waited ${Math.round(waited)} ms`);
   assert.equal(e.seen[8]!.host, e.seen[0]!.host, "the region whose second ended first");
+});
+
+// M374 (2): the review's R4-J1 saw two sends to one region 0.1 ms apart under load: both waits were booked a second
+// apart, but the event loop stalled past both, so both timers fired in one turn. A real stall here (a busy loop).
+test("M374 (2): an event loop that stalls past two booked seconds never sends twice to one region inside one interval", async () => {
+  const at: number[] = [];
+  const fetchFn = async () => (at.push(performance.now()), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG })));
+  const j = jitoSender({ fetch: fetchFn, regions: [SOLANA_JITO_BLOCK_ENGINES[0]!], intervalMs: 200 });
+  const sends = [j.send("AA==", SIG), j.send("AA==", SIG), j.send("AA==", SIG)]; // the first now, then booked at 200 and 400 ms
+  const stall = performance.now() + 500;
+  while (performance.now() < stall); // both later sends' timers are past due when the loop comes back
+  const r = await Promise.all(sends);
+  assert.ok(r.every((x) => x.kind === "ok"));
+  assert.equal(at.length, 3);
+  for (let k = 1; k < at.length; k++) assert.ok(at[k]! - at[k - 1]! >= 199, `sends ${k - 1} and ${k} went ${(at[k]! - at[k - 1]!).toFixed(1)} ms apart`);
+  // and a rebroadcast is held to the last actual send too, not to the booking
+  assert.equal((await j.rebroadcast(SOLANA_JITO_BLOCK_ENGINES[0]!, "AA==", SIG)).kind, "busy");
+});
+
+// The review's G2 (fold 4, R4f): the default queue limit is in use, not only a constant. Every region booked 3 s ahead:
+// a default sender's next first send is busy at once.
+test("G2: by default a first send never waits past JITO_QUEUE_MAX_MS: a 17th booking is refused at once", async () => {
+  const j = jitoSender({ fetch: ok().fetch, intervalMs: 1_500 });
+  const all = Array.from({ length: 16 }, () => j.send("AA==", SIG)); // booked in this tick: every region's next second 3 s on
+  const t0 = performance.now();
+  const r = await j.send("AA==", SIG);
+  assert.equal(r.kind, "busy");
+  assert.ok(performance.now() - t0 < 100);
+  await Promise.all(all);
+});
+
+// R4g: the default per-region timeout is in use: a region that never answers is given up at about 2 s.
+test("a default sender gives up on a hung region at about JITO_TIMEOUT_MS (2 s): transport", async () => {
+  const hung = (_u: string, init: RequestInit) => new Promise<Response>((_, no) => init.signal!.addEventListener("abort", () => no(new Error("timeout"))));
+  const j = jitoSender({ fetch: hung, regions: [SOLANA_JITO_BLOCK_ENGINES[0]!] });
+  const t0 = performance.now();
+  const r = await j.send("AA==", SIG);
+  const ms = performance.now() - t0;
+  assert.equal(r.kind, "transport");
+  assert.ok(ms >= 1_900 && ms < 2_600, `gave up after ${Math.round(ms)} ms`);
+  assert.equal(JITO_TIMEOUT_MS, 2_000);
 });

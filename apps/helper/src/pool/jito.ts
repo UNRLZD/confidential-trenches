@@ -71,8 +71,17 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
   const interval = opts.intervalMs ?? SOLANA_KEYLESS_PATH_INTERVAL_MS;
   const queueMax = opts.queueMaxMs ?? JITO_QUEUE_MAX_MS;
   const clock = () => performance.now(); // monotonic: a wall clock set back never books a second twice
-  /** Per region: when its next second starts (no request before it). */
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  /** Per region: when its next second starts (no request before it); a first send books it ahead. */
   const free = regions.map(() => -Infinity);
+  /** Per region: when its last request actually went (M374 (2)): a timer that fires late never brings two inside one
+   * interval, as two sends booked a second apart would be after an event loop that stalled past both. */
+  const sent = regions.map(() => -Infinity);
+  /** Marks region i's request as going now; the caller calls the region in the same turn, with no await between. */
+  const mark = (i: number, now: number) => {
+    sent[i] = now;
+    free[i] = Math.max(free[i]!, now + interval);
+  };
 
   // M369 (L1): only a thrown fetch, a timeout or an oversized answer is transport; every HTTP answer is the region's
   // word: 429, 5xx or a rate-limit error is busy (the next region), anything else not the signature is refused.
@@ -127,7 +136,10 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
           break;
         }
         free[at] = go + interval; // booked: a rebroadcast cannot take this second
-        if (go > now) await new Promise((r) => setTimeout(r, go - now));
+        if (go > now) await sleep(go - now);
+        // then what is left of the region's interval since its last actual request (a late timer), and go at once
+        for (let wait = sent[at]! + interval - clock(); wait > 0; wait = sent[at]! + interval - clock()) await sleep(wait);
+        mark(at, clock());
         const t = await one(regions[at]!, b64, signature);
         if (t.kind === "ok") return { kind: "ok", region: regions[at]! };
         if (t.kind === "refused") return { kind: "refused", detail: t.detail };
@@ -140,8 +152,9 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
       const i = regions.indexOf(region);
       if (i < 0) return { kind: "refused", detail: "not a block engine" };
       const now = clock();
+      // free is never under the last actual request plus the interval (mark), so this holds both
       if (free[i]! > now) return { kind: "busy", detail: "the region's second is taken" };
-      free[i] = now + interval;
+      mark(i, now);
       return one(region, b64, signature);
     },
   };
