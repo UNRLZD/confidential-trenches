@@ -20,8 +20,8 @@ export const ROUTES: readonly { id: RouteId; path: string }[] = [
   { id: "terms", path: "/terms" },
 ];
 
-/** The chains a token route names: the helper's chain ids, nothing else. */
-export const TOKEN_CHAINS = ["solana", "base", "eip155:4663", "near"] as const satisfies readonly MarketChain[];
+/** The chains a token route names: the helper's own spellings (it serves chain=base and chain=robinhood), nothing else. */
+export const TOKEN_CHAINS = ["solana", "base", "robinhood", "near"] as const satisfies readonly MarketChain[];
 
 /** A row's link to its token's page. The id is one path segment (encoded); the chain is one of TOKEN_CHAINS. */
 export const tokenHref = (chain: MarketChain, id: string): string => `/token/${chain}/${encodeURIComponent(id)}`;

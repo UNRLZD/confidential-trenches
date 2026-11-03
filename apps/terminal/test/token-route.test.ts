@@ -33,14 +33,14 @@ test("the route: /token/:chain/:id, one entry of the route map, drawn by the tok
 });
 
 test("parse: a chain the terminal draws and an id", () => {
-  assert.deepEqual(TOKEN_CHAINS, ["solana", "base", "eip155:4663", "near"]);
+  assert.deepEqual(TOKEN_CHAINS, ["solana", "base", "robinhood", "near"]);
   for (const chain of TOKEN_CHAINS) assert.deepEqual(parseTokenRoute({ chain, id: "abc" }), { chain, id: "abc" }, chain);
   assert.deepEqual(parseTokenRoute({ chain: "solana", id: MINT }), { chain: "solana", id: MINT });
   assert.deepEqual(parseTokenRoute({ chain: "near", id: "a-token.tkn.near" }), { chain: "near", id: "a-token.tkn.near" });
 });
 
 test("parse: a bad chain or a missing id is refused", () => {
-  for (const chain of ["dogecoin", "Solana", "SOLANA", "eip155:1", "", " solana", "solana ", "__proto__", "constructor", undefined])
+  for (const chain of ["dogecoin", "Solana", "SOLANA", "eip155:1", "eip155:4663", "", " solana", "solana ", "__proto__", "constructor", undefined])
     assert.equal(parseTokenRoute({ chain, id: "abc" }), null, String(chain));
   for (const id of ["", undefined]) assert.equal(parseTokenRoute({ chain: "solana", id }), null, String(id));
   assert.equal(parseTokenRoute({}), null);
@@ -48,7 +48,7 @@ test("parse: a bad chain or a missing id is refused", () => {
 
 test("href: a row's link is /token/<chain>/<id>, the id encoded", () => {
   assert.equal(tokenHref("solana", MINT), `/token/solana/${MINT}`);
-  assert.equal(tokenHref("eip155:4663", "0xAbC"), "/token/eip155:4663/0xAbC");
+  assert.equal(tokenHref("robinhood", "0xAbC"), "/token/robinhood/0xAbC");
   assert.equal(tokenHref("near", "a/b?c#d.tkn.near"), "/token/near/a%2Fb%3Fc%23d.tkn.near");
   // what the href names parses back to the same token (the router decodes the segment)
   const href = tokenHref("near", "a/b?c#d.tkn.near");
@@ -68,7 +68,7 @@ test("loadToken: reads /v1/market/token for that chain and id (and nothing else)
 
 test("TOKEN_URL: the chain and the id are the query, both encoded; the chain defaults to solana", () => {
   assert.equal(source.TOKEN_URL(MINT), `https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=${MINT}`);
-  assert.equal(source.TOKEN_URL("0xab", "eip155:4663"), "https://api.confidential.unrealized.trade/v1/market/token?chain=eip155%3A4663&token=0xab");
+  assert.equal(source.TOKEN_URL("0xab", "robinhood"), "https://api.confidential.unrealized.trade/v1/market/token?chain=robinhood&token=0xab");
 });
 
 test("loadToken: an unknown id (the helper answers 404) is the not-found state, not the error state", async () => {
