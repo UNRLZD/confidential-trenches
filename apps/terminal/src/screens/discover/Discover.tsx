@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Link } from "react-router";
+import { tokenHref } from "../../routes/routes.ts";
 import type { MarketSnapshot } from "./fields.ts";
 import { COLUMNS, columnRows, rowView } from "./model.ts";
 import type { ColumnKey, Level, RowView, Win } from "./model.ts";
@@ -90,68 +92,72 @@ function HoldersIcon() {
   );
 }
 
-/** R5 TokenRow (desktop). */
-function Row({ v, win }: { v: RowView; win: Win }) {
+/** R5 TokenRow (desktop): the whole row is a link to the token's page (S5.2; `href` is /token/<chain>/<id>). */
+function Row({ v, win, href }: { v: RowView; win: Win; href: string }) {
   return (
-    <div className="dsc-row" data-token={v.token} role="listitem">
-      <span className="dsc-ringw">
-        <Ring v={v} size={68} stroke={3.5} av={50} />
-        <span className="dsc-rpill" data-curve={v.stage.curve}>{v.stage.pill === "POOL" ? WORDS.pool.text : v.stage.pill}</span>
-      </span>
-      <span className="dsc-info">
-        <span className="dsc-l1">
-          <span className="dsc-sym" title={v.symbol}>{v.symbol}</span>
-          <span className="dsc-name" title={v.name}>{v.name}</span>
+    <div data-token={v.token} role="listitem">
+      <Link className="dsc-row" to={href}>
+        <span className="dsc-ringw">
+          <Ring v={v} size={68} stroke={3.5} av={50} />
+          <span className="dsc-rpill" data-curve={v.stage.curve}>{v.stage.pill === "POOL" ? WORDS.pool.text : v.stage.pill}</span>
         </span>
-        <span className="dsc-l2">
-          <span className="dsc-age" data-fresh={v.fresh}>{v.age}</span>
-          <Pill label="top10" value={v.top10} />
-          <Pill label="creatorHolds" value={v.dev} />
-          <Pill label="snipers" value={v.snipers} />
+        <span className="dsc-info">
+          <span className="dsc-l1">
+            <span className="dsc-sym" title={v.symbol}>{v.symbol}</span>
+            <span className="dsc-name" title={v.name}>{v.name}</span>
+          </span>
+          <span className="dsc-l2">
+            <span className="dsc-age" data-fresh={v.fresh}>{v.age}</span>
+            <Pill label="top10" value={v.top10} />
+            <Pill label="creatorHolds" value={v.dev} />
+            <Pill label="snipers" value={v.snipers} />
+          </span>
+          <span className="dsc-l3">
+            <span className="dsc-press" data-on={v.buyShare !== null} style={v.buyShare !== null ? { ["--buy" as string]: `${v.buyShare * 100}%` } : undefined} aria-hidden="true"><i /><i /></span>
+            <span className="dsc-bs">{v.buys}/{v.sells}</span>
+            <span className="dsc-hold" title={WORDS.holders.text}><HoldersIcon />{v.holders}</span>
+          </span>
         </span>
-        <span className="dsc-l3">
-          <span className="dsc-press" data-on={v.buyShare !== null} style={v.buyShare !== null ? { ["--buy" as string]: `${v.buyShare * 100}%` } : undefined} aria-hidden="true"><i /><i /></span>
-          <span className="dsc-bs">{v.buys}/{v.sells}</span>
-          <span className="dsc-hold" title={WORDS.holders.text}><HoldersIcon />{v.holders}</span>
+        <span className="dsc-mkt">
+          <span className="dsc-mc" title={`${WORDS.price.text} ${v.price}`}>
+            <span className="dsc-lbl">{WORDS.mc.text}</span>
+            {v.mc}
+          </span>
+          <span className="dsc-chg" data-dir={v.dir}>{v.chg}</span>
+          <span className="dsc-vol"><span className="dsc-lbl">{WORDS.vol.text} {win}</span> {v.vol}</span>
         </span>
-      </span>
-      <span className="dsc-mkt">
-        <span className="dsc-mc" title={`${WORDS.price.text} ${v.price}`}>
-          <span className="dsc-lbl">{WORDS.mc.text}</span>
-          {v.mc}
-        </span>
-        <span className="dsc-chg" data-dir={v.dir}>{v.chg}</span>
-        <span className="dsc-vol"><span className="dsc-lbl">{WORDS.vol.text} {win}</span> {v.vol}</span>
-      </span>
+      </Link>
     </div>
   );
 }
 
-/** R5 LaunchRow (phone): ring, name, then age, MC, holders and dev, then the curve's 40 dots. */
-function PhoneRow({ v }: { v: RowView }) {
+/** R5 LaunchRow (phone), a link to the token's page as the desktop row is: ring, name, then age, MC, holders and dev, then the curve's 40 dots. */
+function PhoneRow({ v, href }: { v: RowView; href: string }) {
   const lit = v.stage.fill <= 0 ? 0 : Math.max(1, Math.round(v.stage.fill * 40));
   const tier = v.stage.fill > 0.85 ? "high" : v.stage.fill > 0.5 ? "mid" : "low";
   return (
-    <div className="dsc-prow" data-token={v.token} role="listitem">
-      <Ring v={v} size={52} stroke={3} av={40} />
-      <span className="dsc-pinfo">
-        <span className="dsc-l1">
-          <span className="dsc-sym" title={v.symbol}>{v.symbol}</span>
-          <span className="dsc-name" title={v.name}>{v.name}</span>
-        </span>
-        <span className="dsc-pmeta">
-          <span className="dsc-age" data-fresh={v.fresh}>{v.age}</span>
-          <span title={`${WORDS.price.text} ${v.price}`}>{v.mc}</span>
-          <span className="dsc-hold" title={WORDS.holders.text}><HoldersIcon />{v.holders}</span>
-          <span className="dsc-pdev" data-level={v.dev.level} title={WORDS.creatorHolds.text}>{WORDS.dev.text} {v.dev.text}</span>
-        </span>
-        <span className="dsc-pcurve">
-          <span className="dsc-dots" data-tier={v.stage.curve ? tier : "pool"} aria-hidden="true">
-            {Array.from({ length: 40 }, (_, i) => <i key={i} data-on={i < lit} />)}
+    <div data-token={v.token} role="listitem">
+      <Link className="dsc-prow" to={href}>
+        <Ring v={v} size={52} stroke={3} av={40} />
+        <span className="dsc-pinfo">
+          <span className="dsc-l1">
+            <span className="dsc-sym" title={v.symbol}>{v.symbol}</span>
+            <span className="dsc-name" title={v.name}>{v.name}</span>
           </span>
-          <span className="dsc-pl">{v.stage.pill === "POOL" ? WORDS.pool.text : v.stage.pill}</span>
+          <span className="dsc-pmeta">
+            <span className="dsc-age" data-fresh={v.fresh}>{v.age}</span>
+            <span title={`${WORDS.price.text} ${v.price}`}>{v.mc}</span>
+            <span className="dsc-hold" title={WORDS.holders.text}><HoldersIcon />{v.holders}</span>
+            <span className="dsc-pdev" data-level={v.dev.level} title={WORDS.creatorHolds.text}>{WORDS.dev.text} {v.dev.text}</span>
+          </span>
+          <span className="dsc-pcurve">
+            <span className="dsc-dots" data-tier={v.stage.curve ? tier : "pool"} aria-hidden="true">
+              {Array.from({ length: 40 }, (_, i) => <i key={i} data-on={i < lit} />)}
+            </span>
+            <span className="dsc-pl">{v.stage.pill === "POOL" ? WORDS.pool.text : v.stage.pill}</span>
+          </span>
         </span>
-      </span>
+      </Link>
     </div>
   );
 }
@@ -192,7 +198,7 @@ function Body({ data, k, win, phone, nowMs, onRetry }: { data: DiscoverData; k: 
     );
   return (
     <div className="dsc-rows" role="list" data-state="S5.2">
-      {rows.map((r) => (phone ? <PhoneRow key={r.token} v={rowView(r, win, nowMs)} /> : <Row key={r.token} v={rowView(r, win, nowMs)} win={win} />))}
+      {rows.map((r) => (phone ? <PhoneRow key={r.token} v={rowView(r, win, nowMs)} href={tokenHref(r.chain, r.token)} /> : <Row key={r.token} v={rowView(r, win, nowMs)} win={win} href={tokenHref(r.chain, r.token)} />))}
     </div>
   );
 }

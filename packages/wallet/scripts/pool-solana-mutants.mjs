@@ -104,6 +104,9 @@ const M = [
   [R, "  signal?.throwIfAborted(); // a signal aborted already never fires its event\n", "", T, "sol-marks-scale fold 1 S2: a throw"],
   [R, "a.lagWait, \"spent\");", "a.lagWait);", T, "sol-marks-scale fold 1 S4"],
   [R, "(only === \"spent\" ? [0] : [0, 1])", "[0, 1]", T, "sol-marks-scale fold 1 S4"],
+  // card pool-sol-mark-tag: the bucket's memcmp without the tag (the old filter), and a record without the tag taken
+  [R, "const high = new Uint8Array(width);", "const high = new Uint8Array(width - 1);", T, "sol-marks-scale fold 1 RV-B3"],
+  [R, "if (bytes[size - 1] !== SOL_MARK_TAG) throw", "if (false) throw", T, "card pool-sol-mark-tag: a record"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];
