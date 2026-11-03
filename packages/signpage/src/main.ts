@@ -63,6 +63,8 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { depositQuoteHost } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
+import { PAGE_POOLS, withPools } from "./pools.ts";
+import { openNoteStore, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
@@ -122,7 +124,8 @@ else {
   // under the APP_HOST frame: the app's boot frame as shapes, for the moment before a new frame paints (src/backdrop.ts)
   document.body.append(drawBackdrop(document));
   shell = mountShell(document, {
-    state: fs.state,
+    // the private balance per chain's pool, from this page's own notes (src/pools.ts); the frame's state has none
+    state: () => fs.state().then((s) => withPools(s, pageNotes, PAGE_POOLS)),
     watch: fs.watch,
     kinds: {
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
@@ -434,6 +437,16 @@ const namer = depositNamer({
   startup: () => startup,
   resyncing: () => resyncing,
 });
+// state.pools' notes (src/pools.ts): read with this page's note store on its own wallet store, closed after; top-level
+// only, as the frame never opens the note store. A function declaration, as the shell's state, made at the top, holds it.
+async function pageNotes(): Promise<NoteRecord[]> {
+  const notes = await openNoteStore(await open());
+  try {
+    return await notes.list();
+  } finally {
+    notes.close();
+  }
+}
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {
   if (!shell || pageScope() === null || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
