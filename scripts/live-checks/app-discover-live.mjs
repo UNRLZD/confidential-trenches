@@ -22,11 +22,11 @@
 // --url is the page to open (default APP_HOST/discover); --record writes what the run read, so the check's test can
 // replay it through judge().
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ROW_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-discover-live";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -154,10 +154,8 @@ const MEASURE = ({ phone }) => {
 };
 
 export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), prepare = null } = {}) {
-  // playwright is the terminal's dev dependency (apps/terminal/package.json)
-  const { chromium } = createRequire(new URL("../../apps/terminal/package.json", import.meta.url))("playwright");
   mkdirSync(shots, { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await launchBrowser("chromium");
   const rec = { url, at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) {
@@ -265,7 +263,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);
-    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"}`);
+    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"} (Chrome ${rec.browser})`);
     process.exit(ok ? 0 : 1);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);

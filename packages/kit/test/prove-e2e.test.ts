@@ -195,7 +195,12 @@ test(
   "chromium: the real worker proves from the fixture's leaves, snarkjs accepts each proof, a changed leaf or answer is refused",
   { skip: process.env.KIT_PROVER_E2E === "1" ? false : "KIT_PROVER_E2E=1 runs it (a heavy job: Playwright Chromium)", timeout: 600_000 },
   async (t) => {
-    const { chromium } = (await import("playwright")) as typeof import("playwright");
+    // the one place a browser starts: the installed Google Chrome with its sandbox on (scripts/browsers.mjs)
+    const { browserLabel, launchBrowser, launchDiskProfile } = (await import(String(new URL("../../../scripts/browsers.mjs", import.meta.url)))) as {
+      browserLabel(browser: unknown): string;
+      launchBrowser(engine: "chromium"): Promise<{ newContext(): Promise<import("playwright").BrowserContext>; version(): string; close(): Promise<void> }>;
+      launchDiskProfile(): Promise<{ context: import("playwright").BrowserContext; label: string; close(): Promise<void> }>;
+    };
     const { build } = (await import("rolldown")) as typeof import("rolldown");
     const { buildProverThread, buildProverWorker, PROVER_THREAD_FILE, PROVER_WORKER_FILE } = (await import(String(new URL("../src/prover/build.mjs", import.meta.url)))) as {
       buildProverWorker(out: string): { file: string; bytes: number; sha256: string };
@@ -253,12 +258,12 @@ test(
     });
     await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
     const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-    const browser = await chromium.launch();
+    const browser = await launchBrowser("chromium");
     // `disk`: a profile on disk, so the browser keeps a 17 MB answer in its HTTP cache as a phone does (a fresh
     // context's cache is in memory and keeps no entry that large)
     const runPage = async (plant: string, times: number, disk = false): Promise<PageRun> => {
-      const profile = disk ? mkdtempSync(join(tmpdir(), "kit-prove-e2e-profile-")) : null;
-      const ctx = profile ? await chromium.launchPersistentContext(profile) : await browser.newContext();
+      const profile = disk ? await launchDiskProfile() : null;
+      const ctx = profile ? profile.context : await browser.newContext();
       const page = await ctx.newPage();
       const logs: string[] = [];
       page.on("pageerror", (e) => logs.push(`pageerror ${e.message}`));
@@ -270,12 +275,11 @@ test(
           [CV, plant, times] as const,
         );
       } finally {
-        await ctx.close();
-        if (profile) rmSync(profile, { recursive: true, force: true });
+        await (profile ? profile.close() : ctx.close());
       }
     };
     try {
-      const machine = { chromium: browser.version(), cpu: cpus()[0]?.model, cores: cpus().length, host: execFileSync("uname", ["-sm"]).toString().trim(), worker: worker.sha256 };
+      const machine = { chromium: browserLabel(browser), cpu: cpus()[0]?.model, cores: cpus().length, host: execFileSync("uname", ["-sm"]).toString().trim(), worker: worker.sha256 };
       t.diagnostic(JSON.stringify(machine));
 
       const ok = await runPage("none", 3);

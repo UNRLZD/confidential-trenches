@@ -1,0 +1,37 @@
+# Every browser the checks start is the installed Google Chrome with its sandbox on (scripts/browsers.mjs, held by
+# scripts/ci/browser-launch.mjs), never Playwright's bundled Chromium, which is pinned to the Playwright release and
+# runs with the sandbox off unless told otherwise. The runner image's own Chrome is updated only when the image is
+# (20261026 holds 156.0.8078.47; actions/runner-images Ubuntu2404-Readme.md, read 2026-11-03 14:24Z), so this step
+# puts Google's current stable on it from Google's apt repository: the repository's key must be the one with
+# fingerprint EB4C 1BFD 4F04 2F6D DDCC EC91 7721 F63B D38B 4796 (the key at dl.google.com/linux/linux_signing_key.pub,
+# fingerprint read with gpg 2026-11-03 14:31Z; it verifies the repository's InRelease), and apt checks every package against it. apt reads only this one source (Dir::Etc::sourcelist),
+# so the image's own Google entry cannot clash with it. The .deb's postinst loads its AppArmor profile
+# (opt/google/chrome/apparmor.d/google-chrome-stable, "userns,") when the machine has AppArmor 4, which is what lets
+# Chrome's sandbox make a user namespace on Ubuntu 24.04. The floor is the Chrome release that fixed the four
+# renderer CVEs listed 2026-11-02 (156.0.8078.73). The last line runs scripts/browsers.mjs, which starts that Chrome and
+# reads, for each renderer, its own command line and the kernel's seccomp mode (2 = the sandbox's filter is on),
+# plus the AppArmor profile Chrome runs under: the step fails when a renderer has no filter.
+# Used by ci.yml's test job and live.yml's jobs (card ci-live-runners), so the key's fingerprint and the version floor
+# are written once. It runs after a checkout and a pnpm install: its last line starts the Chrome through the launcher.
+name: Google Chrome stable, and its sandbox comes up
+description: Google's current stable Chrome from Google's apt repository, then scripts/browsers.mjs proves its sandbox is on
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        curl -sSfL -o "$RUNNER_TEMP/google-signing-key.pub" https://dl.google.com/linux/linux_signing_key.pub
+        fpr="$(gpg --show-keys --with-colons "$RUNNER_TEMP/google-signing-key.pub" | awk -F: '$1 == "fpr" { print $10; exit }')"
+        test "$fpr" = EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796 || { echo "Google's signing key is $fpr"; exit 1; }
+        gpg --dearmor --yes -o "$RUNNER_TEMP/google-chrome.gpg" "$RUNNER_TEMP/google-signing-key.pub"
+        sudo install -m 0644 "$RUNNER_TEMP/google-chrome.gpg" /usr/share/keyrings/google-chrome-ci.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-ci.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > "$RUNNER_TEMP/google-chrome.list"
+        APT=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/google-chrome.list" -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+        sudo apt-get "${APT[@]}" update
+        sudo apt-get "${APT[@]}" install -y google-chrome-stable
+        version="$(dpkg-query -W -f='${Version}' google-chrome-stable)"
+        echo "google-chrome-stable $version"
+        dpkg --compare-versions "$version" ge 156.0.8078.73 || { echo "older than 156.0.8078.73, the release that fixed the listed renderer CVEs"; exit 1; }
+        echo "kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
+        ls -l /etc/apparmor.d/google-chrome-stable /etc/apparmor.d/chrome 2>&1 || true
+        node scripts/browsers.mjs
