@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const RPCS = { near: ["n1", "n2"], "near-testnet": ["t1", "t2"], solana: ["s1", "s2"], base: ["b1", "b2"], robinhood: ["r1", "r2"] };
+const RPCS = { near: ["n1", "n2"], "near-testnet": ["t1", "t2"], solana: ["s1", "s2"], "solana-devnet": ["d1", "d2"], base: ["b1", "b2"], robinhood: ["r1", "r2"] };
 const BASE_TX = "0x" + "ab".repeat(32);
 const NEAR_TX = "Bv7hjXuDcC9WePLNbq3qntubUKqDR8x8dvgJSSH7mk8o";
 const SOL_TX = "2z6qyzLaN9dV3SUaNyCGXm4zPQTQ61vuJJnTvbn3vzPkZNwQ8KJhCEETJeN7vtM9y5BeuGDxCDwrkfAHKUc6rZDw";
@@ -665,6 +665,34 @@ test("a near-testnet record never counts as real-money proof", () => {
   assert.deepEqual(only.real, []);
   const mixed = parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\nTx: base ${BASE_TX}\n`, "demo");
   assert.deepEqual(mixed.real.map((t) => `${t.chain} ${t.hash}`), [`base ${BASE_TX}`]);
+});
+
+test("a solana-devnet tx reads ok on both devnet RPCs, on no mainnet RPC, and is never real-money proof", async () => {
+  const seen = urlsOf(good);
+  const r = await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), seen.fetchFn, RPCS);
+  assert.deepEqual(r.refusals, []);
+  assert.deepEqual(r.read, ["d1", "d2"].map((u) => `solana-devnet ${SOL_TX} ok on ${u} (testnet, not real-money proof)`));
+  assert.deepEqual([...seen.urls].sort(), ["d1", "d2"]);
+  assert.ok(REAL_RPCS["solana-devnet"].length >= 2);
+  for (const u of REAL_RPCS["solana-devnet"]) for (const c of ["near", "near-testnet", "solana", "base", "robinhood"]) assert.ok(!REAL_RPCS[c].includes(u), u);
+  const only = parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: solana-devnet ${SOL_TX}\n`, "demo");
+  assert.deepEqual([only.problems, only.txs.length, only.real], [[], 1, []]);
+});
+
+test("a solana-devnet tx failed, missing or old on one devnet RPC is refused", async () => {
+  const failed = stub((url, method) => (method === "getTransaction" ? { result: { meta: { err: url === "d2" ? { InstructionError: [0, "x"] } : null }, blockTime: NOV2 } } : undefined));
+  assert.match((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), failed, RPCS)).refusals.join("\n"), /ok on d1, failed on d2/);
+  const missing = stub((url, method) => (method === "getTransaction" ? { result: url === "d1" ? null : { meta: { err: null }, blockTime: NOV2 } } : undefined));
+  assert.match((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), missing, RPCS)).refusals.join("\n"), /missing on d1, ok on d2/);
+  const old = await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), stub(chainAnswers(OCT1)), RPCS);
+  assert.match(old.refusals.join("\n"), /solana-devnet \S+: old: 2026-10-01T00:00:00\.000Z is before 2026-11-01T00:00:00\.000Z on d1, old: .* on d2$/);
+});
+
+test('a devnet signature written as "Tx: solana" is refused on the mainnet RPCs, and a malformed one is refused', async () => {
+  const split = stub((url, method) => (url.startsWith("d") ? chainAnswers(NOV2)(url, method) : { result: null }));
+  assert.match((await moneyGate(rec(`Money path: yes\nTx: solana ${SOL_TX}\n`), split, RPCS)).refusals.join("\n"), /missing on s1, missing on s2/);
+  assert.deepEqual((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), split, RPCS)).refusals, []);
+  assert.match(parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: solana-devnet ${NEAR_TX}\n`, "demo").problems.join(), /bad solana-devnet hash/);
 });
 
 test("a near-testnet record keeps the tx-word rule and needs its signer", () => {
