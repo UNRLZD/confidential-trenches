@@ -79,7 +79,7 @@ export const MUTANTS = [
   [SELL, 'if (addressOf(secretKey) !== lower(built.w)) return refuse("bad_key", "the key is not W\'s");', "", SIGNER],
   [SELL, "      word(BigInt(chainId)),\n      addressWord(built.w),", "      word(BigInt(chainId)),\n      addressWord(built.pool),", CAST],
   [SELL, "const chainId = venueOf(built.chain).chainId;", "const chainId = 8453;", CAST],
-  [SELL, "uint256 feeCap,uint256 deadline,uint256 nonce)", "uint256 feeCap,uint256 nonce,uint256 deadline)", CAST],
+  [SELL, 'uint256 feeCap,uint256 deadline,uint256 nonce)"),', 'uint256 feeCap,uint256 nonce,uint256 deadline)"),', CAST],
   [SELL, "      word(built.deadline),\n      word(built.nonce),", "      word(built.nonce),\n      word(built.deadline),", CAST],
   [SELL, "keccak_256(fromHex(built.data))", "keccak_256(utf8(built.data))", CAST],
   [SELL, "out[64] = 27 + rec[0]!;", "out[64] = rec[0]!;", SIGS],

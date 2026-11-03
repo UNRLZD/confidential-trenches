@@ -180,7 +180,7 @@ test("the route sells the token for the chain's WETH, through listed middles onl
   assert.equal(c(v3([X, USDG, B.weth])), "middle_not_listed"); // Robinhood's middle, not Base's
   assert.equal(c(v3([X, USDC, USDC, B.weth])), "bad_route"); // a hop that buys what it spends
   assert.equal(c(v3([X, X, B.weth])), "middle_not_listed");
-  assert.equal(c(v3([X, USDC, USDC, USDC, USDC, B.weth])), "bad_route"); // five hops
+  assert.equal(c(v3([X, Y, X, Y, X, B.weth])), "bad_route"); // five hops: refused before its middles are read
   assert.equal(c(v3([X, USDC, Y, USDC, B.weth])), "middle_not_listed");
   assert.equal(c(v3([X, B.weth], [0x1000000])), "bad_route");
   assert.equal(c(v3([X, B.weth], [1.5])), "bad_route");
