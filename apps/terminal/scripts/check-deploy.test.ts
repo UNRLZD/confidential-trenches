@@ -180,10 +180,13 @@ test("deploy.mjs runs the gate first: a refused build reaches no upload; a passi
   assert.equal(PROJECT, "confidential-trenches-app");
 });
 
-test("deploy.mjs names every live check that reads APP_HOST in its success line", async () => {
-  const { deploy } = await import("./deploy.mjs");
+test("deploy.mjs's live runs name every live check that reads APP_HOST, and its success line is the command that runs them on GitHub's runners", async () => {
+  const { deploy, LIVE_CHECKS: CHECKS, liveRuns } = await import("./deploy.mjs");
   const run = (cmd: string, args: string[]) => ({ status: 0, stdout: cmd === "git" && args.includes("rev-parse") ? "abc123\n" : "" });
-  const out = deploy([BUILD], { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" }, run).out!.join("\n");
+  const done = deploy([BUILD], { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" }, run).out!;
+  assert.ok(done.includes("next: gh workflow run live.yml -f host=app -f commit=abc123"), done.join("\n"));
+  assert.ok(done.includes("then: gh run watch --exit-status"), done.join("\n"));
+  const out = CHECKS.flatMap((k: string) => liveRuns(k)).join("\n");
   // a check reads APP_HOST when it is an app-* live check; each such file must hold APP_HOST's own address
   const dir = join(HERE, "..", "..", "..", "scripts", "live-checks");
   const keys = readdirSync(dir).filter((f) => /^app-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs")).map((f) => f.replace(/\.mjs$/, ""));

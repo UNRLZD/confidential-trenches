@@ -23,11 +23,11 @@ import { createSecureServer } from "node:http2";
 import { cpus, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
 import { build } from "rolldown";
 import * as snarkjs from "snarkjs";
 import { buildProverThread, buildProverWorker, PROVER_THREAD_FILE, PROVER_WORKER_FILE } from "../../src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../src/zk/setup-files.ts";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const KIT = join(HERE, "..", "..");
@@ -151,7 +151,7 @@ assert.equal(createHash("sha256").update(readFileSync(join(KIT, "zk", "withdraw.
 
 const headers = siteHeaders();
 const { files, worker } = await site();
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 const failures = [];
 const check = (name, f) => {
   try {
@@ -163,7 +163,7 @@ const check = (name, f) => {
   }
 };
 try {
-  console.log(JSON.stringify({ http: HTTP1 ? "1.1" : "2", chromium: browser.version(), cpu: cpus()[0]?.model, host: execFileSync("uname", ["-sm"]).toString().trim(), worker: { bytes: worker.bytes, sha256: worker.sha256 } }));
+  console.log(JSON.stringify({ http: HTTP1 ? "1.1" : "2", chromium: browserLabel(browser), cpu: cpus()[0]?.model, host: execFileSync("uname", ["-sm"]).toString().trim(), worker: { bytes: worker.bytes, sha256: worker.sha256 } }));
 
   const good = await runCase(browser, files, headers, input);
   const verified = good.result ? await snarkjs.groth16.verify(vkey, good.result.publicSignals, good.result.proof) : false;
@@ -217,5 +217,5 @@ try {
   await browser.close();
   globalThis.curve_bn128?.terminate?.();
 }
-console.log(failures.length ? `FAILED ${failures.length}: ${failures.join("; ")}` : "ALL PASS");
+console.log(failures.length ? `FAILED ${failures.length}: ${failures.join("; ")}` : `ALL PASS on ${browserLabel(browser)}`);
 process.exit(failures.length ? 1 : 0);

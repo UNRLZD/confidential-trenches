@@ -15,11 +15,11 @@
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
 // helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-no-test-token";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -91,15 +91,13 @@ const MEASURE = () => {
 };
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
-  // playwright is the terminal's dev dependency (apps/terminal/package.json)
-  const { chromium } = createRequire(new URL("../../apps/terminal/package.json", import.meta.url))("playwright");
   mkdirSync(shots, { recursive: true });
   let harness = null;
   if (build) {
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "signed");
   }
-  const browser = await chromium.launch();
+  const browser = await launchBrowser("chromium");
   const rec = { source: build ? `harness: the build ${build} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const [i, w] of LOADS.entries()) {
@@ -177,7 +175,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);
-    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"}`);
+    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"} (Chrome ${rec.browser})`);
     process.exit(ok ? 0 : 1);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
