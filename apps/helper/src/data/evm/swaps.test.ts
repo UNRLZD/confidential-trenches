@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
 import { fakeChain, ICNT, open, POOL_ICNT, POOL_VVV, REC, timeOf, toLog, URLS, VVV, KNOWN } from "./swaps.fake.ts";
-import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, type Log, type Pool } from "./swaps.ts";
+import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, v4Key, type Log, type Pool } from "./swaps.ts";
 
 /** The book the same logs make rebuilt in one go: every swap and ETH price in order, all settled. */
 function rebuild(pool: Pool, upTo: number) {
@@ -116,6 +116,19 @@ test("swapFilter: a v4 pool by the PoolManager and its id, any other by its addr
   assert.deepEqual(swapFilter(POOL_V4, 16, 32), { address: BASE_VENUES.poolManager, topics: [TOPIC.swap4, V4_ID], fromBlock: "0x10", toBlock: "0x20" });
   assert.deepEqual(swapFilter(POOL_ICNT, 16, 32), { address: POOL_ICNT.id, topics: [TOPIC.swap3], fromBlock: "0x10", toBlock: "0x20" });
   assert.deepEqual(swapFilter(POOL_VVV, 16, 32).topics, [TOPIC.swap2]);
+});
+
+test("v4Key: a Doppler pool the PositionManager never made has its key worked out and proved by its hash (read on chain 2026-11-03: USDDT, WETH, dynamic fee, spacing 200, the Doppler hook)", () => {
+  const id = "0xcabbd9e6629b78fcdf6af95f67a102c8dc2b9c66c964377879969081f5fafade";
+  const token = "0xd5e61aca87b93d8558e4a187d57302cdf0638ba3";
+  const hook = "0xbdf938149ac6a781f94faa0ed45e6a0e984c6544";
+  const around = [BASE_VENUES.weth, BASE_VENUES.poolManager, "0x9982538f41f2ae29ddb9d3d9307010052984fdbb", token, hook];
+  const k = v4Key(id, token, 7000, around)!;
+  const w = (x: string) => x.slice(2).padStart(64, "0");
+  assert.equal(k, `0x${w(token)}${w(BASE_VENUES.weth)}${(0x800000).toString(16).padStart(64, "0")}${(200).toString(16).padStart(64, "0")}${w(hook)}`.replace(`${w(token)}${w(BASE_VENUES.weth)}`, token < BASE_VENUES.weth ? `${w(token)}${w(BASE_VENUES.weth)}` : `${w(BASE_VENUES.weth)}${w(token)}`));
+  assert.equal(v4Key(id, token, 7000, around.filter((a) => a !== hook)), null, "without the hook among the addresses there is no key");
+  assert.equal(v4Key(id, "0x0000000000000000000000000000000000000abc", 7000, around), null, "another token");
+  assert.equal(v4Key(`0x${"11".repeat(32)}`, token, 7000, Array.from({ length: 5_000 }, (_, i) => `0x${i.toString(16).padStart(40, "0")}`)), null, "a transaction of thousands of addresses is searched in bounded time");
 });
 
 // -- the recorded logs -----------------------------------------------------------------------------------------------

@@ -136,6 +136,38 @@ const GT_FRESH_MS = 3_600_000;
 // Logs
 // ---------------------------------------------------------------------------------------------------------------
 
+const keccakHex = (k: string): string => `0x${Buffer.from(keccak_256(Buffer.from(k.slice(2), "hex"))).toString("hex")}`;
+
+/** Tick spacings tried first, then every one up to TICK_SPACING_MAX (v4 allows 1 to 32767; the pools read use a few). */
+const TICK_SPACINGS = [1, 10, 60, 200, 30, 8, 100, 50, 20, 2, 4, 5];
+const TICK_SPACING_MAX = 400;
+/** The hook candidates tried: the first few addresses of the transaction (the work is bounded however many it holds). */
+const HOOKS_MAX = 10;
+const DYNAMIC_FEE = 0x800000;
+
+/**
+ * The PoolKey (abi-encoded: currency0, currency1, fee, tickSpacing, hooks) of a v4 pool that hashes to `id`, or null.
+ * A pool the PositionManager did not make has no record there; its key is found by trying what a swap shows of it:
+ * the token and one of the currencies we price (native ETH, WETH, USDC), the swap's own fee or the dynamic-fee flag or a
+ * standard tier, the hooks among the addresses in the transaction (or none), and a tick spacing. A hash that equals the
+ * id proves the key; nothing else is accepted.
+ */
+export function v4Key(id: string, token: string, swapFee: number, around: readonly string[]): string | null {
+  const w = (n: bigint): string => n.toString(16).padStart(64, "0");
+  const a = (x: string): string => x.slice(2).padStart(64, "0");
+  const hooks = [ZERO, ...around.filter((x) => x !== token && x !== BASE_VENUES.poolManager && x !== BASE_VENUES.weth && x !== BASE_VENUES.usdc).slice(0, HOOKS_MAX)];
+  const fees = [...new Set([swapFee, DYNAMIC_FEE, 100, 500, 2500, 3000, 10000])];
+  const spacings = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
+  for (const other of [ZERO, BASE_VENUES.weth, BASE_VENUES.usdc]) {
+    const [c0, c1] = token < other ? [token, other] : [other, token];
+    for (const ts of spacings) for (const h of hooks) for (const f of fees) {
+      const k = `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
+      if (keccakHex(k) === id) return k;
+    }
+  }
+  return null;
+}
+
 export type Log = { block: number; index: number; tx: string; address: string; topics: string[]; data: string };
 const WORD = /^0x[0-9a-f]{64}$/;
 const HEXDATA = /^0x([0-9a-f]{64})*$/;
@@ -449,24 +481,34 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const quote = other === V.usdc ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth ? ({ kind: "eth", decimals: 18 } as const) : null;
       if (quote !== null) cands.push({ venue: isV2 ? "v2" : "v3", id: a, token, tokenIs0, quote });
     });
-    // v4 pools: the pool ids the PoolManager's recent swaps in the token's transactions name, each checked against the key
+    // v4 pools: the pool ids the PoolManager's recent swaps in the token's transactions name. A key is the
+    // PositionManager's own record of it when there is one; a pool made without it (Doppler, Zora) has its key worked out
+    // from the swap's own fee and the addresses in its transaction (v4Key). Either way the key must hash to the id.
     if (pmTxs.length > 0) {
-      const ids = new Set<string>();
+      const seen = new Map<string, { fee: number; around: Set<string> }>();
       for (const u of usable(rpcs)) {
         const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
         if (r === null) continue;
-        for (const x of r) for (const raw of Array.isArray(obj(x.ok ? x.result : null).logs) ? (obj((x as { result: unknown }).result).logs as unknown[]) : []) {
-          const l = parseLog(raw);
-          if (l !== null && l.address === V.poolManager && l.topics.length === 3 && l.topics[0] === TOPIC.swap4) ids.add(l.topics[1]!);
+        for (const x of r) {
+          const logs = (Array.isArray(obj(x.ok ? x.result : null).logs) ? (obj((x as { result: unknown }).result).logs as unknown[]) : []).map(parseLog).filter((l): l is Log => l !== null);
+          for (const l of logs) {
+            if (l.address !== V.poolManager || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap4 || l.data.length !== 2 + 64 * 6) continue;
+            const e = seen.get(l.topics[1]!) ?? { fee: Number(BigInt(`0x${l.data.slice(2 + 64 * 5)}`)), around: new Set<string>() };
+            for (const o of logs) e.around.add(o.address);
+            seen.set(l.topics[1]!, e);
+          }
         }
         break;
       }
-      const list = [...ids].slice(0, CANDIDATES_MAX);
+      const list = [...seen.keys()].slice(0, CANDIDATES_MAX);
       const keys = await callsAgreed(head.n, list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` })));
       list.forEach((id, i) => {
-        const k = keys[i];
-        if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k)) return;
-        if (`0x${Buffer.from(keccak_256(Buffer.from(k.slice(2), "hex"))).toString("hex")}` !== id) return; // the key must hash to the id
+        let k: string | undefined = keys[i];
+        if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k) || keccakHex(k) !== id) {
+          const e = seen.get(id)!;
+          k = v4Key(id, token, e.fee, [...e.around]) ?? undefined; // the key must hash to the id
+        }
+        if (k === undefined) return;
         const [c0, c1] = [wordAddr(k, 0)!, wordAddr(k, 1)!];
         const tokenIs0 = c0 === token;
         if (!tokenIs0 && c1 !== token) return;
