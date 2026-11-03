@@ -56,7 +56,7 @@ import {
   solanaTableIsActive,
   type SolanaLookupTable,
 } from "../../../kit/src/checks/solana/message.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, checkSolanaTeardown, type SolanaTeardownReads } from "../../../kit/src/checks/solana/checks.ts";
+import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_LAMPORTS_PER_SIGNATURE, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, checkSolanaTeardown, type SolanaTeardownReads } from "../../../kit/src/checks/solana/checks.ts";
 import {
   SOLANA_POOL_TAG_RELEASE,
   checkSolanaPoolBuy,
@@ -90,6 +90,13 @@ export const POOL_MAX_SLIPPAGE_BPS = 5_000;
 /** The most compute a Solana transaction may ask: the runtime's MAX_COMPUTE_UNIT_LIMIT. With the kit's price cap
  *  (SOLANA_CU_PRICE_MAX) it bounds the priority fee a payer can be made to pay at 1,400,000 lamports. */
 export const SOLANA_POOL_CU_LIMIT_MAX = 1_400_000;
+/** The most one transaction W signs alone can cost W: one signature and the priority fee at the compute and price caps
+ *  above (5,000 + 1,400,000 lamports). */
+export const SOLANA_POOL_TX_FEE_MAX = SOLANA_LAMPORTS_PER_SIGNATURE + (BigInt(SOLANA_POOL_CU_LIMIT_MAX) * SOLANA_CU_PRICE_MAX) / 1_000_000n;
+/** The most a sell may keep on W, out of the pool: its own fee and its teardown's first frame's, each at that cap
+ *  (2,810,000 lamports). The teardown's later frames are paid by the rent the first gives back. A larger reserve is
+ *  money held back from the user's note, whoever asks for it. */
+export const SOLANA_POOL_SELL_RESERVE_MAX = 2n * SOLANA_POOL_TX_FEE_MAX;
 
 // Every payload a check passed, by identity and by what it is, with what the check read: the signers below sign only
 // these, and only from that read (the pins, the venue list, the proof's values), never from a payload or a context
@@ -147,6 +154,11 @@ export type PoolRequest = { kind: PoolKind; chain: string; token?: string; amoun
 /** The request in the device's terms: the amount in base units of the pool's asset, or of the token for a sell. */
 export type PoolAsk = { kind: PoolKind; chain: PoolChain; token: string | null; amount: bigint; slippageBps: number; decimals: number };
 
+/** Whether `token` is an address on `chain` (a 32-byte base58 key on Solana, 0x and 40 hex on EVM): checked before
+ *  the device reads anything for it. */
+export function poolTokenAddress(chain: PoolChain, token: unknown): token is string {
+  return typeof token === "string" && (chain === "solana" ? SOL_KEY(token) : EVM_ADDRESS.test(token));
+}
 const SOL_KEY = (s: string): boolean => {
   try {
     return base58.decode(s).length === 32;
@@ -181,7 +193,8 @@ function decimalsAnswer(chain: PoolChain, a: unknown): number {
     } catch {
       return refuse("decimals");
     }
-    const mint = o.owner === SOLANA_TOKEN_PROGRAM ? d.length === 82 : o.owner === SOLANA_TOKEN_2022_PROGRAM && (d.length === 82 || (d.length > 165 && d[165] === 1));
+    // a 355-byte account is a multisig, never a mint, as spl-token-2022's own unpack refuses it
+    const mint = o.owner === SOLANA_TOKEN_PROGRAM ? d.length === 82 : o.owner === SOLANA_TOKEN_2022_PROGRAM && (d.length === 82 || (d.length > 165 && d.length !== 355 && d[165] === 1));
     if (!mint || d[45] !== 1) return refuse("decimals");
     return d[44]!;
   }
@@ -462,7 +475,7 @@ export function checkSolanaSell(
     if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");
     if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
   }
-  if (typeof reserve !== "bigint" || reserve < 0n || reserve >= minOut) return refuse("reserve");
+  if (typeof reserve !== "bigint" || reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");
   const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads);
   if (back !== minOut - reserve) return refuse("deposit_amount");
   passedWire(wire);
@@ -594,7 +607,8 @@ export function checkEvmAuthorization(ask: PoolAsk, ctx: PoolContext, nonce: big
 export function signEvmBuy(secretKey: Uint8Array, _ctx: PoolContext, built: EvmPoolBuy, pool: string, proof: EvmPoolProofBinding): Uint8Array {
   const b = mustHavePassed("evm.buy", built);
   const read = proofMustHavePassed("evm.buy", proof);
-  if (lower(pool) !== lower(read.pool) || b.pool !== read.pool || b.venues !== read.venues) return refuse("unchecked");
+  // the built and the proof one check passed together: each check keeps one proof snapshot for both
+  if (lower(pool) !== lower(read.pool) || b.pool !== read.pool || b.venues !== read.venues || b.proof !== read.proof) return refuse("unchecked");
   return pinnedSignBuy(read.venues, secretKey, built.chain, read.pool, built, read.proof);
 }
 /** W's Sell signature (the kit's pinned signer: a sell its builder did not return is refused not_built). */

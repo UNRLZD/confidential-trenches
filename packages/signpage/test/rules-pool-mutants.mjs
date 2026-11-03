@@ -41,7 +41,8 @@ export const MUTANTS = [
   ['if (!Array.isArray(reads) || reads.length !== 2) return refuse("decimals");', "", DEC],
   ['if (decimalsAnswer(chain, reads[1]) !== a) return refuse("decimals");', "", DEC],
   ["o.owner === SOLANA_TOKEN_PROGRAM ? d.length === 82 :", "o.owner === SOLANA_TOKEN_PROGRAM ? d.length >= 82 :", DEC],
-  ["(d.length > 165 && d[165] === 1)", "d.length > 165", DEC],
+  ["d.length !== 355 && d[165] === 1)", "d.length !== 355)", DEC],
+  ["(d.length > 165 && d.length !== 355 && d[165] === 1)", "(d.length > 165 && d[165] === 1)", DEC],
   ['if (!mint || d[45] !== 1) return refuse("decimals");', 'if (!mint) return refuse("decimals");', DEC],
   ['/^0x[0-9a-fA-F]{64}$/.test(a)', "/^0x[0-9a-fA-F]+$/.test(a)", DEC],
   ['if (n > 255n) return refuse("decimals");', "", DEC],
@@ -90,7 +91,9 @@ export const MUTANTS = [
   ['if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");', "", SELL],
   ['if (sell.length !== want.length) return refuse("sell");', "", SELL],
   ['if (back !== minOut - reserve) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
-  ['if (typeof reserve !== "bigint" || reserve < 0n || reserve >= minOut) return refuse("reserve");', "", SELL],
+  ['if (typeof reserve !== "bigint" || reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");', "", SELL],
+  ["reserve > SOLANA_POOL_SELL_RESERVE_MAX || ", "", SELL],
+  ["export const SOLANA_POOL_SELL_RESERVE_MAX = 2n * SOLANA_POOL_TX_FEE_MAX;", "export const SOLANA_POOL_SELL_RESERVE_MAX = 3n * SOLANA_POOL_TX_FEE_MAX;", SELL],
   // the EVM relay data
   ['if (lower(relay.recipient) !== lower(ctx.wallet)) refuse("recipient");', "", EBUY],
   ['if (lower(relay.recipient) !== lower(ctx.wallet)) refuse("recipient");', "", EWD],
@@ -128,7 +131,8 @@ export const MUTANTS = [
   ['return r ?? refuse("unchecked");', 'return r ?? CHECKED["evm.buy"].get(x) ?? CHECKED["evm.withdraw"].get(x) ?? refuse("unchecked");', EBUY],
   ['if (!k || p.nullifier !== k.nullifier || p.context !== k.context || p.value !== k.value) return refuse("unchecked");', 'if (!k) return refuse("unchecked");', EBUY],
   ['  passed("evm.buy", given, read);\n', "", EBUY],
-  ['if (lower(pool) !== lower(read.pool) || b.pool !== read.pool || b.venues !== read.venues) return refuse("unchecked");', "", EBUY],
+  ['if (lower(pool) !== lower(read.pool) || b.pool !== read.pool || b.venues !== read.venues || b.proof !== read.proof) return refuse("unchecked");', "", EBUY],
+  [" || b.proof !== read.proof) return refuse(\"unchecked\");", ") return refuse(\"unchecked\");", EBUY],
   ['  passed("evm.withdraw", given, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof });\n', "", EWD],
   ['  passed("evm.sell", built, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId });\n', "", ESELL],
   ["pinnedSignSellAuthorization(read.venues,", "pinnedSignSellAuthorization(_ctx.evm!.venues,", ESELL],
@@ -141,9 +145,12 @@ export const MUTANTS = [
   ['const frac = (amount % base).toString().padStart(decimals, "0").replace(/0+$/, "");', 'const frac = (amount % base).toString().replace(/0+$/, "");', SELL],
 ];
 
+// a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
+// would report to the parent's runner and print no summary of its own)
+const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
 const run = (name, file = TEST) => {
   try {
-    const out = execFileSync(process.execPath, ["--test", "--test-timeout=120000", "--test-name-pattern", name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), file], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const out = execFileSync(process.execPath, ["--test", "--test-timeout=120000", "--test-name-pattern", name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), file], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: CHILD_ENV });
     return { ok: true, ran: /ℹ pass [1-9]/.test(out) };
   } catch (e) {
     return { ok: false, ran: true, out: String(e.stdout ?? "") };
@@ -156,6 +163,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (test.split(IMPORT).length !== 2) { console.log("BAD  rules-pool.test.ts imports pool.ts not once"); process.exit(1); }
   writeFileSync(MUTANT_TEST, test.replace(IMPORT, `from "../src/rules/.pool-mutant-${process.pid}.ts";`));
   process.on("exit", () => { rmSync(MUTANT_TEST, { force: true }); rmSync(MUTANT_SRC, { force: true }); });
+  // an interrupt removes the copies too (exit runs the handler above)
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(130));
   let bad = 0;
   for (const name of new Set(MUTANTS.map((m) => m[2]))) {
     const r = run(name);

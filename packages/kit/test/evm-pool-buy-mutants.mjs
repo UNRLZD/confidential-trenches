@@ -140,11 +140,14 @@ export const MUTANTS = [
   ['middles: Object.freeze([]),\n      // no Uniswap v3 on Robinhood testnet', 'middles: Object.freeze(["0x036CbD53842c5426634e7929541eC2318f3dCF7e"]),\n      // no Uniswap v3 on Robinhood testnet', PINS],
 ];
 
+// a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
+// would report to the parent's runner and print no summary of its own)
+const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`
 function run(name) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, ...TESTS];
   try {
-    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8" });
+    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV });
     return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
   } catch {
     return "fail";

@@ -126,11 +126,14 @@ export const MUTANTS = [
   [SELL, "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });", "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)).replace(/.$/, \"0\") });", FIXTURE],
 ];
 
+// a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
+// would report to the parent's runner and print no summary of its own)
+const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
 // "pass", "fail" or "none" (no test ran) of the tests whose names start with `name`
 function run(name) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, TEST];
   try {
-    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8" });
+    const out = execFileSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV });
     return /^# pass ([1-9]\d*)$/m.test(out) ? "pass" : "none";
   } catch {
     return "fail";

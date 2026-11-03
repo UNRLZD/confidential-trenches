@@ -113,3 +113,17 @@ test("readTokenDecimals asks each provider once, for the token's address only", 
   assert.equal(p.calls.length, 2);
   assert.ok(p.calls.every(([, params]) => JSON.stringify(params) === JSON.stringify([{ to: EVM_TOKEN, data: "0x313ce567" }, "latest"])));
 });
+
+test("a sell whose token is not an address of its chain makes no provider read and is refused", async () => {
+  const p = providers(() => mint(6));
+  const k = poolKinds({ pinned: () => true, rpcs: () => p.pair, flow: () => ({ error: "busy" }) });
+  for (const [chain, token] of [
+    ["solana", "any string the app picks"],
+    ["solana", EVM_TOKEN],
+    ["base", SOL_TOKEN],
+    ["robinhood", "0x12"],
+  ] as const) {
+    assert.deepEqual(await settle(k["pool.sell"]({ chain, token, amount: "1", slippage_bps: 100 }, ctx)), { error: "not_allowed" }, `${chain} ${token}`);
+  }
+  assert.equal(p.calls.length, 0);
+});

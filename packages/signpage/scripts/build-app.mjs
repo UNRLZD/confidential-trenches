@@ -123,8 +123,12 @@ export async function bundle(pkg = PKG) {
   }
 }
 
-/** A test file, a test helper, a test-only package, or Node's own test runner, by module id. */
-const TEST_PATH = /(^|[\\/])(test|tests|__tests__|fixtures)[\\/]|\.(test|spec|e2e)\.[cm]?[jt]sx?$|[\\/]node_modules[\\/](fake-indexeddb|playwright[\w-]*)[\\/]|^node:test$/;
+/** A test file, a test helper, or Node's own test runner, by module id. */
+const TEST_PATH = /(^|[\\/])(test|tests|__tests__|fixtures)[\\/]|\.(test|spec|e2e)\.[cm]?[jt]sx?$|^node:test$/;
+/** The package's dev-only packages (its devDependencies: the fake store, the browser driver, the bundler...): none of
+ *  them may be in the bundle, by module id. */
+const DEV_ONLY = Object.keys(JSON.parse(readFileSync(join(dirname(dirname(fileURLToPath(import.meta.url))), "package.json"), "utf8")).devDependencies ?? {});
+const devOnly = (id) => DEV_ONLY.some((name) => id.split(/[\\/]/).join("/").includes(`/node_modules/${name}/`));
 /** A source line that puts a wallet into READY: an arm record made armed (`state: "READY"`, `to: "READY"`). */
 const ARMS = /\b(state|to)\s*:\s*["']READY["']/;
 
@@ -136,7 +140,7 @@ export function bundleModuleProblems(modules, read = (id) => readFileSync(id.spl
   const p = [];
   if (!modules.length) p.push("the bundle's module list is empty: the build gave none to check");
   for (const id of modules) {
-    if (TEST_PATH.test(id)) p.push(`the bundle carries a test path: ${id}`);
+    if (TEST_PATH.test(id) || devOnly(id)) p.push(`the bundle carries a test path: ${id}`);
     else if (!/[\\/]node_modules[\\/]/.test(id) && !id.startsWith("\0") && /\.[cm]?[jt]sx?$/.test(id.split("?")[0]) && ARMS.test(read(id))) {
       p.push(`the bundle carries a module that puts a wallet into READY: ${id}`);
     }

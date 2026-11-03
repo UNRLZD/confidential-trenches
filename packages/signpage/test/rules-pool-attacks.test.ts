@@ -234,3 +234,37 @@ test("HARDEN A9: an EVM withdraw signs only under the kit's own chain id, never 
   const proof = { nullifier: 11n, context: evmPoolContextOf({ processooor: EVM_POOL, relay: r }, evmPoolScopeOf(EVM_POOL, 0n)), value: 10n ** 16n };
   refused(() => { checkEvmWithdraw(EVM_POOL, proof, r, ask, ctx); signEvmWithdraw(EVM_SECRET, ctx, ask, EVM_POOL, proof); });
 });
+
+// ======================= the re-check's planted attacks (fold 2): each payload must be refused =======================
+
+// R1: the Solana sell's reserve is the caller's: a reserve of min out - 1 deposits 1 lamport and W signs it.
+test("RECHECK R1: a Solana sell whose 'reserve' leaves 1 lamport for the pool is refused", async () => {
+  const { venue, ref, reads } = await setup("pump");
+  const amount = 5_000_000n;
+  const reference = { amount, ref, slippageBps: 300 };
+  const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
+  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
+  const steps = solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+  const w = wire(SOL_W, [cuLimit, ...steps, depositIx({ value: 1n })]);
+  let signed = false;
+  try {
+    const d = checkSolanaSell(w, ask, solCtx(), venue, reference, reads.slot, SOL_READS, floor - 1n);
+    signed = signSolana(SOL_SECRET, w).length === 64;
+  } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
+  assert.equal(signed, false, "W signed a sell whose deposit is 1 lamport (reserve = min out - 1, the caller's number)");
+});
+
+// R2: an EVM buy's built and proof from two different checks are signed together.
+test("RECHECK R2: an EVM buy signs only the built and the proof one check passed together", () => {
+  const r1 = relay();
+  const r2 = relay({ salt: "0x" + "cd".repeat(16) });
+  const builtSmall = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 10n, X); // min out for 0.01 ETH
+  const builtBig = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 10n ** 9n, X); // min out for 1 ETH
+  const p1 = proofOf(r1, 10n ** 16n);
+  const p2 = proofOf(r2, 10n ** 18n);
+  checkEvmBuy(builtSmall, EVM_POOL, p1, r1, { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 16n, slippageBps: 100, decimals: 18 }, evmCtx(), 10n);
+  checkEvmBuy(builtBig, EVM_POOL, p2, r2, { kind: "pool.buy", chain: "base", token: X, amount: 10n ** 18n, slippageBps: 100, decimals: 18 }, evmCtx(), 10n ** 9n);
+  let sig: Uint8Array | null = null;
+  try { sig = signEvmBuy(EVM_SECRET, evmCtx(), builtSmall, EVM_POOL, p2); } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
+  assert.equal(sig, null, "W signed a Buy pairing check 1's built (min out 10) with check 2's 1 ETH proof");
+});

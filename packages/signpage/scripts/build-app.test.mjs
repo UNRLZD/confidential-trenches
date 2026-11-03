@@ -138,11 +138,13 @@ test("no test path marks a wallet as armed: the shipped bundle's modules hold no
 test("planted: a test file, a fixture, a test-only package, Node's test runner, a module that arms a wallet, or no module list fails the release build", () => {
   const src = (text) => () => text;
   const clean = "/r/packages/signpage/src/trade.ts";
-  for (const id of ["/r/packages/signpage/test/trade.test.ts", "/r/packages/kit/test/fixtures/solana-pool-buy.json.ts", "/r/packages/signpage/src/arm.test.ts", "/r/node_modules/.pnpm/fake-indexeddb@6.2.6/node_modules/fake-indexeddb/build/esm/index.js", "node:test"]) {
+  for (const id of ["/r/packages/signpage/test/trade.test.ts", "/r/packages/kit/test/fixtures/solana-pool-buy.json.ts", "/r/packages/signpage/src/arm.test.ts", "/r/node_modules/.pnpm/fake-indexeddb@6.2.6/node_modules/fake-indexeddb/build/esm/index.js", "/r/node_modules/.pnpm/vite@8.3.5/node_modules/vite/dist/client/env.mjs", "node:test"]) {
     assert.match(bundleModuleProblems([clean, id], src("")).join("\n"), /carries a test path/, id);
   }
   assert.match(bundleModuleProblems([clean, "/r/packages/signpage/src/arm-hook.ts"], (id) => (id === clean ? "" : 'await store.put("wallets", { ...rec, state: "READY" });')).join("\n"), /puts a wallet into READY: \/r\/packages\/signpage\/src\/arm-hook\.ts/);
   assert.match(bundleModuleProblems([clean], src("moveArmRecord(s, k, 'ARMING', to: 'READY')")).join("\n"), /puts a wallet into READY/);
   assert.deepEqual(bundleModuleProblems([clean], src('settleArm(store, key, op, { from: "READY", to: "IN_POSITION" })')), [], "moving a READY wallet on is not arming one");
   assert.match(bundleModuleProblems([]).join("\n"), /module list is empty/);
+  // a runtime dependency is no test path: only the package's devDependencies are
+  assert.deepEqual(bundleModuleProblems([clean, "/r/node_modules/.pnpm/@noble+curves@2.4.0/node_modules/@noble/curves/esm/ed25519.js"], src("")), []);
 });

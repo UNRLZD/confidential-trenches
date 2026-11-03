@@ -40,6 +40,7 @@ import {
   checkSolanaSell,
   checkSolanaWithdraw,
   drawPool,
+  SOLANA_POOL_SELL_RESERVE_MAX,
   evmWithdrawDigest,
   signEvmAuthorization,
   signEvmBuy,
@@ -130,6 +131,8 @@ test("a request's decimals are never the caller's: the pool asset's for a deposi
     ["solana", [mintAnswer(6, { len: 165 }), mintAnswer(6, { len: 165 })]],
     ["solana", [mintAnswer(6, { owner: SOLANA_TOKEN_2022_PROGRAM, len: 200, type: 2 }), mintAnswer(6, { owner: SOLANA_TOKEN_2022_PROGRAM, len: 200, type: 2 })]],
     ["solana", [mintAnswer(6, { len: 200 }), mintAnswer(6, { len: 200 })]],
+    // a Token-2022 multisig (355 bytes) reads as no mint, whatever its byte 165 holds
+    ["solana", [mintAnswer(6, { owner: SOLANA_TOKEN_2022_PROGRAM, len: 355 }), mintAnswer(6, { owner: SOLANA_TOKEN_2022_PROGRAM, len: 355 })]],
     ["solana", [{ value: null }, { value: null }]],
     ["solana", [{ value: { owner: SOLANA_TOKEN_PROGRAM, data: ["!!", "base64"] } }, mintAnswer(6)]],
     ["base", undefined],
@@ -317,6 +320,18 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Token", "Amount", "To", "Amount", "Fee cap", "Pool"]);
   assert.deepEqual(drawPool(d)[2], ["Amount", "5"]);
   assert.deepEqual(drawPool(d)[4], ["Amount", String(Number(floor - RESERVE) / 1e9)]);
+  // an amount under 1 keeps its leading zeros: 5,000,000 lamports is 0.005 SOL
+  assert.deepEqual(drawPool({ ...d, back: 5_000_000n })[4], ["Amount", "0.005"]);
+  // the reserve is the device's own fee money for W, never more than its fixed cap: the cap passes, one lamport more is refused
+  assert.equal(SOLANA_POOL_SELL_RESERVE_MAX, 2_810_000n);
+  assert.ok(floor > SOLANA_POOL_SELL_RESERVE_MAX + 1n, "the fixture's min out is above the cap");
+  const atCap = (r: bigint) => {
+    const steps = solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+    return checkSolanaSell(wire(SOL_W, [cuLimit, ...steps, depositIx({ value: floor - r })]), ask, solCtx(), venue, reference, slot, SOL_READS, r);
+  };
+  assert.equal(atCap(SOLANA_POOL_SELL_RESERVE_MAX).back, floor - SOLANA_POOL_SELL_RESERVE_MAX);
+  assert.throws(() => atCap(SOLANA_POOL_SELL_RESERVE_MAX + 1n), refusedAs("reserve"));
+  assert.throws(() => atCap(floor - 1n), refusedAs("reserve"));
   // a higher min out the bytes carry is fine, its deposit that min out less the reserve
   assert.equal(checkSolanaSell(sellWire({ minOut: floor + 10n }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE).back, floor + 10n - RESERVE);
   for (const [w, rule] of [
@@ -390,6 +405,13 @@ test("EVM buy: the kit's pinned Buy of the request's token, the proof bound to W
   const otherCtx = evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 1, adapters: Object.freeze({ v3: A_V3 }) }) }), feeRecipient: FEE_TO } });
   assert.deepEqual(signEvmBuy(EVM_SECRET, otherCtx, built, EVM_POOL, proof), sig);
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, "0x2222222222222222222222222222222222222222", proof), refusedAs("unchecked"));
+  // a built and a proof each passed by its own check are never signed together
+  const r2 = relay({ salt: "0x" + "cd".repeat(16) });
+  const built2 = pinnedBuild(VENUES, "base", A_V3, v3([B.weth, X]), 2n, X);
+  const proof2 = proofOf(r2, 10n ** 18n);
+  checkEvmBuy(built2, EVM_POOL, proof2, r2, { ...ask, amount: 10n ** 18n }, evmCtx(), 1n);
+  assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proof2), refusedAs("unchecked"));
+  assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built2, EVM_POOL, proof), refusedAs("unchecked"));
   // only what the check passed: another proof object, a proof changed after, a proof checked as a buy signed as a withdraw
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), built, EVM_POOL, proofOf(r)), refusedAs("unchecked"));
   assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), { ...ask, kind: "pool.withdraw" }, EVM_POOL, proof), refusedAs("unchecked"));

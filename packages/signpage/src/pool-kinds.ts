@@ -9,7 +9,7 @@
 // - The flows that build, prove, sign and send each op land with the pools; until a pinned pool has its flow, a
 //   request that passed every check is refused not_allowed too, never half run.
 import type { KindContext, Deferred, HostRefusal } from "./api.ts";
-import { PoolRuleRefused, checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
+import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
 export type PoolRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
@@ -66,11 +66,11 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         if (!deps.pinned(ask.chain) || (ask.chain !== "solana" && EVM_REFUSED.has(kind)) || !deps.flow) return NO;
         return deps.flow(ask, ctx);
       }
-      // a sell: on a pinned pool's chain only, the token's decimals read on two providers, then the whole request
-      // checked with them (the token's address included: a read of a string that is no token answers no mint)
+      // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals read
+      // on two providers, then the whole request checked with them; no read is made for any other string
       if (!(["solana", "base", "robinhood"] as const).includes(chain as never) || !deps.pinned(chain)) return NO;
       const rpcs = deps.rpcs(chain);
-      if (!rpcs || typeof p.token !== "string") return NO;
+      if (!rpcs || !poolTokenAddress(chain, p.token)) return NO;
       let answer: HostRefusal = NO;
       const after = readTokenDecimals(chain, p.token, rpcs).then(
         (reads) => {
