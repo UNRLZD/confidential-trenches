@@ -1,0 +1,178 @@
+{
+  "good": {
+    "at": "2026-11-03T07:57:58.318Z",
+    "source": "harness, this branch's terminal build with Portfolio mounted on /portfolio (the one route line of card app-portfolio-mount)",
+    "answer": {
+      "release": "check-shell",
+      "api": 1,
+      "signed_in": true,
+      "way": "passkey",
+      "code_saved": true,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": [],
+      "pools": [
+        {
+          "chain": "solana",
+          "balance": "1250000.5",
+          "ready": "999999.99"
+        },
+        {
+          "chain": "base",
+          "balance": "320"
+        },
+        {
+          "chain": "robinhood",
+          "balance": "0",
+          "ready": "0"
+        }
+      ]
+    },
+    "runs": [
+      {
+        "width": "phone",
+        "frame": "https://confidential.unrealized.trade/portfolio",
+        "view": "rows",
+        "rows": [
+          {
+            "chain": "solana",
+            "balance": "125000050",
+            "ready": "99999999",
+            "pending": "25000051",
+            "text": [
+              "Solana",
+              "$1.25M",
+              "$999,999.99",
+              "$250,000.51"
+            ]
+          },
+          {
+            "chain": "base",
+            "balance": "32000",
+            "ready": "none",
+            "pending": "none",
+            "text": [
+              "Base",
+              "$320.00",
+              "\u2014",
+              "\u2014"
+            ]
+          },
+          {
+            "chain": "robinhood",
+            "balance": "0",
+            "ready": "0",
+            "pending": "0",
+            "text": [
+              "Robinhood",
+              "$0.00",
+              "$0.00",
+              "$0.00"
+            ]
+          }
+        ],
+        "violations": [],
+        "errors": []
+      },
+      {
+        "width": "desktop",
+        "frame": "https://confidential.unrealized.trade/portfolio",
+        "view": "rows",
+        "rows": [
+          {
+            "chain": "solana",
+            "balance": "125000050",
+            "ready": "99999999",
+            "pending": "25000051",
+            "text": [
+              "Solana",
+              "$1.25M",
+              "$999,999.99",
+              "$250,000.51"
+            ]
+          },
+          {
+            "chain": "base",
+            "balance": "32000",
+            "ready": "none",
+            "pending": "none",
+            "text": [
+              "Base",
+              "$320.00",
+              "\u2014",
+              "\u2014"
+            ]
+          },
+          {
+            "chain": "robinhood",
+            "balance": "0",
+            "ready": "0",
+            "pending": "0",
+            "text": [
+              "Robinhood",
+              "$0.00",
+              "$0.00",
+              "$0.00"
+            ]
+          }
+        ],
+        "violations": [],
+        "errors": []
+      }
+    ]
+  },
+  "deployed": {
+    "at": "2026-11-03T07:56:02.503Z",
+    "source": "live https://confidential.unrealized.trade",
+    "answer": {
+      "release": "check-shell",
+      "api": 1,
+      "signed_in": true,
+      "way": "passkey",
+      "code_saved": true,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": [],
+      "pools": [
+        {
+          "chain": "solana",
+          "balance": "1250000.5",
+          "ready": "999999.99"
+        },
+        {
+          "chain": "base",
+          "balance": "320"
+        },
+        {
+          "chain": "robinhood",
+          "balance": "0",
+          "ready": "0"
+        }
+      ]
+    },
+    "runs": [
+      {
+        "width": "phone",
+        "frame": "https://confidential.unrealized.trade/portfolio",
+        "view": null,
+        "rows": [],
+        "violations": [],
+        "errors": []
+      },
+      {
+        "width": "desktop",
+        "frame": "https://confidential.unrealized.trade/portfolio",
+        "view": null,
+        "rows": [],
+        "violations": [],
+        "errors": []
+      }
+    ]
+  }
+}
