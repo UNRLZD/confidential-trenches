@@ -361,7 +361,7 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   assert.deepEqual(hits, ["packages/wallet/src/derive/keys.ts"]);
   // every W a pool pays comes from freshWallet, called where the queue proves and where a restore lists it
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
+  assert.deepEqual(calls, ["packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts"]);
 });
 
 // ---------- fold 2 ----------

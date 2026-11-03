@@ -512,6 +512,19 @@ export async function evmTokensSentTo(rpcs: readonly [EvmRpc, EvmRpc], w: string
   return [...new Set(logs.map((l) => l.token))].sort();
 }
 
+/**
+ * Two RPCs that read on the pool's chain at the restore's anchor: eth_chainId must be `chainId` on both (another chain
+ * is refused), and the anchor's height must hold the anchor's hash on both (another hash, or none yet, is a lag: a
+ * retry). Run before a W's Transfer reads, so no Transfer log of another chain or another fork is ever taken.
+ */
+export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: bigint, anchor: EvmBlock, signal?: AbortSignal): Promise<void> {
+  checkEvmRpcs(rpcs);
+  const ids = await both(rpcs, async (rpc, k) => qty(await rpc("eth_chainId", []), `rpc ${k} eth_chainId`), signal);
+  if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);
+  const bs = await both(rpcs, (rpc, k) => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), signal);
+  if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(`an RPC does not hold block ${anchor.number} as ${anchor.hash}`);
+}
+
 /** What a trees() call may ask beyond the cut: a deposit's own note's newest root, read like every other read. */
 export type EvmTreesOpts = { newest?: boolean };
 
@@ -521,8 +534,9 @@ type Round = EvmAnchors & { events: Ev[] };
 export type EvmTreeSync = {
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: EvmTreesOpts): Promise<PoolTrees>;
   /** Every leaf event of the pool up to the newest agreed block, the same on both RPCs and making the pool's trees at
-   * that block (its views), with the round's two anchors: the whole set a restore reads (./evm-restore.ts). */
-  events(signal?: AbortSignal): Promise<Round>;
+   * that block (its views), with the round's two anchors: the whole set a restore reads (./evm-restore.ts). With
+   * `once`, one round and its lag thrown, for a caller that retries itself (one retry budget, never one in another). */
+  events(signal?: AbortSignal, once?: boolean): Promise<Round>;
   /** The state tree's depth after every leaf in blocks up to `block` (the pool's currentTreeDepth at that block). With
    * `hash`, `block` must still be that block on both RPCs after the round (the round's chain), else a lag; then the
    * caller retries (it re-reads the block), not depthAt. */
@@ -715,11 +729,12 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         return { stateTree, labelTree, stateRoot: stateTree.root!, labelRoot: labelTree.root! };
       }, sleep, signal));
     },
-    events(signal) {
-      return serial(() => evmRetryLag(async () => {
+    events(signal, once) {
+      const one = async (): Promise<Round> => {
         const { fin, anchor, events } = await round(signal);
         return { fin, anchor, events };
-      }, sleep, signal));
+      };
+      return serial(() => (once === true ? one() : evmRetryLag(one, sleep, signal)));
     },
     depthAt(block, signal, hash) {
       if (typeof block !== "bigint" || block < 0n) return Promise.reject(new Error("block: a block number"));

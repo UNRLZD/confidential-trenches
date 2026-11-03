@@ -97,7 +97,7 @@ test("solanaRestore zeroes each spent note's W secret key once it has the addres
   assert.ok(zero(calls[at]!.out.secretKey), "buyWallets leaves W's secret key in memory");
 });
 
-test("evmRestore zeroes each spent note's W secret key once it has the address, on a refusal too (card notes-restore-evm)", () => {
+test("evmRestore zeroes each spent note's W secret key once it has the address, a release paid elsewhere too (card notes-restore-evm)", () => {
   const scope = 7n;
   const dep = { kind: "deposit", s: scope, i: 0 } as const;
   const P = noteSecrets(SEED, dep).precommitment;
@@ -108,12 +108,13 @@ test("evmRestore zeroes each spent note's W secret key once it has the address, 
     { ...base, block: 1n, kind: "deposit" as const, state: noteCommitment(10_000_000n, label, P), label, value: 10_000_000n, precommitment: P },
     { ...base, block: 2n, kind: "withdraw" as const, state: noteCommitment(0n, label, cP), value: 10_000_000n, nullifier: noteSecrets(SEED, dep).nullifierHash, recipient: "0x0000000000000000000000000000000000005555" },
   ];
-  // a release that paid another address: refused, and the W derived to check it is zeroed all the same
+  // a release that paid another address: one W derived and zeroed, no refusal, the release listed elsewhere
   const first = calls.length;
-  assert.throws(() => evmRestore({ seed64: SEED, scope, events, gap: 2 }), /not its W/);
+  const o = evmRestore({ seed64: SEED, scope, events, gap: 2 });
+  assert.deepEqual([o.spends.length, o.elsewhere.length], [0, 1]);
   assert.equal(calls.length - first, 1);
   const w = calls[first]!.out as unknown as { secretKey: Uint8Array; address: string };
-  assert.ok(zero(w.secretKey), "W's secret key is left in memory on a refusal");
+  assert.ok(zero(w.secretKey), "W's secret key is left in memory for a release paid elsewhere");
   events[1]!.recipient = w.address.toLowerCase();
   const at = calls.length;
   const r = evmRestore({ seed64: SEED, scope, events, gap: 2 });

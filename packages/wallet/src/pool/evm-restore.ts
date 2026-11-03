@@ -16,24 +16,34 @@
 //   nullifier spent twice, or one commitment twice in the state tree is not this pool (it refuses each) and stops it.
 // - The walk: deposit indices lane by lane until RESTORE_GAP misses in a row (../notes/restore.ts walkLane), each
 //   deposit note's second arrivals; for each note found, spent when its nullifier hash is a release's. The release
-//   must come after the note's leaf, withdraw at most its value and above 0, and pay W_{evm, l, j} (l the note's label,
-//   j = jOf(its ref), ./queue.ts), the only W the device binds (./evm.ts bind). Its change note is value - withdrawn
-//   under change (l, j) and must be the release's own _newCommitment. Then the move, return and second-arrival notes
-//   the release's W brought back, as on the Solana pool. No refund note: a release pays W in its own transaction and
-//   uses no refund precommitment (src/PrivacyPool.sol:112-138, src/PrivacyPoolSimple.sol:49-78).
+//   must come after the note's leaf and withdraw at most its value and above 0: a pool cannot make any other, so any
+//   other stops the restore. Its change note is value - withdrawn under change (l, j), kept when it is the release's own
+//   _newCommitment. The device's own release pays W_{evm, l, j} (l the note's label, j = jOf(its ref), ./queue.ts, the
+//   only W bind takes, ./evm.ts) and makes that change note. One that does not (paid another address, or made another
+//   new commitment: the note's secrets used elsewhere) is the chain's truth and never hides the rest: it is listed in
+//   `elsewhere`, its change note is still kept when it matches, and an address the words do not give is never listed
+//   as a W nor named in a read. Then the move, return and second-arrival notes under (l, j), as on the Solana pool.
+//   No refund note: a release pays W in its own transaction and uses no refund precommitment
+//   (src/PrivacyPool.sol:112-138, src/PrivacyPoolSimple.sol:49-78).
 // - Each spent note's W: its secret key, derived for its address, is zeroed at once. Its tokens are every contract
 //   that sent it a Transfer log from its release's block on (./evm.ts evmTokensSentTo: topic 2 = W, no token named, on
 //   two RPCs, paged under each provider's range and result caps, any log one RPC gives and the other lacks refused for
 //   every device alike), and a buy's _token. Each read names one W and nothing else; the Ws are read in a random order,
-//   never in the notes' order (./buy-wallets.ts does the same for holdings).
-// - A lag (an RPC behind the other) is a retry, EVM_LAG_TRIES rounds at most, then refused; a lie is refused at once.
+//   never in the notes' order (./buy-wallets.ts does the same for holdings). The Transfer RPCs are their own pair, no
+//   provider of the pool's pair, and must be on the pool's chain and hold the restore's anchor block first.
+// - The notes never wait on a W: a W whose read fails (a lag that stays, a lie, a provider's cap no page can meet, as a
+//   stranger's Transfer spam to a public W can force) is listed with tokens null and its error; the notes stand.
+// - The pool read: a lag (an RPC behind the other) is a retry, EVM_LAG_TRIES rounds at most, then refused; a lie is
+//   refused at once. A newest agreed block more than an epoch behind the higher RPC's latest time is a lag: the lower
+//   of two latest blocks is the anchor, so an RPC stuck behind would otherwise give an old restore as a whole one.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultLabelOf } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf } from "../notes/store.ts";
-import { checkEvmRpcs, EVM_CHAIN_IDS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "./evm.ts";
+import { solanaSameProvider } from "@blindfill/kit";
+import { checkEvmRpcs, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmHoldsAnchor, evmLatestHigh, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "./evm.ts";
 import { jOf } from "./queue.ts";
 
 const U32 = 0xffffffff;
@@ -43,8 +53,12 @@ export type EvmRestoredNote = { ref: NoteRef; scope: bigint; precommitment: bigi
 /** A spent note of ours: its release (l, j), the W it paid (lowercase), what it withdrew, the release's block, and a
  * buy's token (lowercase; null for a withdraw). */
 export type EvmRestoredSpend = { l: bigint; j: number; note: string; w: string; withdrawn: bigint; block: bigint; token: string | null };
-/** A spend's W and every token it was sent from the release's block on (lowercase contracts, sorted). */
-export type EvmRestoredWallet = { note: string; w: string; tokens: string[] };
+/** A spend's W and every token it was sent from the release's block on (lowercase contracts, sorted); null with the
+ * error when its reads failed. */
+export type EvmRestoredWallet = { note: string; w: string; tokens: string[] | null; error?: string };
+/** A spent note of ours whose release the device did not make: it paid `to` (lowercase), not the note's W, or its new
+ * commitment is not the note's change note (`changeOurs` false). Data only. */
+export type EvmRestoredElsewhere = { note: string; to: string; withdrawn: bigint; block: bigint; changeOurs: boolean };
 
 export type EvmRestoreArgs = {
   seed64: Uint8Array;
@@ -55,7 +69,7 @@ export type EvmRestoreArgs = {
   gap?: number;
 };
 
-export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[] } {
+export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[] } {
   const { seed64, scope, events } = a;
   // every event adds one state leaf (src/PrivacyPool.sol:101, 263), and each Deposited one label: its place is the index
   const leaves = new Set<bigint>();
@@ -77,6 +91,7 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
 
   const notes: EvmRestoredNote[] = [];
   const spends: EvmRestoredSpend[] = [];
+  const elsewhere: EvmRestoredElsewhere[] = [];
   const seen = new Set<string>();
   const put = (ref: NoteRef, precommitment: bigint, leaf: Leaf, parent?: string): void => {
     const key = refKey(ref);
@@ -118,14 +133,16 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
     if (e.value === 0n || e.value > note.leaf.value) throw new Error(`${key}: its release withdrew ${e.value} of ${note.leaf.value}`);
     const w = freshWallet(seed64, "evm", l, j);
     w.secretKey.fill(0);
-    if (e.recipient !== w.address.toLowerCase()) throw new Error(`${key}: its release paid an address that is not its W (l, j ${j})`);
-    spends.push({ l, j, note: key, w: e.recipient, withdrawn: e.value, block: e.block, token: e.token });
+    const ours = e.recipient === w.address.toLowerCase();
     const cref: NoteRef = { kind: "change", l, j };
     const cP = noteSecrets(seed64, cref).precommitment;
     const cValue = note.leaf.value - e.value;
     const cCommitment = noteCommitment(cValue, l, cP);
-    if (cCommitment !== e.state) throw new Error(`${key}: spent, but its release's new commitment is not its change note (l, j ${j})`);
-    put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(at) }, key);
+    const changeOurs = cCommitment === e.state;
+    // only a W the words give is listed (and read); a release the device did not make is listed as such, never a refusal
+    if (ours) spends.push({ l, j, note: key, w: e.recipient!, withdrawn: e.value, block: e.block, token: e.token });
+    if (!ours || !changeOurs) elsewhere.push({ note: key, to: e.recipient!, withdrawn: e.value, block: e.block, changeOurs });
+    if (changeOurs) put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(at) }, key);
     asDeposit({ kind: "move", l, j });
     seconds({ id: "V", l, j });
     seconds({ id: "A", l, j });
@@ -134,7 +151,7 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
       seconds({ id: "R", c, l, j });
     }
   }
-  return { notes, spends };
+  return { notes, spends, elsewhere };
 }
 
 const randomIndex = (n: number): number => {
@@ -161,13 +178,15 @@ export type EvmRestoreNotesArgs = {
 };
 
 /**
- * Restore of the EVM pool from the 12 words: the pool's whole set of events on two RPCs (evmTreeSync), evmRestore, then
- * each spent note's W's tokens on two RPCs from its release's block up to the same newest agreed block. A lag retries
- * the whole read, EVM_LAG_TRIES rounds at most.
+ * Restore of the EVM pool from the 12 words: the pool's whole set of events on two RPCs (evmTreeSync), at a newest
+ * agreed block within an epoch of the higher RPC's latest time, one retry budget (EVM_LAG_TRIES); evmRestore; then
+ * each spent note's W's tokens on the two Transfer RPCs from its release's block up to that same block, each W on its
+ * own budget. A W that cannot be read is listed unread; the notes never fail with it.
  */
-export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; wallets: EvmRestoredWallet[]; block: bigint }> {
+export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[]; wallets: EvmRestoredWallet[]; block: bigint }> {
   checkEvmRpcs(a.rpcs);
   checkEvmRpcs(a.walletRpcs);
+  for (const w of a.walletRpcs) for (const p of a.rpcs) if (solanaSameProvider(w, p)) throw new Error("walletRpcs: a provider of the pool's rpcs; the Transfer reads name Ws and go to their own pair");
   const chainId = EVM_CHAIN_IDS[a.pin.network];
   if (chainId === undefined) throw new Error(`network: unknown ${String(a.pin.network)}`);
   const scope = evmPoolScopeOf(a.pin.pool, chainId);
@@ -175,24 +194,31 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   const sync = evmTreeSync({ rpcs: a.rpcs, pin: a.pin, ...(sleep ? { sleep } : {}) });
   const pick = a.pick ?? randomIndex;
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
-  return evmRetryLag(async () => {
-    // events() retries its own lags; one it gave up on is a refusal here, not EVM_LAG_TRIES more rounds
-    const r = await sync.events(a.signal).catch((e: unknown) => {
-      throw e instanceof EvmLagError ? new Error(e.message) : e;
-    });
-    const { notes, spends } = evmRestore({ seed64: a.seed64, scope, events: r.events, ...(a.gap === undefined ? {} : { gap: a.gap }) });
-    const order = spends.map((_, k) => k);
-    for (let i = order.length - 1; i > 0; i--) {
-      const x = pick(i + 1);
-      if (!Number.isInteger(x) || x < 0 || x > i) throw new Error("pick: not an index");
-      [order[i], order[x]] = [order[x]!, order[i]!];
-    }
-    const wallets: EvmRestoredWallet[] = spends.map((s) => ({ note: s.note, w: s.w, tokens: [] }));
-    for (const k of order) {
-      const s = spends[k]!;
-      const tokens = await evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal);
-      wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();
-    }
-    return { notes, spends, wallets, block: r.anchor.number };
+  const r = await evmRetryLag(async () => {
+    const r = await sync.events(a.signal, true);
+    const high = await evmLatestHigh(a.rpcs, a.signal);
+    if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw new EvmLagError(`the newest agreed block ${r.anchor.number} is more than an epoch behind an RPC's latest block`);
+    return r;
   }, sleep, a.signal);
+  const { notes, spends, elsewhere } = evmRestore({ seed64: a.seed64, scope, events: r.events, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+  const order = spends.map((_, k) => k);
+  for (let i = order.length - 1; i > 0; i--) {
+    const x = pick(i + 1);
+    if (!Number.isInteger(x) || x < 0 || x > i) throw new Error("pick: not an index");
+    [order[i], order[x]] = [order[x]!, order[i]!];
+  }
+  const wallets: EvmRestoredWallet[] = spends.map((s) => ({ note: s.note, w: s.w, tokens: null }));
+  // the Transfer RPCs on the pool's chain and at the restore's block before any W is named to them
+  if (order.length > 0) await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal), sleep, a.signal);
+  for (const k of order) {
+    const s = spends[k]!;
+    try {
+      const tokens = await evmRetryLag(() => evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal), sleep, a.signal);
+      wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();
+    } catch (e) {
+      a.signal?.throwIfAborted();
+      wallets[k]!.error = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { notes, spends, elsewhere, wallets, block: r.anchor.number };
 }
