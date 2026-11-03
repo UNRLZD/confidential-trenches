@@ -27,8 +27,8 @@
 //!   (`InvalidPoolState`).
 //! - Row 10: Groth16 verify of the 8 signals (`InvalidProof`).
 //! - Row 11: the spent mark `["spent", existingNullifierHash]` must not exist (`NullifierAlreadySpent`); it is made, its
-//!   rent from the fee payer, and holds withdrawnValue u64 LE then the release's number u32 LE (`SPENT_MARK_LEN`, M355
-//!   (3), M376). withdrawnValue is public in the release already, and lets a restore from the 12 words know each spent
+//!   rent from the fee payer, and holds withdrawnValue u64 LE, then the release's number u32 LE, then `MARK_TAG`
+//!   (`SPENT_MARK_LEN`, M355 (3), M376; the tag so that no zero-filled account a stranger makes is read as a mark). withdrawnValue is public in the release already, and lets a restore from the 12 words know each spent
 //!   note's change from the marks alone; the number, the count of releases before this one (the state tree's size less
 //!   the label tree's, before row 12), lets it read every mark in bounded answers however many the pool holds. A pool
 //!   whose label tree is larger than its state tree is refused (`InvalidPoolState`), and a number past u32 (`Overflow`).
@@ -39,14 +39,14 @@
 //! - Row 13: the pool pays `withdrawnValue - relay_fee - tip` to W, `relay_fee` to the fee payer and, for tag 3, `tip` to
 //!   the tip account; `spent += withdrawnValue`.
 //!
-//! Rent: the fee payer pays the spent mark (12 bytes) and the change note's page entry (72 bytes),
+//! Rent: the fee payer pays the spent mark (13 bytes) and the change note's page entry (72 bytes),
 //! and the transaction fee. The relay fee the device signs for covers them; the cap in the proof bounds it (row 8).
 
 use crate::context::{context_of, scope_of, ContextFields};
 use crate::deposit::push;
 use crate::error::PoolError;
 use crate::field;
-use crate::state::{self, Pool, SPENT_MARK_LEN, SPENT_SEED, TREE_LABEL, TREE_STATE};
+use crate::state::{self, Pool, MARK_TAG, SPENT_MARK_LEN, SPENT_SEED, TREE_LABEL, TREE_STATE};
 use crate::tree::MAX_TREE_DEPTH;
 use crate::verifier::{verify_withdraw, PROOF_LEN};
 use crate::MAX_RELAY_FEE_BPS;
@@ -219,9 +219,9 @@ pub(crate) fn settle<'a>(
         return Err(PoolError::InvalidWithdrawalAmount.into());
     }
     // row 8. The fee payer's cost per release, at mainnet rent (read on two RPCs, 2 Nov 2026: 650,240 lamports for an
-    // empty account, 5,080 per byte): the spent mark of 12 bytes 711,200 + the change entry 72 x 5,080 = 365,760 + the
-    // base fee of two signatures 10,000 = 1,086,960 lamports (M355 (3), M376). The one release in 1,024 whose change
-    // opens a page pays the page account (16 + 72 bytes) instead of the entry: 711,200 + 1,097,280 + 10,000 = 1,818,480.
+    // empty account, 5,080 per byte): the spent mark of 13 bytes 716,280 + the change entry 72 x 5,080 = 365,760 + the
+    // base fee of two signatures 10,000 = 1,092,040 lamports (M355 (3), M376). The one release in 1,024 whose change
+    // opens a page pays the page account (16 + 72 bytes) instead of the entry: 716,280 + 1,097,280 + 10,000 = 1,823,560.
     // A cap below that leaves the relayer short; the program does not hold a floor, since rent can change and the device
     // sets the cap.
     if r.relay_fee > r.relay_fee_cap {
@@ -258,11 +258,12 @@ pub(crate) fn settle<'a>(
     let number = pool.state.size.checked_sub(pool.label.size).ok_or(PoolError::InvalidPoolState)?;
     let number = u32::try_from(number).map_err(|_| ProgramError::from(PoolError::Overflow))?;
     state::put_mark_of(program_id, fee_payer, spent_mark, system, SPENT_SEED, &r.nullifier_hash, SPENT_MARK_LEN, PoolError::NullifierAlreadySpent)?;
-    // the record a restore reads: this release's withdrawnValue, then its number
+    // the record a restore reads: this release's withdrawnValue, then its number, then the tag
     {
         let mut m = spent_mark.try_borrow_mut_data()?;
         m[0..8].copy_from_slice(&r.withdrawn.to_le_bytes());
         m[8..12].copy_from_slice(&number.to_le_bytes());
+        m[12] = MARK_TAG;
     }
     // row 12
     push(program_id, fee_payer, state_page, system, TREE_STATE, &mut pool.state, &r.new_commitment)?;

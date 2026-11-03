@@ -11,7 +11,7 @@ import { base58, base64 } from "@scure/base";
 import { VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
-import { solanaMarkOf } from "../src/pool/solana-restore.ts";
+import { SOL_MARK_TAG, solanaMarkOf } from "../src/pool/solana-restore.ts";
 import { solanaPageOf, solanaPoolOf } from "../src/pool/solana.ts";
 import { solanaRestoreWallets, type HoldingsReader } from "../src/pool/buy-wallets.ts";
 import { jOf } from "../src/pool/queue.ts";
@@ -76,17 +76,18 @@ test("the whole Solana restore lists the W of every spent note: change, move, V 
     const label = vaultLabelOf(keccak_256, SCOPE, nonce);
     labels.push({ leaf: label, t });
     state.push({ leaf: noteCommitment(value, label, P(ref)), t });
-    marks.set(solanaMarkOf(PROGRAM, "pre", P(ref)), u64s(value, nonce));
+    // the precommitment mark: value u64 LE, nonce u64 LE, the program's tag
+    marks.set(solanaMarkOf(PROGRAM, "pre", P(ref)), Uint8Array.of(...u64s(value, nonce), SOL_MARK_TAG));
     t += 1n;
     return label;
   };
   // a release as the queue makes it: the spent mark, and change note (l, jOf(ref)) of what is left
   const release = (ref: NoteRef, l: bigint, value: bigint, withdrawn: bigint): void => {
     // the spent mark (M376): withdrawnValue u64 LE, then the release's number u32 LE, the state tree's size less the
-    // label tree's before its change note goes in
+    // label tree's before its change note goes in, then the program's tag
     const number = new Uint8Array(4);
     new DataView(number.buffer).setUint32(0, state.length - labels.length, true);
-    marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, ref).nullifierHash), Uint8Array.of(...u64s(withdrawn), ...number));
+    marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, ref).nullifierHash), Uint8Array.of(...u64s(withdrawn), ...number, SOL_MARK_TAG));
     state.push({ leaf: noteCommitment(value - withdrawn, l, P({ kind: "change", l, j: jOf(ref) })), t: (t += 1n) });
   };
   const dep: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };

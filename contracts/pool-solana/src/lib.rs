@@ -13,8 +13,9 @@
 //! Instructions (tag, then fields, integers little-endian, field elements 32 bytes big-endian):
 //! - `0 init`: creates the pool account. Anyone, once; it takes nothing that could differ between callers.
 //! - `1 deposit(value u64, precommitment)`: src/deposit.rs. Its precommitment mark `["pre", precommitment]` holds
-//!   16 bytes, `value u64 LE ‖ nonce u64 LE` (the nonce its label hashes), so a restore from the 12 words finds
-//!   every deposit in one read of the pool's accounts (M353).
+//!   17 bytes, `value u64 LE ‖ nonce u64 LE ‖ MARK_TAG` (the nonce its label hashes), so a restore from the 12 words
+//!   finds every deposit in reads of the pool's accounts (M353); the tag keeps a stranger's zero-filled accounts out of
+//!   those reads (src/state.rs).
 //! - `2 release(...)`: src/release.rs.
 //! - `3 release_and_buy(...)`: src/buy.rs; its byte layout is TAG3.md.
 //!
@@ -25,8 +26,8 @@
 //!   (in place of an ed25519 instruction read by introspection).
 //! - The release names its two roots by index into the pages, and the program reads the roots from them: a root the
 //!   pool never had cannot be named at all.
-//! - Storage is Solana accounts and rent: each insert pays its page entry, each spend its spent mark (12 bytes:
-//!   withdrawnValue and the release's number, M355 (3), M376), each deposit its precommitment mark, all by the
+//! - Storage is Solana accounts and rent: each insert pays its page entry, each spend its spent mark (13 bytes:
+//!   withdrawnValue, the release's number and the tag, M355 (3), M376), each deposit its precommitment mark, all by the
 //!   transaction's payer (src/state.rs).
 //! - The relay fee is an amount at most the cap the proof binds, under the vault's backstop.
 //! - No `LeafAlreadyExists` map (src/tree.rs gives the reason).
@@ -48,8 +49,8 @@
 //! Smallest release: W (a fresh system account) must end at least the rent-exempt minimum of 0 bytes, so
 //! `withdrawnValue - relay_fee >= rent(0)`, and the backstop needs `withdrawnValue >= 2 * relay_fee`. With the relay
 //! fee at the fee payer's floor (src/release.rs, row 8), the smallest chunk is `max(rent(0) + floor, 2 * floor)`. At
-//! mainnet rent that is max(650,240 + 1,086,960, 2,173,920) = 2,173,920 lamports, or 3,636,960 when the change opens
-//! a page (floor 1,818,480). The device's Solana adapter holds its smallest rung to that; below it the runtime refuses
+//! mainnet rent that is max(650,240 + 1,092,040, 2,184,080) = 2,184,080 lamports, or 3,647,120 when the change opens
+//! a page (floor 1,823,560). The device's Solana adapter holds its smallest rung to that; below it the runtime refuses
 //! a W left under rent(0), and the program refuses a fee over the backstop.
 
 // solana-poseidon 3.1.6 marks its API deprecated ahead of 4.0.0's `agave-unstable-api` feature; 3.1.6 is the version
