@@ -24,11 +24,12 @@
 //   (JSON-RPC code 3) or that has no code ("0x") is listed unreadable. Any other error (a block a lagging backend lacks,
 //   a limit) or answer not in the asked shape stops that pool, so it is read again.
 // - Pacing: both helper readers run in the kit's provider queue (solanaPacedRpc, any (method, params) call) at
-//   HOLDINGS_RPC_LIMIT (M361b), on a queue of their own per helper route: keyed on the readers' own function, never the
-//   route's URL, so a restore never slows the trade path's calls on the same /v1/rpc route. The helper's 429 is a
-//   failed round: the reader waits its Retry-After (at most RETRY_AFTER_MAX_MS, else RETRY_AFTER_DEFAULT_MS) and reads
-//   again, within SOL_HOLDINGS_ROUNDS or EVM_HOLDINGS_ROUNDS. The budget the helper enforces per client is card
-//   helper-abuse-limits.
+//   HOLDINGS_RPC_LIMIT (M367), on one queue of their own per helper route URL: keyed on the readers' own function,
+//   never the route's URL, so a restore never slows the trade path's calls on the same /v1/rpc route. A Solana round's
+//   three calls go out in one tick and the limit's total is one round, so they are booked as one unit, at one
+//   instant, and a failed round leaves no call behind it. The helper's 429 is a failed round: the reader waits its
+//   Retry-After (at most RETRY_AFTER_MAX_MS, else RETRY_AFTER_DEFAULT_MS) and reads again, within SOL_HOLDINGS_ROUNDS
+//   or EVM_HOLDINGS_ROUNDS. The budget the helper enforces per client is card helper-abuse-limits.
 // - One failure never hides the rest: a pool that fails reports its error and the others still list.
 // - Privacy: every request names one W and nothing else of the user's: no batch, no call carries two Ws. The Ws of every
 //   pool are read one after another in a random order, never in the notes' order.
@@ -73,26 +74,34 @@ export type BuyPool = {
 export type BuyWallet = { pool: string; chain: BuyChain; note: string; l: bigint; j: number; path: string; address: string; holdings: Holdings };
 export type BuyWallets = { wallets: BuyWallet[]; failed: { pool: string; error: string }[] };
 
-/** A Solana W's three reads are made again at the highest slot at most this many times before a refusal. */
-export const SOL_HOLDINGS_ROUNDS = 4;
+/** A Solana W's three reads are made again at the highest slot at most this many times before a refusal: about a third
+ * of mainnet-beta's rounds answer from backends at different slots, and a W took up to 4 rounds live (M367; see
+ * HOLDINGS_RPC_LIMIT), so 8 leaves a refusal to a chain that keeps moving under the reads. */
+export const SOL_HOLDINGS_ROUNDS = 8;
 /** An EVM W's reads are made again after the helper's 429 at most this many times before a refusal. */
 export const EVM_HOLDINGS_ROUNDS = 4;
-/** The holdings readers' own pace on a helper route (M361b), both chains: one call of a method every 1.1 s, at most
- * ten calls in it. It is the fallback upstream's, measured; it rises once the helper has a keyed primary and paces
- * its upstream itself (card helper-abuse-limits).
- * Measured on 2026-11-03 from one IP: the reader's 12-W mix (36 calls of its real methods) in the kit's queue, 3 runs
- * 15 s apart, HTTP 429s per run:
- *   at 10 a second   api.mainnet-beta.solana.com 14, 14, 14   mainnet.base.org 0, 0, 0        (02:02-02:03Z)
- *   at 5 a second    api.mainnet-beta.solana.com 14, 14, 14   mainnet.base.org 0, 0, 0        (02:03-02:04Z)
- *   9 per 10 s       api.mainnet-beta.solana.com 8, 0, 0      mainnet.base.org 0, 0, 0        (02:08-02:10Z)
- *   9 per 11 s       api.mainnet-beta.solana.com 2, 1, 3                                      (02:12-02:14Z)
- *   this limit       api.mainnet-beta.solana.com 0, 0, 0 (12 Ws in 25.7 s)
- *                    mainnet.base.org 0, 0, 0 (12 Ws in 13.1 s)                                (02:15-02:18Z)
- * getTokenAccountsByOwner alone, 24 or 27 calls: 400 ms apart, calls 1-10 answer and the 11th (8.6 s) draws a 429 with
- * Retry-After 10 (02:06Z); in bursts of 9 at 9 per 10 s, 7 of 9 are refused at 10 s and again at 20 s (02:10Z), and at
- * 9 per 11 s, 7 and 6 of 9 (02:12Z); 1.1 s apart, 27 of 27 answer (02:15Z). mainnet-beta takes about 10 of it in 10 s
- * and refuses a burst at a window's edge, so the pace is spread, not a 10 s budget. */
-export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = Object.freeze({ windowMs: 1_100, total: 10, perMethod: 1 });
+/** The holdings readers' own pace on a helper route (M367), both chains: one Solana round (getBalance and the two
+ * getTokenAccountsByOwner) in any 3 s, booked as one unit: `total` is the round's three calls and binds, so the round's
+ * calls, made in one tick, start at one instant (calls spread over the finalized slot, which moves about every 400 ms,
+ * never meet: M361b's one call of a method a 1.1 s refused every Solana W live). It is the fallback upstream's,
+ * measured; it rises once the helper has a keyed primary and paces its upstream itself (card helper-abuse-limits).
+ * Measured on 2026-11-03 from one IP, the reader as built (its own url-less queue) on the helper's fallback upstreams,
+ * 12 Ws of the all-zero test seed a run, 3 runs 15 s apart:
+ *   api.mainnet-beta.solana.com, 1 round in 3 s, 8 rounds: 0 HTTP 429s in every run; 12/12, 12/12, 12/12 Ws read, each
+ *     at one slot; 16, 19, 17 rounds (at most 4 for a W); 45.2, 54.4, 48.5 s (03:50-03:53Z)
+ *   mainnet.base.org, the same limit (one token, three calls a W): 0 HTTP 429s in every run; 12/12 read in each;
+ *     34.4, 34.1, 34.2 s (03:53-03:56Z)
+ *   mainnet-beta, 1 round in 2.2 s, 4 rounds: one 429 in every run; 12/12, 12/12, 10/12 read (two Ws met at no one
+ *     slot in 4 rounds); 18, 17, 20 rounds; 37.5, 35.3, 41.9 s (03:44-03:46Z)
+ *   mainnet-beta, the 12-W call mix (36 calls, no slot rule) at 10 and 5 calls a second: 14 429s in each of 6 runs
+ *     (02:02-02:04Z); at 9 a method in 10 s: 8, 0, 0; at 9 in 11 s: 2, 1, 3 (02:08-02:14Z)
+ * mainnet-beta's answers to one round's three calls, sent at one instant, come from backends at different finalized
+ * slots in about a third of rounds, hence SOL_HOLDINGS_ROUNDS. getTokenAccountsByOwner alone: 400 ms apart, calls
+ * 1-10 answer and the 11th draws a 429 with Retry-After 10 (02:06Z); in bursts of 9 at a 10 s or 11 s window's edge,
+ * 6 or 7 of 9 are refused (02:10Z, 02:12Z); 1.1 s apart, 27 of 27 answer (02:15Z). So about 10 of it in 10 s, never in
+ * a burst: a round's two in 3 s keep it at 6.7. A JSON-RPC batch of the three is no fix: its answers came from
+ * backends of two versions, and batches drew a 429 at one in 2.2 s (03:47-03:49Z). */
+export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = Object.freeze({ windowMs: 3_000, total: 3, perMethod: 2 });
 /** Solana's JSON-RPC code for a minContextSlot the node has not reached. */
 const MIN_CONTEXT_SLOT_NOT_REACHED = "-32016";
 /** The JSON-RPC code of an eth_call that reverted ("execution reverted"); every other error is the provider's. */
@@ -193,7 +202,9 @@ export const RETRY_AFTER_DEFAULT_MS = 1_000;
 const IMF_FIXDATE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 export function retryAfterMs(header: string | null, nowMs: number): number {
   const h = header?.trim() ?? "";
-  const ms = /^\d+$/.test(h) ? Number(h) * 1000 : IMF_FIXDATE.test(h) ? Date.parse(h) - nowMs : NaN;
+  // delay-seconds past the cap waits the cap, a digit string too long for a number (Infinity) included
+  if (/^\d+$/.test(h)) return Math.min(Number(h) * 1000, RETRY_AFTER_MAX_MS);
+  const ms = IMF_FIXDATE.test(h) ? Date.parse(h) - nowMs : NaN;
   return Number.isFinite(ms) ? Math.min(Math.max(ms, 0), RETRY_AFTER_MAX_MS) : RETRY_AFTER_DEFAULT_MS;
 }
 /** The helper transport's fetch, which keeps the Retry-After of the latest 429 it saw for the reader's next wait. */
@@ -209,19 +220,18 @@ function retryAfterFetch(): { fetch: SolanaFetch; wait429: () => number } {
     wait429: () => next,
   };
 }
-/** The readers' paced transport on one helper route at one limit, made once and shared by every reader of it. Its
- * queue is keyed on its own function with no url, so the kit never adds this limit to the route URL's queue, where
- * the trade path's calls (send.ts rpcPath, solanaPacedRpc on the helper) are paced. */
+/** The readers' paced transport on one helper route URL, at HOLDINGS_RPC_LIMIT, made once and shared by every reader
+ * of it. Its queue is keyed on its own function with no url, so the kit never adds this limit to the route URL's
+ * queue, where the trade path's calls (send.ts rpcPath, solanaPacedRpc on the helper) are paced. */
 const holdingsRoutes = new Map<string, { rpc: SolanaRpc; wait429: () => number }>();
-function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc, limit: SolanaRpcLimit): { rpc: SolanaRpc; wait429: () => number } {
+function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc): { rpc: SolanaRpc; wait429: () => number } {
   const t = retryAfterFetch();
   const bare = make(t.fetch);
-  const key = `${bare.url} ${limit.windowMs}/${limit.total}/${limit.perMethod}`;
-  let r = holdingsRoutes.get(key);
+  let r = holdingsRoutes.get(String(bare.url));
   if (r === undefined) {
     const own: SolanaRpc = (method, params) => bare(method, params); // no url: the kit keys its queue on this function
-    r = { rpc: solanaPacedRpc(own, limit), wait429: t.wait429 };
-    holdingsRoutes.set(key, r);
+    r = { rpc: solanaPacedRpc(own, HOLDINGS_RPC_LIMIT), wait429: t.wait429 };
+    holdingsRoutes.set(String(bare.url), r);
   }
   return r;
 }
@@ -309,8 +319,8 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
 
 /** The Solana reader on the helper (POST /v1/rpc/solana), paced in the kit's provider queue (solanaPacedRpc) at
  * HOLDINGS_RPC_LIMIT on the readers' own queue for the route; a 429 waits the answer's Retry-After. */
-export function solanaHelperHoldings(origin: string, limit: SolanaRpcLimit = HOLDINGS_RPC_LIMIT): HoldingsReader {
-  const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }), limit);
+export function solanaHelperHoldings(origin: string): HoldingsReader {
+  const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }));
   return solanaHoldingsReader(r.rpc, { wait429: r.wait429 });
 }
 
@@ -391,8 +401,8 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
  * (solanaJsonRpc: plain JSON-RPC over POST, whatever the chain) with the helper's fetch settings, paced in the kit's
  * provider queue (any (method, params) call) at HOLDINGS_RPC_LIMIT on the readers' own queue for the route; a 429
  * waits the answer's Retry-After. */
-export function evmHelperHoldings(origin: string, chain: "base" | "robinhood", tokens: readonly string[], limit: SolanaRpcLimit = HOLDINGS_RPC_LIMIT): HoldingsReader {
+export function evmHelperHoldings(origin: string, chain: "base" | "robinhood", tokens: readonly string[]): HoldingsReader {
   const url = helperUrl(origin, chain);
-  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }), limit);
+  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
   return evmHoldingsReader(r.rpc, tokens, { wait429: r.wait429 });
 }

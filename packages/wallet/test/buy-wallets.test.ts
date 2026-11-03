@@ -409,14 +409,14 @@ test("the helper's Solana reader is paced in the kit's provider queue: a burst o
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: { context: { slot: 1 }, value: q.method === "getBalance" ? 0 : [] } }), { headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   try {
-    const reader = solanaHelperHoldings("https://api.example", { windowMs: 400, total: 3, perMethod: 3 });
+    const reader = solanaHelperHoldings("https://api.example");
     const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }, { ref: { kind: "change", l: L, j: 0 }, label: L }], reader }]);
     assert.deepEqual(r.failed, []);
   } finally {
     globalThis.fetch = real;
   }
   assert.equal(starts.length, 6);
-  assert.ok(starts[3]! - starts[0]! >= 390, `the second W's reads wait for the window: ${starts[3]! - starts[0]!} ms`);
+  assert.ok(starts[3]! - starts[0]! >= HOLDINGS_RPC_LIMIT.windowMs, `the second W's reads wait for the window: ${starts[3]! - starts[0]!} ms`);
 });
 
 test("one pool given twice: its W is listed once, and the later pool is refused", async () => {
@@ -426,7 +426,7 @@ test("one pool given twice: its W is listed once, and the later pool is refused"
   assert.deepEqual(r.failed, [{ pool: "sol-again", error: "wallet 0: its W is pool 0 wallet 0's" }]);
 });
 
-// ---------- the readers' pace (M361b): HOLDINGS_RPC_LIMIT on their own queue, and the helper's 429 a failed round ----------
+// ---------- the readers' pace (M367): HOLDINGS_RPC_LIMIT on their own queue, a round as one unit, the helper's 429 a failed round ----------
 /** A stub fetch for one test origin: `answer` gives each call's Response; the real fetch serves every other URL. */
 function stubFetch(origin: string, answer: (method: string, id: string, n: number) => Response): { starts: [number, string][]; restore: () => void } {
   const real = globalThis.fetch, starts: [number, string][] = [];
@@ -443,15 +443,20 @@ const solOk = (method: string, id: string): Response => ok(id, { context: { slot
 const evmOk = (method: string, id: string): Response => ok(id, method === "eth_getBlockByNumber" ? { hash: hashOf(0), number: "0x0" } : "0x0");
 const too = (retryAfter?: string): Response => new Response("slow down", { status: 429, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
 
-const FAST = { windowMs: 1_000, total: 100, perMethod: 100 }; // a limit that never waits, for the 429 tests
 const gaps = (starts: readonly [number, string][], method: string): number[] => {
   const t = starts.filter(([, m]) => m === method).map(([at]) => at);
   return t.slice(1).map((x, k) => x - t[k]!);
 };
+/** The start times of a Solana reader's rounds: its calls in threes, as they started. */
+const rounds = (starts: readonly [number, string][]): number[][] => {
+  const t = starts.map(([at]) => at);
+  return Array.from({ length: Math.ceil(t.length / 3) }, (_, k) => t.slice(3 * k, 3 * k + 3));
+};
+const spread = (r: readonly number[]): number => Math.max(...r) - Math.min(...r);
 
-test("HOLDINGS_RPC_LIMIT is the measured pace, and every helper reader of a route is paced at it on one queue", async () => {
-  assert.deepEqual({ ...HOLDINGS_RPC_LIMIT }, { windowMs: 1_100, total: 10, perMethod: 1 });
-  // two Solana readers of one route (two pools) read a W each, and an EVM reader two Ws: one call of a method in 1.1 s
+test("HOLDINGS_RPC_LIMIT is the measured pace: a Solana round's three calls start at one instant, one round in 3 s; every reader of a route on one queue", async () => {
+  assert.deepEqual({ ...HOLDINGS_RPC_LIMIT }, { windowMs: 3_000, total: 3, perMethod: 2 });
+  // two Solana readers of one route (two pools) read a W each, and an EVM reader two Ws (two calls a W)
   const sol = stubFetch("https://pace-sol.example", (m, id) => solOk(m, id));
   const evm = stubFetch("https://pace-evm.example", (m, id) => evmOk(m, id));
   try {
@@ -464,16 +469,58 @@ test("HOLDINGS_RPC_LIMIT is the measured pace, and every helper reader of a rout
     evm.restore();
     sol.restore();
   }
-  for (const [s, method, n] of [[sol.starts, "getTokenAccountsByOwner", 4], [sol.starts, "getBalance", 2], [evm.starts, "eth_getBlockByNumber", 2], [evm.starts, "eth_getBalance", 2]] as const) {
-    const g = gaps(s, method);
-    assert.equal(g.length, n - 1, method);
-    assert.ok(g.every((x) => x >= HOLDINGS_RPC_LIMIT.windowMs), `${method}: one a ${HOLDINGS_RPC_LIMIT.windowMs} ms: ${g.join(", ")}`);
+  const r = rounds(sol.starts);
+  assert.equal(r.length, 2);
+  for (const x of r) assert.ok(spread(x) < 50, `a round's three calls start at one instant: ${spread(x)} ms`);
+  assert.ok(r[1]![0]! - r[0]![0]! >= HOLDINGS_RPC_LIMIT.windowMs, `the second reader's round waits the window: ${r[1]![0]! - r[0]![0]!} ms`);
+  // EVM: four calls, at most three in any 3 s
+  assert.equal(evm.starts.length, 4);
+  assert.ok(evm.starts[3]![0] - evm.starts[0]![0] >= HOLDINGS_RPC_LIMIT.windowMs, `EVM: the fourth call waits the window`);
+});
+
+test("a chain whose finalized slot moves every 400 ms: every W's round answers at one slot, so each is read", async () => {
+  // as Solana's does; a minContextSlot past the slot is refused with -32016, as the RPC does
+  const t0 = Date.now();
+  const slotNow = () => 1_000 + Math.floor((Date.now() - t0) / 400);
+  const st = stubFetch("https://slot-moves.example", (m, id) => ok(id, { context: { slot: slotNow() }, value: m === "getBalance" ? 0 : [] }));
+  let r: Awaited<ReturnType<typeof buyWallets>>;
+  try {
+    const spent = [0, 1, 2].map((i) => ({ ref: i === 0 ? DEP : { kind: "change" as const, l: L, j: i - 1 }, label: L }));
+    r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: solanaHelperHoldings("https://slot-moves.example") }]);
+  } finally {
+    st.restore();
   }
+  assert.deepEqual(r.failed, []);
+  assert.equal(r.wallets.length, 3);
+  assert.ok(st.starts.length <= 3 * 4, `a W takes a round, rarely two: ${st.starts.length / 3} rounds`);
+});
+
+test("a round failed by a 429 leaves no call behind it: its three calls went out at once, and the next round is three more", async () => {
+  const st = stubFetch("https://leftover.example", (m, id, n) => (n === 1 ? too("0") : solOk(m, id)));
+  try {
+    await solanaHelperHoldings("https://leftover.example").read(solW(0));
+  } finally {
+    st.restore();
+  }
+  const r = rounds(st.starts);
+  assert.equal(st.starts.length, 6, "two rounds of three, nothing after either");
+  assert.ok(spread(r[0]!) < 50 && spread(r[1]!) < 50, `each round at one instant: ${spread(r[0]!)}, ${spread(r[1]!)} ms`);
+  assert.ok(r[1]![0]! - r[0]![2]! >= HOLDINGS_RPC_LIMIT.windowMs - 50, "the second round waits the window");
+});
+
+test("SOL_HOLDINGS_ROUNDS is 8: a W whose reads meet at one slot only in its eighth round is read", async () => {
+  // a swap lands between getBalance and the token reads in each of the first seven rounds
+  let balances = 0;
+  const c: SolChain = { ...solChain(), onCall: (m, ch) => { if (m === "getBalance" && ++balances < SOL_HOLDINGS_ROUNDS) ch.slot++; } };
+  const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solReader(c) }]);
+  assert.equal(SOL_HOLDINGS_ROUNDS, 8);
+  assert.deepEqual(r.failed, []);
+  assert.equal(balances, 8);
 });
 
 test("a restore never slows the trade path: the readers' queue is their own, not the helper URL's", async () => {
   // a restore of three Ws runs on the helper's Solana route while the trade path makes five calls of one method on the
-  // same URL through the kit's queue at its own limit: they all start at once, not one a 1.1 s
+  // same URL through the kit's queue at its own limit: they all start at once, not paced at the readers' limit
   const st = stubFetch("https://trade.example", (m, id) => solOk(m, id));
   const trade = solanaPacedRpc(solanaHelperRpc("https://trade.example"), { windowMs: 10_000, total: 100, perMethod: 40 });
   let tradeStarts: number[] = [];
@@ -504,35 +551,42 @@ test("a Retry-After is a delay in seconds or an HTTP date, capped at 10 s; absen
   assert.equal(retryAfterMs("Tue, 03 Nov 2026 02:01:00 GMT", now), 10_000);
   assert.equal(retryAfterMs("Tue, 03 Nov 2026 01:59:00 GMT", now), 0);
   for (const h of [null, "", "-1", "1.5", "soon", "2026-11-03T02:00:05Z"]) assert.equal(retryAfterMs(h, now), 1_000, String(h));
+  // past the cap is the cap, never the default: a long digit string, and one too long for a number (Infinity)
+  for (const h of ["99999999999", "9".repeat(400), "Fri, 31 Dec 9999 23:59:59 GMT"]) assert.equal(retryAfterMs(h, now), 10_000, h.slice(0, 20));
 });
 
 test("the helper's 429 is a failed round on both chains: the reader waits its Retry-After and reads again", async () => {
-  // the first call of each route draws a 429 with Retry-After 0, so the next round comes at once (1 s with none)
-  const sol = stubFetch("https://r429-sol.example", (m, id, n) => (n === 1 ? too("0") : solOk(m, id)));
-  const evm = stubFetch("https://r429-evm.example", (m, id, n) => (n === 1 ? too("0") : evmOk(m, id)));
+  // the first call of each route draws a 429 with Retry-After 4: the next round waits 4 s, past the pace's 3 s
+  const sol = stubFetch("https://r429-sol.example", (m, id, n) => (n === 1 ? too("4") : solOk(m, id)));
+  const evm = stubFetch("https://r429-evm.example", (m, id, n) => (n === 1 ? too("4") : evmOk(m, id)));
   const t0 = Date.now();
-  let s: Awaited<ReturnType<HoldingsReader["read"]>>, e: typeof s;
+  let s: Awaited<ReturnType<HoldingsReader["read"]>> | undefined, e: typeof s;
   try {
-    s = await solanaHelperHoldings("https://r429-sol.example", FAST).read(solW(0));
-    e = await evmHelperHoldings("https://r429-evm.example", "base", [], FAST).read(evmW(L, 0));
+    await Promise.all([
+      (async () => { s = await solanaHelperHoldings("https://r429-sol.example").read(solW(0)); })(),
+      (async () => { e = await evmHelperHoldings("https://r429-evm.example", "base", []).read(evmW(L, 0)); })(),
+    ]);
   } finally {
     evm.restore();
     sol.restore();
   }
-  assert.ok(Date.now() - t0 < 900, `Retry-After 0 is no wait: ${Date.now() - t0} ms`);
-  assert.equal(s.native, 0n);
-  assert.equal(e.native, 0n);
+  const took = Date.now() - t0;
+  assert.ok(took >= 3_990 && took < 6_000, `Retry-After 4 is a 4 s wait: ${took} ms`);
+  assert.equal(s!.native, 0n);
+  assert.equal(e!.native, 0n);
   assert.equal(sol.starts.length, 6, "two rounds of three");
+  assert.ok(sol.starts[3]![0] - sol.starts[0]![0] >= 3_990, "Solana's second round after the wait");
   assert.deepEqual(evm.starts.map(([, m]) => m), ["eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getBalance"]);
+  assert.ok(evm.starts[1]![0] - evm.starts[0]![0] >= 3_990, "EVM's second round after the wait");
   // no Retry-After: the default wait
   const bare = stubFetch("https://r429-bare.example", (m, id, n) => (n === 1 ? too() : evmOk(m, id)));
-  const t1 = Date.now();
   try {
-    await evmHelperHoldings("https://r429-bare.example", "base", [], FAST).read(evmW(L, 0));
+    await evmHelperHoldings("https://r429-bare.example", "base", []).read(evmW(L, 0));
   } finally {
     bare.restore();
   }
-  assert.ok(Date.now() - t1 >= RETRY_AFTER_DEFAULT_MS - 10, `no Retry-After waits 1 s: ${Date.now() - t1} ms`);
+  const w = bare.starts[1]![0] - bare.starts[0]![0];
+  assert.ok(w >= RETRY_AFTER_DEFAULT_MS - 10 && w < 2_000, `no Retry-After waits 1 s: ${w} ms`);
 });
 
 test("a 429 on every round is a refusal at the bound, after a wait between rounds; another HTTP status fails at once", async () => {

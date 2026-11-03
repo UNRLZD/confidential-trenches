@@ -68,13 +68,13 @@ test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the rel
   }
 });
 
-test("each of the two origins is echoed byte for byte, with Vary: Origin and no credentials", async () => {
+test("each of the two origins is echoed byte for byte, with Vary: Origin and no credentials; Retry-After is exposed", async () => {
   for (const o of [APP, SIGN]) {
     const r = await call("GET", "/v1/health", { origin: o });
     assert.equal(r.headers["access-control-allow-origin"], o);
     assert.equal(r.headers["vary"], "Origin");
     assert.equal(r.headers["access-control-allow-credentials"], undefined);
-    assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At");
+    assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After");
   }
 });
 

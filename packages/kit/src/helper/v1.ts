@@ -42,7 +42,8 @@ export const HELPER_CORS = {
   origins: ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade"],
   allowMethods: ["GET", "POST", "PUT", "DELETE"],
   allowHeaders: ["content-type"],
-  exposeHeaders: ["X-Helper-Commit", "X-Helper-Source", "X-Fetched-At"],
+  // Retry-After: a device reads a 429's wait cross-origin (card wallet-per-buy, M367)
+  exposeHeaders: ["X-Helper-Commit", "X-Helper-Source", "X-Fetched-At", "Retry-After"],
   maxAgeSeconds: 600,
   vary: "Origin",
   allowCredentialsHeader: "absent",
