@@ -2,8 +2,8 @@
 // (market-data-evm.answers.json). good: apps/helper on card/market-data-evm-lists-fold (15:09Z) run on a Mac against the
 // real GeckoTerminal and Base providers, with every RPC answer the maker re-read got: PASS. bad_not_deployed: the deployed helper before this card,
 // 404: FAIL. Made from the good answer: a tagged row's pad swapped for another table pad (wrong tag), an untagged row from
-// no listed factory given a tag, a row missing a frozen field, a pad no table row has: each FAIL. good_robinhood: the same
-// helper's Robinhood lists (15:09Z): PASS; a wrong tag and a Base pad on a Robinhood row: FAIL. A tagged row served
+// no listed factory given a tag, a row missing a frozen field, a pad no table row has: each FAIL. good_robinhood: the
+// helper's Robinhood lists on card/helper-launchpad-origin (17:04Z, Pons v1 in the table): PASS; a wrong tag and a Base pad on a Robinhood row: FAIL. A tagged row served
 // untagged and not named unsettled (the deployed a0f19f5's Paper): FAIL; `unsettled` missing, naming a tagged token or
 // over half the tokens: FAIL.
 import assert from "node:assert/strict";

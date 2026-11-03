@@ -29,6 +29,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-venues-pin.mjs",
   "scripts/live-checks/helper-abuse-limits.mjs",
   "scripts/live-checks/helper-host-health.mjs",
+  "scripts/live-checks/helper-launchpad-origin.mjs",
   "scripts/live-checks/helper-pool-senders.mjs",
   "scripts/live-checks/helper-proxy.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
