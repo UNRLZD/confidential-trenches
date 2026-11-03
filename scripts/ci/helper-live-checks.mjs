@@ -17,6 +17,7 @@ export const LIVE_CHECKS = [
   "market-data-solana-token",
   "market-data-evm",
   "helper-launchpad-origin",
+  "index-evm-swaps",
   "relayer-withdraw-send",
   "relayer-withdraw-fee",
 ];
