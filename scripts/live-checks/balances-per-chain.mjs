@@ -4,12 +4,14 @@
 // package's pool balances and its tests; a read of a real device note joins the money-path run on pool deploy day).
 // Headless Chromium opens APP_HOST/portfolio at 390 x 844 (phone, dpr 2, touch) and 1440 x 900 (desktop, dpr 1) inside a
 // stand-in SIGN_HOST shell (Playwright's route answers SIGN_HOST's name; the shell frames APP_HOST, posts `ready` and
-// answers `state` with ANSWER below: three pools, one with a ready, one with none sent, one with nothing in it) and
-// reads, in the form on screen:
-//   - the pool block's view is "rows", with one row per pool in the answer's order, its chain, and its balance, ready
-//     and pending in cents (pending = balance - ready) as the answer's decimals rounded down;
-//   - a pool the answer sends with no ready draws Ready and Pending as a dash, never $0.00; one with a ready draws a
-//     dollar amount;
+// answers `state` with ANSWER below: three pools in SOL and ETH, one with a ready, one with none sent, one with nothing in
+// it) and reads, in the form on screen:
+//   - the pool block's view is "rows", with one row per pool in the answer's order, its chain and asset, and its
+//     balance, ready and pending in the asset's base units (pending = balance - ready), the answer's decimals read at the
+//     kit's table (POOL_ASSET_DECIMALS), rounded down;
+//   - each pool is drawn in its own asset: the balance names it ("12.5 SOL") and no amount in a pool row is a dollar
+//     figure (a SOL or ETH pool has none until a price read exists);
+//   - a pool the answer sends with no ready draws Ready and Pending as a dash, never 0; one with a ready draws a number;
 //   - no CSP violation and no console error in the terminal's frame.
 // It passes on the deployed host once Portfolio is mounted on /portfolio (card app-portfolio-mount) and this card is
 // deployed. A screenshot of each width is kept.
@@ -25,6 +27,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { POOL_ASSET_DECIMALS } from "../../packages/kit/src/index.ts";
 import { APP_HOST, harnessRoute, shellHeaders, SIGN_HOST } from "./app-in-shell.mjs";
 
 const KEY = "balances-per-chain";
@@ -38,16 +41,17 @@ const READY_MS = 20_000;
 
 /** The pools the stand-in shell sends: a ready, no ready (no proof queue running), and an empty pool. */
 export const POOLS = [
-  { chain: "solana", balance: "1250000.5", ready: "999999.99" },
-  { chain: "base", balance: "320" },
-  { chain: "robinhood", balance: "0", ready: "0" },
+  { chain: "solana", asset: "SOL", balance: "12.5", ready: "10" },
+  { chain: "base", asset: "ETH", balance: "0.25" },
+  { chain: "robinhood", asset: "ETH", balance: "0", ready: "0" },
 ];
 export const ANSWER = { release: "check-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [], pools: POOLS };
 
-/** A decimal string to cents, rounded down (the screen's rule); null when it is not one. */
-export function cents(s) {
+/** A decimal string in whole units of `asset` to base units at the kit's decimals, rounded down; null when it is not one. */
+export function base(s, asset) {
+  const d = POOL_ASSET_DECIMALS[asset];
   const m = /^(\d+)(?:\.(\d+))?$/.exec(String(s));
-  return m ? (BigInt(m[1]) * 100n + BigInt(((m[2] ?? "") + "00").slice(0, 2))).toString() : null;
+  return m && d !== undefined ? BigInt(m[1] + ((m[2] ?? "") + "0".repeat(d)).slice(0, d)).toString() : null;
 }
 
 // ------------------------------------------------------------------------------------------------ the verdict
@@ -69,14 +73,15 @@ export function judge(rec) {
         say(false, `${n}: no row for ${p.chain}`);
         continue;
       }
-      const bal = cents(p.balance);
-      say(x.balance === bal, `${n}: ${p.chain} balance ${x.balance} cents, want ${bal}`);
+      const bal = base(p.balance, p.asset);
+      say(x.asset === p.asset && x.balance === bal, `${n}: ${p.chain} balance ${x.balance} base units of ${x.asset}, want ${bal} of ${p.asset}`);
+      say(new RegExp(`^[0-9][0-9.,]*[KMB]? ${p.asset}$`).test(x.text[1] ?? "") && !x.text.some((t) => t.includes("$")), `${n}: ${p.chain} drawn ${JSON.stringify(x.text.slice(1))}: the balance in ${p.asset}, no dollar figure`);
       if (p.ready === undefined) {
-        say(x.ready === "none" && x.pending === "none" && x.text[2] === "—" && x.text[3] === "—", `${n}: ${p.chain} sends no ready: Ready ${JSON.stringify(x.text[2])} and Pending ${JSON.stringify(x.text[3])} (${x.ready}, ${x.pending}), want dashes, never $0.00`);
+        say(x.ready === "none" && x.pending === "none" && x.text[2] === "—" && x.text[3] === "—", `${n}: ${p.chain} sends no ready: Ready ${JSON.stringify(x.text[2])} and Pending ${JSON.stringify(x.text[3])} (${x.ready}, ${x.pending}), want dashes, never 0`);
       } else {
-        const rd = cents(p.ready);
+        const rd = base(p.ready, p.asset);
         const pd = (BigInt(bal) - BigInt(rd)).toString();
-        say(x.ready === rd && x.pending === pd && /^\$/.test(x.text[2] ?? "") && /^\$/.test(x.text[3] ?? ""), `${n}: ${p.chain} ready ${x.ready} and pending ${x.pending} cents drawn ${JSON.stringify(x.text[2])} and ${JSON.stringify(x.text[3])}, want ${rd} and ${pd} in dollars`);
+        say(x.ready === rd && x.pending === pd && /^[0-9]/.test(x.text[2] ?? "") && /^[0-9]/.test(x.text[3] ?? ""), `${n}: ${p.chain} ready ${x.ready} and pending ${x.pending} drawn ${JSON.stringify(x.text[2])} and ${JSON.stringify(x.text[3])}, want ${rd} and ${pd} as numbers`);
       }
     }
     const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.errors ?? []).map((e) => `console ${e}`)];
@@ -140,7 +145,7 @@ const INIT = ({ app }) => {
 const READ = (phone) => {
   const b = document.querySelector(phone ? ".pfm .pools" : ".pfd .pools");
   if (!b) return { view: null, rows: [] };
-  const rows = [...b.querySelectorAll("[data-pool]")].filter((x) => x.dataset.pool !== "unread").map((x) => ({ chain: x.dataset.pool, balance: x.dataset.balance, ready: x.dataset.ready, pending: x.dataset.pending, text: [...x.children].map((c) => c.textContent) }));
+  const rows = [...b.querySelectorAll("[data-pool]")].filter((x) => x.dataset.pool !== "unread").map((x) => ({ chain: x.dataset.pool, asset: x.dataset.asset, balance: x.dataset.balance, ready: x.dataset.ready, pending: x.dataset.pending, text: [...x.children].map((c) => c.textContent) }));
   return { view: b.dataset.pools ?? null, rows };
 };
 

@@ -6,14 +6,15 @@
 //             cents, the pool sent with no ready drawn with dashes: PASS;
 //   deployed: APP_HOST as served on 3 Nov before this card and app-portfolio-mount deploy: /portfolio draws no pool
 //             block: FAIL;
-//   planted from good: a pool row missing, and a false $0.00 in Ready where the pool sent none: each FAIL.
+//   planted from good: a pool row missing, a false 0 in Ready where the pool sent none, a SOL balance drawn as dollars
+//             ("$12.50"), and the wrong asset: each FAIL.
 // Each answer's `at` is when it was recorded.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ANSWER, cents, judge, POOLS } from "./balances-per-chain.mjs";
+import { ANSWER, base, judge, POOLS } from "./balances-per-chain.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "balances-per-chain.answers.json"), "utf8"));
@@ -24,12 +25,13 @@ const mut = (f) => {
   return judge(rec);
 };
 
-test("cents: decimals rounded down, garbage null", () => {
-  assert.equal(cents("1250000.5"), "125000050");
-  assert.equal(cents("999999.999"), "99999999");
-  assert.equal(cents("0"), "0");
-  assert.equal(cents("-1"), null);
-  assert.equal(cents("1e3"), null);
+test("base units at the kit's decimals: rounded down, garbage and an unknown asset null", () => {
+  assert.equal(base("12.5", "SOL"), "12500000000");
+  assert.equal(base("0.25", "ETH"), "250000000000000000");
+  assert.equal(base("1.0000001", "USDC"), "1000000");
+  assert.equal(base("-1", "SOL"), null);
+  assert.equal(base("1e3", "SOL"), null);
+  assert.equal(base("1", "BTC"), null);
 });
 
 test("the recorded answers are the shell's answer as this check sends it", () => {
@@ -56,13 +58,28 @@ test("planted: a pool row missing: FAIL", () => {
   assert.ok(bad(r).some((l) => /no row for base/.test(l)), bad(r).join("\n"));
 });
 
-test("planted: a false $0.00 where the pool sent no ready: FAIL", () => {
+test("planted: a SOL balance drawn as dollars: FAIL", () => {
+  const r = mut((rec) => {
+    rec.runs.find((y) => y.width === "phone").rows.find((y) => y.chain === "solana").text[1] = "$12.50";
+  });
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => /solana drawn .*no dollar figure/.test(l)), bad(r).join("\n"));
+});
+
+test("planted: the wrong asset on a row: FAIL", () => {
+  const r = mut((rec) => {
+    rec.runs.find((y) => y.width === "desktop").rows.find((y) => y.chain === "base").asset = "SOL";
+  });
+  assert.equal(r.ok, false);
+});
+
+test("planted: a false 0 where the pool sent no ready: FAIL", () => {
   const r = mut((rec) => {
     const x = rec.runs.find((y) => y.width === "desktop").rows.find((y) => y.chain === "base");
     x.ready = "0";
-    x.pending = "32000";
-    x.text[2] = "$0.00";
-    x.text[3] = "$320.00";
+    x.pending = "250000000000000000";
+    x.text[2] = "0";
+    x.text[3] = "0.25";
   });
   assert.equal(r.ok, false);
   assert.ok(bad(r).some((l) => /base sends no ready/.test(l)), bad(r).join("\n"));
