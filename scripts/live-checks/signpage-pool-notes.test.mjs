@@ -2,7 +2,8 @@
 // (signpage-pool-notes.answers.json). good: the signing page's devnet deposit (signpage-pool-notes.run.json) read on two
 // devnet RPCs, and SIGN_HOST's /app.js with no testnet pin and no deposit flow: PASS. bad: the same reads with another
 // precommitment in the run's place, whose mark does not exist: FAIL. Planted on the good one: SIGN_HOST serving the
-// deposit flow, the deposit tx failed, the mark's value another, a state leaf another, U not emptied: FAIL.
+// deposit flow, the deposit tx failed, the mark's value another, a state leaf another, U not emptied, a record naming
+// another deposit's leaf and commitment: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -62,4 +63,13 @@ test("planted on the good answer: the deposit failed, the mark another value, a 
   const o = 16 + Number(BigInt(R.leafIndex) % 1024n) * 72;
   bad(await run(A.good, account((d) => d.subarray(0, 8).toString() === "bfpage01" && d[8] === 0, (d) => (d[o + 31] ^= 1))), "state page ");
   bad(await run(A.good, (a) => (a.method === "getBalance" ? ((a.json.result.value = 1), a.json) : a.json)), "U ");
+});
+
+test("planted: a record naming another deposit's leaf (the deploy run's, state leaf 0) and its commitment: FAIL", async () => {
+  const page = A.good.answers.find((a) => a.method === "getAccountInfo" && a.json?.result?.value?.owner === R.program && Buffer.from(a.json.result.value.data[0], "base64").subarray(0, 9).equals(Buffer.concat([Buffer.from("bfpage01"), Buffer.of(0)])));
+  const other = Buffer.from(page.json.result.value.data[0], "base64").subarray(16, 48).toString("hex");
+  assert.notEqual(other, R.commitment);
+  const r = await check({ run: { ...R, leafIndex: "0", commitment: other }, precommitment: R.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign });
+  bad(r, "the run's recorded commitment");
+  bad(r, "state page 0 entry 0");
 });

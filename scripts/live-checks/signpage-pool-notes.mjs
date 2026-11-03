@@ -7,8 +7,8 @@
 //   - the run's deposit tx: no error, signed and paid by the run's one-time wallet U, calling the pinned program;
 //   - the precommitment's mark ["pre", precommitment]: the program's, 17 bytes, the run's value and nonce, tag 1;
 //   - label page entry nonce-1: keccak256(scope, nonce) mod p, worked out here;
-//   - state page entry at the run's leaf index: the note's commitment as the device computed it from the mark's value,
-//     the label and the precommitment before it stored the note UNSPENT, with a nonzero root;
+//   - state page entry at the run's leaf index: the note's commitment, worked out here from the run's value, the label
+//     and the precommitment (the kit's vaultCommitment), with a nonzero root; the run's recorded commitment must be it;
 //   - U holds 0 lamports: the deposit spent all of it, rung and costs.
 //   node scripts/live-checks/signpage-pool-notes.mjs [--precommitment <hex>] [--record <file>]
 // --precommitment reads another precommitment in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1,
@@ -18,6 +18,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { RPCS, MARK_TAG, PRE_MARK_LEN, account, be32, hex, labelOf, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
 import { PIN, SIGN, TESTNET_ONLY } from "./signpage-pool-flow.mjs";
+import { vaultCommitment } from "../../packages/kit/src/index.ts";
 
 const KEY = "signpage-pool-notes";
 export const RUN = new URL("./signpage-pool-notes.run.json", import.meta.url);
@@ -50,7 +51,8 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
   const nonce = BigInt(run.nonce);
   const leafIndex = BigInt(run.leafIndex);
   const label = labelOf(scope, nonce);
-  const commitment = Buffer.from(run.commitment, "hex");
+  const commitment = be32(vaultCommitment(value, BigInt(`0x${hex(label)}`), BigInt(`0x${precommitment}`)));
+  say(hex(commitment) === run.commitment, `the run's recorded commitment is Poseidon(value, label, precommitment): ${run.commitment}`);
   const mark = preMarkAddress(prog, Buffer.from(precommitment, "hex"));
   for (const url of rpcs.slice(0, 2)) {
     const at = `on ${url}`;

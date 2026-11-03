@@ -108,8 +108,13 @@ function chain() {
       const value = new DataView(ix.data.buffer, ix.data.byteOffset + 1, 8).getBigUint64(0, true);
       const pre = beInt(ix.data.subarray(9, 41));
       const mark = solanaProgramAddress([enc.encode("pre"), be32(pre)], FIX.program);
+      // a tx that fails on chain still pays its fee
       const fail = (why: string): never => {
-        if (!dry) statuses.set(sig, { err: { InstructionError: [0, why] }, confirmationStatus: "finalized" });
+        if (!dry) {
+          statuses.set(sig, { err: { InstructionError: [0, why] }, confirmationStatus: "finalized" });
+          const payer = accounts.get(signer);
+          if (payer) payer.lamports = Math.max(0, payer.lamports - FEE);
+        }
         throw new Error(why);
       };
       if (accounts.has(mark)) fail("PrecommitmentAlreadyUsed");
@@ -215,6 +220,11 @@ async function notes(): Promise<NoteStore> {
   closers.push(() => ns.close());
   return ns;
 }
+/** A precommitment mark of the pool (not the 17-byte Rent sysvar): what `hide` keeps from one RPC. */
+const isMark = (c: ReturnType<typeof chain>) => (a: string) => {
+  const x = c.accounts.get(a);
+  return x?.owner === FIX.program && x.data.length === 17;
+};
 type Host = PoolDepositHost & { landedNotes: NoteRecord[]; seeds: Uint8Array[]; stages: string[] };
 function host(c: ReturnType<typeof chain>, ns: NoteStore, over: Partial<PoolDepositHost> = {}): Host {
   const landedNotes: NoteRecord[] = [];
@@ -379,14 +389,16 @@ test("H2 (probe A): a front-run deposit on the user's precommitment is never the
   assert.ok((await ours(ns)).every((n) => n.leaf?.value !== 1_000_000n));
 });
 
-test("H2 (probe D): a mark of another value than the note's own landed send is refused on every run, never stored", async () => {
+test("H2 (probe D): a mark of another value than the note's recorded value is another deposit's: TAKEN, never stored as money", async () => {
   const c = chain();
   const ns = await notes();
-  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
   c.moreValue = true;
-  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { error: "failed" });
-  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { error: "failed" });
-  assert.deepEqual((await ours(ns)).map((n) => n.state), ["INCOMING"]);
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { error: "not_funded" });
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "TAKEN", undefined],
+    ["second", "PLANNED", undefined],
+  ]);
 });
 
 test("M1 (probe C): a cut-short note is finished as its own move, sent again only at its own value once its blockhash expired, and its landed signature reported", async () => {
@@ -403,16 +415,20 @@ test("M1 (probe C): a cut-short note is finished as its own move, sent again onl
   const r2 = await runPoolDeposit(host(c, ns), ask(10_000_000n));
   assert.deepEqual(r2, { stage: "not_landed", txs: [] });
   assert.equal(c.sent.length, 1);
-  // past its last valid height: sent again at 0.02, its own value, then the new ask's 0.01 on the same U
+  // past its last valid height: sent again at 0.02, its own value, never told to the new ask, which waits for it
   c.height += 1_000;
   const r3 = await runPoolDeposit(host(c, ns), ask(10_000_000n));
+  assert.equal(c.sent.length, 2);
+  assert.deepEqual(r3, { stage: "not_landed", txs: [] });
+  // landed: the new ask's 0.01 goes on the same U, its own send the only one it reports
+  const r4 = await runPoolDeposit(host(c, ns), ask(10_000_000n));
   assert.equal(c.sent.length, 3);
-  assert.deepEqual(r3, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }, { chain: "solana", hash: c.sent[2] }] });
-  assert.deepEqual(await shape(ns), [
+  assert.deepEqual(r4, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[2] }] });
+  assert.deepEqual((await shape(ns)).filter((x) => x[1] !== "PLANNED"), [
     ["deposit", "UNSPENT", 20_000_000n],
     ["second", "UNSPENT", 10_000_000n],
   ]);
-  assert.deepEqual((await ours(ns)).find((n) => n.ref.kind === "deposit")!.sends!.map((s) => s.value), [20_000_000n, 20_000_000n]);
+  assert.deepEqual((await ours(ns)).find((n) => n.ref.kind === "deposit" && n.sends)!.sends!.map((s) => s.value), [20_000_000n, 20_000_000n]);
 });
 
 test("M1: the first tx landing late is the note's, at its own value, whatever the next ask is", async () => {
@@ -430,7 +446,7 @@ test("M1: the first tx landing late is the note's, at its own value, whatever th
   c.lands = true;
   c.apply(first!); // lands now
   const r = await runPoolDeposit(host(c, ns), ask(10_000_000n));
-  assert.deepEqual((r as { txs: { hash: string }[] }).txs.map((t) => t.hash)[0], sigOf(first!));
+  assert.deepEqual(r, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }] }, "the new ask reports its own send only");
   assert.deepEqual(await shape(ns), [
     ["deposit", "UNSPENT", 20_000_000n],
     ["second", "UNSPENT", 10_000_000n],
@@ -441,11 +457,11 @@ test("a deposit that does not read back on both RPCs answers not_landed and its 
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, 50_000_000);
-  const h = host(c, ns, { rpcs: [c.rpc(), c.rpc({ hideStatus: true })] });
+  const h = host(c, ns, { rpcs: [c.rpc(), c.rpc({ hide: isMark(c) })] });
   assert.deepEqual(await runPoolDeposit(h, ask(RUNG)), { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[0] }] });
   assert.deepEqual((await ours(ns)).map((n) => n.state), ["INCOMING"]);
   assert.equal(h.landedNotes.length, 0, "no proof for a note that has not landed");
-  const one = host(c, ns, { rpcs: [c.rpc(), c.rpc({ hide: (a) => c.accounts.get(a)?.data.length === 17 })] });
+  const one = host(c, ns, { rpcs: [c.rpc(), c.rpc({ hide: isMark(c) })] });
   assert.equal(((await settlePoolDeposits(one)) as { stage: string }).stage, "not_landed");
   const load = host(c, ns);
   assert.deepEqual(await settlePoolDeposits(load), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[0] }] });
@@ -523,4 +539,132 @@ test("the store refuses a pool note planned past a note that has not landed or b
   const d = await ns.planDeposit(SCOPE, (ref) => noteSecrets(SEED64, ref).precommitment);
   const r: NoteRef = { kind: "second", id: { id: "U", s: SCOPE, i: (d.ref as { i: number }).i }, n: 0 };
   await assert.rejects(ns.add({ ref: r, scope: SCOPE, precommitment: noteSecrets(SEED64, r).precommitment, state: "PLANNED" }), /waits until the note before it has landed/);
+});
+
+test("N1 (probe F1): one RPC without the tx's history: the note lands on its mark, and every later ask runs", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 3 * (Number(RUNG) + COST));
+  const r1 = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ hideStatus: true })] }), ask(RUNG));
+  assert.deepEqual(r1, { stage: "filled", txs: [{ chain: "solana", hash: c.sent[0] }] }, "named from the RPC that holds it");
+  const r2 = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc({ hideStatus: true }), c.rpc({ hideStatus: true })] }), ask(RUNG));
+  assert.deepEqual(r2, { stage: "filled", txs: [] }, "landed, its tx named by neither RPC");
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", RUNG],
+    ["second", "UNSPENT", RUNG],
+  ]);
+});
+
+test("N1 (probe F2): the note's own deposit, read back hours later with no RPC holding its history, is UNSPENT, never TAKEN", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 3 * (Number(RUNG) + COST));
+  // cut short: one RPC has not the mark yet
+  const r1 = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ hide: isMark(c) })], reads: 1 }), ask(RUNG));
+  assert.equal((r1 as { stage: string }).stage, "not_landed");
+  const left = c.lamports(u.address);
+  c.height += 500; // past its last valid height; the RPCs' status caches no longer hold it
+  const load = host(c, ns, { rpcs: [c.rpc({ hideStatus: true }), c.rpc({ hideStatus: true })] });
+  assert.deepEqual(await settlePoolDeposits(load), { stage: "filled", txs: [] });
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
+  assert.equal(load.landedNotes.length, 1);
+  assert.equal(c.sent.length, 1, "never sent again");
+  assert.equal(c.lamports(u.address), left);
+});
+
+test("N1: a same-value deposit by another on the note's precommitment funds the user's note: UNSPENT, and U keeps its money", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  const base = c.rpc();
+  let raced = false;
+  const racing = async (method: string, params: readonly unknown[]) => {
+    if (method === "sendTransaction" && !raced) {
+      raced = true;
+      c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), RUNG));
+    }
+    return base(method, params);
+  };
+  const r = await runPoolDeposit(host(c, ns, { rpcs: [racing, c.rpc()] }), ask(RUNG));
+  assert.deepEqual(r, { stage: "filled", txs: [] }, "no tx of the user's landed");
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
+  assert.equal(c.lamports(u.address), 50_000_000 - FEE, "only the failed tx's fee left U");
+});
+
+test("N2 (probe G): one RPC's far-future last valid height is capped by the other's height + 151: the dropped send goes again, told to no new ask", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 3 * (Number(RUNG) + COST));
+  const base = c.rpc();
+  const lie = async (m: string, p: readonly unknown[]) => {
+    const r = (await base(m, p)) as { value: { lastValidBlockHeight: number } };
+    if (m === "getLatestBlockhash") r.value.lastValidBlockHeight = 1e12;
+    return r;
+  };
+  c.lands = false;
+  const at = c.height;
+  assert.equal(((await runPoolDeposit(host(c, ns, { rpcs: [lie, c.rpc()] }), ask(RUNG))) as { stage: string }).stage, "not_landed");
+  assert.deepEqual((await ours(ns))[0]!.sends!.map((s) => s.last_valid_block_height), [BigInt(at + 151)]);
+  c.lands = true;
+  c.height += 10_000;
+  const told: string[] = [];
+  const r2 = await runPoolDeposit(host(c, ns, { sent: (s) => told.push(s) }), ask(RUNG));
+  assert.equal(c.sent.length, 2, "sent again at its own value");
+  assert.deepEqual([r2, told], [{ stage: "not_landed", txs: [] }, []], "the resend is not the new ask's");
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[2] }] });
+  assert.deepEqual((await shape(ns)).filter((x) => x[1] !== "PLANNED"), [
+    ["deposit", "UNSPENT", RUNG],
+    ["second", "UNSPENT", RUNG],
+  ]);
+});
+
+test("N3 (probe E): a send again U cannot pay leaves its note INCOMING, names the top-up, and blocks no other U", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST);
+  const base = c.rpc();
+  let once = false;
+  const f = async (m: string, p: readonly unknown[]) => {
+    if (m === "sendTransaction" && !once) {
+      once = true; // fails on chain after a passing simulation (a page-boundary race): the fee is taken
+      const tx = base64.decode(p[0] as string);
+      c.statuses.set(sigOf(tx), { err: { InstructionError: [0, "WrongAccount"] }, confirmationStatus: "finalized" });
+      c.accounts.get(u.address)!.lamports -= FEE;
+      c.sent.push(sigOf(tx));
+      c.height += 200;
+      return sigOf(tx);
+    }
+    return base(m, p);
+  };
+  const short: [string, bigint][] = [];
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [f, c.rpc()], short: (a, l) => short.push([a, l]) }), ask(RUNG)), { error: "not_funded" });
+  assert.deepEqual(short, [[u.address, BigInt(FEE)]]);
+  // another U, funded: its ask runs; the stuck note waits for its top-up
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { error: "not_funded" });
+  const next = (await ours(ns)).find((n) => n.ref.kind === "deposit" && n.state === "PLANNED")!;
+  c.fund(U((next.ref as { i: number }).i), 50_000_000);
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { stage: string }).stage, "filled");
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { error: "not_funded" });
+  // topped up: page load sends it again at its own value, and the next load reads it landed
+  c.accounts.get(u.address)!.lamports += FEE;
+  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "not_landed");
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent.at(-1) }] });
+  assert.deepEqual((await ours(ns)).filter((n) => n.ref.kind === "deposit").map((n) => [n.state, n.leaf?.value]).sort(), [["UNSPENT", RUNG], ["UNSPENT", RUNG]]);
+});
+
+test("M5: page load reads an open note once and never waits on it, so an ask behind it answers at once", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  assert.equal(((await runPoolDeposit(host(c, ns, { reads: 1 }), ask(RUNG))) as { stage: string }).stage, "not_landed");
+  let waits = 0;
+  const load = host(c, ns, { reads: 120, wait: async () => void waits++ });
+  assert.deepEqual(await settlePoolDeposits(load), { stage: "not_landed", txs: [] });
+  assert.equal(waits, 0);
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { reads: 120, wait: async () => void waits++ }), ask(RUNG)), { stage: "not_landed", txs: [] });
+  assert.equal(waits, 0, "the ask did not wait on the earlier note");
 });
