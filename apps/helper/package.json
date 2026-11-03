@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "node src/server.ts",
-    "test": "node --test src/*.test.ts src/proxy/*.test.ts src/rpc/*.test.ts src/token-status/*.test.ts src/bind/*.test.ts src/withdraw/*.test.ts src/data/solana/*.test.ts test/bind-send/*.test.ts deploy/*.test.mjs",
+    "test": "node --test src/*.test.ts src/proxy/*.test.ts src/rpc/*.test.ts src/token-status/*.test.ts src/bind/*.test.ts src/withdraw/*.test.ts src/data/solana/*.test.ts src/pool/*.test.ts test/bind-send/*.test.ts deploy/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

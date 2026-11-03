@@ -52,6 +52,35 @@ services:
       BIND_RELAYER_TESTNET: ${BIND_RELAYER_TESTNET:-}
       BIND_RELAYER_KEY_TESTNET: ${BIND_RELAYER_KEY_TESTNET:-}
       BIND_MARGIN_K: ${BIND_MARGIN_K:-}
+      # GET /v1/pool/fee and POST /v1/pool/solana/send per cluster (src/pool/solana.ts; empty: that cluster's pool is
+      # not carried): the pool program, the fee payer's key (base58 of 64 bytes, gas SOL only), the fee in lamports
+      # (rounded up to 100,000, at least a release's worst cost) and two RPC URLs, comma-separated
+      POOL_SOLANA_PROGRAM_MAINNET: ${POOL_SOLANA_PROGRAM_MAINNET:-}
+      POOL_SOLANA_FEE_PAYER_KEY_MAINNET: ${POOL_SOLANA_FEE_PAYER_KEY_MAINNET:-}
+      POOL_SOLANA_FEE_MAINNET: ${POOL_SOLANA_FEE_MAINNET:-}
+      POOL_SOLANA_RPCS_MAINNET: ${POOL_SOLANA_RPCS_MAINNET:-}
+      POOL_SOLANA_PROGRAM_DEVNET: ${POOL_SOLANA_PROGRAM_DEVNET:-}
+      POOL_SOLANA_FEE_PAYER_KEY_DEVNET: ${POOL_SOLANA_FEE_PAYER_KEY_DEVNET:-}
+      POOL_SOLANA_FEE_DEVNET: ${POOL_SOLANA_FEE_DEVNET:-}
+      POOL_SOLANA_RPCS_DEVNET: ${POOL_SOLANA_RPCS_DEVNET:-}
+      # POST /v1/pool/evm/send per network (src/pool/evm.ts; empty: that network's pool is not carried): the pool, the
+      # sender's key (0x + 64 hex, gas only), the fee in the asset's base units, its recipient (empty: the sender) and
+      # two RPC URLs, comma-separated
+      POOL_EVM_ADDRESS_BASE: ${POOL_EVM_ADDRESS_BASE:-}
+      POOL_EVM_SENDER_KEY_BASE: ${POOL_EVM_SENDER_KEY_BASE:-}
+      POOL_EVM_FEE_BASE: ${POOL_EVM_FEE_BASE:-}
+      POOL_EVM_FEE_RECIPIENT_BASE: ${POOL_EVM_FEE_RECIPIENT_BASE:-}
+      POOL_EVM_RPCS_BASE: ${POOL_EVM_RPCS_BASE:-}
+      POOL_EVM_ADDRESS_ROBINHOOD: ${POOL_EVM_ADDRESS_ROBINHOOD:-}
+      POOL_EVM_SENDER_KEY_ROBINHOOD: ${POOL_EVM_SENDER_KEY_ROBINHOOD:-}
+      POOL_EVM_FEE_ROBINHOOD: ${POOL_EVM_FEE_ROBINHOOD:-}
+      POOL_EVM_FEE_RECIPIENT_ROBINHOOD: ${POOL_EVM_FEE_RECIPIENT_ROBINHOOD:-}
+      POOL_EVM_RPCS_ROBINHOOD: ${POOL_EVM_RPCS_ROBINHOOD:-}
+      POOL_EVM_ADDRESS_BASE_SEPOLIA: ${POOL_EVM_ADDRESS_BASE_SEPOLIA:-}
+      POOL_EVM_SENDER_KEY_BASE_SEPOLIA: ${POOL_EVM_SENDER_KEY_BASE_SEPOLIA:-}
+      POOL_EVM_FEE_BASE_SEPOLIA: ${POOL_EVM_FEE_BASE_SEPOLIA:-}
+      POOL_EVM_FEE_RECIPIENT_BASE_SEPOLIA: ${POOL_EVM_FEE_RECIPIENT_BASE_SEPOLIA:-}
+      POOL_EVM_RPCS_BASE_SEPOLIA: ${POOL_EVM_RPCS_BASE_SEPOLIA:-}
       HELPER_RELEASE: ${HELPER_RELEASE:-}
       # the relayers' durable store (src/store/durable.ts): the one writable path in a read-only container
       HELPER_STORE_DIR: /app/data

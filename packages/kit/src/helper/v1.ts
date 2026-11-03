@@ -108,6 +108,9 @@ export const HELPER_V1_PATHS = [
   { method: "GET", path: "/v1/withdraw/{tx_hash}", part: "relay", limitBytes: 1024 },
   // the pool relayers (card helper-pool-senders, apps/helper/src/pool/): the epoch's fee, then a pool release or buy
   // the device signed, carried as is (POOL_SOLANA_BODY_MAX and POOL_EVM_BODY_MAX, 4 KB each)
+  // POST /v1/pool/solana/send on mainnet answers a tag 3 only once its send is decided (the fill, or not_landed), so
+  // the device's fetch for it waits longer than a blockhash lives (150 blocks; SOLANA_POOL_SEND_MARGIN_MS, 90 s, is
+  // longer), never a short timeout
   { method: "GET", path: "/v1/pool/fee", part: "relay", limitBytes: 1024 },
   { method: "POST", path: "/v1/pool/solana/send", part: "relay", limitBytes: 4096 },
   { method: "POST", path: "/v1/pool/evm/send", part: "relay", limitBytes: 4096 },
