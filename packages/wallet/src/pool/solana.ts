@@ -238,17 +238,23 @@ function decodePage(raw: unknown, program: string, tree: number, pageNo: number,
 type Commitment = "finalized" | "confirmed";
 
 /** Calls of one read when the RPC answers -32016 (its node has not reached minContextSlot): a load-balanced provider
- * can route one call to a node a slot or two behind the one that answered the call before. Any other error, or the
- * last -32016, is thrown as it came. */
+ * can route one call to a node a slot or two behind the one that answered the call before. Between two calls the
+ * device waits about one slot, SOL_LAG_WAIT_MS, so the lagging node can catch up; never after the last. Any other
+ * error, or the last -32016, is thrown as it came. */
 export const SOL_LAG_TRIES = 3;
+export const SOL_LAG_WAIT_MS = 400;
+/** The wait between two calls of a lagging read; tests pass one that returns at once. */
+export type SolanaLagWait = (ms: number) => Promise<void>;
+const slotWait: SolanaLagWait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const LAGGING = /(RPC error -32016\b|Minimum context slot has not been reached)/;
-export async function solanaLagRetry<T>(f: () => Promise<T>): Promise<T> {
+export async function solanaLagRetry<T>(f: () => Promise<T>, wait: SolanaLagWait = slotWait): Promise<T> {
   for (let k = 1; ; k++) {
     try {
       return await f();
     } catch (e) {
       if (k >= SOL_LAG_TRIES || !(e instanceof Error) || !LAGGING.test(e.message)) throw e;
     }
+    await wait(SOL_LAG_WAIT_MS);
   }
 }
 
@@ -258,7 +264,7 @@ export async function solanaLagRetry<T>(f: () => Promise<T>): Promise<T> {
  * agreed before.
  * minContextSlot: the RPC must answer from that slot or a later one (an RPC behind it refuses, never serves older pages).
  */
-async function readPages(rpc: SolanaRpc, program: string, from: readonly [number, number], commitment: Commitment, minContextSlot: number, signal?: AbortSignal): Promise<{ pages: [Entry[], Entry[]]; slot: number; top: number }> {
+async function readPages(rpc: SolanaRpc, program: string, from: readonly [number, number], commitment: Commitment, minContextSlot: number, signal?: AbortSignal, lagWait?: SolanaLagWait): Promise<{ pages: [Entry[], Entry[]]; slot: number; top: number }> {
   const pages: [Entry[], Entry[]] = [[], []];
   const open = [true, true];
   let slot = Number.MAX_SAFE_INTEGER;
@@ -268,7 +274,7 @@ async function readPages(rpc: SolanaRpc, program: string, from: readonly [number
     const want: { tree: 0 | 1; pageNo: number }[] = [];
     for (const tree of [TREE_STATE, TREE_LABEL] as const) if (open[tree]) for (let k = 0; k < BATCH / 2; k++) want.push({ tree, pageNo: from[tree] + step + k });
     const cfg = { commitment, encoding: "base64", ...(minContextSlot > 0 ? { minContextSlot } : {}) };
-    const a = (await solanaLagRetry(() => rpc("getMultipleAccounts", [want.map((w) => solanaPageOf(program, w.tree, w.pageNo)), cfg]))) as { context?: { slot?: unknown }; value?: unknown };
+    const a = (await solanaLagRetry(() => rpc("getMultipleAccounts", [want.map((w) => solanaPageOf(program, w.tree, w.pageNo)), cfg]), lagWait)) as { context?: { slot?: unknown }; value?: unknown };
     const at = int(a?.context?.slot, "getMultipleAccounts context slot");
     if (at < minContextSlot) throw new Error(`getMultipleAccounts: answered at slot ${at}, below ${minContextSlot}`);
     slot = Math.min(slot, at);
@@ -307,7 +313,7 @@ export type SolanaTreeSync = {
   leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number] }>;
 };
 
-export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: string): SolanaTreeSync {
+export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, lagWait?: SolanaLagWait): SolanaTreeSync {
   checkSolanaRpcs(rpcs);
   const held: [Entry[], Entry[]] = [[], []];
   const lastSlot = [0, 0];
@@ -316,7 +322,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     const base = [held[0], held[1]] as const;
     const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
     const reads = await both(rpcs, async (rpc, k) => {
-      const r = await readPages(rpc, program, from, commitment, Math.max(minSlot, lastSlot[k]!), signal);
+      const r = await readPages(rpc, program, from, commitment, Math.max(minSlot, lastSlot[k]!), signal, lagWait);
       // every leaf under the cut is in only once the block read at is at or past beforeMs: a later block's time is too
       if (beforeMs !== null) {
         const { ms } = await blockTime(rpc, r.slot);

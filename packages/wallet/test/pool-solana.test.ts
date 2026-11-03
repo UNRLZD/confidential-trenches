@@ -18,7 +18,7 @@ import { openWalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import {
-  SOL_LAG_TRIES, SOL_LIFE_MS, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
+  SOL_LAG_TRIES, SOL_LAG_WAIT_MS, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
 } from "../src/pool/solana.ts";
 
 type Spend = { name: string; note: number; new_commitment: string; withdrawn: string; state_root_index: number; label_root_index: number; salt: string; public_signals: string[] };
@@ -842,6 +842,28 @@ test("N1 round 2 (MX5): the pages are read again at or past the merged marks' sl
   assert.equal(js(await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [mk("https://a.example", count), mk("https://b.example", count)], gap: 4 })), js(base));
 });
 
+const instant: SolanaLagWait = async () => {};
+
+test("RPC lag: the wait of about a slot comes between two calls, never after the last; no wait for any other error", async () => {
+  const lag = () => new Error("RPC error -32016: Minimum context slot has not been reached");
+  const run = async (answers: (Error | string)[]): Promise<{ steps: string[]; out: string }> => {
+    const steps: string[] = [];
+    let k = 0;
+    const out = await solanaLagRetry(async () => {
+      steps.push("call");
+      const a = answers[k++]!;
+      if (a instanceof Error) throw a;
+      return a;
+    }, async (ms) => void steps.push(`wait ${ms}`)).catch((e: Error) => `threw ${e.message.slice(0, 16)}`);
+    return { steps, out };
+  };
+  assert.deepEqual(await run([lag(), lag(), "ok"]), { steps: ["call", "wait 400", "call", "wait 400", "call"], out: "ok" });
+  assert.deepEqual(await run([lag(), lag(), lag(), "never"]), { steps: ["call", "wait 400", "call", "wait 400", "call"], out: "threw RPC error -32016" });
+  assert.deepEqual(await run([new Error("RPC error -32005: node is unhealthy")]), { steps: ["call"], out: "threw RPC error -32005" });
+  assert.deepEqual(await run(["ok"]), { steps: ["call"], out: "ok" });
+  assert.equal(SOL_LAG_WAIT_MS, 400);
+});
+
 test("RPC lag: a -32016 answer is tried again, SOL_LAG_TRIES calls at most, then refused", async () => {
   const { chain } = restorePool();
   const base = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 });
@@ -855,10 +877,10 @@ test("RPC lag: a -32016 answer is tried again, SOL_LAG_TRIES calls at most, then
   };
   // each first call with minContextSlot lags once: the restore holds
   const calls: string[] = [];
-  assert.equal(js(await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [flaky("https://a.example", 2, calls), rpc(chain, { ...MAINNET, url: "https://b.example" })], gap: 4 })), js(base));
+  assert.equal(js(await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lagWait: instant, rpcs: [flaky("https://a.example", 2, calls), rpc(chain, { ...MAINNET, url: "https://b.example" })], gap: 4 })), js(base));
   // a node that never reaches the slot: refused after SOL_LAG_TRIES calls of that read
   const stuck: string[] = [];
-  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [flaky("https://a.example", 1, stuck), rpc(chain, { ...MAINNET, url: "https://b.example" })], gap: 4 }), /-32016/);
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lagWait: instant, rpcs: [flaky("https://a.example", 1, stuck), rpc(chain, { ...MAINNET, url: "https://b.example" })], gap: 4 }), /-32016/);
   assert.equal(stuck.filter((m) => m === "getMultipleAccounts").length, SOL_LAG_TRIES);
   // any other error is never tried again
   let other = 0;
@@ -866,7 +888,7 @@ test("RPC lag: a -32016 answer is tried again, SOL_LAG_TRIES calls at most, then
     if (m === "getProgramAccounts") (other++, (() => { throw new Error("RPC error -32005: node is unhealthy"); })());
     return rpc(chain, MAINNET)(m, p);
   }, { url: "https://a.example" });
-  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [broken, rpc(chain, { ...MAINNET, url: "https://b.example" })], gap: 4 }), /-32005/);
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lagWait: instant, rpcs: [broken, rpc(chain, { ...MAINNET, url: "https://b.example" })], gap: 4 }), /-32005/);
   assert.equal(other, 1);
 });
 

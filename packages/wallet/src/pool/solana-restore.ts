@@ -40,7 +40,7 @@ import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
-import { checkSolanaRpcs, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
+import { checkSolanaRpcs, type SolanaLagWait, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
 
 const U32 = 0xffffffff;
 const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
@@ -66,14 +66,14 @@ export const SOL_PRE_MARK_LEN = 16;
 
 /**
  * Every mark of the pool, the union of two RPCs' whole-set reads; a key both hold with different bytes is refused.
- * minSlots: RPC k answers at or past minSlots[k] (minContextSlot), and an answer below it is refused.
+ * minSlots: RPC k answers at or past minSlots[k] (minContextSlot), and an answer below it is refused. lagWait: tests only.
  */
-export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal, minSlots?: readonly [number, number]): Promise<SolanaMarks> {
+export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal, minSlots?: readonly [number, number], lagWait?: SolanaLagWait): Promise<SolanaMarks> {
   checkSolanaRpcs(rpcs);
   if (minSlots !== undefined && !(Array.isArray(minSlots) && minSlots.length === 2 && minSlots.every((x) => Number.isSafeInteger(x) && x >= 0))) throw new Error("minSlots: two slots");
   const read = async (rpc: SolanaRpc, k: number, size: number): Promise<{ marks: Map<string, string>; slot: number }> => {
     const min = minSlots?.[k] ?? 0;
-    const a = (await solanaLagRetry(() => rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters: [{ dataSize: size }] }]))) as { context?: { slot?: unknown }; value?: unknown };
+    const a = (await solanaLagRetry(() => rpc("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, ...(min > 0 ? { minContextSlot: min } : {}), filters: [{ dataSize: size }] }]), lagWait)) as { context?: { slot?: unknown }; value?: unknown };
     const slot = a?.context?.slot;
     if (!Number.isSafeInteger(slot) || (slot as number) < 0 || !Array.isArray(a.value)) throw new Error(`rpc ${k}: getProgramAccounts: not a list with its context`);
     if ((slot as number) < min) throw new Error(`rpc ${k}: getProgramAccounts: answered at slot ${slot as number}, below ${min}`);
@@ -250,13 +250,13 @@ class Looked<V> extends Map<string, V> {
  * Restore of the Solana pool from the 12 words, on two RPCs: the marks, then rounds of the pages and the marks again past
  * them until two marks reads agree (bounded, header), then solanaRestore once on the last marks and pages.
  */
-export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number }) {
-  const sync = solanaTreeSync(a.rpcs, a.program);
+export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number; /** tests only */ lagWait?: SolanaLagWait }) {
+  const sync = solanaTreeSync(a.rpcs, a.program, a.lagWait);
   const scope = solanaPoolOf(a.program).scope;
-  let marks = await solanaMarks(a.rpcs, a.program, a.signal);
+  let marks = await solanaMarks(a.rpcs, a.program, a.signal, undefined, a.lagWait);
   for (let round = 1, walks = 0; ; round++) {
     const leaves = await sync.leaves(marks.slot, a.signal);
-    const again = solanaMarksUnion(marks, await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots));
+    const again = solanaMarksUnion(marks, await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots, a.lagWait));
     const fresh = [...again.spent.keys(), ...again.pre.keys()].filter((key) => !marks.spent.has(key) && !marks.pre.has(key));
     if (fresh.length > 0 && round <= SOL_RESTORE_QUIET_ROUNDS) {
       marks = again;
@@ -287,13 +287,13 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * The sender treats "unspent" as: the note stays RESERVED and the settle is tried again later (the marks are read at
  * finalized, so a spend that just landed shows up a few seconds on), until the store's deadline rule frees it.
  */
-export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal }): Promise<SolanaSettled> {
+export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaSettled> {
   if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
   const scope = solanaPoolOf(a.program).scope;
   const note = await a.notes.get(a.noteId);
   if (note === undefined || note.leaf === undefined || note.scope !== scope) throw new Error(`note ${a.noteId}: not a landed note of this pool`);
-  const marks = await solanaMarks(a.rpcs, a.program, a.signal);
-  const leaves = await solanaTreeSync(a.rpcs, a.program).leaves(marks.slot, a.signal);
+  const marks = await solanaMarks(a.rpcs, a.program, a.signal, undefined, a.lagWait);
+  const leaves = await solanaTreeSync(a.rpcs, a.program, a.lagWait).leaves(marks.slot, a.signal);
   const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash));
   if (withdrawn === undefined) return { kind: "unspent" };
   const leafAt = new Map<bigint, number>();
