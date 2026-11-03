@@ -6,7 +6,18 @@ export * from "./zk/setup-files.ts";
 export * from "./checks/solana/index.ts";
 export * from "./vault/shapes.ts";
 export * from "./checks/oneclick.ts";
-export * from "./checks/evm/quote.ts";
+// the device's EVM quote on its pinned providers; evmPoolBuyQuoteWith (any providers, any clock) stays inside the kit
+export {
+  EVM_NOOP_HOOK_CODE,
+  EVM_QUOTE_MAX_AGE_MS,
+  evmIsDeviceQuote,
+  evmPoolBuyQuote,
+  EvmQuoteError,
+  type EvmHookTake,
+  type EvmPoolBuyQuote,
+  type EvmPoolBuyQuoteRequest,
+  type EvmQuoteErrorCode,
+} from "./checks/evm/quote.ts";
 export * from "./signpage/client.ts";
 export * from "./vault/messages.ts";
 export * from "./prover/prove.ts";

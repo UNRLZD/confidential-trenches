@@ -2,18 +2,21 @@
 // buy only at a minOut from this quote: for a hooked v4 hop minOut is the only bound (M360), so it comes from the
 // device's own reads, never from a number the helper sends.
 //
-// Every read is an eth_call at one block hash (EIP-1898, requireCanonical) on two RPC providers, the same calls on
-// both, and any answer they do not both give is refused (rpc_disagree): an RPC that lies about a quote, or hides a pool
-// by faking a revert, is caught by the other. The reads, all in one JSON-RPC batch per provider:
+// Every read is an eth_call at one block hash (EIP-1898, requireCanonical) on the chain's two pinned RPC providers (on
+// two hosts), the same calls on both, and any answer they do not both give is refused (rpc_disagree): an RPC that lies
+// about a quote, or hides a pool by faking a revert, is caught by the other. The block is the lower of the two heads,
+// at most the chain's maxLag blocks apart, which the other provider must hold with the same hash and time, and no more
+// than 30 s behind the device's clock (stale_quote): one provider alone cannot pick it. The reads, in aggregate3 calls:
 // - the route's quote Q for the amount in (QuoterV2.quoteExactInput for v3, V4Quoter.quoteExactInput for v4, the
 //   chain's pinned quoters), and the same route for twice the amount: a route whose output does not grow with its input
 //   has run out of a pool's liquidity, which both quoters report as if the fill were complete (partial_fill; read
 //   2026-11-03 on Base: V4Quoter quoted 1e27 wei of ETH into the ETH/USDC 0.05% pool as 284,167 USDC);
-// - the standard pools for the pair, the device's own choice: v3 WETH to the token at each standard fee tier and v4
-//   native to the token at each standard fee and tick spacing with no hook; and for a two-hop route through a listed
-//   middle token, every standard pool of each leg on the route's venue (16 two-hop routes). The best one that fills
-//   completely is the reference R, and a route quoted below it is refused (below_reference, M366 (4)): a helper cannot steer a buy into a
-//   pool it seeded or a hook that keeps the difference;
+// - the standard pools for the token, the device's own choice, whatever the route's shape: v3 WETH to the token at each
+//   standard fee tier, v4 native to the token at each standard fee and tick spacing with no hook, every two-hop of
+//   those through each listed middle token on both venues, and each pinned launchpad pool shape (hook, fee, tick
+//   spacing) for the token. The best one that fills completely is the reference R, and a route quoted below it is
+//   refused (below_reference, M366 (4)): a helper cannot steer a buy into a pool it seeded or a hook that keeps the
+//   difference. With no R the route is refused (no_reference): a token only an unpinned hook trades is not bought;
 // - for a route with a hooked v4 hop, the same route with each hook's code replaced by a hook that does nothing
 //   (eth_call's state override): the hookless output H. The hook's take H - Q is shown as a fee before the buy,
 //   information only, never a pop-up (M360). The route's own Q, which the hook ran in, sets minOut;
@@ -21,7 +24,8 @@
 //   route's first hop: a route that starts from WETH is refused when one exists (native_first), and R is then read
 //   from native routes only.
 //
-// minOut = floor(Q x (10000 - slippageBps) / 10000), with Q >= R whenever a standard pool answers.
+// minOut = floor(Q x (10000 - slippageBps) / 10000), with Q >= R. Only a quote made here builds a buy, within 30 s of
+// its block (trade/evm/buy.ts), and W signs only a buy built from one.
 import {
   copyRoute,
   evmPoolRouteData,
@@ -57,8 +61,8 @@ export type EvmPoolBuyQuote = {
   readonly token: string;
   readonly amountIn: bigint;
   readonly route: EvmRoute;
-  /** The block both providers answered at. */
-  readonly block: { readonly number: bigint; readonly hash: string };
+  /** The block both providers answered at, and its time (unix seconds) as both providers give it. */
+  readonly block: { readonly number: bigint; readonly hash: string; readonly timestamp: bigint };
   /** Q: the route's output, the same on both providers. */
   readonly amountOut: bigint;
   /** What W signs: floor(Q x (10000 - slippageBps) / 10000). */
@@ -78,7 +82,9 @@ export type EvmQuoteErrorCode =
   | "no_quote" // the route reverts, or quotes nothing
   | "partial_fill" // the route runs out of a pool's liquidity
   | "below_reference" // the route is quoted below the device's own standard pool
-  | "native_first"; // the route starts from WETH where a native v4 pool exists
+  | "native_first" // the route starts from WETH where a native v4 pool exists
+  | "no_reference" // no standard or pinned launchpad pool answers: nothing the device chose holds the route
+  | "stale_quote"; // the block is more than 30 s behind the device's clock
 export class EvmQuoteError extends Error {
   readonly code: EvmQuoteErrorCode;
   /** On below_reference and native_first: the device's own best route, which the caller may quote instead. */
@@ -124,7 +130,16 @@ function venue(chain: EvmPoolChain) {
   const v = all[chain];
   const q = Object.hasOwn(v, "quoters") ? v.quoters : undefined;
   const own = (k: "v3" | "v4") => (q !== undefined && Object.hasOwn(q, k) && isAddress(q[k]) ? q[k] : undefined);
-  return { weth: v.weth, v3: own("v3"), v4: own("v4"), nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true };
+  return {
+    weth: v.weth,
+    middles: v.middles,
+    v3: own("v3"),
+    v4: own("v4"),
+    nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true,
+    providers: Object.hasOwn(v, "providers") ? v.providers : undefined,
+    maxLag: Object.hasOwn(v, "maxLag") && Number.isSafeInteger(v.maxLag) ? BigInt(v.maxLag!) : 0n,
+    hookedPools: Object.hasOwn(v, "hookedPools") ? v.hookedPools! : [],
+  };
 }
 
 /** The quoter call for `route` (checked by the builder's own route checks) and `amount`. */
@@ -162,7 +177,10 @@ function answerOf(a: unknown, who: string, raw = false): Answer | string {
     }
     return raw ? r : { kind: "out", amountOut: BigInt(r.slice(0, 66)) };
   }
-  if (raw) return refuse("rpc_error", `${who} answered the multicall with an error`);
+  if (raw) {
+    const m = (o as { error?: { message?: unknown } }).error?.message;
+    return refuse("rpc_error", `${who} answered the multicall with an error: ${String(m).slice(0, 120)}`);
+  }
   if (Object.hasOwn(o, "error") && typeof o.error === "object" && o.error !== null) {
     const { code, message } = o.error as { code?: unknown; message?: unknown };
     if (code === 3 || (typeof message === "string" && /revert/i.test(message))) return { kind: "revert", partial: false };
@@ -173,9 +191,8 @@ function answerOf(a: unknown, who: string, raw = false): Answer | string {
 
 // Multicall3 (github.com/mds1/multicall3), the same address on every chain; eth_getCode on all four providers
 // (mainnet.base.org, base-rpc.publicnode.com, rpc.mainnet.chain.robinhood.com, robinhood.drpc.org, 2026-11-03 18:00Z):
-// 3,808 bytes, keccak 0xd5c15df6…e770891 on each. Every read but the hookless one goes in one aggregate3 call, so a
-// provider is asked one batch of at most two calls (robinhood.drpc.org's free plan takes 3, mainnet.base.org 25 a
-// second).
+// 3,808 bytes, keccak 0xd5c15df6…e770891 on each. The reads but the hookless one go in aggregate3 calls (see
+// READS_PER_CALL below).
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
 const SEL_AGGREGATE3 = "82ad56cb"; // aggregate3((address,bool,bytes)[])
 
@@ -201,8 +218,9 @@ function unaggregate(a: unknown, n: number, who: string): Answer[] {
   const len = (r.length - 2) / 2;
   const at = (o: number): number => {
     if (!Number.isSafeInteger(o) || o < 0 || o + 32 > len) return refuse("rpc_error", `${who} answered a short multicall`);
-    const v = BigInt("0x" + r.slice(2 + 2 * o, 66 + 2 * o));
-    return v > BigInt(len) ? refuse("rpc_error", `${who} answered a multicall offset outside it`) : Number(v);
+    // every word read is compared for equality, or is an offset or a length that the next read or the bound below
+    // holds inside the answer (a word past 2^53 fails Number.isSafeInteger there)
+    return Number(BigInt("0x" + r.slice(2 + 2 * o, 66 + 2 * o)));
   };
   if (at(0) !== 0x20 || at(32) !== n) return refuse("rpc_error", `${who} answered another number of reads`);
   const out: Answer[] = [];
@@ -219,22 +237,32 @@ function unaggregate(a: unknown, n: number, who: string): Answer[] {
   return out;
 }
 
-/** Both providers' answers to `reads` at `hash`, which must be the same: the reads without a state override in one
- *  aggregate3 call, a read with one in its own call. */
+// Reads per aggregate3 call, and calls per JSON-RPC batch: base-rpc.publicnode.com caps an eth_call at 50,000,000 gas,
+// which one call of 90 quotes of 100 ETH passed (read 2026-11-03 19:00Z), and robinhood.drpc.org's free plan takes a
+// batch of 3 calls at most
+const READS_PER_CALL = 6;
+const CALLS_PER_BATCH = 3;
+
+/** Both providers' answers to `reads` at `hash`, which must be the same: the reads without a state override in
+ *  aggregate3 calls of READS_PER_CALL, a read with one in its own call, sent in batches of CALLS_PER_BATCH at once. */
 async function readBoth(rpcs: readonly [EvmRpc, EvmRpc], hash: string, reads: readonly Read[]): Promise<Answer[]> {
   const at = { blockHash: hash, requireCanonical: true };
   const plain = reads.flatMap((r, i) => (r.override === undefined ? [i] : []));
   const lone = reads.flatMap((r, i) => (r.override === undefined ? [] : [i]));
+  const parts: number[][] = [];
+  for (let k = 0; k < plain.length; k += READS_PER_CALL) parts.push(plain.slice(k, k + READS_PER_CALL));
   const calls: EvmRpcCall[] = [
-    { method: "eth_call", params: [{ to: MULTICALL3, data: aggregate(plain.map((i) => reads[i]!)) }, at] },
+    ...parts.map((part) => ({ method: "eth_call", params: [{ to: MULTICALL3, data: aggregate(part.map((i) => reads[i]!)) }, at] })),
     ...lone.map((i) => ({ method: "eth_call", params: [{ to: reads[i]!.to, data: reads[i]!.data }, at, reads[i]!.override] })),
   ];
-  const both = await Promise.all(rpcs.map((rpc) => ask(rpc, calls)));
+  const batches: EvmRpcCall[][] = [];
+  for (let k = 0; k < calls.length; k += CALLS_PER_BATCH) batches.push(calls.slice(k, k + CALLS_PER_BATCH));
+  const both = await Promise.all(rpcs.map(async (rpc) => (await Promise.all(batches.map((b) => askAt(rpc, b)))).flat()));
   const answers = both.map((b, p) => {
     const who = `provider ${p + 1}`;
     const all: Answer[] = new Array(reads.length);
-    unaggregate(b[0], plain.length, who).forEach((x, k) => (all[plain[k]!] = x));
-    lone.forEach((i, k) => (all[i] = answerOf(b[1 + k], who) as Answer));
+    parts.forEach((part, c) => unaggregate(b[c], part.length, who).forEach((x, k) => (all[part[k]!] = x)));
+    lone.forEach((i, k) => (all[i] = answerOf(b[parts.length + k], who) as Answer));
     return all;
   });
   return reads.map((_, i) => {
@@ -259,18 +287,53 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly 
   return out;
 }
 
-/** The block both providers read at: the lower of their latest blocks, by its hash, which the other must hold. */
-async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc]): Promise<{ number: bigint; hash: string }> {
+/** ask, once more after FRESH_RETRY_MS when an answer says the provider does not hold the block yet: a provider behind
+ *  a load balancer can send a call to a node one block behind the one that gave the head ("block not found: canonical
+ *  hash", base-rpc.publicnode.com, 2026-11-03 19:09Z). */
+async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly unknown[]> {
+  const out = await ask(rpc, calls);
+  const behind = out.some((a) => {
+    const o = a as { result?: unknown; error?: { message?: unknown } } | null;
+    return o?.result === null || (typeof o?.error?.message === "string" && /(block|header).*not found|unknown block/i.test(o.error.message));
+  });
+  if (!behind) return out;
+  await new Promise((r) => setTimeout(r, FRESH_RETRY_MS));
+  return ask(rpc, calls);
+}
+const FRESH_RETRY_MS = 250;
+
+/** A block header from a provider's answer: number, hash and timestamp, or a refusal. */
+function header(a: unknown, who: string): Block {
+  const r = (a as { result?: unknown } | null)?.result as { number?: unknown; hash?: unknown; timestamp?: unknown } | null | undefined;
+  const q = (x: unknown) => typeof x === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(x);
+  if (typeof r !== "object" || r === null || !q(r.number) || !q(r.timestamp) || typeof r.hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(r.hash)) {
+    return refuse("rpc_error", `${who} answered no block`);
+  }
+  return { number: BigInt(r.number as string), hash: lower(r.hash), timestamp: BigInt(r.timestamp as string) };
+}
+
+type Block = { number: bigint; hash: string; timestamp: bigint };
+/** The block both providers read at: the lower of their two heads, at most `maxLag` blocks apart and no more than
+ *  EVM_QUOTE_MAX_AGE_MS behind the device's clock, with `confirm`, which reads that number's hash and time on the other
+ *  provider and must find the same block. One provider alone cannot pick an old block, nor name a block the other does
+ *  not hold (review of b17d1fc, R1, R1b). `confirm` runs beside the reads, and nothing read is used before it passes. */
+async function agreedBlock(rpcs: readonly [EvmRpc, EvmRpc], maxLag: bigint, nowMs: number): Promise<{ block: Block; confirm: () => Promise<void> }> {
   const call: EvmRpcCall = { method: "eth_getBlockByNumber", params: ["latest", false] };
   const heads = await Promise.all(rpcs.map((rpc) => ask(rpc, [call])));
-  const [a, b] = heads.map((h, i) => {
-    const r = (h[0] as { result?: unknown } | null)?.result as { number?: unknown; hash?: unknown } | null | undefined;
-    const ok = typeof r === "object" && r !== null && typeof r.number === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(r.number) && typeof r.hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(r.hash);
-    if (!ok) return refuse("rpc_error", `provider ${i + 1} answered no latest block`);
-    return { number: BigInt(r!.number as string), hash: lower(r!.hash as string) };
-  });
-  return a!.number <= b!.number ? a! : b!;
+  const [a, b] = heads.map((h, i) => header(h[0], `provider ${i + 1}`)) as [Block, Block];
+  if (a.number - b.number > maxLag || b.number - a.number > maxLag) return refuse("rpc_disagree", `the providers' heads ${a.number} and ${b.number} are more than ${maxLag} blocks apart`);
+  const [lo, other, who] = a.number <= b.number ? [a, rpcs[1], "provider 2"] : [b, rpcs[0], "provider 1"];
+  if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse("stale_quote", `block ${lo.number} is more than 30 s old`);
+  const confirm = async () => {
+    const back = header((await askAt(other, [{ method: "eth_getBlockByNumber", params: ["0x" + lo.number.toString(16), false] }]))[0], who);
+    if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp) {
+      return refuse("rpc_disagree", `the providers hold different blocks at ${lo.number}`);
+    }
+  };
+  return { block: lo, confirm };
 }
+/** The oldest block a quote reads, and the oldest quote a buy is built from, behind the device's clock. */
+export const EVM_QUOTE_MAX_AGE_MS = 30_000;
 
 const v3Direct = (weth: string, token: string, fee: number): EvmV3Route => ({ venue: "uniswap-v3", tokens: [weth, token], fees: [fee] });
 const v4Direct = (from: string, to: string, [fee, tickSpacing]: readonly [number, number]): EvmV4Route => ({
@@ -280,10 +343,38 @@ const v4Direct = (from: string, to: string, [fee, tickSpacing]: readonly [number
 });
 const startsNative = (r: EvmRoute) => r.venue === "uniswap-v4" && lower(r.currencyIn) === NATIVE;
 
-/** The device's quote of `req.route` on the two providers `rpcs`, with every check above; throws EvmQuoteError (or the
- *  builder's EvmPoolBuyError for a route it refuses). */
-export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, rpcs: readonly [EvmRpc, EvmRpc]): Promise<EvmPoolBuyQuote> {
+/** The device's quote of `req.route` on the chain's two pinned providers, with every check above; throws EvmQuoteError
+ *  (or the builder's EvmPoolBuyError for a route it refuses). `opts.fetch` replaces the global fetch (tests). */
+export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, opts: { fetch?: typeof fetch } = {}): Promise<EvmPoolBuyQuote> {
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
+  const p = venue(req.chain).providers;
+  if (p === undefined) return refuse("no_quoter", `${req.chain} has no pinned providers`);
+  return evmPoolBuyQuoteWith(req, evmProviders(p, opts.fetch ?? fetch), Date.now());
+}
+
+/** Two providers from two https URLs on different hosts. */
+export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): [EvmRpc, EvmRpc] {
+  if (!Array.isArray(urls) || urls.length !== 2) return refuse("bad_request", "two provider URLs");
+  const hosts = urls.map((u) => {
+    let h: string;
+    try {
+      const x = new URL(u);
+      if (x.protocol !== "https:") throw new Error("not https");
+      h = x.hostname.toLowerCase();
+    } catch {
+      return refuse("bad_request", "a provider URL is https");
+    }
+    return h;
+  });
+  if (hosts[0] === hosts[1]) return refuse("bad_request", "the two providers are on one host");
+  return [evmJsonRpc(urls[0]!, fetchFn), evmJsonRpc(urls[1]!, fetchFn)];
+}
+
+/** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
+ *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
+export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcs: readonly [EvmRpc, EvmRpc], nowMs: number): Promise<EvmPoolBuyQuote> {
+  if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
+  if (!Number.isFinite(nowMs)) return refuse("bad_request", "the device's clock");
   const { chain, token, amountIn, slippageBps } = req;
   const route = copyRoute(req.route);
   if (!Array.isArray(rpcs) || rpcs.length !== 2 || typeof rpcs[0] !== "function" || typeof rpcs[1] !== "function" || rpcs[0] === rpcs[1]) {
@@ -308,12 +399,12 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, rpcs: readonl
   const candidate = (r: EvmRoute) => candidates.push({ route: r, at: at(r, amountIn), twice: at(r, 2n * amountIn) });
   if (v.v3 !== undefined) for (const fee of V3_FEES) candidate(v3Direct(v.weth, token, fee));
   if (v.v4 !== undefined) for (const key of V4_KEYS) candidate(v4Direct(NATIVE, token, key));
-  // a two-hop route: its middle (a listed one, the builder's check) to the token, every standard leg pair
-  const middle = route.venue === "uniswap-v3" ? (route.tokens.length === 3 ? route.tokens[1]! : null) : route.hops.length === 2 ? route.hops[0]!.currency : null;
-  if (middle !== null && route.venue === "uniswap-v3" && v.v3 !== undefined) {
-    for (const f1 of V3_FEES) for (const f2 of V3_FEES) candidate({ venue: "uniswap-v3", tokens: [v.weth, middle, token], fees: [f1, f2] });
-  }
-  if (middle !== null && route.venue === "uniswap-v4" && v.v4 !== undefined) {
+  // every route, whatever its shape and venue, is also held to each standard two-hop through each listed middle, on
+  // both venues (review of b17d1fc, R2, R3), and to each pinned launchpad pool shape for the token
+  for (const middle of v.middles) {
+    if (lower(middle) === lower(token)) continue;
+    if (v.v3 !== undefined) for (const f1 of V3_FEES) for (const f2 of V3_FEES) candidate({ venue: "uniswap-v3", tokens: [v.weth, middle, token], fees: [f1, f2] });
+    if (v.v4 === undefined) continue;
     for (const k1 of V4_KEYS) {
       for (const k2 of V4_KEYS) {
         candidate({
@@ -327,6 +418,12 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, rpcs: readonl
       }
     }
   }
+  if (v.v4 !== undefined) {
+    for (const h of v.hookedPools) {
+      const from = h.from === "native" ? NATIVE : v.weth;
+      candidate({ venue: "uniswap-v4", currencyIn: from, hops: [{ currency: token, fee: h.fee, tickSpacing: h.tickSpacing, hooks: h.hooks, hookData: "0x" }] });
+    }
+  }
   const wethStart = !startsNative(route);
   const firstOut = route.venue === "uniswap-v3" ? route.tokens[1]! : route.hops[0]!.currency;
   const firstHop: { at: number; twice: number }[] = [];
@@ -337,8 +434,12 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, rpcs: readonl
     }
   }
 
-  const block = await agreedBlock(rpcs);
-  const ans = await readBoth(rpcs, block.hash, reads);
+  // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
+  const { block, confirm } = await agreedBlock(rpcs, v.maxLag, nowMs);
+  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, block.hash, reads)]);
+  if (confirmed.status === "rejected") throw confirmed.reason;
+  if (read.status === "rejected") throw read.reason;
+  const ans = read.value;
   const out = (i: number) => (ans[i]!.kind === "out" ? (ans[i] as { amountOut: bigint }).amountOut : null);
 
   // The route: a quote, and one that grows with its input
@@ -348,20 +449,23 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest, rpcs: readonl
   if (q === null || q === 0n) return refuse("no_quote", "the route reverts or quotes nothing");
   const q2 = out(twice);
   if (q2 !== null && q2 <= q) return refuse("partial_fill", `twice the amount quotes ${q2}, not more than ${q}: a pool runs out`);
+  // a v3 route has no hook: its quote at twice the amount reverts only when a pool cannot fill it
+  if (q2 === null && route.venue === "uniswap-v3") return refuse("partial_fill", "twice the amount reverts on a v3 route");
 
   // The standard pools: each that quotes and fills completely; native ones only where a native pool must start
-  const fills = (c: { at: number; twice: number }) => {
+  const fills = (c: { at: number; twice: number }, v3 = false) => {
     const a = out(c.at);
     const b = out(c.twice);
-    return a !== null && a > 0n && (b === null || b > a);
+    return a !== null && a > 0n && (b === null ? !v3 : b > a);
   };
-  const filled = candidates.flatMap((c) => (fills(c) ? [{ route: c.route, amountOut: out(c.at)! }] : []));
-  const nativeExists = v.nativeFirst && (filled.some((c) => startsNative(c.route)) || firstHop.some(fills));
+  const filled = candidates.flatMap((c) => (fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route, amountOut: out(c.at)! }] : []));
+  const nativeExists = v.nativeFirst && (filled.some((c) => startsNative(c.route)) || firstHop.some((c) => fills(c)));
   const pool = nativeExists ? filled.filter((c) => startsNative(c.route)) : filled;
   const best = pool.reduce<{ route: EvmRoute; amountOut: bigint } | null>((m, c) => (m === null || c.amountOut > m.amountOut ? c : m), null);
   const reference = best === null ? null : Object.freeze({ amountOut: best.amountOut, route: copyRoute(best.route) });
   if (nativeExists && wethStart) return refuse("native_first", `${chain}'s WETH is behind an upgradeable proxy and a native v4 pool exists`, reference);
-  if (reference !== null && q < reference.amountOut) {
+  if (reference === null) return refuse("no_reference", "no standard pool and no pinned launchpad pool answers for the token");
+  if (q < reference.amountOut) {
     return refuse("below_reference", `the route quotes ${q}, below the standard pool's ${reference.amountOut}`, reference);
   }
 

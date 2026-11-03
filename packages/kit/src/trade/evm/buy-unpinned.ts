@@ -46,7 +46,14 @@ export type EvmPoolVenue = {
   /** A route starts from the native asset whenever a native v4 pool exists (the chain's WETH is behind an upgradeable
    *  proxy). */
   readonly nativeFirst?: boolean;
+  /** The two RPC providers the device's quote reads (different hosts), and how many blocks their heads may differ. */
+  readonly providers?: readonly [string, string];
+  readonly maxLag?: number;
+  /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
+   *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
+  readonly hookedPools?: readonly EvmHookedPool[];
 };
+export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
 
 /** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
  *  read only this list. Frozen all the way down, so no code can swap a chain id, WETH or a middle (nor, once
@@ -71,6 +78,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
+      providers: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
+      maxLag: 5, // 2 s blocks: 10 s
+      // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
+      // the same transaction, read 2026-11-03 18:49Z on base-rpc.publicnode.com; each hook's code the same on both
+      // providers (bytes, keccak prefix): Clanker v4 16,405 b0676099; Zora 24,148 90685df9; Doppler 4,884 317314fa;
+      // Flaunch 23,479 295e84c7
+      hookedPools: Object.freeze([
+        bare({ pad: "clanker", from: "weth" as const, fee: 0x800000, tickSpacing: 200, hooks: "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc" }),
+        bare({ pad: "zora", from: "weth" as const, fee: 0x800000, tickSpacing: 200, hooks: "0x0469a4bd3724dc86c9542f4694c976da13c450c0" }),
+        bare({ pad: "doppler", from: "weth" as const, fee: 0x800000, tickSpacing: 10, hooks: "0xbb7784a4d481184283ed89619a3e3ed143e1adc0" }),
+        bare({ pad: "flaunch", from: "native" as const, fee: 0, tickSpacing: 60, hooks: "0x588c683ecc450f8b2aadb13d7f63792b840425dc" }),
+      ]),
     }),
     robinhood: bare({
       chainId: 4663,
@@ -84,6 +103,14 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
       nativeFirst: true,
+      providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
+      maxLag: 100, // 0.1 s blocks: 10 s
+      // as Base's (read 2026-11-03 18:49Z on rpc.mainnet.chain.robinhood.com; code the same on both providers): Clanker v4
+      // 16,405 0883056c; Doppler 25,533 c41a9110
+      hookedPools: Object.freeze([
+        bare({ pad: "clanker", from: "weth" as const, fee: 0x800000, tickSpacing: 200, hooks: "0x48b8f6ad3a1b4aa477314c9a23035b8f84dde8cc" }),
+        bare({ pad: "doppler", from: "weth" as const, fee: 0x800000, tickSpacing: 8, hooks: "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544" }),
+      ]),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
@@ -341,8 +368,8 @@ export function evmPoolSignBuyUnpinned(secretKey: Uint8Array, chain: EvmPoolChai
   return out;
 }
 
-// The pinned buy (M370): what the kit's index exports as evmPoolBuild and evmPoolSignBuy (buy.ts), here with the venue
-// list as an input so the tests can pin a list of their own; the index's functions pass evmPoolVenues().
+// The pinned buy (M370): what the kit's evmPoolBuildQuoted and evmPoolSignBuy run (buy.ts), here with the venue list
+// as an input so the tests can pin a list of their own; the index's functions pass evmPoolVenues().
 
 /** A pin: `o`'s own `k` when it is a string, never one inherited from a prototype a polluted page filled. */
 function ownPin(o: unknown, k: string): string | undefined {

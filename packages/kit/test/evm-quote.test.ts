@@ -1,27 +1,24 @@
 // The device's EVM buy quote (src/checks/evm/quote.ts; card evm-pool-buy-quote) on the answers Base and Robinhood
-// Chain mainnet gave two public providers, recorded by test/evm-quote-record.ts into fixtures/evm-quote.json. A planted
-// case edits one recorded answer: a provider that lies, a quoter that reports a partial fill as complete, a hook that
-// keeps more, a standard pool better than the route. test/evm-quote-mutants.mjs removes each check and runs the test
-// named for it.
+// Chain mainnet gave the chains' two pinned providers, recorded by test/evm-quote-record.ts into
+// fixtures/evm-quote.json with the device's clock. A planted case edits recorded answers, found by the quote each read
+// asks for: a provider that lies, a quoter that reports a partial fill as complete, a hook that keeps more, a standard
+// pool better than the route. test/evm-quote-attacks.test.ts holds the review's attacks on a modelled chain;
+// test/evm-quote-mutants.mjs removes each check and runs the test named for it.
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import {
-  EVM_NOOP_HOOK_CODE,
-  evmPoolBuildQuoted,
-  evmPoolBuyQuote,
-  EvmPoolBuyError,
-  EvmQuoteError,
-  type EvmPoolBuyQuote,
-  type EvmPoolBuyQuoteRequest,
-  type EvmRpc,
-  type EvmRpcCall,
-} from "../src/index.ts";
+import * as kit from "../src/index.ts";
+import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
+import { evmPoolBuyQuoteWith, evmProviders, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
 
 type Answer = { result?: string; error?: { code: number; message: string; data?: string } } & Record<string, unknown>;
 type Exchange = { calls: EvmRpcCall[]; answers: Answer[] };
-type Case = { request: Record<string, unknown>; outcome: { code: string; detail: string }; exchanges: [Exchange[], Exchange[]] };
+type Case = { request: Record<string, unknown>; now: number; outcome: { code: string; detail: string }; exchanges: [Exchange[], Exchange[]] };
 const F: Record<string, Case> = JSON.parse(readFileSync(new URL("./fixtures/evm-quote.json", import.meta.url), "utf8"));
+const MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11";
+const ZERO = "0x0000000000000000000000000000000000000000";
+const CLANKER_HOOK = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc";
 
 /** The answers a provider gave to exactly these calls; `edit` changes a copy of them. */
 type Edit = (answers: Answer[], calls: readonly EvmRpcCall[]) => void;
@@ -29,7 +26,7 @@ const replay = (ex: Exchange[], edit?: Edit): EvmRpc => async (calls) => {
   const e = ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls));
   if (e === undefined) throw new Error("no recorded answer for these calls");
   const a = structuredClone(e.answers);
-  if (edit !== undefined && calls[0]!.method === "eth_call") edit(a, calls);
+  if (edit !== undefined) edit(a, calls);
   return a;
 };
 // the fixture keeps the request's token as "buys" (see evm-quote-record.ts)
@@ -37,8 +34,8 @@ const request = (name: string): EvmPoolBuyQuoteRequest => {
   const { buys, amountIn, ...rest } = F[name]!.request;
   return { ...(rest as Omit<EvmPoolBuyQuoteRequest, "token" | "amountIn">), token: buys as string, amountIn: BigInt(amountIn as string) };
 };
-const quote = (name: string, edit1?: Edit, edit2?: Edit): Promise<EvmPoolBuyQuote> =>
-  evmPoolBuyQuote(request(name), [replay(F[name]!.exchanges[0], edit1), replay(F[name]!.exchanges[1], edit2)]);
+const quote = (name: string, edit1?: Edit, edit2?: Edit, now = F[name]!.now): Promise<EvmPoolBuyQuote> =>
+  evmPoolBuyQuoteWith(request(name), [replay(F[name]!.exchanges[0], edit1), replay(F[name]!.exchanges[1], edit2)], now);
 const refused = async (p: Promise<unknown>, code: string) => {
   await assert.rejects(p, (e: unknown) => {
     assert.ok(e instanceof EvmQuoteError, `an EvmQuoteError, not ${e}`);
@@ -47,17 +44,55 @@ const refused = async (p: Promise<unknown>, code: string) => {
   });
 };
 
-// The multicall's answer: (bool success, bytes returnData)[], read and written back
+// One quoter read, from its calldata: venue, start, the currencies after it, fees, tick spacings, hooks, amount
 const W = (v: bigint) => v.toString(16).padStart(64, "0");
+type Read = { venue: "v3" | "v4"; from: string; to: string[]; fees: number[]; spacings: number[]; hooks: string[]; amount: bigint };
+function readOf(data: string): Read {
+  const sel = data.slice(0, 8);
+  const h = data.slice(8);
+  const w = (i: number) => BigInt("0x" + h.slice(64 * i, 64 * i + 64));
+  const addr = (i: number) => "0x" + h.slice(64 * i + 24, 64 * i + 64);
+  if (sel === "cdca1753") {
+    const path = h.slice(64 * 3, 64 * 3 + 2 * Number(w(2)));
+    const n = (path.length / 2 - 20) / 23;
+    return {
+      venue: "v3",
+      from: "0x" + path.slice(0, 40),
+      to: Array.from({ length: n }, (_, i) => "0x" + path.slice(46 + 46 * i, 86 + 46 * i)),
+      fees: Array.from({ length: n }, (_, i) => parseInt(path.slice(40 + 46 * i, 46 + 46 * i), 16)),
+      spacings: [],
+      hooks: [],
+      amount: w(1),
+    };
+  }
+  assert.equal(sel, "ca253dc9");
+  const n = Number(w(4));
+  const r: Read = { venue: "v4", from: addr(1), to: [], fees: [], spacings: [], hooks: [], amount: w(3) };
+  for (let i = 0; i < n; i++) {
+    const at = 5 + Number(w(5 + i)) / 32;
+    r.to.push(addr(at));
+    r.fees.push(Number(w(at + 1)));
+    r.spacings.push(Number(w(at + 2)));
+    r.hooks.push(addr(at + 3));
+  }
+  return r;
+}
+/** aggregate3's calldata: each read's calldata, in order. */
+function callsOf(data: string): string[] {
+  const h = data.slice(10);
+  const w = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+  return Array.from({ length: w(32) }, (_, i) => {
+    const e = 64 + w(64 + 32 * i);
+    return h.slice(2 * (e + 128), 2 * (e + 128 + w(e + 96)));
+  });
+}
 type El = { ok: boolean; data: string };
 function decode(r: string): El[] {
   const h = r.slice(2);
   const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
-  const n = at(32);
-  return Array.from({ length: n }, (_, i) => {
+  return Array.from({ length: at(32) }, (_, i) => {
     const e = 64 + at(64 + 32 * i);
-    const dl = at(e + 64);
-    return { ok: at(e) === 1, data: h.slice(2 * (e + 96), 2 * (e + 96 + dl)) };
+    return { ok: at(e) === 1, data: h.slice(2 * (e + 96), 2 * (e + 96 + at(e + 64))) };
   });
 }
 function encode(els: El[]): string {
@@ -70,53 +105,63 @@ function encode(els: El[]): string {
   });
   return "0x" + W(0x20n) + W(BigInt(els.length)) + offs.join("") + body.join("");
 }
-/** Edits read `i` of the multicall (the route at 0, at twice the amount at 1, then each standard pool at the amount and
- *  at twice it: v3 at fees 100, 500, 3000, 10000, then v4 at (100, 1), (500, 10), (3000, 60), (10000, 200)). */
-const read = (i: number, f: (x: El) => El): Edit => (a) => {
-  const els = decode(a[0]!.result!);
-  els[i] = f(els[i]!);
-  a[0]!.result = encode(els);
+/** Edits every multicall read `f` names: f returns the new answer, or undefined to keep it. */
+const plant = (f: (r: Read, el: El) => El | undefined): Edit => (a, calls) => {
+  calls.forEach((c, i) => {
+    const p = c.params[0] as { to?: string; data?: string };
+    if (c.method !== "eth_call" || p.to?.toLowerCase() !== MULTICALL3 || a[i]?.result === undefined) return;
+    const reads = callsOf(p.data!).map(readOf);
+    const els = decode(a[i]!.result!);
+    a[i]!.result = encode(els.map((el, k) => f(reads[k]!, el) ?? el));
+  });
+};
+/** Edits the hookless read (the one call with a state override). */
+const hookless = (f: (a: Answer) => Answer): Edit => (a, calls) => {
+  calls.forEach((c, i) => {
+    if (c.method === "eth_call" && c.params.length === 3) a[i] = f(a[i]!);
+  });
 };
 const outOf = (x: El) => BigInt("0x" + x.data.slice(0, 64));
-const withOut = (x: El, v: bigint): El => ({ ok: true, data: W(v) + x.data.slice(64) });
-const both = (...edits: Edit[]): Edit => (a, c) => edits.forEach((e) => e(a, c));
+const out = (v: bigint): El => ({ ok: true, data: W(v) + W(0n) });
+const REVERT: El = { ok: false, data: "" };
+const same = (r: Read, name: string) => {
+  const route = request(name).route;
+  if (route.venue === "uniswap-v3") return r.venue === "v3" && r.from === route.tokens[0]!.toLowerCase() && r.fees.join() === route.fees.join() && r.to.join() === route.tokens.slice(1).join().toLowerCase();
+  return r.venue === "v4" && r.from === route.currencyIn.toLowerCase() && r.fees.join() === route.hops.map((h) => h.fee).join() && r.hooks.join() === route.hops.map((h) => h.hooks.toLowerCase()).join() && r.to.join() === route.hops.map((h) => h.currency.toLowerCase()).join();
+};
+const isRoute = (name: string, times: bigint) => (r: Read) => same(r, name) && r.amount === times * request(name).amountIn;
 
-test("Q1 the device quotes a route both providers agree on, at one block hash", async () => {
+test("Q1 the device quotes a route both providers agree on, at one block both hold", async () => {
   for (const name of ["base-ok", "robinhood-ok", "base-hook"]) {
     const q = await quote(name);
     const req = request(name);
     assert.equal(F[name]!.outcome.code, "ok");
     assert.ok(q.amountOut > 0n);
     assert.equal(q.minOut, (q.amountOut * BigInt(10000 - req.slippageBps)) / 10000n, `${name}: minOut from Q`);
-    if (q.reference !== null) assert.ok(q.amountOut >= q.reference.amountOut, `${name}: Q at least R`);
-    // every eth_call on both providers is at the block both hold, the lower of their heads
+    assert.ok(q.reference !== null && q.amountOut >= q.reference.amountOut, `${name}: Q at least R`);
+    // the lower head, confirmed by number on the other provider, its time within 30 s of the device's clock
     const heads = F[name]!.exchanges.map((ex) => BigInt((ex[0]!.answers[0]!.result as unknown as { number: string }).number));
     assert.equal(q.block.number, heads[0]! <= heads[1]! ? heads[0] : heads[1]);
+    assert.ok(F[name]!.now - Number(q.block.timestamp) * 1000 <= 30_000);
     for (const ex of F[name]!.exchanges) {
-      for (const c of ex[1]!.calls) assert.deepEqual(c.params[1], { blockHash: q.block.hash, requireCanonical: true });
+      for (const e of ex) for (const c of e.calls) if (c.method === "eth_call") assert.deepEqual(c.params[1], { blockHash: q.block.hash, requireCanonical: true });
     }
   }
 });
 
 test("Q2 two providers that disagree refuse", async () => {
+  const main = isRoute("base-ok", 1n);
   // the route's quote, one more on provider 2
-  await refused(quote("base-ok", undefined, read(0, (x) => withOut(x, outOf(x) + 1n))), "rpc_disagree");
-  // the standard pool that is the reference, lower on provider 2 (it would hide the device's reference)
-  await refused(quote("base-ok", undefined, read(2, (x) => withOut(x, outOf(x) - 1n))), "rpc_disagree");
-  // provider 2 fakes a revert of a standard pool
-  await refused(quote("base-ok", undefined, read(2, () => ({ ok: false, data: "" }))), "rpc_disagree");
+  await refused(quote("base-ok", undefined, plant((r, el) => (main(r) ? out(outOf(el) + 1n) : undefined))), "rpc_disagree");
+  // every standard pool lower on provider 2 (it would hide the device's reference)
+  await refused(quote("base-ok", undefined, plant((r, el) => (!main(r) && el.ok ? out(outOf(el) - 1n) : undefined))), "rpc_disagree");
+  // provider 2 fakes a revert of every standard pool
+  await refused(quote("base-ok", undefined, plant((r) => (!same(r, "base-ok") ? REVERT : undefined))), "rpc_disagree");
   // the hookless read, more on provider 2
-  await refused(
-    quote("base-hook", undefined, (a) => {
-      a[1]!.result = "0x" + W(BigInt(a[1]!.result!.slice(0, 66)) + 1n) + a[1]!.result!.slice(66);
-    }),
-    "rpc_disagree",
-  );
-  // a partial fill on one provider only
-  await refused(
-    quote("base-partial-v4", undefined, read(0, () => ({ ok: false, data: "" }))),
-    "rpc_disagree",
-  );
+  await refused(quote("base-hook", undefined, hookless((a) => ({ ...a, result: "0x" + W(BigInt(a.result!.slice(0, 66)) + 1n) + a.result!.slice(66) }))), "rpc_disagree");
+  // a partial fill on one provider only: a quote on the other, or a plain revert
+  await refused(quote("base-partial-v4", undefined, plant((r) => (isRoute("base-partial-v4", 1n)(r) ? out(1n) : undefined))), "rpc_disagree");
+  await refused(quote("base-partial-v4", undefined, plant((r) => (isRoute("base-partial-v4", 1n)(r) ? REVERT : undefined))), "rpc_disagree");
 });
 
 test("Q3 a partial-fill quote refuses", async () => {
@@ -124,56 +169,48 @@ test("Q3 a partial-fill quote refuses", async () => {
   assert.equal(F["base-partial-v4"]!.outcome.code, "partial_fill");
   await refused(quote("base-partial-v4"), "partial_fill");
   // a quoter that reports a partial fill as complete (QuoterV2 does): twice the amount quotes no more, on both
-  const same: Edit = (a) => {
-    const els = decode(a[0]!.result!);
-    els[1] = withOut(els[1]!, outOf(els[0]!));
-    a[0]!.result = encode(els);
+  const flat: Edit = (a, c) => {
+    let once = 0n;
+    plant((r, el) => (isRoute("base-ok", 1n)(r) ? ((once = outOf(el)), undefined) : undefined))(a, c);
+    plant((r) => (isRoute("base-ok", 2n)(r) ? out(once) : undefined))(a, c);
   };
-  await refused(quote("base-ok", same, same), "partial_fill");
-  const less: Edit = (a) => {
-    const els = decode(a[0]!.result!);
-    els[1] = withOut(els[1]!, outOf(els[0]!) - 1n);
-    a[0]!.result = encode(els);
-  };
-  await refused(quote("robinhood-ok", less, less), "partial_fill");
-  // a standard pool whose output does not grow with its input is no reference, though it quotes more than the route
-  const ranOut = both(
-    read(10, (x) => withOut(x, 10n ** 30n)),
-    read(11, (x) => withOut(x, 10n ** 30n)),
-  );
+  await refused(quote("base-ok", flat, flat), "partial_fill");
+  // a v3 route whose quote at twice the amount reverts
+  const v3twice = plant((r) => (isRoute("base-below", 2n)(r) ? REVERT : undefined));
+  await refused(quote("base-below", v3twice, v3twice), "partial_fill");
+  // a standard pool whose output does not grow with its input is no reference, though it quotes far more
+  const ranOut = plant((r) => (r.venue === "v4" && r.to.length === 1 && r.fees[0] === 100 && r.spacings[0] === 1 && r.from === ZERO && !same(r, "base-ok") ? out(10n ** 30n) : undefined));
   const q = await quote("base-ok", ranOut, ranOut);
-  assert.equal(q.reference?.route.venue, "uniswap-v3", "a standard pool whose output does not grow is not the reference");
+  assert.ok(q.reference !== null && q.reference.amountOut < 10n ** 30n, "a standard pool whose output does not grow is not the reference");
+  // nor a v3 pool whose quote at twice the amount reverts (a v3 pool has no hook to revert it)
+  const v3ranOut = plant((r) => (r.venue === "v3" && r.to.length === 1 && r.fees[0] === 100 ? (r.amount === request("base-ok").amountIn ? out(10n ** 30n) : REVERT) : undefined));
+  const q3 = await quote("base-ok", v3ranOut, v3ranOut);
+  assert.ok(q3.reference !== null && q3.reference.amountOut < 10n ** 30n, "a v3 pool that cannot fill twice the amount is not the reference");
 });
 
-test("Q4 a planted hook's take is shown and bounded by minOut", async () => {
+test("Q4 a launchpad hook's take is shown and bounded by minOut", async () => {
   const q = await quote("base-hook");
   assert.ok(q.hook !== null && q.hook.hookless !== null && q.hook.take !== null);
   assert.equal(q.hook.take, q.hook.hookless - q.amountOut);
-  assert.ok(q.hook.take > 0n, "the recorded hook keeps part of the buy");
+  assert.ok(q.hook.take > 0n, "Clanker's hook keeps part of the buy");
   assert.equal(q.hook.takeBps, Number((q.hook.take * 10000n) / q.hook.hookless));
   // minOut comes from the route the hook runs in, so the hook cannot keep more than shown and the slippage
   assert.equal(q.minOut, (q.amountOut * 9700n) / 10000n);
   assert.ok(q.minOut < q.amountOut && q.amountOut < q.hook.hookless);
-  // the hookless read is the same route with the hook's code replaced by the no-op hook
-  const lone = F["base-hook"]!.exchanges[0]![1]!.calls[1]!;
-  assert.deepEqual(lone.params[2], { "0xcd5198de17bd95f9c5cdaa761e61f0e569ee2444": { code: EVM_NOOP_HOOK_CODE } });
+  // the hookless read is the same route with the pinned hook's code replaced by the no-op hook
+  const lone = F["base-hook"]!.exchanges[0]!.flatMap((e) => e.calls).find((c) => c.params.length === 3)!;
+  assert.deepEqual(lone.params[2], { [CLANKER_HOOK]: { code: EVM_NOOP_HOOK_CODE } });
   // a planted hook that keeps more: the take grows, minOut stays the route's
-  const more: Edit = (a) => {
-    a[1]!.result = "0x" + W(BigInt(a[1]!.result!.slice(0, 66)) * 3n) + a[1]!.result!.slice(66);
-  };
+  const more = hookless((a) => ({ ...a, result: "0x" + W(BigInt(a.result!.slice(0, 66)) * 3n) + a.result!.slice(66) }));
   const p = await quote("base-hook", more, more);
   assert.equal(p.hook!.take, p.hook!.hookless! - p.amountOut);
   assert.ok(p.hook!.takeBps! > 6000);
   assert.equal(p.minOut, q.minOut);
   // a hook that gives more than its pool: no take
-  const less: Edit = (a) => {
-    a[1]!.result = "0x" + W(1n) + a[1]!.result!.slice(66);
-  };
+  const less = hookless((a) => ({ ...a, result: "0x" + W(1n) + a.result!.slice(66) }));
   assert.equal((await quote("base-hook", less, less)).hook!.take, 0n);
   // a hookless read that reverts on both: the take is unknown, the quote stands
-  const gone: Edit = (a) => {
-    a[1] = { jsonrpc: "2.0", id: 1, error: { code: 3, message: "execution reverted" } };
-  };
+  const gone = hookless((a) => ({ jsonrpc: "2.0", id: a.id, error: { code: 3, message: "execution reverted" } }));
   const u = await quote("base-hook", gone, gone);
   assert.deepEqual(u.hook, { hookless: null, take: null, takeBps: null });
   // a route with no hooked hop has no take
@@ -184,13 +221,22 @@ test("Q5 a helper route below the device's standard-pool reference refuses", asy
   assert.equal(F["base-below"]!.outcome.code, "below_reference");
   await assert.rejects(quote("base-below"), (e: unknown) => {
     assert.ok(e instanceof EvmQuoteError && e.code === "below_reference");
-    assert.deepEqual(e.reference?.route, { venue: "uniswap-v3", tokens: ["0x4200000000000000000000000000000000000006", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"], fees: [100] });
+    assert.ok(e.reference !== null && e.reference.amountOut > 0n);
     return true;
   });
   // a standard v4 pool one unit better than the route, on both providers
   const Q = (await quote("base-ok")).amountOut;
-  const better = both(read(10, (x) => withOut(x, Q + 1n)), read(11, (x) => withOut(x, 2n * Q)));
+  const better = plant((r) =>
+    r.venue === "v4" && r.to.length === 1 && r.fees[0] === 10000 && r.from === ZERO && r.hooks[0] === ZERO ? out(r.amount === request("base-ok").amountIn ? Q + 1n : 3n * Q) : undefined,
+  );
   await refused(quote("base-ok", better, better), "below_reference");
+  // and a standard v3 pool
+  const betterV3 = plant((r) => (r.venue === "v3" && r.to.length === 1 && r.fees[0] === 500 ? out(r.amount === request("base-ok").amountIn ? Q + 1n : 3n * Q) : undefined));
+  await assert.rejects(quote("base-ok", betterV3, betterV3), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference", String(e));
+    assert.equal(e.reference?.route.venue, "uniswap-v3");
+    return true;
+  });
 });
 
 test("Q6 the Robinhood native-first rule picks native", async () => {
@@ -199,44 +245,53 @@ test("Q6 the Robinhood native-first rule picks native", async () => {
     await assert.rejects(quote(name), (e: unknown) => {
       assert.ok(e instanceof EvmQuoteError && e.code === "native_first", String(e));
       const r = e.reference?.route;
-      assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === "0x0000000000000000000000000000000000000000", "the device's own route starts native");
+      assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === ZERO, "the device's own route starts native");
       return true;
     });
   }
   // a WETH pool planted as the best on both providers: where a native pool exists the reference is still native
-  const wethBest = both(read(2, () => withOut({ ok: true, data: W(0n) + W(0n) }, 10n ** 12n)), read(3, () => withOut({ ok: true, data: W(0n) + W(0n) }, 2n * 10n ** 12n)));
+  const wethBest = plant((r) => (r.venue === "v3" && r.to.length === 1 ? out(r.amount * 10n ** 9n) : undefined));
   await assert.rejects(quote("robinhood-weth-v3", wethBest, wethBest), (e: unknown) => {
     assert.ok(e instanceof EvmQuoteError && e.code === "native_first", String(e));
     const r = e.reference?.route;
-    assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === "0x0000000000000000000000000000000000000000", JSON.stringify(r));
+    assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === ZERO, JSON.stringify(r));
     return true;
   });
   // the native route quotes
   const q = await quote("robinhood-ok");
-  assert.ok(q.route.venue === "uniswap-v4" && q.route.currencyIn === "0x0000000000000000000000000000000000000000");
-  // with no native pool answering, a WETH route is no longer refused for its start (v4 reads 10 to 17 revert)
-  const noNative: Edit = (a) => {
-    const els = decode(a[0]!.result!);
-    for (let i = 10; i < 18; i++) els[i] = { ok: false, data: "" };
-    a[0]!.result = encode(els);
-  };
-  const w = await quote("robinhood-weth-v3", noNative, noNative);
-  assert.ok(w.route.venue === "uniswap-v3", "the WETH route quotes when no native pool answers");
+  assert.ok(q.route.venue === "uniswap-v4" && q.route.currencyIn === ZERO);
+  // with no native pool answering, a WETH route is not refused for its start
+  const noNative = plant((r) => (r.venue === "v4" && r.from === ZERO ? REVERT : undefined));
+  const w = await quote("robinhood-weth-v3", noNative, noNative).then((x) => x.route.venue, (e: unknown) => (e as EvmQuoteError).code);
+  assert.equal(w, "uniswap-v3");
 });
 
-test("Q7 only a quote the device made builds a buy", async () => {
+test("Q7 only a quote the device made builds a buy, and only within 30 s, and W signs only that build", async () => {
   const q = await quote("base-ok");
-  assert.throws(() => evmPoolBuildQuoted("0x0000000000000000000000000000000000000001", { ...q }), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
-  assert.throws(() => evmPoolBuildQuoted("0x0000000000000000000000000000000000000001", { ...q, minOut: 1n }), (e: unknown) => e instanceof EvmQuoteError);
+  const at = Number(q.block.timestamp) * 1000;
+  const ADAPTER = "0x0000000000000000000000000000000000000001";
+  assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q }, at), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
+  assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q, minOut: 1n }, at), (e: unknown) => e instanceof EvmQuoteError);
   // the device's quote passes to the pinned builder, which refuses Base until pool-evm-deploy pins its adapters
-  assert.throws(() => evmPoolBuildQuoted("0x0000000000000000000000000000000000000001", q), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_deployed");
-  assert.ok(Object.isFrozen(q) && Object.isFrozen(q.route));
+  assert.throws(() => evmPoolBuildQuoted(ADAPTER, q, at), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_deployed");
+  // 31 s after its block, the same quote builds nothing
+  assert.throws(() => evmPoolBuildQuoted(ADAPTER, q, at + 31_000), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
+  assert.ok(Object.isFrozen(q) && Object.isFrozen(q.route) && Object.isFrozen(q.block));
+  // W signs no buy built another way: here the pinned builder W's own build would call, on a testnet it pins
+  const venues = evmPoolVenues();
+  const other = pinnedBuild(venues, "base-sepolia", venues["base-sepolia"].adapters!.v4!, q.route, 1n, q.token);
+  const proof = { nullifier: 1n, context: 2n, value: 3n };
+  assert.throws(() => evmPoolSignBuy(new Uint8Array(32).fill(1), "base-sepolia", venues["base-sepolia"].pool!, other, proof), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_built");
+  // the kit exports no builder that takes its caller's minOut
+  assert.equal("evmPoolBuild" in kit, false);
+  assert.equal("evmPoolBuyQuoteWith" in kit, false);
 });
 
 test("Q8 a bad request refuses before any read", async () => {
   const none: EvmRpc = async () => assert.fail("no read");
   const other: EvmRpc = async () => assert.fail("no read");
   const r = request("base-ok");
+  const now = F["base-ok"]!.now;
   for (const [bad, code] of [
     [{ ...r, amountIn: 0n }, "bad_request"],
     [{ ...r, amountIn: 1n << 127n }, "bad_request"],
@@ -245,60 +300,105 @@ test("Q8 a bad request refuses before any read", async () => {
     [{ ...r, slippageBps: 1.5 }, "bad_request"],
     [{ ...r, token: "0x4200000000000000000000000000000000000006" }, "token_mismatch"],
   ] as const) {
-    await refused(evmPoolBuyQuote(bad as EvmPoolBuyQuoteRequest, [none, other]), code);
+    await refused(evmPoolBuyQuoteWith(bad as EvmPoolBuyQuoteRequest, [none, other], now), code);
   }
-  await refused(evmPoolBuyQuote(r, [none, none]), "bad_request");
-  await refused(evmPoolBuyQuote({ ...r, chain: "base-sepolia" }, [none, other]), "no_quoter");
+  await refused(evmPoolBuyQuoteWith(r, [none, none], now), "bad_request");
+  await refused(evmPoolBuyQuoteWith({ ...r, chain: "base-sepolia" }, [none, other], now), "no_quoter");
+  await refused(kit.evmPoolBuyQuote({ ...r, chain: "base-sepolia" }, { fetch: async () => assert.fail("no read") }), "no_quoter");
+  // two providers on one host, or not https, are refused
+  assert.throws(() => evmProviders(["https://a.example.org/x", "https://A.example.org/y"], fetch), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
+  assert.throws(() => evmProviders(["http://a.example.org", "https://b.example.org"], fetch), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
 });
 
 test("Q9 a provider error or a malformed answer refuses", async () => {
-  const limited: Edit = (a) => {
-    a[0] = { jsonrpc: "2.0", id: 0, error: { code: -32007, message: "25/second request limit reached" } };
+  const limited: Edit = (a, c) => {
+    c.forEach((x, i) => {
+      if (x.method === "eth_call") a[i] = { jsonrpc: "2.0", id: i, error: { code: -32007, message: "25/second request limit reached" } };
+    });
   };
   await refused(quote("base-ok", undefined, limited), "rpc_error");
-  const short: Edit = (a) => {
-    a[0]!.result = a[0]!.result!.slice(0, 2 + 64 * 3);
+  // a multicall answer cut short, one with an offset past its end, and a batch with one answer missing
+  const short: Edit = (a, c) => {
+    c.forEach((x, i) => {
+      if (x.method === "eth_call" && a[i]!.result) a[i]!.result = a[i]!.result!.slice(0, 2 + 64 * 3);
+    });
   };
   await refused(quote("base-ok", short, undefined), "rpc_error");
-  const outside: Edit = (a) => {
-    a[0]!.result = "0x" + W(0x20n) + W(1n) + W(1n << 200n);
+  // the first result's offset past the answer's end
+  const outside: Edit = (a, c) => {
+    c.forEach((x, i) => {
+      const p = x.params[0] as { to?: string };
+      if (x.method === "eth_call" && p.to?.toLowerCase() === MULTICALL3 && a[i]!.result) a[i]!.result = a[i]!.result!.slice(0, 2 + 128) + W(0x10000n) + a[i]!.result!.slice(2 + 192);
+    });
   };
   await refused(quote("base-ok", outside, outside), "rpc_error");
+  // the first result's length past the answer's end
+  const longer: Edit = (a, c) => {
+    c.forEach((x, i) => {
+      const p = x.params[0] as { to?: string };
+      if (x.method !== "eth_call" || p.to?.toLowerCase() !== MULTICALL3 || !a[i]!.result) return;
+      const r = a[i]!.result!;
+      const e = 2 + 2 * (64 + Number(BigInt("0x" + r.slice(2 + 128, 2 + 192))));
+      a[i]!.result = r.slice(0, e + 128) + W(0x10000n) + r.slice(e + 192);
+    });
+  };
+  await refused(quote("base-ok", longer, longer), "rpc_error");
+  const fewer: Edit = (a, c) => {
+    if (c.length > 1) a.pop();
+  };
+  await refused(quote("base-ok", fewer, undefined), "rpc_error");
+  // a full batch answered with one answer too many (a copy of its first): read on, it would shift every later answer
+  const more: Edit = (a, c) => {
+    if (c.length === 3) a.push(structuredClone(a[0]!));
+  };
+  await refused(quote("base-ok", more, undefined), "rpc_error");
   const down: EvmRpc = async () => {
     throw new Error("offline");
   };
-  await refused(evmPoolBuyQuote(request("base-ok"), [replay(F["base-ok"]!.exchanges[0]), down]), "rpc_error");
+  await refused(evmPoolBuyQuoteWith(request("base-ok"), [replay(F["base-ok"]!.exchanges[0]), down], F["base-ok"]!.now), "rpc_error");
 });
 
 test("Q10 a quote too small for a minimum above 0 refuses", async () => {
-  // the hooked token has no standard pool, so only the route's own quote is read: 1 unit, which 3% slippage floors to 0
-  const one = both(read(0, (x) => withOut(x, 1n)), read(1, (x) => withOut(x, 2n)));
+  // the route and its pinned launchpad pool are the same read: 1 unit, which 3% slippage floors to 0
+  const one = plant((r) => (same(r, "base-hook") ? out(r.amount === request("base-hook").amountIn ? 1n : 2n) : undefined));
   await refused(quote("base-hook", one, one), "no_quote");
 });
 
-test("Q11 a two-hop route through the listed middle is held to every standard two-hop route and the direct pools", async () => {
-  // recorded: native to USDC to cbBTC through v4 quotes below the v3 WETH/cbBTC 0.05% pool
+test("Q11 a v4 two-hop route through the listed middle is held to every standard route", async () => {
   assert.equal(F["base-two-hop"]!.outcome.code, "below_reference");
   await refused(quote("base-two-hop"), "below_reference");
-  // a standard two-hop route (the first of the 16: v4 (100, 1) then (100, 1)) planted as the best, on both providers
-  const twoHop = both(read(18, () => withOut({ ok: true, data: W(0n) + W(0n) }, 10n ** 12n)), read(19, () => withOut({ ok: true, data: W(0n) + W(0n) }, 2n * 10n ** 12n)));
-  await assert.rejects(quote("base-two-hop", twoHop, twoHop), (e: unknown) => {
+  // a v3 two-hop through USDC planted as the best: the v4 route is held to it too
+  const v3best = plant((r) => (r.venue === "v3" && r.to.length === 2 && r.fees.join() === "100,100" ? out(r.amount) : undefined));
+  await assert.rejects(quote("base-two-hop", v3best, v3best), (e: unknown) => {
     assert.ok(e instanceof EvmQuoteError && e.code === "below_reference");
     const r = e.reference?.route;
-    assert.ok(r?.venue === "uniswap-v4" && r.hops.length === 2 && r.hops[0]!.fee === 100 && r.hops[1]!.fee === 100, JSON.stringify(r));
+    assert.ok(r?.venue === "uniswap-v3" && r.tokens.length === 3 && r.fees.join() === "100,100", JSON.stringify(r));
     return true;
   });
 });
 
-test("Q12 a v3 two-hop route through the listed middle is held to every standard v3 two-hop route", async () => {
-  // recorded: WETH to USDC to cbBTC through v3 0.05% then 0.05%, held to 8 direct pools and 16 v3 two-hop routes
+test("Q12 a v3 two-hop route through the listed middle is held to every standard route", async () => {
   assert.equal(F["base-two-hop-v3"]!.outcome.code, "below_reference");
   await refused(quote("base-two-hop-v3"), "below_reference");
-  const twoHop = both(read(18, () => withOut({ ok: true, data: W(0n) + W(0n) }, 10n ** 12n)), read(19, () => withOut({ ok: true, data: W(0n) + W(0n) }, 2n * 10n ** 12n)));
-  await assert.rejects(quote("base-two-hop-v3", twoHop, twoHop), (e: unknown) => {
+  const v4best = plant((r) => (r.venue === "v4" && r.to.length === 2 && r.fees.join() === "100,100" ? out(r.amount) : undefined));
+  await assert.rejects(quote("base-two-hop-v3", v4best, v4best), (e: unknown) => {
     assert.ok(e instanceof EvmQuoteError && e.code === "below_reference");
     const r = e.reference?.route;
-    assert.ok(r?.venue === "uniswap-v3" && r.tokens.length === 3 && r.fees[0] === 100 && r.fees[1] === 100, JSON.stringify(r));
+    assert.ok(r?.venue === "uniswap-v4" && r.hops.length === 2 && r.hops[0]!.fee === 100, JSON.stringify(r));
     return true;
   });
+});
+
+test("Q13 a token whose only pool sits behind a hook the device has not pinned refuses", async () => {
+  assert.equal(F["base-unknown-hook"]!.outcome.code, "no_reference");
+  await refused(quote("base-unknown-hook"), "no_reference");
+  // a pinned launchpad pool is a reference: Clanker's pool for the Clanker token answers, so its route quotes
+  assert.ok((await quote("base-hook")).reference !== null);
+});
+
+test("Q14 a block more than 30 s behind the device's clock refuses", async () => {
+  const q = await quote("base-ok");
+  await refused(quote("base-ok", undefined, undefined, Number(q.block.timestamp) * 1000 + 30_001), "stale_quote");
+  // and a device clock that is no number
+  await refused(quote("base-ok", undefined, undefined, Number.NaN), "bad_request");
 });

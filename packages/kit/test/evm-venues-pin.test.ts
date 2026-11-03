@@ -1,6 +1,6 @@
 // Card evm-venues-pin: the kit's venue list pins each testnet chain's deployed pool, v3 and v4 adapters and sell
-// delegate, equal to pool-evm-deploy's records (scripts/live-checks/pool-evm-deploy.<chain>.json), and the kit's index
-// builds and signs only for them: another pool or adapter is refused (not_pinned), a venue with no adapter
+// delegate, equal to pool-evm-deploy's records (scripts/live-checks/pool-evm-deploy.<chain>.json), and the pinned
+// builder and signer the kit's index runs build and sign only for them: another pool or adapter is refused (not_pinned), a venue with no adapter
 // (Robinhood testnet's v3, M365) is refused (not_deployed), and W's 7702 authorization names only the pinned delegate.
 // scripts/live-checks/evm-venues-pin.mjs reads each pin's code on the chain's two RPCs.
 import { mock, test } from "node:test";
@@ -10,6 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
 import { EvmPoolBuyError, EvmPoolSellError, evmPoolVenues, type EvmPoolChain, type EvmRoute } from "../src/index.ts";
+import { pinnedBuild, pinnedSignBuy } from "../src/trade/evm/buy-unpinned.ts";
 
 const code = (f: () => unknown): string => {
   try {
@@ -73,21 +74,23 @@ test("a buy builds only through the chain's pinned adapter for its venue, and W 
     const v = evmPoolVenues()[c];
     const r = record(chain);
     // v4: the pinned adapter only
-    assert.equal(code(() => kit.evmPoolBuild(c, OTHER, v4(), 1n, X)), "not_pinned", chain);
-    assert.equal(code(() => kit.evmPoolBuild(c, r.PrivacyPoolSimple!.address, v4(), 1n, X)), "not_pinned", chain);
-    const built = kit.evmPoolBuild(c, r.UniswapV4Adapter!.address, v4(), 1n, X);
+    assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, OTHER, v4(), 1n, X)), "not_pinned", chain);
+    assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, r.PrivacyPoolSimple!.address, v4(), 1n, X)), "not_pinned", chain);
+    const built = pinnedBuild(evmPoolVenues(), c, r.UniswapV4Adapter!.address, v4(), 1n, X);
     // the pool: the pinned one only
-    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, c, OTHER, built, PROOF)), "not_pinned", chain);
-    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, c, r.UniswapV4Adapter!.address, built, PROOF)), "not_pinned", chain);
-    assert.equal(kit.evmPoolSignBuy(W_KEY, c, r.PrivacyPoolSimple!.address.toUpperCase().replace("0X", "0x"), built, PROOF).length, 65, chain);
+    assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, c, OTHER, built, PROOF)), "not_pinned", chain);
+    assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, c, r.UniswapV4Adapter!.address, built, PROOF)), "not_pinned", chain);
+    assert.equal(pinnedSignBuy(evmPoolVenues(), W_KEY, c, r.PrivacyPoolSimple!.address.toUpperCase().replace("0X", "0x"), built, PROOF).length, 65, chain);
+    // the kit's signer takes only a buy evmPoolBuildQuoted returned, from a device quote (the testnets have no quoter)
+    assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, c, r.PrivacyPoolSimple!.address, built, PROOF)), "not_built", chain);
     // v3: Base Sepolia's pinned adapter only; Robinhood testnet has none
     if (r.UniswapV3Adapter) {
-      assert.equal(code(() => kit.evmPoolBuild(c, OTHER, v3(v.weth), 1n, X)), "not_pinned", chain);
-      assert.equal(code(() => kit.evmPoolBuild(c, r.UniswapV4Adapter!.address, v3(v.weth), 1n, X)), "not_pinned", chain);
-      const b3 = kit.evmPoolBuild(c, r.UniswapV3Adapter.address, v3(v.weth), 1n, X);
-      assert.equal(kit.evmPoolSignBuy(W_KEY, c, r.PrivacyPoolSimple!.address, b3, PROOF).length, 65, chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, OTHER, v3(v.weth), 1n, X)), "not_pinned", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, r.UniswapV4Adapter!.address, v3(v.weth), 1n, X)), "not_pinned", chain);
+      const b3 = pinnedBuild(evmPoolVenues(), c, r.UniswapV3Adapter.address, v3(v.weth), 1n, X);
+      assert.equal(pinnedSignBuy(evmPoolVenues(), W_KEY, c, r.PrivacyPoolSimple!.address, b3, PROOF).length, 65, chain);
     } else {
-      assert.equal(code(() => kit.evmPoolBuild(c, OTHER, v3(v.weth), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), c, OTHER, v3(v.weth), 1n, X)), "not_deployed", chain);
     }
   }
 });
