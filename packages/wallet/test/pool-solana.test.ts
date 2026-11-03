@@ -1506,9 +1506,10 @@ test("fold 7 (G4): b answers read 1 at slot 705 without K, a answers read 2 at t
   }
 });
 
-// fold 10 (the review of f05379b, probe d): a spent mark is withdrawnValue then the release's number (12 bytes), and the
-// union across reads compares both. RPC a, a slot ahead, gives a new release's spent mark at slot 702 with number 9; RPC b
-// at 701 lacks it; from the next read both give number 0. Two reads of one mark differ: refused on every device.
+// fold 10 (the review of f05379b, probe d): a spent mark is withdrawnValue then the release's number, then the tag (13
+// bytes), and the union across reads compares both. RPC a, a slot ahead, gives a new release's spent mark at slot 702
+// with number 9; RPC b at 701 lacks it; from the next read both give number 0. Two reads of one mark differ: refused on
+// every device.
 test("fold 10 (number): a spent mark whose release number changes between two reads is refused on every device", async () => {
   const c0 = (slot: number): Chain => depositsChain(OURS, slot, 0);
   const r = (slot: number, number = 0): Chain => {

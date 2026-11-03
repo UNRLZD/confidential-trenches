@@ -65,6 +65,16 @@ importers:
         specifier: 8.3.5
         version: 8.3.5(@types/node@24.10.1)
 
+  packages/exit:
+    dependencies:
+      '@blindfill/kit':
+        specifier: workspace:*
+        version: link:../kit
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
+
   packages/kit:
     dependencies:
       '@noble/curves':
