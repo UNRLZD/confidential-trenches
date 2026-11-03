@@ -222,6 +222,12 @@ export interface SignpageState {
   signin_failed?: { way: SigninWay; reason: string };
   /** USDC in the vault. */
   vault_balance: string;
+  /**
+   * The private balance held in each chain's pool, read from the device's own notes (never from a server): one entry
+   * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC. `ready` is how much of it is ready to buy (chunks with a proof ready); absent while no proof
+   * queue runs, never "0" in its place. Absent when the page is signed out or the notes could not be read.
+   */
+  pools?: { chain: Chain; balance: string; ready?: string }[];
   wallets: { chain: Chain; address: string; role: "fresh" | "hop"; size: string; state: WalletState }[];
   positions: { chain: Chain; token: string; amount: string; cost: string; wallets: string[] }[];
   orders: {

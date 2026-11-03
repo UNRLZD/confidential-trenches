@@ -4,6 +4,9 @@
 // - a landing names U (landed() calls the namer, top: !framed), and a quote at boot waits for that naming (named());
 // - a notes change (another tab: money reached the index) names again, so the next quote names the next index;
 // - another tab's sign out and sign-in: a quote asked as the resync starts waits for the resync's naming (resyncing).
+// - state.pools (card balances-per-chain): the shell's state carries the balance of this page's own notes per chain of
+//   the page's pool table, which a second hook gives one pool of this test's scope (mainnet has none yet); a note that
+//   lands is counted in the next state. The framed side is test/main-framed-pools.test.ts.
 // The release names no vault on the page's network yet (vaultScope is null on mainnet), so a load hook makes checks.ts's
 // vaultScope answer this test's scope; nothing else of main.ts or its imports is changed. The helper is a fetch that
 // records each request and answers 503, so a quote that reached it answers "down" and carries U in its body.
@@ -16,14 +19,21 @@ import { test } from "node:test";
 import { depositId, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
+import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SOL_USDC } from "./oneclick-mock.ts";
 
 const SCOPE = 4242n;
 const ANCHOR = "export function vaultScope(network: NearNetwork): bigint | null {";
+const TABLE = "export const PAGE_POOLS: readonly BalancePool[] = Object.freeze([]);";
 registerHooks({
   load(url, context, next) {
     const r = next(url, context);
+    if (url.endsWith("/signpage/src/pools.ts")) {
+      const src = String(r.source);
+      if (!src.includes(TABLE)) throw new Error("pools.ts: PAGE_POOLS's line moved; update this test's hook");
+      return { ...r, source: src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: ${SCOPE}n, one: 1000000n }]);`) };
+    }
     if (!url.endsWith("/src/withdraw/checks.ts")) return r;
     const src = String(r.source);
     if (!src.includes(ANCHOR)) throw new Error("checks.ts: vaultScope's line moved; update this test's hook");
@@ -129,6 +139,20 @@ async function quote(): Promise<{ code: string; body: string | undefined }> {
   }
   throw new Error("no answer to deposit.quote");
 }
+/** Asks `state` as the APP_HOST frame does, and waits for its result. */
+async function askState(): Promise<{ signed_in: boolean; pools?: unknown }> {
+  const id = crypto.randomUUID();
+  const e = new Event("message");
+  Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "state" } } });
+  win.dispatchEvent(e);
+  for (let t = 0; t < 500; t++) {
+    const a = posted.find((m) => m.id === id) as { ok?: boolean; result?: { signed_in: boolean; pools?: unknown } } | undefined;
+    if (a?.ok) return a.result!;
+    if (a) throw new Error("state refused");
+    await new Promise((ok) => setTimeout(ok, 10));
+  }
+  throw new Error("no answer to state");
+}
 const recordOf = async (w: WalletStore) => (await w.get("meta", `deposit/${SCOPE}`)) as { index: number; id: string } | undefined;
 const plannedOf = async (w: WalletStore) => {
   const ns = await openNoteStore(w);
@@ -178,6 +202,16 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   assert.equal(second.code, "down");
   assert.ok(second.body?.includes(U(rec2.index)), "the second quote did not carry the next index's U");
   assert.ok(!second.body?.includes(U(rec1!.index)), "the second quote carried the funded index's U");
+
+  // state.pools: an INCOMING note has no value yet; once it lands (UNSPENT, its leaf) the next state counts it
+  const s0 = await askState();
+  assert.equal(s0.signed_in, true);
+  assert.deepEqual(s0.pools, [{ chain: "near", balance: "0" }], "the shell's state carries no pools of the page's notes");
+  const n2 = await openNoteStore(other);
+  const p1 = planned1[0]!;
+  await n2.move(p1.id, "INCOMING", "UNSPENT", { leaf: { value: 25_000_000n, label: 77n, commitment: noteCommitment(25_000_000n, 77n, p1.precommitment), leafIndex: 0n } });
+  n2.close();
+  assert.deepEqual((await askState()).pools, [{ chain: "near", balance: "25" }]);
 
   // 3. another tab signs out and signs in again: the store starts over (no record), the page resyncs and names; a quote
   // asked as the resync starts waits for that naming

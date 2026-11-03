@@ -145,6 +145,11 @@ const op = (kind: SignpageSchema, stages: readonly string[], extra: Record<strin
   obj({ id: str, kind, stage: oneOf(stages), txs }, extra);
 const errorCode: SignpageSchema = (v) => typeof v === "string" && /^[a-z0-9_.-]{1,64}$/.test(v);
 
+/** The private balance per chain's pool: each entry exact, one entry per chain (a chain twice is refused). */
+const poolList = arr(obj({ chain, balance: dec }, { ready: dec }));
+const pools: SignpageSchema = (v) =>
+  poolList(v) && new Set((v as { chain: unknown }[]).map((p) => p.chain)).size === (v as unknown[]).length;
+
 const state = obj(
   {
     release: str,
@@ -173,7 +178,7 @@ const state = obj(
       }),
     ),
   },
-  { way, signin_failed: obj({ way, reason: str }) },
+  { way, signin_failed: obj({ way, reason: str }), pools },
 );
 
 const open = obj({ pending: lit(true) });
