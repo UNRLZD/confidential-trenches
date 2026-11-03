@@ -7,8 +7,10 @@
 // DISCOVER_BLOCKS blocks, found on chain and kept (POOL_KEEP_MS): the token's Transfer logs over those blocks (two
 // providers that agree) name the addresses that held and moved it; each is checked on chain, never taken on a vendor's
 // word. A v2, v3 or Slipstream pool counts when its factory() is one of the venues below and its token0() and token1()
-// are the token and USDC or WETH; a v4 pool counts when the PositionManager's poolKeys() gives a key that hashes to
-// the pool id (keccak256 of the key, the id the PoolManager logs) and pairs the token with USDC, WETH or ETH. A token with
+// are the token and USDC or WETH; a v4 pool counts when its key hashes to the pool id (keccak256 of the key, the id the
+// PoolManager logs) and pairs the token with USDC, WETH or ETH: the key is the PositionManager's poolKeys() when it knows
+// the pool, and for a pool it never made (Doppler) v4Key works the key out from the swap's fee and the addresses in its
+// transaction, trusted only when the hash equals the id. A token with
 // no such pool (Zora's creator-coin pairs, a cbBTC or VIRTUAL pair, a venue not listed here: slice 2 of the card) answers
 // 404, never a guess.
 //
