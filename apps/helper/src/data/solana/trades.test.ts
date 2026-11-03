@@ -97,7 +97,7 @@ test("a trade the stream sends reaches the tape (with its trader) and the 1s can
   assert.equal((await s.t.trades("So11111111111111111111111111111111111111112", 50)).status, 404);
 });
 
-test("a dropped stream: the gap is walked from signatures before the tape moves again, in chain order", async () => {
+test("a dropped stream: the stream's trades stay on the tape at once, the gap is walked from signatures and joins in chain order", async () => {
   const asked: Record<string, unknown>[] = [];
   const chain: Chain = {
     sigs: (p) => (asked.push(p), p.until === "SIG1" ? [{ signature: "SIG3", slot: 103, err: null }, { signature: "SIG2", slot: 102, err: null }] : []),
@@ -111,10 +111,10 @@ test("a dropped stream: the gap is walked from signatures before the tape moves 
   s.on().note(MINT, s.note("SIG1", 101));
   await settle();
   s.on().down();
-  // while the stream is down and again up but not yet refilled, a new trade waits
+  // while the stream is down and again up but not yet refilled, a new trade is on the tape at once
   s.on().note(MINT, s.note("SIG4", 104));
   await settle();
-  assert.deepEqual((await tape(s.t)).trades.map((r) => r.tx), ["SIG1"]);
+  assert.deepEqual((await tape(s.t)).trades.map((r) => r.tx), ["SIG4", "SIG1"]);
   s.on().up();
   await settle();
   assert.deepEqual(asked.at(-1), { limit: 100, commitment: "confirmed", until: "SIG1" });
@@ -254,4 +254,54 @@ test("candles of a mint the lists do not hold are the history source's own answe
   assert.deepEqual(asked, [[OTHER, "1h", null, 24]]);
   // its trade tape is still ours only: not listed, not read
   assert.equal((await t.trades(OTHER, 50)).status, 404);
+});
+
+/** setup() with signature reads that hang while `hold()` is in force, until `release()` (a slow or limited public RPC). */
+function slowSigs() {
+  let release = () => undefined as void;
+  let gate: Promise<void> | null = null;
+  let on: SourceEvents | null = null;
+  let walks = 0;
+  const fast = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const t = createSolanaTrades({
+    fetch: async (url, init) => {
+      if (JSON.parse(String(init.body)).method === "getSignaturesForAddress") {
+        walks++;
+        if (gate !== null) await gate;
+      }
+      return fast(url, init);
+    },
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+  });
+  const note = (sig: string, slot: number): Note => ({ sig, slot, err: false, logs: BUY.result.meta.logMessages });
+  const hold = () => (gate = new Promise<void>((r) => (release = r)));
+  return { t, on: () => on!, note, hold, walks: () => walks, release: () => ((gate = null), release()) };
+}
+
+test("the tape never waits on the RPC: a stream trade is on it while a first walk's signature read hangs", async () => {
+  const s = slowSigs();
+  s.hold();
+  assert.equal((await s.t.trades(MINT, 50)).status, 200); // served once the stream holds the token (COLD_WAIT_MS)
+  s.on().note(MINT, s.note(BUY.signature, 465_000_000));
+  await settle();
+  assert.deepEqual((await tape(s.t)).trades.map((r) => r.tx), [BUY.signature]);
+  s.release();
+});
+
+test("the tape never waits on the RPC: after a dropped stream, a stream trade is on it while the gap's walk hangs", async () => {
+  const s = slowSigs();
+  assert.equal((await s.t.trades(MINT, 50)).status, 200); // the first walk answers at once
+  s.hold();
+  s.on().down();
+  s.on().up(); // the gap's walk starts, and hangs
+  await settle();
+  assert.equal(s.walks(), 2);
+  s.on().note(MINT, s.note(BUY.signature, 465_000_000));
+  await settle();
+  assert.deepEqual((await tape(s.t)).trades.map((r) => r.tx), [BUY.signature]);
+  s.release();
 });
