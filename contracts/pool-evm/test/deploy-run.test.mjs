@@ -1,9 +1,11 @@
 // The EVM pool's deploy run (script/deploy.mjs main()) against a mock op-geth chain: Base Sepolia's id and fee
-// terms, geth's txpool rules (a resend is "already known", a replacement must pay 10% more on both fee terms, the
-// balance check counts the account's pending costs) and op-geth's L1 fee added to that check and to the fee. The run's
+// terms, geth's txpool rules (a resend of what is pending is "already known"; a replacement must pay strictly more
+// and at least 10% more on both fee terms, and a resend of a replaced hash is "underpriced"; the balance check counts
+// the account's pending costs) and op-geth's L1 fee added to that check and to the fee. The run's
 // clock is virtual. Each case is a way a real run could leave money on the run key or send it nowhere:
 //   a send answer lost, a deploy stuck below the base fee, an L1 fee rise while the run waits for funding, a bad
-//   --return, a second signal during the sweep, and a funding transfer that lands after a stop.
+//   --return, a second signal during the sweep, a funding transfer that lands after a stop, a chain that includes
+//   nothing for 40 min, and a stuck deploy on a chain whose suggested tip is 0 (as Robinhood's is).
 //   node --test contracts/pool-evm/test/deploy-run.test.mjs     (after a forge build: it reads out/)
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -52,7 +54,7 @@ const parse = (raw) => {
 
 /** A mock chain and a virtual clock. `on` hooks: lose(t) -> true loses that send's answer; afterMine(chain). */
 function chain(on = {}) {
-  const c = { base: 5_000_000n, tip: 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
+  const c = { base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
   const g = (m, k) => m.get(k.toLowerCase()) ?? 0n;
   const l1Of = (len) => c.l1Scale * (len > 100n ? len : 100n);
   const costOf = (t) => t.gas * t.maxFee + t.value + l1Of(t.len);
@@ -102,12 +104,13 @@ function chain(on = {}) {
       case "eth_sendRawTransaction": {
         const t = parse(params[0]);
         const hash = keccak(params[0]);
-        if (c.seen.has(hash)) return err("already known");
+        if (c.pool.some((p) => p.hash === hash)) return err("already known");
         if (t.nonce < g(c.nonce, c.deployer)) return err("nonce too low");
         const at = c.pool.findIndex((p) => p.t.nonce === t.nonce);
         if (at >= 0) {
+          // geth: strictly greater on both terms, and at least the 10% price bump (a replaced hash sent again lands here)
           const o = c.pool[at].t;
-          if (t.tip * 10n < o.tip * 11n || t.maxFee * 10n < o.maxFee * 11n) return err("replacement transaction underpriced");
+          if (t.tip <= o.tip || t.maxFee <= o.maxFee || t.tip * 10n < o.tip * 11n || t.maxFee * 10n < o.maxFee * 11n) return err("replacement transaction underpriced");
         }
         const others = c.pool.filter((p, i) => i !== at).reduce((s, p) => s + costOf(p.t), 0n);
         if (g(c.bal, c.deployer) < others + costOf(t)) return err("insufficient funds for gas * price + value");
@@ -245,4 +248,33 @@ test("a funding transfer that lands 20 s after a stop during the funding wait is
   assert.match(String(r.error?.message), /stopped by SIGTERM/, why(c));
   assert.ok(c.balanceOf(E) > (c.fundWei * 9n) / 10n, `the stand-in got back ${c.balanceOf(E)} of ${c.fundWei}${why(c)}`);
   settled(c, r);
+});
+
+test("a chain that includes nothing for 40 min from the second deploy on: cancels and the sweep-anyway each price above what is pending, and the sweep lands", { timeout: 120_000 }, async (t) => {
+  const c = chain();
+  let haltFrom = null;
+  const mine = c.mine;
+  c.mine = () => {
+    if (haltFrom !== null && c.clock < haltFrom + 40 * 60_000) return;
+    mine();
+  };
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method } = JSON.parse(init.body);
+    if (method === "eth_sendRawTransaction" && haltFrom === null && c.nonce.get(c.deployer) === 1n) haltFrom = c.clock;
+    return fetch0(u, init);
+  };
+  const r = await run(t, c);
+  assert.match(String(r.error?.message), /no receipt in 180 s|the deploy stopped/, why(c));
+  settled(c, r);
+  assert.ok(c.balanceOf(E) > (c.fundWei * 8n) / 10n, `the stand-in got back ${c.balanceOf(E)} of ${c.fundWei}${why(c)}`);
+});
+
+test("a stuck deploy on a chain whose suggested tip is 0 is cancelled with a tip of at least 1 (geth needs strictly more)", OPTS, async (t) => {
+  const c = chain({ tip: 0n, afterMine: (ch, tx) => tx.nonce === 0n && (ch.base *= 10n) });
+  const r = await run(t, c);
+  assert.match(String(r.error?.message), /no receipt in 180 s|the deploy stopped/, why(c));
+  settled(c, r);
+  assert.ok(r.record.txs.some((x) => x.step.startsWith("cancel (replaces deploy PrivacyPoolSimple")), why(c));
+  assert.ok(c.balanceOf(E) > 0n);
 });

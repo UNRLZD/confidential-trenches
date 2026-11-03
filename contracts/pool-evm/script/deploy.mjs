@@ -31,7 +31,8 @@
 //     short; a stop during the funding wait watches the balance for WAITS.lateFunding first, so a transfer in flight
 //     is swept too. The settle: until the key's latest nonce covers every nonce it signed, a pending transaction is
 //     sent again, and one pending longer than WAITS.stuck is replaced at its nonce by a cancel (0 to the key itself,
-//     both fee terms 12.5% higher). Then the sweep: the key's balance, less the transfer's fee bound (the L1 fee bound
+//     both fee terms 12.5% and at least 1 wei above the highest the key sent at that nonce; a refused send never
+//     counts). A sweep at a nonce with something pending (after a settle that ran out) is priced the same way. Then the sweep: the key's balance, less the transfer's fee bound (the L1 fee bound
 //     read on each pass, doubled), goes to --return, again while what is left is more than two such bounds; a failed
 //     pass is retried with backoff over WAITS.sweep. Every hash is printed.
 //  7. Writes the deployment record (scripts/live-checks/pool-evm-deploy.<chain>.json, or --out) with every
@@ -132,8 +133,13 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 // before a sweep waits for the run key's transactions to land; the sweep's whole retry window; the balance watch after
 // a stop during the funding wait (a funding transfer still in flight lands and is swept too).
 export const WAITS = Object.freeze({ receipt: 180_000, stuck: 90_000, settle: 900_000, sweep: 1_800_000, lateFunding: 60_000, poll: 5_000 });
-// a replacement pays at least 10% more on both fee terms (geth's txpool price bump); 12.5% clears it with rounding
-const bump = (x) => (x * 1125n + 999n) / 1000n;
+// a replacement pays at least 10% more on both fee terms, and strictly more (geth's txpool price bump and its
+// strictly-greater check); 12.5%, rounded up and at least +1 (a tip of 0, as Robinhood suggests, must become 1)
+const bump = (x) => {
+  const b = (x * 1125n + 999n) / 1000n;
+  return b > x ? b : x + 1n;
+};
+const maxOf = (...xs) => xs.reduce((a, b) => (b > a ? b : a));
 
 /** --return: a 20-byte address, EIP-55 when mixed case, not the zero address */
 export function returnAddress(s) {
@@ -232,10 +238,22 @@ export async function main(args, io = {}) {
     try {
       await call("eth_sendRawTransaction", [s.raw]);
     } catch (e) {
-      // a resend of a send whose answer was lost (or one already mined) is the node saying it has it
-      if (!/already known|known transaction|nonce too low|already imported/i.test(e.message)) throw e;
+      // a resend of a send whose answer was lost (or one already mined) is the node saying it has it; any other answer
+      // is a refusal: that transaction is dropped, so it never becomes the fee basis of a replacement
+      if (!/already known|known transaction|nonce too low|already imported/i.test(e.message)) {
+        signed.splice(signed.indexOf(s), 1);
+        throw e;
+      }
     }
     return s;
+  };
+  // The fees for a transaction at nonce n: the chain's now, and when the key has sent one at n already, a bump over
+  // the highest of each term it sent there (a replacement geth takes)
+  const priceAt = (n, f) => {
+    const at = signed.filter((s) => s.nonce === n);
+    if (!at.length) return f;
+    const tip = maxOf(bump(maxOf(...at.map((s) => s.tip))), f.tip);
+    return { tip, maxFee: maxOf(bump(maxOf(...at.map((s) => s.maxFee))), f.maxFee, tip) };
   };
   const receiptOf = async (s) => (s.receipt ??= await call("eth_getTransactionReceipt", [s.hash]));
   const waitReceipt = async (s, ms) => {
@@ -269,10 +287,8 @@ export async function main(args, io = {}) {
           await call("eth_sendRawTransaction", [last.raw]).catch(() => {});
           continue;
         }
-        const f = await fees();
-        const tipNew = bump(last.tip) > f.tip ? bump(last.tip) : f.tip;
-        const feeNew = [bump(last.maxFee), f.maxFee, tipNew].reduce((a, b) => (b > a ? b : a));
-        const c = await send(`cancel (replaces ${last.step} at nonce ${n})`, { nonce: n, maxPriorityFeePerGas: tipNew, maxFeePerGas: feeNew, gas: await transferGas(deployer), to: deployer, value: 0n })
+        const p = priceAt(n, await fees());
+        const c = await send(`cancel (replaces ${last.step} at nonce ${n})`, { nonce: n, maxPriorityFeePerGas: p.tip, maxFeePerGas: p.maxFee, gas: await transferGas(deployer), to: deployer, value: 0n })
           .catch((e) => console.error(`deploy: cancel at nonce ${n} not taken: ${e.message}`));
         if (c) console.log(`deploy: nonce ${n} pending since ${Math.round((now() - last.sentAt) / 1000)} s: replaced by a cancel ${c.hash}`);
       }
@@ -287,16 +303,17 @@ export async function main(args, io = {}) {
     for (let wait = WAITS.poll; ; ) {
       try {
         if (!(await settle())) console.error(`deploy: the run key's transactions have not all landed after ${WAITS.settle / 1000} s; sweeping anyway`);
+        // at the latest nonce: after a settle that ran out, a sweep that replaces what is pending there, priced above it
+        const nonce = big(await call("eth_getTransactionCount", [deployer, "latest"]));
         const bal = big(await call("eth_getBalance", [deployer, "latest"]));
-        const f = await fees();
+        const p = priceAt(nonce, await fees());
         const g = await transferGas(ret);
-        const reserve = g * f.maxFee + 2n * (await l1Bound(SWEEP_TX_BYTES));
+        const reserve = g * p.maxFee + 2n * (await l1Bound(SWEEP_TX_BYTES));
         if (bal <= 2n * reserve) {
           console.log(`deploy: run key keeps ${bal} wei, less than two sweeps' fee bound (${2n * reserve})`);
           return;
         }
-        const nonce = big(await call("eth_getTransactionCount", [deployer, "latest"]));
-        const s = await send("sweep (the run key's rest back)", { nonce, maxPriorityFeePerGas: f.tip, maxFeePerGas: f.maxFee, gas: g, to: ret, value: bal - reserve });
+        const s = await send("sweep (the run key's rest back)", { nonce, maxPriorityFeePerGas: p.tip, maxFeePerGas: p.maxFee, gas: g, to: ret, value: bal - reserve });
         console.log(`deploy: sweep ${bal - reserve} wei to ${ret}: ${s.hash}`);
         await waitReceipt(s, WAITS.receipt); // no receipt yet: the next pass's settle waits for it or replaces it
       } catch (e) {
