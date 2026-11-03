@@ -38,6 +38,7 @@ export const CHANGED = [
   "scripts/live-checks/market-data-solana-token.mjs",
   "scripts/live-checks/money-gate-testnet.mjs",
   "scripts/live-checks/near-rpc-operators.mjs",
+  "scripts/live-checks/notes-per-pool-evm.mjs",
   "scripts/live-checks/pool-sol-deploy.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
   "scripts/live-checks/relayer-withdraw-send.mjs",
