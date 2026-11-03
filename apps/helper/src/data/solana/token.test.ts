@@ -7,6 +7,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
+import { createProxy } from "../../proxy/proxy.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
   CANDLES_FIELDS, createSolanaToken, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
@@ -71,6 +72,40 @@ function fakeGecko(opts: { status?: number; headers?: Record<string, string> } =
 }
 
 // ---- the page ------------------------------------------------------------------------------------------------
+
+test("fold 6 (R5c): Jupiter's batched search draws on the helper's own reserve, so a page is served with every caller's part of Jupiter spent", async () => {
+  const searched: string[] = [];
+  const proxy = createProxy({}, {
+    now: () => NOW,
+    fetch: (async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname !== "/tokens/v2/search") return new Response('{"ok":1}', { status: 200, headers: { "content-type": "application/json" } });
+      const mints = u.searchParams.get("query")!.split(",");
+      searched.push(...mints);
+      return new Response(JSON.stringify(mints.flatMap((m) => FX.tokens[m]?.search ?? [])), { status: 200, headers: { "content-type": "application/json" } });
+    }) as never,
+  });
+  let callers = 0;
+  for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await proxy.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
+  assert.equal(callers, 60 - 34, "callers' part of Jupiter Free is spent");
+  const a = await createSolanaToken(proxy, fakeRpc(), { now: () => NOW }).page(PUMP);
+  assert.equal(a.status, 200, "the page is served");
+  assert.deepEqual(searched, [PUMP], "its search reached Jupiter");
+  assert.equal(JSON.parse(a.body).row.symbol, "PUMP");
+});
+
+test("fold 6 (re-check 4 P5b): the token page's chain reads draw the share of the caller who opened it; a hit draws nothing", async () => {
+  const seen: (string | undefined)[] = [];
+  const rpc = fakeRpc();
+  const spy = { handle: (c: string, ct: string | undefined, body: string, client?: string) => (seen.push(client), rpc.handle(c, ct, body)) };
+  const t = createSolanaToken(fakeProxy(), spy, { now: () => NOW });
+  assert.equal((await t.page(PUMP, "198.51.100.9")).status, 200);
+  assert.deepEqual(seen, ["198.51.100.9"], "the mint read carried the caller");
+  assert.equal((await t.page(PUMP, "198.51.100.10")).status, 200);
+  assert.equal(seen.length, 1, "a cache hit reaches no provider and draws nothing");
+  await t.holders(PUMP, "198.51.100.11");
+  assert.deepEqual(seen.slice(1), ["198.51.100.11"], "the holders' mint read carries its caller too");
+});
 
 test("page: a Token-2022 mint off any curve, in 06b's TokenPage fields, the chain's authorities and fee, Jupiter's row", async () => {
   const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW });

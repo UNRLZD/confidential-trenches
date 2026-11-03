@@ -62,7 +62,7 @@ export const RPC_METHOD_MAX = 40;
  * getMultipleAccounts per 100 pump.fun mints (data/solana/lists.ts l.338), of at most 300 rows (three Jupiter lists of
  * limit=100, READS), once per FRESH_MS 12 s refresh: 3 in any 10 s. The other chains: no own reads through here (the
  * token watches and the pool senders read their own providers), so 0. The token page's reads are not in it: they are
- * one per token a caller opens, so they stop at the total less this, as callers do.
+ * one per token a caller opens, so they draw that caller's share and stop at the total less this, as callers do.
  */
 export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0 };
 /** Each chain's budget unless RPC_BUDGET_<CHAIN> says; only Solana's public endpoint publishes a limit per method. */

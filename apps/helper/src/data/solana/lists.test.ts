@@ -15,6 +15,8 @@ import {
   address, b58decode, b58encode, createSolanaLists, dec, FRESH_MS, LIST_MAX, pumpCandidates, pumpCurveAddress, pumpCurveBps, PUMP_PROGRAM,
   readPumpCurves, READS, ROW_FIELDS, snapshot, STALE_MS, text, toRow, toRows, type Row,
 } from "./lists.ts";
+import { createProxy } from "../../proxy/proxy.ts";
+import { createRpc } from "../../rpc/rpc.ts";
 
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
 const RAW = { new: JSON.parse(fx("jupiter-recent.json")), trending_5m: JSON.parse(fx("jupiter-toptrending-5m.json")), trending_1h: JSON.parse(fx("jupiter-toptrending-1h.json")) };
@@ -253,6 +255,38 @@ function fakes(opts: { fail?: () => boolean } = {}) {
   };
   return { proxy, calls, now: () => t, step: (ms: number) => (t += ms) };
 }
+
+test("fold 6 (R5b, R5d): Discover's Jupiter lists and curve reads draw on the helper's own reserve: with every caller's part of Jupiter and of getMultipleAccounts spent, the lists are served whole", async () => {
+  const t = AS_OF;
+  const jup: string[] = [];
+  const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
+  const proxy = createProxy({}, {
+    now: () => t,
+    fetch: (async (url: string) => {
+      const path = new URL(url).pathname;
+      jup.push(path);
+      const k = path === READS.new ? "new" : path === READS.trending_5m ? "trending_5m" : path === READS.trending_1h ? "trending_1h" : null;
+      return json(k === null ? { ok: 1 } : RAW[k]);
+    }) as never,
+  });
+  const curves: number[] = [];
+  const rpc = createRpc({}, { now: () => t, fetch: (async (_u: string, i: RequestInit) => (JSON.parse(String(i.body)).id === 1 && curves.push(1), json(CURVES.answer))) as never });
+  let callers = 0;
+  for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await proxy.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
+  assert.equal(callers, 60 - 34, "callers' part of Jupiter Free is spent");
+  const gma = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "getMultipleAccounts", params: [[]] });
+  let reads = 0;
+  for (let a = 0; a < 4; a++) for (let i = 0; i < 16; i++) if ((await rpc.handle("solana", "application/json", gma, `198.51.100.${a}`)).status === 200) reads++;
+  assert.equal(reads, 40 - 3, "callers' part of getMultipleAccounts is spent");
+  jup.length = 0;
+  const a = await createSolanaLists(proxy, rpc, { now: () => t }).get();
+  assert.equal(a.status, 200);
+  assert.deepEqual(jup.sort(), [READS.new, READS.trending_1h, READS.trending_5m].sort(), "the three lists reached Jupiter");
+  assert.ok(curves.length >= 1, "the curve reads reached the provider");
+  const s = JSON.parse(a.body);
+  assert.ok(s.lists.new.length > 0 && s.lists.trending_5m.length > 0);
+  assert.ok((s.lists.new as Row[]).concat(s.lists.trending_5m, s.lists.trending_1h).some((r: Row) => r.curve_bps !== null && r.curve_bps !== undefined), "a curve read's answer is on the rows");
+});
 
 test("the lists: one read of the three Jupiter lists through the proxy, shared until FRESH_MS; gzip of the same body", async () => {
   const f = fakes();

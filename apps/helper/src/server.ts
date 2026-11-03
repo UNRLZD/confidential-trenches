@@ -25,7 +25,7 @@ import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER
 import { createSolanaLists } from "./data/solana/lists.ts";
 import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { health, releaseOf, type Part } from "./health.ts";
-import { createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
+import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -382,7 +382,7 @@ export function handler(
             return send(404, { error: { code: "not_found" } }, cors(req));
           }
           read = token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit));
-        } else read = path === MARKET_TOKEN ? token.page(mint) : token.holders(mint);
+        } else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
         void read
           .then((a) => {
             if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1));
@@ -444,8 +444,9 @@ export function handler(
 
 /**
  * The token page's reads: the helper's one RPC client, so they draw from the same Solana provider's one budget as every
- * caller (no caller's share; a second client would be a second budget on one provider, and together they could pass
- * its limit), and holders on SOLANA_HOLDERS_RPC_URL when set (src/data/solana/token.ts).
+ * caller (a second client would be a second budget on one provider, and together they could pass its limit), each read
+ * from the share of the caller whose request made it, and holders on SOLANA_HOLDERS_RPC_URL when set
+ * (src/data/solana/token.ts).
  */
 export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc): Token {
   const holders = env.SOLANA_HOLDERS_RPC_URL;
@@ -478,6 +479,7 @@ if (import.meta.main) {
   }
   let server: Server;
   try {
+    checkVendorPlans(process.env);
     const proxy = createProxy(process.env);
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);

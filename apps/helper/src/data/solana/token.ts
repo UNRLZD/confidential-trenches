@@ -258,7 +258,7 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
 type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
-type Rpc = { handle(chain: string, contentType: string | undefined, body: string): Promise<{ status: number; headers?: Record<string, string>; body: string }> };
+type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
 export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number };
@@ -284,19 +284,21 @@ function bounded<V>(max: number) {
 }
 
 /** A read cached per key: fresh within `freshMs` of our own read; a failed refresh serves the last good one while its
- *  data is under STALE_MS old; one read per key at a time. `read` answers null for "no such token" and throws for an
+ *  data is under STALE_MS old; one read per key at a time. `client`, the caller whose request makes the read, draws
+ *  its share of the provider's budget for it (card helper-abuse-limits); a hit or a call joining one in flight draws
+ *  nothing. `read` answers null for "no such token" and throws for an
  *  upstream failure. */
-function cached(freshMs: number, now: () => number, read: (key: string) => Promise<DataAnswer>) {
+function cached(freshMs: number, now: () => number, read: (key: string, client?: string) => Promise<DataAnswer>) {
   const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<DataAnswer>>();
   return {
     size: last.size,
-    get(key: string): Promise<DataAnswer> {
+    get(key: string, client?: string): Promise<DataAnswer> {
       const hit = last.get(key);
       if (hit !== undefined && now() - hit.at < freshMs) return Promise.resolve(hit.a);
       let p = running.get(key);
       if (p === undefined) {
-        p = read(key)
+        p = read(key, client)
           .then((a) => {
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: now() });
             return a;
@@ -322,8 +324,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
 
-  async function call(method: string, params: unknown[], via: Rpc = rpc): Promise<{ result: Record<string, unknown> }> {
-    const a = await via.handle("solana", "application/json", rpcBody(method, params));
+  async function call(method: string, params: unknown[], via: Rpc = rpc, client?: string): Promise<{ result: Record<string, unknown> }> {
+    const a = await via.handle("solana", "application/json", rpcBody(method, params), client);
     if (a.status === 429) throw new Throttled(retryAfterOf(a.headers));
     if (a.status !== 200) throw new Upstream();
     const j = obj(JSON.parse(a.body));
@@ -392,9 +394,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   }
 
   /** The mint account at a slot, or null when it is not a mint. */
-  async function mintAt(mint: string, curveToo: boolean) {
+  async function mintAt(mint: string, curveToo: boolean, client?: string) {
     const keys = curveToo ? [mint, pumpCurveAddress(mint)] : [mint];
-    const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }]);
+    const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client);
     const value = result.value;
     const slot = obj(result.context).slot;
     if (!Array.isArray(value) || value.length !== keys.length || !Number.isSafeInteger(slot)) throw new Upstream();
@@ -429,9 +431,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return row === null ? null : { row, at: j.at };
   }
 
-  const page = cached(PAGE_FRESH_MS, now, async (mint) => {
+  const page = cached(PAGE_FRESH_MS, now, async (mint, client) => {
     const listed = await listedRow(mint);
-    const [m, j] = await Promise.all([mintAt(mint, true), listed === null ? jupiter(mint) : null]);
+    const [m, j] = await Promise.all([mintAt(mint, true, client), listed === null ? jupiter(mint) : null]);
     if (m.mint === null) return NOT_FOUND;
     let base: Row | null = listed?.row ?? null;
     let at = listed?.at ?? 0;
@@ -447,16 +449,16 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return { status: 200, body: JSON.stringify(p), src: "jupiter", asOfMs: Math.min(m.at, at) };
   });
 
-  const holders = cached(HOLDERS_FRESH_MS, now, async (mint) => {
-    const m = await mintAt(mint, false);
+  const holders = cached(HOLDERS_FRESH_MS, now, async (mint, client) => {
+    const m = await mintAt(mint, false, client);
     if (m.mint === null) return NOT_FOUND;
     try {
       if (deps.holdersRpc === undefined) throw new Upstream();
-      const largest = (await call("getTokenLargestAccounts", [mint, { commitment: "confirmed" }], deps.holdersRpc)).result.value;
+      const largest = (await call("getTokenLargestAccounts", [mint, { commitment: "confirmed" }], deps.holdersRpc, client)).result.value;
       if (!Array.isArray(largest)) throw new Upstream();
       const accts = largest.slice(0, HOLDERS_MAX).map((r) => address(obj(r).address));
       if (accts.some((a) => a === null)) throw new Upstream();
-      const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }], deps.holdersRpc)).result.value;
+      const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }], deps.holdersRpc, client)).result.value;
       const rows = toHolders(largest.slice(0, HOLDERS_MAX), Array.isArray(owners) ? owners : [], m.mint.supply);
       if (rows === null) throw new Upstream();
       const top = rows.slice(0, 10).reduce((s, h) => s + (h.bps ?? 0), 0);
@@ -522,9 +524,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
 
   return {
     /** 06b TokenPage for a Solana mint: 404 when it is no mint or Jupiter does not list it, 503 on an upstream failure. */
-    page: (mint: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : page.get(mint)),
+    page: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : page.get(mint, client)),
     /** 06b Holders (20 rows, merged per owner), or Jupiter's fallback. */
-    holders: (mint: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint)),
+    holders: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint, client)),
     /** 06b Candles: up to `limit` bars of `tf` ending before `to` (unix seconds) when it is set. */
     async candles(mint: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       if (address(mint) === null || !Object.hasOwn(TF, tf)) return NOT_FOUND;

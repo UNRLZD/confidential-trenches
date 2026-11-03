@@ -6,7 +6,9 @@
 # nothing):
 #   0. every RPC_BUDGET_* and PROXY_BUDGET_* compose may pass, from deploy/.env and from this shell, is checked with the
 #      rule the helper's start applies (src/limits/limits.ts budgetFromEnv): a value it would refuse stops here, naming
-#      the variable only, instead of leaving the container restarting;
+#      the variable only, instead of leaving the container restarting; and each vendor's key (JUPITER_API_KEY,
+#      RELAY_API_KEY, LIFI_API_KEY, ONECLICK_JWT) is set, or its PROXY_BUDGET_<VENDOR> names the keyless plan, as the
+#      helper's start requires (src/proxy/proxy.ts checkVendorPlans);
 #   1. fetches the commit (depth 1) and checks it out, detached;
 #   2. in deploy/.env, next to compose.yaml: sets HELPER_COMMIT to the commit and HELPER_RELEASE to the release number
 #      send.ts reads (a whole number that only goes up, one per release): kept when the commit is the one already
@@ -50,9 +52,9 @@ main() {
   HELPER_COMMIT="$sha" HELPER_RELEASE="$release" docker compose up -d --build
 }
 
-# The lines that set NAME in a .env, in any form compose may read (spaces, export).
+# The lines that set NAME in a .env, in any form compose may read (spaces, export, and its "NAME: value" form).
 lines_of() {
-  grep -E "^[[:space:]]*(export[[:space:]]+)?$2[[:space:]]*=" "$1" || true
+  grep -E "^[[:space:]]*(export[[:space:]]+)?$2[[:space:]]*[=:]" "$1" || true
 }
 
 # One plain NAME=value line or none; prints the value (to the caller's variable only).
@@ -113,6 +115,27 @@ check_budgets() {
       fi
     fi
   done
+  # a vendor with no key needs its budget set to the keyless plan (compose reads this shell first, then deploy/.env)
+  local vendor key budget
+  for vendor in JUPITER:JUPITER_API_KEY RELAY:RELAY_API_KEY LIFI:LIFI_API_KEY ONECLICK:ONECLICK_JWT; do
+    key="${vendor#*:}" budget="PROXY_BUDGET_${vendor%%:*}"
+    is_set "$env" "$key" || is_set "$env" "$budget" || {
+      echo "redeploy: $key is unset: set it, or $budget to the plan without a key; nothing changed" >&2
+      return 1
+    }
+  done
+}
+
+# Whether NAME reaches compose non-empty: from this shell if set there, else from its one plain line in deploy/.env.
+# Reads the value only to test it; never prints it.
+is_set() {
+  local value=""
+  if [[ -n "${!2+set}" ]]; then
+    value="${!2}"
+  elif [[ -e "$1" ]]; then
+    value="$(plain_value "$1" "$2" '.*')" || return 1
+  fi
+  [[ -n "$value" ]]
 }
 
 # The release for this deploy: the same commit keeps it, another commit raises it by one, none starts at 1.

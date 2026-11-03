@@ -65,6 +65,18 @@ export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
 export const PROXY_RESERVE: Readonly<Record<VendorName, number>> = { jupiter: 34, relay: 0, lifi: 0, oneclick: 0 };
 /** The environment variable naming a vendor's budget, "<total per minute>,<per client per 10 s>". */
 export const proxyBudgetEnv = (vendor: VendorName): string => `PROXY_BUDGET_${vendor.toUpperCase()}`;
+/**
+ * The start's check that each vendor's budget is its key's plan: every default above is a keyed plan's figure, and a
+ * vendor called with no key holds us to its keyless limit, lower (Jupiter's keyless 30 a minute, LI.FI's unauthenticated
+ * /quote 75 per two hours). So a vendor with no key needs PROXY_BUDGET_<VENDOR> set to the plan it is on; the error
+ * names the variables, never a value.
+ */
+export function checkVendorPlans(env: Record<string, string | undefined>): void {
+  for (const v of VENDOR_NAMES) {
+    const key = VENDORS[v].env;
+    if ((env[key] ?? "") === "" && (env[proxyBudgetEnv(v)] ?? "") === "") throw new Error(`${key} is unset: set it, or ${proxyBudgetEnv(v)} to the plan without a key`);
+  }
+}
 export const CACHE_ENTRIES = 256;
 export const CACHE_BYTES = 32 * 1024 * 1024;
 const KEY_SHAPE = /^[\x21-\x7e]{8,4096}$/; // printable ASCII, no space or line break, so it can never split a header

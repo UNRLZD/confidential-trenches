@@ -11,6 +11,9 @@ import { after, before, mock, test } from "node:test";
 import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
 import { PARTS, releaseOf } from "./health.ts";
 import { createRpc } from "./rpc/rpc.ts";
+import { createProxy } from "./proxy/proxy.ts";
+import { b58encode, createSolanaLists } from "./data/solana/lists.ts";
+import { randomBytes } from "node:crypto";
 import { heldPerClient, throttleOf, upstreamBudget } from "./limits/limits.ts";
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
@@ -20,6 +23,8 @@ import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+/** Test values for the vendor keys a start requires (proxy.ts checkVendorPlans); no real key. */
+const TEST_VENDOR_KEYS = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
 const APP = "https://confidential.unrealized.trade";
 const SIGN = "https://sign.confidential.unrealized.trade";
 let port = 0;
@@ -471,7 +476,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
   await new Promise((ok) => free.close(ok));
   const run = (fee: string) =>
     spawn(process.execPath, [join(import.meta.dirname, "server.ts")], {
-      env: { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: String(hp), POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: fee, POOL_SOLANA_RPCS_DEVNET: urls },
+      env: { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: String(hp), ...TEST_VENDOR_KEYS, POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: fee, POOL_SOLANA_RPCS_DEVNET: urls },
       stdio: ["ignore", "pipe", "pipe"],
     });
   const exited = (c: ReturnType<typeof run>) => new Promise<number | null>((ok) => c.on("exit", ok));
@@ -718,4 +723,102 @@ test("no IP stored: driving every limit past its edge logs nothing and writes no
   }
   assert.deepEqual(out.filter((l) => l.startsWith("fs.")), [], "no file written");
   assert.deepEqual(out.filter((l) => l.includes(IP) || l.includes("198.51.100")), [], "nothing logged holds the address");
+});
+
+// ---- fold 6 (card helper-abuse-limits, re-check 4) ----
+
+test("re-check 4 finding 4: a start with a vendor's key unset and no PROXY_BUDGET_<VENDOR> exits 2, naming the variables only", async () => {
+  const { spawn } = await import("node:child_process");
+  for (const [key, budget] of [["JUPITER_API_KEY", "PROXY_BUDGET_JUPITER"], ["LIFI_API_KEY", "PROXY_BUDGET_LIFI"]] as const) {
+    const env: Record<string, string | undefined> = { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: "0", ...TEST_VENDOR_KEYS };
+    delete env[key];
+    const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "ignore", "pipe"] });
+    let err = "";
+    c.stderr!.on("data", (d) => (err += d));
+    const code = await Promise.race([new Promise<number | null>((ok) => c.on("exit", ok)), new Promise<string>((ok) => setTimeout(() => ok("still running"), 10_000))]);
+    if (code === "still running") c.kill();
+    assert.equal(code, 2, `${key}: ${err}`);
+    assert.equal(err.trim(), `helper: ${key} is unset: set it, or ${budget} to the plan without a key`);
+  }
+});
+
+function postAs(port: number, path: string, body: string, xff: string): Promise<number> {
+  return new Promise((ok, fail) => {
+    const r = request({ host: "127.0.0.1", port, path, method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": xff, "content-length": Buffer.byteLength(body) }, agent: false }, (res) => (res.resume(), res.on("end", () => ok(res.statusCode!))));
+    r.on("error", fail);
+    r.end(body);
+  });
+}
+function getAs(port: number, path: string, xff: string): Promise<number> {
+  return new Promise((ok, fail) => {
+    const r = request({ host: "127.0.0.1", port, path, method: "GET", headers: { "x-forwarded-for": xff }, agent: false }, (res) => (res.resume(), res.on("end", () => ok(res.statusCode!))));
+    r.on("error", fail);
+    r.end();
+  });
+}
+/** The helper as deployed, on a stub of the public Solana endpoint (100 a 10 s, 40 a 10 s for one method, rolling) and
+ * a Jupiter that lists nothing: `pages` token pages of fresh mints opened by one address, then `then` while they run. */
+async function tokenPagesThen(pages: number, then: (port: number) => Promise<number[]>) {
+  const all: number[] = [];
+  const per = new Map<string, number[]>();
+  let refused = 0;
+  const realFetch = globalThis.fetch;
+  const stub = (async (u: string | URL | Request, i?: RequestInit) => {
+    const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
+    if (!String(u).includes("api.mainnet-beta.solana.com")) return json({ tokens: [] });
+    const t = Date.now();
+    const b = JSON.parse(String(i?.body));
+    const reqs: { id: unknown; method: string }[] = Array.isArray(b) ? b : [b];
+    const roll = (a: number[]) => {
+      while (a.length && t - a[0]! >= 10_000) a.shift();
+    };
+    roll(all);
+    for (const r of reqs) {
+      const a = per.get(r.method) ?? [];
+      roll(a);
+      per.set(r.method, a);
+    }
+    if (all.length + reqs.length > 100 || reqs.some((r) => per.get(r.method)!.length + 1 > 40)) return (refused++, new Response("slow", { status: 429, headers: { "retry-after": "10" } }));
+    for (const r of reqs) (all.push(t), per.get(r.method)!.push(t));
+    const one = (r: { id: unknown; method: string }) => ({ jsonrpc: "2.0", id: r.id, result: r.method === "getMultipleAccounts" ? { context: { slot: 1 }, value: [null, null] } : 1 });
+    return json(Array.isArray(b) ? reqs.map(one) : one(reqs[0]!));
+  }) as typeof fetch;
+  // the share is a fixed 10 s window: start early in one, so the run stays inside it
+  while (Date.now() % 10_000 > 2_000) await new Promise((r) => setTimeout(r, 50));
+  globalThis.fetch = stub;
+  try {
+    const proxy = createProxy({}, { fetch: stub });
+    const rpc = createRpc({}, { fetch: stub });
+    const lists = createSolanaLists(proxy, rpc);
+    const h = createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, undefined, undefined, null, new Map(), new Map()));
+    await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+    const port = (h.address() as AddressInfo).port;
+    const opened = Array.from({ length: pages }, () => getAs(port, `/v1/market/token?chain=solana&token=${b58encode(randomBytes(32))}`, "198.51.100.77"));
+    await new Promise((r) => setTimeout(r, 300));
+    const st = await then(port);
+    const ps = await Promise.all(opened);
+    h.closeAllConnections();
+    await new Promise<void>((r) => h.close(() => r()));
+    return { refused, st, ps };
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+const someGma = () => JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [[b58encode(randomBytes(32))]] });
+
+test("re-check 4 P5b: one address's token pages of fresh mints take only its own share; two honest devices' getMultipleAccounts in the same 10 s are all served", async () => {
+  const r = await tokenPagesThen(40, async (port) => {
+    const st: number[] = [];
+    for (let d = 0; d < 2; d++) for (let i = 0; i < 10; i++) st.push(await postAs(port, "/v1/rpc/solana", someGma(), `192.0.2.${20 + d}`));
+    return st;
+  });
+  assert.equal(r.refused, 0, "the endpoint never answered 429");
+  assert.deepEqual(r.st.filter((x) => x !== 200), [], "every honest device read was served");
+  assert.ok(r.ps.filter((x) => x === 429).length >= 40 - 16, `the address stops at its share: ${JSON.stringify(r.ps)}`);
+});
+
+test("re-check 4 R5e: the token page reads through the helper's one RPC budget: an address's pages spend its own share of the chain", async () => {
+  const r = await tokenPagesThen(16, async (port) => [await postAs(port, "/v1/rpc/solana", someGma(), "198.51.100.77"), await postAs(port, "/v1/rpc/solana", someGma(), "192.0.2.30")]);
+  assert.equal(r.refused, 0);
+  assert.deepEqual(r.st, [429, 200], "the address's 16 pages spent its share of the one budget; another address still reads");
 });

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import * as proxyModule from "./proxy.ts";
 import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
+const { checkVendorPlans } = proxyModule as unknown as { checkVendorPlans: (env: Record<string, string | undefined>) => void };
 const { PROXY_BUDGETS, proxyBudgetEnv } = proxyModule as unknown as { PROXY_BUDGETS: Record<string, { total: number; perClient: number; reserve?: number }>; proxyBudgetEnv: (v: string) => string };
 // the mechanism tests run on an explicit budget, so they read the same whatever the defaults are
 const PROXY_VENDOR_MAX = 300;
@@ -384,6 +385,27 @@ test("re-check F-D: a call joining one in flight reaches no vendor, so it draws 
   assert.equal(f.seen.length, 1, "one vendor call for both");
   assert.equal((await p.handle("jupiter", "/tokens/v2/toptrending/1h", "limit=100", "", "c")).status, 200, "the total's second draw is still there");
   assert.equal(f.seen.length, 2);
+});
+
+test("fold 6 (R5h): a reserved own read's retry after a vendor's short reset still draws on the reserve, with the callers' part full", async () => {
+  const c = clock();
+  const f = vendor((_c, n) => (n === 27 ? json({ e: "slow" }, 429, { "retry-after": "0" }) : json({ ok: 1 })));
+  const p = createProxy({}, { fetch: f.fetch, now: c.now, sleep: c.sleep });
+  let callers = 0;
+  for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await p.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
+  assert.equal(callers, 60 - 34, "the callers' part is full");
+  assert.equal((await p.handle("jupiter", "/tokens/v2/search", "query=x", "", undefined, true)).status, 200, "the own read is served by its retry");
+  assert.equal(f.seen.length, 28, "the call and its retry both reached the vendor");
+});
+
+test("fold 6 (re-check 4 finding 4): a vendor with no key needs its keyless plan named: the start stops, naming the variables only", () => {
+  const keys = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
+  assert.doesNotThrow(() => checkVendorPlans(keys));
+  for (const [key, budget] of [["JUPITER_API_KEY", "PROXY_BUDGET_JUPITER"], ["RELAY_API_KEY", "PROXY_BUDGET_RELAY"], ["LIFI_API_KEY", "PROXY_BUDGET_LIFI"], ["ONECLICK_JWT", "PROXY_BUDGET_ONECLICK"]] as const) {
+    for (const env of [{ ...keys, [key]: undefined }, { ...keys, [key]: "" }])
+      assert.throws(() => checkVendorPlans(env), (e: Error) => e.message === `${key} is unset: set it, or ${budget} to the plan without a key` && !Object.values(keys).some((k) => e.message.includes(k)), key);
+    assert.doesNotThrow(() => checkVendorPlans({ ...keys, [key]: "", [budget]: "100,2" }), `${key}: the keyless plan named`);
+  }
 });
 
 test("reset headers: seconds, an epoch in s or ms, an HTTP date; none means 1 s", () => {
