@@ -64,7 +64,7 @@ import { startApi } from "./api.ts";
 import { depositQuoteHost } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { PAGE_POOLS, withPools } from "./pools.ts";
-import { openNoteStore, type NoteRecord } from "../../wallet/src/notes/store.ts";
+import { readNotes, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
@@ -437,15 +437,11 @@ const namer = depositNamer({
   startup: () => startup,
   resyncing: () => resyncing,
 });
-// state.pools' notes (src/pools.ts): read with this page's note store on its own wallet store, closed after; top-level
-// only, as the frame never opens the note store. A function declaration, as the shell's state, made at the top, holds it.
+// state.pools' notes (src/pools.ts): read only, with the wallet's readNotes on this page's own wallet store: no Web Lock,
+// no write, so a state read never frees a note or finishes a parent (the note store's own paths do). Top-level only, as
+// the frame keeps no note data. A function declaration, as the shell's state, made at the top, holds it.
 async function pageNotes(): Promise<NoteRecord[]> {
-  const notes = await openNoteStore(await open());
-  try {
-    return await notes.list();
-  } finally {
-    notes.close();
-  }
+  return readNotes(await open());
 }
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {

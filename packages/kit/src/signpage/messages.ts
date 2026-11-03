@@ -198,6 +198,12 @@ export type ReturnStage = "signed" | "sent" | "in_transit" | "into_vault" | "don
 export type RestoreStage = "started" | "reading" | "done" | "stalled";
 export type Stage = DepositStage | WithdrawStage | TradeStage | HopStage | ReturnStage | RestoreStage | "queued";
 
+/** The assets a chain's pool holds. A pool's asset comes from the device's own pool table, never from a server. */
+export type PoolAsset = "SOL" | "ETH" | "USDC";
+export const POOL_ASSETS: readonly PoolAsset[] = Object.freeze(["SOL", "ETH", "USDC"] as const);
+/** Each pool asset's decimals: the one table. state.pools carries no decimals; an amount's 1.0 is 10^decimals here. */
+export const POOL_ASSET_DECIMALS: Readonly<Record<PoolAsset, number>> = Object.freeze({ SOL: 9, ETH: 18, USDC: 6 });
+
 export type WalletState = "PLANNED" | "ARMING" | "READY" | "IN_POSITION" | "RETURNING" | "EMPTY";
 export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
 
@@ -224,10 +230,12 @@ export interface SignpageState {
   vault_balance: string;
   /**
    * The private balance held in each chain's pool, read from the device's own notes (never from a server): one entry
-   * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC. `ready` is how much of it is ready to buy (chunks with a proof ready); absent while no proof
+   * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC (12.5 SOL
+   * is "12.5"). `asset` is the pool's, set by the device from the pool's kind; its decimals are POOL_ASSET_DECIMALS's
+   * alone. `ready` is how much of it is ready to buy (chunks with a proof ready); absent while no proof
    * queue runs, never "0" in its place. Absent when the page is signed out or the notes could not be read.
    */
-  pools?: { chain: Chain; balance: string; ready?: string }[];
+  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string }[];
   wallets: { chain: Chain; address: string; role: "fresh" | "hop"; size: string; state: WalletState }[];
   positions: { chain: Chain; token: string; amount: string; cost: string; wallets: string[] }[];
   orders: {

@@ -7,13 +7,14 @@ import type { SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import type { BalancePool } from "../../wallet/src/pool/balances.ts";
+import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
 import { signedOutState } from "../src/api.ts";
 import { PAGE_POOLS, withPools } from "../src/pools.ts";
 import { ANSWER_ROOM, pickOps, stateOf } from "../src/state.ts";
 
-const SOL: BalancePool = { id: "sol:p", chain: "solana", scope: 11n, one: 1_000_000n };
-const BASE: BalancePool = { id: "evm:p", chain: "base", scope: 22n, one: 1_000_000n };
+const SOL: BalancePool = { id: "sol:p", chain: "solana", scope: 11n, asset: "SOL" };
+const BASE: BalancePool = { id: "evm:p", chain: "base", scope: 22n, asset: "ETH" };
 const SIGNED_IN = stateOf(true, { source: "code", code_saved: true }, []);
 const note = (id: string, scope: bigint, value: bigint): NoteRecord => ({
   id,
@@ -26,9 +27,9 @@ const note = (id: string, scope: bigint, value: bigint): NoteRecord => ({
 
 test("signed in: pools from the notes read, one entry per chain of the table, valid for the kit's state schema", async () => {
   let reads = 0;
-  const read = async () => (reads++, [note("a", SOL.scope, 12_500_000n)]);
+  const read = async () => (reads++, [note("a", SOL.scope, 12_500_000_000n)]);
   const out = await withPools(SIGNED_IN, read, [SOL, BASE]);
-  assert.deepEqual(out, { ...SIGNED_IN, pools: [{ chain: "solana", balance: "12.5" }, { chain: "base", balance: "0" }] });
+  assert.deepEqual(out, { ...SIGNED_IN, pools: [{ chain: "solana", asset: "SOL", balance: "12.5" }, { chain: "base", asset: "ETH", balance: "0" }] });
   assert.equal(reads, 1);
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(out), true);
   assert.equal(Object.hasOwn(SIGNED_IN, "pools"), false, "the state handed in is not changed");
@@ -49,7 +50,7 @@ test("a notes read that throws or rejects, or notes that fail the sum: the state
   assert.deepEqual(await withPools(SIGNED_IN, () => Promise.reject(new Error("no Web Locks")), [SOL]), SIGNED_IN);
   const broken = [{ ...note("b", SOL.scope, 1n), leaf: undefined }];
   assert.deepEqual(await withPools(SIGNED_IN, async () => broken, [SOL]), SIGNED_IN);
-  assert.deepEqual(await withPools(SIGNED_IN, async () => [], [{ ...SOL, one: 3n }]), SIGNED_IN, "a bad pool table");
+  assert.deepEqual(await withPools(SIGNED_IN, async () => [], [{ ...SOL, asset: "BTC" as never }]), SIGNED_IN, "a bad pool table");
 });
 
 test("an empty pool table: pools [] and the notes never read", async () => {
@@ -59,10 +60,10 @@ test("an empty pool table: pools [] and the notes never read", async () => {
 });
 
 test("ready: passed through when given, absent when not", async () => {
-  const held: NoteRecord = { ...note("h", SOL.scope, 20_000_000n), state: "HELD", attempt: "a1", deadlineMs: 1n };
-  const ready = [{ noteId: "h", attempt: "a1", poolId: SOL.id, chunk: 20_000_000n }];
-  assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [SOL], ready)).pools, [{ chain: "solana", balance: "20", ready: "20" }]);
-  assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [SOL])).pools, [{ chain: "solana", balance: "20" }]);
+  const held: NoteRecord = { ...note("h", SOL.scope, 20_000_000_000n), state: "HELD", attempt: "a1", deadlineMs: 1n };
+  const ready = [{ noteId: "h", attempt: "a1", poolId: SOL.id, chunk: 20_000_000_000n }];
+  assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [SOL], ready)).pools, [{ chain: "solana", asset: "SOL", balance: "20", ready: "20" }]);
+  assert.deepEqual((await withPools(SIGNED_IN, async () => [held], [SOL])).pools, [{ chain: "solana", asset: "SOL", balance: "20" }]);
 });
 
 test("a state whose ops already fill the answer cap: the oldest ops give way to pools, so the answer still fits", async () => {
@@ -85,8 +86,10 @@ test("a state whose ops already fill the answer cap: the oldest ops give way to 
 });
 
 test("the page's pool table is empty while no pool is pinned on mainnet: a mainnet pin must be added to it", () => {
-  // SOL_POOLS (wallet/src/pool/solana.ts) is the only pool pin table in the tree; no EVM pool address is pinned
+  // the pool pin tables: SOL_POOLS (wallet/src/pool/solana.ts) and EVM_POOLS (wallet/src/pool/evm.ts)
   assert.equal(SOL_POOLS.mainnet, undefined, "a Solana pool is pinned on mainnet: add it to PAGE_POOLS and this test");
+  assert.equal(EVM_POOLS.base, undefined, "an EVM pool is pinned on Base: add it to PAGE_POOLS and this test");
+  assert.equal(EVM_POOLS.robinhood, undefined, "an EVM pool is pinned on Robinhood: add it to PAGE_POOLS and this test");
   assert.deepEqual(PAGE_POOLS, []);
   assert.ok(Object.isFrozen(PAGE_POOLS));
 });

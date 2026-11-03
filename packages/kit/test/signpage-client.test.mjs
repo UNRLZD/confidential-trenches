@@ -13,6 +13,7 @@ import { FIXTURES, STATE } from "./signpage-fixtures.ts";
 const SRC = process.env.SIGNPAGE_SRC ? pathToFileURL(`${process.env.SIGNPAGE_SRC}/`).href : new URL("../src/", import.meta.url).href;
 const C = await import(`${SRC}signpage/client.ts`);
 const S = await import(`${SRC}signpage/schema.ts`);
+const MSG = await import(`${SRC}signpage/messages.ts`);
 
 const URL_ = "https://sign.confidential.unrealized.trade/";
 const ORIGIN = "https://sign.confidential.unrealized.trade";
@@ -521,29 +522,44 @@ test("open kinds take only their return key and their own fields (APU-02)", () =
   for (const [k, params] of bad) assert.throws(() => C.signpageBuildRequest(k, params, "id"), TypeError, `${k} ${JSON.stringify(params)}`);
 });
 
-test("state.pools: the private balance per chain's pool is optional; each entry exact, amounts decimal, one entry per chain", () => {
+test("state.pools: the private balance per chain's pool is optional; each entry exact, its asset from the kit's table, amounts decimal, one entry per chain", () => {
   const ok = S.SIGNPAGE_RESULT_SCHEMAS.state;
   const pools = [
-    { chain: "solana", balance: "12.5", ready: "10" },
-    { chain: "base", balance: "0" },
+    { chain: "solana", asset: "SOL", balance: "12.5", ready: "10" },
+    { chain: "base", asset: "ETH", balance: "0.25" },
+    { chain: "near", asset: "USDC", balance: "0" },
   ];
   assert.equal(ok(STATE), true, "a state without pools passes");
   assert.equal(ok({ ...STATE, pools }), true, "a valid pools answer passes");
   assert.equal(ok({ ...STATE, pools: [] }), true, "an empty pool table passes");
   assert.equal(S.signpageStateEventSchema({ v: 1, type: "state", state: { ...STATE, pools } }), true, "and as a state event");
+  for (const asset of ["SOL", "ETH", "USDC"]) assert.equal(ok({ ...STATE, pools: [{ chain: "solana", asset, balance: "1" }] }), true, asset);
+  assert.deepEqual([...MSG.POOL_ASSETS], ["SOL", "ETH", "USDC"]);
+  assert.deepEqual({ ...MSG.POOL_ASSET_DECIMALS }, { SOL: 9, ETH: 18, USDC: 6 });
+  assert.equal(Object.isFrozen(MSG.POOL_ASSETS) && Object.isFrozen(MSG.POOL_ASSET_DECIMALS), true, "the asset table is frozen");
   const bad = {
-    "an entry with an extra key": [{ chain: "solana", balance: "1", note: "x" }],
-    "an entry with no balance": [{ chain: "solana" }],
-    "a bad chain": [{ chain: "ethereum", balance: "1" }],
-    "a negative balance": [{ chain: "solana", balance: "-1" }],
-    "a negative ready": [{ chain: "solana", balance: "1", ready: "-1" }],
-    "an exponent": [{ chain: "solana", balance: "1e3" }],
-    "an empty amount": [{ chain: "solana", balance: "" }],
-    "a bare point": [{ chain: "solana", balance: "1." }],
-    "a non-decimal ready": [{ chain: "solana", balance: "1", ready: "1e3" }],
-    "a number, not a string": [{ chain: "solana", balance: 1 }],
-    "a chain twice": [{ chain: "solana", balance: "1" }, { chain: "base", balance: "2" }, { chain: "solana", balance: "3" }],
-    "not an array": { chain: "solana", balance: "1" },
+    "an unknown asset BTC": [{ chain: "solana", asset: "BTC", balance: "1" }],
+    "an asset in lower case": [{ chain: "solana", asset: "sol", balance: "1" }],
+    "an empty asset": [{ chain: "solana", asset: "", balance: "1" }],
+    "no asset": [{ chain: "solana", balance: "1" }],
+    "an asset that is not a string": [{ chain: "solana", asset: 9, balance: "1" }],
+    "a decimals key": [{ chain: "solana", asset: "SOL", balance: "1", decimals: 9 }],
+    "an entry with an extra key": [{ chain: "solana", asset: "SOL", balance: "1", note: "x" }],
+    "an entry with no balance": [{ chain: "solana", asset: "SOL" }],
+    "a bad chain": [{ chain: "ethereum", asset: "ETH", balance: "1" }],
+    "a negative balance": [{ chain: "solana", asset: "SOL", balance: "-1" }],
+    "a negative ready": [{ chain: "solana", asset: "SOL", balance: "1", ready: "-1" }],
+    "an exponent": [{ chain: "solana", asset: "SOL", balance: "1e3" }],
+    "an empty amount": [{ chain: "solana", asset: "SOL", balance: "" }],
+    "a bare point": [{ chain: "solana", asset: "SOL", balance: "1." }],
+    "a non-decimal ready": [{ chain: "solana", asset: "SOL", balance: "1", ready: "1e3" }],
+    "a number, not a string": [{ chain: "solana", asset: "SOL", balance: 1 }],
+    "a chain twice": [
+      { chain: "solana", asset: "SOL", balance: "1" },
+      { chain: "base", asset: "ETH", balance: "2" },
+      { chain: "solana", asset: "USDC", balance: "3" },
+    ],
+    "not an array": { chain: "solana", asset: "SOL", balance: "1" },
   };
   for (const [name, v] of Object.entries(bad)) assert.equal(ok({ ...STATE, pools: v }), false, name);
 });

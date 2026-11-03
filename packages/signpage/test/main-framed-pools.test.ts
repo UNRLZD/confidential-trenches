@@ -1,6 +1,7 @@
 // src/main.ts booted in a frame (APP_HOST frames SIGN_HOST) on a minimal DOM with the wallet's real store
 // (fake-indexeddb), card balances-per-chain: the frame keeps no note data. Its state carries no `pools`, and nothing on
-// the framed path calls the note store's open or withPools, at boot, on a state request or on another tab's change.
+// the framed path calls the note store's open, the wallet's readNotes or withPools, at boot, on a state request or on
+// another tab's change.
 // The frame loads the same bundle as the top-level page, so both modules are loaded; a load hook wraps each one's
 // export to record every call, and gives the page's pool table one pool, so a call would read notes. The top-level
 // side (pools read and sent) is test/main-wiring.test.ts. A separate file: main.ts is imported once per process.
@@ -29,10 +30,13 @@ registerHooks({
     if (url.endsWith("/signpage/src/pools.ts")) {
       let src = String(r.source);
       if (!src.includes(TABLE)) throw new Error("pools.ts: PAGE_POOLS's line moved; update this test's hook");
-      src = src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: 4242n, one: 1000000n }]);`);
+      src = src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: 4242n, asset: "USDC" }]);`);
       return { ...r, source: spy(src, "withPools", "export async function withPools(") };
     }
-    if (url.endsWith("/wallet/src/notes/store.ts")) return { ...r, source: spy(String(r.source), "openNoteStore", "export async function openNoteStore(") };
+    if (url.endsWith("/wallet/src/notes/store.ts")) {
+      const src = spy(String(r.source), "openNoteStore", "export async function openNoteStore(");
+      return { ...r, source: spy(src, "readNotes", "export async function readNotes(") };
+    }
     return r;
   },
 });
