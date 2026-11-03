@@ -55,7 +55,8 @@ test("recorded good answer: the deployed vault, keys [] on two RPCs, its code, c
   assert.equal(new Set(answers.map((a) => a.url)).size, 2);
   const r = await check({ deployment, fetchFn: replay(answers) });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 22);
+  assert.equal(r.lines.length, 24);
+  assert.equal(r.lines.filter((l) => /^ok  not the out-of-gas test build on .*: no test mark$/.test(l)).length, 2);
   assert.equal(r.lines.filter((l) => /^ok  \S+ key list is \[\] on .*: 0 key\(s\) at block/.test(l)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  ${deployment.account_id} code hash ${deployment.code_hash} equals`)).length, 2);
   assert.equal(r.lines.filter((l) => l.startsWith(`ok  code sha256 ${deployment.wasm_sha256} equals`)).length, 2);
@@ -139,7 +140,7 @@ test("the same answers from two hosts of one operator (FastNEAR twice): FAIL on 
   const r = await check({ deployment, fetchFn: replay(answers), rpcs: ["https://test.rpc.fastnear.com", NEAR_ORG] });
   assert.equal(r.ok, false);
   assert.deepEqual(bads(r), ["BAD only 1 operator(s) in https://test.rpc.fastnear.com (fastnear), https://rpc.testnet.near.org (fastnear); want two testnet operators"], r.lines.join("\n")); // near-rpc-operators: one operator (planted: the same-operator case this check must refuse)
-  assert.equal(r.lines.filter((l) => l.startsWith("ok ")).length, 22);
+  assert.equal(r.lines.filter((l) => l.startsWith("ok ")).length, 24);
 });
 
 test("the network rule reads the token ids only: the deployed wasm passes; the skeleton's and mainnet's ids are refused", () => {
