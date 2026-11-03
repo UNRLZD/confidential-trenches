@@ -4,7 +4,8 @@
 // whose relay_fee is not the fee published for its epoch (./solana.ts).
 //
 // The fee is the kit's one definition, solanaPoolFee(rent) (M355 (2)): the release's cost (solanaPoolReleaseCost: the
-// spent mark's rent with its 8-byte value, the change note's page entry, two signatures; 1,066,640 at mainnet rent)
+// spent mark's rent with its 12 bytes, withdrawnValue and the release's number; the change note's page entry; two
+// signatures; 1,086,960 at mainnet rent)
 // rounded up to the 100,000 step, plus two steps: 1,300,000. The helper reads the rent on both providers once an epoch
 // (./solana.ts) and computes the fee from it, as the device does, so one epoch's answer never differs between callers
 // and a Rent sysvar change moves the fee at the next epoch with no restart. The host also sets it

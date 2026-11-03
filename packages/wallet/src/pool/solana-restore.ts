@@ -1,10 +1,11 @@
 // Restore of the Solana pool's notes from the 12 words (card notes-per-pool-sol; ../notes/restore.ts is the NEAR
 // vault's, whose walk and follow rules this keeps).
 //
-// - No request names a note or a wallet of the user's. The program's marks are its only accounts of 8 and 16 bytes
-//   (src/state.rs, M353, M355 (3)): a spent mark ["spent", nullifierHash] records the release's withdrawnValue u64 LE,
-//   and a precommitment mark ["pre", precommitment] its deposit, value u64 LE then the nonce u64 LE its label hashes.
-//   Two getProgramAccounts reads (dataSize 8 and dataSize 16, withContext) on each of two RPCs return every mark of
+// - No request names a note or a wallet of the user's. The program's marks are its only accounts of 12 and 16 bytes
+//   (src/state.rs, M353, M355 (3), M376): a spent mark ["spent", nullifierHash] records the release's withdrawnValue
+//   u64 LE then the release's number u32 LE, and a precommitment mark ["pre", precommitment] its deposit, value u64 LE
+//   then the nonce u64 LE its label hashes.
+//   Two getProgramAccounts reads (dataSize 12 and dataSize 16, withContext) on each of two RPCs return every mark of
 //   every user. The marks are the union of the two RPCs' (M355 (4)): two honest RPCs at different finalized slots differ
 //   by the marks between them, and an RPC cannot invent a mark of ours, since a note's nullifier hash and precommitment
 //   stay secret until used; a key both hold with different bytes stops the restore. Then the pages, on both RPCs at or
@@ -22,7 +23,7 @@
 // - Each spent note's W is W_{sol, l, j}: its address is returned and its secret key, derived for it, is zeroed at once.
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
+import { SOLANA_POOL_SPENT_MARK_LEN, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
@@ -48,7 +49,8 @@ export type SolanaDepositMark = { value: bigint; nonce: bigint };
 /** Every mark of the pool: each spent mark's address with its withdrawnValue, each precommitment mark's with its record. */
 export type SolanaMarks = { spent: ReadonlyMap<string, bigint>; pre: ReadonlyMap<string, SolanaDepositMark>; slot: number };
 
-export const SOL_SPENT_MARK_LEN = 8;
+/** The kit's one definition of the spent mark's length (src/state.rs SPENT_MARK_LEN). */
+export const SOL_SPENT_MARK_LEN = SOLANA_POOL_SPENT_MARK_LEN;
 export const SOL_PRE_MARK_LEN = 16;
 
 /** Every mark of the pool, the union of two RPCs' whole-set reads; a key both hold with different bytes is refused. */

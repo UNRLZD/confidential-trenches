@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | pool | `["pool"]` | the lamports every note holds, plus its own rent; `nonce`, `deposited`, `spent`; each tree's size, depth and 33 side nodes (`POOL_LEN` bytes) |
 //! | page | `["page", tree, page_no u32 LE]` | up to `PAGE_ENTRIES` entries (leaf, root, time) of one tree, in insert order: entry `i` is leaf `page_no * PAGE_ENTRIES + i`, the tree's root right after it, and the cluster Clock's `unix_timestamp` (i64 LE) at that insert |
-//! | spent mark | `["spent", nullifierHash]` | the release that spent the note (`SPENT_MARK_LEN` bytes): withdrawnValue u64 LE |
+//! | spent mark | `["spent", nullifierHash]` | the release that spent the note (`SPENT_MARK_LEN` bytes): withdrawnValue u64 LE, then the release's number u32 LE (how many releases came before it) |
 //! | precommitment mark | `["pre", precommitment]` | the deposit that used it (`PRE_MARK_LEN` bytes): value u64 LE, then its nonce u64 LE, the one its label hashes |
 //!
 //! A page grows by one entry (72 bytes) per insert, its rent paid by the inserting transaction's payer; the insert
@@ -35,8 +35,12 @@ pub const POOL_SEED: &[u8] = b"pool";
 /// A precommitment mark's data: the deposit's value u64 LE ‖ its nonce u64 LE.
 pub const PRE_MARK_LEN: usize = 16;
 /// A spent mark's data: the release's withdrawnValue u64 LE (M355 (3)), so a restore from the 12 words knows each
-/// spent note's change exactly from the marks alone.
-pub const SPENT_MARK_LEN: usize = 8;
+/// spent note's change exactly from the marks alone; then the release's number u32 LE, the count of releases before it
+/// (the state tree's size less the label tree's, before its change leaf goes in). Releases are numbered 0, 1, 2, ... with
+/// no gap, as deposits are by their nonce 1, 2, 3, ..., so a restore reads the marks in buckets of consecutive numbers
+/// (one memcmp on the number's bytes) and checks that a cut holds every one (M376). 12 bytes, so a spent mark is told
+/// from a precommitment mark (16) by its size alone.
+pub const SPENT_MARK_LEN: usize = 12;
 pub const PAGE_SEED: &[u8] = b"page";
 pub const SPENT_SEED: &[u8] = b"spent";
 pub const PRE_SEED: &[u8] = b"pre";
