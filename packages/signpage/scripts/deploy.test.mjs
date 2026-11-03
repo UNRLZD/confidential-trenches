@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, deploy } from "./deploy.mjs";
+import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, deploy, liveRuns } from "./deploy.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -172,10 +172,12 @@ test("an unknown argument is a usage error", () => {
   assert.equal(deploy(["dist"], ENV, recorder().run).code, 2);
 });
 
-test("a deploy names every live check that reads SIGN_HOST in its success line", () => {
+test("a deploy's live runs name every live check that reads SIGN_HOST, and its success line is the command that runs them on GitHub's runners", () => {
   const r = deploy([], ENV, recorder().run);
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
-  const out = r.out.join("\n");
+  assert.ok(r.out.some((l) => /^next: gh workflow run live\.yml -f host=sign -f commit=\S+$/.test(l)), r.out.join("\n"));
+  assert.ok(r.out.includes("then: gh run watch --exit-status"), r.out.join("\n"));
+  const out = LIVE_CHECKS.flatMap((k) => liveRuns(k)).join("\n");
   // every signpage-* live check is named, and every named check exists and holds SIGN_HOST's own name
   const dir = join(PKG, "..", "..", "scripts", "live-checks");
   const own = readdirSync(dir).filter((f) => /^signpage-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs")).map((f) => f.replace(/\.mjs$/, ""));

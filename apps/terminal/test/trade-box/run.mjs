@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -79,7 +80,8 @@ function serve(dir) {
     const file = path.join(dir, p === "/" ? "index.html" : p);
     if (!file.startsWith(dir)) return res.writeHead(403).end();
     try {
-      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(readFileSync(file));
+      const body = readFileSync(file); // read before the headers go: a missing file is a 404, never a second write
+      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(body);
     } catch {
       res.writeHead(404).end();
     }
@@ -150,8 +152,7 @@ function kitSet(cents) {
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     for (const [want, f, tapIt, ms, time, LABEL, end] of STATES) {
@@ -293,4 +294,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} shots, the double tap, the preset and the typed amount${PLANT ? ` (planted: ${PLANT})` : ""}`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots, the double tap, the preset and the typed amount at 390 and 1440${PLANT ? ` (planted: ${PLANT}: a planted fault passed)` : ""}`);
+console.log(`PASS ${n} shots, the double tap, the preset and the typed amount at 390 and 1440${PLANT ? ` (planted: ${PLANT}: a planted fault passed)` : ""} on ${browserLabel(browser)}`);
