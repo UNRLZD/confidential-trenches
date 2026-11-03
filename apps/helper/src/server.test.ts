@@ -256,7 +256,8 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
   assert.match(main, /const withdraw = withdrawSenderFromEnv\(process\.env, fee, statusesOf\(watches\)\);/);
   assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
-  assert.match(main, /await Promise\.all\(\[\.\.\.pools\.values\(\)\]\.map\(\(p\) => p\.ready\)\);/);
+  assert.match(main, /for \(const p of pools\.values\(\)\) p\.ready\.catch\(\(e: Error\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
+  assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind, pools\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
@@ -409,5 +410,73 @@ test("POST /v1/bind is not tied to the request: a client that closes at 1 s does
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+// M362 (3): the helper's own main, as the host runs it, with one devnet Solana pool whose two RPCs are local stubs.
+// A failed rent read takes down only that pool (503 upstream) and the rest answers; a configured fee that is not the
+// kit's for the rent read makes the process exit 2. Test keys only: sha256 of a label.
+test("M362 (3): a pool's failed rent read leaves the helper up with that pool 503; a mismatched configured fee exits 2", async () => {
+  const { spawn } = await import("node:child_process");
+  const { createHash } = await import("node:crypto");
+  const { ed25519 } = await import("@noble/curves/ed25519.js");
+  const { solanaPoolAccount } = await import("@blindfill/kit");
+  const SYSVAR_OWNER = "Sysvar1111111111111111111111111111111111111";
+  const { base58 } = await import("./bind/checks.ts");
+  const seed = new Uint8Array(createHash("sha256").update("helper-pool-senders/server/FP").digest());
+  const feePayer = base58(Uint8Array.from([...seed, ...ed25519.getPublicKey(seed)]));
+  const program = base58(ed25519.getPublicKey(new Uint8Array(createHash("sha256").update("helper-pool-senders/server/PROGRAM").digest())));
+  const RENT = "2BMAAAAAAAAAAAAAAADwPzI="; // the Rent sysvar devnet and mainnet answer (5,080 a byte, factor 2): fee 1,300,000
+  let up = false;
+  const rpc = () =>
+    createServer((req, res) => {
+      let b = "";
+      req.on("data", (d) => (b += d)).on("end", () => {
+        if (!up) return void res.writeHead(500).end();
+        const { id } = JSON.parse(b);
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: { owner: SYSVAR_OWNER, data: [RENT, "base64"], lamports: 1, executable: false } } }));
+      });
+    }).listen(0, "127.0.0.1");
+  const stubs = [rpc(), rpc()];
+  await Promise.all(stubs.map((s) => new Promise((ok) => s.on("listening", ok))));
+  const urls = stubs.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`).join(",");
+  const free = createServer().listen(0, "127.0.0.1");
+  await new Promise((ok) => free.on("listening", ok));
+  const hp = (free.address() as AddressInfo).port;
+  await new Promise((ok) => free.close(ok));
+  const run = (fee: string) =>
+    spawn(process.execPath, [join(import.meta.dirname, "server.ts")], {
+      env: { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: String(hp), POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: fee, POOL_SOLANA_RPCS_DEVNET: urls },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  const exited = (c: ReturnType<typeof run>) => new Promise<number | null>((ok) => c.on("exit", ok));
+  const listening = (c: ReturnType<typeof run>) => new Promise<void>((ok) => c.stdout!.on("data", (d) => String(d).includes("listening") && ok()));
+  const pool = solanaPoolAccount(program);
+  try {
+    // the RPCs down: the helper starts, answers its health, and the pool answers 503 upstream
+    const a = run("1300000");
+    try {
+      await listening(a);
+      assert.equal((await call("GET", "/v1/health", {}, undefined, hp)).status, 200);
+      const f = await call("GET", `/v1/pool/fee?pool=${pool}`, {}, undefined, hp);
+      assert.deepEqual([f.status, JSON.parse(f.body).error.code], [503, "upstream"]);
+      const s = await call("POST", "/v1/pool/solana/send", { "content-type": "application/json" }, JSON.stringify({ pool, tx: "AA==" }), hp);
+      assert.deepEqual([s.status, JSON.parse(s.body).error.code], [503, "upstream"], "the pool's send is down with it");
+      // the RPCs back: the next ask reads, the configured fee is the kit's, and the pool answers
+      up = true;
+      const g = await call("GET", `/v1/pool/fee?pool=${pool}`, {}, undefined, hp);
+      assert.deepEqual([g.status, JSON.parse(g.body).fee], [200, "1300000"]);
+      assert.equal(a.exitCode, null);
+    } finally {
+      a.kill();
+      await exited(a);
+    }
+    // a configured fee that is not the kit's for the rent read: the process exits 2
+    const b = run("1400000");
+    const code = await Promise.race([exited(b), new Promise<string>((ok) => setTimeout(() => ok("still running"), 10_000))]);
+    if (code === "still running") b.kill();
+    assert.equal(code, 2);
+  } finally {
+    await Promise.all(stubs.map((s) => new Promise((ok) => (s.closeAllConnections(), s.close(ok)))));
   }
 });

@@ -266,6 +266,29 @@ test("the published fee: the kit's for the rent read, the same for every caller 
   await assert.rejects(sender(null, [], [], { fee: 1_300_000n }).ready, /the kit's fee for this rent, 2000000/, "a fee off the kit's for the rent read stops the helper");
 });
 
+test("M362 (3): a failed rent read never rejects ready: the pool answers 503 upstream, and the first good read checks the configured fee", async () => {
+  let fail = true;
+  const reads: number[] = [];
+  const s = sender(null, [], [], { fee: 2_000_000n, readRent: async (e) => { reads.push(e); if (fail) throw new Error("down"); return TEST_RENT; } });
+  let settled = "pending";
+  s.ready.then(() => (settled = "ok"), () => (settled = "rejected"));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual([settled, reads.length], ["pending", 1], "the start read failed and ready waits");
+  await assert.rejects(s.fee(NOW));
+  assert.equal(code(await s.carry(body(build()))), "upstream");
+  fail = false;
+  assert.equal(code(await s.carry(body(build()))), "ok", "the next good read checks the fee and the pool carries");
+  assert.equal(settled, "ok");
+  // a mismatch found at a later good read: ready rejects (the helper exits) and the pool refuses meanwhile
+  fail = true;
+  const t = sender(null, [], [], { fee: 1_300_000n, readRent: async () => { if (fail) throw new Error("down"); return TEST_RENT; } });
+  const r = t.ready;
+  await new Promise((x) => setImmediate(x));
+  fail = false;
+  assert.equal(code(await t.carry(body(build()))), "upstream");
+  await assert.rejects(r, /the kit's fee for this rent, 2000000/);
+});
+
 test("the fee payer's key: 64 bytes whose public half is its seed's", () => {
   assert.equal(feePayerKey(FP.secret).address, FP.address);
   assert.throws(() => feePayerKey(base58(Uint8Array.from([...FP.seed, ...ed25519.getPublicKey(W.seed)]))), /public half/);

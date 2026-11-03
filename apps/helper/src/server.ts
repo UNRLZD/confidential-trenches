@@ -450,9 +450,10 @@ if (import.meta.main) {
     // each network's carry is held by its own watch only
     const withdraw = withdrawSenderFromEnv(process.env, fee, statusesOf(watches));
     const bind = bindSenderFromEnv(process.env, watches);
-    // the Solana pool senders start only when the rent both providers read gives the kit's fee (pool/solana.ts ready)
+    // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
+    // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
-    await Promise.all([...pools.values()].map((p) => p.ready));
+    for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
     server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind, pools); // warms both relayers
     lists.warm();
   } catch (e) {

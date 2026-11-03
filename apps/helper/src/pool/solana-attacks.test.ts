@@ -9,8 +9,10 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
+  SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_POOL_STEP_PROGRAMS,
   SOLANA_SYSTEM_PROGRAM,
+  SOLANA_TOKEN_2022_PROGRAM,
   solanaCompileV0,
   solanaDecodeLookupTable,
   solanaEncodePoolRelease,
@@ -26,6 +28,7 @@ import { base58 } from "../bind/checks.ts";
 import { POOL_EPOCH_MS } from "./fee.ts";
 import { solanaPoolPriorityBudget, type SolanaRent } from "@blindfill/kit";
 import { checkSolanaPoolTx, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
+import { jitoSender, SOLANA_JITO_BLOCK_ENGINES } from "./jito.ts";
 
 const key = (n: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/attack/${n}`).digest());
@@ -86,6 +89,9 @@ type Opt = {
   innerIx?: { program: number; accounts: number[] };
   /** edit the message bytes before W signs */
   edit?: (m: Uint8Array) => void;
+  /** tag 3: a Jito tip, paid to `tipTo` (account 8, before the inner program and TO) */
+  tip?: bigint;
+  tipTo?: string;
 };
 function wire(o: Opt = {}): Uint8Array {
   const r = rel(o.r);
@@ -93,9 +99,11 @@ function wire(o: Opt = {}): Uint8Array {
   let data: Uint8Array;
   if (o.inner === undefined && o.innerIx === undefined) data = solanaEncodePoolRelease(r);
   else {
+    const tipped = o.tip !== undefined && o.tip > 0n;
+    if (tipped) accounts.push({ key: o.tipTo ?? SOLANA_JITO_TIP_ACCOUNTS[0]!, signer: false, writable: true });
     accounts.push({ key: o.inner ?? SOLANA_SYSTEM_PROGRAM, signer: false, writable: false }, { key: TO, signer: false, writable: true });
     const transfer = Uint8Array.from([2, 0, 0, 0, ...u64(1_000n)]);
-    data = solanaEncodePoolTag3(r, false, 0n, [{ ...(o.innerIx ?? { program: 8, accounts: [1, 9] }), data: transfer }]);
+    data = solanaEncodePoolTag3(r, false, o.tip ?? 0n, [{ ...(o.innerIx ?? (tipped ? { program: 9, accounts: [1, 10] } : { program: 8, accounts: [1, 9] })), data: transfer }]);
   }
   if (o.accounts) accounts = o.accounts(accounts);
   const tables = o.table
@@ -148,6 +156,22 @@ test("A1: a tag 3 inner instruction invoking a program off the kit's list is ref
   for (const p of SOLANA_POOL_STEP_PROGRAMS) assert.equal(verdict(wire({ inner: p })), "ok", p);
   const calls: Calls = [];
   assert.equal(code(await sender({ a: calls }).carry(body(wire({ inner: ATTACKER })))), "inner_program");
+  assert.deepEqual(calls, []);
+});
+
+test("M362 (1): a tag 3 inner step invoking Token-2022 (a transfer that runs the mint's hook) is refused before any read (inner_program)", async () => {
+  assert.equal(verdict(wire({ inner: SOLANA_TOKEN_2022_PROGRAM })), "inner_program");
+  const calls: Calls = [];
+  assert.equal(code(await sender({ a: calls }).carry(body(wire({ inner: SOLANA_TOKEN_2022_PROGRAM })))), "inner_program");
+  assert.deepEqual(calls, []);
+});
+
+test("M362 (5): a tag 2 W signed with a 9th account is refused before any read (not_pool)", async () => {
+  const nine = wire({ accounts: (a) => [...a, { key: TO, signer: false, writable: false }] });
+  assert.equal(verdict(nine), "not_pool");
+  assert.equal(verdict(wire()), "ok");
+  const calls: Calls = [];
+  assert.equal(code(await sender({ a: calls }).carry(body(nine))), "not_pool");
   assert.deepEqual(calls, []);
 });
 
@@ -259,4 +283,155 @@ test("a message loading more than SOLANA_POOL_LOOKUPS_MAX (4) tables is refused 
   assert.equal(five.ok ? "ok" : five.code, "bad_shape");
   const four = checkSolanaPoolTx(wire({ inner: SOLANA_SYSTEM_PROGRAM, tables: loadable.slice(0, 4) }), CFG);
   assert.ok(four.ok && four.tx.message.lookups.length === 4);
+});
+
+// ------------------------------------------------------------------------------------------------ M362 (4): Jito
+// A fake block engine: per region (by host), the answer to give; it records every request. "ok" answers the signature
+// of the transaction posted.
+type Engine = "ok" | "429" | "503" | "throw" | "rpc_error" | "rate_error";
+function blockEngine(plan: (host: string, n: number) => Engine) {
+  const seen: { host: string; url: string; body: { method: string; params: [string, { encoding: string }] } }[] = [];
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const u = new URL(url);
+    const body = JSON.parse(String(init.body));
+    seen.push({ host: u.host, url, body });
+    const what = plan(u.host, seen.length - 1);
+    if (what === "throw") throw new Error("connect ECONNREFUSED");
+    if (what === "429") return new Response("rate limited", { status: 429 });
+    if (what === "503") return new Response("", { status: 503 });
+    if (what === "rpc_error") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "bundle must tip" } }), { status: 400 });
+    if (what === "rate_error") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32097, message: "Rate limit exceeded" } }), { status: 200 });
+    const w = Buffer.from(body.params[0], "base64");
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: base58(w.subarray(1, 65)) }), { status: 200 });
+  };
+  return { seen, fetchFn };
+}
+const REGIONS = SOLANA_JITO_BLOCK_ENGINES;
+/** A mainnet sender on a fake block engine; the kit's send is faked as the chain: a bundle-only send that would fail
+ * never lands (expired), a plain one that fails lands as a paid failure. */
+function mainnet(o: { engine: ReturnType<typeof blockEngine>; a?: Calls; now?: () => number; paths?: string[][]; end?: "failed" | "filled" }) {
+  return solanaPoolSender(
+    { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    {
+      providers: [stub(o.a ?? []), stub([])],
+      now: o.now ?? (() => NOW),
+      readRent: async () => MAINNET,
+      jito: jitoSender({ fetch: o.engine.fetchFn, timeoutMs: 1_000 }),
+      send: (set, opts) => {
+        const names = opts.paths.map((p) => p.name);
+        o.paths?.push(names);
+        const sig = base58(set[0]!.wire.subarray(1, 65));
+        const end = (o.end ?? "failed") === "filled" ? "filled" : names.includes("jito") ? "expired" : "failed";
+        return { signatures: [sig], done: Promise.resolve({ txs: [{ signature: sig, state: end as "filled", sends: [] }] }), stop() {} };
+      },
+    },
+  );
+}
+const tipped = (o: Opt = {}) => wire({ inner: SOLANA_SYSTEM_PROGRAM, tip: 1_000n, ...o });
+const MCFG = { ...CFG, jito: true };
+const mverdict = (w: Uint8Array) => {
+  const c = checkSolanaPoolTx(w, MCFG);
+  return c.ok ? "ok" : c.code;
+};
+
+test("M362 (4): on mainnet a tag 3 tips at least 1,000 lamports to a Jito tip account named statically, or is refused before any read (tip_low)", async () => {
+  assert.equal(mverdict(tipped()), "ok");
+  for (const t of SOLANA_JITO_TIP_ACCOUNTS) assert.equal(mverdict(tipped({ tipTo: t })), "ok", t);
+  assert.equal(mverdict(tipped({ tip: 999n })), "tip_low");
+  assert.equal(mverdict(wire({ inner: SOLANA_SYSTEM_PROGRAM })), "tip_low", "no tip at all");
+  assert.equal(mverdict(tipped({ tipTo: TO })), "tip_low", "a tip to an account that is not Jito's");
+  // the kit's compiler never loads a Jito tip account (M362 (4)), so a loaded account 8 is another key: refused unread
+  const loaded = key("TIP_LOADED").address;
+  const wl = tipped({ tipTo: loaded, table: [loaded] });
+  const c = checkSolanaPoolTx(wl, CFG);
+  assert.ok(c.ok && c.tx.message.lookups.length === 1, "account 8 is loaded from the table");
+  assert.equal(mverdict(wl), "tip_low", "account 8 loaded from a table");
+  assert.equal(mverdict(wire()), "ok", "a tag 2 carries no tip");
+  assert.equal(verdict(wire({ inner: SOLANA_SYSTEM_PROGRAM })), "ok", "devnet: no tip asked");
+  const engine = blockEngine(() => "ok");
+  const calls: Calls = [];
+  assert.equal(code(await mainnet({ engine, a: calls }).carry(body(tipped({ tip: 999n })))), "tip_low");
+  assert.deepEqual(calls, []);
+  assert.equal(engine.seen.length, 0);
+});
+
+test("M362 (4): a mainnet tag 3 goes bundle-only to a block engine and is rebroadcast only there", async () => {
+  const engine = blockEngine(() => "ok");
+  const paths: string[][] = [];
+  const a = await mainnet({ engine, paths }).carry(body(tipped()));
+  assert.equal(code(a), "ok");
+  assert.equal(engine.seen.length, 1);
+  const u = new URL(engine.seen[0]!.url);
+  assert.equal(u.pathname, "/api/v1/transactions");
+  assert.equal(u.searchParams.get("bundleOnly"), "true");
+  assert.equal(engine.seen[0]!.body.method, "sendTransaction");
+  assert.equal(engine.seen[0]!.body.params[1].encoding, "base64");
+  assert.deepEqual(paths, [["jito"]]);
+  assert.ok(REGIONS.every((r) => new URL(r).searchParams.get("bundleOnly") === "true" && new URL(r).host.endsWith(".block-engine.jito.wtf")));
+  assert.equal(REGIONS.length, 9);
+});
+
+test("M362 (4): a 429 from one region goes to the next; sends start at the next region each time", async () => {
+  const engine = blockEngine((host) => (host.startsWith("mainnet.") ? "429" : "ok"));
+  const s = mainnet({ engine });
+  assert.equal(code(await s.carry(body(tipped()))), "ok");
+  assert.deepEqual(engine.seen.map((x) => x.host.split(".")[0]), ["mainnet", "amsterdam"]);
+  assert.equal(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(77) } })))), "ok");
+  assert.deepEqual(engine.seen.slice(2).map((x) => x.host.split(".")[0]), ["amsterdam"], "the next send starts one region further on");
+  assert.equal(code(await s.carry(body(tipped({ r: { existingNullifierHash: f32(78) } })))), "ok");
+  assert.deepEqual(engine.seen.slice(3).map((x) => x.host.split(".")[0]), ["dublin"]);
+  const rate = blockEngine((host) => (host.startsWith("mainnet.") ? "rate_error" : "ok"));
+  assert.equal(code(await mainnet({ engine: rate }).carry(body(tipped()))), "ok");
+  assert.equal(rate.seen.length, 2, "a JSON-RPC rate-limit answer counts as busy too");
+});
+
+test("M362 (4): the plain send only when every region fails on transport; busy or refused everywhere sends nothing (503)", async () => {
+  for (const fail of ["throw", "503"] as const) {
+    const engine = blockEngine(() => fail);
+    const paths: string[][] = [];
+    assert.equal(code(await mainnet({ engine, paths }).carry(body(tipped()))), "ok", fail);
+    assert.equal(engine.seen.length, 9);
+    assert.deepEqual(paths, [["rpc0", "rpc1"]], `${fail}: the plain send`);
+  }
+  const mixed = blockEngine((host) => (host.startsWith("tokyo.") ? "429" : "throw"));
+  const p1: string[][] = [];
+  const a = await mainnet({ engine: mixed, paths: p1 }).carry(body(tipped()));
+  assert.deepEqual([a.status, code(a)], [503, "upstream"], "one region busy: not every region failed on transport");
+  assert.deepEqual(p1, []);
+  const refused = blockEngine(() => "rpc_error");
+  const p2: string[][] = [];
+  const b = await mainnet({ engine: refused, paths: p2 }).carry(body(tipped()));
+  assert.deepEqual([b.status, code(b)], [503, "upstream"]);
+  assert.equal(refused.seen.length, 1, "a refusal ends the try");
+  assert.deepEqual(p2, []);
+  // and a 503 frees the nullifier: the next carry tries again
+  const s = mainnet({ engine: blockEngine((_, n) => (n === 0 ? "rpc_error" : "ok")) });
+  assert.equal(code(await s.carry(body(tipped()))), "upstream");
+  assert.equal(code(await s.carry(body(tipped()))), "ok");
+});
+
+test("M362 (4): a mainnet tag 2 goes plain, never to a block engine", async () => {
+  const engine = blockEngine(() => "ok");
+  const paths: string[][] = [];
+  assert.equal(code(await mainnet({ engine, paths, end: "filled" }).carry(body(wire()))), "ok");
+  assert.equal(engine.seen.length, 0);
+  assert.deepEqual(paths, [["rpc0", "rpc1"]]);
+});
+
+test("R2-D1 rerun (M362 (4)): ten notes, sixty epochs on mainnet: bundle-only, so no failure lands and the drain is 0", async () => {
+  const engine = blockEngine(() => "ok");
+  const paths: string[][] = [];
+  let now = NOW;
+  const s = mainnet({ engine, paths, now: () => now });
+  const budget = solanaPoolPriorityBudget(MAINNET, FEE);
+  const top = (budget * 1_000_000n) / 1_400_000n;
+  const notes = Array.from({ length: 10 }, (_, i) => tipped({ pre: [cuLimit(1_400_000), cuPrice(top)], r: { existingNullifierHash: f32(100 + i), deadlineMs: BigInt(NOW + 3_700_000) } }));
+  for (let e = 0; e < 60; e++) {
+    for (const n of notes) assert.equal(code(await s.carry(body(n))), "ok");
+    await new Promise((r) => setImmediate(r));
+    now += POOL_EPOCH_MS;
+  }
+  assert.equal(paths.length, 600, "each carry sent (a send that never lands frees its note)");
+  const plain = paths.filter((p) => !p.includes("jito")).length;
+  assert.equal(plain, 0, "no plain send, so no paid failure: the fee payer's drain is 0");
 });

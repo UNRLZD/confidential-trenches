@@ -26,17 +26,27 @@
 //                       that cannot land before it would only be a paid failure;
 //   inner_program       a tag 3 inner instruction invokes a program off the kit's SOLANA_POOL_STEP_PROGRAMS (helper
 //                       policy, M356 (1): a program W chose could fail on chain after passing the simulation);
+//   tip_low             mainnet only: a tag 3 whose Jito tip is under SOLANA_JITO_TIP_MIN (1,000 lamports), or whose tip
+//                       account (account 8) is not a Jito tip account named in the message itself (./jito.ts: "When
+//                       tipping make sure to not use Address Lookup Tables for the tip accounts", M362 (4));
 //   bad_table           a lookup table the message loads is not an active table both providers read the same at
 //                       every index used (read only when the message has lookups; at most SOLANA_POOL_LOOKUPS_MAX);
 //   failed_this_epoch   this nullifier's send already failed on chain in this epoch (M356 (1): at most one paid
 //                       failure per nullifier per epoch);
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
-//   upstream (503)      the simulation or the blockhash read could not be made.
+//   upstream (503)      the simulation or the blockhash read could not be made, this epoch's rent could not be read,
+//                       or (mainnet tag 3) every block engine was busy or refused it.
 // Answer: 200 { signature } (the fee payer's, the transaction id). The device reads the fill itself.
+// The send (M362 (4)): on mainnet a tag 3 goes to Jito bundle-only (./jito.ts), so one that fails on chain never lands
+// and the fee payer pays nothing for it; only when every block engine fails on transport does it go out as a plain send,
+// under M356 (1)'s one paid failure per nullifier per epoch. A tag 2 (its one on-chain failure is the note spent
+// elsewhere) and every devnet send (devnet has no block engine) go plain.
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
+  SOLANA_JITO_TIP_ACCOUNTS,
+  SOLANA_KEYLESS_PATH_INTERVAL_MS,
   SOLANA_MAX_TX_BYTES,
   SOLANA_POOL_SEND_MARGIN_MS,
   SOLANA_POOL_STEP_PROGRAMS,
@@ -63,6 +73,7 @@ import {
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
+import { jitoSender, SOLANA_JITO_TIP_MIN, type JitoSender } from "./jito.ts";
 import { oncePerNullifier } from "./once.ts";
 import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, type PoolFeeAnswer } from "./fee.ts";
 import { POOL_LIFE_MAX_MS } from "./evm.ts";
@@ -90,6 +101,7 @@ export type PoolSendCode =
   | "no_cu_limit"
   | "deadline_near"
   | "inner_program"
+  | "tip_low"
   | "bad_table"
   | "failed_this_epoch"
   | "simulation_failed"
@@ -97,13 +109,13 @@ export type PoolSendCode =
 export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } } };
 
 /** What a pool instruction carries that the checks read: its tag, its relay fee and the accounts tag 3's inner instructions name. */
-export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; innerAccounts: number[]; innerPrograms: number[] };
+export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; tip: bigint; innerAccounts: number[]; innerPrograms: number[] };
 
 /** Tag 2's or tag 3's data, read; throws on any layout TAG3.md and release.rs do not allow. */
 export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   if (d[0] === SOLANA_POOL_TAG_RELEASE) {
     const r = solanaDecodePoolRelease(d); // exactly 387 bytes
-    return { tag: 2, relayFee: r.relayFee, deadlineMs: r.deadlineMs, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), innerAccounts: [], innerPrograms: [] };
+    return { tag: 2, relayFee: r.relayFee, deadlineMs: r.deadlineMs, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), tip: 0n, innerAccounts: [], innerPrograms: [] };
   }
   if (d[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || d.length < 2) throw new Error("not tag 2 or tag 3");
   const flags = d[1]!;
@@ -132,7 +144,7 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
     if (at > d.length) throw new Error("tag 3 inner data truncated");
   }
   if (at !== d.length) throw new Error("tag 3 bytes after the last inner instruction");
-  return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), innerAccounts, innerPrograms };
+  return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), tip: v.getBigUint64(tipAt, true), innerAccounts, innerPrograms };
 }
 
 /** The relay fee a pool instruction carries, or null when the bytes are not one (checkSolanaPoolTx then names why). */
@@ -151,6 +163,7 @@ const priorityFee = (price: bigint, limit: bigint): bigint => (price * limit + M
 
 /** A transaction that passed every check: its bytes, its message, W, its relay fee and its nullifier hash (64 hex). */
 export type SolanaPoolChecked = {
+  tag: 2 | 3;
   wire: Uint8Array;
   messageBytes: Uint8Array;
   w: string;
@@ -165,7 +178,7 @@ export type SolanaPoolChecked = {
 export type SolanaPoolCheck = { ok: true; tx: SolanaPoolChecked } | { ok: false; status: number; code: PoolSendCode; detail?: string };
 
 /** Every check before any read, on the bytes as received and the caller's clock. Pure: no read. */
-export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool: string; feePayer: string; fee: bigint; budget: bigint; nowMs: number }): SolanaPoolCheck {
+export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool: string; feePayer: string; fee: bigint; budget: bigint; nowMs: number; jito?: boolean }): SolanaPoolCheck {
   const no = (code: PoolSendCode, detail?: string, status = 422): SolanaPoolCheck => ({ ok: false, status, code, ...(detail ? { detail } : {}) });
   if (wire.length > SOLANA_MAX_TX_BYTES) return no("bad_shape", "over 1,232 bytes", 400);
   let tx;
@@ -226,10 +239,16 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   const priority = priorityFee(price ?? 0n, limit ?? 0n); // a price comes with a limit (no_cu_limit)
   if (priority > cfg.budget) return no("fee_below_cost", `priority ${priority}, budget ${cfg.budget}`);
   if (p.deadlineMs < BigInt(cfg.nowMs) + SOLANA_POOL_SEND_MARGIN_MS) return no("deadline_near", `deadline ${p.deadlineMs}, now ${cfg.nowMs}`);
+  // a bundle-only send (M362 (4)): the tip at least Jito's minimum, to a tip account the message names as a static key
+  if (cfg.jito && p.tag === 3) {
+    const t = pix.accounts[8]; // the release's 8 accounts, then the tip account when the tip is above 0
+    if (p.tip < SOLANA_JITO_TIP_MIN) return no("tip_low", `tip ${p.tip}, the least ${SOLANA_JITO_TIP_MIN}`);
+    if (t === undefined || t >= m.staticKeys.length || !SOLANA_JITO_TIP_ACCOUNTS.includes(m.staticKeys[t]!)) return no("tip_low", "account 8 is not a Jito tip account named in the message");
+  }
   // tag 3's inner programs, by their message index; a static one is checked now, a loaded one after its table's read
   const innerProgramIndexes = p.innerPrograms.map((i) => pix.accounts[i]!);
   if (innerProgramIndexes.some((i) => i < m.staticKeys.length && !SOLANA_POOL_STEP_PROGRAMS.includes(m.staticKeys[i]!))) return no("inner_program", "an inner instruction invokes a program off the kit's list");
-  const checked: SolanaPoolChecked = { wire, messageBytes: tx.messageBytes, w, relayFee: p.relayFee, deadlineMs: p.deadlineMs, nullifier: p.nullifier, message: m, poolIndex: pix.accounts[0]!, innerProgramIndexes };
+  const checked: SolanaPoolChecked = { tag: p.tag, wire, messageBytes: tx.messageBytes, w, relayFee: p.relayFee, deadlineMs: p.deadlineMs, nullifier: p.nullifier, message: m, poolIndex: pix.accounts[0]!, innerProgramIndexes };
   return { ok: true, tx: checked };
 }
 
@@ -290,6 +309,9 @@ export type SolanaPoolSenderDeps = {
   now?: () => number;
   /** The Rent sysvar for an epoch; default readSolanaRent on both providers (replaced in tests). */
   readRent?: (epoch: number) => Promise<SolanaRent>;
+  /** The bundle-only sender a mainnet tag 3 goes through (./jito.ts); default the block engines on mainnet, none on
+   * any other cluster. null: none (every send plain). */
+  jito?: JitoSender | null;
 };
 
 export type SolanaPoolSender = {
@@ -297,8 +319,9 @@ export type SolanaPoolSender = {
   readonly program: string;
   readonly pool: string;
   readonly feePayer: string;
-  /** Settles once this epoch's rent is read on both providers and the configured fee is the kit's for it; rejects
-   * otherwise, and the helper does not start (server.ts awaits it). */
+  /** Asks this epoch's rent (the first read, at start); settles at the first good read: resolves when the configured
+   * fee is the kit's for it, rejects when it is not, and the helper exits (server.ts). A failed read never rejects it:
+   * the pool answers 503 upstream until a read succeeds, and the rest of the helper serves on (M362 (3)). */
   readonly ready: Promise<void>;
   /** GET /v1/pool/fee: the kit's fee for the epoch holding `atMs`, from the rent read in that epoch; the same for every caller. */
   fee(atMs: number): Promise<PoolFeeAnswer>;
@@ -335,12 +358,24 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   type EpochFee = { fee: bigint; budget: bigint };
   const epochFees = new Map<number, Promise<EpochFee>>();
   const known = new Map<number, EpochFee>();
+  // M362 (3): the configured fee is checked at the first good read, whenever it comes; a mismatch rejects `ready` (the
+  // helper exits) and the pool refuses every carry and fee meanwhile
+  let settle!: { ok: () => void; no: (e: Error) => void };
+  const readyP = new Promise<void>((ok, no) => (settle = { ok, no }));
+  readyP.catch(() => {}); // a sender nobody awaits (a test) must not end the process; server.ts awaits it
+  let configured: "unchecked" | "ok" | "mismatch" = "unchecked";
   const feeOf = (epoch: number): Promise<EpochFee> => {
     const had = epochFees.get(epoch);
     if (had) return had;
     const p = readRent(epoch).then((rent) => {
       const fee = solanaPoolFee(rent);
       const f = { fee, budget: solanaPoolPriorityBudget(rent, fee) };
+      if (configured === "unchecked") {
+        configured = /^[1-9][0-9]{0,18}$/.test(cfg.fee) && BigInt(cfg.fee) === fee ? "ok" : "mismatch";
+        if (configured === "ok") settle.ok();
+        else settle.no(new Error(`the ${cfg.cluster} pool fee must be the kit's fee for this rent, ${fee} lamports`));
+      }
+      if (configured === "mismatch") throw new Error("the configured fee is not the kit's");
       known.set(epoch, f);
       return f;
     });
@@ -351,12 +386,16 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     for (const m of [epochFees, known]) for (const k of [...m.keys()]) if (k < epoch - POOL_LIFE_MAX_MS) m.delete(k);
     return p;
   };
-  let readyP: Promise<void> | null = null;
-  const ready = (): Promise<void> =>
-    (readyP ??= feeOf(epochStartOf((deps.now ?? Date.now)())).then((f) => {
-      if (!/^[1-9][0-9]{0,18}$/.test(cfg.fee) || BigInt(cfg.fee) !== f.fee) throw new Error(`the ${cfg.cluster} pool fee must be the kit's fee for this rent, ${f.fee} lamports`);
-    }));
+  let asked = false;
+  const ready = (): Promise<void> => {
+    if (!asked) {
+      asked = true;
+      feeOf(epochStartOf((deps.now ?? Date.now)())).catch(() => {}); // a failed read: the next ask reads again
+    }
+    return readyP;
+  };
   const send = deps.send ?? sendSolanaSet;
+  const jito = deps.jito !== undefined ? deps.jito : cfg.cluster === "mainnet" ? jitoSender() : null;
   const paths: readonly SolanaSendPath[] =
     deps.paths ??
     deps.providers.map((rpc, i) => ({
@@ -411,7 +450,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       const relay = relayFeeOf(wire);
       const match = relay === current.fee ? current : [...known.entries()].find(([k, f]) => k >= at - POOL_LIFE_MAX_MS && f.fee === relay)?.[1];
       const f = match ?? current;
-      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee: f.fee, budget: f.budget, nowMs: at });
+      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee: f.fee, budget: f.budget, nowMs: at, jito: jito !== null });
       if (!c.ok) return no(c.status, c.code, c.detail);
       const nf = c.tx.nullifier;
       const failed = failedIn.get(nf);
@@ -465,7 +504,27 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (v.err !== null) return no(422, "simulation_failed", JSON.stringify(v.err).slice(0, 200));
       if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
       const signed: SolanaSignedTx = { wire: signAsFeePayer(tx, seed), lastValidBlockHeight: height };
-      const h = send([signed], { paths, providers: [a, b] });
+      let through = paths;
+      if (jito !== null && tx.tag === 3) {
+        // M362 (4): bundle-only, so a tag 3 that would fail on chain never lands; rebroadcast the same way, one a second
+        const sig = base58(signed.wire.subarray(1, 65));
+        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig);
+        if (j.kind === "busy" || j.kind === "refused") return no(503, "upstream", `block engine ${j.kind}: ${j.detail}`);
+        if (j.kind === "ok")
+          through = [
+            {
+              name: "jito",
+              minIntervalMs: SOLANA_KEYLESS_PATH_INTERVAL_MS,
+              send: async (b64) => {
+                const r = await jito.send(b64, sig);
+                if (r.kind !== "ok") throw new Error(`block engine ${r.kind}: ${r.detail}`);
+                return sig;
+              },
+            },
+          ];
+        // every region failed on transport: the plain send, under M356 (1) (a failure that lands is paid once an epoch)
+      }
+      const h = send([signed], { paths: through, providers: [a, b] });
       // the send's end frees the nullifier only if once still holds this send's entry (a newer one stays):
       //   expired (never landed, no fee paid): free now; failed (a paid failure): free, and refuse it until the next
       //   epoch; unknown, or no answer: held until the release's deadline, after which it cannot land
