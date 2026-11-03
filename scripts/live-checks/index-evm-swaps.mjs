@@ -23,6 +23,7 @@
 // providers' newest block's time within 20 s of the read, each block time read on two providers that agree; its swaps
 // include the Pons v2 curve's CurveBuy and CurveSell, and its pool's logs are read in the 100-block spans its keyless
 // providers take.
+// With no --chain it checks both chains and passes only when both pass (the deployed helper's run).
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";
@@ -321,21 +322,27 @@ if (import.meta.main) {
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
     const base = opt("--base", BASE);
-    const net = opt("--chain", "base");
-    if (!["base", "robinhood"].includes(net)) throw new Error(`--chain ${net}: base or robinhood`);
-    const run = await read(base, opt("--token"), fetch, undefined, net);
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-    const { ok, lines } = judge(run);
-    for (const l of lines) console.log(l);
-    console.log(`first reads (${run.coin}): candles ${run.reads.candles?.ms} ms, trades ${run.reads.trades?.ms} ms`);
-    const n = Number(opt("--speed", "0"));
-    if (n > 0 && run.coin) {
-      const ms = [];
-      for (let i = 0; i < n; i++) ms.push((await get(base, CANDLES_PATH(run.coin, net), fetch)).ms);
-      console.log(`speed: ${n} candle reads, p50 ${pct(ms, 50)} ms, p95 ${pct(ms, 95)} ms, max ${Math.max(...ms)} ms`);
+    // no --chain: both chains, as the deployed helper's runs ask it (scripts/ci/helper-live-checks.mjs passes no args)
+    const nets = a.includes("--chain") ? [opt("--chain")] : ["base", "robinhood"];
+    if (!nets.every((n) => ["base", "robinhood"].includes(n))) throw new Error(`--chain ${nets}: base or robinhood`);
+    if (nets.length > 1 && opt("--token")) throw new Error("--token needs --chain");
+    let all = true;
+    for (const net of nets) {
+      const run = await read(base, opt("--token"), fetch, undefined, net);
+      if (opt("--record")) writeFileSync(nets.length > 1 ? opt("--record").replace(/(\.json)?$/, `.${net}.json`) : opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
+      const { ok, lines } = judge(run);
+      for (const l of lines) console.log(`${nets.length > 1 ? `[${net}] ` : ""}${l}`);
+      console.log(`first reads (${net} ${run.coin}): candles ${run.reads.candles?.ms} ms, trades ${run.reads.trades?.ms} ms`);
+      const n = Number(opt("--speed", "0"));
+      if (n > 0 && run.coin) {
+        const ms = [];
+        for (let i = 0; i < n; i++) ms.push((await get(base, CANDLES_PATH(run.coin, net), fetch)).ms);
+        console.log(`speed (${net}): ${n} candle reads, p50 ${pct(ms, 50)} ms, p95 ${pct(ms, 95)} ms, max ${Math.max(...ms)} ms`);
+      }
+      all &&= ok;
     }
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${run.base})`);
-    process.exit(ok ? 0 : 1);
+    console.log(`live-check ${KEY}: ${all ? "PASS" : "FAIL"} (${base}, ${nets.join(" and ")})`);
+    process.exit(all ? 0 : 1);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);
