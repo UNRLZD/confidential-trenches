@@ -34,6 +34,9 @@ export function price(v: string | null | undefined): string {
   return `$${p.n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** A small-number form ($0.0₁₀123, 9 characters) cut to the 8 a tile holds; the other forms are 8 or fewer. */
+const fit = (s: string): string => (s.startsWith("$0.") && s.length > 8 ? s.slice(0, 8) : s);
+
 /** The price in the token page's strip tile, at most 8 characters, the width the tile is drawn for (like $1.25M and 71.3K
  *  in its neighbours): from $100,000 it is compact ($184.2K); below, a full form longer than 8 characters drops its
  *  decimals, cut and never rounded up, until it fits; $1 and under are `price`'s own small-number form. The header and
@@ -43,7 +46,8 @@ export function priceTile(v: string | null | undefined): string {
   if (!p) return DASH;
   if (p.n >= 1e5) return `$${compact(p.n)}`;
   const full = price(v);
-  if (p.n < 1 || full.length <= 8) return full;
+  if (p.n < 1) return fit(full);
+  if (full.length <= 8) return full;
   const [int = "0", frac = ""] = p.s.split(".");
   const whole = Number(int).toLocaleString("en-US");
   const one = `$${whole}.${frac.padEnd(1, "0").slice(0, 1)}`;
@@ -59,7 +63,7 @@ const BANDS = [
 ] as const;
 
 /** A compact number: K from 1,000, M, B, T; a value that rounds into the next band is drawn in it. */
-function compact(n: number): string {
+export function compact(n: number): string {
   let i = -1;
   for (let j = 0; j < BANDS.length; j++) if (n >= BANDS[j]!.min) i = j;
   for (;;) {
@@ -86,6 +90,11 @@ export function usd(v: string | null | undefined): string {
   if (p.n === 0) return "$0";
   if (p.n < 1) return `$${small(p)}`;
   return `$${compact(p.n)}`;
+}
+
+/** `usd` in the token page's tiles: at most 8 characters, the width a tile is drawn for ($123.46T, $297.4K). */
+export function usdTile(v: string | null | undefined): string {
+  return fit(usd(v));
 }
 
 /** Time since launch in whole units, rounded down: 59s, 1m, 23h, 1d. A launch time ahead of the clock is 1s. */

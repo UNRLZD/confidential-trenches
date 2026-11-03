@@ -42,10 +42,9 @@
 .tkp-strip { flex: 0 1 auto; margin-left: auto; min-width: min(100%, 260px); display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .tkp-mc { flex: none; margin-left: auto; padding: 8px 14px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .tkp-mcval { min-width: 120px; text-align: center; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
-.tkp-tile { flex: none; min-width: 96px; padding: 8px 14px; border-radius: 10px; background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.tkp-tile { flex: none; min-width: 100px; padding: 8px 14px; border-radius: 10px; background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .tkp-tile[data-k="curve"] { min-width: 120px; }
-/* the price tile holds 8 characters at its face (9 px each) and the padding: 100, so a filled tile is the skeleton's width */
-.tkp-tile[data-k="price"] { min-width: 100px; }
+
 .tkp-chart { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; overflow: hidden; }
 .tkp-tfs { flex: none; height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border-panel); }
 .tkp-tf { height: 28px; min-width: 36px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); font: 12px var(--font-num); cursor: pointer; }
