@@ -202,6 +202,10 @@ try {
           const np = await popup;
           check(!!np, `${tag} ${how}-click: no new tab`);
           if (np) {
+            // Google Chrome opens a control or middle click as a background tab and throttles a hidden tab (CI run 41672680026:
+            // the tab sat at APP_HOST, its move to the shell never ran). A user who opens a tab looks at it, so the tab is
+            // brought to the front before its frame is judged; what it must show is unchanged.
+            await np.bringToFront();
             const nf = await appFrame(np);
             check(!!nf, `${tag} ${how}-click: the new tab has no terminal frame (top at ${np.url()})`);
             if (nf) {
