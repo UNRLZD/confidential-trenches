@@ -6,7 +6,7 @@
 //   cd contracts/pool-solana && cargo-build-sbf --sbf-out-dir out && (cd svm-tests/evil-venue && cargo-build-sbf --sbf-out-dir ../../out) \
 //     && node scripts/mutants.mjs
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,7 +24,8 @@ export const MUTANTS = [
   ["tree depths", "src/release.rs", "if r.state_depth > MAX_TREE_DEPTH || r.label_depth > MAX_TREE_DEPTH {", "if false {", "a_changed_public_signal_is_refused"],
   ["what the notes hold", "src/release.rs", "if r.withdrawn as u128 > held {", "if false {", "a_release_over_what_the_notes_hold_is_refused"],
   ["Groth16 verify", "src/release.rs", "verify_withdraw(&r.proof, &signals)?;", "let _ = (&r.proof, &signals);", "a_changed_public_signal_is_refused"],
-  ["spent mark", "src/release.rs", "state::put_mark_of(program_id, fee_payer, spent_mark, system, SPENT_SEED, &r.nullifier_hash, SPENT_MARK_LEN, PoolError::NullifierAlreadySpent)?;", "let _ = (SPENT_SEED, SPENT_MARK_LEN);", "the_same_note_twice_is_refused"],
+  // the existing mark refuses the second release (the second release lands without it; the first lands either way)
+  ["spent mark", "src/state.rs", "    if target.owner == program_id {\n        return Err(exists.into());", "    if false {\n        return Err(exists.into());", "the_same_note_twice_is_refused"],
   ["signals below p (both layers)", "src/release.rs", "if !field::is_field(&r.new_commitment) || !field::is_field(&r.nullifier_hash) {", "if false {", "a_signal_at_or_over_p_is_refused", ["src/verifier.rs", "        if !field::is_field(s) {", "        if false {"]],
   ["coordinates below q", "src/verifier.rs", "if !field::is_coord(c) {", "if false {", "a_signal_at_or_over_p_is_refused"],
   ["page owner", "src/state.rs", "    if page.owner != program_id {\n        return None;", "    if false {\n        return None;", "a_forged_page_is_refused"],
@@ -95,6 +96,8 @@ for (const [name, file, from, to, testName, extra] of MUTANTS) {
     execFileSync("cargo-build-sbf", ["--sbf-out-dir", "out/mutant"], { cwd: here, stdio: "ignore" });
   } finally {
     restore();
+    // the keypair cargo-build-sbf writes beside the .so: deleted unread, as deploy.mjs does
+    rmSync(join(here, "out/mutant/blindfill_pool_solana-keypair.json"), { force: true });
   }
   const red = !test(testName, join(here, "out/mutant", SO));
   const green = test(testName, join(here, "out", SO));

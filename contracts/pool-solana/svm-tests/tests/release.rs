@@ -674,6 +674,8 @@ fn a_funded_mark_address_blocks_nothing() {
     env.svm.airdrop(&mark, min).unwrap();
     release(&mut env, &r).expect("the release lands");
     assert_eq!(env.svm.get_account(&mark).unwrap().owner, env.program);
+    // topped up to 8 bytes' rent and holding this release's withdrawnValue, like any spent mark
+    assert_spent(&env, &r, &spend_fx(&env, "release"));
     // and a precommitment's mark address before the deposit
     let pre = h32(&format!("{:064x}", 77));
     env.svm.airdrop(&pda(&[b"pre", &pre], &env.program), min + 5).unwrap();
