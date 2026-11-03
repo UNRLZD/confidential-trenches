@@ -33,7 +33,7 @@ import { vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
-import { refKey, type Leaf } from "../notes/store.ts";
+import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { checkSolanaRpcs, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
 
 const U32 = 0xffffffff;
@@ -104,6 +104,24 @@ export type SolanaRestoredNote = { ref: NoteRef; scope: bigint; precommitment: b
 /** A spent note of ours: its release (l, j), the W it paid and the chunk. */
 export type SolanaRestoredSpend = { l: bigint; j: number; note: string; w: string; withdrawn: bigint };
 
+// A spent note's change note: value - withdrawnValue (its spent mark's) under change (l, j), j the spend's change index,
+// which must be a leaf of the state tree; a withdrawal of 0 or over the note's value, or a change not in the tree, is a
+// drift and stops. The one rule for the walk and for a send refused as already spent.
+function spentChange(seed64: Uint8Array, ref: NoteRef, leaf: Leaf, withdrawn: bigint, leafAt: ReadonlyMap<bigint, number>): { ref: NoteRef & { kind: "change" }; precommitment: bigint; leaf: Leaf } {
+  const l = leaf.label;
+  const j = ref.kind === "change" ? ref.j + 1 : 0;
+  if (j > U32) throw new Error("change index out of range");
+  const key = refKey(ref);
+  if (withdrawn === 0n || withdrawn > leaf.value) throw new Error(`${key}: its spent mark withdrew ${withdrawn} of ${leaf.value}`);
+  const cref = { kind: "change", l, j } as const;
+  const cP = noteSecrets(seed64, cref).precommitment;
+  const cValue = leaf.value - withdrawn;
+  const cCommitment = noteCommitment(cValue, l, cP);
+  const cAt = leafAt.get(cCommitment);
+  if (cAt === undefined) throw new Error(`${key}: spent, but its change note (l ${l}, j ${j}) is not in the state tree`);
+  return { ref: cref, precommitment: cP, leaf: { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(cAt) } };
+}
+
 export type SolanaRestoreArgs = {
   seed64: Uint8Array;
   program: string;
@@ -164,20 +182,13 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
     if (withdrawn === undefined) continue;
     note.state = "SPENT";
     const l = note.leaf.label;
-    const j = ref.kind === "change" ? ref.j + 1 : 0;
-    if (j > U32) throw new Error("change index out of range");
     const key = refKey(ref);
-    if (withdrawn === 0n || withdrawn > note.leaf.value) throw new Error(`${key}: its spent mark withdrew ${withdrawn} of ${note.leaf.value}`);
+    const c = spentChange(seed64, ref, note.leaf, withdrawn, leafAt);
+    const j = c.ref.j;
     const w = freshWallet(seed64, "sol", l, j);
     w.secretKey.fill(0);
     spends.push({ l, j, note: key, w: w.address, withdrawn });
-    const cref: NoteRef = { kind: "change", l, j };
-    const cP = noteSecrets(seed64, cref).precommitment;
-    const cValue = note.leaf.value - withdrawn;
-    const cCommitment = noteCommitment(cValue, l, cP);
-    const cAt = leafAt.get(cCommitment);
-    if (cAt === undefined) throw new Error(`${key}: spent, but its change note (l ${l}, j ${j}) is not in the state tree`);
-    put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(cAt) }, key);
+    put(c.ref, c.precommitment, c.leaf, key);
     asDeposit({ kind: "move", l, j });
     seconds({ id: "V", l, j });
     seconds({ id: "A", l, j });
@@ -241,5 +252,43 @@ export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: strin
     if (!grew) return out;
     if (round >= SOL_RESTORE_ROUNDS) throw new Error(`restore: the user's own marks still grew after ${SOL_RESTORE_ROUNDS} reads; try again`);
     marks = again;
+  }
+}
+
+/** What a refused send's settle found: the note's spend on chain (its change written, the note SPENT), or none. */
+export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigint } | { kind: "unspent" };
+
+/**
+ * The one place a Solana pool send the chain refused as already spent (the pool's NullifierAlreadySpent, error 16: the
+ * note's spent mark exists) is settled, by whatever sends a release. Never on the refusal's word: the helper, the
+ * simulation and the send are hostile input, and the nullifier hash is no longer secret once the send has left. The
+ * marks are read whole on two RPCs (the union, as a restore reads them: no read names the note), then the pages past
+ * them. Only when the note's spent mark is there and its change note (spentChange: value - withdrawnValue under change
+ * (l, j)) is a leaf both RPCs agree on is the change written UNSPENT through the store's add(child, parent), which moves
+ * the note to SPENT, so the queue never offers it again. No spent mark: nothing is written ("unspent"). A spent mark
+ * whose change is not in the state tree: a refusal, nothing written. A change another tab wrote first, with this leaf,
+ * is taken.
+ */
+export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal }): Promise<SolanaSettled> {
+  if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
+  const scope = solanaPoolOf(a.program).scope;
+  const note = await a.notes.get(a.noteId);
+  if (note === undefined || note.leaf === undefined || note.scope !== scope) throw new Error(`note ${a.noteId}: not a landed note of this pool`);
+  const marks = await solanaMarks(a.rpcs, a.program, a.signal);
+  const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash));
+  if (withdrawn === undefined) return { kind: "unspent" };
+  const leaves = await solanaTreeSync(a.rpcs, a.program).leaves(marks.slot, a.signal);
+  const leafAt = new Map<bigint, number>();
+  leaves.state.forEach((c, k) => {
+    if (leafAt.has(c)) throw new Error(`state leaf ${k} repeats`);
+    leafAt.set(c, k);
+  });
+  const c = spentChange(a.seed64, note.ref, note.leaf, withdrawn, leafAt);
+  try {
+    return { kind: "spent", change: await a.notes.add({ ref: c.ref, scope, precommitment: c.precommitment, state: "UNSPENT", parent: note.id, leaf: c.leaf }), withdrawn };
+  } catch (e) {
+    const there = (await a.notes.list()).find((n) => n.scope === scope && refKey(n.ref) === refKey(c.ref));
+    if (there !== undefined && there.precommitment === c.precommitment && there.leaf?.commitment === c.leaf.commitment && there.leaf.leafIndex === c.leaf.leafIndex) return { kind: "spent", change: there, withdrawn };
+    throw e;
   }
 }

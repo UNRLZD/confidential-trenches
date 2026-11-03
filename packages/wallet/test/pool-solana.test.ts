@@ -5,13 +5,16 @@
 // land and assert page by page: commitment, root and time per entry. Test notes only, never money; no key.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
 import { VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { SOL_RESTORE_ROUNDS, solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes } from "../src/pool/solana-restore.ts";
+import { SOL_RESTORE_ROUNDS, solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent } from "../src/pool/solana-restore.ts";
+import { IDBFactory } from "fake-indexeddb";
+import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
+import { openWalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
 import { checkPool } from "../src/pool/pool.ts";
 import {
@@ -816,4 +819,59 @@ test("N1 union: a mark the second read gives with other bytes than the first is 
   }
   assert.throws(() => solanaMarksUnion({ spent: new Map([["k", 1n]]), pre: new Map(), slot: 1 }, { spent: new Map([["k", 2n]]), pre: new Map(), slot: 2 }), /two reads differ/);
   assert.equal(solanaMarksUnion({ spent: new Map([["k", 1n]]), pre: new Map(), slot: 1 }, { spent: new Map([["j", 2n]]), pre: new Map(), slot: 2 }).slot, 2);
+});
+
+// A note store holding deposit note 0 of the pool, RESERVED: proved, taken and sent (queue.ts take), as when the send
+// comes back refused as already spent.
+const stores: { close(): void }[] = [];
+after(() => { for (const x of stores.splice(0)) x.close(); });
+async function reservedDeposit0(l0: bigint): Promise<{ ns: NoteStore; id: string }> {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  const ns = await openNoteStore(w);
+  stores.push(ns, w);
+  const ref = { kind: "deposit", s: SCOPE, i: 0 } as const;
+  const P0 = noteSecrets(SEED, ref).precommitment;
+  let n = await ns.add({ ref, scope: SCOPE, precommitment: P0, state: "UNSPENT", leaf: { value: 50_000_000n, label: l0, commitment: noteCommitment(50_000_000n, l0, P0), leafIndex: 1n } });
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: 1_800_000_200_000n, context: "1" });
+  n = await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  return { ns, id: n.id };
+}
+
+test("already spent: a send refused as spent marks the note SPENT with its change, only from the chain's marks and pages on two RPCs", async () => {
+  const { chain, beforeSpend, l0 } = restorePool();
+  // the chain holds the spend: the change is written UNSPENT and the note goes SPENT, so the queue never offers it again
+  const a = await reservedDeposit0(l0);
+  const r = await solanaSettleSpent({ seed64: SEED, notes: a.ns, noteId: a.id, program: PROGRAM, rpcs: pair(chain, chain) });
+  assert.equal(r.kind, "spent");
+  assert.equal((await a.ns.get(a.id))!.state, "SPENT");
+  const change = (await a.ns.list()).find((n) => n.ref.kind === "change")!;
+  assert.deepEqual([change.state, change.parent, change.leaf!.value, change.leaf!.leafIndex], ["UNSPENT", a.id, 0n, 4n]);
+  // settled again (another tab, a retry): the change already there is taken
+  const again = await solanaSettleSpent({ seed64: SEED, notes: a.ns, noteId: a.id, program: PROGRAM, rpcs: pair(chain, chain) });
+  assert.equal(again.kind === "spent" && again.change.id, change.id);
+
+  // no spent mark on either RPC: the refusal's word changes nothing
+  const b = await reservedDeposit0(l0);
+  assert.deepEqual(await solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: pair(beforeSpend, beforeSpend) }), { kind: "unspent" });
+  assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  assert.equal((await b.ns.list()).length, 1);
+
+  // one RPC (with the helper, which saw the nullifier hash in the send) claims the spent mark, but the pages both RPCs
+  // agree on hold no change leaf: refused, nothing written
+  const spent0 = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const claimed: Chain = { ...beforeSpend, marks: new Map(beforeSpend.marks!).set(spent0, spentData(50_000_000n)) };
+  for (const rs of [pair(claimed, beforeSpend), pair(beforeSpend, claimed)]) {
+    await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: rs }), /is not in the state tree/);
+    assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  }
+  // a spent mark over the note's value: refused
+  const over: Chain = { ...chain, marks: new Map(chain.marks!).set(spent0, spentData(50_000_001n)) };
+  await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: pair(over, over) }), /withdrew 50000001 of 50000000/);
+  assert.equal((await b.ns.list()).length, 1);
+  // a change already in the store at another leaf is never taken for this spend
+  const cP = noteSecrets(SEED, { kind: "change", l: l0, j: 0 }).precommitment;
+  await b.ns.add({ ref: { kind: "change", l: l0, j: 0 }, scope: SCOPE, precommitment: cP, state: "UNSPENT", parent: b.id, leaf: { value: 0n, label: l0, commitment: noteCommitment(0n, l0, cP), leafIndex: 9n } });
+  await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: pair(chain, chain) }));
+  // a note of another pool is refused before any read
+  await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: b58(R.pool), rpcs: pair(chain, chain) }), /not a landed note of this pool/);
 });
