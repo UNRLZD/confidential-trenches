@@ -76,18 +76,11 @@ export const MUTANTS = [
   [QUOTE, "const minOut = (q * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = q;", Q, "Q1 "],
   [QUOTE, 'if (minOut === 0n) return refuse("no_quote", "the route quotes too little to set a minimum above 0");', "", Q, "Q10 "],
   // native first
-  [QUOTE, "  if (nativeExists && wethStart) return refuse(", "  if (false) return refuse(", Q, "Q6 "],
+  [QUOTE, "  if (nativeExists && wethStart) {", "  if (false) {", Q, "Q6 "],
   [QUOTE, 'nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true', "nativeFirst: false", Q, "Q6 "],
   [QUOTE, "bestOf(filled.filter((c) => startsNative(c.route))));", "bestOf(filled));", Q, "Q6 "],
   [QUOTE, "  const reference = bestOf(filled);", "  const reference = bestOf(filled.filter((c) => !nativeExists || startsNative(c.route)));", R, "N1f "],
   [QUOTE, "|| firstHop.some((c) => fills(c)))", ")", R, "R7 "],
-  [
-    QUOTE,
-    '  if (nativeExists && wethStart) return refuse("native_first", `${chain}\'s WETH is behind an upgradeable proxy and a native v4 pool exists`, reference);\n  if (reference === null) return refuse("no_reference", "no standard pool and no pinned launchpad pool answers for the token");',
-    '  if (reference === null) return refuse("no_reference", "no standard pool and no pinned launchpad pool answers for the token");\n  if (nativeExists && wethStart) return refuse("native_first", `${chain}\'s WETH is behind an upgradeable proxy and a native v4 pool exists`, reference);',
-    R,
-    "R7 ",
-  ],
   // only a device quote builds, within 30 s, and W signs only that build
   [QUOTE, "QUOTED.add(quote);", "", Q, "Q7 "],
   [BUY, "if (!evmIsDeviceQuote(quote)) throw", "if (false) throw", Q, "Q7 "],
