@@ -74,6 +74,8 @@ import { drawWithdrawForm, type WithdrawFormDeps } from "./withdraw/form.ts";
 import { NEAR_NETWORKS, nearRpc, type NearNetwork } from "../../kit/src/near/networks.ts";
 import { releaseTradeDeps, SOLANA_PROVIDER_A, TRADE_HELPER, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
+import { testnetPoolDeps } from "./pool-testnet.ts";
+import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import type { PoolChain } from "./rules/pool.ts";
 import { SOL_POOLS } from "../../wallet/src/pool/solana.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
@@ -149,11 +151,16 @@ else {
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
-      // network pins (none yet: every one refused not_allowed, no read made); a sell's decimals read on two providers
-      ...poolKinds({
-        pinned: poolPinned,
-        rpcs: (chain) => (chain === "solana" ? [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] : null),
-      }),
+      // network pins (mainnet: none yet, every one refused not_allowed, no read made; the testnet build: the devnet
+      // pool, src/pool-testnet.ts); a sell's decimals read on two providers
+      ...poolKinds(
+        POOL_TESTNET
+          ? testnetPoolDeps()
+          : {
+              pinned: poolPinned,
+              rpcs: (chain) => (chain === "solana" ? [solanaJsonRpc(SOLANA_PROVIDER_A), solanaHelperRpc(TRADE_HELPER)] : null),
+            },
+      ),
     },
   });
   shell.layer.append(root);

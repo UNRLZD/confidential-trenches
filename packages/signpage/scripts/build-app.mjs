@@ -91,8 +91,14 @@ export const page = (integrity) => `<!doctype html>
 </html>
 `;
 
-/** A fresh bundle: { js, html, worker, thread } as bytes, text, bytes and bytes. */
-export async function bundle(pkg = PKG) {
+/** The networks a build is for (card signpage-pool-flow): SIGN_HOST's, and the testnet build's (Solana devnet, Base
+ *  Sepolia, Robinhood testnet). The wallet's pool/network.ts reads it as __SIGN_NETWORK__, folded at build time. */
+export const NETWORKS = Object.freeze(["mainnet", "testnet"]);
+
+/** A fresh bundle for `network` (SIGN_HOST's, mainnet, unless named): { js, html, worker, thread } as bytes, text,
+ *  bytes and bytes. */
+export async function bundle(pkg = PKG, { network = "mainnet" } = {}) {
+  if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
   const { build } = await import("vite");
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-app-"));
   try {
@@ -101,6 +107,7 @@ export async function bundle(pkg = PKG) {
       root: pkg,
       logLevel: "warn",
       publicDir: false,
+      define: { __SIGN_NETWORK__: JSON.stringify(network) },
       build: {
         outDir: out,
         emptyOutDir: true,
