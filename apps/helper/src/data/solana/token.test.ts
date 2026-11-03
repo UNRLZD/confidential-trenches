@@ -7,6 +7,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
+import { geckoBudget } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
@@ -389,6 +390,20 @@ test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal and ans
   now += 10_000;
   assert.deepEqual([(await t2.candles(CURVE, "5m", null, 10)).status, (await t2.candles(CURVE, "15m", null, 10)).retryAfterS], [429, 20], "the paused queue answers the pause left");
   assert.equal(limited.urls.length, 1, "paused after the 429");
+});
+
+test("candles: the server's one GeckoTerminal budget holds the token page to its lane, the EVM lists' calls counting against the minute", async () => {
+  const g = fakeGecko();
+  const now = NOW;
+  const shared = geckoBudget(() => now, { lists: 3, pages: 7 });
+  for (let i = 0; i < 3; i++) assert.equal(shared.take("lists"), true);
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: g.fetch, gecko: shared });
+  const tfs = ["1m", "5m", "15m", "1h", "4h", "1d"];
+  for (let i = 0; i < 20; i++) await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10);
+  assert.equal(g.urls.length, 7, "the pages lane's 7, never the whole 10");
+  assert.equal(shared.take("lists"), false, "and the minute's 10 are spent");
+  const over = await t.candles(CURVE, "1d", 1793620800 - 40 * 86_400, 10);
+  assert.deepEqual([over.status, over.retryAfterS], [429, 60], "a call past the lane is a throttle naming the wait to its oldest call's minute");
 });
 
 test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 429 with a wait, not 503", async () => {

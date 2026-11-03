@@ -23,6 +23,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { createSolanaLists } from "./data/solana/lists.ts";
+import { createEvmLists, LISTS_PER_MIN, type EvmChain } from "./data/evm/lists.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
@@ -41,6 +43,7 @@ import { clientOf, clientWindow, throttled, throttleOf } from "./limits/limits.t
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
 type Lists = ReturnType<typeof createSolanaLists>;
+type EvmLists = Partial<Record<EvmChain, ReturnType<typeof createEvmLists>>>;
 type Token = ReturnType<typeof createSolanaToken>;
 type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
@@ -156,6 +159,7 @@ export function handler(
   pools: ReadonlyMap<string, SolanaPoolSender> = solanaPoolSendersFromEnv(process.env),
   evmPools: ReadonlyMap<string, EvmPoolSender> = evmPoolSendersFromEnv(process.env),
   now: () => number = Date.now,
+  evmLists: EvmLists = {},
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // GET /v1/token-status serves each network's token from that network's own watch
@@ -341,16 +345,18 @@ export function handler(
       }
       if (path === MARKET_LISTS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        // Discover's lists (src/data/solana/lists.ts): exactly one chain, and Solana is the one served so far
+        // Discover's lists: exactly one chain, Solana (src/data/solana/lists.ts) or an EVM chain this helper serves
+        // (src/data/evm/lists.ts)
         const chains = new URL(req.url ?? "/", "http://helper.invalid").searchParams.getAll("chain");
-        if (chains.length !== 1 || chains[0] !== "solana") return send(404, { error: { code: "not_found" } }, cors(req));
-        void lists
+        const evm = chains.length === 1 && Object.hasOwn(evmLists, chains[0]!) ? evmLists[chains[0] as EvmChain] : undefined;
+        if (chains.length !== 1 || (chains[0] !== "solana" && evm === undefined)) return send(404, { error: { code: "not_found" } }, cors(req));
+        void (evm ?? lists)
           .get()
           .then((a) => {
             const h: Headers = { ...base, ...cors(req), Vary: "Origin, Accept-Encoding", "Content-Type": "application/json; charset=utf-8" };
             if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1));
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
-            h[HELPER_SOURCE_HEADER] = "jupiter";
+            h[HELPER_SOURCE_HEADER] = evm === undefined ? "jupiter" : "geckoterminal";
             h[HELPER_FETCHED_AT_HEADER] = new Date(a.asOfMs).toISOString();
             const gzip = a.gzip !== undefined && /\bgzip\b/i.test(String(req.headers["accept-encoding"] ?? ""));
             const out = gzip ? a.gzip! : Buffer.from(a.body, "utf8");
@@ -447,20 +453,21 @@ export function handler(
  * from the share of the caller whose request made it, and holders on SOLANA_HOLDERS_RPC_URL when set
  * (src/data/solana/token.ts).
  */
-export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc): Token {
+export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc, gecko?: GeckoBudget): Token {
   const holders = env.SOLANA_HOLDERS_RPC_URL;
   return createSolanaToken(proxy, rpc, {
+    gecko,
     listed: lists.get,
     holdersRpc: holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }),
   });
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools, undefined, undefined, evmLists),
   );
   server.listen(port);
   // the relayers start with the helper: a restart resends their open sends and settles before any request
@@ -482,6 +489,12 @@ if (import.meta.main) {
     const proxy = createProxy(process.env);
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);
+    // GeckoTerminal's one keyless budget (src/data/gecko.ts): the EVM lists' lane and the Solana token page's candles
+    const SERVED_EVM: readonly EvmChain[] = ["base", "robinhood"];
+    const listsLane = LISTS_PER_MIN * SERVED_EVM.length;
+    const gecko = geckoBudget(Date.now, { lists: listsLane, pages: GT_LIMIT_PER_MIN - listsLane });
+    const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko)]));
+    const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko);
     const watches = tokenWatchesFromEnv(process.env);
     const fee = feeQuoterFromEnv(process.env);
     // each network's carry is held by its own watch only
@@ -491,8 +504,9 @@ if (import.meta.main) {
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
     for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
-    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind, pools); // warms both relayers
+    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists); // warms both relayers
     lists.warm();
+    for (const l of Object.values(evmLists)) l.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
     process.exit(2);

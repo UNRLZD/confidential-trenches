@@ -31,6 +31,13 @@ let port = 0;
 const server = start(COMMIT, 0);
 before(() => new Promise<void>((ok) => server.on("listening", () => ((port = (server.address() as AddressInfo).port), ok()))));
 after(() => new Promise<void>((ok) => (server.closeAllConnections(), server.close(() => ok()))));
+/** Closes a test's own server, from t.after: a failed assertion anywhere in the test can never leave it open and hold
+ *  the file's process (a server closed already in the test's finally answers ERR_SERVER_NOT_RUNNING, which is fine). */
+const closeServer = (s: ReturnType<typeof createServer>) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok())));
+/** A server a helper function or a long test makes, closed when the file ends whatever failed (the same guard as t.after). */
+const owned = new Set<ReturnType<typeof createServer>>();
+const own = (s: ReturnType<typeof createServer>) => (owned.add(s), s);
+after(() => Promise.all([...owned].map(closeServer)).then(() => undefined));
 
 // raw http, so the Origin header is sent exactly as written (fetch would add or forbid some headers)
 function call(method: string, path: string, headers: Record<string, string> = {}, body?: string, to = port) {
@@ -59,11 +66,12 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
 
 // card helper-release-bump: the release HELPER_RELEASE names (deploy/redeploy.sh raises it per new commit) is in the
 // answer, so the live check can read that a deploy raised it
-test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the relayers would refuse is null", async () => {
+test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the relayers would refuse is null", async (t) => {
   assert.equal(releaseOf({ HELPER_RELEASE: "12" }), 12);
   assert.equal(releaseOf({ HELPER_RELEASE: "999999999" }), 999999999);
   for (const v of [undefined, "", "0", "07", "1.5", "-1", " 3", "3\n", "1000000000", "abc"]) assert.equal(releaseOf({ HELPER_RELEASE: v }), null, JSON.stringify(v));
   const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 12));
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
   try {
     const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
@@ -181,7 +189,7 @@ test("/v1/rpc: another HTTP method 405, an unknown or nested chain 404, a body o
   assert.deepEqual(JSON.parse(big.body), { error: { code: "too_large" } });
 });
 
-test("/v1/rpc forwards an allowlisted call to the configured provider and passes its answer back (local stub)", async () => {
+test("/v1/rpc forwards an allowlisted call to the configured provider and passes its answer back (local stub)", async (t) => {
   const seen: string[] = [];
   const stub = createServer((req, res) => {
     let b = "";
@@ -191,8 +199,10 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
     });
   });
   await new Promise<void>((ok) => stub.listen(0, "127.0.0.1", () => ok()));
+  t.after(() => closeServer(stub));
   const up = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
   const helper = start(COMMIT, 0, undefined, createRpc({ SOLANA_RPC_URL: up }));
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   try {
     const r = await call("POST", "/v1/rpc/solana", JSON_H, rpcBody("getBalance"), (helper.address() as AddressInfo).port);
@@ -208,7 +218,7 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
   }
 });
 
-test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async () => {
+test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async (t) => {
   const ANSWER = { relayer_account: "relayer.confidential.unrlzd.near", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "207609", gp: "100000000", px: "4.135781763845", g_w: "92505000000000", valid_until_block: 222699586 };
   let failing = false;
   const fee: FeeQuoter = {
@@ -220,6 +230,7 @@ test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another t
     reads: () => ({ feeMin: async () => 0n }),
   };
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, fee);
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   try {
@@ -246,7 +257,7 @@ test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another t
   }
 });
 
-test("POST /v1/withdraw: the body parsed and handed to the sender, its status and code answered; not JSON 400 bad_shape; over 8 KB 413 too_large; GET 405", async () => {
+test("POST /v1/withdraw: the body parsed and handed to the sender, its status and code answered; not JSON 400 bad_shape; over 8 KB 413 too_large; GET 405", async (t) => {
   const seen: unknown[] = [];
   const withdraw: WithdrawSender = {
     carry: async (body) => {
@@ -261,6 +272,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   };
   let warmed = 0;
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw);
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   assert.equal(warmed, 1, "start warms the withdrawal relayer: a restart resends its open sends before any request");
   // and the helper's main starts the server with the relayer it built
   const main = readFileSync(join(import.meta.dirname, "server.ts"), "utf8").split("if (import.meta.main)")[1] ?? "";
@@ -268,7 +280,14 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
   assert.match(main, /for \(const p of pools\.values\(\)\) p\.ready\.catch\(\(e: Error\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind, pools\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists\);/);
+  // the EVM lists (src/data/evm/lists.ts): each served chain's lists on GeckoTerminal's one budget, shared with the
+  // Solana token page's candles, and warmed at start
+  assert.match(main, /const SERVED_EVM: readonly EvmChain\[\] = \["base", "robinhood"\];/);
+  assert.match(main, /const gecko = geckoBudget\(Date\.now, \{ lists: listsLane, pages: GT_LIMIT_PER_MIN - listsLane \}\);/);
+  assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko\)\]\)\);/);
+  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko\);/);
+  assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   try {
@@ -297,7 +316,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   }
 });
 
-test("POST /v1/bind: mounted; with no network set the helper starts and a body that does not decode is 400 bad_shape (networks.test.ts: a delegate on no carried token is token_not_accepted); over 4 KB 413; GET 405", async () => {
+test("POST /v1/bind: mounted; with no network set the helper starts and a body that does not decode is 400 bad_shape (networks.test.ts: a delegate on no carried token is token_not_accepted); over 4 KB 413; GET 405", async (t) => {
   // the deployed composition (no sender handed in, nothing set): the helper starts and answers its not-configured codes
   const decodable = "AAAAAA=="; // not one SignedDelegateAction: check 1
   const a = await call("POST", "/v1/bind", { ...JSON_H, origin: APP }, JSON.stringify({ signed_delegate: decodable }));
@@ -319,6 +338,7 @@ test("POST /v1/bind: mounted; with no network set the helper starts and a body t
     stop: () => undefined,
   };
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   assert.equal(warmed, 1, "start warms the deposit relayer: a restart reads its open records before any request");
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   try {
@@ -331,7 +351,7 @@ test("POST /v1/bind: mounted; with no network set the helper starts and a body t
   }
 });
 
-test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the device's send waits for: a carry still running then answers in_flight and goes on to its own end; one that ends inside it answers its own", async () => {
+test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the device's send waits for: a carry still running then answers in_flight and goes on to its own end; one that ends inside it answers its own", async (t) => {
   const TX = "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL";
   const turns = async (n = 50) => {
     for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok));
@@ -351,6 +371,7 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
     stop: () => undefined,
   };
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   mock.timers.enable({ apis: ["setTimeout"] });
@@ -387,7 +408,7 @@ test("POST /v1/bind answers within the kit's HELPER_BIND_ANSWER_MS, which the de
   }
 });
 
-test("POST /v1/bind is not tied to the request: a client that closes at 1 s does not cancel the carry, which runs to its answer and its record; the helper keeps serving", async () => {
+test("POST /v1/bind is not tied to the request: a client that closes at 1 s does not cancel the carry, which runs to its answer and its record; the helper keeps serving", async (t) => {
   const records: string[] = [];
   let finished = 0;
   const bind: BindSender = {
@@ -401,6 +422,7 @@ test("POST /v1/bind is not tied to the request: a client that closes at 1 s does
     stop: () => undefined,
   };
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   try {
@@ -425,11 +447,12 @@ test("POST /v1/bind is not tied to the request: a client that closes at 1 s does
 
 // M369 (M1): the pool's per-client hold (two mainnet tag 3 carries in flight) needs the caller's address: the route
 // hands the pool clientOf(req), the last X-Forwarded-For hop Caddy writes, as the rate limit reads it.
-test("M369 (M1): POST /v1/pool/solana/send hands the pool the caller's address", async () => {
+test("M369 (M1): POST /v1/pool/solana/send hands the pool the caller's address", async (t) => {
   const seen: [unknown, string | undefined][] = [];
   const POOL = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
   const pool = { carry: async (body: unknown, client?: string) => (seen.push([body, client]), { status: 200, body: { signature: "s" } }) } as unknown as SolanaPoolSender;
   const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new Map([[POOL, pool]]));
+  t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
   try {
@@ -445,7 +468,7 @@ test("M369 (M1): POST /v1/pool/solana/send hands the pool the caller's address",
 // M362 (3): the helper's own main, as the host runs it, with one devnet Solana pool whose two RPCs are local stubs.
 // A failed rent read takes down only that pool (503 upstream) and the rest answers; a configured fee that is not the
 // kit's for the rent read makes the process exit 2. Test keys only: sha256 of a label.
-test("M362 (3): a pool's failed rent read leaves the helper up with that pool 503; a mismatched configured fee exits 2", async () => {
+test("M362 (3): a pool's failed rent read leaves the helper up with that pool 503; a mismatched configured fee exits 2", async (t) => {
   const { spawn } = await import("node:child_process");
   const { createHash } = await import("node:crypto");
   const { ed25519 } = await import("@noble/curves/ed25519.js");
@@ -467,6 +490,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
       });
     }).listen(0, "127.0.0.1");
   const stubs = [rpc(), rpc()];
+  t.after(() => Promise.all(stubs.map(closeServer)).then(() => undefined));
   await Promise.all(stubs.map((s) => new Promise((ok) => s.on("listening", ok))));
   const urls = stubs.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`).join(",");
   const free = createServer().listen(0, "127.0.0.1");
@@ -516,7 +540,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
 async function limited(o: { rpc?: ReturnType<typeof createRpc> } = {}) {
   let t = 1_800_000_000_000;
   const now = () => (t += 3);
-  const h = createServer(handler(COMMIT, undefined, o.rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), now));
+  const h = own(createServer(handler(COMMIT, undefined, o.rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), now)));
   await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
   const to = (h.address() as AddressInfo).port;
   return {
@@ -625,7 +649,7 @@ test("a throttle behind a read answers the same 429 contract, never 503: the mar
   const fee: FeeQuoter = { networkOf: () => "mainnet", quote: async () => { throw refused; }, reads: () => ({ feeMin: async () => 0n }) };
   const POOL = "11111111111111111111111111111111";
   const pools = new Map([[POOL, { fee: async () => { throw new Error("HTTP 429"); } }]]) as never;
-  const h = createServer(handler(COMMIT, undefined, undefined, undefined, lists, fee, undefined, token, undefined, null, pools, new Map()));
+  const h = own(createServer(handler(COMMIT, undefined, undefined, undefined, lists, fee, undefined, token, undefined, null, pools, new Map())));
   await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
   const to = (h.address() as AddressInfo).port;
   try {
@@ -655,7 +679,7 @@ function postRaw(port: number, path: string, body: string, xff: string): Promise
 test("review F-C: one address sending 600 off-list RPC calls of ~250 KB in one window meets a 429", async () => {
   let t = 1_800_000_000_000;
   const rpc = createRpc({}, { now: () => (t += 1), fetch: async () => new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } }) });
-  const h = createServer(handler(COMMIT, undefined, rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), () => (t += 1)));
+  const h = own(createServer(handler(COMMIT, undefined, rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), () => (t += 1))));
   await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
   const to = (h.address() as AddressInfo).port;
   const nums = Array.from({ length: 62_000 }, (_, i) => i % 10).join(",");
@@ -789,7 +813,7 @@ async function tokenPagesThen(pages: number, then: (port: number) => Promise<num
     const proxy = createProxy({}, { fetch: stub });
     const rpc = createRpc({}, { fetch: stub });
     const lists = createSolanaLists(proxy, rpc);
-    const h = createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, undefined, undefined, null, new Map(), new Map()));
+    const h = own(createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, undefined, undefined, null, new Map(), new Map())));
     await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
     const port = (h.address() as AddressInfo).port;
     const opened = Array.from({ length: pages }, () => getAs(port, `/v1/market/token?chain=solana&token=${b58encode(randomBytes(32))}`, "198.51.100.77"));
