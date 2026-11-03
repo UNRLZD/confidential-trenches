@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The local dry run of deploy.mjs on a fresh solana-test-validator: three runs, each funded with exactly the need the
+# The local dry run of deploy.mjs on a fresh solana-test-validator: five runs, each funded with exactly the need the
 # script prints, from a local stand-in for the devnet wallet (a key made here, airdropped, never leaving this run):
-#   1. the whole run: build, deploy --final, init, deposit, sweep; then the live check on two loopback URLs, recorded;
-#   2. a planted failure after the deploy (--fail-after deploy): the cleanup sweeps, the program stays final;
-#   3. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps.
+#   1. the whole run with planted transient failures (--flaky: every third RPC call throws "fetch failed"): build,
+#      deploy --final, init, deposit, sweep; then the live check on two loopback URLs, recorded;
+#   2. a planted stop just past the deploy (--fail-after deploy): the cleanup sweeps, the program stays final;
+#   3. the resume of that program (--program, --flaky): init and deposit only; the live check on its record;
+#   4. a second resume of it: its pool exists, so init is skipped;
+#   5. the CLI stopped while it writes the buffer (SIGTERM): the cleanup closes the buffer and sweeps.
 # After each, the funder must hold 0. Outputs go to contracts/pool-solana/out/dry-run/ (ignored by git).
 #   scripts/heavy.sh pool-sol-deploy -- bash contracts/pool-solana/scripts/dry-run.sh
 set -euo pipefail
@@ -51,9 +54,14 @@ run() {
   cat "$log"
   echo "dry-run [$name]: exit $rc; funder $funder holds $(solana -u "$URL" balance "$funder" --lamports)"
 }
-run whole
+run whole --flaky
 run planted --no-build --fail-after deploy
+PROGRAM=$(awk '/^deploy: program id /{print $4}' "$OUT/planted.log")
+run resumed --no-build --flaky --program "$PROGRAM"
+run resumed-again --no-build --program "$PROGRAM"
 run stopped --no-build
-echo "dry-run: stand-in wallet $D holds $(solana -u "$URL" balance "$D" --lamports) after the three runs"
+echo "dry-run: stand-in wallet $D holds $(solana -u "$URL" balance "$D" --lamports) after every run"
 echo "dry-run: buffers left with any authority: $(solana -u "$URL" program show --buffers --all 2>&1 | tail -n +1 | grep -c '^ *[1-9A-HJ-NP-Za-km-z]\{32,44\} ' || true)"
 node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/whole.json" --rpc "$URL,http://localhost:$PORT" --record "$OUT/whole-answers.json"
+node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/resumed.json" --rpc "$URL,http://localhost:$PORT" | tail -1
+node "$ROOT/scripts/live-checks/pool-sol-deploy.mjs" --deployment "$OUT/resumed-again.json" --rpc "$URL,http://localhost:$PORT" | tail -1

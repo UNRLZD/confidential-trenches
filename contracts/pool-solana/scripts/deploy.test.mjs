@@ -134,3 +134,96 @@ test("every committed deployment record's commitment is Poseidon(value, label, p
     assert.equal(c.toString(16).padStart(64, "0"), d.deposit.commitment);
   }
 });
+
+// ---- the devnet run of 90522c4 stopped on one "fetch failed" after its deploy (the cleanup swept it) ----
+import { rpc } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
+
+/** A fetch that throws or answers `script` in order, then answers `final`. */
+function flaky(script, final = { result: "ok" }) {
+  let n = 0;
+  const calls = () => n;
+  const fetchFn = async () => {
+    const step = script[n++];
+    if (step === "throw") throw new TypeError("fetch failed");
+    const [status, body] = step ?? [200, { jsonrpc: "2.0", id: 1, ...final }];
+    return { ok: status === 200, status, json: async () => body };
+  };
+  return { fetchFn, calls };
+}
+const noWait = async () => {};
+
+test("rpc retries a transient failure: a network error, a reset, a 429, a 5xx, then answers", async () => {
+  for (const script of [["throw"], ["throw", "throw", "throw", "throw"], [[429, null]], [[503, null]], [[502, { error: "bad gateway" }]], [[200, { jsonrpc: "2.0", id: 1, error: { code: -32029 } }]]]) {
+    const f = flaky(script);
+    assert.equal(await rpc(f.fetchFn, "u", "getBalance", [], noWait), "ok", JSON.stringify(script));
+    assert.equal(f.calls(), script.length + 1);
+  }
+});
+
+test("rpc gives up after five tries, and never retries a real JSON-RPC error", async () => {
+  const f = flaky(["throw", "throw", "throw", "throw", "throw", "throw"]);
+  await assert.rejects(rpc(f.fetchFn, "u", "getBalance", [], noWait), /fetch failed/);
+  assert.equal(f.calls(), 5);
+  const e = flaky([[200, { jsonrpc: "2.0", id: 1, error: { code: -32002, message: "Transaction simulation failed" } }]]);
+  await assert.rejects(rpc(e.fetchFn, "u", "sendTransaction", [], noWait), /simulation failed/);
+  assert.equal(e.calls(), 1);
+});
+
+// ---- the resume (--program): a program refused unless final with this build's code; a pool that exists skips init ----
+import { programProblems, poolState } from "./deploy.mjs";
+
+const REC = JSON.parse(readFileSync(path.join(REPO, "scripts/live-checks/pool-sol-deploy.answers.json"), "utf8"));
+const RD = REC.deployment;
+/** A fetch answering getAccountInfo from the recording, each account changed by `change[address]`. */
+function chainOf(change = {}) {
+  return async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const a = REC.good.find((x) => x.method === method && x.params[0] === params[0]);
+    const json = structuredClone(a?.json ?? { jsonrpc: "2.0", id: 1, result: { value: null } });
+    if (change[params[0]]) json.result.value = change[params[0]](json.result.value);
+    return { ok: true, status: 200, json: async () => json };
+  };
+}
+const recordedCode = () => {
+  const pd = REC.good.find((x) => x.method === "getAccountInfo" && x.params[0] === RD.programdata);
+  return Buffer.from(pd.json.result.value.data[0], "base64").subarray(45, 45 + RD.so_len);
+};
+const withData = (f) => (v) => {
+  const d = Buffer.from(v.data[0], "base64");
+  f(d);
+  return { ...v, data: [d.toString("base64"), "base64"] };
+};
+
+test("the resume takes the recorded program: executable, final, this build's code", async () => {
+  assert.deepEqual(await programProblems(chainOf(), "u", RD.program_id, recordedCode()), []);
+});
+
+test("the resume refuses a program with an authority, other bytes, a non-executable or missing account", async () => {
+  const so = recordedCode();
+  const auth = await programProblems(chainOf({ [RD.programdata]: withData((d) => (d[12] = 1, d.fill(9, 13, 45))) }), "u", RD.program_id, so);
+  assert.match(auth.join(), /upgrade authority \S+ is set/);
+  const other = Buffer.from(so);
+  other[100] ^= 1;
+  assert.match((await programProblems(chainOf(), "u", RD.program_id, other)).join(), /is not this build's/);
+  const tail = await programProblems(chainOf({ [RD.programdata]: (v) => ({ ...v, data: [Buffer.concat([Buffer.from(v.data[0], "base64"), Buffer.from([1])]).toString("base64"), "base64"] }) }), "u", RD.program_id, so);
+  assert.match(tail.join(), /is not this build's/);
+  const notExec = await programProblems(chainOf({ [RD.program_id]: (v) => ({ ...v, executable: false }) }), "u", RD.program_id, so);
+  assert.match(notExec.join(), /is not an executable upgradeable-loader program/);
+  assert.match((await programProblems(chainOf({ [RD.program_id]: () => null }), "u", RD.program_id, so)).join(), /no account/);
+});
+
+test("a pool that exists skips init and its rent; another account at the pool address is refused", async () => {
+  const pool = REC.good.find((x) => x.method === "getAccountInfo" && x.params[0] === RD.pool).json.result.value;
+  const acc = { owner: pool.owner, data: Buffer.from(pool.data[0], "base64") };
+  assert.equal(poolState(acc, RD.program_id), "ours");
+  assert.equal(poolState(null, RD.program_id), "missing");
+  assert.match(poolState({ ...acc, owner: "11111111111111111111111111111111" }, RD.program_id), /^not the pool/);
+  const rent = async (n) => (BigInt(n) + 128n) * 5080n;
+  const fresh = await needOf(rent, 77_160);
+  const resumed = await needOf(rent, 77_160, { resume: true });
+  const initialized = await needOf(rent, 77_160, { resume: true, poolExists: true });
+  assert.deepEqual(Object.keys(resumed.parts).sort(), ["deposit", "deposit_mark", "deposit_pages", "fees", "funder_floor", "pool"]);
+  assert.equal(initialized.parts.pool, undefined);
+  assert.equal(resumed.total - initialized.total, resumed.parts.pool + FEE_PER_SIGNATURE);
+  assert.ok(fresh.total - resumed.total > fresh.parts.programdata);
+});

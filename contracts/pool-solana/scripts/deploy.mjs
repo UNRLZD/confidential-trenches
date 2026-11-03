@@ -38,7 +38,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEVNET_GENESIS, MAINNET_GENESIS, LOADER_V3, SYSTEM, POOL_LEN, PRE_MARK_LEN, P,
-  account, address, b58encode, be32, cat, hex, labelOf, le, pageAddress, poolAddress, preMarkAddress, programDataAddress, rpc, scopeOf,
+  RPCS as DEVNET_RPCS, account, address, b58encode, be32, cat, hex, labelOf, le, pageAddress, poolAddress, preMarkAddress, programDataAddress, rpc,
+  scopeOf,
 } from "../../../scripts/live-checks/pool-sol-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -120,8 +121,17 @@ export async function sendAndConfirm(fetchFn, url, ixs, payer, keys) {
   const { value } = await rpc(fetchFn, url, "getLatestBlockhash", [{ commitment: "confirmed" }]);
   const tx = signTx(compileMessage(payer.id, ixs, value.blockhash), keys);
   const until = Date.now() + 90_000;
+  const status = async () => (await rpc(fetchFn, url, "getSignatureStatuses", [[tx.signature], { searchTransactionHistory: true }])).value[0];
   while (Date.now() < until) {
-    await rpc(fetchFn, url, "sendTransaction", [tx.base64, { encoding: "base64", preflightCommitment: "confirmed" }]);
+    try {
+      await rpc(fetchFn, url, "sendTransaction", [tx.base64, { encoding: "base64", preflightCommitment: "confirmed" }]);
+    } catch (e) {
+      // a resend of a transaction that already landed ("already been processed") is not a failure: its status says
+      const s = await status();
+      if (s?.err) throw new Error(`${tx.signature} failed: ${JSON.stringify(s.err)}`);
+      if (s && ["confirmed", "finalized"].includes(s.confirmationStatus)) return tx.signature;
+      if (!/already been processed/i.test(e.message)) throw e;
+    }
     for (let i = 0; i < 4; i++) {
       await sleep(500);
       const s = (await rpc(fetchFn, url, "getSignatureStatuses", [[tx.signature]])).value[0];
@@ -141,12 +151,13 @@ function cli(args, { allowFail = false } = {}) {
 
 // ---- the need ----
 /** The funder's need: each part in lamports, and their sum. `rent(n)` is the cluster's rent-exempt minimum. */
-export async function needOf(rent, soLen) {
+export async function needOf(rent, soLen, { resume = false, poolExists = false } = {}) {
   const writes = BigInt(Math.ceil(soLen / WRITE_CHUNK));
+  // a resume (--program) deploys nothing: no program account, programdata, buffer, writes or deploy signatures
+  const deployParts = resume ? {} : { program_account: await rent(36), programdata: await rent(45 + soLen) };
   const parts = {
-    program_account: await rent(36),
-    programdata: await rent(45 + soLen),
-    pool: await rent(POOL_LEN),
+    ...deployParts,
+    ...(poolExists ? {} : { pool: await rent(POOL_LEN) }),
     deposit: DEPOSIT,
     deposit_mark: await rent(PRE_MARK_LEN),
     deposit_pages: 2n * (await rent(16 + 72)),
@@ -156,7 +167,7 @@ export async function needOf(rent, soLen) {
     // signatures: buffer 2, writes, deploy 2 (funder and program), init 1, deposit 1, sweep 1; buffer and program
     // close 1 each, only after a failure; and RETRY_SIGNATURES for writes the CLI re-signs on a new blockhash (the
     // dry run used all but 10 of the counted fees). Whatever is not spent is swept back.
-    fees: FEE_PER_SIGNATURE * (2n + writes + 2n + 1n + 1n + 1n + 2n + RETRY_SIGNATURES),
+    fees: FEE_PER_SIGNATURE * ((resume ? 0n : 2n + writes + 2n) + (poolExists ? 0n : 1n) + 1n + 1n + 2n + RETRY_SIGNATURES),
   };
   return { parts, total: Object.values(parts).reduce((a, b) => a + b, 0n) };
 }
@@ -216,6 +227,34 @@ async function settled(fetchFn, url, addr, ready = () => true) {
   }
 }
 
+/** What keeps `programId` from being this build, final, on `url`: [] when it is executable, owned by the upgradeable
+ * loader, its programdata the one its id derives, its upgrade authority none, and its code `so` with only zeros
+ * after it. A resume (--program) reads it on two RPCs before it spends a lamport. */
+export async function programProblems(fetchFn, url, programId, so) {
+  const out = [];
+  const pa = await account(fetchFn, url, programId);
+  const pdAddr = programDataAddress(programId);
+  if (!pa) return [`${programId}: no account on ${url}`];
+  if (!pa.executable || pa.owner !== LOADER_V3 || pa.data.length !== 36 || pa.data[0] !== 2 || b58encode(pa.data.subarray(4, 36)) !== pdAddr) {
+    out.push(`${programId} is not an executable upgradeable-loader program pointing at ${pdAddr} on ${url}`);
+  }
+  const pd = await account(fetchFn, url, pdAddr);
+  if (!pd || pd.owner !== LOADER_V3 || pd.data.length < 45 || pd.data[0] !== 3) return [...out, `programdata ${pdAddr} missing or not the loader's on ${url}`];
+  if (pd.data[12] !== 0) out.push(`upgrade authority ${b58encode(pd.data.subarray(13, 45))} is set on ${url}`);
+  const code = pd.data.subarray(45);
+  const sha = (b) => createHash("sha256").update(b).digest("hex");
+  if (code.length < so.length || sha(code.subarray(0, so.length)) !== sha(so) || !code.subarray(so.length).every((b) => b === 0)) {
+    out.push(`the code at ${pdAddr} is not this build's (sha256 ${sha(so)}) on ${url}`);
+  }
+  return out;
+}
+
+/** The pool account's state: "missing", "ours" (the program's, POOL_LEN bytes, "bfpool01"), or why it is neither. */
+export function poolState(acc, programId) {
+  if (!acc) return "missing";
+  return acc.owner === programId && acc.data.length === POOL_LEN && Buffer.from(acc.data.subarray(0, 8)).toString() === "bfpool01" ? "ours" : `not the pool (owner ${acc.owner}, ${acc.data.length} bytes)`;
+}
+
 async function waitFinalized(fetchFn, url, sigs) {
   const until = Date.now() + 120_000;
   while (Date.now() < until) {
@@ -237,7 +276,20 @@ export async function main(argv, fetchFn = fetch) {
   if (cluster === "mainnet") throw new Error("mainnet refused: its deploy is the owner's, with a program id of its own (M351)");
   if (!cluster) throw new Error(`genesis ${genesis} at ${url} is neither devnet nor a loopback validator`);
   const failAfter = opt("--fail-after");
-  if (failAfter && cluster !== "localnet") throw new Error("--fail-after is for the local dry run only");
+  if ((failAfter || argv.includes("--flaky")) && cluster !== "localnet") throw new Error("--fail-after and --flaky are for the local dry run only");
+  if (argv.includes("--flaky")) {
+    // the dry run's planted transient failures: every third call throws as a reset connection does
+    const real = fetchFn;
+    let n = 0;
+    fetchFn = async (u, init) => {
+      if (++n % 3 === 0) throw new TypeError("fetch failed");
+      return real(u, init);
+    };
+  }
+  // a resume: the program is deployed and final already (a run that stopped after its deploy); init and deposit only
+  const resumeId = opt("--program");
+  if (resumeId) address(resumeId);
+  const prior = (opt("--prior") ?? "").split(",").filter(Boolean);
   log(`cluster ${cluster} (genesis ${genesis}) at ${url}`);
 
   if (!argv.includes("--no-build")) {
@@ -252,16 +304,27 @@ export async function main(argv, fetchFn = fetch) {
   const soSha = createHash("sha256").update(so).digest("hex");
   log(`code ${so.length} bytes, sha256 ${soSha}`);
 
+  const second = cluster === "devnet" ? DEVNET_RPCS.find((u) => u !== url) ?? DEVNET_RPCS[1] : url.replace("127.0.0.1", "localhost");
+  let poolExists = false;
+  if (resumeId) {
+    const problems = [...(await programProblems(fetchFn, url, resumeId, so)), ...(await programProblems(fetchFn, second, resumeId, so))];
+    if (problems.length) throw new Error(`--program ${resumeId} refused: ${problems.join("; ")}`);
+    const ps = poolState(await account(fetchFn, url, poolAddress(resumeId).address), resumeId);
+    if (ps !== "missing" && ps !== "ours") throw new Error(`--program ${resumeId} refused: its pool address holds ${ps}`);
+    poolExists = ps === "ours";
+    log(`resume: ${resumeId} is final with this build's code on ${url} and ${second}; its pool ${poolExists ? "exists, init skipped" : "is missing, init runs"}`);
+  }
+
   const dir = mkdtempSync(path.join(tmpdir(), "pool-sol-deploy-"));
   chmodSync(dir, 0o700);
-  const program = newKey();
+  const program = resumeId ? { id: resumeId } : newKey();
   const funder = newKey();
   const fileOf = (k, name) => {
     const f = path.join(dir, name);
     writeFileSync(f, JSON.stringify([...k.secret, ...k.pub]), { mode: 0o600 });
     return f;
   };
-  const programFile = fileOf(program, "program.json");
+  const programFile = resumeId ? null : fileOf(program, "program.json");
   const funderFile = fileOf(funder, "funder.json");
   const common = ["--url", url, "--keypair", funderFile, "--commitment", "confirmed"];
   const txs = [];
@@ -280,10 +343,12 @@ export async function main(argv, fetchFn = fetch) {
       log(`buffers closed: ${said}`);
     },
     upgradeableByFunder: async () => {
+      if (resumeId) return false; // final already: read on two RPCs before this run spent anything
       const pd = await account(fetchFn, url, programDataAddress(program.id)).catch(() => null);
       return !!pd && pd.data[12] === 1 && b58encode(pd.data.subarray(13, 45)) === funder.id;
     },
     closeProgram: async () => {
+      if (resumeId) throw new Error("a resumed program is never closed here");
       cli(["program", "close", program.id, "--recipient", funder.id, "--bypass-warning", ...common]);
       log(`program ${program.id} closed (it was not final)`);
     },
@@ -292,7 +357,7 @@ export async function main(argv, fetchFn = fetch) {
   };
   try {
     const rent = async (n) => BigInt(await rpc(fetchFn, url, "getMinimumBalanceForRentExemption", [n]));
-    const need = await needOf(rent, so.length);
+    const need = await needOf(rent, so.length, { resume: !!resumeId, poolExists });
     log(`program id ${program.id}`);
     log(`funder ${funder.id} needs ${need.total} lamports (${Object.entries(need.parts).map(([k, v]) => `${k} ${v}`).join(", ")}); the rest is swept back to ${returnTo}`);
     log(`waiting for ${funder.id} to hold ${need.total} lamports`);
@@ -306,25 +371,33 @@ export async function main(argv, fetchFn = fetch) {
     log(`funded: ${funding.length} incoming transfer(s)`);
     check("funding");
 
-    const dep = cli(["program", "deploy", SO, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
-      "--final", "--use-rpc", "--output", "json", ...common]);
-    const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
-    if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
-    txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature });
-    const pd = await settled(fetchFn, url, programDataAddress(program.id));
-    if (pd.data[12] !== 0) throw new Error("the upgrade authority is not none after --final");
-    const code = pd.data.subarray(45);
-    if (createHash("sha256").update(code.subarray(0, so.length)).digest("hex") !== soSha || !code.subarray(so.length).every((b) => b === 0)) {
-      throw new Error("the deployed code is not the build's");
+    if (resumeId) {
+      // the first run's transactions: its own (--prior: its funding and sweep), then the program's history before now
+      for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig });
+      const hist = (await rpc(fetchFn, url, "getSignaturesForAddress", [program.id, { commitment: "confirmed" }])).filter((x) => x.err === null);
+      for (const h of hist.reverse()) txs.push({ step: "first run: deploy with the upgradeable loader, --final, or an earlier step on the program", signature: h.signature });
+      log(`resume: ${prior.length} prior and ${hist.length} program transaction(s) kept for the record`);
+    } else {
+      const dep = cli(["program", "deploy", SO, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
+        "--final", "--use-rpc", "--output", "json", ...common]);
+      const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
+      if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);
+      txs.push({ step: "deploy with the upgradeable loader, --final", signature: out.signature });
+      await settled(fetchFn, url, programDataAddress(program.id));
+      const problems = await programProblems(fetchFn, url, program.id, so);
+      if (problems.length) throw new Error(problems.join("; "));
+      log(`deployed ${program.id}, upgrade authority none, code sha256 ${soSha}`);
+      check("deploy");
     }
-    log(`deployed ${program.id}, upgrade authority none, code sha256 ${soSha}`);
-    check("deploy");
 
     const pool = poolAddress(program.id);
     const sysKey = { id: SYSTEM, signer: false, writable: false };
-    const init = await sendAndConfirm(fetchFn, url, [{ program: program.id, keys: [{ id: pool.address, signer: false, writable: true }, { id: funder.id, signer: true, writable: true }, sysKey], data: Uint8Array.of(0) }], funder, [funder]);
-    txs.push({ step: "init (tag 0)", signature: init });
-    log(`pool ${pool.address} made`);
+    if (poolExists) log(`pool ${pool.address} exists: init skipped`);
+    else {
+      const init = await sendAndConfirm(fetchFn, url, [{ program: program.id, keys: [{ id: pool.address, signer: false, writable: true }, { id: funder.id, signer: true, writable: true }, sysKey], data: Uint8Array.of(0) }], funder, [funder]);
+      txs.push({ step: "init (tag 0)", signature: init });
+      log(`pool ${pool.address} made`);
+    }
     check("init");
 
     // a fresh note: its nullifier and secret live only in this block
@@ -385,12 +458,14 @@ export async function main(argv, fetchFn = fetch) {
     process.removeListener("SIGINT", onSignal).removeListener("SIGTERM", onSignal);
   }
   if (!result) throw new Error("the sweep left the funder with more than one fee");
-  await waitFinalized(fetchFn, url, txs.map((t) => t.signature));
-  result.txs = txs;
+  // one line per transaction: a --prior signature may also be in the program's history
+  const seen = new Set();
+  result.txs = txs.filter((t) => !seen.has(t.signature) && seen.add(t.signature));
+  await waitFinalized(fetchFn, url, result.txs.map((t) => t.signature));
   const outFile = opt("--out", path.join(REPO, `scripts/live-checks/pool-sol-deploy.${cluster}.json`));
   writeFileSync(outFile, JSON.stringify(result, null, 2) + "\n");
   log(`every transaction finalized; wrote ${path.relative(process.cwd(), outFile)}`);
-  for (const t of txs) log(`tx ${t.step}: ${t.signature}`);
+  for (const t of result.txs) log(`tx ${t.step}: ${t.signature}`);
   const rpcArg = cluster === "localnet" ? ` --rpc ${url},${url.replace("127.0.0.1", "localhost")} --deployment ${path.relative(process.cwd(), outFile)}` : "";
   log(`next: node scripts/live-checks/pool-sol-deploy.mjs${rpcArg}${cluster === "devnet" ? " --record /tmp/pool-sol-deploy.devnet-answers.json --write-record" : ""}`);
   return result;

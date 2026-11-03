@@ -147,14 +147,23 @@ export const pageAddress = (program, tree, pageNo) => pda([enc("page"), Uint8Arr
 export const programDataAddress = (program) => pda([address(program)], LOADER_V3).address;
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
-/** One JSON-RPC call; a 429 (or a -32029 / -32429 answer) is waited out, up to five tries. */
-export async function rpc(fetchFn, url, method, params, sleep = sleepMs) {
-  for (let i = 0; ; i++) {
-    const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-    const j = await r.json().catch(() => null);
-    const limited = r.status === 429 || [-32029, -32429].includes(j?.error?.code);
-    if (limited && i < 5) {
-      await sleep(1500 * (i + 1));
+/** One JSON-RPC call, five tries at most: a transient failure (the fetch throws, as on a reset or "fetch failed"; a
+ * 429 or a 5xx; a -32029 / -32429 rate answer) is retried with backoff (the devnet run of 90522c4 stopped on one).
+ * A JSON-RPC error answer is never retried: it is the node's word. Re-sending a signed transaction is safe, since it
+ * keeps its signature. */
+export async function rpc(fetchFn, url, method, params, sleep = sleepMs, tries = 5) {
+  for (let i = 1; ; i++) {
+    let r, j, transient;
+    try {
+      r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+      j = await r.json().catch(() => null);
+      transient = r.status === 429 || r.status >= 500 || [-32029, -32429].includes(j?.error?.code) ? new Error(`${method}: HTTP ${r.status} ${JSON.stringify(j?.error ?? null).slice(0, 80)}`) : null;
+    } catch (e) {
+      transient = new Error(`${method}: ${e?.cause?.code ?? e?.message ?? e}`);
+    }
+    if (transient) {
+      if (i >= tries) throw transient;
+      await sleep(1500 * i);
       continue;
     }
     if (!j) throw new Error(`${method}: HTTP ${r.status}, no JSON`);
