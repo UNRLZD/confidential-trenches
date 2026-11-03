@@ -23,6 +23,12 @@
 //   learns nothing of which notes are the user's from how the restore reads. No cap and no timer: while marks keep
 //   landing the restore reads on as the chain moves (a round is a pages read and a marks read, about a second or two),
 //   and the signal stops it.
+// - The leaf count: a deposit writes its precommitment mark, one state leaf and one label leaf (contracts/pool-solana/
+//   src/deposit.rs:85, 95-96), a release its spent mark and one state leaf (release.rs:252, 256), and nothing else
+//   writes a leaf or a mark. At a read with no new mark the pages hold every leaf of the marks and no other, so the walk
+//   runs only when the label leaves number the deposit marks and the state leaves the deposit and spent marks together.
+//   An RPC that pages short (a relayer that knows a change commitment can cut just before it) is refused on every
+//   device alike, never only on the one whose note the missing leaf is.
 // - The never-closed rule (solanaMarksGaps): no mark is ever closed, so a mark one RPC gives at slot s that the other
 //   lacks at an equal or later slot is a lie, refused on every device alike; the device never judges an RPC's answer by
 //   its own notes. Each RPC's next read is at or past every slot read before it (its pages at or past the merged marks'
@@ -278,8 +284,12 @@ export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: strin
     solanaMarksGaps(calls, read.calls);
     const again = solanaMarksUnion(marks, read);
     // the one rule, on the RPCs' answers alone: walk at the first read with no new mark; else read again past it
-    if ([...again.spent.keys(), ...again.pre.keys()].every((key) => marks.spent.has(key) || marks.pre.has(key)))
+    if ([...again.spent.keys(), ...again.pre.keys()].every((key) => marks.spent.has(key) || marks.pre.has(key))) {
+      // the pages hold exactly the marks' leaves (header): pages short of them, or past them, are refused on every device
+      if (leaves.label.length !== marks.pre.size || leaves.state.length !== marks.pre.size + marks.spent.size)
+        throw new Error(`restore: the pages hold ${leaves.state.length} state and ${leaves.label.length} label leaves for ${marks.pre.size} deposits and ${marks.spent.size} releases`);
       return solanaRestore({ seed64: a.seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+    }
     marks = again;
   }
 }

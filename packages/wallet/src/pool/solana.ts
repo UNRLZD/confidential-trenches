@@ -237,23 +237,25 @@ function decodePage(raw: unknown, program: string, tree: number, pageNo: number,
 
 type Commitment = "finalized" | "confirmed";
 
-/** Calls of one read when the RPC answers -32016 (its node has not reached minContextSlot): a load-balanced provider
- * can route one call to a node a slot or two behind the one that answered the call before. Between two calls the
- * device waits about one slot, SOL_LAG_WAIT_MS, so the lagging node can catch up; never after the last, and an abort
- * during the wait stops the read with no further call. Any other error, or the last -32016, is thrown as it came (the
- * kit's JSON-RPC client throws "RPC error <code>: <message>", trade/solana/send.ts). */
-export const SOL_LAG_TRIES = 3;
+/** A read whose RPC answers -32016 (its node has not reached minContextSlot) is tried again, a slot apart, until the
+ * node reaches it: an honest RPC's finalized slot can trail the other's by a few slots (mainnet-beta vs publicnode, 30
+ * pairs on 3 Nov: mostly 0 to 2 apart, once 4), and a load-balanced provider can route one call to a node behind the
+ * one before. The budget is in slots, not tries: SOL_LAG_SLOTS waits of SOL_LAG_WAIT_MS (about a slot) each, 32 slots
+ * (Solana's finality depth, about 13 s), so a node a whole finality depth behind still answers. Never a wait after the
+ * last call; an abort during a wait stops the read with no further call. Any other error, or a -32016 past the budget,
+ * is thrown as it came (the kit's JSON-RPC client throws "RPC error <code>: <message>", trade/solana/send.ts). */
+export const SOL_LAG_SLOTS = 32;
 export const SOL_LAG_WAIT_MS = 400;
 /** The wait between two calls of a lagging read; tests pass one that returns at once. */
 export type SolanaLagWait = (ms: number) => Promise<void>;
 const slotWait: SolanaLagWait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const LAGGING = /RPC error -32016\b/;
 export async function solanaLagRetry<T>(f: () => Promise<T>, wait: SolanaLagWait = slotWait, signal?: AbortSignal): Promise<T> {
-  for (let k = 1; ; k++) {
+  for (let slots = 0; ; slots++) {
     try {
       return await f();
     } catch (e) {
-      if (k >= SOL_LAG_TRIES || !(e instanceof Error) || !LAGGING.test(e.message)) throw e;
+      if (slots >= SOL_LAG_SLOTS || !(e instanceof Error) || !LAGGING.test(e.message)) throw e;
     }
     await wait(SOL_LAG_WAIT_MS);
     signal?.throwIfAborted();
