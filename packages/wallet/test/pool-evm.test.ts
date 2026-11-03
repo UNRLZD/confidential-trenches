@@ -1,0 +1,393 @@
+// node --test packages/wallet/test/pool-evm.test.ts: the EVM pool as a pool of the proof queue (card notes-per-pool-evm,
+// src/pool/evm.ts). The context and scope are checked byte for byte against the pool's forge fixtures
+// (contracts/pool-evm/test/fixtures/pool-proofs.json and buy-proofs.json: real proofs the pool's Foundry tests land,
+// each request's context preimage and context recorded by make-pool-proofs.mjs), and the roots the device builds from
+// the pool's events against the roots those proofs proved against. The RPCs are a mock chain: blocks, the pool's
+// Deposited, Withdrawn and Bought logs as the pool emits them, and its views at each block computed from those logs.
+// Test notes only, never money; no key (W is evmAddress of a public key made from a fixed test scalar).
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { VaultTree } from "@blindfill/kit";
+import { evmAddress } from "../src/derive/index.ts";
+import { checkPool } from "../src/pool/pool.ts";
+import {
+  EVM_LAG_TRIES, EVM_LIFE_MS, EVM_POOL_EVENTS, evmContextPreimage, evmEpochBlock, evmNow, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
+  type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
+} from "../src/pool/evm.ts";
+
+type Spend = { name: string; request: { recipient: string; feeRecipient: string; feeCap: string; deadlineMs: string; refundPrecommitment: string; salt: string; trailing?: string }; contextPreimage: string; context: string; proof: { pubSignals: string[] } };
+type Set3 = { pool: string; chainId: string; scope: string; labels: string[]; commitments: string[] };
+const fx = (f: string) => JSON.parse(readFileSync(new URL(`../../../contracts/pool-evm/test/fixtures/${f}`, import.meta.url), "utf8"));
+const PP = fx("pool-proofs.json") as Set3 & Record<"relayed" | "old_root" | "big_cap" | "zero_withdrawal", Spend>;
+const BP = fx("buy-proofs.json") as { local: Set3 & Record<"buy" | "buy2" | "trailing" | "swap" | "big", Spend>; base: Set3 & { buy: Spend }; robinhood: Set3 & { buy: Spend } };
+
+const enc = new TextEncoder();
+const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+const w64 = (x: bigint): string => x.toString(16).padStart(64, "0");
+const q = (n: number | bigint): string => `0x${BigInt(n).toString(16)}`;
+const h32 = (s: string): string => `0x${hex(keccak_256(enc.encode(s)))}`;
+const reqOf = (pool: string, s: Spend): EvmPoolRequest => ({
+  processooor: pool,
+  relay: { recipient: s.request.recipient, feeRecipient: s.request.feeRecipient, feeCap: BigInt(s.request.feeCap), deadlineMs: BigInt(s.request.deadlineMs), refundPrecommitment: BigInt(s.request.refundPrecommitment), salt: s.request.salt },
+});
+
+// the topics, from Foundry's `cast sig-event` of each signature (an encoder that is not this file's), 3 Nov
+const TOPIC = {
+  dep: "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549",
+  wd: "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a",
+  buy: "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d",
+};
+const sel = (s: string): string => hex(keccak_256(enc.encode(s)).subarray(0, 4));
+
+// ---- a mock chain: blocks every 2 s, the pool's logs, and its views at each block ----
+const T0 = 1_800_000_000n;
+const POOL = BP.base.pool; // 0x...b1f1f001
+const FEE_TO = "0x000000000000000000000000000000000000fee1";
+const W_KEY = 0x1234567n; // a test scalar, never money
+const W_PUB = secp256k1.getPublicKey(Uint8Array.from(Buffer.from(w64(W_KEY), "hex")), true);
+const W = evmAddress(W_PUB);
+
+type Ev = { block: number; kind: "dep" | "wd" | "buy"; leaf: bigint; label?: bigint };
+type Chain = { events: Ev[]; head: number; finalized: number; ts: (n: number) => bigint; hashOf: (n: number) => string };
+const chain = (events: Ev[], head = 100, finalized = head - 10): Chain => ({ events, head, finalized, ts: (n) => T0 + 2n * BigInt(n), hashOf: (n) => h32(`block ${n}`) });
+const deps = (s: Set3, blocks: number[]): Ev[] => blocks.map((block, i) => ({ block, kind: "dep", leaf: BigInt(s.commitments[i]!), label: BigInt(s.labels[i]!) }));
+
+function rawLogs(c: Chain): Record<string, unknown>[] {
+  const per = new Map<number, number>();
+  return c.events.map((e, i) => {
+    const logIndex = per.get(e.block) ?? 0;
+    per.set(e.block, logIndex + 1);
+    const data =
+      e.kind === "dep" ? w64(e.leaf) + w64(e.label!) + w64(10n ** 18n) + w64(77n)
+      : w64(BigInt(FEE_TO)) + w64(4n * 10n ** 17n) + w64(10n ** 15n) + w64(55n + BigInt(i)) + w64(e.leaf) + (e.kind === "buy" ? w64(0x70c1en) + w64(1000n) : "");
+    const who = e.kind === "dep" ? "d0d0" : W.slice(2).toLowerCase();
+    return {
+      address: POOL, topics: [TOPIC[e.kind], `0x${who.padStart(64, "0")}`], data: `0x${data}`, blockNumber: q(e.block), blockHash: c.hashOf(e.block),
+      logIndex: q(logIndex + 3), transactionHash: h32(`tx ${i}`), transactionIndex: q(logIndex), removed: false,
+    };
+  });
+}
+
+/** The pool's views at block n: its trees after every event up to n, and each root's block time. */
+function viewsAt(c: Chain, n: number) {
+  const evs = c.events.filter((e) => e.block <= n);
+  const st = new VaultTree(), lt = new VaultTree();
+  const stateTimes = new Map<bigint, bigint>(), labelTimes = new Map<bigint, bigint>();
+  for (const e of evs) {
+    st.append([e.leaf]);
+    stateTimes.set(st.root!, c.ts(e.block));
+    if (e.label !== undefined) (lt.append([e.label]), labelTimes.set(lt.root!, c.ts(e.block)));
+  }
+  return { root: st.root ?? 0n, size: BigInt(st.size), labelRoot: lt.root ?? 0n, labelSize: BigInt(lt.size), stateTimes, labelTimes };
+}
+
+type Over = {
+  url?: string; chainId?: bigint; scope?: bigint;
+  /** the RPC's finalized block, by call */
+  finalized?: (call: number) => number;
+  /** a block number it answers null for, by call */
+  unknown?: (n: number, call: number) => boolean;
+  cap?: number;
+  logs?: (l: Record<string, unknown>[]) => Record<string, unknown>[];
+  view?: (name: string, v: bigint) => bigint;
+  hashOf?: (n: number) => string;
+  ts?: (n: number) => bigint;
+  log?: string[];
+};
+function rpc(c: Chain, o: Over = {}): EvmRpc {
+  let fin = 0, byNum = 0;
+  const hashOf = o.hashOf ?? c.hashOf, ts = o.ts ?? c.ts;
+  const block = (n: number) => (n > c.head ? null : { number: q(n), hash: hashOf(n), timestamp: q(ts(n)), baseFeePerGas: q(1_000_000n + BigInt(n)), parentHash: hashOf(n - 1) });
+  const f = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    o.log?.push(`${method} ${JSON.stringify(params, (_, v) => (typeof v === "bigint" ? String(v) : v))}`);
+    switch (method) {
+      case "eth_chainId": return q(o.chainId ?? 8453n);
+      case "eth_getBlockByNumber": {
+        const at = params[0] as string;
+        if (at === "finalized") return block(o.finalized ? o.finalized(fin++) : c.finalized);
+        if (at === "latest") return block(c.head);
+        const n = Number(BigInt(at));
+        if (o.unknown?.(n, byNum++)) return null;
+        return block(n);
+      }
+      case "eth_getBlockByHash": {
+        for (let n = 0; n <= c.head; n++) if (hashOf(n) === params[0]) return block(n);
+        return null;
+      }
+      case "eth_getLogs": {
+        const p = params[0] as { address: string; topics: string[][]; fromBlock: string; toBlock: string };
+        assert.equal(p.address, POOL.toLowerCase());
+        assert.deepEqual(p.topics, [[TOPIC.dep, TOPIC.wd, TOPIC.buy]]);
+        const from = Number(BigInt(p.fromBlock)), to = Number(BigInt(p.toBlock));
+        if (o.cap !== undefined && to - from + 1 > o.cap) throw new Error(`RPC error -32614: eth_getLogs is limited to a ${o.cap} range`);
+        const all = (o.logs ?? ((x) => x))(rawLogs(c));
+        return all.filter((l) => Number(BigInt(l.blockNumber as string)) >= from && Number(BigInt(l.blockNumber as string)) <= to);
+      }
+      case "eth_call": {
+        const [{ to, data }, { blockHash }] = params as [{ to: string; data: string }, { blockHash: string }];
+        assert.equal(to, POOL.toLowerCase());
+        let n = -1;
+        for (let k = 0; k <= c.head; k++) if (hashOf(k) === blockHash) n = k;
+        if (n < 0) throw new Error("RPC error -32000: header not found");
+        const v = viewsAt(c, n);
+        const s = data.slice(2, 10), arg = data.length > 10 ? BigInt(`0x${data.slice(10)}`) : 0n;
+        const out: [string, bigint] =
+          s === sel("SCOPE()") ? ["SCOPE", o.scope ?? evmPoolScopeOf(POOL, o.chainId ?? 8453n)]
+          : s === sel("currentRoot()") ? ["currentRoot", v.root]
+          : s === sel("currentTreeSize()") ? ["currentTreeSize", v.size]
+          : s === sel("currentLabelRoot()") ? ["currentLabelRoot", v.labelRoot]
+          : s === sel("currentLabelTreeSize()") ? ["currentLabelTreeSize", v.labelSize]
+          : s === sel("stateRootTimes(uint256)") ? ["stateRootTimes", v.stateTimes.get(arg) ?? 0n]
+          : s === sel("labelRootTimes(uint256)") ? ["labelRootTimes", v.labelTimes.get(arg) ?? 0n]
+          : assert.fail(`unexpected view ${data}`);
+        return `0x${w64(o.view ? o.view(out[0], out[1]) : out[1])}`;
+      }
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  return Object.assign(f, { url: o.url ?? "https://a.example" });
+}
+const pair = (a: Chain, b: Chain, oa: Over = {}, ob: Over = {}): [EvmRpc, EvmRpc] => [rpc(a, { url: "https://a.example", ...oa }), rpc(b, { url: "https://b.example", ...ob })];
+const PIN: EvmPoolPin = { network: "base", pool: POOL, feeRecipient: FEE_TO, fromBlock: 1n };
+const noWait = { sleep: async () => {} };
+const sync = (rpcs: [EvmRpc, EvmRpc], sleep: () => Promise<void> = async () => {}) => evmTreeSync({ rpcs, pin: PIN, sleep });
+/** ms just past block n's time: the cut that keeps every leaf up to block n */
+const after = (n: number): bigint => (T0 + 2n * BigInt(n)) * 1000n + 1n;
+
+// ---- the pool's own computations, against its forge fixtures ----
+
+test("the topics are keccak256 of the pool's event signatures (cast sig-event)", () => {
+  assert.equal(h32(EVM_POOL_EVENTS.Deposited), TOPIC.dep);
+  assert.equal(h32(EVM_POOL_EVENTS.Withdrawn), TOPIC.wd);
+  assert.equal(h32(EVM_POOL_EVENTS.Bought), TOPIC.buy);
+});
+
+test("the scope is the pool's on each chain (State.sol:105)", () => {
+  for (const s of [PP, BP.local, BP.base, BP.robinhood]) assert.equal(evmPoolScopeOf(s.pool, BigInt(s.chainId)).toString(), s.scope, s.chainId);
+});
+
+test("the context of every forge request equals the pool's, byte for byte, and is its proof's 8th signal", () => {
+  const all: [Set3, Spend][] = [
+    ...(["relayed", "old_root", "big_cap", "zero_withdrawal"] as const).map((k) => [PP, PP[k]] as [Set3, Spend]),
+    ...(["buy", "buy2", "swap", "big"] as const).map((k) => [BP.local, BP.local[k]] as [Set3, Spend]),
+    [BP.base, BP.base.buy], [BP.robinhood, BP.robinhood.buy],
+  ];
+  for (const [s, sp] of all) {
+    const scope = BigInt(s.scope);
+    assert.equal(`0x${hex(evmContextPreimage(reqOf(s.pool, sp), scope))}`, sp.contextPreimage, `${sp.name} preimage`);
+    assert.equal(evmPoolContextOf(reqOf(s.pool, sp), scope).toString(), sp.context, `${sp.name} context`);
+    assert.equal(sp.context, sp.proof.pubSignals[7], `${sp.name} signal`);
+  }
+  // a request with a word after RelayData is one the device never makes: its context is not the 192-byte one
+  assert.notEqual(evmPoolContextOf(reqOf(BP.local.pool, BP.local.trailing), BigInt(BP.local.scope)).toString(), BP.local.trailing.context);
+});
+
+test("trees: the device's roots from the pool's logs are the roots the forge proofs proved against", async () => {
+  for (const s of [BP.base, BP.robinhood]) {
+    const c = chain(deps(s, [10, 12, 15]));
+    const t = await evmTreeSync({ rpcs: pair(c, c, { chainId: BigInt(s.chainId) }, { chainId: BigInt(s.chainId) }), pin: { ...PIN, network: s === BP.base ? "base" : "robinhood" }, ...noWait }).trees(after(20));
+    assert.equal(t.stateRoot.toString(), s.buy.proof.pubSignals[3], `${s.chainId} state root`);
+    assert.equal(t.labelRoot.toString(), s.buy.proof.pubSignals[5], `${s.chainId} label root`);
+  }
+  // pool-proofs' leaves (chain 31337's): the cut after two deposits is old_root's root, after three relayed's
+  const c = chain([...deps(PP, [10, 12, 15]), { block: 30, kind: "wd", leaf: 999n }, { block: 30, kind: "buy", leaf: 998n }]);
+  const s = sync(pair(c, c));
+  const two = await s.trees(after(12));
+  assert.equal(two.stateRoot.toString(), PP.old_root.proof.pubSignals[3]);
+  assert.equal(two.labelRoot.toString(), PP.old_root.proof.pubSignals[5]);
+  const three = await s.trees(after(15));
+  assert.equal(three.stateRoot.toString(), PP.relayed.proof.pubSignals[3]);
+  assert.equal(three.labelRoot.toString(), PP.relayed.proof.pubSignals[5]);
+  // the cut is by block time: a leaf at exactly beforeMs is out
+  assert.equal((await s.trees((T0 + 2n * 15n) * 1000n)).stateRoot.toString(), PP.old_root.proof.pubSignals[3]);
+  // Withdrawn and Bought each add a state leaf, never a label
+  const all = await s.trees(after(31));
+  assert.equal(all.stateTree.size, 5);
+  assert.equal(all.labelRoot.toString(), PP.relayed.proof.pubSignals[5]);
+  await assert.rejects(s.trees(after(9)), /no leaf before/);
+});
+
+// ---- the two-RPC sync's refusals ----
+
+const C3 = () => chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }]);
+
+test("a dropped log or a changed leaf on one RPC is refused", async () => {
+  const c = C3();
+  await assert.rejects(sync(pair(c, c, {}, { logs: (l) => l.filter((_, i) => i !== 1) })).trees(after(25)), /the two RPCs differ at log 1/);
+  const flip = (l: Record<string, unknown>[]) => l.map((x, i) => (i === 2 ? { ...x, data: `${(x.data as string).slice(0, 65)}${(x.data as string)[65] === "1" ? "2" : "1"}${(x.data as string).slice(66)}` } : x));
+  await assert.rejects(sync(pair(c, c, {}, { logs: flip })).trees(after(25)), /the two RPCs differ at log 2/);
+  // the same lie on both RPCs: the pool's own views refuse the trees built from it
+  await assert.rejects(sync(pair(c, c, { logs: flip }, { logs: flip })).trees(after(25)), /the state tree from the logs .* is not the pool's/);
+  const drop = (l: Record<string, unknown>[]) => l.filter((_, i) => i !== 3);
+  await assert.rejects(sync(pair(c, c, { logs: drop }, { logs: drop })).trees(after(25)), /the state tree from the logs \(3 leaves\) is not the pool's/);
+});
+
+test("another root on one RPC, or a root the pool never recorded at the cut's time, is refused", async () => {
+  const c = C3();
+  const off = (name: string) => ({ view: (n: string, v: bigint) => (n === name ? v + 1n : v) });
+  await assert.rejects(sync(pair(c, c, {}, off("currentRoot"))).trees(after(25)), /the two RPCs differ on currentRoot\(\)/);
+  await assert.rejects(sync(pair(c, c, off("currentLabelRoot"), {})).trees(after(25)), /differ on currentLabelRoot\(\)/);
+  await assert.rejects(sync(pair(c, c, off("currentTreeSize"), off("currentTreeSize"))).trees(after(25)), /state tree from the logs/);
+  await assert.rejects(sync(pair(c, c, off("currentLabelRoot"), off("currentLabelRoot"))).trees(after(25)), /label tree from the logs/);
+  await assert.rejects(sync(pair(c, c, off("stateRootTimes"), off("stateRootTimes"))).trees(after(25)), /the state root built from the cut is not the pool's root of block 20/);
+  await assert.rejects(sync(pair(c, c, off("labelRootTimes"), off("labelRootTimes"))).trees(after(25)), /the label root built from the cut is not the pool's root of block 15/);
+  // one RPC's time of a leaf's block differs
+  await assert.rejects(sync(pair(c, c, {}, { ts: (n) => T0 + 2n * BigInt(n) + (n === 15 ? 1n : 0n) })).trees(after(25)), /differ on its time|hold different blocks/);
+});
+
+test("a lagging RPC is a retry, then the answer; one that stays behind is refused", async () => {
+  const c = C3();
+  const waits: number[] = [];
+  const sleep = async (ms: number) => void waits.push(ms);
+  // RPC b's finalized block is before the cut for two reads, then past it
+  const behind = { finalized: (k: number) => (k < 2 ? 22 : 90) };
+  const t = await evmTreeSync({ rpcs: pair(c, c, {}, behind), pin: PIN, sleep }).trees(after(25));
+  assert.equal(t.stateTree.size, 4);
+  assert.deepEqual(waits, [2000, 2000]);
+  // RPC b does not know the anchor block for its first read
+  waits.length = 0;
+  const t2 = await evmTreeSync({ rpcs: pair(c, c, {}, { unknown: (n, k) => n === 90 && k === 0 }), pin: PIN, sleep }).trees(after(25));
+  assert.equal(t2.stateRoot, t.stateRoot);
+  assert.deepEqual(waits, [2000]);
+  // never catches up: refused after EVM_LAG_TRIES reads, with no answer
+  waits.length = 0;
+  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, {}, { finalized: () => 22 }), pin: PIN, sleep }).trees(after(25)), /has not reached/);
+  assert.equal(waits.length, EVM_LAG_TRIES - 1);
+});
+
+test("the anchor is the lower RPC's block, one hash on both; two blocks at one height are refused", async () => {
+  const c = C3();
+  const la: string[] = [], lb: string[] = [];
+  await sync(pair(c, c, { finalized: () => 90, log: la }, { finalized: () => 60, log: lb })).trees(after(25));
+  for (const l of [la, lb]) assert.ok(l.some((x) => x.startsWith('eth_getLogs [{"address"') && x.endsWith('"toBlock":"0x3c"}]')), "both read up to block 60");
+  await assert.rejects(sync(pair(c, c, {}, { hashOf: (n) => (n === 90 ? h32("other 90") : c.hashOf(n)) })).trees(after(25)), /hold different blocks at 90/);
+});
+
+test("a range-cap error halves that RPC's page, and the sync still reads every block", async () => {
+  const c = chain([...deps(PP, [10, 1200, 4800]), { block: 4900, kind: "buy", leaf: 997n }], 6000, 5000);
+  const la: string[] = [];
+  const t = await sync(pair(c, c, { cap: 200, log: la }, {})).trees(after(4950));
+  assert.equal(t.stateTree.size, 4);
+  const ranges = la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1).map((h) => Number(BigInt(h))));
+  // the first pages are refused and halved down to 156 blocks; the pages then tile 1..5000 with no gap
+  assert.ok(ranges.length > 25);
+  const ok = ranges.filter(([f, t]) => t! - f! + 1 <= 200);
+  assert.equal(ok[0]![0], 1);
+  for (let i = 1; i < ok.length; i++) assert.equal(ok[i]![0], ok[i - 1]![1]! + 1);
+  assert.equal(ok[ok.length - 1]![1], 5000);
+  // a provider that refuses even one block is an error, never a smaller tree
+  await assert.rejects(sync(pair(c, c, { cap: 0 }, {})).trees(after(4950)), /limited to a 0 range/);
+});
+
+test("a log that is not the pool's leaf event, out of order, or not of the anchor's block is refused", async () => {
+  const c = C3();
+  const edit = (f: (x: Record<string, unknown>, i: number) => Record<string, unknown>) => ({ logs: (l: Record<string, unknown>[]) => l.map(f) });
+  const at1 = (f: (x: Record<string, unknown>) => Record<string, unknown>) => edit((x, i) => (i === 1 ? f(x) : x));
+  const cases: [Over, RegExp][] = [
+    [at1((x) => ({ ...x, address: "0x00000000000000000000000000000000b1f1f002" })), /not the pool's log/],
+    [at1((x) => ({ ...x, removed: true })), /a removed log/],
+    [at1((x) => ({ ...x, topics: [h32("Other(uint256)"), (x.topics as string[])[1]] })), /not Deposited, Withdrawn or Bought/],
+    [at1((x) => ({ ...x, data: `${x.data}00` })), /not 4 data words/],
+    [at1((x) => ({ ...x, topics: [(x.topics as string[])[0], `0x${"ff".repeat(32)}`] })), /not an address/],
+    [{ logs: (l) => [l[1]!, l[0]!, ...l.slice(2)] }, /not in order/],
+    [at1((x) => ({ ...x, data: `0x${w64(0n)}${(x.data as string).slice(66)}` })), /not a field element above 0/],
+  ];
+  for (const [o, re] of cases) await assert.rejects(sync(pair(c, c, o, o)).trees(after(25)), re);
+  // a log in the anchor's block that names another hash
+  const at90 = chain([...deps(PP, [10, 12, 90])]);
+  const o = edit((x, i) => (i === 2 ? { ...x, blockHash: h32("other 90") } : x));
+  await assert.rejects(sync(pair(at90, at90, o, o)).trees(after(80)), /is not of the anchor/);
+});
+
+test("a pool on another chain, or another pool's SCOPE, is refused", async () => {
+  const c = C3();
+  await assert.rejects(sync(pair(c, c, {}, { chainId: 84532n })).trees(after(25)), /not base's 8453/);
+  await assert.rejects(sync(pair(c, c, { scope: 5n }, { scope: 5n })).trees(after(25)), /SCOPE\(\): not the scope/);
+  assert.throws(() => sync([rpc(c, { url: "https://same.example" }), rpc(c, { url: "https://same.example" })]), /one provider twice/);
+});
+
+test("the sync keeps what both RPCs agreed on and reads only past it; a newest read is never kept", async () => {
+  const c = C3();
+  const la: string[] = [];
+  let fin = 50;
+  const s = sync(pair(c, c, { log: la, finalized: () => fin }, { finalized: () => fin }));
+  await s.trees(after(25));
+  fin = 90;
+  la.length = 0;
+  await s.trees(after(25));
+  assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]), ["0x33"]);
+  // newest: read at latest (block 100, past the finalized 90), not kept, so the next epoch read starts at 91 again
+  c.events.push({ block: 95, kind: "dep", leaf: 1234n, label: 4321n });
+  const n = await s.trees(after(96), undefined, { newest: true });
+  assert.equal(n.stateTree.size, 5);
+  la.length = 0;
+  await assert.rejects(s.trees(after(96)), /has not reached/);
+  assert.ok(la.filter((x) => x.startsWith("eth_getLogs")).every((x) => x.includes('"fromBlock":"0x5b"')), "the newest read was not kept");
+});
+
+test("now is the lower of the two RPCs' finalized block times", async () => {
+  const c = C3();
+  assert.equal(await evmNow(pair(c, c, { finalized: () => 80 }, { finalized: () => 79 })), (T0 + 158n) * 1000n);
+  assert.equal(await evmNow(pair(c, c, { finalized: () => 70 }, { finalized: () => 79 })), (T0 + 140n) * 1000n);
+});
+
+test("the epoch's first block is the first at or after its start, the same on both RPCs", async () => {
+  const c = C3();
+  const start = (T0 + 2n * 41n) * 1000n - 1000n; // between block 40 and 41
+  const b = await evmEpochBlock(pair(c, c), start);
+  assert.equal(b.number, 41n);
+  assert.equal(b.hash, c.hashOf(41));
+  assert.equal((await evmEpochBlock(pair(c, c), (T0 + 2n * 41n) * 1000n)).number, 41n);
+  await assert.rejects(evmEpochBlock(pair(c, c, {}, { hashOf: (n) => (n === 41 ? h32("other 41") : c.hashOf(n)) }), start), /hold different blocks at 41/);
+  await assert.rejects(evmEpochBlock(pair(c, c, {}, { hashOf: (n) => (n === 40 ? h32("other 40") : c.hashOf(n)) }), start), /hold different blocks at 40/);
+});
+
+// ---- bind ----
+
+const EPOCH = 1_800_000_060_000n; // block 30's time is T0 + 60 s: the epoch's first block
+const feeRule = (seen: unknown[]) => (at: { block: bigint; baseFeePerGas: bigint; depth: number }) => (seen.push(at), 10n ** 13n * BigInt(at.depth + 1));
+const answer = (over: Partial<EvmFeeAnswer> = {}): EvmFeeAnswer => ({ chain: "evm", network: "base", pool: POOL, fee_recipient: FEE_TO, epoch_ms: 60_000, epoch_start_ms: Number(EPOCH), block: "0x1e", fee: "30000000000000", step: "10000000000000", ...over });
+// the epoch's first block is 30: with its own leaf the tree there holds 3 leaves (depth 2); without it 2 (depth 1);
+// with the five later leaves 8 (depth 3)
+const CB = () => chain([...deps(PP, [10, 12, 30]), { block: 31, kind: "wd", leaf: 999n }, { block: 32, kind: "wd", leaf: 998n }, { block: 33, kind: "wd", leaf: 997n }, { block: 34, kind: "wd", leaf: 996n }, { block: 35, kind: "wd", leaf: 995n }], 200, 40);
+const poolOf = (c: Chain, ans: (e: bigint) => EvmFeeAnswer = () => answer(), seen: unknown[] = []) =>
+  evmPool({ pin: PIN, rpcs: pair(c, c), relayFee: async (e) => ans(e), epochFee: feeRule(seen), salt: () => Uint8Array.from(Buffer.from(PP.relayed.request.salt.slice(2), "hex")), ...noWait });
+const bindArgs = (over: Record<string, unknown> = {}) => ({ chunk: 4n * 10n ** 17n, wallet: { address: W, publicKey: W_PUB }, refundPrecommitment: 5n, epochStartMs: EPOCH, deadlineMs: EPOCH + EVM_LIFE_MS, ...over });
+
+test("bind: the pool's context of W's request, its fee the device's own from the epoch's first block and depth", async () => {
+  const seen: unknown[] = [];
+  const p = poolOf(CB(), undefined, seen);
+  checkPool(p);
+  assert.equal(p.scope, evmPoolScopeOf(POOL, 8453n));
+  const b = await p.bind(bindArgs());
+  assert.deepEqual(seen, [{ block: 30n, baseFeePerGas: 1_000_030n, depth: 2 }]);
+  assert.equal(b.feeCap, 3n * 10n ** 13n);
+  assert.deepEqual(b.request, { processooor: POOL, relay: { recipient: W, feeRecipient: FEE_TO, feeCap: 3n * 10n ** 13n, deadlineMs: EPOCH + EVM_LIFE_MS, refundPrecommitment: 5n, salt: PP.relayed.request.salt } });
+  assert.equal(b.context, evmPoolContextOf(b.request, p.scope));
+});
+
+test("bind refuses the helper's fee unless it is the device's, for this pool and epoch, and a W, chunk or deadline the pool would not take", async () => {
+  const c = CB();
+  const cases: [Partial<EvmFeeAnswer>, RegExp][] = [
+    [{ fee: "40000000000000" }, /is not the epoch's fee/],
+    [{ pool: "0x00000000000000000000000000000000b1f1f002" }, /not this pool's/],
+    [{ fee_recipient: "0x000000000000000000000000000000000000fee2" }, /not this pool's/],
+    [{ network: "robinhood" }, /not this pool's/],
+    [{ block: "0x1f" }, /not its first block/],
+    [{ epoch_start_ms: Number(EPOCH) + 60_000 }, /not this epoch's/],
+  ];
+  for (const [o, re] of cases) await assert.rejects(poolOf(c, () => answer(o)).bind(bindArgs()), re);
+  const p = poolOf(c);
+  await assert.rejects(p.bind(bindArgs({ wallet: { address: W.toLowerCase(), publicKey: W_PUB } })), /EIP-55 of its secp256k1 public key/);
+  await assert.rejects(p.bind(bindArgs({ wallet: { address: evmAddress(secp256k1.getPublicKey(Uint8Array.from(Buffer.from(w64(7n), "hex")), true)), publicKey: W_PUB } })), /EIP-55/);
+  await assert.rejects(p.bind(bindArgs({ deadlineMs: EPOCH + EVM_LIFE_MS + 1n })), /deadlineMs/);
+  await assert.rejects(p.bind(bindArgs({ epochStartMs: EPOCH + 1n, deadlineMs: EPOCH + 1n + EVM_LIFE_MS })), /epochStartMs/);
+  await assert.rejects(p.bind(bindArgs({ chunk: 6n * 10n ** 13n - 1n })), /backstop/);
+  await assert.rejects(p.bind(bindArgs({ refundPrecommitment: 1n << 254n })), /refundPrecommitment/);
+  // a deadline already within the send margin of the pool's time
+  const late = chain(CB().events, 400, 350);
+  await assert.rejects(poolOf(late).bind(bindArgs()), /too close to send/);
+});
