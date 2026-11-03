@@ -19,7 +19,7 @@
 //     the funder at 0 on two RPCs with no buffer or upgradeable program of its left; otherwise it is kept and its path
 //     printed with why, so no lamport is ever stranded behind a deleted key.
 //  4. The funder's need, printed with its parts: rent of the program account (36 B) and its programdata (45 B + the
-//     code), the pool (POOL_LEN), the deposit (0.01 SOL, its 16 B mark and two first page entries), the funder's own
+//     code), the pool (POOL_LEN), the deposit (0.01 SOL, its 17 B mark and two first page entries), the funder's own
 //     rent(0) (it must stay rent-exempt between steps), and a fee bound for
 //     every signature (the CLI's write chunks counted at 900 B, fewer than it writes). Then it waits until the
 //     funder holds that much, and records the funding transactions.
