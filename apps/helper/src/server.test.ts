@@ -284,7 +284,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // the EVM lists (src/data/evm/lists.ts): each served chain's lists on GeckoTerminal's one budget, shared with the
   // Solana token page's candles, and warmed at start
   assert.match(main, /const SERVED_EVM: readonly EvmChain\[\] = \["base", "robinhood"\];/);
-  assert.match(main, /const gecko = geckoBudget\(Date\.now, \{ lists: listsLane, pages: GT_LIMIT_PER_MIN - listsLane \}\);/);
+  assert.match(main, /const gecko = geckoBudget\(Date\.now\);/);
   assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko\)\]\)\);/);
   assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko\);/);
   assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);

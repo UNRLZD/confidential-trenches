@@ -9,7 +9,9 @@
 //     equals trending_1h;
 //   - every row holds exactly the terminal's ROW_FIELDS (apps/terminal/src/screens/discover/fields.ts) in their wire
 //     forms, chain <chain>, token a lowercase 0x address, launchpad null or one of the chain's table pads;
-//   - the maker, re-read on chain: for up to SAMPLE tagged rows and SAMPLE untagged rows (each list's first), the
+//   - `unsettled` (the tokens whose maker the helper has not read yet) is a list of listed tokens, each row of them
+//     untagged, and at most half the listed tokens;
+//   - the maker, re-read on chain: for up to SAMPLE tagged rows and SAMPLE untagged settled rows (each list's first), the
 //     table's creation events over the row's pool block, read here on the chain's providers (MAKER_RPCS: two that
 //     answer and agree), name the same pad as the row, or none for an untagged row. A row the read does not settle is
 //     said, not failed; a sample with tagged rows and none of them settled is a FAIL, since then nothing was re-read.
@@ -59,10 +61,12 @@ export function rowFault(chain, r) {
 }
 
 /** The rows whose maker the check re-reads: up to SAMPLE tagged and SAMPLE untagged, each token once. */
-export function sample(lists) {
+/** Up to SAMPLE tagged rows and SAMPLE untagged rows whose maker the helper has read (not in `unsettled`). */
+export function sample(lists, unsettled = []) {
   const seen = new Set();
   const all = LISTS.flatMap((k) => (Array.isArray(lists[k]) ? lists[k] : [])).filter((r) => r && ADDR.test(r.token) && Number.isSafeInteger(r.created_s) && !seen.has(r.token) && seen.add(r.token));
-  return [...all.filter((r) => typeof r.launchpad === "string").slice(0, SAMPLE), ...all.filter((r) => r.launchpad === null).slice(0, SAMPLE)];
+  const open = new Set(Array.isArray(unsettled) ? unsettled : []);
+  return [...all.filter((r) => typeof r.launchpad === "string").slice(0, SAMPLE), ...all.filter((r) => r.launchpad === null && !open.has(r.token)).slice(0, SAMPLE)];
 }
 
 /** The check of one chain's read: { status, headers, body, readAt } and the makers re-read for its sample. */
@@ -100,7 +104,11 @@ export function judge(chain, r, makers) {
   say(Array.isArray(lists.new) && lists.new.length > 0, `new holds rows: ${lists.new?.length ?? 0}`);
   say(Array.isArray(lists.trending_1h) && lists.trending_1h.length > 0, `trending_1h holds rows: ${lists.trending_1h?.length ?? 0}`);
   say(Array.isArray(lists.trending) && JSON.stringify(lists.trending) === JSON.stringify(lists.trending_1h), "trending equals trending_1h");
-  const rows = sample(lists);
+  const listed = new Map(LISTS.flatMap((k) => (Array.isArray(lists[k]) ? lists[k] : [])).filter((r) => r && typeof r.token === "string").map((r) => [r.token, r]));
+  const open = s?.unsettled;
+  const openOk = Array.isArray(open) && open.every((t) => typeof t === "string" && listed.has(t) && listed.get(t).launchpad === null) && new Set(open).size === open.length;
+  say(openOk && open.length * 2 <= listed.size, `unsettled: ${Array.isArray(open) ? `${open.length} of ${listed.size} listed tokens, each listed and untagged, at most half` : show(open)}`);
+  const rows = sample(lists, openOk ? open : []);
   let tagged = 0;
   let taggedRead = 0;
   for (const row of rows) {
@@ -151,14 +159,14 @@ export async function read(chain, base = BASE, fetchFn = fetch) {
 /** Read and judge one chain: the helper's answer, then the sample's makers on chain. */
 export async function check(chain, base = BASE, fetchFn = fetch, nowMs = Date.now()) {
   const answer = await read(chain, base, fetchFn);
-  let lists = {};
+  let body = {};
   try {
-    lists = JSON.parse(answer.body)?.lists ?? {};
+    body = JSON.parse(answer.body) ?? {};
   } catch {
-    lists = {};
+    body = {};
   }
   const rpc = [];
-  const makers = await rereadMakers(chain, sample(lists), fetchFn, rpc, nowMs);
+  const makers = await rereadMakers(chain, sample(body.lists ?? {}, body.unsettled), fetchFn, rpc, nowMs);
   return { answer, rpc, ...judge(chain, answer, makers) };
 }
 

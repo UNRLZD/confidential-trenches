@@ -3,9 +3,10 @@
 // factory made the token (owner 3 Nov 10:11Z), read on chain.
 //
 // Lists: GeckoTerminal's keyless `networks/<net>/new_pools` and `trending_pools?duration=5m|1h` (D-E2, M:2315; D-E6
-// names the same networks), page 1 each (20 pools), with the pools' base tokens included. GeckoTerminal allows 10
-// calls a minute per caller (../gecko.ts), shared with the Solana token page's candles, so each chain's three lists
-// are read together once per LIST_MS in the "lists" lane, capped at LISTS_PER_MIN per chain.
+// names the same networks), page 1 each (20 pools), with the pools' base tokens included. GeckoTerminal answers one
+// address a few calls a minute (../gecko.ts), shared with the Solana token page's candles, which go first: each tick
+// reads the stalest list older than LIST_MS, one call at a time while the "lists" lane yields a call, so the lists
+// slow down while pages are opened and answer 503 only past STALE_MS.
 //
 // Launchpad (the maker): the block the token's pool was made in, then on two RPC providers one `eth_getLogs` over that
 // block and the one before it, filtered to the chain's FACTORIES and their creation events; the row's launchpad is the
@@ -24,23 +25,28 @@ import type { GeckoBudget } from "../gecko.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
-export type EvmSnapshot = { chain: EvmChain; lists: Record<"new" | "trending" | "trending_5m" | "trending_1h" | "graduating", Row[]>; as_of_ms: number };
+/** `unsettled`: the listed tokens whose maker is not read yet; their rows' launchpad null means "not read yet", every
+ *  other row's null means no listed factory made the token. Not a row field: the frozen rows are unchanged. */
+export type EvmSnapshot = { chain: EvmChain; lists: Record<"new" | "trending" | "trending_5m" | "trending_1h" | "graduating", Row[]>; as_of_ms: number; unsettled: string[] };
 
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** GeckoTerminal's network id per chain (read 2026-11-03 11:25Z: `networks/base/new_pools` and `networks/robinhood/new_pools`, 20 pools each). */
 export const GT_NETWORK: Readonly<Record<EvmChain, string>> = { base: "base", robinhood: "robinhood" };
+export const LIST_KEYS = ["new", "trending_5m", "trending_1h"] as const;
+type ListKey = (typeof LIST_KEYS)[number];
 export const GT_READS = {
   new: "new_pools?include=base_token&page=1",
   trending_5m: "trending_pools?include=base_token&duration=5m&page=1",
   trending_1h: "trending_pools?include=base_token&duration=1h&page=1",
 } as const;
-/** Each chain's three lists are read together once a minute: 3 calls a minute per chain from GeckoTerminal's 10. */
+/** A list is read again once its last read is this old, when the lists lane yields a call. */
 export const LIST_MS = 60_000;
-export const LISTS_PER_MIN = 3;
+/** A list this old is read even while pages are being opened (still leaving a page one call), so it never reaches STALE_MS. */
+export const LIST_URGENT_MS = 240_000;
 /** The snapshot is rebuilt on the Solana lists' cadence (D-S2's 12 s): makers not settled yet are read again. */
 export const TICK_MS = 12_000;
 /** A snapshot whose oldest list read is older than this answers 503, never a stale list passed as fresh. */
-export const STALE_MS = 2 * LIST_MS;
+export const STALE_MS = 300_000;
 /** A pool younger than this whose block shows no creation event is read again, since a provider may not hold its logs yet. */
 export const SETTLE_MS = 60_000;
 export const MAKER_MAX = 20_000;
@@ -471,8 +477,9 @@ async function padsAt(chain: EvmChain, doFetch: Fetch, asks: readonly { token: s
   return out;
 }
 
-/** Tokens per tick whose creation block is searched (EARLIER_READS_MAX block reads each, at most). */
-export const EARLIER_PER_TICK = 2;
+/** Creation-block searches run at once (EARLIER_READS_MAX block reads each, at most); every older token a tick asks
+ *  about is searched in that tick, so none waits behind newer tokens with a null that means "not read yet". */
+export const EARLIER_PARALLEL = 3;
 export const EARLIER_READS_MAX = 120;
 
 /**
@@ -537,17 +544,20 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
     else out.set(a.token, x);
   }
   // none at the pool: a token with no code before its pool was made there, so none; an older token's creation block is
-  // searched, a few a tick (the rest are read again next tick)
+  // searched, EARLIER_PARALLEL at a time
   const had = await hadCode(chain, doFetch, none.map((a) => ({ token: a.token, at: a.range[0] - 1 })));
   const older = none.filter((a, i) => {
     if (had[i] === false) out.set(a.token, null);
     return had[i] === true;
   });
   const earlier: { token: string; range: [number, number] }[] = [];
-  for (const a of older.slice(0, EARLIER_PER_TICK)) {
-    const b = await codeBlock(chain, a.token, a.range[0], doFetch);
-    if (b === null) out.set(a.token, null);
-    else if (b !== undefined) earlier.push({ token: a.token, range: [b, b] });
+  for (let i = 0; i < older.length; i += EARLIER_PARALLEL) {
+    const part = older.slice(i, i + EARLIER_PARALLEL);
+    const found = await Promise.all(part.map((a) => codeBlock(chain, a.token, a.range[0], doFetch)));
+    for (const [k, b] of found.entries()) {
+      if (b === null) out.set(part[k]!.token, null);
+      else if (b !== undefined) earlier.push({ token: part[k]!.token, range: [b, b] });
+    }
   }
   const second = await padsAt(chain, doFetch, earlier);
   for (const e of earlier) if (second.has(e.token)) out.set(e.token, second.get(e.token)!);
@@ -568,12 +578,12 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   const makers = new Map<string, string | null>();
   const known = new Map<number, number>(); // block times the Robinhood search has read
   const tries = new Map<string, number>(); // maker reads that settled nothing, per token
-  let read: { new: Read; trending_5m: Read; trending_1h: Read } | null = null;
+  const reads: Partial<Record<ListKey, Read>> = {};
   let last: (ListsAnswer & { asOfMs: number }) | null = null;
   let running: Promise<void> | null = null;
 
-  async function gt(path: string): Promise<Read | null> {
-    if (!gecko.take("lists")) return null;
+  async function gt(path: string, urgent: boolean): Promise<Read | null> {
+    if (!gecko.take("lists", urgent)) return null;
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
@@ -596,20 +606,29 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     }
   }
 
+  const all = (): { new: Read; trending_5m: Read; trending_1h: Read } | null =>
+    reads.new && reads.trending_5m && reads.trending_1h ? { new: reads.new, trending_5m: reads.trending_5m, trending_1h: reads.trending_1h } : null;
+
   function build() {
+    const read = all();
     if (read === null) return;
     const tag = (rows: Row[]) => rows.map((r) => ({ ...r, launchpad: makers.get(r.token as string) ?? null }));
     const asOf = Math.min(read.new.at, read.trending_5m.at, read.trending_1h.at);
     const lists = { new: tag(read.new.rows), trending: tag(read.trending_1h.rows), trending_5m: tag(read.trending_5m.rows), trending_1h: tag(read.trending_1h.rows), graduating: [] as Row[] };
-    const body = JSON.stringify({ chain, lists, as_of_ms: asOf } satisfies EvmSnapshot);
+    const unsettled = [...new Set([read.new, read.trending_5m, read.trending_1h].flatMap((r) => r.rows.map((x) => x.token as string)))].filter((t) => !makers.has(t));
+    const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled } satisfies EvmSnapshot);
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
   }
 
   async function tick(): Promise<void> {
-    if (read === null || now() - Math.min(read.new.at, read.trending_5m.at, read.trending_1h.at) >= LIST_MS) {
-      const [n, t5, t1] = await Promise.all([gt(GT_READS.new), gt(GT_READS.trending_5m), gt(GT_READS.trending_1h)]);
-      if (n !== null && t5 !== null && t1 !== null) read = { new: n, trending_5m: t5, trending_1h: t1 };
+    // the stalest list first (a missing one before any), one call at a time while the lists lane yields one
+    const age = (k: ListKey) => (reads[k] === undefined ? Infinity : now() - reads[k]!.at);
+    for (const k of LIST_KEYS.filter((x) => age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
+      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS && age(k) !== Infinity);
+      if (r === null) break;
+      reads[k] = r;
     }
+    const read = all();
     if (read === null) return;
     const wanted = new Map<string, number>();
     for (const r of [read.new, read.trending_5m, read.trending_1h]) for (const [t, s] of r.created) if (!makers.has(t) && s >= 0) wanted.set(t, s);

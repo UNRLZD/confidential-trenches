@@ -23,8 +23,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { createSolanaLists } from "./data/solana/lists.ts";
-import { createEvmLists, LISTS_PER_MIN, type EvmChain } from "./data/evm/lists.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
+import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
+import { geckoBudget, type GeckoBudget } from "./data/gecko.ts";
 import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
@@ -489,10 +489,9 @@ if (import.meta.main) {
     const proxy = createProxy(process.env);
     const rpc = createRpc(process.env);
     const lists = createSolanaLists(proxy, rpc);
-    // GeckoTerminal's one keyless budget (src/data/gecko.ts): the EVM lists' lane and the Solana token page's candles
+    // GeckoTerminal's one keyless budget (src/data/gecko.ts): the Solana token page's candles first, the EVM lists after
     const SERVED_EVM: readonly EvmChain[] = ["base", "robinhood"];
-    const listsLane = LISTS_PER_MIN * SERVED_EVM.length;
-    const gecko = geckoBudget(Date.now, { lists: listsLane, pages: GT_LIMIT_PER_MIN - listsLane });
+    const gecko = geckoBudget(Date.now);
     const evmLists: EvmLists = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmLists(c, gecko)]));
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko);
     const watches = tokenWatchesFromEnv(process.env);

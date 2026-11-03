@@ -1,44 +1,57 @@
-// GeckoTerminal's keyless API allows 10 calls a minute per caller ("from 10 calls/min to 250 calls/min" on a paid
-// plan, apiguide.geckoterminal.com/faq, read 2026-11-03 11:27Z). The helper has one address, so every part that reads
-// GeckoTerminal (the Solana token page's candles, src/data/solana/token.ts, and the EVM lists, src/data/evm/lists.ts)
-// takes its calls from one budget: at most PER_MIN in any 60 s, split into lanes with fixed caps so one part can never
-// spend another's calls, and a 429 pauses every lane.
-export const GT_LIMIT_PER_MIN = 10;
+// GeckoTerminal's keyless API: the helper has one address, so every part that reads GeckoTerminal (the Solana token
+// page's candles, src/data/solana/token.ts, and the EVM lists, src/data/evm/lists.ts) takes its calls from one budget
+// of GT_LIMIT_PER_MIN in any 60 s. The token page goes first: the "lists" lane yields, taking a call only while
+// PAGE_RESERVE calls stay free for a page, and none while a page has called in the last YIELD_MS, unless its read is
+// urgent (about to go stale, src/data/evm/lists.ts LIST_URGENT_MS), when it still leaves one call free. A 429 pauses
+// every lane, since GeckoTerminal answers our address, not a lane.
+//
+// The limit is measured, not the published one: GeckoTerminal's FAQ says 10 calls a minute (apiguide.geckoterminal.com/
+// faq, read 2026-11-03 11:27Z), but read from one address after 70 s with no call, on 2026-11-03 at 14:58:04Z, 14 calls
+// back to back answered 200 five times, then 429 (Retry-After "0") nine times, and still 429 30 s later; the deployed
+// helper budgeting 10 met GeckoTerminal's 429 within minutes (market-data-solana-token live, 14:47Z).
+export const GT_LIMIT_PER_MIN = 5;
+/** Calls a page may always find free: a token page's first open reads the token's top pool and one candles range. */
+export const PAGE_RESERVE = 2;
+/** A page call this recent makes the lists lane wait (unless its read is urgent). */
+export const YIELD_MS = 60_000;
 
 export type GeckoBudget = {
-  /** One call now in `lane`, or false when the lane's cap, the minute's total or a 429 pause says no. */
-  take(lane: string): boolean;
+  /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. */
+  take(lane: string, urgent?: boolean): boolean;
   /** A 429: no lane calls until `untilMs`. */
   pause(untilMs: number): void;
-  /** When `lane` can next take a call (now when it can now): the pause's end, or the minute's or the lane's oldest call
-   *  leaving the window; what a refused caller names as its wait. */
+  /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
+   *  the window; what a refused page names as its wait. */
   retryAt(lane: string): number;
 };
 
-/** A budget of at most `perMin` calls in any 60 s, with each lane held to its cap (a lane not named has `perMin`). */
-export function geckoBudget(now: () => number, caps: Readonly<Record<string, number>> = {}, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
+/** A budget of at most `perMin` calls in any 60 s, the "lists" lane yielding to every other. */
+export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
   const calls: { at: number; lane: string }[] = [];
   let pausedUntil = 0;
+  const prune = (t: number) => {
+    while (calls.length > 0 && t - calls[0]!.at >= 60_000) calls.shift();
+  };
   return {
-    take(lane) {
+    take(lane, urgent = false) {
       const t = now();
-      while (calls.length > 0 && t - calls[0]!.at >= 60_000) calls.shift();
+      prune(t);
       if (t < pausedUntil || calls.length >= perMin) return false;
-      if (calls.filter((c) => c.lane === lane).length >= (caps[lane] ?? perMin)) return false;
+      if (lane === "lists") {
+        if (urgent ? calls.length >= perMin - 1 : calls.length >= perMin - PAGE_RESERVE) return false;
+        if (!urgent && calls.some((c) => c.lane !== "lists" && t - c.at < YIELD_MS)) return false;
+      }
       calls.push({ at: t, lane });
       return true;
     },
     pause(untilMs) {
       pausedUntil = Math.max(pausedUntil, untilMs);
     },
-    retryAt(lane) {
+    retryAt() {
       const t = now();
-      while (calls.length > 0 && t - calls[0]!.at >= 60_000) calls.shift();
-      const own = calls.filter((c) => c.lane === lane);
-      const cap = caps[lane] ?? perMin;
+      prune(t);
       let at = Math.max(t, pausedUntil);
       if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + 60_000);
-      if (own.length >= cap) at = Math.max(at, own[own.length - cap]!.at + 60_000);
       return at;
     },
   };
