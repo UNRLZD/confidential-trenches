@@ -406,9 +406,13 @@ test("Solana: a re-read a backend refuses with -32016 is asked again a slot late
   assert.deepEqual(b.failed, []);
   assert.equal(waits.length, SOL_LAG_SLOTS);
   // a backend that never catches up: the bound, then the refusal
+  // its getBalance lags past the budget's SOL_LAG_SLOTS + 1 calls end in another error, so a reader with no budget fails,
+  // never spins
+  let lagged = 0;
   const never: Edit = (m, o, p) => {
     const min = (p[p.length - 1] as { minContextSlot?: number }).minContextSlot;
     if (min === undefined && m === "getBalance") return { ...(o as object), context: { slot: 100 } };
+    if (min !== undefined && m === "getBalance" && ++lagged > SOL_LAG_SLOTS + 1) throw new Error("RPC error -32005: the fake's lag ran past the budget");
     if (min !== undefined) throw new Error("RPC error -32016: Minimum context slot has not been reached");
     return o;
   };

@@ -907,11 +907,16 @@ test("RPC lag: the wait of about a slot comes between two calls, never after the
 test("RPC lag: a -32016 answer is tried again a slot apart, SOL_LAG_SLOTS waits at most, then refused", { timeout: 20_000 }, async () => {
   const { chain } = restorePool();
   const base = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 });
+  // a run of lags past the budget's SOL_LAG_SLOTS + 1 calls ends in another error, so a read with no budget fails, never spins
   const flaky = (url: string, every: number, calls: string[]): SolanaRpc => {
-    let k = 0;
+    let k = 0, run = 0;
     return Object.assign(async (m: string, p: readonly unknown[]) => {
       calls.push(m);
-      if ((p[1] as { minContextSlot?: number } | undefined)?.minContextSlot !== undefined && k++ % every === 0) throw new Error("RPC error -32016: Minimum context slot has not been reached");
+      if ((p[1] as { minContextSlot?: number } | undefined)?.minContextSlot !== undefined && k++ % every === 0) {
+        if (++run > SOL_LAG_SLOTS + 1) throw new Error("RPC error -32005: the fake's lag ran past the budget");
+        throw new Error("RPC error -32016: Minimum context slot has not been reached");
+      }
+      run = 0;
       return rpc(chain, MAINNET)(m, p);
     }, { url });
   };
@@ -1415,4 +1420,25 @@ test("fold 6 (M376): a full call of pages stays under the kit's answer cap, and 
   const got = await solanaTreeSync([rpc(c, { ...MAINNET, url: "https://a.example" }, log), rpc(c, { ...MAINNET, url: "https://b.example" })], PROGRAM).leaves(0);
   assert.deepEqual([got.state.length, got.label.length], [30 * 1024, 30 * 1024]);
   assert.equal(log.filter((m) => m === "getMultipleAccounts").length, Math.ceil(31 / (SOL_PAGES_A_CALL / 2)), "pages 0..30 of each tree (30 is the empty one), SOL_PAGES_A_CALL a call");
+});
+
+// fold 7 (the review of 7c7cf92): G4 (solana-restore.ts:101) told apart. RPC b answers read 1 at slot 705 without K; RPC a
+// answers read 2 at that same slot 705 with K; b gives K from read 2 on. Two answers at one slot differ: a lie, refused
+// (header). Without line 101 the next read holds K on both and the restore walks.
+function slotRpc(url: string, marksAt: (i: number) => Chain, pagesAfter: (i: number) => Chain): SolanaRpc {
+  let calls = 0;
+  return Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getProgramAccounts") return rpc(marksAt(Math.floor(calls++ / 2)), MAINNET)(m, p);
+    return rpc(pagesAfter(Math.max(0, Math.floor(calls / 2) - 1)), MAINNET)(m, p);
+  }, { url });
+}
+test("fold 7 (G4): b answers read 1 at slot 705 without K, a answers read 2 at that same slot 705 with K: refused on every device", async () => {
+  const c = (n: number, slot: number): Chain => ({ ...depositsChain([...OURS, ...Array.from({ length: n }, (_, k) => FOREIGN(k))], 0), slot });
+  const aMarks = (i: number) => [c(0, 700), c(1, 703), c(2, 705)][i] ?? c(2, 704 + i);
+  const bMarks = (i: number) => [c(0, 700), c(1, 705), c(2, 706)][i] ?? c(2, 704 + i);
+  const pages = (i: number) => [c(0, 700), c(1, 705), c(2, 706)][i] ?? c(2, 704 + i);
+  for (const seed64 of [SEED, SEED_OTHER]) {
+    const out = await outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: [slotRpc("https://a.example", aMarks, pages), slotRpc("https://b.example", bMarks, pages)], gap: 4 }));
+    assert.match(out, /^refused: mark \S+: rpc 0 gives it at slot 705 and rpc 1 lacks it at slot 705; a mark is never closed$/);
+  }
 });
