@@ -736,6 +736,15 @@ test("R4: a state tree that holds one commitment twice stops the restore", () =>
   assert.throws(() => solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c, c], labelLeaves: [label], marks, gap: 2 }), /state leaf 1 repeats/);
 });
 
+test("sol-marks-scale fold 1 R11: solanaRestore refuses a deposit mark of value 0 or nonce 0 handed to it directly (the marks read passes over the first and refuses the second)", () => {
+  const P = noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).precommitment;
+  const label = vaultLabelOf(keccak_256, SCOPE, 1n);
+  for (const m of [{ value: 0n, nonce: 1n }, { value: 10_000_000n, nonce: 0n }]) {
+    const marks = { pre: new Map([[solanaMarkOf(PROGRAM, "pre", P), m]]), spent: new Map<string, SolanaSpentMark>(), slot: 1 };
+    assert.throws(() => solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [noteCommitment(m.value, label, P)], labelLeaves: [label], marks, gap: 2 }), /its mark's nonce \d+ is not a label tree leaf/);
+  }
+});
+
 test("S5: past a full page, the order of times is checked across the page edge", async () => {
   const { state, label } = boundary();
   const chain = { c: { accounts: new Map([...pages(0, state.slice(0, 1024)), ...pages(1, label.slice(0, 1024))]), slot: 900, time: () => 1_800_003_000n } as Chain };

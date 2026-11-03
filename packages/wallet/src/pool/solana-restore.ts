@@ -409,11 +409,12 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * note's spent mark exists) is settled, by whatever sends a release. Never on the refusal's word: the helper, the
  * simulation and the send are hostile input, and the nullifier hash is no longer secret once the send has left. The
  * spent marks are read whole on two RPCs (the union, as a restore reads them: no read names the note; the deposit
- * marks are not read, review S4), then the pages past them. Only when the note's spent mark is there and its change note (spentChange: value - withdrawnValue under change
- * (l, j)) is a leaf both RPCs agree on is the change written UNSPENT through the store's add(child, parent), which moves
- * the note to SPENT, so the queue never offers it again. No spent mark: nothing is written ("unspent"). A spent mark
- * whose change is not in the state tree: a refusal, nothing written. A change another tab wrote first, with this leaf,
- * is taken. The marks and the pages are read whether or not the mark is there, so the reads look the same either way.
+ * marks are not read, review S4), then the pages past them. Only when the note's spent mark is there and its change
+ * note (spentChange: value - withdrawnValue under change (l, j)) is a leaf both RPCs agree on is the change written
+ * UNSPENT through the store's add(child, parent), which moves the note to SPENT, so the queue never offers it again.
+ * No spent mark: nothing is written ("unspent"). A spent mark whose change is not in the state tree: a refusal, nothing
+ * written. A change another tab wrote first, with this leaf, is taken. The marks and the pages are read whether or not
+ * the mark is there, so the reads look the same either way.
  * The sender treats "unspent" as: the note stays RESERVED and the settle is tried again later (the marks are read at
  * finalized, so a spend that just landed shows up a few seconds on), until the store's deadline rule frees it.
  */

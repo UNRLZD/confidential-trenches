@@ -52,7 +52,7 @@ const M = [
   [R, "if (keys.has(x.pubkey)) throw", "if (false) throw", T, "restore refuses"],
   [R, "x.account?.owner !== program || ", "", T, "restore refuses"],
   [R, "a.stateLeaves.forEach((c, k) => {\n    if (leafAt.has(c)) throw", "a.stateLeaves.forEach((c, k) => {\n    if (false) throw", T, "R4"],
-  [R, "if (m.value === 0n || m.nonce === 0n || ", "if (", T, "restore refuses"],
+  [R, "if (m.value === 0n || m.nonce === 0n || ", "if (", T, "sol-marks-scale fold 1 R11"],
   [R, "for (const [key, d] of marks[1][i]) {", "for (const [key, d] of [] as [string, string][]) {", T, "RV5"],
   [R, "if (bytes.length !== size) throw", "if (false) throw", T, "restore refuses"],
   [R, "const slot = Math.max(...calls.flat(2).map((c) => c.slot));", "const slot = Math.min(...calls.flat(2).map((c) => c.slot));", T, "RV7"],
