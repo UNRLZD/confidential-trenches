@@ -11,7 +11,7 @@ import { base58, base64 } from "@scure/base";
 import { SOLANA_ANSWER_MAX_BYTES, VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent } from "../src/pool/solana-restore.ts";
+import { solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
@@ -701,7 +701,7 @@ test("R4: a state tree that holds one commitment twice stops the restore", () =>
   const P = noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).precommitment;
   const label = vaultLabelOf(keccak_256, SCOPE, 1n);
   const c = noteCommitment(10_000_000n, label, P);
-  const marks = { pre: new Map([[solanaMarkOf(PROGRAM, "pre", P), { value: 10_000_000n, nonce: 1n }]]), spent: new Map<string, bigint>(), slot: 1 };
+  const marks = { pre: new Map([[solanaMarkOf(PROGRAM, "pre", P), { value: 10_000_000n, nonce: 1n }]]), spent: new Map<string, SolanaSpentMark>(), slot: 1 };
   assert.equal(solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c], labelLeaves: [label], marks, gap: 2 }).notes.length, 1);
   assert.throws(() => solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c, c], labelLeaves: [label], marks, gap: 2 }), /state leaf 1 repeats/);
 });
@@ -972,8 +972,10 @@ test("N1 union: a mark the second read gives with other bytes than the first is 
     const changed: Chain = { ...chain, marks: new Map(chain.marks!).set(k, d) };
     await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: movingPair([chain, changed]), gap: 4 }), /two reads differ/, k);
   }
-  assert.throws(() => solanaMarksUnion({ spent: new Map([["k", 1n]]), pre: new Map(), slot: 1 }, { spent: new Map([["k", 2n]]), pre: new Map(), slot: 2 }), /two reads differ/);
-  assert.equal(solanaMarksUnion({ spent: new Map([["k", 1n]]), pre: new Map(), slot: 1 }, { spent: new Map([["j", 2n]]), pre: new Map(), slot: 2 }).slot, 2);
+  const sm = (withdrawn: bigint, number = 0): SolanaSpentMark => ({ withdrawn, number });
+  assert.throws(() => solanaMarksUnion({ spent: new Map([["k", sm(1n)]]), pre: new Map(), slot: 1 }, { spent: new Map([["k", sm(2n)]]), pre: new Map(), slot: 2 }), /two reads differ/);
+  assert.throws(() => solanaMarksUnion({ spent: new Map([["k", sm(1n, 0)]]), pre: new Map(), slot: 1 }, { spent: new Map([["k", sm(1n, 9)]]), pre: new Map(), slot: 2 }), /two reads differ/, "the release number alone");
+  assert.equal(solanaMarksUnion({ spent: new Map([["k", sm(1n)]]), pre: new Map(), slot: 1 }, { spent: new Map([["j", sm(2n)]]), pre: new Map(), slot: 2 }).slot, 2);
 });
 
 // A note store holding deposit note 0 of the pool, RESERVED: proved, taken and sent (queue.ts take), as when the send
@@ -1447,4 +1449,25 @@ test("fold 7 (G4): b answers read 1 at slot 705 without K, a answers read 2 at t
     const out = await outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: [slotRpc("https://a.example", aMarks, pages), slotRpc("https://b.example", bMarks, pages)], gap: 4 }));
     assert.match(out, /^refused: mark \S+: rpc 0 gives it at slot 705 and rpc 1 lacks it at slot 705; a mark is never closed$/);
   }
+});
+
+// fold 10 (the review of f05379b, probe d): a spent mark is withdrawnValue then the release's number (12 bytes), and the
+// union across reads compares both. RPC a, a slot ahead, gives a new release's spent mark at slot 702 with number 9; RPC b
+// at 701 lacks it; from the next read both give number 0. Two reads of one mark differ: refused on every device.
+test("fold 10 (number): a spent mark whose release number changes between two reads is refused on every device", async () => {
+  const c0 = (slot: number): Chain => depositsChain(OURS, slot, 0);
+  const r = (slot: number, number = 0): Chain => {
+    const ch = depositsChain(OURS, slot, 1);
+    return number === 0 ? ch : { ...ch, marks: new Map(ch.marks!).set(solanaMarkOf(PROGRAM, "spent", 770_001n), spentData(1n, number)) };
+  };
+  const aMarks = (i: number) => [c0(700), r(702, 9)][i] ?? r(702 + i);
+  const bMarks = (i: number) => [c0(700), c0(701)][i] ?? r(702 + i);
+  const pages = (i: number) => [c0(700), r(703)][i] ?? r(703 + i);
+  for (const seed64 of [SEED, SEED_OTHER]) {
+    const out = await outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: [slotRpc("https://a.example", aMarks, pages), slotRpc("https://b.example", bMarks, pages)], gap: 4 }));
+    assert.match(out, /^refused: mark \S+: two reads differ$/);
+  }
+  // the same mark with its true number on every read restores
+  const ok = await outcome(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [slotRpc("https://a.example", (i) => [c0(700), r(702)][i] ?? r(702 + i), pages), slotRpc("https://b.example", bMarks, pages)], gap: 4 }));
+  assert.equal(ok, "restored");
 });

@@ -70,8 +70,10 @@ export function solanaMarkOf(program: string, seed: "spent" | "pre", key: bigint
 
 /** A deposit as its precommitment mark records it. */
 export type SolanaDepositMark = { value: bigint; nonce: bigint };
-/** Every mark of the pool: each spent mark's address with its withdrawnValue, each precommitment mark's with its record. */
-export type SolanaMarks = { spent: ReadonlyMap<string, bigint>; pre: ReadonlyMap<string, SolanaDepositMark>; slot: number };
+/** A release as its spent mark records it: withdrawnValue, then the release's number (how many releases came before it). */
+export type SolanaSpentMark = { withdrawn: bigint; number: number };
+/** Every mark of the pool: each spent mark's address with its record, each precommitment mark's with its record. */
+export type SolanaMarks = { spent: ReadonlyMap<string, SolanaSpentMark>; pre: ReadonlyMap<string, SolanaDepositMark>; slot: number };
 /** One getProgramAccounts answer: the slot it was answered at and the marks' keys it gave. */
 export type SolanaMarkCall = { slot: number; keys: ReadonlySet<string> };
 /** One read of the marks: their union, and each RPC's two answers, [spent, pre]. */
@@ -145,7 +147,7 @@ export async function solanaMarks(rpcs: readonly [SolanaRpc, SolanaRpc], program
     return new Map([...out].map(([key, d]) => [key, base64.decode(d)]));
   };
   const u64 = (d: Uint8Array, at: number): bigint => new DataView(d.buffer, d.byteOffset, d.length).getBigUint64(at, true);
-  const spent = new Map([...union(0)].map(([key, d]) => [key, u64(d, 0)] as const));
+  const spent = new Map([...union(0)].map(([key, d]) => [key, { withdrawn: u64(d, 0), number: new DataView(d.buffer, d.byteOffset, d.length).getUint32(8, true) }] as const));
   const pre = new Map([...union(1)].map(([key, d]) => [key, { value: u64(d, 0), nonce: u64(d, 8) }] as const));
   const slot = Math.max(...reads.flatMap((r) => [r[0].slot, r[1].slot]));
   return { spent, pre, slot, calls };
@@ -229,7 +231,7 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
     const note = notes[k]!;
     const ref = note.ref;
     if (ref.kind === "deposit") seconds({ id: "U", s: ref.s, i: ref.i });
-    const withdrawn = marks.spent.get(solanaMarkOf(program, "spent", noteSecrets(seed64, ref).nullifierHash));
+    const withdrawn = marks.spent.get(solanaMarkOf(program, "spent", noteSecrets(seed64, ref).nullifierHash))?.withdrawn;
     if (withdrawn === undefined) continue;
     note.state = "SPENT";
     const l = note.leaf.label;
@@ -251,12 +253,12 @@ export function solanaRestore(a: SolanaRestoreArgs): { notes: SolanaRestoredNote
   return { notes, spends };
 }
 
-/** Two reads of the marks as one: the union, a key both hold with different values refused, the higher slot. */
+/** Two reads of the marks as one: the union, a key both hold with a different record (any field) refused, the higher slot. */
 export function solanaMarksUnion(x: SolanaMarks, y: SolanaMarks): SolanaMarks {
   const spent = new Map(x.spent);
   for (const [key, w] of y.spent) {
     const have = spent.get(key);
-    if (have !== undefined && have !== w) throw new Error(`mark ${key}: two reads differ`);
+    if (have !== undefined && (have.withdrawn !== w.withdrawn || have.number !== w.number)) throw new Error(`mark ${key}: two reads differ`);
     spent.set(key, w);
   }
   const pre = new Map(x.pre);
@@ -319,7 +321,7 @@ export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStor
   if (note === undefined || note.leaf === undefined || note.scope !== scope) throw new Error(`note ${a.noteId}: not a landed note of this pool`);
   const marks = await solanaMarks(a.rpcs, a.program, a.signal, undefined, a.lagWait);
   const leaves = await solanaTreeSync(a.rpcs, a.program, a.lagWait).leaves(marks.slot, a.signal);
-  const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash));
+  const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash))?.withdrawn;
   if (withdrawn === undefined) return { kind: "unspent" };
   const leafAt = new Map<bigint, number>();
   leaves.state.forEach((c, k) => {

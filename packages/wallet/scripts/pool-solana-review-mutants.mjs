@@ -36,7 +36,7 @@ const M = [
   ["B9", K, `if (rents[0]!.lamportsPerByte !== rents[1]!.lamportsPerByte || rents[0]!.factor !== rents[1]!.factor) throw`, `if (false) throw`],
   ["B10", S, `if (feePayer === pool) throw`, `if (false) throw`],
   ["B11", S, `if (solanaSameProvider(rpcs[0], rpcs[1])) throw`, `if (false) throw`],
-  ["B12", S, `return { context: solanaContextOf(request, scope), feeCap: fee, request };`, `return { context: solanaContextOf({ ...request, feePayer: f.fee_payer }, scope), feeCap: fee, request };`, "equivalent: bind refuses an answer whose fee_payer is not feePayer (src/pool/solana.ts:472) before it builds the request, so both contexts are one"],
+  ["B12", S, `return { context: solanaContextOf(request, scope), feeCap: fee, request };`, `return { context: solanaContextOf({ ...request, feePayer: f.fee_payer }, scope), feeCap: fee, request };`, "equivalent: bind refuses an answer whose fee_payer is not feePayer (src/pool/solana.ts:483) before it builds the request, so both contexts are one"],
   // restore
   ["R1", R, `if (have !== undefined && have !== d) throw`, `if (false) throw`],
   ["R2", R, `if (m.has(x.pubkey)) throw`, `if (false) throw`],

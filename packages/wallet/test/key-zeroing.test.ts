@@ -131,7 +131,7 @@ test("solanaRestore zeroes the HKDF and HMAC bytes of each W it derives (card no
   const cP = noteSecrets(SEED, { kind: "change", l: label, j: 0 }).precommitment;
   const marks = {
     pre: new Map([[solanaMarkOf(program, "pre", P), { value: 10_000_000n, nonce: 1n }]]),
-    spent: new Map([[solanaMarkOf(program, "spent", noteSecrets(SEED, { kind: "deposit", s: scope, i: 0 }).nullifierHash), 10_000_000n]]),
+    spent: new Map([[solanaMarkOf(program, "spent", noteSecrets(SEED, { kind: "deposit", s: scope, i: 0 }).nullifierHash), { withdrawn: 10_000_000n, number: 0 }]]),
     slot: 1,
   };
   const leaves = [noteCommitment(10_000_000n, label, P), noteCommitment(0n, label, cP)];

@@ -73,6 +73,9 @@ const M = [
   [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold 7 \\(G4"],
   // fold 8: the merged marks carried into the next round (M7): without them the restore never walks
   [R, "    marks = again;\n", "", T, "N1 race"],
+  // fold 10: the release number read from a spent mark, and compared across reads
+  [R, " || have.number !== w.number)) throw", ")) throw", T, "fold 10 \\(number"],
+  [R, "number: new DataView(d.buffer, d.byteOffset, d.length).getUint32(8, true) }", "number: 0 }", T, "fold 10 \\(number"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];
