@@ -6,8 +6,11 @@
 //   Tx: near <tx hash> <signer account>
 //   Tx: near-testnet <tx hash> <signer account>
 //   Tx: solana <signature>
+//   Tx: solana-devnet <signature>
 //   Tx: base <0x hash>
 //   Tx: robinhood <0x hash>
+//   Tx: base-sepolia <0x hash>
+//   Tx: robinhood-testnet <0x hash>
 //   Deleted: near <account>            a one-use account the record's own txs swept, now gone (also near-testnet)
 // Refused: a record that is not a regular file (a symlink); a record whose CARD, Money path or Tx lines do not parse
 // as its own card's sections; a money-path record with no Tx; a Tx listed twice, in any record; in the last live
@@ -35,7 +38,8 @@
 // the signer of a Tx the record lists on the same chain, and it passes only when view_account at the final block
 // answers UNKNOWN_ACCOUNT naming it on two operators (dRPC and FastNEAR) and no host reads it present, at any time.
 // near-testnet is NEAR's test network, read on its own RPCs with the same rules: a testnet tx written as "Tx: near" is
-// read on the mainnet RPCs, where it does not exist, and is refused. A testnet tx is never real-money proof: parseLive's
+// read on the mainnet RPCs, where it does not exist, and is refused. solana-devnet, base-sepolia and robinhood-testnet
+// are read the same way, each on its own RPCs (TESTNET below). A testnet tx is never real-money proof: parseLive's
 // `real` lists the mainnet txs only, and a release counts those alone.
 // A change (a pull request, or a push to main) that touches money code (MONEY below) may merge with no record: when a
 // card whose commit touches money code changes its record in the same change, that record must be true, so "Money
@@ -67,9 +71,18 @@ export const RPCS = {
   // test.rpc.fastnear.com and near-testnet.drpc.org keep only recent txs (each answered UNKNOWN_TRANSACTION for a
   // 2026-10-26 tx that both archival RPCs read), so FastNEAR's archival RPC stands in for its test.rpc.
   "near-testnet": ["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.testnet.near.org"],
+  // Solana devnet, read 2026-11-02 between 23:12 and 23:14Z: the cluster's public RPC and OnFinality's public devnet
+  // endpoint each answered getTransaction for one devnet signature (rpc-operators.mjs names both).
+  "solana-devnet": ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
+  // Base Sepolia and Robinhood's testnet, read 2026-11-03 between 03:07:14 and 03:07:19Z: each host answered its
+  // chain's eth_chainId (0x14a34, 0xb626) and eth_getTransactionReceipt with status 0x1 for one testnet tx, which the
+  // mainnet RPCs above answered as unknown (rpc-operators.mjs names each host's operator).
+  "base-sepolia": ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
+  "robinhood-testnet": ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
 };
 // test networks: read back like any chain, never real-money proof
-export const TESTNET = new Set(["near-testnet"]);
+export const TESTNET = new Set(["near-testnet", "solana-devnet", "base-sepolia", "robinhood-testnet"]);
+const SOLANA = new Set(["solana", "solana-devnet"]);
 const NEAR = new Set(["near", "near-testnet"]);
 // The build starts here: a tx before it is not this repo's (a pasted research tx, say).
 export const FLOOR = Date.parse("2026-11-01T00:00:00Z");
@@ -80,7 +93,7 @@ export const FLOOR = Date.parse("2026-11-01T00:00:00Z");
 // money code.
 export const MONEY = ["contracts/vault/", "contracts/pool-solana/", "contracts/pool-evm/", "packages/kit/", "packages/wallet/", "apps/terminal/src/trading/"];
 export const LIVE = "scripts/live-checks/";
-const CHAIN_ID = { base: "0x2105", robinhood: "0x1237" }; // 8453, 4663
+const CHAIN_ID = { base: "0x2105", robinhood: "0x1237", "base-sepolia": "0x14a34", "robinhood-testnet": "0xb626" }; // 8453, 4663, 84532, 46630
 const B58 = "[1-9A-HJ-NP-Za-km-z]";
 const FORMAT = {
   near: new RegExp(`^${B58}{43,44}$`),
@@ -89,6 +102,9 @@ const FORMAT = {
   robinhood: /^0x[0-9a-f]{64}$/,
 };
 FORMAT["near-testnet"] = FORMAT.near;
+FORMAT["solana-devnet"] = FORMAT.solana;
+FORMAT["base-sepolia"] = FORMAT.base;
+FORMAT["robinhood-testnet"] = FORMAT.robinhood;
 // a line that starts with Tx or Money path and a colon, in any shape (after a bullet "-", "*", "+" or "1.", a quote ">",
 // bold "**"): it must parse, or it is refused. The same words further into a line are prose (a Repro that quotes a
 // record line, a clause that cites "(tx: <hash>)"), not record lines.
@@ -306,7 +322,7 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       out.result = r;
       return when(Number(BigInt(ns) / 1000000n), floor);
     }
-    if (chain === "solana") {
+    if (SOLANA.has(chain)) {
       j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep, rateWait);
       if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
       if (!j.result) return "missing";

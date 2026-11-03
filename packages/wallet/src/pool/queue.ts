@@ -90,8 +90,8 @@ export interface ProofQueue<R> {
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-// The change index of the spend of this note (keys.ts changeIndex).
-function jOf(ref: NoteRef): number {
+/** The change index of the spend of this note (keys.ts changeIndex): its W is W_{chain, label, jOf(ref)}. */
+export function jOf(ref: NoteRef): number {
   return ref.kind === "change" ? changeIndex({ kind: "change", j: ref.j }) : changeIndex({ kind: "deposit" });
 }
 

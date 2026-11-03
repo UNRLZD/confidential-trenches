@@ -88,6 +88,13 @@ abstract contract BuyForkBase is BuyBase {
     assertEq(W.balance, 0);
   }
 
+  /// The kit builds this test's path byte for byte (test/fixtures/kit-routes.json, packages/kit/test/evm-pool-buy.test.ts)
+  function test_theKitBuildsThisPath() public view {
+    string memory _k = vm.readFile('test/fixtures/kit-routes.json');
+    (, string memory _set,) = _chain();
+    assertEq(vm.parseJsonBytes(_k, string.concat('.', _set, '.v3.data')), _path());
+  }
+
   /// A minOut above what the swap gives: the router refuses it (the adapter passes minOut on), so the buy reverts
   /// and the note stays unspent.
   function test_aMinOutOverTheQuoteFails() public {

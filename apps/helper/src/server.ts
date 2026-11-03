@@ -32,6 +32,10 @@ import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
+import { POOL_EPOCH_MS } from "./pool/fee.ts";
+import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
+import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
+import { clientOf, POOL_RATE_WINDOW_MS, poolRateLimit } from "./pool/rate.ts";
 
 type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
@@ -41,9 +45,9 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
 // routes are mounted.
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES] = MOUNTED.proxy;
-const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -136,10 +140,15 @@ export function handler(
   token: Token = solanaTokenFromEnv(process.env, proxy, lists),
   bind: BindSender = bindSenderFromEnv(process.env, watches),
   release: number | null = releaseOf(process.env),
+  pools: ReadonlyMap<string, SolanaPoolSender> = solanaPoolSendersFromEnv(process.env),
+  evmPools: ReadonlyMap<string, EvmPoolSender> = evmPoolSendersFromEnv(process.env),
+  now: () => number = Date.now,
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // GET /v1/token-status serves each network's token from that network's own watch
   const watchOf = new Map<string, TokenWatch>(Object.values(watches).map((w) => [w.token, w]));
+  // the pool routes' per-client limit (pool/rate.ts): in memory, the client's address never logged
+  const poolRate = poolRateLimit(now);
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
       [HELPER_COMMIT_HEADER]: commit,
@@ -196,6 +205,73 @@ export function handler(
           .quote(tokens[0]!)
           .then((a) => send(200, a, cors(req)))
           .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? send(503, { error: { code: "upstream" } }, cors(req)) : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path === POOL_FEE) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        if (!poolRate.take(clientOf(req))) return send(429, { error: { code: "rate_limited" } }, { ...cors(req), "Retry-After": String(POOL_RATE_WINDOW_MS / 1000) });
+        // the relayer's one fee per pool per epoch (pool/fee.ts): exactly one pool this helper carries, and at most one
+        // epoch start on the 60 s grid (default: the epoch now) within [now - POOL_LIFE_MAX_MS, now], refused before
+        // any read (M356 (3)); the same answer for every caller
+        const q = new URL(req.url ?? "/", "http://helper.invalid").searchParams;
+        const asked = q.getAll("pool").length === 1 ? q.get("pool")! : "";
+        const pool = pools.get(asked) ?? evmPools.get(asked);
+        const epochs = q.getAll("epoch");
+        if (pool === undefined || epochs.length > 1) return send(404, { error: { code: "not_found" } }, cors(req));
+        const nowMs = now();
+        if (epochs.length === 1 && (!/^[1-9][0-9]{0,15}$/.test(epochs[0]!) || Number(epochs[0]) % POOL_EPOCH_MS !== 0 || Number(epochs[0]) > nowMs || Number(epochs[0]) < nowMs - POOL_LIFE_MAX_MS)) return send(404, { error: { code: "not_found" } }, cors(req));
+        // a Solana fee is the host's; an EVM fee is read from the epoch's first block (null: no block in it yet)
+        void Promise.resolve()
+          .then((): unknown => pool.fee(epochs.length === 1 ? Number(epochs[0]) : nowMs))
+          .then((a) => (a === null ? send(404, { error: { code: "not_found" } }, cors(req)) : send(200, a, cors(req))))
+          .catch(() => (res.headersSent ? res.destroy() : send(503, { error: { code: "upstream" } }, cors(req))));
+        return;
+      }
+      if (path === POOL_SOLANA_SEND) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        if (!poolRate.take(clientOf(req))) return send(429, { error: { code: "rate_limited" } }, { ...cors(req), "Retry-After": String(POOL_RATE_WINDOW_MS / 1000) });
+        // pool/solana.ts: { pool, tx }, the pool one this helper carries (else 404 not_found)
+        void readBody(req, POOL_SOLANA_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            // the pool the body names, one this helper carries (pool/solana.ts checks the transaction is that pool's)
+            const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
+            const pool = typeof name === "string" ? pools.get(name) : undefined;
+            if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+            const a = await pool.carry(body, clientOf(req));
+            return { status: a.status, body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path === POOL_EVM_SEND) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        if (!poolRate.take(clientOf(req))) return send(429, { error: { code: "rate_limited" } }, { ...cors(req), "Retry-After": String(POOL_RATE_WINDOW_MS / 1000) });
+        // pool/evm.ts: { pool, data }, the pool one this helper carries (else 404 not_found)
+        void readBody(req, POOL_EVM_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            const name = typeof body === "object" && body !== null ? (body as { pool?: unknown }).pool : undefined;
+            const pool = typeof name === "string" ? evmPools.get(name) : undefined;
+            if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+            const a = await pool.carry(body);
+            return { status: a.status, body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
       if (path === WITHDRAW) {
@@ -343,12 +419,12 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   });
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools),
   );
   server.listen(port);
   // the relayers start with the helper: a restart resends their open sends and settles before any request
@@ -374,7 +450,11 @@ if (import.meta.main) {
     // each network's carry is held by its own watch only
     const withdraw = withdrawSenderFromEnv(process.env, fee, statusesOf(watches));
     const bind = bindSenderFromEnv(process.env, watches);
-    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind); // warms both relayers
+    // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
+    // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
+    const pools = solanaPoolSendersFromEnv(process.env);
+    for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
+    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind, pools); // warms both relayers
     lists.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);
