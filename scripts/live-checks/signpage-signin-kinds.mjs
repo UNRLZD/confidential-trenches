@@ -4,7 +4,9 @@
 // Chromium opens SIGN_HOST top-level, the shell that frames APP_HOST (card signpage-shell), and posts the kit's open
 // kinds from inside the APP_HOST frame, as the terminal does. A CDP virtual authenticator holds the passkeys.
 //   prf run (hasPrf true): signin.open {way: passkey} opens the layer on the passkey page; Create signs in and the layer
-//     closes, back to the app with a frame again. backup.open draws the 12 words in the layer (counted, never read) and
+//     closes, back to the app with a frame again; that frame takes the signed-in state, pools included (live: the
+//     deployed terminal's own kit client reaches ready, <html data-signpage>, never down; both: the state the shell
+//     answers is signed in, holds pools and passes the kit's client, scripts/signpage-state.mjs). backup.open draws the 12 words in the layer (counted, never read) and
 //     Cancel goes back to the app, still signed in. signout opens the sign-out page in the top window (the frame out of
 //     the document, no Sign out in any frame); Sign out deletes the store and goes back to the app, signed out. A
 //     signout sent signed out, and a backup.open sent signed out, are refused (not_allowed). Signed in, a signin.open is
@@ -41,6 +43,7 @@ import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { kitTakesState } from "../signpage-state.mjs";
 
 const KEY = "signpage-signin-kinds";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -114,6 +117,15 @@ export function judge(rec) {
   const A = p.create?.account;
   say(backToApp(p.create, "signed-in") && HEX64.test(A ?? "") && p.create?.seed === true,
     `prf: Create signs in and goes back to the app (${p.create?.state}, layer ${p.create?.layer}, frame ${p.create?.frame ? "back" : "gone"})`);
+  // live, the frame is the deployed terminal: its own kit client is READY only once its handshake's state passed the
+  // kit's schema (signpage-frame.tsx, <html data-signpage>), and a refused one is down; on the harness the frame is a
+  // stand-in with no client, so the state the shell answers is judged by the kit's client here alone
+  const ap = p.app ?? {};
+  const st = ap.state;
+  const takes = kitTakesState(st);
+  const term = rec.mode === "live" ? ap.signpage === "ready" : rec.mode === "harness";
+  say(backToApp(p.create, "signed-in") && st?.signed_in === true && Array.isArray(st?.pools) && takes && term,
+    `prf: the terminal in the frame takes the signed-in state with pools (${rec.mode === "live" ? `APP_HOST's client ${ap.signpage ?? "none"}` : "harness stand-in, the kit's client here"}, ${st ? `signed_in ${st.signed_in}, pools ${Array.isArray(st.pools) ? st.pools.length : "none"}, the kit ${takes ? "takes it" : "refuses it"}` : "no state"})`);
   say(pending(p.backup?.answer) && inLayer(p.backup?.page, "backup") && p.backup?.page?.words === 12 && p.backup?.page?.account === A,
     `prf: backup.open draws the 12 words of the account in the top window (${p.backup?.page?.state}, ${p.backup?.page?.words ?? 0} words)`);
   say(inLayer(p.backup?.page, "backup") && backToApp(p.backupCancel, "signed-in") && p.backupCancel?.account === A && p.backupCancel?.words === 0,
@@ -299,6 +311,21 @@ async function send(page, type, params = {}) {
   }), { type, params, origin: `https://${SIGN_HOST}` });
 }
 
+// The APP_HOST frame after a sign-in: its <html data-signpage> once the terminal's client settles (ready, down or
+// update; the harness's stand-in has none), and the state the shell answers it.
+async function appTakes(page) {
+  const f = await appFrame(page).catch(() => null);
+  if (!f) return { noFrame: true };
+  const settledAs = () => {
+    const s = document.documentElement.dataset.signpage;
+    return s === "ready" || s === "down" || s === "update" ? s : false;
+  };
+  // the client's handshake ends within SIGNPAGE_HANDSHAKE_MS (5 s) of its start
+  const signpage = await f.waitForFunction(settledAs, null, { timeout: 8_000 }).then((h) => h.jsonValue(), () => null);
+  const answer = await send(page, "state");
+  return { signpage, state: answer?.ok === true ? answer.result : null };
+}
+
 // The top window's page once it settles past `not` (states the step leaves).
 async function read(page, not = []) {
   await page.waitForFunction((not) => {
@@ -372,6 +399,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const answer = await send(page, "signin.open", { way: "passkey", return_key: "settings" });
       p.signin = { answer, page: await read(page) };
       p.create = await press(page, "create", ["signed-out"]);
+      p.app = await appTakes(page);
       p.framed = await framedTry(page);
       errors.push(...p.framed.errors);
       delete p.framed.errors;

@@ -1,7 +1,10 @@
 // node --test scripts/live-checks/signpage-signin-kinds.test.mjs: the live check's verdict on its recorded answers, with
-// no browser and no network. Every record is a real run on the browser harness (SIGN_HOST's and APP_HOST's real names
+// no browser and no network. Every record but liveGood is a real run on the browser harness (SIGN_HOST's and APP_HOST's real names
 // mapped to it, SIGN_HOST's build under its own _headers and the APP_HOST stand-in under the terminal's), but the two
-// marked edited. good: this card's page at 8fe32cc, which passes. Each bad fails on its own lines only:
+// marked edited. good: this tree's page on the harness with the step where the frame takes the signed-in state
+// (pools included), which passes; liveGood: the deployed SIGN_HOST at release-9 framing the deployed terminal, whose
+// own kit client is ready on that state, which passes, and edited from it, the step's bads (the client down or never
+// settled, a state the kit refuses, no pools, no state). Each bad fails on its own lines only:
 // - bad: the card's page at efacb58, before the recheck's Lows (an open sent during a resync refused; Cancel stuck on
 //   the error page when the stored seed cannot be read);
 // - badDcad6c9: the card's page at dcad6c9, before the review fixes (Create passkey offered after I already have one,
@@ -22,7 +25,11 @@ import { judge } from "./signpage-signin-kinds.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "signpage-signin-kinds.answers.json"), "utf8"));
-const BAD = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0].slice(4));
+const BAD_ALL = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0].slice(4));
+// The terminal-takes-the-state step came after most bads were recorded: a record with no prf.app step was recorded
+// before it, and is read on its other lines (the step's own bads are below, and a good with the step deleted is BAD).
+const APP = "prf: the terminal in the frame takes the signed-in state with pools";
+const BAD = (rec) => BAD_ALL(rec).filter((l) => l !== APP || Object.hasOwn(rec.prf ?? {}, "app"));
 
 const FRAMED = "prf: a signout sent to SIGN_HOST in a frame is refused, the frame never loads a sign-out";
 const AGAIN = "prf: signin.open sent signed in is refused, the seed kept";
@@ -40,6 +47,38 @@ test("the recorded good answer passes", () => {
   assert.equal(r.pass, true, r.lines.join("\n"));
   assert.equal(answers.good.mode, "harness");
   assert.ok(answers.good.prf.framed.refusals >= 1);
+  assert.ok(Array.isArray(answers.good.prf.app.state.pools));
+});
+
+test("the recorded live answer on release-9 passes: the deployed terminal's client is ready on a state with pools", () => {
+  const r = judge(answers.liveGood);
+  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.equal(answers.liveGood.mode, "live");
+  assert.equal(answers.liveGood.prf.app.signpage, "ready");
+  assert.ok(r.lines.includes(`ok  ${APP} (APP_HOST's client ready, signed_in true, pools ${answers.liveGood.prf.app.state.pools.length}, the kit takes it)`));
+});
+
+test("the terminal's step fails on a client down, a state the kit refuses, no pools, or no state (edited from the live good)", () => {
+  const cases = {
+    "the terminal's client went down": (a) => (a.prf.app.signpage = "down"),
+    "the terminal's client never settled": (a) => (a.prf.app.signpage = null),
+    "a key the kit does not know": (a) => (a.prf.app.state.extra = 1),
+    "a pool the kit refuses": (a) => (a.prf.app.state.pools = [{ chain: "solana", asset: "ETH", balance: "1" }]),
+    "no pools": (a) => delete a.prf.app.state.pools,
+    "signed out": (a) => (a.prf.app.state.signed_in = false),
+    "no state": (a) => (a.prf.app.state = null),
+    "no frame": (a) => (a.prf.app = { noFrame: true }),
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    const a = structuredClone(answers.liveGood);
+    change(a);
+    assert.deepEqual(BAD(a), [APP], name);
+  }
+  // a harness record never stands in for the live client: the same record named live with no client read fails
+  const h = structuredClone(answers.good);
+  h.mode = "live";
+  delete h.prf.app.signpage;
+  assert.deepEqual(BAD(h), [APP]);
 });
 
 test("the card's page before the recheck's Lows fails: an open refused during a resync, Cancel stuck on a broken store", () => {
@@ -102,7 +141,8 @@ test("a step that never ran is BAD, never ok, and a missing error list is BAD", 
   delete rec.wallet.existingUse;
   delete rec.twoTabs;
   delete rec.broken;
-  assert.deepEqual(BAD(rec), [AGAIN, FRAMED, EARLY, NO_CREATE, TWO_TABS, BROKEN]);
+  delete rec.prf.app;
+  assert.deepEqual(BAD_ALL(rec), [APP, AGAIN, FRAMED, EARLY, NO_CREATE, TWO_TABS, BROKEN]);
   const none = structuredClone(answers.good);
   delete none.errors;
   assert.deepEqual(BAD(none), ["no page error or CSP violation"]);
