@@ -2,7 +2,7 @@
 // The token page's shots and checks (card app-token-page; AS-02, app.md:1356; card app-no-test-token), taken from the
 // built app at its route, not a test page: apps/terminal built with its own vite config and opened at /
 // (src/screens/token/source.ts: the top of the helper's Trending column, then its token read), with HELPER_HOST
-// answered per state from the fixtures (fixtures.ts, every age shifted to the run's clock), at 390 x 844 (dpr 2, touch)
+// answered per state from the fixtures (fixtures.ts, every age shifted to the run's clock), at 390 x 844 (dpr 2, touch),
 // 1440 x 900 and 1280 x 800 (dpr 1). The terminal runs only inside SIGN_HOST's shell (a top-level visit moves there,
 // src/shell/in-shell.ts), so the run answers the hosts' real names from local files as app-in-shell.mjs --harness and
 // the BAR-10 run do: APP_HOST the build under its _headers, SIGN_HOST the stand-in shell, signed in; every read is of

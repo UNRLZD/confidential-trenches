@@ -22,10 +22,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { isGecko, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
-import { APP_HOST, HELPER_HOST, LISTS_URL, pickOf, SIGN_HOST } from "./app-token-route.mjs";
+import { HELPER_HOST, LISTS_URL, pickOf } from "./app-token-route.mjs";
 
 const KEY = "app-token-chart";
-export { APP_HOST, SIGN_HOST, HELPER_HOST, LISTS_URL };
+export const APP_HOST = "https://confidential.unrealized.trade";
+export { HELPER_HOST, LISTS_URL };
 export const CANDLES_PATH = "/v1/market/candles";
 export const CANDLES_URL = (mint) => `${HELPER_HOST}${CANDLES_PATH}?chain=solana&token=${encodeURIComponent(mint)}&tf=15m&limit=500`;
 export const LOADS = [
