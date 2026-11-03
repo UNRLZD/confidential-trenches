@@ -68,7 +68,10 @@
 //   is this file's; that card makes both kit constants (the full M356 (4) EVM fee and the send margin, which the helper
 //   imports too), and this file then imports them and drops EvmEpochFeeRule.
 // - Two RPCs are two providers: the kit's solanaSameProvider (one function, or one URL) refuses one passed twice.
-// Nothing here holds a secret, and no read names a note or a wallet of the user's: only the pool's own logs and views.
+// - A restore (./evm-restore.ts) reads the same agreed events (events()), then each W's Transfer logs (evmTokensSentTo)
+//   through the same pager and the same two-RPC compare (evmAgreedLogs): one rule for every log the device reads.
+// Nothing here holds a secret, and no read names a note of the user's: only the pool's own logs and views. The one read
+// that names a wallet is evmTokensSentTo, one W a call, for the restore.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
