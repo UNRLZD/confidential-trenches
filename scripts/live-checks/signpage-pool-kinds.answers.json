@@ -8,9 +8,9 @@
   }
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-N8DAieoJi36aVZQQKUeSBEIjGWxbQlZPHDlfaKKT3YpvDC3mtvuj+nJBgKBVOFfY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7iIpuYok0JOyapd9b6u5DgMPDqztSFgxg6q12pTex92h7YUOdRrPTjReIB+KXM0g\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-N8DAieoJi36aVZQQKUeSBEIjGWxbQlZPHDlfaKKT3YpvDC3mtvuj+nJBgKBVOFfY",
+   "sha384": "sha384-7iIpuYok0JOyapd9b6u5DgMPDqztSFgxg6q12pTex92h7YUOdRrPTjReIB+KXM0g",
    "markers": [
     "pool request not allowed: ",
     "PoolRuleRefused",
