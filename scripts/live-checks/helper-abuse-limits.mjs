@@ -10,7 +10,8 @@
 // A second batch is sent only when the first met no 429 (a window turning while the first batch was in flight).
 // Each burst passes only when:
 //   - every answer that is not a 429 is not a 5xx (the unknown pool's own 404, health's 200);
-//   - the 429 has a Retry-After of whole seconds, 1 to 60; Access-Control-Allow-Origin exactly APP_HOST;
+//   - the 429 has a Retry-After of whole seconds, 1 to RETRY_AFTER_MAX_S (75, apps/helper/src/limits/limits.ts: the
+//     longest true wait); Access-Control-Allow-Origin exactly APP_HOST;
 //     Access-Control-Expose-Headers naming Retry-After (else a browser cannot read the wait); Vary: Origin; no
 //     Access-Control-Allow-Credentials; and a body that is exactly { error: { code: "rate_limited" } };
 //   - after waiting the Retry-After it named, the same request is no longer a 429.
@@ -21,6 +22,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { RETRY_AFTER_MAX_S } from "../../apps/helper/src/limits/limits.ts";
 
 const KEY = "helper-abuse-limits";
 export const BASE = "https://api.confidential.unrealized.trade";
@@ -94,7 +96,7 @@ function judgeBurst(b, max, say) {
   if (throttle !== null) {
     const h = throttle.headers;
     const wait = h["retry-after"];
-    say(/^[1-9][0-9]?$/.test(wait ?? "") && Number(wait) <= 60, `Retry-After ${show(wait)}, whole seconds 1 to 60`);
+    say(/^[1-9][0-9]{0,2}$/.test(wait ?? "") && Number(wait) <= RETRY_AFTER_MAX_S, `Retry-After ${show(wait)}, whole seconds 1 to ${RETRY_AFTER_MAX_S}`);
     say(h["access-control-allow-origin"] === APP, `Access-Control-Allow-Origin ${show(h["access-control-allow-origin"])}`);
     const exposed = (h["access-control-expose-headers"] ?? "").split(",").map((s) => s.trim().toLowerCase());
     say(exposed.includes("retry-after"), `Access-Control-Expose-Headers ${show(h["access-control-expose-headers"])} names Retry-After`);

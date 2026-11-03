@@ -10,6 +10,7 @@ import { HELPER_RPC_BATCH_MAX, HELPER_RPC_METHODS, HELPER_V1_PATHS } from "../..
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS } from "./methods.ts";
 import * as rpcModule from "./rpc.ts";
 import { createRpc, readUpstreams, RPC_ANSWER_MAX, RPC_UPSTREAMS } from "./rpc.ts";
+import { RETRY_AFTER_MAX_S } from "../limits/limits.ts";
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { RPC_CHAIN_MAX, RPC_CLIENT_MAX } = rpcModule as unknown as { RPC_CHAIN_MAX: number; RPC_CLIENT_MAX: number };
 
@@ -249,7 +250,7 @@ test("a provider that fails answers 503 upstream: 5xx, 401, 403, a redirect, not
 // card helper-abuse-limits (M367 (3), review finding 3): the helper is the provider's one client, so a provider's 429
 // holds the chain until the reset it named and every caller is told the seconds left as a 429 (at be4b353 the pause
 // answered 503, which the device reads as fatal; at 06a656f the next caller still reached the provider)
-test("a provider's 429 holds that chain until the reset it named (at most a minute): every caller, the helper's own reads included, gets 429 with the seconds left and nothing reaches the provider", async () => {
+test("a provider's 429 holds that chain until the reset it named (at most RETRY_AFTER_MAX_S): every caller, the helper's own reads included, gets 429 with the seconds left and nothing reaches the provider", async () => {
   let t = 1_800_000_000_000;
   const r = createRpc({ SOLANA_RPC_URL: base, NEAR_RPC_URL: base }, { now: () => t });
   const ok = { jsonrpc: "2.0", id: 1, method: "getBalance", params: ["x"] };
@@ -266,10 +267,10 @@ test("a provider's 429 holds that chain until the reset it named (at most a minu
   assert.equal((await call(r, "near", { ...ok, method: "block" })).status, 200, "another chain is not held");
   t += 3_000;
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "honest")).status, 200, "at the reset the chain is open");
-  // a reset past a minute is held to 60 s, a missing one is 1 s
+  // a reset past RETRY_AFTER_MAX_S is held to it (75 s), a missing one is 1 s
   next = { status: 429, type: JSON_T, body: () => "{}", headers: { "retry-after": "3600" } };
-  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "c")).headers?.["Retry-After"], "60");
-  t += 60_000;
+  assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "c")).headers?.["Retry-After"], String(RETRY_AFTER_MAX_S));
+  t += RETRY_AFTER_MAX_S * 1000;
   next = { status: 429, type: JSON_T, body: () => "{}" };
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "c")).headers?.["Retry-After"], "1");
 });
