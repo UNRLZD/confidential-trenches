@@ -475,29 +475,31 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
 }
 
 /**
- * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's candles and trade tape. A token is served only when
- * its chain's Discover lists hold it. The providers are the host's BASE_RPC_URL when set (a keyed one, asked first),
- * then the public ones (SWAP_RPCS).
+ * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's and Robinhood's candles and trade tape. A token is
+ * served only when its chain's Discover lists hold it. Base's providers are the host's BASE_RPC_URL when set (a keyed
+ * one, asked first), then the public ones (SWAP_RPCS); Robinhood's are the public ones.
  */
 export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget): Swaps {
   const out: Swaps = {};
-  const lists = evmLists.base;
-  if (lists === undefined) return out;
-  const url = env.BASE_RPC_URL;
-  let seen: { asOfMs: number; tokens: Set<string> } | null = null;
-  out.base = createSwaps("base", {
-    gecko,
-    rpcs: url === undefined || url === "" ? SWAP_RPCS.base : [url, ...SWAP_RPCS.base],
-    listed: async (token) => {
-      const a = await lists.get();
-      if (a.status !== 200 || a.asOfMs === undefined) return false;
-      if (seen === null || seen.asOfMs !== a.asOfMs) {
-        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]> };
-        seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))) };
-      }
-      return seen.tokens.has(token);
-    },
-  });
+  for (const chain of ["base", "robinhood"] as const) {
+    const lists = evmLists[chain];
+    if (lists === undefined) continue;
+    const url = chain === "base" ? env.BASE_RPC_URL : undefined;
+    let seen: { asOfMs: number; tokens: Set<string> } | null = null;
+    out[chain] = createSwaps(chain, {
+      gecko,
+      rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
+      listed: async (token) => {
+        const a = await lists.get();
+        if (a.status !== 200 || a.asOfMs === undefined) return false;
+        if (seen === null || seen.asOfMs !== a.asOfMs) {
+          const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]> };
+          seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))) };
+        }
+        return seen.tokens.has(token);
+      },
+    });
+  }
   return out;
 }
 

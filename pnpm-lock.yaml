@@ -36,6 +36,9 @@ importers:
       '@blindfill/kit':
         specifier: workspace:*
         version: link:../../packages/kit
+      klinecharts:
+        specifier: 10.0.3
+        version: 10.0.3
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -583,6 +586,9 @@ packages:
   kleur@3.0.3:
     resolution: {integrity: sha512-eTIzlVOSUR+JxdDFepEYcBMtZ9Qqdef+rnzWdRZuMbOywu5tO2w2N7rqjoANZ5k9vywhL6Br1VRjUIgTQx4E8w==}
     engines: {node: '>=6'}
+
+  klinecharts@10.0.3:
+    resolution: {integrity: sha512-phvf5CyS7oGE46nuC+nxQxl9D+8+5w8q3reExh0oNeMV1Jws4X0CMHNkOI9xlNA/XWctNS5whZ3PqIJi8YM2Tw==}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -1236,6 +1242,8 @@ snapshots:
       underscore: 1.13.6
 
   kleur@3.0.3: {}
+
+  klinecharts@10.0.3: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true

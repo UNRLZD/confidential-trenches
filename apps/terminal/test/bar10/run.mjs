@@ -33,6 +33,7 @@ const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : undefined;
 
 const LISTS_URL = "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana";
 const isTokenRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/token";
+const isCandleRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/candles";
 
 /** The helper's answer: every list of the fixtures, edge rows after the recorded ones; New also holds the rows on a
  *  curve, as the live one does, so the percent pills are on its first screen. */
@@ -134,6 +135,24 @@ try {
       const row = Object.values(answer.lists).flat().find((x) => x.token === u.searchParams.get("token"));
       const body = row && u.searchParams.get("chain") === "solana" ? { row, decimals: 6, pool: null, risk: {}, route: "ok" } : { error: "unknown token" };
       await r.fulfill({ status: row ? 200 : 404, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) }).catch(() => {});
+    });
+    // and its chart's candles (card app-token-chart): 60 bars of the requested timeframe around the row's price, our own
+    // source, so the token page's chart draws with no failed load too
+    await ctx.route(isCandleRead, async (r) => {
+      if (late) await wait(LATE.helperMs);
+      const u = new URL(r.request().url());
+      const tf = u.searchParams.get("tf");
+      const step = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 }[tf] ?? 900;
+      const row = Object.values(answer.lists).flat().find((x) => x.token === u.searchParams.get("token"));
+      const p = Number(row?.price_usd) > 0 ? Number(row.price_usd) : 0.001;
+      const end = Math.floor(Date.now() / 1000 / step) * step;
+      const f = (x) => x.toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+      const candles = Array.from({ length: 60 }, (_, i) => {
+        const o = p * (1 + 0.1 * Math.sin(i / 5));
+        const c = p * (1 + 0.1 * Math.sin((i + 1) / 5));
+        return [end - (59 - i) * step, f(o), f(Math.max(o, c) * 1.01), f(Math.min(o, c) * 0.99), f(c), String(100 + i * 10)];
+      });
+      await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST, "access-control-expose-headers": "X-Helper-Source", "x-helper-source": "chain" }, body: JSON.stringify({ tf, candles, src: "chain", as_of_ms: Date.now() }) }).catch(() => {});
     });
   };
   const prepare = answering(false);

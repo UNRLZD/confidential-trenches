@@ -12,6 +12,12 @@ export default defineConfig({
     assetsInlineLimit: 0,
     modulePreload: false,
     cssCodeSplit: false,
-    rolldownOptions: { output: { codeSplitting: false } },
+    // keep every legal comment (`@license`, `@preserve`, `/*!`) the minifier would drop: the licences' notices ship with
+    // the code they cover (Apache-2.0 §4(d) for klinecharts' NOTICE, MIT for React's header). Vite 8 sets
+    // `comments.legal` to `!minify` and spreads this object over it (vite 8.3.5 dist/node/chunks/node.js:34787-34792);
+    // rolldown 1.2.15's OutputOptions.comments.legal keeps "Comments that contain `@license`, `@preserve` or start with
+    // `//!` or `/*!`" (dist/shared/define-config-BoIay7tU.d.mts:352-356; `legalComments` is deprecated for it, :893).
+    // Held by test/legal-comments.test.ts.
+    rolldownOptions: { output: { codeSplitting: false, comments: { legal: true } } },
   },
 });

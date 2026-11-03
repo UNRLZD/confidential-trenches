@@ -178,13 +178,21 @@ jobs:
             *) node scripts/ci/money-gate.mjs --all ;;
           esac
 
-  # Each package's own fast tests. Two heavy suites stay out of this job: the near-sandbox tests (a
-  # cargo test target with required-features = ["sandbox"], which a plain cargo test skips) and Playwright (a
-  # package's test:e2e script, never its test script), but for the terminal's in-shell run below.
-  test:
+  # Each package's own fast tests. Two heavy suites stay out of these jobs: the near-sandbox tests (a cargo test target
+  # with required-features = ["sandbox"], which a plain cargo test skips) and Playwright (a package's test:e2e script,
+  # never its test script), but for the terminal's in-shell run below.
+  #
+  # The work runs as parallel shards, each a job with its own timeout, and the job `test` (a required check of main's
+  # ruleset) passes only when every shard passed: one job ran it all in 19-20 minutes (run 41705134432: the package
+  # tests 4m44s, wallet 3m08s of it; the terminal's browser runs 6m40s; the vault's scripts 1m48s; the Solana pool's
+  # deploy tests 1m31s; cargo 2m38s), and a run cancelled at its 20-minute limit failed on the clock. Each shard is a
+  # job named test-*, and scripts/ci/test-shards.test.mjs fails when one is missing from test's needs, when test
+  # could pass on a shard that failed, was skipped or was cancelled, or when a shard has no timeout of its own.
+  # scripts/ci/tests-run.test.mjs reads each pnpm --filter, so a package no shard selects fails it.
+  test-wallet:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -194,43 +202,94 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      - name: every workspace package's test script
-        run: pnpm -r --if-present --no-bail run test
+      - name: the wallet package's test script
+        run: pnpm --filter @blindfill/wallet run test
+
+  test-packages:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: every other workspace package's test script
+        run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test
       - name: every workspace package's typecheck
         run: pnpm -r --if-present run typecheck
       - name: the deploy gate's own tests
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
+
+  # The terminal's browser runs, split across the matrix: scripts/ci/test-shards.mjs reads apps/terminal's test:e2e,
+  # runs its first command (the build) in every part and gives each later command to exactly one part, by the job's
+  # own strategy.job-index of strategy.job-total, so a part added to the matrix or to test:e2e is never dropped.
+  test-browser:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
       # Every browser the checks start is the installed Google Chrome with its sandbox on (scripts/browsers.mjs); the
       # action puts Google's current stable on the runner and proves the sandbox (its file says how).
       - name: Google Chrome stable, and its sandbox comes up
         uses: ./.github/actions/chrome
       # The terminal runs inside SIGN_HOST's shell: a top-level visit to APP_HOST lands on SIGN_HOST with the path kept,
       # and the framed terminal reads the shell's state with no hop (the live check app-in-shell in --harness mode, in
-      # Chromium). Left to hand runs, a stale stand-in once failed on main unseen for hours. The same step runs BAR-10
+      # Chromium). Left to hand runs, a stale stand-in once failed on main unseen for hours. The same script runs BAR-10
       # (no text under 11 px, no phone tap box under 44 px) with the deployed app-shell check's own rules on the build,
       # inside the shell, every routed path (test/bar10/run.mjs).
-      - name: the terminal's browser runs (in-shell, and BAR-10 on every routed path)
-        run: pnpm --filter terminal run test:e2e
+      - name: the terminal's browser runs (in-shell, and BAR-10 on every routed path), this part's share
+        env:
+          INDEX: ${{ strategy.job-index }}
+          TOTAL: ${{ strategy.job-total }}
+        run: |
+          cmd="$(node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL")"
+          echo "$cmd"
+          cd apps/terminal && pnpm exec sh -c "$cmd"
       # The kit's one call in headless Chromium: the real prover worker under SIGN_HOST's own headers proves the fixture's
       # leaves, snarkjs accepts each proof, and a changed leaf or worker answer is refused (vault-prover-e2e; card
-      # signpage-prover-host). The browser is the Chrome the step above installs.
+      # signpage-prover-host). The browser is the Chrome the step above installs. The first part runs it.
       - name: the prover in Chromium (KIT_PROVER_E2E)
+        if: strategy.job-index == 0
         run: KIT_PROVER_E2E=1 node --test packages/kit/test/prove-e2e.test.ts
+
+  test-scripts:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
       - name: the vault's scripts' own tests
         run: pnpm run test:vault-scripts
       # the Solana pool's deploy script: its cleanup never strands a lamport on the run key, and every committed
       # deployment record's commitment is Poseidon(value, label, precommitment)
       - name: the Solana pool's deploy script's own tests
         run: node --test contracts/pool-solana/scripts/deploy.test.mjs
-      # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins
-      # one. rustup is on the ubuntu-24.04 image (actions/runner-images Ubuntu2404-Readme.md, read 2026-10-31 19:32Z).
-      - name: the vault's own tests, without the sandbox suite
-        if: hashFiles('contracts/vault/Cargo.toml') != ''
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
       # version its tests were first run with, released 2026-05-08) through foundry-toolchain v1.9.1 (908c540, read
       # 2026-11-02 20:12Z), solc 0.8.28 as its foundry.toml pins. The forge tests run the kit's real proofs through the
@@ -246,6 +305,38 @@ jobs:
         run: |
           node contracts/pool-evm/test/fork-rpc.mjs -- forge test --root contracts/pool-evm --no-storage-caching
           node --test contracts/pool-evm/test/*.test.mjs
+
+  # rustc 1.96.0, the vault's build in the G1 gas proof (cargo-near 0.22.0); neither the kit nor the vault paper pins
+  # one. rustup is on the ubuntu-24.04 image (actions/runner-images Ubuntu2404-Readme.md, read 2026-10-31 19:32Z).
+  # No cache: cargo's 2m38s here ends well inside the longest shard's time.
+  test-vault:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the vault's own tests, without the sandbox suite
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
+
+  # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
+  # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset.
+  test:
+    needs: [test-wallet, test-packages, test-browser, test-scripts, test-vault]
+    if: always() && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every shard passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          printf '%s' "$NEEDS" | jq -e 'type == "object" and length > 0 and all(.[]; .result == "success")' > /dev/null || { echo "a shard did not pass"; exit 1; }
+          echo "every shard passed"
 
   # The vault's near-sandbox suite (contracts/vault/tests/harness/run.sh: the vault, the mock token and the harness's
   # probe built with cargo-near, the pinned mainnet USDC and intents.near wasm, near-sandbox 2.13.4), which the test
