@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { check, copyServed, SERVED, sha384 } from "./build-app.mjs";
-import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
+import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -36,6 +36,7 @@ test("a hand-edited bundle or a stale integrity is caught", async () => {
   writeFileSync(join(d, "public/app.js"), js.replace("sign.confidential.unrealized.trade", "sign.evil.test"));
   cpSync(join(PKG, "index.html"), join(d, "index.html"));
   cpSync(join(PKG, "public/prover-worker.js"), join(d, "public/prover-worker.js"));
+  cpSync(join(PKG, "public/prover-thread.js"), join(d, "public/prover-thread.js"));
   assert.match((await check(PKG, d)).join("\n"), /public\/app\.js is not the build/);
   writeFileSync(join(d, "public/app.js"), js);
   writeFileSync(join(d, "index.html"), readFileSync(join(PKG, "index.html"), "utf8").replace(/sha384-[^"]+/, sha384(Buffer.from("x"))));
@@ -58,6 +59,26 @@ test("a stale or hand-edited prover worker is caught", async () => {
     assert.deepEqual(await check(PKG, d), ["public/prover-worker.js is not the kit's prover worker build: run node packages/signpage/scripts/build-app.mjs"]);
     rmSync(join(d, "public/prover-worker.js"));
     assert.deepEqual(await check(PKG, d), ["public/prover-worker.js is not the kit's prover worker build: run node packages/signpage/scripts/build-app.mjs"]);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("public/prover-thread.js is the kit's prover thread build, byte for byte (card signpage-prover-threads)", () => {
+  assert.ok(readFileSync(join(PKG, "public/prover-thread.js")).equals(proverThreadSource()));
+});
+
+test("a stale or hand-edited prover thread file is caught", async () => {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-build-test-"));
+  try {
+    cpSync(join(PKG, "public"), join(d, "public"), { recursive: true });
+    cpSync(join(PKG, "index.html"), join(d, "index.html"));
+    const t = readFileSync(join(PKG, "public/prover-thread.js"), "utf8");
+    writeFileSync(join(d, "public/prover-thread.js"), t.replace("const MAXMEM = 32767;", "const MAXMEM = 32766;"));
+    const want = ["public/prover-thread.js is not the kit's prover thread build: run node packages/signpage/scripts/build-app.mjs"];
+    assert.deepEqual(await check(PKG, d), want);
+    rmSync(join(d, "public/prover-thread.js"));
+    assert.deepEqual(await check(PKG, d), want);
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

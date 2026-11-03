@@ -37,6 +37,7 @@ function recorder() {
 }
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
+const THREAD_RULE = "/prover-thread.js\n  Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'\n";
 const ZK_RULE = "/assets/zk/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
 const swap = (from, to) => {
@@ -86,6 +87,21 @@ test("other policy breaks are refused", () => {
     "the worker's CSP also on another path": `${REAL}${WORKER_RULE.replace("/prover-worker.js", "/app.js")}`,
     "the worker rule sets a second header": swap(WORKER_RULE, `${WORKER_RULE}  Cross-Origin-Resource-Policy: cross-origin\n`),
     "the worker rule removes the site's CSP": swap(WORKER_RULE, `${WORKER_RULE}  ! Content-Security-Policy\n`),
+    // the thread file's rule (card signpage-prover-threads): exactly its own CSP, on that one path
+    "no thread rule": swap(THREAD_RULE, ""),
+    "the thread rule twice": `${REAL}${THREAD_RULE}`,
+    "the thread's CSP without default-src": swap(THREAD_RULE, THREAD_RULE.replace("default-src 'none'; ", "")),
+    "the thread's CSP with 'unsafe-eval'": swap(THREAD_RULE, THREAD_RULE.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'")),
+    "the thread's CSP with worker-src data: blob:": swap(THREAD_RULE, THREAD_RULE.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval'; worker-src data: blob:")),
+    "the thread's CSP loads scripts": swap(THREAD_RULE, THREAD_RULE.replace("script-src 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval'")),
+    "the thread's CSP on another path": swap(THREAD_RULE, THREAD_RULE.replace("/prover-thread.js", "/prover-*.js")),
+    "the thread rule sets a second header": swap(THREAD_RULE, `${THREAD_RULE}  Cross-Origin-Embedder-Policy: require-corp\n`),
+    "the thread rule removes the site's CSP": swap(THREAD_RULE, `${THREAD_RULE}  ! Content-Security-Policy\n`),
+    // the site's worker-src loosened to fit a library's thread workers
+    "worker-src data:": swap("worker-src 'self';", "worker-src 'self' data:;"),
+    "worker-src blob:": swap("worker-src 'self';", "worker-src 'self' blob:;"),
+    "script-src 'unsafe-eval'": swap("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'"),
+    "COEP added": swap("  Cross-Origin-Opener-Policy:", "  Cross-Origin-Embedder-Policy: require-corp\n  Cross-Origin-Opener-Policy:"),
     // the review's plants (signpage-prover-host round 2): every rule, header and removal off the allow-list
     "/ sends Refresh to another site": `${REAL}/\n  Refresh: 0; url=https://evil.example/\n`,
     "/index.html sends Refresh": `${REAL}/index.html\n  Refresh: 0; url=https://evil.example/\n`,
@@ -166,7 +182,7 @@ test("a deploy names every live check that reads SIGN_HOST in its success line",
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
-  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "signpage-postmessage", "signpage-prover-host", "signpage-release", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-withdraw-form", "wallet-passkey-prf"]);
+  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-withdraw-form", "wallet-passkey-prf"]);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   // the release check reads SIGN_HOST alone, against this commit's build
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host sign"), `the success line does not run signpage-release on SIGN_HOST alone: ${out}`);
@@ -181,6 +197,7 @@ test("the build holds the prover: the worker, the six setup files at /assets/zk/
     assert.deepEqual(readdirSync(join(dir, "assets", "zk")).sort(), Object.keys(ZK_SETUP_FILES).map((n) => zkPath(n).slice("assets/zk/".length)).sort());
     for (const n of Object.keys(ZK_SETUP_FILES)) assert.ok(readFileSync(join(dir, zkPath(n))).equals(readFileSync(join(PKG, "..", "kit", "zk", n))), n);
     assert.ok(readFileSync(join(dir, "prover-worker.js")).equals(readFileSync(join(PKG, "public", "prover-worker.js"))));
+    assert.ok(readFileSync(join(dir, "prover-thread.js")).equals(readFileSync(join(PKG, "public", "prover-thread.js"))));
     assert.ok(readFileSync(join(dir, "licenses", "GPL-3.0.txt")).equals(readFileSync(join(PKG, "..", "kit", "zk", "LICENSE-GPL-3.0.txt"))));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -200,6 +217,8 @@ test("a build whose setup files or worker are not the pinned ones is refused", (
     "a setup file under another name": (d) => (writeFileSync(join(d, "assets", "zk", `${"0".repeat(64)}.zkey`), "x"), /assets\/zk\/0{64}\.zkey: not a pinned setup file/),
     "the worker changed": (d) => (writeFileSync(join(d, "prover-worker.js"), "postMessage(1)"), /prover-worker\.js is not the kit's prover worker build/),
     "the worker missing": (d) => (rmSync(join(d, "prover-worker.js")), /prover-worker\.js is not the kit's prover worker build/),
+    "the thread file changed": (d) => (writeFileSync(join(d, "prover-thread.js"), "postMessage(1)"), /prover-thread\.js is not the kit's prover thread build/),
+    "the thread file missing": (d) => (rmSync(join(d, "prover-thread.js")), /prover-thread\.js is not the kit's prover thread build/),
     "the GPL text missing": (d) => (rmSync(join(d, "licenses", "GPL-3.0.txt")), /licenses\/GPL-3\.0\.txt: missing/),
   };
   for (const [name, plant] of Object.entries(plants)) {

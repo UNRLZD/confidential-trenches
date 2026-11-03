@@ -24,6 +24,10 @@ export function freshWallet(...a) { const out = m.freshWallet(...a); globalThis.
 const { USDC_LADDER } = await import("../src/pool/near.ts");
 const { openProofQueue } = await import("../src/pool/queue.ts");
 const { closeVaults, SEED, SCOPE, signalsProver, vaultWith } = await import("./withdraw-fixture.ts");
+const { solanaRestore, solanaMarkOf } = await import("../src/pool/solana-restore.ts");
+const { noteSecrets, noteCommitment } = await import("../src/notes/secrets.ts");
+const { vaultLabelOf } = await import("@blindfill/kit");
+const { keccak_256 } = await import("@noble/hashes/sha3.js");
 after(closeVaults);
 
 const zero = (b: Uint8Array): boolean => b.every((x) => x === 0);
@@ -62,4 +66,24 @@ test("every W secret key is zeroed once derived; the seed's copy stays until clo
   assert.ok(zero(copy), "close zeroes the seed's copy");
   assert.ok(!zero(SEED), "never the caller's seed");
   assert.deepEqual((await v.ns.list()).map((n) => n.state), ["UNSPENT", "UNSPENT"]);
+});
+
+test("solanaRestore zeroes each spent note's W secret key once it has the address (card notes-per-pool-sol)", () => {
+  const program = "GrhFJ6E7xdXj4Yf6zxwKEdcHPVJKDTRd3sYNkKYdKbt6"; // any base58 32-byte key: a test program id
+  const scope = 7n;
+  const dep = { kind: "deposit", s: scope, i: 0 } as const;
+  const P = noteSecrets(SEED, dep).precommitment;
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const cP = noteSecrets(SEED, { kind: "change", l: label, j: 0 }).precommitment;
+  const marks = {
+    pre: new Map([[solanaMarkOf(program, "pre", P), { value: 10_000_000n, nonce: 1n }]]),
+    spent: new Map([[solanaMarkOf(program, "spent", noteSecrets(SEED, dep).nullifierHash), 10_000_000n]]),
+    slot: 1,
+  };
+  const from = calls.length;
+  const r = solanaRestore({ seed64: SEED, program, scope, stateLeaves: [noteCommitment(10_000_000n, label, P), noteCommitment(0n, label, cP)], labelLeaves: [label], marks, gap: 2 });
+  const made = calls.slice(from);
+  assert.equal(r.spends.length, 1);
+  assert.equal(made.length, 1, "one W derived, for the one spent note");
+  assert.ok(zero(made[0]!.out.secretKey), "W's secret key is left in memory");
 });

@@ -4,11 +4,12 @@
 // with one byte of withdraw.zkey changed: its sha256 is not the pin and the worker refuses it at load, so nothing is
 // proved: FAIL. The other bad answers are the good one with one fault planted each: FAIL.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, LICENSES, PINS, policies, WORKER_CSP, WORKER_PATH, zkPath } from "./signpage-prover-host.mjs";
+import { judge, LICENSES, openBrowser, PINS, policies, WORKER_CSP, WORKER_PATH, zkPath } from "./signpage-prover-host.mjs";
 
 after(() => globalThis.curve_bn128?.terminate?.());
 
@@ -85,4 +86,21 @@ test("planted: Trusted Types not enforced, a violation beyond the probes, or a p
   bad(await judge(planted((a) => (a.page.result.proof.pi_a[0] = String(BigInt(a.page.result.proof.pi_a[0]) + 1n)))), "snarkjs groth16.verify with the pinned withdraw.vkey: false");
   bad(await judge(planted((a) => (a.page.posts[0].bytesLeftHere = [2607967, 17793015]))), "the wasm and zkey moved to the worker by transfer");
   bad(await judge(planted((a) => delete a.page)), "the page: not run");
+});
+
+test("the harness's TLS folder is removed when openssl fails after writing the key (fold 1, item 4)", async () => {
+  const bin = mkdtempSync(path.join(tmpdir(), "ct-fake-openssl-"));
+  // writes a key file where -keyout says, then fails
+  writeFileSync(path.join(bin, "openssl"), '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -keyout ] && echo not-a-key > "$2"; shift; done\necho made up >&2\nexit 1\n');
+  chmodSync(path.join(bin, "openssl"), 0o755);
+  const before = new Set(readdirSync(tmpdir()).filter((f) => f.startsWith("ct-harness-tls-")));
+  const PATH = process.env.PATH;
+  process.env.PATH = `${bin}:${PATH}`;
+  try {
+    await assert.rejects(openBrowser("chromium", () => ({ status: 404, headers: {}, body: Buffer.alloc(0) })), /^Error: openssl: exit 1: made up$/);
+  } finally {
+    process.env.PATH = PATH;
+    rmSync(bin, { recursive: true, force: true });
+  }
+  assert.deepEqual(readdirSync(tmpdir()).filter((f) => f.startsWith("ct-harness-tls-") && !before.has(f)), []);
 });
