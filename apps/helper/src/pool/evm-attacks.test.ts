@@ -230,6 +230,8 @@ test("a provider's transport error or HTTP 429 is 503 upstream; an execution rev
     ["eth_call", "RPC error 3: execution reverted: 0x8b1c4b0b", "simulation_failed"],
     ["eth_estimateGas", "RPC error 3: execution reverted", "simulation_failed"],
     ["eth_estimateGas", "RPC error -32000: insufficient funds for gas * price + value", "simulation_failed"],
+    ["eth_call", "RPC error -32003: EVM error InvalidFEOpcode", "simulation_failed"], // anvil 1.8.6's halt
+    ["eth_call", "RPC error -32603: internal error", "upstream"],
   ] as const) {
     const a: Calls = [];
     const x = await make(a, { fail: { [method]: msg } }).carry(req());
