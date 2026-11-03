@@ -144,11 +144,11 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
         nullifiers.push(d[3]);
         said = `W ${lower(t.w)}, value ${d[1]}, fee ${d[2]}, nullifier ${d[3]}`;
         if (t.kind === "buy") {
-          same("the token", addrOf(d[5]), lower(t.token)), same("out", d[6], t.out);
+          same("the token", addrOf(d[5]), lower(t.coin)), same("out", d[6], t.out);
           if (d[6] < BigInt(t.minOut)) throw new Error(`${t.step} ${t.hash}: out ${d[6]} under the signed minOut ${t.minOut}`);
-          const tr = r.logs.filter((x) => lower(x.address) === lower(t.token) && x.topics[0] === TOPICS.Transfer && topicAddr(x.topics[2]) === lower(t.w));
-          if (tr.length !== 1 || words(tr[0].data)[0] !== d[6]) throw new Error(`${t.step} ${t.hash}: no Transfer of ${d[6]} ${t.token} to W`);
-          said = `Bought ${d[6]} of ${lower(t.token)} (minOut ${t.minOut}) for ${said}`;
+          const tr = r.logs.filter((x) => lower(x.address) === lower(t.coin) && x.topics[0] === TOPICS.Transfer && topicAddr(x.topics[2]) === lower(t.w));
+          if (tr.length !== 1 || words(tr[0].data)[0] !== d[6]) throw new Error(`${t.step} ${t.hash}: no Transfer of ${d[6]} ${t.coin} to W`);
+          said = `Bought ${d[6]} of ${lower(t.coin)} (minOut ${t.minOut}) for ${said}`;
         } else said = `Withdrawn to ${said}`;
       } else if (t.kind === "sweep") {
         const tx = await one("eth_getTransactionByHash", [t.hash], `${t.step} ${t.hash}`);
@@ -205,7 +205,7 @@ export function runRecord(rec) {
     "Money path: yes",
     ...rec.txs.map((t) => `Tx: ${rec.chain} ${t.hash}`),
     "",
-    `${rec.chain} (chain id ${rec.chainId}), contracts/pool-evm/script/testnet-run.mjs at ${rec.at}, the pool ${rec.pool}, the token ${rec.token}, venues ${rec.venues.join(" and ")}. Its steps, in the order of its Tx lines above: ${rec.txs.map((t) => t.step).join(", ")}.`,
+    `${rec.chain} (chain id ${rec.chainId}), contracts/pool-evm/script/testnet-run.mjs at ${rec.at}, the pool ${rec.pool}, the token ${rec.coin}, venues ${rec.venues.join(" and ")}. Its steps, in the order of its Tx lines above: ${rec.txs.map((t) => t.step).join(", ")}.`,
     `The run key ${rec.relayer} lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with ${rec.need} wei (the printed need) and swept back to ${rec.return}. The run's 12 words lived only in the run; every note came from them.`,
     rec.restore ? `The restore from the words (packages/wallet evmRestoreNotes) at block ${rec.restore.block}: ${rec.restore.notes} notes, ${rec.restore.spends} spends, the Ws ${rec.restore.wallets.map((w) => `${w.w} (${(w.tokens ?? ["unread"]).join(", ") || "no token"})`).join(", ")}.` : "No restore was run.",
     "",

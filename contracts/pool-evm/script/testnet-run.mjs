@@ -299,7 +299,7 @@ export async function main(args, io = {}) {
         const built = kit.evmPoolBuild(chain, adapters[v], route, lessSlippage(q), token);
         const sig = kit.evmPoolSignBuy(W.secretKey, chain, pool, built, { nullifier, context: b.context, value: withdrawn });
         step = `buy through ${v}`;
-        r = await send(step, { to: pool, data: buyData(pool, relay, proof, fee, built, sig) }, { kind: "buy", venue: v, w: lower(W.address), nullifier: String(nullifier), minOut: String(built.minOut), token });
+        r = await send(step, { to: pool, data: buyData(pool, relay, proof, fee, built, sig) }, { kind: "buy", venue: v, w: lower(W.address), nullifier: String(nullifier), minOut: String(built.minOut), coin: token });
         const ev = poolLog(r, T.Bought);
         if (!ev) throw new Error(`${step}: no Bought event`);
         const d = words(ev.data);
@@ -345,7 +345,7 @@ export async function main(args, io = {}) {
       const built = kit.evmPoolBuildSell(chain, { w: W.address, token, amount, target: router, route: { venue: "uniswap-v3", tokens: [token, weth], fees: [net.v3.fee] }, minOut: lessSlippage(q), precommitment: noteSecrets(seed64, ref).precommitment, feeCap: fee, deadline, nonce: 0n });
       const sig = kit.evmPoolSignSell(W.secretKey, chain, built);
       const auth = kit.evmPoolSignSellAuthorization(W.secretKey, chain, BigInt(await call("eth_getTransactionCount", [W.address, "latest"])));
-      const r = await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, { kind: "sell", w: lower(W.address), amount: String(amount), minOut: String(built.minOut), fee: String(fee), token });
+      const r = await send("sell through SellDelegate", { to: lower(W.address), data: sellData(built, fee, sig), authorizations: [auth] }, { kind: "sell", w: lower(W.address), amount: String(amount), minOut: String(built.minOut), fee: String(fee), coin: token });
       const ev = poolLog(r, T.Deposited);
       if (!ev || lower(`0x${ev.topics[1].slice(26)}`) !== lower(W.address)) throw new Error("sell: no Deposited event from W");
       const d = words(ev.data);
@@ -472,7 +472,7 @@ export async function main(args, io = {}) {
       for (const s of SIGNALS) process.off(s, onSignal);
       const landed = steps.filter((s) => s.landed).map(({ landed, ...s }) => s);
       writeFileSync(out, JSON.stringify({
-        key: KEY, chain, chainId: Number(chainId), dryRun, at: new Date().toISOString(), pool, token, venues, relayer, return: ret, need: need.toString(),
+        key: KEY, chain, chainId: Number(chainId), dryRun, at: new Date().toISOString(), pool, coin: token, venues, relayer, return: ret, need: need.toString(),
         restore: restored && { notes: restored.notes.length, spends: restored.spends.length, wallets: restored.wallets.map((w) => ({ w: w.w, tokens: w.tokens })), block: String(restored.block) },
         txs: landed,
       }, null, 2) + "\n");
