@@ -37,8 +37,9 @@ const TIP_TO = testKey("TIP_TO").address;
 const TO = testKey("TO").address;
 const BLOCKHASH = testKey("BLOCKHASH").address;
 const FEE = 2_000_000n;
-/** A test rent whose kit fee is FEE: cost (128 + 8 + 72) x 8,500 + 10,000 = 1,778,000, up to 1,800,000, plus two steps. */
-const TEST_RENT: SolanaRent = { lamportsPerByte: 8_500n, factor: 1n };
+/** A test rent whose kit fee is FEE: cost (128 + 12 + 72) x 8,400 + 10,000 = 1,790,800, up to 1,800,000, plus two steps
+ * (the spent mark is 12 bytes, M376). */
+const TEST_RENT: SolanaRent = { lamportsPerByte: 8_400n, factor: 1n };
 /** Mainnet's, read 2026-11-02 on two providers (the kit's pool-buy.ts): 5,080 a byte, factor 1.0. */
 const MAINNET: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
 const BUDGET = solanaPoolPriorityBudget(TEST_RENT, FEE);
@@ -256,11 +257,12 @@ test("the published fee: the kit's for the rent read, the same for every caller 
   const a = await s.fee(1_800_000_012_345);
   assert.deepEqual(a, { chain: "solana", cluster: "devnet", program: PROGRAM, pool: POOL, fee_payer: FP.address, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: 1_800_000_000_000, fee: "2000000", step: "100000" });
   assert.equal((await s.fee(1_800_000_060_000)).fee, a.fee);
-  // M355 at mainnet rent: cost 1,066,640, fee 1,300,000, page reserve 715, priority budget 232,645
-  assert.equal(solanaPoolReleaseCost(MAINNET), 1_066_640n);
+  // M355, M376 at mainnet rent: cost 1,086,960 (the spent mark 12 bytes), fee 1,300,000, page reserve 715, priority
+  // budget 212,325
+  assert.equal(solanaPoolReleaseCost(MAINNET), 1_086_960n);
   assert.equal(solanaPoolFee(MAINNET), 1_300_000n);
   assert.equal(solanaPoolPageReserve(MAINNET), 715n);
-  assert.equal(solanaPoolPriorityBudget(MAINNET, 1_300_000n), 232_645n);
+  assert.equal(solanaPoolPriorityBudget(MAINNET, 1_300_000n), 212_325n);
   await sender(null, [], [], { fee: 1_300_000n, rent: MAINNET }).ready;
   for (const off of [1_200_000n, 1_400_000n, 1_299_999n, 2_000_000n]) await assert.rejects(sender(null, [], [], { fee: off, rent: MAINNET }).ready, /the kit's fee for this rent, 1300000/, String(off));
   await assert.rejects(sender(null, [], [], { fee: 1_300_000n }).ready, /the kit's fee for this rent, 2000000/, "a fee off the kit's for the rent read stops the helper");
