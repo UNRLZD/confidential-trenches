@@ -52,7 +52,7 @@
 .eq .brk { display: flex; gap: 28px; }
 .eq .brk .k { font: 500 11px var(--font-ui); color: var(--text-3); white-space: nowrap; }
 .eq .brk .v { font-size: 14px; margin-top: 4px; white-space: nowrap; }
-.eqsplit { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; margin-top: 14px; }
+.eqsplit { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 24px; margin-top: 14px; }
 .eqbrk { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .eqh { font: 500 12px var(--font-ui); color: var(--text-3); }
 .eqch { min-width: 0; display: flex; flex-direction: column; }
@@ -267,3 +267,27 @@
   .rcpt { padding: 10px 16px 14px 58px; }
   .rcpt .rl { font-size: 12.5px; }
 }
+
+/* the pools (card balances-per-chain, v2 A1): each chain's private balance, ready and pending, in Where it is */
+.pools { display: grid; grid-template-columns: minmax(max-content, 1fr) auto auto auto; column-gap: 8px; row-gap: 5px; align-items: baseline; margin-top: 4px; font: 500 12px var(--font-ui); }
+.pools .plk { grid-column: 1 / -1; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pools .plc { color: var(--text-3); font-size: 11px; text-align: right; white-space: nowrap; }
+.pools .plst { grid-column: 1 / -1; color: var(--text-2); white-space: nowrap; }
+.pools .plr { display: contents; }
+.pools .plr > * { color: var(--text-1); white-space: nowrap; }
+.pools .plr > .num { text-align: right; font-size: 12px; }
+.pools .plr > .t2 { color: var(--text-2); }
+.pools .plr > .ell { color: var(--text-2); }
+.pools .plr > .num .gain { color: var(--acc); }
+.pools .plr > .sk { justify-self: end; }
+.pools .plr > .sk:first-child { justify-self: start; }
+@media (max-width: 767.98px) {
+  .pools.ph { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--m-line); row-gap: 8px; font-size: 13px; }
+  .pools.ph .plk { font-size: 13px; color: var(--m-text-3); }
+  .pools.ph .plc { font-size: 12px; }
+  .pools.ph .plr > .num { font-size: 13px; }
+}
+/* desktop: the header row is fixed (the positions bar needs its 9 rows), so Where it is gives its dot strips' height
+   to the pool rows; the phone keeps them (placement on the owner's picks page) */
+.pfd .eqbrk .pvtstrip { display: none; }
+.pfd .eqbrk { gap: 6px; }
