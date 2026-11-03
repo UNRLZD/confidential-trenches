@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { test } from "node:test";
 import { bytes, hex, keccak, selector } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
 import { intBytes, rlp } from "../script/deploy.mjs";
-import { buyData, depositData, revertName, sellData, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest } from "../script/testnet-run-lib.mjs";
+import { WITHDRAW_TRIES, buyData, depositData, revertName, sellData, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "../script/testnet-run-lib.mjs";
 
 const V = JSON.parse(readFileSync(new URL("./fixtures/testnet-run-calldata.json", import.meta.url), "utf8"));
 const { secp256k1 } = await import(createRequire(new URL("../../../packages/kit/package.json", import.meta.url)).resolve("@noble/curves/secp256k1.js"));
@@ -59,4 +59,32 @@ test("a revert names its custom error; unknown data is kept", () => {
   assert.equal(revertName(`${selector("InvalidSignature()")}`), "InvalidSignature()");
   assert.equal(revertName("0x12345678"), "0x12345678");
   assert.equal(revertName(undefined), "no revert data");
+});
+
+// The stop path: the deployed pool has no ragequit (src/PrivacyPool.sol), so a note is only ever got out by a withdraw.
+// A withdraw that cannot land (run 1's DeadlineExpired: an epoch read before a slow sync) is tried again, each try a
+// fresh release (new trees, epoch, bind and proof), so a stopped run no longer leaves its notes in the pool.
+const deadline = new Error("withdraw: the simulation reverts (DeadlineExpired()): execution reverted");
+test("a withdraw that reverts DeadlineExpired is tried again with a fresh release, and lands", async () => {
+  const notes = [{ ref: { kind: "deposit" }, value: 3n, spent: false }, { ref: { kind: "change" }, value: 0n, spent: false }];
+  const calls = [], said = [];
+  const ok = await withdrawLeft(notes, async (n) => { calls.push(n.ref.kind); if (calls.length === 1) throw deadline; n.spent = true; }, (m) => said.push(m));
+  assert.equal(ok, true);
+  assert.deepEqual(calls, ["deposit", "deposit"]); // the empty note is left alone
+  assert.match(said[0], /withdraw of the deposit note \(3 wei\), try 1 of 3, failed: withdraw: the simulation reverts \(DeadlineExpired\(\)\)/);
+});
+test("a withdraw that never lands is tried WITHDRAW_TRIES times, the run is not done and the log names the note left", async () => {
+  const notes = [{ ref: { kind: "change" }, value: 7n, spent: false }];
+  let n = 0;
+  const said = [];
+  assert.equal(await withdrawLeft(notes, async () => { n++; throw deadline; }, (m) => said.push(m)), false);
+  assert.equal(n, WITHDRAW_TRIES);
+  assert.match(said.at(-1), /the change note \(7 wei\) stays in the pool after 3 tries/);
+});
+test("a note spent by a try that landed late is not tried again", async () => {
+  const notes = [{ ref: { kind: "deposit" }, value: 2n, spent: false }];
+  let n = 0;
+  // the send throws after the withdraw landed (as a receipt read that times out would), and release marked it spent
+  assert.equal(await withdrawLeft(notes, async (x) => { n++; x.spent = true; throw new Error("receipt: timed out"); }, () => {}), true);
+  assert.equal(n, 1);
 });

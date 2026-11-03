@@ -39,7 +39,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { addressOf, returnAddress, signTx } from "./deploy.mjs";
 import { MAINNET_IDS, deploymentFile, hex, keccak, rpc, selector, word } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { authJson, balanceOfData, buyData, depositData, proofArg, revertName, sellData, sign65, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest } from "./testnet-run-lib.mjs";
+import { authJson, balanceOfData, buyData, depositData, proofArg, revertName, sellData, sign65, signTx7702, v3QuoteData, v4QuoteData, withdrawData, withdrawDigest, withdrawLeft } from "./testnet-run-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HERE, "../../..");
@@ -73,6 +73,19 @@ export const NETS = Object.freeze({
     coin: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", // the token bought: USDC
     v4: { fee: 100, tickSpacing: 1, hooks: ZERO, quoter: "0x4a6513c898fe1b2d0e78d3b0e0a4a151589b1cba" },
     v3: { fee: 3000, quoter: "0xc5290058841028f1614f3a6f0f5816cad0df5e27" },
+  }),
+  // Robinhood testnet: no Uniswap page lists it. Read on both RPCs on 4 Nov: the V4Quoter and StateView sit at the
+  // addresses developers.uniswap.org lists for Robinhood mainnet (4663), with mainnet's code hashes, and
+  // V4Quoter.poolManager() is the pinned PoolManager 0x8366a39c...; the token is tSPILL (18 decimals), whose native ETH
+  // pool (fee 10000, tick spacing 200, no hook, id 0x601b493e...) is the deepest hookless one the PoolManager's
+  // Initialize logs name. No v3 and no router there (M365), so the run buys and sells nothing back. The Transfer reads
+  // go to thirdweb's and dRPC's public gateways (chainid.network, chain 46630), neither a pool provider.
+  "robinhood-testnet": Object.freeze({
+    rpcs: ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
+    walletRpcs: ["https://46630.rpc.thirdweb.com", "https://robinhood-testnet.drpc.org"],
+    op: false,
+    coin: "0x10e626a1d0857174b9a5bdb7a1397068811fbbbc", // the token bought: tSPILL
+    v4: { fee: 10000, tickSpacing: 200, hooks: ZERO, quoter: "0x8dc178efb8111bb0973dd9d722ebeff267c98f94" },
   }),
 });
 
@@ -164,9 +177,10 @@ export async function main(args, io = {}) {
     if (BigInt(id) !== chainId) throw new Error(`${u} answers chain ${BigInt(id)}, not ${chain}'s ${chainId}`);
     if ((await call("eth_getCode", [ret, "latest"], u)) !== "0x") throw new Error(`--return ${ret} has code on ${u}`);
   }
-  const pool = lower(venue.pool), weth = lower(venue.weth), router = lower(venue.routers[0]), token = net.coin;
+  const pool = lower(venue.pool), weth = lower(venue.weth), router = venue.routers[0] ? lower(venue.routers[0]) : null, token = net.coin;
   const adapters = { v4: lower(venue.adapters.v4), v3: lower(venue.adapters.v3 ?? ZERO) };
   for (const v of venues) if (adapters[v] === ZERO) throw new Error(`${chain} has no pinned ${v} adapter`);
+  for (const v of venues) if (!net[v]) throw new Error(`${chain} has no ${v} pool or quoter in NETS`);
   const deployRec = JSON.parse(readFileSync(deploymentFile(chain), "utf8"));
   const deployTx = deployRec.txs.find((t) => t.step === "deploy PrivacyPoolSimple").hash;
   const fromBlock = BigInt((await call("eth_getTransactionReceipt", [deployTx])).blockNumber);
@@ -412,23 +426,19 @@ export async function main(args, io = {}) {
       go();
       await release(notes.findLast((n) => !n.spent && n.ref.kind !== "return"), CHUNK, v);
     }
-    // 5. each W sells what it bought back into the pool
-    for (const b of bought) {
+    // 5. each W sells what it bought back into the pool; a chain with no pinned router builds no sell (the kit's
+    // evmPoolBuildSell names a router), so its Ws keep what they bought
+    if (!router) console.log(`run: no sell on ${chain}: the kit pins no router there, so each W keeps what it bought`);
+    else for (const b of bought) {
       go();
       await sellOf(b);
     }
     done = true;
   } finally {
     try {
-      // 6. every note left is withdrawn to its W (a dry note of under twice the fee is left), then each W swept
-      for (const n of notes.filter((x) => !x.spent && x.value > 0n)) {
-        try {
-          await release(n, n.value, null);
-        } catch (e) {
-          done = false;
-          console.error(`run: withdraw of the ${n.ref.kind} note (${n.value} wei) failed: ${e.message.split("\n")[0]}`);
-        }
-      }
+      // 6. every note left is withdrawn to its W, each tried again with a fresh release until it lands (the pool has
+      // no ragequit), then each W swept
+      if (!(await withdrawLeft(notes, (n) => release(n, n.value, null), (m) => console.error(m)))) done = false;
       for (const w of wallets) await sweepW(w).catch((e) => console.error(`run: a W's sweep failed: ${e.message}`));
       // 7. the restore from the words: every note of the run, found by the wallet's own restore
       if (done && !dryRun) {

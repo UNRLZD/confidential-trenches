@@ -134,3 +134,25 @@ export function revertName(data) {
   if (typeof data !== "string" || data.length < 10) return String(data ?? "no revert data");
   return ERROR_OF.get(data.slice(0, 10)) ?? data.slice(0, 138);
 }
+
+// ---- The stop path: every note left is withdrawn, each tried again until it lands ----
+/** How many times the stop path tries one note's withdraw. */
+export const WITHDRAW_TRIES = 3;
+/** Withdraws every unspent note of value above 0 with `withdrawOne(note)`, which makes a fresh release each call (the
+ *  trees, the epoch, the bind and the proof read again), so a try that failed on a stale epoch (DeadlineExpired) or a
+ *  lagging root is not repeated as it was. The pool has no ragequit, so a withdraw is the only way out; a note still
+ *  unspent after WITHDRAW_TRIES is named by `log` and makes the answer false. */
+export async function withdrawLeft(notes, withdrawOne, log) {
+  let ok = true;
+  for (const n of notes.filter((x) => !x.spent && x.value > 0n)) {
+    for (let k = 1; !n.spent && k <= WITHDRAW_TRIES; k++) {
+      try {
+        await withdrawOne(n);
+      } catch (e) {
+        log(`run: withdraw of the ${n.ref.kind} note (${n.value} wei), try ${k} of ${WITHDRAW_TRIES}, failed: ${e.message.split("\n")[0]}`);
+      }
+    }
+    if (!n.spent) (ok = false), log(`run: the ${n.ref.kind} note (${n.value} wei) stays in the pool after ${WITHDRAW_TRIES} tries; the run's words are gone with it`);
+  }
+  return ok;
+}
