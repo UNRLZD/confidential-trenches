@@ -16,6 +16,7 @@ const ST = "src/State.sol";
 const SIMPLE = "src/PrivacyPoolSimple.sol";
 const VERIFIER = "src/verifiers/WithdrawalVerifier.sol";
 const ADAPTER = "src/adapters/UniswapV3Adapter.sol";
+const V4 = "src/adapters/UniswapV4Adapter.sol";
 // lib/forge-std's submodule commit (v1.9.7), fetched into the copy when the checkout has no submodule files
 const FORGE_STD = "77041d2ce690e692d6e03cc812b57d1ddaa4d505";
 
@@ -118,6 +119,19 @@ export const MUTANTS = [
   [ADAPTER, "if (address(ROUTER).balance != _eth) revert PartialFill();", "", "test_aPartialFillRevertsTheBuy"],
   [ADAPTER, "!= _mid[_i]) {", "!= _mid[_i] && false) {", "test_aPartialSecondHopRevertsTheBuy"],
   [ADAPTER, "uint256 _hops = (data.length - 20) / 23;", "uint256 _hops = (data.length - 20) / 24;", "test_aPartialSecondHopRevertsTheBuy"],
+  // the Uniswap v4 adapter (card evm-adapters): only the PoolManager calls back, every hop takes its whole amount, a
+  // hop gives something and the route at least minOut, a route is not empty and starts from ETH or WETH, what it binds
+  [V4, "if (msg.sender != address(POOL_MANAGER)) revert NotPoolManager();", "", "test_v4OnlyThePoolManagerCallsBack"],
+  [V4, "if (_paid != -int256(_amount)) revert PartialFill();", "", "test_v4APartialFillRevertsTheBuy"],
+  [V4, "if (_paid != -int256(_amount)) revert PartialFill();", "", "test_v4APartialSecondHopRevertsTheBuy"],
+  [V4, "if (_got <= 0) revert TooLittleReceived();", "", "test_v4AHookThatTakesMoreThanTheOutputFails"],
+  [V4, "if (_amount < _minOut) revert TooLittleReceived();", "", "test_v4AMinOutOverTheQuoteFails"],
+  [V4, "if (_amount < _minOut) revert TooLittleReceived();", "", "test_v4AHookThatTakesMoreThanTheQuoteFails"],
+  [V4, "if (_path.length == 0) revert InvalidRoute();", "", "test_v4AnEmptyRouteIsRefused"],
+  [V4, "if (_currencyIn != address(0) && _currencyIn != address(WETH)) revert InvalidRoute();", "", "test_v4ARouteFromAnotherCurrencyIsRefused"],
+  [V4, "POOL_MANAGER.take(_currency, _recipient, _amount);", "POOL_MANAGER.take(_currency, msg.sender, _amount);", "test_v4OneHopLands"],
+  [V4, "amountSpecified: -int256(_amount),", "amountSpecified: -int256(_amount / 2),", "test_v4TwoHopLands"],
+  [V4, "WETH.deposit{value: _in}();", "", "test_v4FromWethLands"],
   // the Opus review's mutants (b61f0f5): EIP-712 strings and encoding, signature parsing, the request's length, what
   // W gets, the fee cap, v, and the fee recipient's reentry
   [PP, "keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')", "keccak256('EIP712Domain(string name,uint256 chainId,address verifyingContract)')", "test_buyLandsAndWHoldsMinOut"],
