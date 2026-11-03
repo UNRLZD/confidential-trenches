@@ -38,12 +38,14 @@
 // --record writes what the run read to <file>, so the check's test can replay it through judge().
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-in-shell";
+// what a PASS line calls each engine: Chromium runs as the installed Google Chrome (scripts/browsers.mjs)
+const BROWSER_NAMES = { chromium: "Chrome", firefox: "Firefox (Playwright's build)", webkit: "WebKit (Playwright's build)" };
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const APP_HOST = "https://confidential.unrealized.trade";
 export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
@@ -493,8 +495,7 @@ async function main() {
   const shots = opt("--shots") ?? path.join(tmpdir(), `${KEY}-${Date.now()}`);
   const engines = (opt("--engines") ?? ENGINES.join(",")).split(",");
   if (!engines.every((e) => ENGINES.includes(e))) throw new Error(`--engines takes ${ENGINES.join(",")}`);
-  const pw = createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
-  const launchers = engines.map((e) => [e, () => pw[e].launch()]);
+  const launchers = engines.map((e) => [e, () => launchBrowser(e)]);
   const harness = args.includes("--harness");
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const routes = harness ? Object.fromEntries(await Promise.all(KINDS.map(async (k) => [k, await harnessRoute(build, k)]))) : null;
@@ -505,7 +506,7 @@ async function main() {
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
   const r = judge(rec);
   for (const l of r.lines) console.log(l);
-  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, ${Object.entries(rec.browsers).map(([k, v]) => `${k} ${v}`).join(", ")}, shots ${shots})`);
+  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, ${Object.entries(rec.browsers).map(([k, v]) => `${BROWSER_NAMES[k] ?? k} ${v}`).join(", ")}, shots ${shots})`);
   process.exit(r.ok ? 0 : 1);
 }
 

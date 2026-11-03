@@ -46,11 +46,11 @@
 // No money and no network beyond the two hosts; the account is the published test vector's, thrown away with the profile.
 import "../net-window.mjs";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SIGNPAGE_IFRAME_ATTRIBUTES } from "../../packages/kit/src/index.ts";
+import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { kitTakesState } from "../signpage-state.mjs";
 
 const KEY = "signpage-shell";
@@ -284,8 +284,7 @@ function serveWith(sign, requests) {
 // ------------------------------------------------------------------------------------------------ the engines
 /** Playwright's Chromium or Firefox behind one driver shape (WebKit's is scripts/webkit-harness's). */
 async function playwrightDriver(engine, serve, live, size) {
-  const pw = createRequire(path.join(REPO, "packages/signpage/package.json"))("playwright");
-  const browser = await pw[engine].launch();
+  const browser = await launchBrowser(engine);
   const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: size.dpr });
   const reports = [];
   await ctx.exposeBinding("__harnessReport", (src, s) => {
@@ -305,7 +304,7 @@ async function playwrightDriver(engine, serve, live, size) {
   const page = await ctx.newPage();
   const appFrame = () => page.frames().find((f) => f !== page.mainFrame() && (() => { try { return new URL(f.url()).host === APP_HOST; } catch { return false; } })());
   return {
-    version: `${engine} ${browser.version()} (Playwright)`,
+    version: browserLabel(browser),
     page,
     goto: (url) => page.goto(url, { waitUntil: "load" }),
     evaluate: (body) => page.evaluate(`(async () => { ${body} })()`),

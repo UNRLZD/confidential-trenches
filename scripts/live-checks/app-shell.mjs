@@ -23,11 +23,11 @@
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
+import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-shell";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -211,10 +211,8 @@ async function open(page, url, origin) {
 // helper there.
 export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live", prepare = null } = {}) {
   const origin = new URL(url).origin;
-  // playwright is the terminal's dev dependency (apps/terminal/package.json)
-  const { chromium } = createRequire(new URL("../../apps/terminal/package.json", import.meta.url))("playwright");
   mkdirSync(shots, { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await launchBrowser("chromium");
   const rec = { url: origin, source, at: new Date().toISOString(), browser: browser.version(), headers: null, scripts: [], loadedScripts: [], loads: [], inShell: [] };
   const seen = new Map();
   try {
@@ -291,7 +289,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);
-    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"}`);
+    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"} (Chrome ${rec.browser})`);
     process.exit(ok ? 0 : 1);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);

@@ -14,10 +14,10 @@
 // AX-09), the pages the context opened (BAR-01), layout shifts summed from a PerformanceObserver with no input
 // exclusion (BAR-04), and a CDP screencast with timestamps (BAR-03). BAR-11's clock is Playwright's own page.clock.
 import { copyFileSync, cpSync, mkdtempSync, rmSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "../../../../scripts/browsers.mjs";
 import { makeCert } from "./certs.mjs";
 import { startServer } from "./server.mjs";
 
@@ -84,7 +84,6 @@ const hostOf = (u) => {
  *   edit changes the default sites before the server starts; realNames maps REAL's names too, served after edit
  */
 export async function startHarness(opts = {}) {
-  const { chromium } = createRequire(path.join(TERMINAL, "package.json"))("playwright");
   const mapped = opts.realNames ? [...MAPPED, ...Object.values(REAL)] : MAPPED;
   const cert = makeCert(mapped);
   const signRoot = buildSignpage();
@@ -100,7 +99,7 @@ export async function startHarness(opts = {}) {
   try {
     server = await startServer({ cert: cert.cert, key: cert.key, sites });
     const rules = [...mapped.map((d) => `MAP ${d} 127.0.0.1:${server.port}`), "MAP * ~NOTFOUND"].join(", ");
-    browser = await chromium.launch({
+    browser = await launchBrowser("chromium", {
       headless: opts.headless ?? true,
       args: [`--host-resolver-rules=${rules}`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
     });

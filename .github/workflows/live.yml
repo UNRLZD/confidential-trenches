@@ -1,0 +1,196 @@
+# The live checks and the browser runs, on GitHub's own runners (card ci-live-runners). A public repository's standard
+# runners cost nothing and start in seconds, so no deploy waits on a queue another product holds.
+#
+#   gh workflow run live.yml -f host=app|sign|helper -f commit=<the deployed commit> [-f network=testnet]
+#   gh run watch --exit-status
+#
+# which each deploy script prints once it has deployed. The plan job reads the checks to run from the deploy
+# (scripts/ci/live-plan.mjs: LIVE_CHECKS and liveRuns of apps/terminal/scripts/deploy.mjs, packages/signpage/scripts/deploy.mjs
+# and scripts/ci/helper-live-checks.mjs), never a copy. Each run of each check is its own job, in parallel: the job
+# checks out the deployed commit, starts Chrome through scripts/browsers.mjs (and installs Playwright's Firefox and WebKit
+# where the run names them), runs the check, and uploads its full output and its screenshots. The run fails on any FAIL
+# or error. The helper's commit is held to what the helper reports (X-Helper-Commit). APP_HOST and SIGN_HOST report none:
+# signpage-release holds their files to the commit's own build, and fails when a host serves another commit's.
+#
+# The workflow reads no secret and holds the read-only token alone. A check that needs one (helper-proxy reads the vendor
+# keys the host holds) is not run: the plan lists it as skipped-needs-secret in the run's summary, which is no pass.
+#
+# On a pull request one job runs the terminal's browser chain and the signing page's browser runs.
+# Every action is pinned by commit sha, each read from its own repo: actions/checkout v7.0.1, actions/setup-node v7.1.0 and
+# pnpm/action-setup v6.1.0 as ci.yml has them, actions/upload-artifact v7.0.2 read from its repo on 2026-11-03 at 14:55Z.
+name: live
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: the deployed host whose checks run
+        required: true
+        type: choice
+        options: [app, sign, helper]
+      commit:
+        description: the deployed commit (40 hex characters)
+        required: true
+        type: string
+      network:
+        description: the network the app's build names (app only; the deploy prints it when it is testnet)
+        required: false
+        default: mainnet
+        type: choice
+        options: [mainnet, testnet]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-${{ github.workflow }}-${{ github.ref }}-${{ inputs.host }}-${{ inputs.commit }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The first proof of this workflow, before main has the file (GitHub dispatches only a workflow the default branch has):
+  # a pull request from card/ci-live-runners runs the sign host's plan at the pull request's head. Remove this condition and
+  # PROOF_* below once main has live.yml and a dispatch has run.
+  plan:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'card/ci-live-runners'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+      skipped: ${{ steps.plan.outputs.skipped }}
+    env:
+      PROOF_HOST: sign
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: the checks this deploy prints, and the commit the host reports
+        id: plan
+        env:
+          HOST: ${{ inputs.host || env.PROOF_HOST }}
+          COMMIT: ${{ inputs.commit || github.event.pull_request.head.sha }}
+          NETWORK: ${{ inputs.network || 'mainnet' }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$COMMIT" || { echo "the checkout is not $COMMIT"; exit 1; }
+          node scripts/ci/live-plan.mjs "$HOST" "$COMMIT" --network "$NETWORK" --verify
+
+  check:
+    needs: plan
+    if: needs.plan.outputs.count != '' && needs.plan.outputs.count != '0'
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Google Chrome stable, and its sandbox comes up
+        if: matrix.chrome
+        uses: ./.github/actions/chrome
+      # Playwright's Firefox and WebKit have no installed channel: the launcher (scripts/browsers.mjs) starts these builds
+      - name: Playwright's Firefox and WebKit
+        if: matrix.engines != ''
+        env:
+          ENGINES: ${{ matrix.engines }}
+        run: |
+          # shellcheck disable=SC2086
+          pnpm --filter terminal exec playwright install --with-deps $ENGINES
+      # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default
+      - name: ${{ matrix.name }}
+        env:
+          KEY: ${{ matrix.key }}
+          ARGS: ${{ matrix.args }}
+          ID: ${{ matrix.id }}
+        run: |
+          out="$RUNNER_TEMP/live"
+          mkdir -p "$out"
+          export TMPDIR="$out"
+          set -o pipefail
+          # shellcheck disable=SC2086
+          node "scripts/live-checks/$KEY.mjs" $ARGS 2>&1 | tee "$out/$ID.log"
+      - name: the lines that matter, in the run's summary
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          ID: ${{ matrix.id }}
+        run: |
+          log="$RUNNER_TEMP/live/$ID.log"
+          {
+            echo "### $NAME"
+            echo '```'
+            if [ -e "$log" ]; then grep -E '^(BAD|WARN)|PASS|FAIL|ERROR|[Ee]rror' "$log" | head -200; else echo "no output: the check did not start"; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: live-${{ matrix.id }}
+          path: |
+            ${{ runner.temp }}/live/*.log
+            ${{ runner.temp }}/live/**/*.png
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The one status to read, and to require: green only when the plan and every check job passed. A skipped check is
+  # listed with its reason, never counted as a pass.
+  live:
+    needs: [plan, check]
+    if: always() && needs.plan.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every check passed, and what was not run
+        env:
+          PLAN: ${{ needs.plan.result }}
+          COUNT: ${{ needs.plan.outputs.count }}
+          CHECKS: ${{ needs.check.result }}
+          SKIPPED: ${{ needs.plan.outputs.skipped }}
+        run: |
+          if [ -n "$SKIPPED" ] && [ "$SKIPPED" != "[]" ]; then
+            echo "$SKIPPED" | jq -r '.[] | "skipped-\(.reason): \(.key) (\(.detail))"' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$PLAN" != success ]; then echo "the plan job ended $PLAN"; exit 1; fi
+          if [ -z "$COUNT" ] || [ "$COUNT" = 0 ]; then echo "the plan lists no check to run"; exit 1; fi
+          if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi
+          echo "all $COUNT live runs passed"
+
+  # The terminal's browser chain and the signing page's browser runs, on every pull request, in parallel with ci.yml's jobs.
+  browser-e2e:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Google Chrome stable, and its sandbox comes up
+        uses: ./.github/actions/chrome
+      - name: the terminal's browser chain (in-shell, BAR-10 and every screen)
+        run: pnpm --filter terminal run test:e2e
+      - name: the signing page in headless Chrome (its headers, its frame)
+        run: pnpm --filter signpage run test:e2e
+      - name: the signing page's withdraw form at 390 and 1440 wide
+        run: node packages/signpage/test/withdraw-screens/run.mjs

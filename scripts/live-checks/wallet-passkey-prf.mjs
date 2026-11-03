@@ -57,9 +57,9 @@ import "../net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, hkdfSync, pbkdf2Sync } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { browserLabel, launchBrowser } from "../browsers.mjs";
 
 const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -261,11 +261,8 @@ export function accountOfEntropy(entropy, list) {
 export const accountOfPrf = (prf, list) => accountOfEntropy(entropyOfPrf(prf), list);
 
 // ------------------------------------------------------------------------------------------------ the probe
-const playwright = () => createRequire(path.join(REPO, "apps/terminal/package.json"))("playwright");
-
 async function launch({ harness, site }) {
-  const { chromium } = playwright();
-  if (!harness) return { browser: await chromium.launch(), harnessApp: false, close: async () => {} };
+  if (!harness) return { browser: await launchBrowser("chromium"), harnessApp: false, close: async () => {} };
   const { makeCert } = await import("../../apps/terminal/test/harness/certs.mjs");
   const { startServer } = await import("../../apps/terminal/test/harness/server.mjs");
   const { buildSignpage } = await import("../../apps/terminal/test/harness/harness.mjs");
@@ -282,7 +279,7 @@ async function launch({ harness, site }) {
   const cert = makeCert([SIGN_HOST, APP_HOST]);
   const server = await startServer({ cert: cert.cert, key: cert.key, sites: { [SIGN_HOST]: { root }, [APP_HOST]: { root: app, spa: true } } });
   const map = [SIGN_HOST, APP_HOST].map((h) => `MAP ${h} 127.0.0.1:${server.port}`).join(", ");
-  const browser = await chromium.launch({
+  const browser = await launchBrowser("chromium", {
     args: [`--host-resolver-rules=${map}, MAP * ~NOTFOUND`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
   });
   return {
@@ -486,6 +483,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
   // prf run
   {
     const h = await launch({ harness, site });
+    record.browser = browserLabel(h.browser);
     try {
       const ctx = await h.browser.newContext();
       await ctx.addInitScript(DRAWN);
@@ -640,6 +638,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
   // race: two tabs, each with its own passkey, press the button at once; one seed is stored and both show it
   {
     const h = await launch({ harness, site });
+    record.browser = browserLabel(h.browser);
     try {
       const ctx = await h.browser.newContext();
       await ctx.addInitScript(HOLD_LAYER);
@@ -661,6 +660,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
   // (touchstart, touchend, no move) after it signs out.
   {
     const h = await launch({ harness, site });
+    record.browser = browserLabel(h.browser);
     try {
       const ctx = await h.browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
       await ctx.addInitScript(DRAWN);
@@ -709,6 +709,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
   // no-prf run
   {
     const h = await launch({ harness, site });
+    record.browser = browserLabel(h.browser);
     try {
       const nctx = await h.browser.newContext();
       await nctx.addInitScript(DRAWN);
@@ -792,7 +793,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const { pass, lines } = judge(record);
     for (const l of lines) console.log(l);
     for (const e of record.errors) console.log(`    ${e}`);
-    console.log(`${KEY}: ${pass ? "PASS" : "FAIL"}`);
+    console.log(`${KEY}: ${pass ? "PASS" : "FAIL"} (${record.browser})`);
     process.exit(pass ? 0 : 1);
   } catch (e) {
     console.error(`${KEY}: error: ${e?.message ?? e}`);

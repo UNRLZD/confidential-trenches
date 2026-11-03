@@ -11,6 +11,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -90,8 +91,7 @@ let BASE = "";
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const { chromium } = await import("playwright");
-const browser = await chromium.launch();
+const browser = await launchBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     for (const scheme of SCHEMES) {
@@ -166,4 +166,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} of ${n} shots and the behaviour checks`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots (${SHOTS_LIST.length} states x 390/1440 x dark/light) and the behaviour checks${SHOTS ? `; shots in ${SHOTS}` : ""}`);
+console.log(`PASS ${n} shots (${SHOTS_LIST.length} states x 390/1440 x dark/light) and the behaviour checks${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

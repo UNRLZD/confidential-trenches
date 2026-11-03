@@ -31,6 +31,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP, CSP as SITE_CSP, SIGN } from "./signpage-skeleton.mjs";
+import { browserLabel, launchBrowser } from "../browsers.mjs";
 
 const KEY = "signpage-prover-host";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -297,12 +298,11 @@ const APP_PAGE = { status: 200, headers: { "content-type": "text/html; charset=u
  * signpage-prover-threads). Either way SIGN_HOST answers from `serve`, APP_HOST a blank page, and nothing else.
  */
 export async function openBrowser(engine, serve) {
-  const pw = createRequire(path.join(REPO, "packages/signpage/package.json"))("playwright");
   const signHost = new URL(SIGN).host;
   const appHost = new URL(APP).host;
   const answer = (host, p) => (host === signHost ? serve(decodeURIComponent(p)) : host === appHost ? APP_PAGE : { status: 404, headers: {}, body: Buffer.alloc(0) });
   if (!serve || engine !== "chromium") {
-    const browser = await pw[engine].launch();
+    const browser = await launchBrowser(engine);
     const ctx = await browser.newContext();
     if (serve)
       await ctx.route("**/*", async (r) => {
@@ -335,7 +335,7 @@ export async function openBrowser(engine, serve) {
   });
   await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
   const port = server.address().port;
-  const browser = await pw.chromium.launch({ args: [`--host-resolver-rules=MAP ${signHost} 127.0.0.1:${port},MAP ${appHost} 127.0.0.1:${port},MAP * ~NOTFOUND`] });
+  const browser = await launchBrowser("chromium", { args: [`--host-resolver-rules=MAP ${signHost} 127.0.0.1:${port},MAP ${appHost} 127.0.0.1:${port},MAP * ~NOTFOUND`] });
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
   return { browser, ctx, close: async () => (await browser.close(), server.close()) };
 }
@@ -353,7 +353,7 @@ async function readPage(serve) {
     const out = await page.evaluate(`(${RUN})(${JSON.stringify([want.input, pins])})`);
     await new Promise((ok) => setTimeout(ok, 250)); // a violation is reported a task after its cause
     out.violations = await page.evaluate(() => window.__ph.violations);
-    return { browser: `chromium ${browser.version()} (Playwright)`, page: out };
+    return { browser: browserLabel(browser), page: out };
   } finally {
     await close();
   }
