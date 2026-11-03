@@ -27,8 +27,9 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 
 export type EvmPoolChain = "base" | "robinhood";
 
-/** One chain's venue: chain id, WETH (a route's only wrapped start) and the middle tokens a route may pass through. */
-export type EvmPoolVenue = { readonly chainId: number; readonly weth: string; readonly middles: readonly string[] };
+/** One chain's venue: chain id, WETH (a route's only wrapped start), the middle tokens a route may pass through, and
+ *  the routers a sell may call (sell.ts). */
+export type EvmPoolVenue = { readonly chainId: number; readonly weth: string; readonly middles: readonly string[]; readonly routers: readonly string[] };
 
 /** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
  *  read only this list. Frozen all the way down, so no code can swap a chain id, WETH or a middle (nor, once
@@ -41,11 +42,17 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       chainId: 8453,
       weth: "0x4200000000000000000000000000000000000006",
       middles: Object.freeze(["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"]), // USDC
+      // Uniswap v3 SwapRouter02 (test/SellFork.t.sol, BuyFork.t.sol); eth_getCode on mainnet.base.org and
+      // base-rpc.publicnode.com: the same 24,498 bytes, codehash 0x38bd640f…124e4 (2026-11-03)
+      routers: Object.freeze(["0x2626664c2603336E57B271c5C0b26F421741e481"]),
     }),
     robinhood: Object.freeze({
       chainId: 4663,
       weth: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", // aeWETH, an upgradeable proxy (contracts/pool-evm/NOTICE)
       middles: Object.freeze(["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"]), // USDG
+      // Uniswap v3 SwapRouter02 (test/SellFork.t.sol, BuyFork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com
+      // and robinhood.drpc.org: the same 24,498 bytes, codehash 0x6f36c378…b25dc (2026-11-03)
+      routers: Object.freeze(["0xCaf681a66D020601342297493863E78C959E5cb2"]),
     }),
   }));
 

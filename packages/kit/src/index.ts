@@ -18,4 +18,5 @@ export * from "./trade/solana/flow.ts";
 export * from "./trade/solana/pool.ts";
 export * from "./trade/solana/pool-buy.ts";
 export * from "./trade/evm/buy.ts";
+export * from "./trade/evm/sell.ts";
 export { nearPairNetwork, nearPairRule, type NearNetwork } from "./near/networks.ts";
