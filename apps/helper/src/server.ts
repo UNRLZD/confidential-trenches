@@ -177,8 +177,6 @@ export function handler(
     };
     const reply = (a: { status: number; headers?: Headers; body: string }) => {
       const h: Headers = { ...base, ...cors(req), ...a.headers, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(a.body)) };
-      // the one throttling contract: a 429 always names its wait
-      if (a.status === 429 && h["Retry-After"] === undefined) h["Retry-After"] = "1";
       if (a.status === 413) h.Connection = "close";
       res.writeHead(a.status, h);
       res.end(a.body);
@@ -428,8 +426,8 @@ export function handler(
 }
 
 /**
- * The token page's reads: their own RPC client on the same Solana provider (a 429 on a data read pauses only data
- * reads, never the device's /v1/rpc/solana), and holders on SOLANA_HOLDERS_RPC_URL when set (src/data/solana/token.ts).
+ * The token page's reads: their own RPC client on the same Solana provider (they draw from no caller's share of the
+ * device's /v1/rpc/solana budget), and holders on SOLANA_HOLDERS_RPC_URL when set (src/data/solana/token.ts).
  */
 export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists): Token {
   const holders = env.SOLANA_HOLDERS_RPC_URL;

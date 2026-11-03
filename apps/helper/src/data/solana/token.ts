@@ -313,7 +313,7 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
 /** `listed` is Discover's lists (lists.ts get): a token on them takes its row from there, with no Jupiter call. */
 /** `holdersRpc` is the provider holders' getTokenLargestAccounts goes to (D-S11: a keyed one, the only kind that
  *  answers it); with none, holders is Jupiter's fallback and the shared RPC path never sees the call, since a provider's
- *  429 on it would pause that path for the device's own reads and sends. */
+ *  429 on it would be the device's own reads' and sends' 429 too. */
 export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
