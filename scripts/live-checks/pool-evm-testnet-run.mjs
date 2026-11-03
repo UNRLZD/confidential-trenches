@@ -19,14 +19,17 @@
 //   - the run key: no more than DUST wei left, and its nonce the number of transactions it sent.
 // The pins (the pool, the sell delegate) come from card pool-evm-deploy's record; nothing else is taken from the
 // run's record but what it claims, and each claim is read back.
+// A chain in NO_SELL has no router the sell can go through, so its record has no sell; the gap is written into the
+// run record with where the sell is proven instead.
 //   node scripts/live-checks/pool-evm-testnet-run.mjs [--record-file <file>] [--rpc <url>,<url>] [--record <answers>]
 //     [--write-record]
 //     PASS exit 0, FAIL exit 1, error exit 2
-// --record writes every answer read, as a good run, and its bad run: the same answers with every nullifierHashes
-// read false on both RPCs (a spend the pool never marked), which must fail. --write-record, on PASS, writes the run
-// record pool-evm-testnet-run.md (Money path: yes, one Tx line per transaction).
+// With no --record-file it checks every chain's record that exists (CHAINS). --record writes every answer read, per
+// run, as a good run, and its bad run: the same answers with every nullifierHashes read false on both RPCs (a spend
+// the pool never marked), which must fail. --write-record, on PASS, writes the run record pool-evm-testnet-run.md
+// (Money path: yes, one Tx line per transaction of every run).
 import "../net-window.mjs";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +41,15 @@ export const RECORD = path.join(HERE, `${KEY}.md`);
 export const recordFileOf = (chain) => path.join(HERE, `${KEY}.${chain}.json`);
 // What a run key may keep: pool-evm-deploy.mjs's DUST (1e13 wei, a transfer's cost many times over)
 export const DUST = 10n ** 13n;
+/** The testnets a run may have a record for, in the run record's order. */
+export const CHAINS = Object.freeze(["base-sepolia", "robinhood-testnet"]);
+/** A chain whose run has no sell, and why, as the run record says it. SellDelegate (contracts/pool-evm/src/
+ *  SellDelegate.sol) approves the target for the amount and calls it, and refuses unless the target pulled all of it
+ *  with transferFrom: a router does that, the v4 PoolManager (unlock and settle, no allowance) does not. */
+export const NO_SELL = Object.freeze({
+  "robinhood-testnet":
+    "No sell on robinhood-testnet: the chain has no Uniswap v3 SwapRouter02 (no code at mainnet's 0xCaf681a66D020601342297493863E78C959E5cb2 on either RPC, 4 Nov) and SellDelegate sells only through a router that pulls the token with transferFrom, so the W that bought keeps its token. The Robinhood sell is proven on a Robinhood mainnet fork (contracts/pool-evm/test/SellFork.t.sol, SellForkRobinhoodTest, through that router) and lands for real in card pool-evm-mainnet-run.",
+});
 
 // @noble/hashes from the helper's own dependencies (apps/ is outside Blindfill), for the selectors and topics
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -87,6 +99,14 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
     if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: the two RPCs answer ${JSON.stringify(a)} and ${JSON.stringify(b)}`);
     return a;
   };
+  // A transaction as both RPCs answer it, but blockTimestamp: Robinhood's own RPC adds it to the object (read 4 Nov) and
+  // PublicNode's does not; it is the block's, which the receipts' one block hash already pins. Any other field differs:
+  // the read fails.
+  const oneTx = async (hash, what) => {
+    const [a, b] = (await both("eth_getTransactionByHash", [hash])).map((x) => (x && typeof x === "object" ? (({ blockTimestamp, ...rest }) => rest)(x) : x));
+    if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${what}: the two RPCs answer ${JSON.stringify(a)} and ${JSON.stringify(b)}`);
+    return a;
+  };
   try {
     if (!urls || urls.length !== 2) throw new Error(`no two RPCs for ${rec.chain}`);
     const pins = pinsOf(rec.chain);
@@ -96,7 +116,7 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
     if (!Array.isArray(rec.txs) || rec.txs.length === 0) throw new Error("the record lists no transaction");
     const relayer = lower(rec.relayer);
     const kinds = new Set(rec.txs.map((t) => t.kind));
-    for (const k of ["deposit", "buy", "sell", "withdraw"]) if (!kinds.has(k)) throw new Error(`the record has no ${k}`);
+    for (const k of ["deposit", "buy", ...(NO_SELL[rec.chain] ? [] : ["sell"]), "withdraw"]) if (!kinds.has(k)) throw new Error(`the record has no ${k}`);
     const nullifiers = [], precommitments = [], sellers = [];
     let sent = 0;
     for (const t of rec.txs) {
@@ -126,7 +146,7 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
         precommitments.push(pre);
         said = `Deposited ${value} wei, label ${label}`;
         if (t.kind === "sell") {
-          const tx = await one("eth_getTransactionByHash", [t.hash], `${t.step} ${t.hash}`);
+          const tx = await oneTx(t.hash, `${t.step} ${t.hash}`);
           if (tx.type !== "0x4") throw new Error(`${t.step} ${t.hash}: type ${tx.type}, not 4 (EIP-7702)`);
           if (lower(tx.to) !== lower(t.w)) throw new Error(`${t.step} ${t.hash}: sent to ${tx.to}, not W ${t.w}`);
           const auths = tx.authorizationList ?? [];
@@ -151,7 +171,7 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
           said = `Bought ${d[6]} of ${lower(t.coin)} (minOut ${t.minOut}) for ${said}`;
         } else said = `Withdrawn to ${said}`;
       } else if (t.kind === "sweep") {
-        const tx = await one("eth_getTransactionByHash", [t.hash], `${t.step} ${t.hash}`);
+        const tx = await oneTx(t.hash, `${t.step} ${t.hash}`);
         if (lower(tx.to) !== lower(rec.return)) throw new Error(`${t.step} ${t.hash}: to ${tx.to}, not the return address ${rec.return}`);
         said = `${BigInt(tx.value)} wei to ${lower(rec.return)}`;
       } else throw new Error(`${t.hash}: unknown kind ${t.kind}`);
@@ -198,38 +218,49 @@ export function spoil(log) {
   );
 }
 
-/** pool-evm-testnet-run.md: Money path: yes, one Tx line per transaction, and what each one is. */
-export function runRecord(rec) {
+/** pool-evm-testnet-run.md: Money path: yes, one Tx line per transaction of every run, and what each one is. */
+export function runRecord(recs) {
   return [
     `CARD ${KEY} / live: PASS`,
     "Money path: yes",
-    ...rec.txs.map((t) => `Tx: ${rec.chain} ${t.hash}`),
+    ...recs.flatMap((rec) => rec.txs.map((t) => `Tx: ${rec.chain} ${t.hash}`)),
     "",
+    ...recs.flatMap(runLines),
+  ].join("\n");
+}
+const runLines = (rec) => [
     `${rec.chain} (chain id ${rec.chainId}), contracts/pool-evm/script/testnet-run.mjs at ${rec.at}, the pool ${rec.pool}, the token ${rec.coin}, venues ${rec.venues.join(" and ")}. Its steps, in the order of its Tx lines above: ${rec.txs.map((t) => t.step).join(", ")}.`,
     `The run key ${rec.relayer} lived only in the run, sent every transaction but the Ws' own sweeps as the relayer, was funded with ${rec.need} wei (the printed need) and swept back to ${rec.return}. The run's 12 words lived only in the run; every note came from them.`,
     rec.restore ? `The restore from the words (packages/wallet evmRestoreNotes) at block ${rec.restore.block}: ${rec.restore.notes} notes, ${rec.restore.spends} spends, the Ws ${rec.restore.wallets.map((w) => `${w.w} (${(w.tokens ?? ["unread"]).join(", ") || "no token"})`).join(", ")}.` : "No restore was run.",
+    ...(NO_SELL[rec.chain] ? [NO_SELL[rec.chain]] : []),
     "",
-  ].join("\n");
-}
+];
 
 async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
-  const file = at("--record-file") ?? recordFileOf("base-sepolia");
-  const rec = JSON.parse(readFileSync(file, "utf8"));
-  const urls = at("--rpc")?.split(",") ?? RPCS[rec.chain];
-  const r0 = recorder();
-  const r = await check(rec, r0.transport, urls);
-  for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
+  const files = at("--record-file") ? [at("--record-file")] : CHAINS.map(recordFileOf).filter((f) => existsSync(f));
+  if (files.length === 0) throw new Error("no run record");
+  const runs = [];
+  let ok = true;
+  for (const file of files) {
+    const rec = JSON.parse(readFileSync(file, "utf8"));
+    const urls = at("--rpc")?.split(",") ?? RPCS[rec.chain];
+    const r0 = recorder();
+    const r = await check(rec, r0.transport, urls);
+    for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
+    ok &&= r.ok;
+    runs.push({ record: rec, urls, good: r0.log, bad: spoil(r0.log) });
+  }
   if (at("--record")) {
-    writeFileSync(at("--record"), `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), record: rec, urls, good: r0.log, bad: spoil(r0.log) }, null, 1)}\n`);
+    writeFileSync(at("--record"), `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), runs }, null, 1)}\n`);
     console.log(`recorded ${at("--record")}`);
   }
-  if (r.ok && argv.includes("--write-record")) {
-    writeFileSync(RECORD, runRecord(rec));
+  if (ok && argv.includes("--write-record")) {
+    writeFileSync(RECORD, runRecord(runs.map((r) => r.record)));
     console.log(`wrote ${path.relative(process.cwd(), RECORD)}`);
   }
-  console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-  return r.ok ? 0 : 1;
+  console.log(ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
+  return ok ? 0 : 1;
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url))
