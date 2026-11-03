@@ -56,6 +56,8 @@ export const edges: MarketRow[] = [
   { ...bare, token: "Huge111111111111111111111111111111111111111", symbol: "HUGE", name: "A very long token name that must cut cleanly at every width", price_usd: "184223.5", mc_usd: "123456789012345", created_s: at(60 * 24 * 900), vol_5m_usd: "98765432.1", buys_5m: 123456, sells_5m: 120001, vol_1h_usd: "987654321.9", chg_5m_bps: 1234567, chg_1h_bps: -9950, holders: 12345678, top10_bps: 1200, dev_bps: 1500, launchpad: null },
   { ...bare, token: "Zalg111111111111111111111111111111111111111", symbol: "Z̢̛ͥ̀̽̽ALGO", name: "<img src=x onerror=alert(1)>", mc_usd: "999999", created_s: at(59), vol_5m_usd: "999.996", buys_5m: 0, sells_5m: 7, chg_5m_bps: -3300, holders: 999, top10_bps: 3000, dev_bps: 1000, launchpad: "met-dbc", curve_bps: 9999 },
   bare,
+  // a pad the table does not know (card app-launchpad-chain-badges): no launchpad badge, never its raw id; the chain mark
+  { ...bare, token: "NewPad1111111111111111111111111111111111111", symbol: "NEWPAD", name: "Unknown launchpad", launchpad: "some-new-pad", curve_bps: 10000 },
 ];
 
 /** Every list empty: S5.3. */

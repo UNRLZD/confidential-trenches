@@ -57,7 +57,7 @@ function Ring({ v, size, stroke, av }: { v: RowView; size: number; stroke: numbe
         {f > 0 && <circle cx={h} cy={h} r={R} fill="none" stroke={col} strokeWidth={stroke} strokeDasharray={`${(c * f).toFixed(2)} ${c.toFixed(2)}`} strokeLinecap="round" transform={`rotate(-90 ${h} ${h})`} />}
       </svg>
       <span className="dsc-ravatar" style={{ inset: (size - av) / 2 }}>
-        <Avatar symbol={v.symbol} size={av} />
+        <Avatar symbol={v.symbol} size={av} pad={v.launchpad} chain={v.chain} />
       </span>
     </span>
   );
@@ -92,10 +92,6 @@ function HoldersIcon() {
   );
 }
 
-function Pad({ id }: { id: string | null }) {
-  return id ? <span className="dsc-pad" title={id}>{id}</span> : null;
-}
-
 /** R5 TokenRow (desktop): the whole row is a link to the token's page (S5.2; `href` is /token/<chain>/<id>). */
 function Row({ v, win, href }: { v: RowView; win: Win; href: string }) {
   return (
@@ -115,7 +111,6 @@ function Row({ v, win, href }: { v: RowView; win: Win; href: string }) {
             <Pill label="top10" value={v.top10} />
             <Pill label="creatorHolds" value={v.dev} />
             <Pill label="snipers" value={v.snipers} />
-            <Pad id={v.launchpad} />
           </span>
           <span className="dsc-l3">
             <span className="dsc-press" data-on={v.buyShare !== null} style={v.buyShare !== null ? { ["--buy" as string]: `${v.buyShare * 100}%` } : undefined} aria-hidden="true"><i /><i /></span>

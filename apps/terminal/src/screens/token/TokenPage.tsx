@@ -90,11 +90,10 @@ function Desktop({ v }: { v: TokenView | null }) {
       <div className="tkp-main">
         <header className="tkp-head">
           <div className="tkp-ident">
-            {v ? <Avatar symbol={v.symbol} size={54} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
+            {v ? <Avatar symbol={v.symbol} size={54} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
             <div className="tkp-idtext">
               <div className="tkp-symrow">
                 {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <Sk w={120} h={22} />}
-                {v?.launchpad && <span className="tkp-pad" title={v.launchpad}>{v.launchpad}</span>}
               </div>
               {v ? (
                 <div className="tkp-meta">
@@ -134,9 +133,8 @@ function Phone({ v }: { v: TokenView | null }) {
     <div className="tkp-phone">
       <div className="tkp-hero">
         <div className="tkp-symrow">
-          {v ? <Avatar symbol={v.symbol} size={32} /> : <span className="tkp-sk tkp-skc" style={{ width: 32, height: 32 }} />}
+          {v ? <Avatar symbol={v.symbol} size={32} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 32, height: 32 }} />}
           {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <Sk w={100} h={20} />}
-          {v?.launchpad && <span className="tkp-pad" title={v.launchpad}>{v.launchpad}</span>}
         </div>
         <div className="tkp-pricerow">
           {v ? <span className="tkp-price">{v.price}</span> : <Sk w={160} h={30} />}
