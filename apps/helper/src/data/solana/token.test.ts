@@ -7,7 +7,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
-import { geckoBudget, PAGE_RESERVE } from "../gecko.ts";
+import { geckoBudget, PAGE_RESERVE, WINDOW_MS } from "../gecko.ts";
 import { createProxy } from "../../proxy/proxy.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
@@ -381,8 +381,8 @@ test("candles: 1s and unknown timeframes 404; a 429 pauses GeckoTerminal and ans
   assert.equal(g.urls.length, GT_PER_MIN);
   assert.equal(ok, GT_PER_MIN - 1, "one token read, then bars until the minute's calls are spent");
   const full = await t.candles(CURVE, "1m", 1793620800 - 21 * 86_400, 10);
-  assert.deepEqual([full.status, JSON.parse(full.body), full.retryAfterS], [429, { error: { code: "rate_limited" } }, 60], "the queue's first call frees in 60 s");
-  now += 61_000;
+  assert.deepEqual([full.status, JSON.parse(full.body), full.retryAfterS], [429, { error: { code: "rate_limited" } }, WINDOW_MS / 1000], "the queue's first call frees in WINDOW_MS, the wait named exactly");
+  now += WINDOW_MS + 1_000;
   const limited = fakeGecko({ status: 429, headers: { "retry-after": "30" } });
   const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: limited.fetch });
   const first = await t2.candles(CURVE, "1m", null, 10);
@@ -403,7 +403,7 @@ test("candles: the server's one GeckoTerminal budget: the page takes what the li
   for (let i = 0; i < 6; i++) await t.candles(CURVE, tfs[i % 6]!, 1793620800 - i * 86_400, 10);
   assert.equal(g.urls.length, PAGE_RESERVE, "the page's calls: the reserve the lists left");
   const over = await t.candles(CURVE, "1d", 1793620800 - 40 * 86_400, 10);
-  assert.deepEqual([over.status, over.retryAfterS], [429, 60], "a call past the minute is a throttle naming the wait to its oldest call's minute");
+  assert.deepEqual([over.status, over.retryAfterS], [429, WINDOW_MS / 1000], "a call past the window is a throttle naming the exact wait to its oldest call leaving it");
 });
 test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 429 with a wait, not 503", async () => {
   let gt = 0;

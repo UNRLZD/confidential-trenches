@@ -14,7 +14,7 @@ import { createRpc } from "./rpc/rpc.ts";
 import { createProxy } from "./proxy/proxy.ts";
 import { b58encode, createSolanaLists } from "./data/solana/lists.ts";
 import { randomBytes } from "node:crypto";
-import { heldPerClient, throttleOf, upstreamBudget } from "./limits/limits.ts";
+import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./limits/limits.ts";
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
@@ -554,11 +554,12 @@ async function limited(o: { rpc?: ReturnType<typeof createRpc> } = {}) {
 }
 const IP_A = "203.0.113.7";
 const IP_B = "203.0.113.8";
-/** The 429 contract: status, a whole-second Retry-After of 1 to 60 that CORS lets the browser read, the code only. */
+/** The 429 contract: status, a whole-second Retry-After of 1 to RETRY_AFTER_MAX_S (75) that CORS lets the browser read,
+ *  the code only. */
 function isThrottle(r: { status: number; headers: Record<string, string | string[] | undefined>; body: string }, origin = APP) {
   assert.equal(r.status, 429);
   const wait = Number(r.headers["retry-after"]);
-  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 60, `Retry-After ${String(r.headers["retry-after"])}`);
+  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= RETRY_AFTER_MAX_S, `Retry-After ${String(r.headers["retry-after"])}`);
   assert.equal(r.headers["access-control-allow-origin"], origin);
   assert.ok(String(r.headers["access-control-expose-headers"]).split(", ").includes("Retry-After"), "Retry-After is exposed");
   assert.deepEqual(JSON.parse(r.body), { error: { code: "rate_limited" } });
