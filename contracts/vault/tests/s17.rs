@@ -255,8 +255,10 @@ async fn out_of_gas(kind: TokenKind) -> R<()> {
 async fn vt_s17(kind: TokenKind) -> R<()> {
     let burn = release(kind).await?;
     let static_gas = Gas::from_tgas(STATIC_TGAS).as_gas();
+    // NEAR hands the callback a share of the unused gas by weight (src/promise.rs WEIGHT), so it ran with more than its
+    // static; the static alone is the floor it is guaranteed, the worst case, and the bound is checked on it
     println!(
-        "{kind:?} VT-S17: on_payout static {STATIC_TGAS} Tgas, measured burn {:.3} Tgas (the larger of the two refund_pending callbacks), static / burn = {:.2}, bound {MARGIN}",
+        "{kind:?} VT-S17: on_payout static {STATIC_TGAS} Tgas (the guaranteed floor, the worst case: the callback also gets a share of the unused gas by weight), measured burn {:.3} Tgas (the larger of the two refund_pending callbacks), static / burn = {:.2}, bound {MARGIN} checked on the static floor",
         burn as f64 / TGAS,
         static_gas as f64 / burn as f64
     );
@@ -274,15 +276,17 @@ async fn vt_s17_usdc() -> R<()> {
     vt_s17(TokenKind::Usdc).await
 }
 
-/// deploy.mjs `deployProblems(wasm, "sandbox")` on the wasm `var` names, as node prints it.
+/// deploy.mjs `deployProblems(wasm, "sandbox")` on the wasm `var` names, as node prints it. deploy.mjs is only
+/// imported, never run: its entry guard runs main() when `process.argv[1]` is its own path, and `node -e <code> <args>`
+/// makes the first arg `process.argv[1]`, so both paths go in the environment and node gets no argument.
 fn deploy_problems(var: &str) -> R<Vec<String>> {
     let file = std::env::var(var).map_err(|_| format!("{var} is not set: run the sandbox tests through tests/harness/run.sh"))?;
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/deploy.mjs");
-    let code = r#"const [script, file] = process.argv.slice(1);
-const { deployProblems } = await import(new URL("file://" + script).href);
+    let code = r#"const { pathToFileURL } = await import("node:url");
 const { readFileSync } = await import("node:fs");
-console.log(JSON.stringify(deployProblems(readFileSync(file), "sandbox")));"#;
-    let out = Command::new("node").args(["--input-type=module", "-e", code]).arg(&script).arg(&file).output()?;
+const { deployProblems } = await import(pathToFileURL(process.env.S17_DEPLOY_SCRIPT).href);
+console.log(JSON.stringify(deployProblems(readFileSync(process.env.S17_WASM), "sandbox")));"#;
+    let out = Command::new("node").args(["--input-type=module", "-e", code]).env("S17_DEPLOY_SCRIPT", &script).env("S17_WASM", &file).output()?;
     if !out.status.success() {
         return Err(format!("node: {}", String::from_utf8_lossy(&out.stderr)).into());
     }
