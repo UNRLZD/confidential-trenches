@@ -31,6 +31,17 @@ services:
       NEAR_RPC_URL_B: ${NEAR_RPC_URL_B:-}
       NEAR_TESTNET_RPC_URL: ${NEAR_TESTNET_RPC_URL:-}
       NEAR_TESTNET_RPC_URL_B: ${NEAR_TESTNET_RPC_URL_B:-}
+      # each chain's RPC budget per 10 s, "<total>,<per client>" (src/rpc/rpc.ts; empty: the public provider's limit)
+      RPC_BUDGET_SOLANA: ${RPC_BUDGET_SOLANA:-}
+      RPC_BUDGET_BASE: ${RPC_BUDGET_BASE:-}
+      RPC_BUDGET_ROBINHOOD: ${RPC_BUDGET_ROBINHOOD:-}
+      RPC_BUDGET_NEAR: ${RPC_BUDGET_NEAR:-}
+      # each vendor's budget per 10 s, "<total>,<per client>" (src/proxy/proxy.ts; empty: the vendor's published limit
+      # for a starting key); set it to the key's plan
+      PROXY_BUDGET_JUPITER: ${PROXY_BUDGET_JUPITER:-}
+      PROXY_BUDGET_RELAY: ${PROXY_BUDGET_RELAY:-}
+      PROXY_BUDGET_LIFI: ${PROXY_BUDGET_LIFI:-}
+      PROXY_BUDGET_ONECLICK: ${PROXY_BUDGET_ONECLICK:-}
       WITHDRAW_RELAYER_MAINNET: ${WITHDRAW_RELAYER_MAINNET:-}
       WITHDRAW_FEE_RECIPIENT_MAINNET: ${WITHDRAW_FEE_RECIPIENT_MAINNET:-}
       WITHDRAW_RELAYER_TESTNET: ${WITHDRAW_RELAYER_TESTNET:-}

@@ -20,6 +20,8 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, dec, pumpCurveAddress, pumpCurveBps, toRow, type Row } from "./lists.ts";
+import { geckoBudget, type GeckoBudget } from "../gecko.ts";
+import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -35,7 +37,7 @@ export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
 export const CANDLES_FRESH_MS = 60_000;
 export const POOL_FRESH_MS = 600_000;
-/** L-05: GeckoTerminal's public API, about 10 calls a minute. */
+/** L-05: GeckoTerminal's public API, about 10 calls a minute; the server shares one budget with the EVM lists (../gecko.ts). */
 export const GT_PER_MIN = 10;
 export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. One search at most every
@@ -256,14 +258,17 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string): Promise<Answer> };
-type Rpc = { handle(chain: string, contentType: string | undefined, body: string): Promise<{ status: number; body: string }> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
+type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<{ status: number; headers?: Record<string, string>; body: string }> };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number };
+/** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
+export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number };
 
 const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 export const NOT_FOUND = err(404, "not_found");
 export const UPSTREAM = err(503, "upstream");
+/** A throttled read with nothing good to serve: 429 with its wait, never 503 (a 503 never means "wait"). */
+const limited = (retryAfterS: number): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS });
 
 /** A map that keeps at most `max` keys, dropping the oldest written. */
 function bounded<V>(max: number) {
@@ -280,24 +285,26 @@ function bounded<V>(max: number) {
 }
 
 /** A read cached per key: fresh within `freshMs` of our own read; a failed refresh serves the last good one while its
- *  data is under STALE_MS old; one read per key at a time. `read` answers null for "no such token" and throws for an
+ *  data is under STALE_MS old; one read per key at a time. `client`, the caller whose request makes the read, draws
+ *  its share of the provider's budget for it (card helper-abuse-limits); a hit or a call joining one in flight draws
+ *  nothing. `read` answers null for "no such token" and throws for an
  *  upstream failure. */
-function cached(freshMs: number, now: () => number, read: (key: string) => Promise<DataAnswer>) {
+function cached(freshMs: number, now: () => number, read: (key: string, client?: string) => Promise<DataAnswer>) {
   const last = bounded<{ a: DataAnswer; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<DataAnswer>>();
   return {
     size: last.size,
-    get(key: string): Promise<DataAnswer> {
+    get(key: string, client?: string): Promise<DataAnswer> {
       const hit = last.get(key);
       if (hit !== undefined && now() - hit.at < freshMs) return Promise.resolve(hit.a);
       let p = running.get(key);
       if (p === undefined) {
-        p = read(key)
+        p = read(key, client)
           .then((a) => {
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: now() });
             return a;
           })
-          .catch(() => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : UPSTREAM))
+          .catch((e) => (hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS ? hit.a : e instanceof Throttled ? limited(e.retryAfterS) : UPSTREAM))
           .finally(() => running.delete(key));
         running.set(key, p);
       }
@@ -313,13 +320,14 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
 /** `listed` is Discover's lists (lists.ts get): a token on them takes its row from there, with no Jupiter call. */
 /** `holdersRpc` is the provider holders' getTokenLargestAccounts goes to (D-S11: a keyed one, the only kind that
  *  answers it); with none, holders is Jupiter's fallback and the shared RPC path never sees the call, since a provider's
- *  429 on it would pause that path for the device's own reads and sends. */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc } = {}) {
+ *  429 on it would be the device's own reads' and sends' 429 too. */
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget } = {}) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
 
-  async function call(method: string, params: unknown[], via: Rpc = rpc): Promise<{ result: Record<string, unknown> }> {
-    const a = await via.handle("solana", "application/json", rpcBody(method, params));
+  async function call(method: string, params: unknown[], via: Rpc = rpc, client?: string): Promise<{ result: Record<string, unknown> }> {
+    const a = await via.handle("solana", "application/json", rpcBody(method, params), client);
+    if (a.status === 429) throw new Throttled(retryAfterOf(a.headers));
     if (a.status !== 200) throw new Upstream();
     const j = obj(JSON.parse(a.body));
     if (!Object.hasOwn(j, "result")) throw new Upstream();
@@ -348,8 +356,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     lastSearch = now();
     let rows: unknown = null;
     let at = now();
+    let wait = 0;
     try {
-      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "");
+      const a = await proxy.handle("jupiter", "/tokens/v2/search", `query=${batch.join(",")}`, "", undefined, true); // proxy.ts PROXY_RESERVE
+      if (a.status === 429) wait = retryAfterOf(a.headers);
       if (a.status === 200) {
         rows = JSON.parse(a.body);
         const t = Date.parse(a.headers["X-Fetched-At"] ?? "");
@@ -362,7 +372,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const ws = waiting.get(mint) ?? [];
       waiting.delete(mint);
       if (!Array.isArray(rows)) {
-        for (const w of ws) w.fail(new Upstream());
+        for (const w of ws) w.fail(wait > 0 ? new Throttled(wait) : new Upstream());
         continue;
       }
       const r: JupRow = { row: searchRow(rows, mint), at };
@@ -385,9 +395,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   }
 
   /** The mint account at a slot, or null when it is not a mint. */
-  async function mintAt(mint: string, curveToo: boolean) {
+  async function mintAt(mint: string, curveToo: boolean, client?: string) {
     const keys = curveToo ? [mint, pumpCurveAddress(mint)] : [mint];
-    const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }]);
+    const { result } = await call("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client);
     const value = result.value;
     const slot = obj(result.context).slot;
     if (!Array.isArray(value) || value.length !== keys.length || !Number.isSafeInteger(slot)) throw new Upstream();
@@ -422,9 +432,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return row === null ? null : { row, at: j.at };
   }
 
-  const page = cached(PAGE_FRESH_MS, now, async (mint) => {
+  const page = cached(PAGE_FRESH_MS, now, async (mint, client) => {
     const listed = await listedRow(mint);
-    const [m, j] = await Promise.all([mintAt(mint, true), listed === null ? jupiter(mint) : null]);
+    const [m, j] = await Promise.all([mintAt(mint, true, client), listed === null ? jupiter(mint) : null]);
     if (m.mint === null) return NOT_FOUND;
     let base: Row | null = listed?.row ?? null;
     let at = listed?.at ?? 0;
@@ -440,16 +450,16 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return { status: 200, body: JSON.stringify(p), src: "jupiter", asOfMs: Math.min(m.at, at) };
   });
 
-  const holders = cached(HOLDERS_FRESH_MS, now, async (mint) => {
-    const m = await mintAt(mint, false);
+  const holders = cached(HOLDERS_FRESH_MS, now, async (mint, client) => {
+    const m = await mintAt(mint, false, client);
     if (m.mint === null) return NOT_FOUND;
     try {
       if (deps.holdersRpc === undefined) throw new Upstream();
-      const largest = (await call("getTokenLargestAccounts", [mint, { commitment: "confirmed" }], deps.holdersRpc)).result.value;
+      const largest = (await call("getTokenLargestAccounts", [mint, { commitment: "confirmed" }], deps.holdersRpc, client)).result.value;
       if (!Array.isArray(largest)) throw new Upstream();
       const accts = largest.slice(0, HOLDERS_MAX).map((r) => address(obj(r).address));
       if (accts.some((a) => a === null)) throw new Upstream();
-      const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }], deps.holdersRpc)).result.value;
+      const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }], deps.holdersRpc, client)).result.value;
       const rows = toHolders(largest.slice(0, HOLDERS_MAX), Array.isArray(owners) ? owners : [], m.mint.supply);
       if (rows === null) throw new Upstream();
       const top = rows.slice(0, 10).reduce((s, h) => s + (h.bps ?? 0), 0);
@@ -467,19 +477,18 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
   });
 
-  // GeckoTerminal: one queue of at most GT_PER_MIN calls a minute, shared by every token; a 429 pauses it
-  const gtCalls: number[] = [];
-  let gtPausedUntil = 0;
+  // GeckoTerminal: at most GT_PER_MIN calls a minute, shared by every token, in the "pages" lane of the server's one
+  // budget (../gecko.ts) when it passes one; a 429 pauses it. A refused call is a throttle naming the wait to the
+  // budget's next free call or the pause's end (card helper-abuse-limits)
+  const gt = deps.gecko ?? geckoBudget(now, {}, GT_PER_MIN);
   async function gecko(path: string): Promise<unknown> {
-    const t = now();
-    while (gtCalls.length > 0 && t - gtCalls[0]! >= 60_000) gtCalls.shift();
-    if (t < gtPausedUntil || gtCalls.length >= GT_PER_MIN) throw new Upstream();
-    gtCalls.push(t);
+    if (!gt.take("pages")) throw new Throttled(secondsUntil(gt.retryAt("pages"), now()));
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
       const ra = Number(r.headers.get("retry-after"));
-      gtPausedUntil = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
-      throw new Upstream();
+      const until = now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 300) * 1000 : 60_000);
+      gt.pause(until);
+      throw new Throttled(secondsUntil(until, now()));
     }
     if (r.status === 404) return null;
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) throw new Upstream();
@@ -499,6 +508,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     const p = await pools.get(mint);
     if (p.status !== 200) {
       if (p.status === 404) return NOT_FOUND;
+      if (p.status === 429) throw new Throttled(p.retryAfterS ?? 1);
       throw new Upstream();
     }
     const { period, aggregate } = TF[tf];
@@ -512,9 +522,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
 
   return {
     /** 06b TokenPage for a Solana mint: 404 when it is no mint or Jupiter does not list it, 503 on an upstream failure. */
-    page: (mint: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : page.get(mint)),
+    page: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : page.get(mint, client)),
     /** 06b Holders (20 rows, merged per owner), or Jupiter's fallback. */
-    holders: (mint: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint)),
+    holders: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint, client)),
     /** 06b Candles: up to `limit` bars of `tf` ending before `to` (unix seconds) when it is set. */
     async candles(mint: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       if (address(mint) === null || !Object.hasOwn(TF, tf)) return NOT_FOUND;
