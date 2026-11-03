@@ -12,9 +12,10 @@ import { gunzipSync } from "node:zlib";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { onCurve } from "../../../../terminal/src/screens/market/curve.ts";
 import {
-  address, b58decode, b58encode, createSolanaLists, dec, FRESH_MS, LIST_MAX, pumpCandidates, pumpCurveAddress, pumpCurveBps, PUMP_PROGRAM,
-  readPumpCurves, READS, ROW_FIELDS, snapshot, STALE_MS, text, toRow, toRows, type Row,
+  address, b58decode, b58encode, createSolanaLists, dec, FRESH_MS, LIST_MAX, pumpCurveAddress, pumpCurveBps, PUMP_PROGRAM,
+  READS, ROW_FIELDS, snapshot, STALE_MS, text, toRow, toRows, type Row,
 } from "./lists.ts";
+import { createOrigins, rpcAccounts } from "./origin.ts";
 import { createProxy } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 
@@ -25,7 +26,18 @@ const AS_OF = Date.parse("2026-11-01T15:16:30Z");
 const rowsOf = (k: keyof typeof RAW) => toRows(RAW[k], AS_OF)!;
 const raw = (k: keyof typeof RAW, symbol: string) => (RAW[k] as Record<string, unknown>[]).find((r) => r.symbol === symbol)!;
 const row = (k: keyof typeof RAW, symbol: string) => rowsOf(k).find((r) => r.symbol === symbol)!;
-const recordedRpc = { handle: async () => ({ status: 200, body: JSON.stringify(CURVES.answer) }) };
+/** The RPC path answering each account from the recording: the recorded pump.fun curves by their address, every other
+ *  account none (the Nov 1 recording read only the curves). */
+const CURVE_BY_KEY = new Map(CURVES.request_mints.map((m, i) => [pumpCurveAddress(m), CURVES.answer.result.value[i]]));
+const accountsRpc = (byKey: ReadonlyMap<string, unknown>, seen: string[][] = []) => ({
+  handle: async (_chain: string, _type: string | undefined, body: string) => {
+    const keys = JSON.parse(body).params[0] as string[];
+    seen.push(keys);
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: keys.map((k) => byKey.get(k) ?? null) } }) };
+  },
+});
+const recordedRpc = accountsRpc(CURVE_BY_KEY);
+const PUMP_TAGGED = [...new Set([...RAW.new, ...RAW.trending_5m, ...RAW.trending_1h].filter((j: any) => j.launchpad === "pump.fun" && j.graduatedPool === undefined).map((j: any) => j.id as string))];
 
 test("the field list is the terminal's ROW_FIELDS in its order, which ends with buys_1h and sells_1h (asked for the Trending column)", () => {
   assert.deepEqual(ROW_FIELDS, TERMINAL_FIELDS);
@@ -118,21 +130,20 @@ test("a window with one side only: Jupiter drops a zero side, so it reads 0; a w
   assert.deepEqual([none.vol_5m_usd, none.net_5m_usd, none.buys_5m, none.sells_5m, none.chg_5m_bps], [null, null, null, null, null]);
 });
 
-test("pump.fun curves: the program address of each mint is the recorded request's, and the recorded accounts read 0-9,999", async () => {
-  const mints = pumpCandidates([...rowsOf("new"), ...rowsOf("trending_5m"), ...rowsOf("trending_1h")]);
-  assert.deepEqual(mints, CURVES.request_mints);
+test("pump.fun curves: each mint's curve account is read at its program address, and the recorded accounts read 0-9,999 with the chain's tag", async () => {
   // a known address: a curve account the recorded answer shows owned by the pump.fun program
   assert.equal(pumpCurveAddress("ETHgDzFEG9gqBrjpPyiLvi12LSN9m7aPSdvWWjyZpump"), "oPYZyVGxKR6QqWpkaBRGxRn8PdfoRCgMWCJJCgpQmxC");
-  const seen: unknown[] = [];
-  const curves = await readPumpCurves({ handle: async (chain, type, body) => (seen.push({ chain, type, body: JSON.parse(body) }), recordedRpc.handle()) }, mints);
-  assert.equal(seen.length, 1, "one getMultipleAccounts for up to 100");
-  assert.deepEqual((seen[0] as any).body.params[0], mints.map(pumpCurveAddress));
-  assert.equal((seen[0] as any).body.method, "getMultipleAccounts");
-  assert.equal(curves.get("ETHgDzFEG9gqBrjpPyiLvi12LSN9m7aPSdvWWjyZpump"), 9089);
-  assert.equal(curves.get("7UF3egEva3jHDZqfM6eCzEq5n5kdZ3Jxk18A5D3ypump"), 0, "untouched curve: 793.1 M left");
-  // a curve whose reserves exceed the standard 793.1 M is another configuration: unknown, never a guess
-  assert.equal(curves.has("6xASXp7JqKnzWTsC8kXcDjSkAVyv2qQRiE2Lgnv9pump"), false);
-  for (const v of curves.values()) assert.ok(Number.isInteger(v) && v >= 0 && v < 10_000);
+  const seen: string[][] = [];
+  const o = createOrigins(rpcAccounts(accountsRpc(CURVE_BY_KEY, seen), true));
+  const rows = [...rowsOf("new"), ...rowsOf("trending_5m"), ...rowsOf("trending_1h")];
+  await o.refresh(rows.map((r) => ({ mint: r.token as string, hint: undefined, createdS: 0 })), AS_OF);
+  for (const m of PUMP_TAGGED) assert.ok(seen.flat().includes(pumpCurveAddress(m)), `${m}: its curve asked`);
+  assert.deepEqual(CURVES.request_mints, PUMP_TAGGED, "the recorded curves are those of the on-curve rows Jupiter tags pump.fun");
+  assert.equal(o.get("ETHgDzFEG9gqBrjpPyiLvi12LSN9m7aPSdvWWjyZpump")?.curveBps, 9089);
+  assert.equal(o.get("ETHgDzFEG9gqBrjpPyiLvi12LSN9m7aPSdvWWjyZpump")?.pad, "pump.fun");
+  assert.equal(o.get("7UF3egEva3jHDZqfM6eCzEq5n5kdZ3Jxk18A5D3ypump")?.curveBps, 0, "untouched curve: 793.1 M left");
+  // a curve whose reserves exceed the standard 793.1 M is another configuration: made by pump.fun, progress unknown
+  assert.deepEqual(o.get("6xASXp7JqKnzWTsC8kXcDjSkAVyv2qQRiE2Lgnv9pump"), { pad: "pump.fun", family: "pump", pool: pumpCurveAddress("6xASXp7JqKnzWTsC8kXcDjSkAVyv2qQRiE2Lgnv9pump"), config: null, curveBps: null });
 });
 
 test("pump.fun curve account checks: complete reads 10,000; wrong owner, discriminator, size or flag reads null", () => {
@@ -155,19 +166,28 @@ test("pump.fun curve account checks: complete reads 10,000; wrong owner, discrim
   for (const bad of [null, undefined, 7, "x", [], { owner: PUMP_PROGRAM }]) assert.equal(pumpCurveBps(bad), null);
 });
 
-test("a failed or malformed RPC answer leaves every curve unknown", async () => {
-  const mints = CURVES.request_mints;
+test("a failed or malformed RPC answer leaves every launch unread: the rows untagged and named unsettled", async () => {
+  const rows = [...rowsOf("new"), ...rowsOf("trending_5m"), ...rowsOf("trending_1h")];
   for (const answer of [{ status: 503, body: "{}" }, { status: 200, body: "not json" }, { status: 200, body: JSON.stringify({ result: { value: [] } }) }, { status: 200, body: JSON.stringify({ error: { code: -32005 } }) }]) {
-    assert.equal((await readPumpCurves({ handle: async () => answer }, mints)).size, 0);
+    const o = createOrigins(rpcAccounts({ handle: async () => answer }, true));
+    await o.refresh(rows.map((r) => ({ mint: r.token as string, hint: undefined, createdS: 0 })), AS_OF);
+    const s = snapshot({ new: rowsOf("new"), trending_5m: rowsOf("trending_5m"), trending_1h: rowsOf("trending_1h") }, o.get, AS_OF);
+    assert.ok(Object.values(s.lists).flat().every((r) => r.launchpad === null));
+    assert.equal(s.unsettled.length, new Set(rows.map((r) => r.token)).size);
   }
-  assert.equal((await readPumpCurves({ handle: async () => { throw new Error("down"); } }, mints)).size, 0);
+  const down = createOrigins(rpcAccounts({ handle: async () => { throw new Error("down"); } }, true));
+  await down.refresh([{ mint: CURVES.request_mints[0]!, hint: undefined, createdS: 0 }], AS_OF);
+  assert.equal(down.get(CURVES.request_mints[0]!), undefined);
 });
 
 test("the snapshot: trending is trending_1h; graduating holds each on-curve token once, highest first, every one on the terminal's curve", async () => {
   const read = { new: rowsOf("new"), trending_5m: rowsOf("trending_5m"), trending_1h: rowsOf("trending_1h") };
-  const curves = await readPumpCurves(recordedRpc, pumpCandidates([...read.new, ...read.trending_5m, ...read.trending_1h]));
-  const s = snapshot(read, curves, AS_OF);
-  assert.deepEqual(Object.keys(s), ["chain", "lists", "as_of_ms"]);
+  const o = createOrigins(rpcAccounts(recordedRpc, true));
+  await o.refresh([...read.new, ...read.trending_5m, ...read.trending_1h].map((r) => ({ mint: r.token as string, hint: undefined, createdS: 0 })), AS_OF);
+  const curves = new Map(PUMP_TAGGED.filter((m) => typeof o.get(m)?.curveBps === "number").map((m) => [m, o.get(m)!.curveBps!]));
+  const s = snapshot(read, o.get, AS_OF);
+  assert.deepEqual(Object.keys(s), ["chain", "lists", "as_of_ms", "unsettled"]);
+  assert.deepEqual(s.unsettled, []);
   assert.deepEqual(Object.keys(s.lists), ["new", "trending", "trending_5m", "trending_1h", "graduating"]);
   assert.equal(s.chain, "solana");
   assert.deepEqual(s.lists.trending, s.lists.trending_1h);
@@ -357,4 +377,26 @@ test("warm(): one refresh at once and one every FRESH_MS, so a caller never wait
   mock.timers.tick(FRESH_MS);
   await new Promise((ok) => setImmediate(ok));
   assert.equal(f.calls.length, 12);
+});
+
+// card helper-launchpad-origin: every row's launchpad is what the chain says made the token, on accounts and Jupiter rows
+// recorded 2026-11-03 16:49Z (fixtures/solana-origins.json, origin.test.ts): Jupiter's tag is kept only when a read agrees
+test("the lists' launchpad tags are the chain's: Jupiter's untagged pump.fun tokens tagged, a tag no launch backs dropped, a LaunchLab or DBC token's pool read", async () => {
+  const OX = JSON.parse(fx("solana-origins.json")) as { read_at: string; tokens: { case: string; mint: string; origin: { pad: string; curveBps: number | null } | null; jupiter: Record<string, unknown> }[]; accounts: Record<string, unknown> };
+  const at = Date.parse(OX.read_at);
+  const jup = OX.tokens.map((t) => t.jupiter);
+  const proxy = { handle: async () => ({ status: 200, headers: { "X-Fetched-At": OX.read_at }, body: JSON.stringify(jup) }) };
+  const lists = createSolanaLists(proxy, accountsRpc(new Map(Object.entries(OX.accounts))), { now: () => at });
+  const a = await lists.get();
+  assert.equal(a.status, 200);
+  const s = JSON.parse(a.body);
+  const rows = new Map((s.lists.new as Row[]).map((r) => [r.token, r]));
+  for (const t of OX.tokens) {
+    const r = rows.get(t.mint)!;
+    assert.equal(r.launchpad, t.origin?.pad ?? null, `${t.case}: ${t.mint} (Jupiter: ${String(t.jupiter.launchpad ?? null)})`);
+    if (t.origin?.curveBps != null) assert.equal(r.curve_bps, t.origin.curveBps, `${t.case}: curve`);
+  }
+  assert.ok(OX.tokens.some((t) => t.jupiter.launchpad === undefined && t.origin !== null), "a token Jupiter leaves untagged is tagged");
+  assert.ok(OX.tokens.some((t) => t.jupiter.launchpad === "metadao" && t.origin === null), "a tag no launch backs is dropped");
+  assert.ok((s.lists.graduating as Row[]).some((r) => r.launchpad === "raydium-launchlab"), "a LaunchLab token on its curve is graduating");
 });

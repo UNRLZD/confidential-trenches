@@ -207,14 +207,18 @@ try {
             // answers it (CI run 41676339679: the tab sat at APP_HOST with the deployed build's page, whose script the
             // local build's hash refuses, so the app never started and nothing moved to the shell). The tab's page is then
             // loaded again at the address it opened at, now through the harness, exactly as the deep link below is.
-            await np.waitForURL(`${APP_HOST}/**`, { timeout: 8_000 }).catch(() => {});
+            // The tab is at the row's link on APP_HOST, or, when the live page loads fast, already moved to SIGN_HOST's shell
+            // at the same path (in-shell.ts): both are the row's own link, nothing else is accepted.
+            const link = `/token/solana/${mint}`;
+            const rowLink = (u) => u === `${APP_HOST}${link}` || u === `${SIGN_HOST}${link}`;
+            await np.waitForURL((u) => rowLink(u.href), { timeout: 8_000 }).catch(() => {});
             const opened = np.url();
             const seen = [];
             np.on("request", (r) => seen.push(`req ${r.method()} ${r.url().slice(0, 120)}`));
             np.on("response", (r) => seen.push(`res ${r.status()} ${r.url().slice(0, 120)}`));
             np.on("console", (m) => m.type() === "error" && seen.push(`console error ${m.text().slice(0, 160)}`));
             np.on("pageerror", (e) => seen.push(`pageerror ${String(e).slice(0, 160)}`));
-            check(opened === `${APP_HOST}/token/solana/${mint}`, `${tag} ${how}-click: the new tab opened at ${opened}, the row's link is /token/solana/${mint}`);
+            check(rowLink(opened), `${tag} ${how}-click: the new tab opened at ${opened}, the row's link is ${link} on ${APP_HOST} or ${SIGN_HOST}`);
             await np.bringToFront(); // a user who opens a tab looks at it
             await np.goto(opened, { waitUntil: "load" });
             const nf = await appFrame(np);

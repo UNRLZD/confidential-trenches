@@ -280,7 +280,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const bind = bindSenderFromEnv\(process\.env, watches\);/);
   assert.match(main, /for \(const p of pools\.values\(\)\) p\.ready\.catch\(\(e: Error\) => \(console\.error\(`helper: \$\{e\.message\}`\), process\.exit\(2\)\)\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, evmSwapsFromEnv\(process\.env, evmLists, gecko\)\);/);
   // the EVM lists (src/data/evm/lists.ts): each served chain's lists on GeckoTerminal's one budget, shared with the
   // Solana token page's candles, and warmed at start
   assert.match(main, /const SERVED_EVM: readonly EvmChain\[\] = \["base", "robinhood"\];/);
