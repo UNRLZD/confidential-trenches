@@ -11,7 +11,7 @@ import { base58, base64 } from "@scure/base";
 import { VaultTree, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { SOL_RESTORE_QUIET_ROUNDS, SOL_RESTORE_ROUNDS, solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent } from "../src/pool/solana-restore.ts";
+import { SOL_RESTORE_LONE_ROUNDS, SOL_RESTORE_QUIET_ROUNDS, SOL_RESTORE_ROUNDS, solanaMarkOf, solanaMarks, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleSpent } from "../src/pool/solana-restore.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
@@ -998,4 +998,126 @@ test("already spent (MX6): the settle reads the pages at or past its marks' slot
   const quiet = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => (log.push(m), rpc(beforeSpend, MAINNET)(m, p)), { url });
   assert.equal((await solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: [quiet("https://a.example"), quiet("https://b.example")] })).kind, "unspent");
   assert.deepEqual(log, spentReads);
+});
+
+// ---------------------------------------------------------------------------------------------- fold 3 (re-check)
+// One RPC on its own script: it counts its own marks reads (2 calls a read: dataSize 8, then 16); read i sees marksAt(i),
+// and the pages read after read i see pagesAfter(i). Logs every call.
+function perRpc(url: string, marksAt: (i: number) => Chain, pagesAfter: (i: number) => Chain, log: string[]): SolanaRpc {
+  let calls = 0;
+  return Object.assign(async (m: string, p: readonly unknown[]) => {
+    log.push(`${url}:${m}`);
+    if (m === "getProgramAccounts") return rpc(marksAt(Math.floor(calls++ / 2)), MAINNET)(m, p);
+    return rpc(pagesAfter(Math.max(0, Math.floor(calls / 2) - 1)), MAINNET)(m, p);
+  }, { url });
+}
+const FOREIGN = (k: number): readonly [bigint, bigint] => [BigInt(5_000_000 + k), 10_000_000n];
+const junkKey = (k: number): string => solanaMarkOf(PROGRAM, "pre", BigInt(880_000 + k));
+// RPC b's chain with a mark of its own making added to every read (never looked up by any walk)
+const withJunk = (c: (i: number) => Chain) => (i: number): Chain => {
+  const ch = c(i);
+  const marks = new Map(ch.marks!);
+  for (let k = 1; k <= i; k++) marks.set(junkKey(k), markData(1n, 1n));
+  return { ...ch, marks };
+};
+
+test("fold 3 (Q2a): a pool busy at every read on both RPCs reaches the fallback; what shows is only whether one of the last round's new marks is the user's", { timeout: 60_000 }, async () => {
+  // reads 1..8 each add a foreign deposit on both RPCs; read 9 adds X (the user's own U(1), or one more foreign)
+  const at = (x: readonly [bigint, bigint]) => memo((i) => depositsChain([...OURS, ...Array.from({ length: Math.min(i, SOL_RESTORE_QUIET_ROUNDS) }, (_, k) => FOREIGN(k)), ...(i > SOL_RESTORE_QUIET_ROUNDS ? [x] : [])], 700 + Math.min(i, SOL_RESTORE_QUIET_ROUNDS + 1)));
+  const run = async (x: readonly [bigint, bigint]) => {
+    const log: string[] = [];
+    const c = at(x);
+    const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [perRpc("https://a.example", c, c, log), perRpc("https://b.example", c, c, log)], gap: 4 });
+    return { log, r };
+  };
+  const own = await run(U(1));
+  const other = await run(FOREIGN(99));
+  // the same reads through round 9's marks read; then the foreign run ends at its walk and the own one reads on once
+  assert.deepEqual(own.log.slice(0, other.log.length), other.log);
+  assert.equal(own.log.length - other.log.length, 2 * (1 + 2), "one more round: each RPC's one pages call and its two marks calls");
+  assert.ok(own.r.notes.some((n) => n.ref.kind === "second" && n.ref.n === 1));
+  // a landing of the user's own inside the busy rounds (read 4 here) reads the same as a foreign one
+  const inside = (x: readonly [bigint, bigint]) => memo((i) => depositsChain([...OURS, ...Array.from({ length: Math.min(i, 3) }, (_, k) => FOREIGN(k)), ...(i >= 4 ? [x] : [])], 700 + Math.min(i, 4)));
+  const logOf = async (x: readonly [bigint, bigint]) => {
+    const log: string[] = [];
+    const c = inside(x);
+    await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [perRpc("https://a.example", c, c, log), perRpc("https://b.example", c, c, log)], gap: 4 });
+    return log;
+  };
+  assert.deepEqual(await logOf(U(1)), await logOf(FOREIGN(99)));
+});
+
+test("fold 3 (Q2b): one RPC that adds a mark of its own making to every read never brings a quiet pool to the fallback: own and foreign read the same, then a refusal", { timeout: 60_000 }, async () => {
+  const honest = (x: readonly [bigint, bigint]) => memo((i) => depositsChain([...OURS, ...(i > SOL_RESTORE_QUIET_ROUNDS ? [x] : [])], 700 + i));
+  const run = async (x: readonly [bigint, bigint], junk: boolean) => {
+    const log: string[] = [];
+    const h = honest(x);
+    const out = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [perRpc("https://a.example", h, h, log), perRpc("https://b.example", junk ? withJunk(h) : h, h, log)], gap: 4 }).then(() => "restored", (e: Error) => `refused: ${e.message}`);
+    return { log, out };
+  };
+  const ownJ = await run(U(1), true);
+  const otherJ = await run(FOREIGN(99), true);
+  assert.deepEqual(ownJ.log, otherJ.log);
+  assert.match(ownJ.out, /one RPC alone gave new marks/);
+  assert.equal(otherJ.out, ownJ.out);
+  assert.equal(ownJ.log.filter((x) => x.endsWith("getProgramAccounts")).length, 4 * (1 + SOL_RESTORE_LONE_ROUNDS + 2), "the first read, the lone rounds, the busy round 9, and round 10's lone read that ends it");
+  // honest RPCs on the same quiet pool: no leak, and the restore holds
+  const ownQ = await run(U(1), false);
+  const otherQ = await run(FOREIGN(99), false);
+  assert.deepEqual(ownQ.log, otherQ.log);
+  assert.deepEqual([ownQ.out, otherQ.out], ["restored", "restored"]);
+});
+
+test("fold 3 (Q2c): one RPC (with the helper) adds marks of its own making, then the spent mark of a note whose send left: the owner's device and another read the same, then both refuse", { timeout: 60_000 }, async () => {
+  const { beforeSpend } = restorePool();
+  const sX = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const sOther = solanaMarkOf(PROGRAM, "spent", 4242n);
+  const b = (key: string) => (i: number): Chain => {
+    const marks = new Map(beforeSpend.marks!);
+    for (let k = 1; k <= i; k++) marks.set(junkKey(k), markData(1n, 1n));
+    if (i > SOL_RESTORE_QUIET_ROUNDS) marks.set(key, spentData(50_000_000n));
+    return { ...beforeSpend, slot: 700 + i, marks };
+  };
+  const a = (i: number): Chain => ({ ...beforeSpend, slot: 700 + i });
+  const run = async (key: string) => {
+    const log: string[] = [];
+    const out = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [perRpc("https://a.example", a, a, log), perRpc("https://b.example", b(key), a, log)], gap: 4 }).then(() => "restored", (e: Error) => `refused: ${e.message}`);
+    return { log, out };
+  };
+  const mine = await run(sX);
+  const notMine = await run(sOther);
+  assert.deepEqual(mine.log, notMine.log);
+  assert.match(mine.out, /one RPC alone gave new marks/);
+  assert.equal(notMine.out, mine.out);
+});
+
+test("fold 3 (L1): an abort during a lag wait stops the read: no RPC call after the abort", async () => {
+  const { chain } = restorePool();
+  const ctl = new AbortController();
+  let afterAbort = 0;
+  const lagOnce = (url: string): SolanaRpc => {
+    let lagged = false;
+    return Object.assign(async (m: string, p: readonly unknown[]) => {
+      if (ctl.signal.aborted) afterAbort++;
+      if (m === "getMultipleAccounts" && !lagged) {
+        lagged = true;
+        throw new Error("RPC error -32016: Minimum context slot has not been reached");
+      }
+      return rpc(chain, MAINNET)(m, p);
+    }, { url });
+  };
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, signal: ctl.signal, lagWait: async () => ctl.abort(), rpcs: [lagOnce("https://a.example"), lagOnce("https://b.example")], gap: 4 }), { name: "AbortError" });
+  await new Promise((ok) => setTimeout(ok, 20)); // let the other RPC's read settle
+  assert.equal(afterAbort, 0);
+  // and the same for the marks read
+  const ctl2 = new AbortController();
+  let after2 = 0;
+  const lagMarks: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (ctl2.signal.aborted) after2++;
+    if (m === "getProgramAccounts") throw new Error("RPC error -32016: Minimum context slot has not been reached");
+    return rpc(chain, MAINNET)(m, p);
+  }, { url: "https://a.example" });
+  await assert.rejects(solanaMarks([lagMarks, rpc(chain, { ...MAINNET, url: "https://b.example" })], PROGRAM, ctl2.signal, undefined, async () => ctl2.abort()), { name: "AbortError" });
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.equal(after2, 0);
 });
