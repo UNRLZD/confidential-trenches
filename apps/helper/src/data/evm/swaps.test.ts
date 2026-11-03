@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
-import { fakeChain, ICNT, open, POOL_ICNT, POOL_VVV, REC, timeOf, toLog, URLS, VVV, KNOWN } from "./swaps.fake.ts";
+import { fakeChain, ICNT, open, POOL_ICNT, POOL_VVV, REC, timeOf, toLog, URLS, VVV, KNOWN } from "../../../test/evm-swaps/base.ts";
 import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, v4Key, type Log, type Pool } from "./swaps.ts";
 
 /** The book the same logs make rebuilt in one go: every swap and ETH price in order, all settled. */

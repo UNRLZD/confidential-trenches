@@ -7,7 +7,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
-import { fakeChain, ICNT, KNOWN, open, REC, timeOf, VVV } from "./swaps.fake.ts";
+import { fakeChain, ICNT, KNOWN, open, REC, timeOf, VVV } from "../../../test/evm-swaps/base.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://confidential.unrealized.trade";

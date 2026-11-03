@@ -1,14 +1,15 @@
-// The recorded Base logs and a fake chain behind three providers that replays them: shared by swaps.test.ts and
-// swaps-route.test.ts. Not a test itself.
+// The recorded Base logs and a fake chain behind three providers that replays them: shared by
+// src/data/evm/swaps.test.ts and swaps-route.test.ts. Not a test itself, and outside src/ so the helper image never
+// holds it.
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
-import { BLOCK_CLOCK } from "./lists.ts";
-import { BASE_VENUES, createSwaps, REF_POOL_ID, type Log, type Pool } from "./swaps.ts";
+import { BLOCK_CLOCK } from "../../src/data/evm/lists.ts";
+import { BASE_VENUES, createSwaps, REF_POOL_ID, type Log, type Pool } from "../../src/data/evm/swaps.ts";
 
 // -- the recorded logs -----------------------------------------------------------------------------------------------
 
 export type Rec = { firstHead: number; lastHead: number; blockTimes: Record<string, number>; logs: Record<"icnt" | "vvv" | "ref", { b: number; i: number; tx: string; t: string[]; d: string; a: string }[]>; recordedAt: string };
-export const REC = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/swaps-base-hour.json.gz", import.meta.url))).toString("utf8")) as Rec;
+export const REC = JSON.parse(gunzipSync(readFileSync(new URL("../../src/data/evm/fixtures/swaps-base-hour.json.gz", import.meta.url))).toString("utf8")) as Rec;
 export const CLOCK = BLOCK_CLOCK.base!;
 export const timeOf = (n: number) => CLOCK.genesisS + CLOCK.blockS * n;
 export const toLog = (l: Rec["logs"]["icnt"][number]): Log => ({ block: l.b, index: l.i, tx: l.tx, address: l.a, topics: l.t, data: l.d });
