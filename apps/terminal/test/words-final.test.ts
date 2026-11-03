@@ -1,6 +1,7 @@
 // The owner's final words (card words-final-nov2): test/words-final.json lists every word the owner picked on the Nov 2
 // words page (owner 2 Nov 06:08Z, all approved; with the five that page left out as already kept or signed) and the
-// new draft words kept on 1 Nov 16:45Z, each with its screen, key, text and pick. Each must read its text byte for byte,
+// new draft words kept on 1 Nov 16:45Z, and the Portfolio pool rows' five kept on 3 Nov 09:17Z (card balances-per-chain),
+// each with its screen, key, text and pick. Each must read its text byte for byte,
 // be no draft (so no data-draft-copy on its element) and name its pick in its source. The trade box's own words are not
 // on the list and stay drafts until the next words page; the ones it shares with Portfolio (Sending, Landing) are
 // Portfolio's approved entries themselves, so an approved word never goes back to draft.
@@ -21,17 +22,16 @@ interface Row { screen: string; key: string; text: string; pick: string }
 
 const SCREENS: Record<string, { WORDS: Record<string, Word>; DRAFTS: readonly string[] }> = { deposit, discover, portfolio, signin, token, verify, withdraw };
 const ROWS = JSON.parse(readFileSync(new URL("./words-final.json", import.meta.url), "utf8")) as Row[];
-const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep"];
-// the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name, and the pool rows'
-// five (card balances-per-chain, for the next words page)
-const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: [], portfolio: ["balance", "more", "noBalance", "pending", "privateBalance", "ready"], signin: [], token: [], verify: [], withdraw: [] };
+const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "owner 3 Nov 09:17Z, keep"];
+// the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name
+const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: [], portfolio: ["more"], signin: [], token: [], verify: [], withdraw: [] };
 
-test("the list: 98 words on these screens, each once, each with a pick", () => {
-  assert.equal(ROWS.length, 98);
+test("the list: 103 words on these screens, each once, each with a pick", () => {
+  assert.equal(ROWS.length, 103);
   assert.equal(new Set(ROWS.map((r) => `${r.screen}.${r.key}`)).size, ROWS.length);
   const per: Record<string, number> = {};
   for (const r of ROWS) per[r.screen] = (per[r.screen] ?? 0) + 1;
-  assert.deepEqual(per, { deposit: 13, withdraw: 6, verify: 17, portfolio: 46, signin: 10, discover: 3, token: 3 });
+  assert.deepEqual(per, { deposit: 13, withdraw: 6, verify: 17, portfolio: 51, signin: 10, discover: 3, token: 3 });
   for (const r of ROWS) assert.ok(PICKS.includes(r.pick), `${r.screen}.${r.key}: ${r.pick}`);
 });
 

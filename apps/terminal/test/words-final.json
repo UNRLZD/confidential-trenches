@@ -96,5 +96,10 @@
  { "screen": "discover", "key": "loading", "text": "Loading", "pick": "owner 1 Nov 16:45Z, keep" },
  { "screen": "token", "key": "loading", "text": "Loading", "pick": "owner 1 Nov 16:45Z, keep" },
  { "screen": "token", "key": "offline", "text": "Offline", "pick": "owner 1 Nov 16:45Z, keep" },
- { "screen": "token", "key": "noToken", "text": "No token", "pick": "owner 1 Nov 16:45Z, keep" }
+ { "screen": "token", "key": "noToken", "text": "No token", "pick": "owner 1 Nov 16:45Z, keep" },
+ { "screen": "portfolio", "key": "privateBalance", "text": "Private balance", "pick": "owner 3 Nov 09:17Z, keep" },
+ { "screen": "portfolio", "key": "balance", "text": "Balance", "pick": "owner 3 Nov 09:17Z, keep" },
+ { "screen": "portfolio", "key": "ready", "text": "Ready", "pick": "owner 3 Nov 09:17Z, keep" },
+ { "screen": "portfolio", "key": "pending", "text": "Pending", "pick": "owner 3 Nov 09:17Z, keep" },
+ { "screen": "portfolio", "key": "noBalance", "text": "No balance", "pick": "owner 3 Nov 09:17Z, keep" }
 ]

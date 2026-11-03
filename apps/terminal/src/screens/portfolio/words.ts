@@ -94,12 +94,12 @@ export const WORDS = {
   red: ok("red", "owner 2 Nov 06:08Z, all approved; drafted from R5 portfolio-1440.html P.dc(\"red\")"),
   heldFor: ok("Held", "owner 2 Nov 06:08Z, all approved; drafted from R5 portfolio-1440.html table column P.dc(\"Held\") (time held)"),
   addExit: ok("Add exit plan", "owner 2 Nov 06:08Z, all approved; drafted from R5 portfolio-1440.html (the EXITIC tile's label)"),
-  // drafts: card balances-per-chain (v2 A1), the per-chain pool rows; on the owner's picks page with their placement
-  privateBalance: draft("Private balance", "card balances-per-chain draft; R5 portfolio-1440.html round 3 note (owner round 15) names \"private balance\""),
-  balance: draft("Balance", "card balances-per-chain draft; approved on Verify (src/screens/verify/words.ts balance, owner 2 Nov 06:08Z), new on this screen"),
-  ready: draft("Ready", "card balances-per-chain draft: the part with a proof ready to buy"),
-  pending: draft("Pending", "card balances-per-chain draft: the part still being proved"),
-  noBalance: draft("No balance", "card balances-per-chain draft: no pool holds anything"),
+  // card balances-per-chain (v2 A1), the per-chain pool rows: kept as drafted with their placement (owner 3 Nov 09:17Z)
+  privateBalance: ok("Private balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain; R5 portfolio-1440.html round 3 note (owner round 15) names \"private balance\""),
+  balance: ok("Balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain; approved on Verify (src/screens/verify/words.ts balance, owner 2 Nov 06:08Z), new on this screen"),
+  ready: ok("Ready", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part with a proof ready to buy"),
+  pending: ok("Pending", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part still being proved"),
+  noBalance: ok("No balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: no pool holds anything"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

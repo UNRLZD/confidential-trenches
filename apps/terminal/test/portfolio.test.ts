@@ -335,10 +335,12 @@ test("cash: the vault and the ready wallets in dollars; a SOL or ETH pool never 
   assert.equal(same.total, 10000n);
 });
 
-test("words: every word has a source; the drafts left are the overflow button's accessible name and the pool rows' words", () => {
+test("words: every word has a source; the one draft left is the overflow button's accessible name", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text && w.source, k);
   for (const k of ["total", "token", "holding", "value", "pnl", "realized", "tpsl", "search", "hideSmall", "minSize", "feesPaid", "receipt", "keyExported", "viewKey"] as const) assert.equal(WORDS[k].draft, false, k);
   // owner 2 Nov 06:08Z, all approved
   for (const k of ["cash", "noPositions", "noActivity", "open", "closed", "offline", "noRoute", "reverted", "held", "today", "yesterday", "notRestorable"] as const) assert.equal(WORDS[k].draft, false, k);
-  assert.deepEqual([...DRAFTS], ["more", "privateBalance", "balance", "ready", "pending", "noBalance"]);
+  // owner 3 Nov 09:17Z, keep (card balances-per-chain)
+  for (const k of ["privateBalance", "balance", "ready", "pending", "noBalance"] as const) assert.equal(WORDS[k].draft, false, k);
+  assert.deepEqual([...DRAFTS], ["more"]);
 });
