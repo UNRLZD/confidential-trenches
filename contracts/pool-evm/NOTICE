@@ -114,16 +114,21 @@ test_gasRealRouterOneHopDepth2/32.) The fork buys (test/BuyFork.t.sol test_aBuyL
 hop at depth 2): Base 619,727 on 1.8.6 (plan) and 599,827 on 1.7.1; Robinhood 646,879 on 1.8.6 (plan) and 626,979
 on 1.7.1.
 
-The Uniswap v4 buys (test/BuyV4Fork.t.sol test_gasV4*), each a transaction of its own (forge test --isolate), forge
-1.7.1, on each chain's fork (Base 53,438,800, Robinhood Chain 104,661,630), about 21,519 gas a level:
+The Uniswap v4 buys (test/BuyV4Fork.t.sol), the same way, on each chain's fork (Base 53,438,800, Robinhood Chain
+104,661,630), about 21,518 gas a level. Forge 1.7.1 and 1.8.6 give the same figures from the native asset; from WETH
+1.8.6 gives 19,900 more (the WETH calls, as through SwapRouter02), so a sender plans for it:
 
-  call                                   depth 2      depth 32
-  buy, v4 one hop, Base                  598,627    1,244,185
-  buy, v4 two hops, Base                 640,380    1,285,943
-  buy, v4 one hop, Robinhood             579,942    1,225,500
-  buy, v4 two hops, Robinhood            632,936    1,278,499
+  call                                  forge          depth 2      depth 32     base (d = 0)
+  buy, v4 one hop, Base                 1.7.1, 1.8.6   598,627    1,244,185        555,590
+  buy, v4 two hops, Base                1.7.1, 1.8.6   640,380    1,285,943        597,342
+  buy, v4 one hop, Robinhood            1.7.1, 1.8.6   579,942    1,225,500        536,905
+  buy, v4 two hops, Robinhood           1.7.1, 1.8.6   632,936    1,278,499        589,898
+  buy, v4 one hop from WETH, Base       1.8.6 (plan)   634,280
+                                        1.7.1          614,380
+  buy, v4 one hop from WETH, Robinhood  1.8.6 (plan)   669,287
+                                        1.7.1          649,387
 
-(The v3 one hop through SwapRouter02, test_gasRealRouterOneHop* run the same way: 666,912 and 1,312,456.)
+(test_gasV4OneHopDepth2/32, test_gasV4TwoHopDepth2/32; from WETH: test_v4FromWethLands, after its quote.)
 
 Spends are seen through two events: Withdrawn (withdraw) and Bought (buy), each with the spent nullifier and the
 new commitment. A reader of the pool's notes (card notes-per-pool-evm) reads both.
