@@ -105,6 +105,7 @@ const VIRTUALS_GRADUATED = "0x381d54fa425631e6266af114239150fae1d5db67bb65b4fa9e
 const VIRTUALS_PERSONA = "0xf9d151d23a5253296eb20ab40959cf48828ea2732d337416716e302ed83ca658"; // NewPersona(uint256 virtualId,address token,address dao,address tba,address veToken,address lp)
 const FLAUNCH_POOL = "0xba4a1a749cfb812cb3d32c76acc5ea9089875a6ca8bdf9d0c29382be94088bf5"; // PoolCreated(bytes32 indexed _poolId,address _memecoin,address _memecoinTreasury,uint256 _tokenId,bool _currencyFlipped,uint256 _flaunchFee,(string,string,string,uint256,address,uint24,uint256,bytes,bytes,address) _params)
 const PONS_LAUNCHED = "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607"; // TokenLaunched(address indexed token,address indexed curve,address indexed deployer,address pairToken,uint256 launchConfigId,uint256 graduationThreshold)
+const PONS_V1_LAUNCHED = "0xdb51ea9ad51ab453a65a4cb7e60c3cb378c9501bb002609f8f97778fb6c4235a"; // TokenLaunched(address indexed token,address indexed deployer,address indexed dexFactory,address pairToken,address pool,uint256 dexId,uint256 launchConfigId,uint256 positionId,uint256 restrictionsEndBlock,uint256 initialBuyAmount)
 const BAGS_CREATED = "0x643b3b606052cbadac2f906ad0b462da99eda2a1d4f824d315d7f6edd3e4cced"; // TokenCreated(address indexed token,address indexed curve,address indexed creator,address feeShare,address partner,bytes32 poolId,string name,string symbol,string metadataURI)
 
 /** The launchpads' factories per chain; each address's cite is on its line. A pad with no row on a chain is one whose
@@ -146,6 +147,9 @@ export const FACTORIES: Readonly<Record<EvmChain, readonly Factory[]>> = {
     { pad: "doppler", address: "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862", topic0: DOPPLER_CREATE, at: { word: 0 }, shared: true },
     // Pons v2: Sourcify chain 4663 [PonsV2LaunchFactory] (no Pons-own page found)
     { pad: "pons", address: "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", topic0: PONS_LAUNCHED, at: { topic: 1 } },
+    // Pons v1: Sourcify chain 4663 [PonsLaunchFactory] (read 2026-11-03 17:00Z; no Pons-own page found); it made YOLO
+    // 0x62c71cd34a52c30d894419cbcc55db2afa8032ea, on the Robinhood lists that minute
+    { pad: "pons", address: "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb", topic0: PONS_V1_LAUNCHED, at: { topic: 1 } },
     // docs.bags.fm/robinhood/overview.md: "BagsFactory | 0xe8Cc4431adF8b5A847C113EF0c6af9043219Cb37" (a proxy; its EIP-1967 slot read 2026-11-03 13:41Z names
     // implementation 0x7dfa0131f6c8626f199a2e33e49dfb5660e6ef1c, Sourcify [BagsFactory], whose TokenCreated adds `partner`: every one of the
     // factory's 4449 creation logs on chain carries this topic0, none the older implementation 0x46aD6f53's)
