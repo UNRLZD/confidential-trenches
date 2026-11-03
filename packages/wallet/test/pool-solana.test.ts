@@ -1212,6 +1212,33 @@ test("fold 4 (H1): honest RPCs one slot apart on a busy pool restore: a late mar
   assert.equal(await run(0, busy12), "restored", "both RPCs at one slot");
   assert.equal(await run(1, busy12), "restored", "b one slot behind a");
   assert.equal(await run(1, Array.from({ length: 24 }, (_, r) => 701 + r)), "restored", "b one slot behind, a landing at every slot");
+  // a pool busy at every read for 40 rounds: the late marks count busy, so the fallback comes after the quiet rounds
+  const pool = landingPool(Array.from({ length: 40 }, (_, r) => 702 + 2 * r));
+  const log: string[] = [];
+  assert.equal(await outcome(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lagWait: instant, rpcs: [skewRpc("https://a.example", 0, pool, log), skewRpc("https://b.example", 1, pool, log)], gap: 4 })), "restored");
+  assert.equal(log.filter((x) => x.includes("marks@")).length, 2 * 2 * (1 + 1 + SOL_RESTORE_QUIET_ROUNDS + 1), "the first read; round 1 (a's landing alone); rounds 2..10 busy (b has the last one); round 10 walks");
+});
+
+test("fold 4 (Q2g): a pool busy for the quiet rounds with landings both RPCs see, then one RPC a slot ahead adds the spent mark of a nullifier hash it holds: not busy, so own and foreign read the same and both refuse at the lie", { timeout: 20_000 }, async () => {
+  const Q = SOL_RESTORE_QUIET_ROUNDS;
+  const sX = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const sOther = solanaMarkOf(PROGRAM, "spent", 4242n);
+  // b reads at 699 + 2i, a at 700 + 2i: a landing at 699 + 2i reaches both in round i, so rounds 1..Q are busy
+  const pool = landingPool(Array.from({ length: Q }, (_, r) => 701 + 2 * r));
+  const run = async (key: string) => {
+    const log: string[] = [];
+    const planted = (slot: number): Chain => {
+      const c = pool(slot);
+      return slot >= 700 + 2 * (Q + 1) ? { ...c, marks: new Map(c.marks!).set(key, spentData(50_000_000n)) } : c;
+    };
+    const out = await outcome(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lagWait: instant, rpcs: [skewRpc("https://a.example", 0, planted, log), skewRpc("https://b.example", 1, pool, log)], gap: 4 }));
+    return { log, out };
+  };
+  const mine = await run(sX);
+  const notMine = await run(sOther);
+  assert.deepEqual(mine.log, notMine.log);
+  assert.match(mine.out, new RegExp(`rpc 0 gives it at slot ${700 + 2 * (Q + 1)} and rpc 1 lacks it at slot ${701 + 2 * (Q + 1)}; a mark is never closed`));
+  assert.equal(mine.out.replace(sX, "K"), notMine.out.replace(sOther, "K"));
 });
 
 test("fold 4 (Q2e): one RPC plants the spent mark of a nullifier hash it holds: refused at the lie on the owner's device and on another alike", { timeout: 20_000 }, async () => {
