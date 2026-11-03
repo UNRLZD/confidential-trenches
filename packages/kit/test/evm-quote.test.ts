@@ -353,9 +353,10 @@ test("Q9 a provider error or a malformed answer refuses", async () => {
     if (c.length > 1) a.pop();
   };
   await refused(quote("base-ok", fewer, undefined), "rpc_error");
-  // a full batch answered with one answer too many (a copy of its first): read on, it would shift every later answer
+  // a batch answered with one answer too many (a copy of its first): the head's, the confirmation's and the last
+  // batch of reads (base-ok's 5 calls go in batches of 3 and 2), where the extra answer would otherwise go unread
   const more: Edit = (a, c) => {
-    if (c.length === 3) a.push(structuredClone(a[0]!));
+    if (c.length < 3) a.push(structuredClone(a[0]!));
   };
   await refused(quote("base-ok", more, undefined), "rpc_error");
   const down: EvmRpc = async () => {

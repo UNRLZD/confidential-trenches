@@ -358,9 +358,8 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): [E
   const hosts = urls.map((u) => {
     let h: string;
     try {
-      const x = new URL(u);
-      if (x.protocol !== "https:") throw new Error("not https");
-      h = x.hostname.toLowerCase();
+      // evmJsonRpc below takes only an https URL
+      h = new URL(u).hostname.toLowerCase();
     } catch {
       return refuse("bad_request", "a provider URL is https");
     }
