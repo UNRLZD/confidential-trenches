@@ -218,6 +218,7 @@ test("a Solana restore's spends must be its spent notes, each at the queue's (l,
   assert.throws(() => solanaSpentNotes({ notes, spends: [spends[0]!, { ...spends[1]!, j: 2 }] }), /spend 1 is not its note's/);
   assert.throws(() => solanaSpentNotes({ notes, spends: [spends[0]!, { ...spends[1]!, l: L2 }] }), /spend 1 is not its note's/);
   assert.throws(() => solanaSpentNotes({ notes, spends: [spends[1]!, spends[0]!] }), /spend 0 is not its note's/);
+  assert.throws(() => solanaSpentNotes({ notes, spends: [{ ...spends[0]!, note: refKey({ kind: "deposit", s: SOL_SCOPE, i: 9 }) }, spends[1]!] }), /spend 0 is not its note's/);
 });
 
 test("W is on the standard path: a stock BIP-32 at the A.8 EVM path and SLIP-10 at the A.8 Solana path give the A.8 addresses", () => {
