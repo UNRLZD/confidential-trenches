@@ -28,6 +28,7 @@ import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { geckoBudget, type GeckoBudget } from "./data/gecko.ts";
 import { CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
+import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
@@ -46,8 +47,9 @@ type Proxy = ReturnType<typeof createProxy>;
 type Rpc = ReturnType<typeof createRpc>;
 type Lists = ReturnType<typeof createSolanaLists>;
 type EvmLists = Partial<Record<EvmChain, ReturnType<typeof createEvmLists>>>;
-/** The EVM chains whose candles and trade tape come from our own swap reads (src/data/evm/swaps.ts). */
-type Swaps = Partial<Record<EvmChain, EvmSwaps>>;
+/** The chains whose candles and trade tape come from our own swap reads: the EVM chains (src/data/evm/swaps.ts) and
+ *  Solana (src/data/solana/trades.ts). */
+type Swaps = Partial<Record<EvmChain, EvmSwaps>> & { solana?: SolanaTrades };
 type Token = ReturnType<typeof createSolanaToken>;
 type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
@@ -384,7 +386,7 @@ export function handler(
         const most = (k: string) => (q.getAll(k).length === 0 ? "" : one(k));
         const chain = one("chain");
         const mint = one("token");
-        const swaps = chain !== null && Object.hasOwn(evmSwaps, chain) ? evmSwaps[chain as EvmChain] : undefined;
+        const swaps = chain !== null && Object.hasOwn(evmSwaps, chain) ? evmSwaps[chain as EvmChain | "solana"] : undefined;
         if (mint === null || (path === MARKET_TRADES ? swaps === undefined : path === MARKET_CANDLES ? chain !== "solana" && swaps === undefined : chain !== "solana")) return send(404, { error: { code: "not_found" } }, cors(req));
         let read: Promise<DataAnswer>;
         if (path === MARKET_TRADES) {
@@ -503,6 +505,31 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
   return out;
 }
 
+/**
+ * Solana's own trade reads (src/data/solana/trades.ts): the candles and tape of a token on the Solana Discover lists,
+ * the bars before our first from the token page's GeckoTerminal candles. The stream is SOLANA_STREAM_WS_URL when set (a
+ * keyed provider's websocket), else the public one; requests go to SOLANA_TRADES_RPC_URL first when set.
+ */
+export function solanaTradesFromEnv(env: Record<string, string | undefined>, lists: Lists, token: Token): SolanaTrades {
+  const ws = env.SOLANA_STREAM_WS_URL;
+  const url = env.SOLANA_TRADES_RPC_URL;
+  let seen: { asOfMs: number; tokens: Set<string> } | null = null;
+  return createSolanaTrades({
+    wsUrl: ws === undefined || ws === "" ? undefined : ws,
+    rpcs: url === undefined || url === "" ? TRADES_RPCS : [url, ...TRADES_RPCS],
+    history: (mint, tf, to, limit) => token.candles(mint, tf, to, limit),
+    listed: async (mint) => {
+      const a = await lists.get();
+      if (a.status !== 200 || a.asOfMs === undefined) return false;
+      if (seen === null || seen.asOfMs !== a.asOfMs) {
+        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]> };
+        seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))) };
+      }
+      return seen.tokens.has(mint);
+    },
+  });
+}
+
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
@@ -551,7 +578,8 @@ if (import.meta.main) {
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
     const pools = solanaPoolSendersFromEnv(process.env);
     for (const p of pools.values()) p.ready.catch((e: Error) => (console.error(`helper: ${e.message}`), process.exit(2)));
-    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, evmSwapsFromEnv(process.env, evmLists, gecko)); // warms both relayers
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko), solana: solanaTradesFromEnv(process.env, lists, token) };
+    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps); // warms both relayers
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
   } catch (e) {
