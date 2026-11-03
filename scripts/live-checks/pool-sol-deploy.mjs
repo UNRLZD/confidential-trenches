@@ -6,8 +6,8 @@
 //   - the programdata account: its upgrade authority is none (the 33-byte Option at bytes 12-44 is 0), and its code
 //     is the build's: sha256 of the first so_len bytes equals the deployment record's, every byte after them is 0;
 //   - the pool account at ["pool"]: owned by the program, POOL_LEN bytes, "bfpool01", its bump the canonical one;
-//   - the test deposit's precommitment mark ["pre", precommitment]: owned by the program, 16 bytes, value u64 LE and
-//     nonce u64 LE equal to the record's (M353);
+//   - the test deposit's precommitment mark ["pre", precommitment]: owned by the program, 17 bytes, value u64 LE and
+//     nonce u64 LE equal to the record's (M353), then the program's tag byte 1 (card pool-sol-mark-tag);
 //   - both pages holding that deposit's leaves (["page", tree, page_no u32 LE]): the label leaf equals
 //     keccak256(scope || nonce) mod p with the scope this program and pool give (contracts/pool-solana/src/context.rs),
 //     so the pool was initialised for this program's scope; the state leaf equals the record's commitment, which the
@@ -62,7 +62,9 @@ const TREE_LEN = 1065;
 const PAGE_HEADER = 16;
 const PAGE_ENTRY = 72;
 const PAGE_ENTRIES = 1024n;
-export const PRE_MARK_LEN = 16;
+// contracts/pool-solana/src/state.rs PRE_MARK_LEN and MARK_TAG: value u64 LE ‖ nonce u64 LE ‖ the tag
+export const PRE_MARK_LEN = 17;
+export const MARK_TAG = 1;
 const PROGRAMDATA_META = 45; // u32 tag 3, u64 slot, 33-byte Option<Pubkey>
 // contracts/pool-solana/src/context.rs
 const SCOPE_TAG = "blindfill-pool-solana-v1";
@@ -250,9 +252,9 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs = RPCS, sleep
       const labelSize = poolOk ? u64At(pl.data, OFF_TREES + TREE_LEN) : -1n;
       say(poolNonce >= nonce && stateSize >= nonce && labelSize >= nonce, `pool nonce ${poolNonce}, state size ${stateSize}, label size ${labelSize} reach the deposit's nonce ${nonce} ${at}`);
       const mk = await account(fetchFn, url, mark.address, sleep);
-      const mv = mk && mk.data.length === PRE_MARK_LEN ? [u64At(mk.data, 0), u64At(mk.data, 8)] : null;
-      say(!!mk && mk.owner === prog && !!mv && mv[0] === BigInt(dep.value) && mv[1] === nonce,
-        `mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"}, the record's ${dep.value} and ${nonce} ${at}${mk ? "" : ": missing"}`);
+      const mv = mk && mk.data.length === PRE_MARK_LEN ? [u64At(mk.data, 0), u64At(mk.data, 8), mk.data[16]] : null;
+      say(!!mk && mk.owner === prog && !!mv && mv[0] === BigInt(dep.value) && mv[1] === nonce && mv[2] === MARK_TAG,
+        `mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"} tag ${mv?.[2] ?? "?"}, the record's ${dep.value} and ${nonce}, tag ${MARK_TAG} ${at}${mk ? ` (${mk.data.length} bytes)` : ": missing"}`);
       for (const [tree, want, name] of [[1, label, "label"], [0, Buffer.from(dep.commitment, "hex"), "state"]]) {
         const pg = pageAddress(prog, tree, pageNo);
         const a = await account(fetchFn, url, pg.address, sleep);

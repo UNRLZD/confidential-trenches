@@ -1,8 +1,8 @@
 // Replays pool-sol-deploy.answers.json through the live check: the recorded good answer (the dry run on a local
 // validator, read on two loopback URLs) passes; the same recording with one thing changed fails: an upgrade authority
 // set, other code bytes, bytes after the code, a program the loader does not own, a missing pool, a mark that
-// disagrees with its leaves, a leaf that disagrees with its mark, a funder holding a lamport, and RPCs that are not two
-// devnet operators.
+// disagrees with its leaves, a mark without the program's tag, a leaf that disagrees with its mark, a funder holding a
+// lamport, and RPCs that are not two devnet operators.
 //   node --test scripts/live-checks/pool-sol-deploy.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -57,7 +57,7 @@ test("an upgrade authority set fails", async () => {
 });
 
 test("other code bytes fail, and so do bytes after the code", async () => {
-  fails(await run(mutate(D.programdata, (d) => (d[45 + 1000] ^= 1))), /code sha256 of 77160 bytes [0-9a-f]{64} equals the build's/);
+  fails(await run(mutate(D.programdata, (d) => (d[45 + 1000] ^= 1))), new RegExp(`code sha256 of ${D.so_len} bytes [0-9a-f]{64} equals the build's`));
   // the account grown by 3 bytes, the last one not 0: the code a later write could reach
   const extra = structuredClone(A.good);
   for (const a of extra) if (a.method === "getAccountInfo" && a.params[0] === D.programdata) {
@@ -83,6 +83,15 @@ test("a mark that disagrees with its leaves fails: another value, another nonce"
   fails(await run(mutate(mark, (d) => d.writeBigUInt64LE(20_000_000n, 0))), /mark \S+ reads value 20000000 nonce 1/);
   fails(await run(mutate(mark, (d) => d.writeBigUInt64LE(2n, 8))), /reads value 10000000 nonce 2/);
   fails(await run(mutate(mark, () => null)), /mark .*: missing/);
+});
+
+test("card pool-sol-mark-tag: a mark without the program's tag fails: its tag byte 0, or the 16-byte mark of a build before the tag", async () => {
+  fails(await run(mutate(mark, (d) => (d[16] = 0))), /mark \S+ reads value 10000000 nonce 1 tag 0, the record's 10000000 and 1, tag 1/);
+  const untagged = structuredClone(A.good);
+  for (const a of untagged) if (a.method === "getAccountInfo" && a.params[0] === mark && a.json.result.value) {
+    a.json.result.value.data[0] = Buffer.from(a.json.result.value.data[0], "base64").subarray(0, 16).toString("base64");
+  }
+  fails(await run(untagged), /mark \S+ reads value \? nonce \? tag \?, .* \(16 bytes\)/);
 });
 
 test("a leaf that disagrees with its mark fails: the state leaf, the label leaf", async () => {

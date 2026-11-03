@@ -130,6 +130,8 @@ test("the need counts every rent the run pays, the deposit, the funder's own ren
   assert.equal(parts.deposit, DEPOSIT);
   assert.equal(parts.funder_floor, 128n * 6960n);
   assert.equal(parts.deposit_pages, 2n * (88n + 128n) * 6960n);
+  // the precommitment mark: value, nonce and the tag, 17 bytes (contracts/pool-solana/src/state.rs PRE_MARK_LEN)
+  assert.equal(parts.deposit_mark, (17n + 128n) * 6960n);
   assert.equal(total, Object.values(parts).reduce((a, b) => a + b, 0n));
 });
 
