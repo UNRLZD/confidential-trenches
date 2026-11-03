@@ -49,6 +49,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-deploy.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
   "scripts/live-checks/relayer-withdraw-send.mjs",
+  "scripts/live-checks/signpage-pool-kinds.mjs",
   "scripts/live-checks/signpage-postmessage.mjs",
   "scripts/live-checks/signpage-prover-host.mjs",
   "scripts/live-checks/signpage-prover-threads.mjs",
