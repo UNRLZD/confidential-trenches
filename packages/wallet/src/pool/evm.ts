@@ -285,11 +285,13 @@ const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such bl
 // range extends beyond current head block: ..." and "-32000: invalid block range params"; rpc.testnet.chain.robinhood.com
 // answered every range (no cap). A cap on the number of logs one call returns is a cap too, recorded live in the
 // team's data run of 2 Nov (a busy token's Transfer logs): Base "query exceeds max results 20000, retry with the range
-// ..." and Robinhood "logs matched by query exceeds limit of 10000". Other providers' wording, as their docs give it:
+// ..." and Robinhood "logs matched by query exceeds limit of 10000". base.drpc.org (the money gate's second Base
+// mainnet RPC), read live 3 Nov 07:05Z: every eth_getLogs of 501 to 1,000,001 blocks answers code 35 "ranges over 10000
+// blocks are not supported on free plan" (101 and 11 blocks answer). Other providers' wording, as their docs give it:
 // "limited to a 10,000 range" (thousands separators), "query returned more than 10000 results", "Log response size
 // exceeded".
 /** A provider's cap on one eth_getLogs page: only this shrinks the page. */
-const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max(imum)? block range|max(imum)? block range (is|of)? ?[\d,]+|range (is )?too (large|wide)|exceeds max(imum)? results [\d,]+|exceeds (the )?limit of [\d,]+|returned more than [\d,]+ results|more than [\d,]+ (results|logs)|response size (exceeded|is larger)|too many (results|logs|blocks)/i;
+const RANGE_CAP = /limited to an? [\d,]+ (block )?range|exceed(s|ed)? (the )?max(imum)? block range|max(imum)? block range (is|of)? ?[\d,]+|range (is )?too (large|wide)|ranges over [\d,]+ blocks are not supported|exceeds max(imum)? results [\d,]+|exceeds (the )?limit of [\d,]+|returned more than [\d,]+ results|more than [\d,]+ (results|logs)|response size (exceeded|is larger)|too many (results|logs|blocks)/i;
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
 const HEAD_LAG = /beyond (the )?current head|invalid block range params|after last accepted block|is ahead of (the )?(head|latest)/i;
 // Read live on 3 Nov 05:35Z, eth_call at a block 20,000 blocks back by hash: rpc.testnet.chain.robinhood.com and

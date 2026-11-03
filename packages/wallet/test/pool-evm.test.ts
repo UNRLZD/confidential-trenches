@@ -871,3 +871,10 @@ test("R2 the pool's now() retries a moment's fork at the newest height like ever
   assert.equal(await p.now(), (T0 + 200n) * 1000n);
   assert.deepEqual(waits, [2000]);
 });
+
+test("F9 dRPC's cap (base.drpc.org, read live 3 Nov 07:05Z: \"ranges over 10000 blocks are not supported on free plan\") shrinks the page", async () => {
+  const c = C3();
+  const drpc = { getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 30) throw new Error("ranges over 10000 blocks are not supported on free plan"); } };
+  const t = await evmTreeSync({ rpcs: pair(c, c, {}, drpc), pin: PIN, sleep: async () => {} }).trees(after(25));
+  assert.equal(t.stateTree.size, 4);
+});
