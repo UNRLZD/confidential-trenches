@@ -25,7 +25,8 @@ svg { display: block; flex: none; }
 .shell { min-height: calc(100dvh / var(--fit-zoom, 1)); display: flex; flex-direction: column; }
 .screen { flex: 1; min-height: 0; }
 /* signed out, a page that needs an account draws the header's Sign in at its centre (routes/Screen.tsx) */
-.signed-out { min-height: 320px; height: 100%; display: flex; align-items: center; justify-content: center; }
+.screen:has(> .signed-out) { display: flex; flex-direction: column; }
+.signed-out { flex: 1; min-height: 320px; display: flex; align-items: center; justify-content: center; }
 .signed-out .btn-signin { height: 44px; }
 
 /* the logo (brand/ct-stack.css; proto.css:69-88). Desktop: drawn at 52.5% (design round 16), whatever the fit zoom */
