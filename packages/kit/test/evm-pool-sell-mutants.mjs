@@ -1,16 +1,22 @@
 // Removes each of src/trade/evm/sell-unpinned.ts's checks (and the router list in buy-unpinned.ts's venue list), one at a time, and runs
 // the test named for it in test/evm-pool-sell.test.ts: each named test passes on the code as it is and fails on every
-// mutant. The file is changed in place and put back after each mutant (and checked to be back); exits 1 when a named
+// mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each mutant (and checked to be back); exits 1 when a named
 // test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
 // once.
 //   node packages/kit/test/evm-pool-sell-mutants.mjs     (a heavy job: run it on a machine with spare cores)
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { KIT, kitCopy } from "./mutant-copy.mjs";
 
-const SELL = fileURLToPath(new URL("../src/trade/evm/sell-unpinned.ts", import.meta.url));
-const BUY = fileURLToPath(new URL("../src/trade/evm/buy-unpinned.ts", import.meta.url));
-const TEST = fileURLToPath(new URL("./evm-pool-sell.test.ts", import.meta.url));
+// the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
+const BASE = process.argv[1] === fileURLToPath(import.meta.url) ? kitCopy() : KIT;
+const at = (rel) => path.join(BASE, rel);
+
+const SELL = at("src/trade/evm/sell-unpinned.ts");
+const BUY = at("src/trade/evm/buy-unpinned.ts");
+const TEST = at("test/evm-pool-sell.test.ts");
 
 const CAST = "the swap data equals cast calldata";
 const AUTH = "W's EIP-7702 authorization equals cast";

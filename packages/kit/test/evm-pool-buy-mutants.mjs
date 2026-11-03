@@ -1,16 +1,22 @@
 // Removes each of src/trade/evm/buy-unpinned.ts's checks, one at a time, and runs the test named for it in
 // test/evm-pool-buy.test.ts, test/evm-pool-buy-hostile.test.ts or test/evm-venues-pin.test.ts: each named test passes on the code as it is and fails
-// on every mutant. The file is changed in place and put back after each mutant (and checked to be back); exits 1 when a
+// on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each mutant (and checked to be back); exits 1 when a
 // named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in the file
 // exactly once. R1-R14 are the evm-pool-buy-tx review's mutants (R10 moved with the digest's data check, now the hook
 // data hex check); K1-K16 are the fold's (merge note M366).
 //   node packages/kit/test/evm-pool-buy-mutants.mjs     (a heavy job: run it on a machine with spare cores)
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { KIT, kitCopy } from "./mutant-copy.mjs";
 
-const SRC = fileURLToPath(new URL("../src/trade/evm/buy-unpinned.ts", import.meta.url));
-const TESTS = ["./evm-pool-buy.test.ts", "./evm-pool-buy-hostile.test.ts", "./evm-venues-pin.test.ts"].map((f) => fileURLToPath(new URL(f, import.meta.url)));
+// the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
+const BASE = process.argv[1] === fileURLToPath(import.meta.url) ? kitCopy() : KIT;
+const at = (rel) => path.join(BASE, rel);
+
+const SRC = at("src/trade/evm/buy-unpinned.ts");
+const TESTS = ["./evm-pool-buy.test.ts", "./evm-pool-buy-hostile.test.ts", "./evm-venues-pin.test.ts"].map((f) => at(`test/${f.slice(2)}`));
 
 const ROUTES = "each fork test's route builds";
 const PINS = "the testnet chains' pins are";
