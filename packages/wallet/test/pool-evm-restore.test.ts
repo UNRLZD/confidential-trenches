@@ -309,17 +309,37 @@ test("an RPC whose head stays behind the other's by more than an epoch is a lag,
   assert.equal(r.block, 75n);
 });
 
-test("Transfer RPCs of another chain are refused, and ones that do not hold the restore's block are a lag, then refused", async () => {
+test("a Transfer pair on another chain, or one that never holds the restore's block, leaves every W unread with no Transfer log taken: only the pool pair refuses the restore", async () => {
   const { world, W0 } = seeded();
+  const unread = (r: Awaited<ReturnType<typeof restore>>, re: RegExp) => {
+    assert.equal(r.notes.length, 10, "every note returned");
+    assert.equal(r.wallets.length, 2);
+    for (const w of r.wallets) {
+      assert.equal(w.tokens, null);
+      assert.match(w.error!, re);
+    }
+  };
   const wlog: Over["log"] = [];
-  await assert.rejects(restore(pair(world, world), wpair(world, world, { chainId: 1n, log: wlog })), /rpcs: chain 1 and 8453, not 8453/);
+  unread(await restore(pair(world, world), wpair(world, world, { chainId: 84532n, log: wlog })), /^the Transfer RPCs: rpcs: chain 84532 and 8453, not 8453$/);
   assert.equal(namedIn(wlog).length, 0, "no W named to an RPC of another chain");
   const other: World = { ...world, hashOf: (n) => h32(`other chain ${n}`), xfers: [...world.xfers, { block: 50, token: "0x00000000000000000000000000000000000000f0", from: STRANGER, to: W0 }] };
   const waits: number[] = [];
   const wlog2: Over["log"] = [];
-  await assert.rejects(restore(pair(world, world), wpair(other, other, { log: wlog2 }), { sleep: async (ms) => void waits.push(ms) }), (e: Error) => e instanceof EvmLagError && /does not hold block 100/.test(e.message));
-  assert.equal(waits.length, EVM_LAG_TRIES - 1);
-  assert.equal(namedIn(wlog2).length, 0);
+  unread(await restore(pair(world, world), wpair(other, other, { log: wlog2 }), { sleep: async (ms) => void waits.push(ms) }), /does not hold block 100/);
+  assert.equal(waits.length, EVM_LAG_TRIES - 1, "one budget for the pair's check");
+  assert.equal(namedIn(wlog2).length, 0, "no Transfer log taken from another fork");
+  // an abort is never a W's error: it stops the restore
+  const ac = new AbortController();
+  await assert.rejects(evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world), walletRpcs: wpair(other), gap: 4, signal: ac.signal, sleep: async () => void ac.abort(new Error("stopped")) }), /stopped/);
+});
+
+test("an unread W's error keeps a provider's words cut to their code: a provider that echoes the request never puts W in it", async () => {
+  const { world, W0 } = seeded();
+  const echo: Over = { xfer: (l, _, to) => { if (to === addrTopic(W0)) throw new Error(`RPC error -32000: bad filter {"topics":[null,null,"${to}"]}`); return l; } };
+  const r = await restore(pair(world, world), wpair(world, world, {}, echo));
+  const w0 = r.wallets.find((w) => w.w === W0)!;
+  assert.equal(w0.error, "rpc error -32000");
+  assert.ok(!JSON.stringify(r.wallets.map((w) => w.error ?? "")).includes(W0.slice(2)));
 });
 
 test("a stranger's Transfer spam to a public W past every page a provider takes leaves that W unread and every note restored", async () => {
@@ -329,7 +349,7 @@ test("a stranger's Transfer spam to a public W past every page a provider takes 
   assert.equal(r.notes.length, 10);
   const w0 = r.wallets.find((w) => w.w === W0)!;
   assert.equal(w0.tokens, null);
-  assert.match(w0.error!, /query exceeds max results 1/);
+  assert.equal(w0.error, "rpc error -32005", "the provider's words cut to its code");
   assert.deepEqual(r.wallets.find((w) => w.w !== W0)!.tokens, [TY]);
 });
 

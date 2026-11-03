@@ -31,8 +31,11 @@
 //   every device alike), and a buy's _token. Each read names one W and nothing else; the Ws are read in a random order,
 //   never in the notes' order (./buy-wallets.ts does the same for holdings). The Transfer RPCs are their own pair, no
 //   provider of the pool's pair, and must be on the pool's chain and hold the restore's anchor block first.
-// - The notes never wait on a W: a W whose read fails (a lag that stays, a lie, a provider's cap no page can meet, as a
-//   stranger's Transfer spam to a public W can force) is listed with tokens null and its error; the notes stand.
+// - Only the pool pair may refuse the whole restore. The notes never wait on a W: a W whose read fails (a lag that
+//   stays, a lie, a provider's cap no page can meet, as a stranger's Transfer spam to a public W can force) is listed
+//   with tokens null and its error, and a Transfer pair that fails its check (another chain, or the restore's block
+//   not held) leaves every W so, with no Transfer log taken; the notes stand. An error keeps a provider's words cut to
+//   its code (as ./buy-wallets.ts does), since a provider may echo the request, and so the W.
 // - The pool read: a lag (an RPC behind the other) is a retry, EVM_LAG_TRIES rounds at most, then refused; a lie is
 //   refused at once. A newest agreed block more than an epoch behind the higher RPC's latest time is a lag: the lower
 //   of two latest blocks is the anchor, so an RPC stuck behind would otherwise give an old restore as a whole one.
@@ -57,7 +60,8 @@ export type EvmRestoredSpend = { l: bigint; j: number; note: string; w: string; 
  * error when its reads failed. */
 export type EvmRestoredWallet = { note: string; w: string; tokens: string[] | null; error?: string };
 /** A spent note of ours whose release the device did not make: it paid `to` (lowercase), not the note's W, or its new
- * commitment is not the note's change note (`changeOurs` false). Data only. */
+ * commitment is not the note's change note (`changeOurs` false). Data only. A list of flags, not a second debit: a
+ * release to our W with a foreign change is in both spends and elsewhere (its `to` is that spends entry's `w`). */
 export type EvmRestoredElsewhere = { note: string; to: string; withdrawn: bigint; block: bigint; changeOurs: boolean };
 
 export type EvmRestoreArgs = {
@@ -154,6 +158,15 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
   return { notes, spends, elsewhere };
 }
 
+/** An unread W's error: a provider's words cut to their JSON-RPC code or HTTP status; the device's own words kept. */
+const cutError = (e: unknown): string => {
+  const m = e instanceof Error ? e.message : String(e);
+  const code = /RPC error (-?\d+)/i.exec(m)?.[1];
+  if (code !== undefined) return `rpc error ${code}`;
+  const http = /\bHTTP (\d{3})\b/.exec(m)?.[1];
+  return http !== undefined ? `http ${http}` : m;
+};
+
 const randomIndex = (n: number): number => {
   const max = Math.floor(0x1_0000_0000 / n) * n;
   const b = new Uint32Array(1);
@@ -208,16 +221,29 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     [order[i], order[x]] = [order[x]!, order[i]!];
   }
   const wallets: EvmRestoredWallet[] = spends.map((s) => ({ note: s.note, w: s.w, tokens: null }));
-  // the Transfer RPCs on the pool's chain and at the restore's block before any W is named to them
-  if (order.length > 0) await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal), sleep, a.signal);
+  // the Transfer RPCs on the pool's chain and at the restore's block before any W is named to them; a pair that fails
+  // leaves every W unread with its error, never the notes
+  let pairError: string | null = null;
+  if (order.length > 0) {
+    try {
+      await evmRetryLag(() => evmHoldsAnchor(a.walletRpcs, chainId, r.anchor, a.signal), sleep, a.signal);
+    } catch (e) {
+      a.signal?.throwIfAborted();
+      pairError = `the Transfer RPCs: ${cutError(e)}`;
+    }
+  }
   for (const k of order) {
     const s = spends[k]!;
+    if (pairError !== null) {
+      wallets[k]!.error = pairError;
+      continue;
+    }
     try {
       const tokens = await evmRetryLag(() => evmTokensSentTo(a.walletRpcs, s.w, s.block, r, page, a.signal), sleep, a.signal);
       wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();
     } catch (e) {
       a.signal?.throwIfAborted();
-      wallets[k]!.error = e instanceof Error ? e.message : String(e);
+      wallets[k]!.error = cutError(e);
     }
   }
   return { notes, spends, elsewhere, wallets, block: r.anchor.number };

@@ -41,9 +41,13 @@ const M = [
   [R, "if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw", "if (false) throw", T, "more than an epoch"],
   [R, "if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw", "if (r.anchor.timestamp * 1000n + 3n * EVM_EPOCH_MS < high) throw", T, "more than an epoch"],
   [R, "    } catch (e) {\n      a.signal?.throwIfAborted();\n      wallets[k]!.error", "    } catch (e) {\n      throw e;\n      wallets[k]!.error", T, "spam"],
-  [R, "if (order.length > 0) await evmRetryLag(() => evmHoldsAnchor(", "if (false) await evmRetryLag(() => evmHoldsAnchor(", T, "another chain"],
-  [S, "if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);\n  const bs", "const bs", T, "another chain"],
-  [S, "if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(", "if (false) lag(", T, "another chain"],
+  [R, "      await evmRetryLag(() => evmHoldsAnchor(", "      if (false) await evmRetryLag(() => evmHoldsAnchor(", T, "another chain, or one that never holds"],
+  // only the pool pair refuses (N1); a provider's words cut to their code (N2)
+  [R, "      a.signal?.throwIfAborted();\n      pairError = `the Transfer RPCs: ${cutError(e)}`;", "      throw e;", T, "another chain, or one that never holds"],
+  [R, "    if (pairError !== null) {\n      wallets[k]!.error = pairError;\n      continue;\n    }\n", "", T, "another chain, or one that never holds"],
+  [R, "  if (code !== undefined) return `rpc error ${code}`;\n", "", T, "cut to their code"],
+  [S, "if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);\n  const bs", "const bs", T, "another chain, or one that never holds"],
+  [S, "if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(", "if (false) lag(", T, "another chain, or one that never holds"],
   [R, "for (const w of a.walletRpcs) for (const p of a.rpcs) if (solanaSameProvider(w, p)) throw", "if (false) throw", T, "their own pair"],
   [R, "s.w, s.block, r, page", "s.w, 0n, r, page", T, "restore of a seeded chain"],
   // the pool's event fields and the Transfer read (./evm.ts)
