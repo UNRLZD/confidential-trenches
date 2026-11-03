@@ -9,7 +9,8 @@
 // type the card's report names as missing kit calls: a token's symbol, name and price and whether a route sells it; a
 // position's bought, sold and realized, its open time, its TP/SL and its held or reverted mark; the closed positions;
 // the value series; the fees paid; and each operation's time, USD size, token and units.
-import type { Chain, Operation, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
+import { POOL_ASSET_DECIMALS } from "@blindfill/kit";
+import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
 
@@ -246,9 +247,10 @@ export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[],
 }
 
 export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
-  // Cash: the vault's USDC, each pool's private balance and the READY wallets, each source counted once
+  // Cash: the vault's USDC, each pool held in USDC and the READY wallets, each source counted once. A SOL or ETH pool
+  // has no dollar value until a price read exists, so it never joins Cash: no dollar figure is invented.
   let cash = cents(s.vault_balance) ?? 0n;
-  for (const p of s.pools ?? []) cash += cents(p.balance) ?? 0n;
+  for (const p of s.pools ?? []) if (p.asset === "USDC") cash += cents(p.balance) ?? 0n;
   let onWay = 0n;
   for (const w of s.wallets) {
     if (w.state === "READY") cash += cents(w.size) ?? 0n;
@@ -280,10 +282,37 @@ export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: n
 
 // ------------------------------------------------------------------------------------------------- the pools (A1)
 
-/** One chain's pool: its private balance from the device's own notes, the part with a proof ready (null: no proof
- *  queue runs, drawn as a dash, never $0.00) and the rest, still being proved (null with ready). Cents, rounded down. */
+/** A decimal string in whole units to base units at `d` decimals, rounded down; null when it is not one. */
+export function baseUnits(s: string, d: number): bigint | null {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(s.trim());
+  if (!m) return null;
+  return BigInt(m[1]! + ((m[2] ?? "") + "0".repeat(d)).slice(0, d));
+}
+
+/** Base units at `d` decimals, short and rounded down, at most 8 characters: up to 6 decimals below 1 ("0.001",
+ *  "0.000123"), up to 4 below 1,000 ("12.5"), then K, M and B with up to 2 ("12.5K", "1.25M"). Never summed. */
+export function amount(base: bigint, d: number): string {
+  const one = 10n ** BigInt(d);
+  const show = (v: bigint, unit: bigint, dp: number, k: string): string => {
+    const w = v / unit;
+    const f = ((v % unit) * 10n ** BigInt(dp)) / unit;
+    const frac = dp ? f.toString().padStart(dp, "0").replace(/0+$/, "") : "";
+    return `${w}${frac ? `.${frac}` : ""}${k}`;
+  };
+  if (base < one) return show(base, one, Math.min(6, d), "");
+  if (base < 1000n * one) return show(base, one, Math.min(4, d), "");
+  if (base < 1_000_000n * one) return show(base, 1000n * one, 2, "K");
+  if (base < 1_000_000_000n * one) return show(base, 1_000_000n * one, 2, "M");
+  return show(base, 1_000_000_000n * one, 2, "B");
+}
+
+/** One chain's pool in its own asset: the private balance from the device's own notes, the part with a proof ready
+ *  (null: no proof queue runs, drawn as a dash, never 0) and the rest, still being proved. Base units of the asset,
+ *  decimals from the kit's table only. */
 export interface PoolRow {
   chain: Chain;
+  asset: PoolAsset;
+  decimals: number;
   balance: bigint;
   ready: bigint | null;
   pending: bigint | null;
@@ -302,10 +331,11 @@ export interface Pools {
 export function pools(s: SignpageState, offline = false): Pools {
   if (s.pools === undefined) return { view: offline ? "offline" : "unread", rows: [] };
   const rows = s.pools.map((p): PoolRow => {
-    const balance = cents(p.balance) ?? 0n;
-    const r = p.ready === undefined ? null : cents(p.ready) ?? 0n;
+    const decimals = POOL_ASSET_DECIMALS[p.asset];
+    const balance = baseUnits(p.balance, decimals) ?? 0n;
+    const r = p.ready === undefined ? null : baseUnits(p.ready, decimals) ?? 0n;
     const ready = r === null ? null : r > balance ? balance : r;
-    return { chain: p.chain, balance, ready, pending: ready === null ? null : balance - ready };
+    return { chain: p.chain, asset: p.asset, decimals, balance, ready, pending: ready === null ? null : balance - ready };
   });
   return { view: rows.some((r) => r.balance > 0n) ? "rows" : "empty", rows };
 }

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Operation, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
-import { activity, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_FILTER, pct, portfolio, restored, sortRows, stats, units, usd } from "../src/screens/portfolio/model.ts";
+import { activity, amount, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_FILTER, pct, portfolio, restored, sortRows, stats, units, usd } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData, TokenMarket } from "../src/screens/portfolio/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/portfolio/words.ts";
 
@@ -267,46 +267,66 @@ test("S14.3 after a restore: the kit's restore op done", () => {
   assert.equal(restored([{ id: "rs", kind: "restore", stage: "reading", txs: [] }]), false);
 });
 
-// the pools (card balances-per-chain, v2 A1): the signing page sends each chain's sum of its own notes (packages/wallet
-// pool balances: spent, reserved, incoming and planned notes are left out there); the screen draws them as sent
-test("pools: loading, offline, unread (none sent), empty, and rows with balance, ready and pending in cents", () => {
+// the pools (card balances-per-chain, v2 A1): the signing page sends each chain's sum of its own notes, in the pool's
+// own asset (packages/wallet pool balances: spent, reserved, incoming and planned notes are left out there); decimals
+// come from the kit's table only, and a pool's amount is never a dollar figure
+test("pools: loading, offline, unread (none sent), empty, and rows in the pool's own asset", () => {
   assert.deepEqual(portfolio(snap(null), data(), NOW).pools, { view: "loading", rows: [] });
   assert.deepEqual(portfolio(snap(null, "down"), data(), NOW).pools, { view: "offline", rows: [] });
-  // a page that sends no pools: dashes, never $0.00
+  // a page that sends no pools: dashes, never 0
   assert.deepEqual(portfolio(snap(STATE), data(), NOW).pools, { view: "unread", rows: [] });
   assert.deepEqual(portfolio(snap(STATE, "down"), data(), NOW).pools, { view: "offline", rows: [] });
   assert.deepEqual(portfolio(snap({ ...STATE, pools: [] }), data(), NOW).pools, { view: "empty", rows: [] });
   // a configured chain with none: still empty while no pool holds anything
-  assert.equal(portfolio(snap({ ...STATE, pools: [{ chain: "solana", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
-  const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", balance: "250.129", ready: "200" }, { chain: "base", balance: "0" }, { chain: "robinhood", balance: "70", ready: "0" }] }), data(), NOW).pools;
+  assert.equal(portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
+  const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "12.5", ready: "10" }, { chain: "base", asset: "ETH", balance: "0.25" }, { chain: "robinhood", asset: "ETH", balance: "0", ready: "0" }] }), data(), NOW).pools;
   assert.equal(p.view, "rows");
   assert.deepEqual(p.rows, [
-    { chain: "solana", balance: 25012n, ready: 20000n, pending: 5012n },
-    // a chain with none keeps its row at $0.00; no ready sent: ready and pending are null (dashes)
-    { chain: "base", balance: 0n, ready: null, pending: null },
-    // a ready of 0 is a real 0: every chunk still being proved
-    { chain: "robinhood", balance: 7000n, ready: 0n, pending: 7000n },
+    // 12.5 SOL in lamports (9 decimals, the kit's table), 10 of it ready
+    { chain: "solana", asset: "SOL", decimals: 9, balance: 12_500_000_000n, ready: 10_000_000_000n, pending: 2_500_000_000n },
+    // 0.25 ETH in wei (18 decimals); no ready sent: ready and pending are null (dashes)
+    { chain: "base", asset: "ETH", decimals: 18, balance: 250_000_000_000_000_000n, ready: null, pending: null },
+    // a ready of 0 is a real 0
+    { chain: "robinhood", asset: "ETH", decimals: 18, balance: 0n, ready: 0n, pending: 0n },
   ]);
+});
+
+test("pools: amounts in the asset's own units, short and rounded down, never a dollar figure", () => {
+  assert.equal(amount(12_500_000_000n, 9), "12.5");
+  assert.equal(amount(250_000_000_000_000_000n, 18), "0.25");
+  // the EVM ladder's smallest rung, 0.001 ETH, and dust below it, never "0"
+  assert.equal(amount(1_000_000_000_000_000n, 18), "0.001");
+  assert.equal(amount(123_456_789_000_000n, 18), "0.000123");
+  assert.equal(amount(999_999_999_999n, 9), "999.9999");
+  assert.equal(amount(12_500_500_000_000n, 9), "12.5K");
+  assert.equal(amount(1_250_000_500_000_000n, 9), "1.25M");
+  assert.equal(amount(3_200_000_000_000_000_000n, 9), "3.2B");
+  assert.equal(amount(0n, 9), "0");
+  assert.equal(amount(12_500_000n, 6), "12.5");
+  // up to 999.99B of the asset, past any asset's whole supply (SOL, ETH and USDC all under 100B); the column widens past that, never clips
+
+  for (const v of [1n, 999_999_999n, 999_999_999_999n, 999_999_999_999_999n, 999_999_999_999n * 10n ** 9n]) assert.ok(amount(v, 9).length <= 8, amount(v, 9));
+  assert.ok(!amount(12_500_000_000n, 9).includes("$"));
 });
 
 test("pools: a ready above the balance is held to it; a garbled amount reads as 0", () => {
-  const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", balance: "10", ready: "12" }, { chain: "base", balance: "x", ready: "1" }] }), data(), NOW).pools;
+  const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "10", ready: "12" }, { chain: "base", asset: "ETH", balance: "x", ready: "1" }] }), data(), NOW).pools;
   assert.deepEqual(p.rows, [
-    { chain: "solana", balance: 1000n, ready: 1000n, pending: 0n },
-    { chain: "base", balance: 0n, ready: 0n, pending: 0n },
+    { chain: "solana", asset: "SOL", decimals: 9, balance: 10_000_000_000n, ready: 10_000_000_000n, pending: 0n },
+    { chain: "base", asset: "ETH", decimals: 18, balance: 0n, ready: 0n, pending: 0n },
   ]);
 });
 
-test("cash: the vault, each pool and the ready wallets, each source counted once", () => {
+test("cash: the vault and the ready wallets in dollars; a SOL or ETH pool never joins it; a USDC pool once", () => {
   const base = { ...STATE, positions: [] };
   // vault 73.18 + ready wallet 10.00
   assert.equal(portfolio(snap(base), data(), NOW).totals!.cash, 8318n);
-  // the pools add their balances once; ready is a part of the balance, never added again
-  const t = portfolio(snap({ ...base, pools: [{ chain: "solana", balance: "100.5", ready: "100" }, { chain: "base", balance: "20" }] }), data(), NOW).totals!;
-  assert.equal(t.cash, 8318n + 10050n + 2000n);
+  // 12.5 SOL and 0.25 ETH have no dollar value until a price read exists: Cash and Total stay as they were
+  const t = portfolio(snap({ ...base, pools: [{ chain: "solana", asset: "SOL", balance: "12.5", ready: "12.5" }, { chain: "base", asset: "ETH", balance: "0.25" }] }), data(), NOW).totals!;
+  assert.equal(t.cash, 8318n);
   assert.equal(t.total, t.cash + t.onWay + t.inPos);
-  // the same amount in the vault and in a pool are two sources: both count, neither twice
-  const same = portfolio(snap({ ...base, vault_balance: "50", wallets: [], pools: [{ chain: "solana", balance: "50", ready: "50" }] }), data(), NOW).totals!;
+  // a USDC pool is dollars: it joins Cash once, and the same amount in the vault is a second source, never merged
+  const same = portfolio(snap({ ...base, vault_balance: "50", wallets: [], pools: [{ chain: "solana", asset: "USDC", balance: "50", ready: "50" }] }), data(), NOW).totals!;
   assert.equal(same.cash, 10000n);
   assert.equal(same.total, 10000n);
 });

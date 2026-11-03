@@ -5,8 +5,8 @@ import { Avatar } from "../market/Avatar.tsx";
 import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
 import { ExitIc, Ic } from "./icons.tsx";
-import { activity, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, stats, units, usd } from "./model.ts";
-import type { ClosedRow, Pools, Range, Row, Stats, Totals } from "./model.ts";
+import { activity, amount, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, stats, units, usd } from "./model.ts";
+import type { ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals } from "./model.ts";
 import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
@@ -266,19 +266,16 @@ function Where({ t, loading, phone }: { t: Totals | null; loading: boolean; phon
   );
 }
 
-/** A pool amount in at most 11 characters, so four columns hold in Where it is at any size: full cents below $1M
- *  ($999,999.99), then short and rounded down ($1.25M, $3.2B). The row's data attributes keep the exact cents. */
-const usdFit = (c: bigint): string => (c >= 100_000_000n ? `$${units((c / 100n).toString())}` : usd(c));
-
 // Chain names are names, drawn as data.
 const CHAIN_NAME = { solana: "Solana", base: "Base", robinhood: "Robinhood", near: "NEAR" } as const;
 
-/** Each chain's pool (card balances-per-chain, v2 A1): the private balance from the device's own notes, the part ready
- *  to buy (a proof made) and the rest still being proved. No proof queue running: Ready and Pending are dashes, never
- *  $0.00. data-pools names the view, each row its chain and cents, for the checks. */
+/** Each chain's pool (card balances-per-chain, v2 A1), in its own asset: the private balance from the device's own
+ *  notes ("12.5 SOL"), the part ready to buy (a proof made) and the rest still being proved, in the same unit. No dollar
+ *  figure: a SOL or ETH pool has none until a price read exists. No proof queue running: Ready and Pending are dashes,
+ *  never 0. data-pools names the view, each row its chain, asset and base units, for the checks. */
 function PoolRows({ p, phone }: { p: Pools; phone?: boolean }) {
   const cols = p.view === "rows" || p.view === "unread" || p.view === "loading";
-  const amt = (c: bigint | null, cls = ""): ReactNode => (c === null ? DASH : <span className={cls}>{usdFit(c)}</span>);
+  const amt = (r: PoolRow, c: bigint | null, cls = ""): ReactNode => (c === null ? DASH : <span className={cls}>{amount(c, r.decimals)}</span>);
   return (
     <div className={`pools${phone ? " ph" : ""}`} data-pools={p.view}>
       <span className="plk"><W id="privateBalance" /></span>
@@ -296,11 +293,11 @@ function PoolRows({ p, phone }: { p: Pools; phone?: boolean }) {
       )}
       {p.view === "rows" &&
         p.rows.map((r) => (
-          <div className="plr" key={r.chain} data-pool={r.chain} data-balance={r.balance.toString()} data-ready={r.ready === null ? "none" : r.ready.toString()} data-pending={r.pending === null ? "none" : r.pending.toString()}>
+          <div className="plr" key={r.chain} data-pool={r.chain} data-asset={r.asset} data-balance={r.balance.toString()} data-ready={r.ready === null ? "none" : r.ready.toString()} data-pending={r.pending === null ? "none" : r.pending.toString()}>
             <span className="ell">{CHAIN_NAME[r.chain]}</span>
-            <span className="num">{usdFit(r.balance)}</span>
-            <span className="num">{amt(r.ready, r.ready ? "gain" : "")}</span>
-            <span className="num t2">{amt(r.pending)}</span>
+            <span className="num">{amount(r.balance, r.decimals)} <span className="t3">{r.asset}</span></span>
+            <span className="num">{amt(r, r.ready, r.ready ? "gain" : "")}</span>
+            <span className="num t2">{amt(r, r.pending)}</span>
           </div>
         ))}
     </div>

@@ -63,8 +63,8 @@ const POOLS = {
   loading: ["loading"],
   offline: ["offline"],
   rows: ["unread"],
-  pools: ["rows", [["Solana", "$1.25M", "$999,999.99", "$250,000.51"], ["Base", "$320.00", "$300.00", "$20.00"], ["Robinhood", "$0.00", "$0.00", "$0.00"]]],
-  "pools-noready": ["rows", [["Solana", "$12,500.50", "—", "—"], ["Base", "$320.00", "—", "—"]]],
+  pools: ["rows", [["Solana", "1.25M SOL", "999.99K", "250K"], ["Base", "0.25 ETH", "0.2", "0.05"], ["Robinhood", "0 ETH", "0", "0"]]],
+  "pools-noready": ["rows", [["Solana", "12.5 SOL", "—", "—"], ["Base", "0.001 ETH", "—", "—"]]],
   "pools-empty": ["empty"],
 };
 

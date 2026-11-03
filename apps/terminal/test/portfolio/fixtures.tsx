@@ -90,8 +90,8 @@ export const FIXTURES: Record<string, Fx> = {
   filtered: { ui: act({ filter: { kinds: ["buy"], min: 2000n, q: "" } }) },
   receipt: { ui: act({ open: "op1" }) },
   // the pools (card balances-per-chain): rows with ready, rows while no proof queue runs (dashes), none held
-  pools: { state: { pools: [{ chain: "solana", balance: "1250000.5", ready: "999999.99" }, { chain: "base", balance: "320", ready: "300" }, { chain: "robinhood", balance: "0", ready: "0" }] } },
-  "pools-noready": { state: { pools: [{ chain: "solana", balance: "12500.5" }, { chain: "base", balance: "320" }] } },
+  pools: { state: { pools: [{ chain: "solana", asset: "SOL", balance: "1250000.5", ready: "999999.99" }, { chain: "base", asset: "ETH", balance: "0.25", ready: "0.2" }, { chain: "robinhood", asset: "ETH", balance: "0", ready: "0" }] } },
+  "pools-noready": { state: { pools: [{ chain: "solana", asset: "SOL", balance: "12.5" }, { chain: "base", asset: "ETH", balance: "0.001" }] } },
   "pools-empty": { state: { pools: [] } },
 };
 
