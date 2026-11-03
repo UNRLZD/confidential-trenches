@@ -768,9 +768,13 @@ function movingPair(chains: readonly Chain[] | ((i: number) => Chain), after = 4
 // Two RPCs on a scripted chain: pick(method, n) is the chain a call sees, n the marks reads (getProgramAccounts calls,
 // both RPCs counted) made before it, this one included for a marks read.
 type RLog = { m: string; url: string; min?: number; slot: number };
+// a restore that reads the marks more than SCRIPTED_READS times (4 calls a read) ends in another error, so a loop that never
+// walks fails its test, never spins to its timeout (fold 8: M7); each script here walks by its third read
+const SCRIPTED_READS = 16;
 function scripted(pick: (m: string, n: number) => Chain, log: RLog[] = []): [SolanaRpc, SolanaRpc] {
   let n = 0;
   const mk = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getProgramAccounts" && n >= 4 * SCRIPTED_READS) throw new Error("RPC error -32005: the fake's reads ran past SCRIPTED_READS");
     const c = m === "getProgramAccounts" ? pick(m, n++) : pick(m, n);
     const min = (p[1] as { minContextSlot?: number } | undefined)?.minContextSlot;
     log.push({ m, url, slot: c.slot, ...(min === undefined ? {} : { min }) });

@@ -71,6 +71,8 @@ const M = [
   // earlier answer checked against the new one (G4, solana-restore.ts:101), told apart by an equal slot
   [R, "  solanaMarksGaps(calls, first.calls);\n", "", T, "fold 6 \\(G7"],
   [R, "        lacks(i, next[i][z], j, y);\n", "", T, "fold 7 \\(G4"],
+  // fold 8: the merged marks carried into the next round (M7): without them the restore never walks
+  [R, "    marks = again;\n", "", T, "N1 race"],
   [Q, "        if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });\n        else todo.push({ n, trees: newest, root: \"newest\" });", "        todo.push({ n, trees: newest as PoolTrees, root: \"newest\" });", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))", "", "test/pool-queue.test.ts", "a failed newest read"],
 ];
