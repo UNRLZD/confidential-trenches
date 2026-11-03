@@ -13,17 +13,29 @@
 //   (src/PrivacyPool.sol:263 via _spendChecked, src/PrivacyPool.sol:130-137, src/PrivacyPoolSimple.sol:68-77). Each
 //   method inserts before it emits and is nonReentrant (src/State.sol:83-88), so the events' order is the inserts'
 //   order. The topics are keccak256 of the event signatures, computed here.
-// - Each sync round reads at one anchor: the lower of the two RPCs' EVM_POOL_TAG blocks, read by number on both, whose
-//   hash must be the same on both. eth_getLogs takes a block range, not a hash (EIP-234's blockHash filter is one block
-//   a call, so a pool of N blocks would need N calls), so every page is a range that ends at or below the anchor; a log
-//   in the anchor's block must carry the anchor's hash, and both RPCs' lists must agree byte for byte (every field
+// - Two tags (M371 (1)): the cache only ever holds leaves of blocks up to EVM_POOL_TAG (finalized), which never move;
+//   every read past it (the tail, finalized + 1 to the newest block both RPCs agree on) is read again on every round
+//   and never kept. A finalized block lags its head by ~155 s to ~1,376 s on Base Sepolia and Robinhood testnet (read
+//   3 Nov 04:46Z), past an epoch's 210 s life, so the roots, the time and the epoch's first block are read at the
+//   newest agreed block: the lower of the two RPCs' EVM_NEWEST_TAG (latest) blocks, read by number on both, the same
+//   hash on both (two blocks at that height on the two RPCs is a retry). A root of a tail a reorg later drops makes the
+//   pool refuse the transaction (UnknownStateRoot: the root was never recorded on the chain that stays) and moves no
+//   money; the next round reads the new tail, so a reorged leaf never enters the cache.
+// - Each sync round reads at two anchors, each read by number on both RPCs with one hash on both: the finalized one
+//   (the lower of the two RPCs' EVM_POOL_TAG blocks; two hashes there are refused) and the newest one above.
+//   eth_getLogs takes a block range, not a hash (EIP-234's blockHash filter is one block a call, so a pool of N blocks
+//   would need N calls), so every page is a range that ends at or below the newest anchor; a log in either anchor's
+//   block must carry that anchor's hash, and both RPCs' lists must agree byte for byte (every field
 //   the device reads). Each RPC pages on its own: a range-cap error halves that RPC's page and tries again, down to
 //   one block, so no provider's cap (200 blocks on sepolia.base.org, 50,000 on publicnode, read 3 Nov 04:21Z) is a
 //   limit on the pool.
-// - The pool's state at the anchor, read with eth_call at the anchor's hash (EIP-1898) on both RPCs, first, before the
-//   logs (a pruning node keeps recent state only): currentRoot, currentTreeSize, currentLabelRoot and
+// - The pool's state at the newest anchor, read with eth_call at its hash (EIP-1898) on both RPCs, first, before the
+//   logs (a pruning node keeps recent state only: Robinhood's publicnode about 30 s, so never at the finalized block):
+//   currentRoot, currentTreeSize, currentLabelRoot and
 //   currentLabelTreeSize (src/State.sol:115-142) must agree on both, and the trees the device builds from every leaf up
-//   to the anchor must have exactly that size and root, so a log dropped or changed on both RPCs is refused too.
+//   to the anchor must have exactly that size and root, so a log dropped or changed on both RPCs is refused too. Only then does the
+//   cache take the leaves up to the finalized anchor. A mismatch (between the two RPCs' logs, or with the views) while
+//   the newest anchor's height holds another hash on either RPC is a reorg under the read: a retry, never an answer.
 // - trees(beforeMs), duty 2 of pool.ts: refused (a retry) until the anchor's block time reached beforeMs, so every
 //   leaf under the cut is in. The cut keeps the leaves whose block's timestamp * 1000 is below beforeMs (block times
 //   read on both RPCs, by hash). The epoch root is the root the pool recorded with that block's time: the pool keeps
@@ -44,6 +56,9 @@
 //   same hash on both RPCs) and the state tree's depth at that block, from the leaves both RPCs agree on (M356 (4),
 //   M357 (3)). The formula is the kit's one definition (G(depth) and the rest of M356 (4)); see EvmEpochFeeRule.
 // - Epochs of 60 s (M350 (1)) and a life of 2E + 60 s + 2 TAKE_SLACK_MS = 210 s: EVM's send margin is 60 s (M356 (1)).
+// - Until card evm-pool-fee-kit (M371 (2)): the epoch fee formula is the caller's EvmEpochFeeRule and EVM_SEND_MARGIN_MS
+//   is this file's; that card makes both kit constants (the full M356 (4) EVM fee and the send margin, which the helper
+//   imports too), and this file then imports them and drops EvmEpochFeeRule.
 // - Two RPCs are two providers: the kit's solanaSameProvider (one function, or one URL) refuses one passed twice.
 // Nothing here holds a secret, and no read names a note or a wallet of the user's: only the pool's own logs and views.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -55,20 +70,25 @@ import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
 
-/** ETH's ladder: one = the pool's MIN_DEPOSIT, 0.0001 ETH (src/PrivacyPool.sol:53), from 0.001 ETH [design: the
- * owner's $2 floor, OD:268, in kind, as SOL_LADDER's 0.01 SOL]. */
+/** ETH's ladder: one = the pool's MIN_DEPOSIT, 0.0001 ETH (src/PrivacyPool.sol:53), from 0.001 ETH = 10 x one, as
+ * SOL_LADDER's smallest chunk is 0.01 SOL = 10 x the Solana program's MIN_DEPOSIT (./solana.ts SOL_LADDER) [design:
+ * the owner's $2 floor, OD:268, in kind]. Against the gas a release costs: the dearest release, a buy through
+ * SwapRouter02 at depth 32, is 1,332,356 gas (contracts/pool-evm/NOTICE, the gas table); at the base fees read on
+ * 3 Nov 05:00Z on two RPCs each (Base 0.005 gwei, Robinhood 0.0201 gwei) that is 6.7e12 and 2.7e13 wei, so M356 (4)'s
+ * 2 x (G x basefee), before the L1 fee, is 1.3% and 5.4% of 0.001 ETH, far under the pool's 50% backstop. */
 export const EVM_LADDER: Ladder = Object.freeze({ one: 100_000_000_000_000n, min: 1_000_000_000_000_000n });
 export const EVM_EPOCH_MS = 60_000n;
-/** EVM's send margin (M356 (1)): 60 s, the helper's EVM_POOL_SEND_MARGIN_MS. */
+/** EVM's send margin (M356 (1)): 60 s, the helper's EVM_POOL_SEND_MARGIN_MS; this file's until card evm-pool-fee-kit
+ * makes it the kit's constant (M371 (2)). */
 export const EVM_SEND_MARGIN_MS = 60_000n;
 export const EVM_LIFE_MS = 2n * EVM_EPOCH_MS + EVM_SEND_MARGIN_MS + 2n * TAKE_SLACK_MS;
 /** The pool's backstop: fee x 10,000 at most withdrawnValue x 5,000 (src/PrivacyPool.sol:55, 186). */
 const MAX_RELAY_FEE_BPS = 5_000n;
 /** Constants.NATIVE_ASSET (src/lib/Constants.sol:8): the asset PrivacyPoolSimple's scope hashes. */
 export const EVM_NATIVE_ASSET = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-/** The block tag every epoch read (the sync's anchor, now) is made at. */
+/** The tag the cache stops at: the sync keeps only leaves of blocks up to it (M371 (1)). */
 export const EVM_POOL_TAG = "finalized";
-/** The tag of a deposit's own note's newest read (pool.ts `newest`): never kept. */
+/** The tag every root, time and epoch block is read at (the newest block both RPCs agree on); never kept. */
 export const EVM_NEWEST_TAG = "latest";
 /** The first eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
 export const EVM_LOG_PAGE_BLOCKS = 10_000n;
@@ -315,7 +335,7 @@ async function readLogs(rpc: EvmRpc, k: number, pool: string, from: bigint, to: 
   return out;
 }
 
-/** What a trees() call may ask beyond the cut: the newest root of a deposit's own note, read at EVM_NEWEST_TAG. */
+/** What a trees() call may ask beyond the cut: a deposit's own note's newest root, read like every other read. */
 export type EvmTreesOpts = { newest?: boolean };
 
 /** The sync's read at one anchor: every leaf event both RPCs agree on up to it, checked against the pool's views. */
@@ -364,7 +384,7 @@ const depthOf = (size: number): number => {
 /**
  * The pool's tree sync on two RPCs. Every leaf event read at an EVM_POOL_TAG anchor on both RPCs, the same on both and
  * matching the pool's views at the anchor, is kept: it can never change. Each round reads only past what it holds. A
- * newest read (EVM_NEWEST_TAG) is checked the same way and is never kept. Rounds run one at a time.
+ * tail past the finalized block is read again on every round and never kept. Rounds run one at a time.
  */
 export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   checkEvmRpcs(a.rpcs);
@@ -422,39 +442,54 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     return x.timestamp;
   }
 
-  /** One round at `at`: the anchor, the pool's views there, then the logs past what is held, all on both RPCs. */
-  async function round(at: string, keep: boolean, signal?: AbortSignal): Promise<Round & { stateTree: VaultTree; labelTree: VaultTree }> {
+  /**
+   * One round: the finalized anchor, the newest anchor, the pool's views at the newest, then the logs past what is
+   * held up to the newest, all on both RPCs. Only once the trees built from them are the pool's at the newest anchor
+   * does the cache take the leaves up to the finalized anchor; the tail is read again on the next round.
+   */
+  async function round(signal?: AbortSignal): Promise<Round & { stateTree: VaultTree; labelTree: VaultTree }> {
     if (!checked) {
       const ids = await both(rpcs, async (rpc, k) => qty(await rpc("eth_chainId", []), `rpc ${k} eth_chainId`), signal);
       if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${a.pin.network}'s ${chainId}`);
     }
-    const anchor = await anchorAt(at, signal);
-    if (anchor.number < heldTo) return lag(`the ${at} block ${anchor.number} is below the ${heldTo} already read`);
+    const fin = await anchorAt(EVM_POOL_TAG, signal);
+    if (fin.number < heldTo) return lag(`the ${EVM_POOL_TAG} block ${fin.number} is below the ${heldTo} already read`);
+    const anchor = await anchorAt(EVM_NEWEST_TAG, signal);
+    if (anchor.number < fin.number) return lag(`the newest agreed block ${anchor.number} is below the ${EVM_POOL_TAG} ${fin.number}`);
     // the views first: a pruning node keeps only recent state
     if (!checked && (await agreed(VIEWS.SCOPE, anchor.hash, "SCOPE()", signal)) !== scope) throw new Error(`SCOPE(): not the scope of ${pool} on ${a.pin.network}`);
     const root = await agreed(VIEWS.currentRoot, anchor.hash, "currentRoot()", signal);
     const size = await agreed(VIEWS.currentTreeSize, anchor.hash, "currentTreeSize()", signal);
     const labelRoot = await agreed(VIEWS.currentLabelRoot, anchor.hash, "currentLabelRoot()", signal);
     const labelSize = await agreed(VIEWS.currentLabelTreeSize, anchor.hash, "currentLabelTreeSize()", signal);
+    // the logs are read by range, not at a hash: a reorg between the views and the logs gives a tail of another chain
+    // on one RPC or both. That is a retry, told apart from a lie by the newest anchor's height holding another hash now.
+    const refuse = async (why: string): Promise<never> => {
+      const now = await both(rpcs, (rpc, k) => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), signal);
+      if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
+      throw new Error(why);
+    };
     let fresh: Ev[] = [];
     if (anchor.number > heldTo) {
       const [x, y] = await both(rpcs, (rpc, k) => readLogs(rpc, k, pool, heldTo + 1n, anchor.number, page, signal), signal);
       for (let i = 0; i < Math.max(x.length, y.length); i++)
-        if (x[i]?.bytes !== y[i]?.bytes) throw new Error(`the two RPCs differ at log ${held.length + i} (blocks ${heldTo + 1n}..${anchor.number})`);
-      for (const e of x) if (e.block === anchor.number && e.blockHash !== anchor.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
+        if (x[i]?.bytes !== y[i]?.bytes) await refuse(`the two RPCs differ at log ${held.length + i} (blocks ${heldTo + 1n}..${anchor.number})`);
+      for (const e of x)
+        for (const b of [fin, anchor]) if (e.block === b.number && e.blockHash !== b.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${b.hash}`);
       fresh = x;
     }
     const events = [...held, ...fresh];
     const stateTree = new VaultTree(events.map((e) => e.state));
     const labels = events.flatMap((e) => (e.label === null ? [] : [e.label]));
     const labelTree = new VaultTree(labels);
-    if (BigInt(stateTree.size) !== size || (stateTree.root ?? 0n) !== root) throw new Error(`the state tree from the logs (${stateTree.size} leaves) is not the pool's at ${anchor.hash} (${size})`);
-    if (BigInt(labelTree.size) !== labelSize || (labelTree.root ?? 0n) !== labelRoot) throw new Error(`the label tree from the logs (${labelTree.size} leaves) is not the pool's at ${anchor.hash} (${labelSize})`);
+    const wrong =
+      BigInt(stateTree.size) !== size || (stateTree.root ?? 0n) !== root ? `the state tree from the logs (${stateTree.size} leaves) is not the pool's at ${anchor.hash} (${size})`
+      : BigInt(labelTree.size) !== labelSize || (labelTree.root ?? 0n) !== labelRoot ? `the label tree from the logs (${labelTree.size} leaves) is not the pool's at ${anchor.hash} (${labelSize})`
+      : null;
+    if (wrong !== null) await refuse(wrong);
     checked = true;
-    if (keep) {
-      held = events;
-      heldTo = anchor.number;
-    }
+    held = events.filter((e) => e.block <= fin.number);
+    heldTo = fin.number;
     return { anchor, events, stateTree, labelTree };
   }
 
@@ -473,9 +508,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   return {
     trees(beforeMs, signal, opts) {
       if (typeof beforeMs !== "bigint" || beforeMs <= 0n) return Promise.reject(new Error("beforeMs: a bigint above 0"));
-      const newest = opts?.newest === true;
+      // a deposit's own note (opts.newest) reads the same newest agreed block as every epoch read
       return serial(() => retryLag(async () => {
-        const r = await round(newest ? EVM_NEWEST_TAG : EVM_POOL_TAG, !newest, signal);
+        const r = await round(signal);
         // every leaf under the cut is in only once the anchor's time reached beforeMs; later blocks' times are too
         if (r.anchor.timestamp * 1000n < beforeMs) lag(`the anchor ${r.anchor.number} (${r.anchor.timestamp * 1000n} ms) has not reached ${beforeMs}`);
         const n = await cutOf(r.events, beforeMs, signal);
@@ -496,25 +531,25 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     depthAt(block, signal) {
       if (typeof block !== "bigint" || block < 0n) return Promise.reject(new Error("block: a block number"));
       return serial(() => retryLag(async () => {
-        const r = await round(EVM_POOL_TAG, true, signal);
-        if (r.anchor.number < block) lag(`the ${EVM_POOL_TAG} block ${r.anchor.number} is below block ${block}`);
+        const r = await round(signal);
+        if (r.anchor.number < block) lag(`the newest agreed block ${r.anchor.number} is below block ${block}`);
         return depthOf(r.events.filter((e) => e.block <= block).length);
       }, sleep, signal));
     },
   };
 }
 
-/** The pool's time: the lower of two RPCs' EVM_POOL_TAG block times, ms. */
+/** The pool's time: the lower of two RPCs' EVM_NEWEST_TAG block times, ms (a finalized block lags past a life). */
 export async function evmNow(rpcs: readonly [EvmRpc, EvmRpc], signal?: AbortSignal): Promise<bigint> {
   checkEvmRpcs(rpcs);
-  const [x, y] = await both(rpcs, (rpc, k) => getBlock(rpc, EVM_POOL_TAG, `rpc ${k} ${EVM_POOL_TAG} block`), signal);
-  if (x === null || y === null) throw new Error(`an RPC has no ${EVM_POOL_TAG} block`);
+  const [x, y] = await both(rpcs, (rpc, k) => getBlock(rpc, EVM_NEWEST_TAG, `rpc ${k} ${EVM_NEWEST_TAG} block`), signal);
+  if (x === null || y === null) throw new Error(`an RPC has no ${EVM_NEWEST_TAG} block`);
   return (x.timestamp < y.timestamp ? x.timestamp : y.timestamp) * 1000n;
 }
 
 /**
  * The epoch's first block: the first whose timestamp * 1000 is at or after `epochStartMs`, found on RPC 0 below its
- * EVM_POOL_TAG block, then it and the block before it read on both RPCs, one hash each.
+ * EVM_NEWEST_TAG block, then it and the block before it read on both RPCs, one hash each.
  */
 export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartMs: bigint, signal?: AbortSignal): Promise<EvmBlock> {
   checkEvmRpcs(rpcs);
@@ -524,8 +559,8 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
     return b;
   };
   const after = (b: EvmBlock) => b.timestamp * 1000n >= epochStartMs;
-  let hi = await at(EVM_POOL_TAG);
-  if (!after(hi)) return lag(`the ${EVM_POOL_TAG} block ${hi.number} is before ${epochStartMs}`);
+  let hi = await at(EVM_NEWEST_TAG);
+  if (!after(hi)) return lag(`the ${EVM_NEWEST_TAG} block ${hi.number} is before ${epochStartMs}`);
   let lo: EvmBlock | null = null;
   for (let step = 1n; hi.number > 0n; step *= 2n) {
     signal?.throwIfAborted();
@@ -557,7 +592,7 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
 export type EvmFeeAnswer = { chain: string; network: string; pool: string; fee_recipient: string; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 /**
- * The epoch fee's formula, M356 (4) and M357 (3): max(floor, ceilStep(2 x (G(depth) x basefee + the L1 fee))), G the
+ * Until card evm-pool-fee-kit makes it the kit's constant (M371 (2)). The epoch fee's formula, M356 (4) and M357 (3): max(floor, ceilStep(2 x (G(depth) x basefee + the L1 fee))), G the
  * kit's evmPoolGas. It is the kit's one definition, which the helper imports too (M356 (6)); the kit on main does not
  * export it yet (card helper-pool-senders holds G), so the caller passes the kit's function. The device reads every
  * input itself: the epoch's first block (both RPCs) and the tree depth at it (the leaves both RPCs agree on).
