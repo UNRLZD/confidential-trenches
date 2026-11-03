@@ -9,7 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
-import { SOLANA_RELEASE_COST } from "../../apps/helper/src/pool/fee.ts";
+import { solanaPoolPriorityBudget, solanaPoolReleaseCost } from "@blindfill/kit";
 import { b58decode, b58encode, COST_MIN, judge, plant, PLANTS, read } from "./helper-pool-senders.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +42,7 @@ test("made from the good run: a planted transaction carried, two fees, a fee und
     assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.asked !== asked) }).ok, false, `${asked} missing`);
     assert.equal(judge(edit(g, asked, (x) => ({ ...x, status: 200, body: '{"signature":"x"}' }))).ok, false, `${asked} carried`);
   }
-  assert.equal(COST_MIN, SOLANA_RELEASE_COST, "the check's floor is the helper's");
+  assert.equal(COST_MIN, solanaPoolReleaseCost({ lamportsPerByte: 5_080n, factor: 1n }), "the check's floor is the kit's release cost at mainnet rent");
 });
 
 test("plant() builds what the helper's checks read: each plant gets its own code from the bytes alone, as is: ok", () => {
@@ -51,7 +51,7 @@ test("plant() builds what the helper's checks read: each plant gets its own code
   const fee = BigInt(f.fee);
   const nowMs = 1_800_000_000_000;
   const at = (wire) => {
-    const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee, nowMs });
+    const c = checkSolanaPoolTx(new Uint8Array(wire), { ...cfg, fee, budget: solanaPoolPriorityBudget({ lamportsPerByte: 5_080n, factor: 1n }, fee), nowMs });
     return c.ok ? "ok" : c.code;
   };
   for (const [asked, code] of PLANTS) assert.equal(at(asked === "fee_off" ? plant({ ...cfg, relayFee: fee + 100_000n, nowMs }) : plant({ ...cfg, relayFee: fee, kind: asked, nowMs })), code, asked);

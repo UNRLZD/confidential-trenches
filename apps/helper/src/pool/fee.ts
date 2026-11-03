@@ -3,39 +3,20 @@
 // an epoch carries the same relay_fee and no fee tells one user's releases apart. The send routes refuse a release
 // whose relay_fee is not the fee published for its epoch (./solana.ts).
 //
-// The fee is the host's (POOL_SOLANA_FEE_<CLUSTER>), rounded up to POOL_FEE_STEP, and it is the same in every epoch of
-// one running release: no caller, request or load moves it, so the answer for an epoch never differs between callers.
-// It must cover the fee payer's cost of the average release (SOLANA_RELEASE_COST, M352 (1)); a fee under it stops the
-// helper at start. The one release in 1,024 whose change note opens a page costs the fee payer 731,520 more, about 714
-// a release on average, which the 100,000 step's rounding carries; charging every release that worst case would
-// overcharge the other 1,023.
+// The fee is the kit's one definition, solanaPoolFee(rent) (M355 (2)): the release's cost (solanaPoolReleaseCost: the
+// spent mark's rent with its 8-byte value, the change note's page entry, two signatures; 1,066,640 at mainnet rent)
+// rounded up to the 100,000 step, plus two steps: 1,300,000. The host sets it (POOL_SOLANA_FEE_<CLUSTER>) and the helper
+// starts only when it equals the kit's number for the rent both providers read at start. It is the same in every epoch
+// of one running release, so the answer for an epoch never differs between callers. A priority fee W sets is carried up
+// to solanaPoolPriorityBudget (the fee less the cost and the page reserve, 715 a release, so the one release in 1,024
+// whose change note opens a page is paid for by the others).
+
+import { SOLANA_POOL_FEE_STEP, solanaPoolFee, type SolanaRent } from "@blindfill/kit";
 
 /** The epoch, ms of chain time (M350 (1)). */
 export const POOL_EPOCH_MS = 60_000;
-/** The coarse step every Solana fee is rounded up to, lamports [design: 0.0001 SOL, so a fee change is a visible step]. */
-export const POOL_FEE_STEP = 100_000n;
-
-/**
- * Mainnet rent, read on two RPCs on 2 Nov 2026 by card pool-sol-core (contracts/pool-solana/src/release.rs row 8):
- * 650,240 lamports for an empty account, 5,080 per byte, so rent(n) = (128 + n) x 5,080. Devnet and testnet share the
- * same rent parameters.
- */
-export const SOLANA_RENT_PER_BYTE = 5_080n;
-export const SOLANA_ACCOUNT_OVERHEAD = 128n;
-export const solanaRent = (bytes: number): bigint => (SOLANA_ACCOUNT_OVERHEAD + BigInt(bytes)) * SOLANA_RENT_PER_BYTE;
-/** A page entry (leaf, root, chain time) and a page's header, bytes (contracts/pool-solana/src/state.rs). */
-export const SOLANA_PAGE_ENTRY = 72;
-export const SOLANA_PAGE_HEADER = 16;
-/** Lamports per signature, and the two signatures of a pool transaction (the fee payer and W). */
-export const SOLANA_SIGNATURE_FEE = 5_000n;
-/**
- * The fee payer's cost of a release before any priority fee: the spent mark (an empty account), the change note's page
- * entry (72 x 5,080) and two signatures: 650,240 + 365,760 + 10,000 = 1,026,000 lamports (release.rs row 8's figure).
- * The relay fee is held at or above this plus the transaction's priority fee (./solana.ts).
- */
-export const SOLANA_RELEASE_COST = solanaRent(0) + BigInt(SOLANA_PAGE_ENTRY) * SOLANA_RENT_PER_BYTE + 2n * SOLANA_SIGNATURE_FEE;
-/** The same when the change note opens a page (16 + 72 bytes): 1,757,520. The helper carries it at the published fee. */
-export const SOLANA_PAGE_RELEASE_COST = solanaRent(0) + solanaRent(SOLANA_PAGE_HEADER + SOLANA_PAGE_ENTRY) + 2n * SOLANA_SIGNATURE_FEE;
+/** The coarse step every Solana fee is on: the kit's SOLANA_POOL_FEE_STEP (0.0001 SOL). */
+export const POOL_FEE_STEP = SOLANA_POOL_FEE_STEP;
 
 export type PoolFeeAnswer = {
   chain: "solana";
@@ -50,19 +31,18 @@ export type PoolFeeAnswer = {
   step: string;
 };
 
-/** A fee from the host: whole lamports, refused under a release's cost, then rounded up to the step. */
-export function solanaPoolFee(raw: string, what: string): bigint {
+/**
+ * The host's configured fee (POOL_SOLANA_FEE_<CLUSTER>), held to the kit's one definition (M355 (2), M356 (6)): it must
+ * be exactly solanaPoolFee(rent) for the rent both providers read at start, or the helper does not start. The device
+ * computes the same number itself and refuses any other, so no configured value can mark one user by fee.
+ */
+export function solanaConfiguredFee(raw: string, rent: SolanaRent, what: string): bigint {
   if (!/^[1-9][0-9]{0,18}$/.test(raw)) throw new Error(`${what} must be a whole number of lamports`);
-  if (BigInt(raw) < SOLANA_RELEASE_COST) throw new Error(`${what} must cover a release's cost, ${SOLANA_RELEASE_COST} lamports`);
-  return ((BigInt(raw) + POOL_FEE_STEP - 1n) / POOL_FEE_STEP) * POOL_FEE_STEP;
+  const want = solanaPoolFee(rent);
+  if (BigInt(raw) !== want) throw new Error(`${what} must be the kit's fee for this rent, ${want} lamports`);
+  return want;
 }
 
 /** The start of the epoch holding `ms`. */
 export const epochStartOf = (ms: number): number => ms - (ms % POOL_EPOCH_MS);
 
-/**
- * M356 (1): the helper refuses a release whose deadline is under now plus this margin, longer than a blockhash lives
- * (about 60 to 90 s), so a send it accepts can still land. The kit's SOLANA_POOL_SEND_MARGIN_MS (card
- * notes-per-pool-sol fold 3, pool-buy.ts) replaces this definition when that card lands on main: one value, the kit's.
- */
-export const SOLANA_POOL_SEND_MARGIN_MS = 90_000n;

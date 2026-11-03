@@ -221,7 +221,8 @@ export function handler(
         const nowMs = now();
         if (epochs.length === 1 && (!/^[1-9][0-9]{0,15}$/.test(epochs[0]!) || Number(epochs[0]) % POOL_EPOCH_MS !== 0 || Number(epochs[0]) > nowMs || Number(epochs[0]) < nowMs - POOL_LIFE_MAX_MS)) return send(404, { error: { code: "not_found" } }, cors(req));
         // a Solana fee is the host's; an EVM fee is read from the epoch's first block (null: no block in it yet)
-        void Promise.resolve(pool.fee(epochs.length === 1 ? Number(epochs[0]) : nowMs))
+        void Promise.resolve()
+          .then((): unknown => pool.fee(epochs.length === 1 ? Number(epochs[0]) : nowMs))
           .then((a) => (a === null ? send(404, { error: { code: "not_found" } }, cors(req)) : send(200, a, cors(req))))
           .catch(() => (res.headersSent ? res.destroy() : send(503, { error: { code: "upstream" } }, cors(req))));
         return;
@@ -418,12 +419,12 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   });
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, undefined, pools),
   );
   server.listen(port);
   // the relayers start with the helper: a restart resends their open sends and settles before any request
@@ -449,7 +450,10 @@ if (import.meta.main) {
     // each network's carry is held by its own watch only
     const withdraw = withdrawSenderFromEnv(process.env, fee, statusesOf(watches));
     const bind = bindSenderFromEnv(process.env, watches);
-    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind); // warms both relayers
+    // the Solana pool senders start only when the rent both providers read gives the kit's fee (pool/solana.ts ready)
+    const pools = solanaPoolSendersFromEnv(process.env);
+    await Promise.all([...pools.values()].map((p) => p.ready));
+    server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, undefined, bind, pools); // warms both relayers
     lists.warm();
   } catch (e) {
     console.error(`helper: ${(e as Error).message}`);

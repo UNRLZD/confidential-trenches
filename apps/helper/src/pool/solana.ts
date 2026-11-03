@@ -18,11 +18,11 @@
 //                       program, another account of any instruction, or an account a tag 3 inner instruction names
 //                       (lookup tables cannot name it: the runtime refuses a key loaded twice);
 //   fee_off             relay_fee is not the fee this helper publishes for the pool;
-//   fee_below_cost      relay_fee under the fee payer's cost of a release (SOLANA_RELEASE_COST, 1,026,000) plus the
-//                       priority fee W set; a release whose change opens a page costs 731,520 more and is carried;
+//   fee_below_cost      the priority fee W set (CU limit x price) over the kit's solanaPoolPriorityBudget: the fee
+//                       less the release's cost and the page reserve (M355, M356 (5));
 //   no_cu_limit         a compute unit price without a compute unit limit (the runtime's default limit is not ours
 //                       to guess, so the priority fee would be unbounded by what the helper priced);
-//   deadline_near       the release's deadline is under now plus SOLANA_POOL_SEND_MARGIN_MS (M356 (1)): a send
+//   deadline_near       the release's deadline is under now plus the kit's SOLANA_POOL_SEND_MARGIN_MS (M356 (1)): a send
 //                       that cannot land before it would only be a paid failure;
 //   inner_program       a tag 3 inner instruction invokes a program off the kit's SOLANA_POOL_STEP_PROGRAMS (helper
 //                       policy, M356 (1): a program W chose could fail on chain after passing the simulation);
@@ -38,6 +38,7 @@ import {
   SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_MAX_TX_BYTES,
+  SOLANA_POOL_SEND_MARGIN_MS,
   SOLANA_POOL_STEP_PROGRAMS,
   SOLANA_POOL_TAG3_MAX_INNER,
   SOLANA_POOL_TAG_RELEASE,
@@ -47,11 +48,14 @@ import {
   solanaDecodePoolRelease,
   solanaDecodeTransaction,
   solanaJsonRpc,
+  readSolanaRent,
   solanaPoolAccount,
+  solanaPoolPriorityBudget,
   solanaResolveKeys,
   solanaTableIsActive,
   type SolanaLookupTable,
   type SolanaMessage,
+  type SolanaRent,
   type SolanaRpc,
   type SolanaSendPath,
   type SolanaSignedTx,
@@ -59,7 +63,7 @@ import {
 import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
 import { oncePerNullifier } from "./once.ts";
-import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, SOLANA_RELEASE_COST, solanaPoolFee, type PoolFeeAnswer } from "./fee.ts";
+import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, solanaConfiguredFee, type PoolFeeAnswer } from "./fee.ts";
 
 /** POST /v1/pool/solana/send's body limit: a 1,232-byte transaction in base64 and the JSON around it. */
 export const POOL_SOLANA_BODY_MAX = 4_096;
@@ -148,7 +152,7 @@ export type SolanaPoolChecked = {
 export type SolanaPoolCheck = { ok: true; tx: SolanaPoolChecked } | { ok: false; status: number; code: PoolSendCode; detail?: string };
 
 /** Every check before any read, on the bytes as received and the caller's clock. Pure: no read. */
-export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool: string; feePayer: string; fee: bigint; nowMs: number }): SolanaPoolCheck {
+export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool: string; feePayer: string; fee: bigint; budget: bigint; nowMs: number }): SolanaPoolCheck {
   const no = (code: PoolSendCode, detail?: string, status = 422): SolanaPoolCheck => ({ ok: false, status, code, ...(detail ? { detail } : {}) });
   if (wire.length > SOLANA_MAX_TX_BYTES) return no("bad_shape", "over 1,232 bytes", 400);
   let tx;
@@ -206,8 +210,8 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   if ([...p.innerAccounts, ...p.innerPrograms].some((i) => i >= pix.accounts.length)) return no("not_pool", "an inner index past the accounts");
 
   if (p.relayFee !== cfg.fee) return no("fee_off", `relay_fee ${p.relayFee}, published ${cfg.fee}`);
-  const cost = SOLANA_RELEASE_COST + priorityFee(price ?? 0n, limit ?? 0n); // a price comes with a limit (no_cu_limit)
-  if (p.relayFee < cost) return no("fee_below_cost", `relay_fee ${p.relayFee}, cost ${cost}`);
+  const priority = priorityFee(price ?? 0n, limit ?? 0n); // a price comes with a limit (no_cu_limit)
+  if (priority > cfg.budget) return no("fee_below_cost", `priority ${priority}, budget ${cfg.budget}`);
   if (p.deadlineMs < BigInt(cfg.nowMs) + SOLANA_POOL_SEND_MARGIN_MS) return no("deadline_near", `deadline ${p.deadlineMs}, now ${cfg.nowMs}`);
   // tag 3's inner programs, by their message index; a static one is checked now, a loaded one after its table's read
   const innerProgramIndexes = p.innerPrograms.map((i) => pix.accounts[i]!);
@@ -271,6 +275,8 @@ export type SolanaPoolSenderDeps = {
   memory?: number;
   /** The clock, ms; replaced in tests. */
   now?: () => number;
+  /** The rent, when the caller read it already (tests); else read on both providers at start. */
+  rent?: SolanaRent;
 };
 
 export type SolanaPoolSender = {
@@ -278,7 +284,10 @@ export type SolanaPoolSender = {
   readonly program: string;
   readonly pool: string;
   readonly feePayer: string;
-  /** GET /v1/pool/fee: the fee for the epoch holding `atMs`; the same for every caller. */
+  /** Settles once the Rent sysvar is read on both providers and the fee is the kit's for it; rejects otherwise, and the
+   * helper does not start (server.ts awaits it). */
+  readonly ready: Promise<void>;
+  /** GET /v1/pool/fee: the fee for the epoch holding `atMs`; the same for every caller. Throws before `ready`. */
   fee(atMs: number): PoolFeeAnswer;
   /** POST /v1/pool/solana/send for a parsed body. */
   carry(body: unknown): Promise<PoolSendAnswer>;
@@ -301,12 +310,25 @@ export function feePayerKey(secret: string): { seed: Uint8Array; address: string
   return { seed, address: base58(pub) };
 }
 
-export function solanaPoolSender(cfg: { cluster: string; program: string; feePayerSecret: string; fee: bigint }, deps: SolanaPoolSenderDeps): SolanaPoolSender {
+export function solanaPoolSender(cfg: { cluster: string; program: string; feePayerSecret: string; fee: string }, deps: SolanaPoolSenderDeps): SolanaPoolSender {
   const { seed, address: feePayer } = feePayerKey(cfg.feePayerSecret);
   const pool = solanaPoolAccount(cfg.program);
-  const fee = cfg.fee;
-  if (fee % POOL_FEE_STEP !== 0n) throw new Error("the fee is not on its step");
   const [a, b] = deps.providers;
+  // M356 (6): the fee and the priority budget from the kit's one definition, for the rent both providers read now
+  let fee: bigint | null = null;
+  let budget = 0n;
+  const take = (rent: SolanaRent) => {
+    fee = solanaConfiguredFee(cfg.fee, rent, `the ${cfg.cluster} pool fee`);
+    budget = solanaPoolPriorityBudget(rent, fee);
+  };
+  if (deps.rent) take(deps.rent);
+  // else read once, on the first ask (server.ts asks at start), so building a sender reads nothing
+  let readyP: Promise<void> | null = deps.rent ? Promise.resolve() : null;
+  const ready = (): Promise<void> => (readyP ??= readSolanaRent([a, b]).then(take));
+  const feeNow = (): bigint => {
+    if (fee === null) throw new Error("the pool fee is not read yet");
+    return fee;
+  };
   const send = deps.send ?? sendSolanaSet;
   const paths: readonly SolanaSendPath[] =
     deps.paths ??
@@ -331,6 +353,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     program: cfg.program,
     pool,
     feePayer,
+    get ready() {
+      return ready();
+    },
     fee: (atMs) => ({
       chain: "solana",
       cluster: cfg.cluster,
@@ -339,7 +364,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       fee_payer: feePayer,
       epoch_ms: POOL_EPOCH_MS,
       epoch_start_ms: epochStartOf(atMs),
-      fee: fee.toString(),
+      fee: feeNow().toString(),
       step: POOL_FEE_STEP.toString(),
     }),
     async carry(body) {
@@ -348,8 +373,15 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (typeof raw !== "string" || raw.length > 1_644 || !B64.test(raw)) return no(400, "bad_shape");
       const wire = new Uint8Array(Buffer.from(raw, "base64"));
       if (Buffer.from(wire).toString("base64") !== raw) return no(400, "bad_shape");
+      if (fee === null) {
+        try {
+          await ready();
+        } catch {
+          return no(503, "upstream");
+        }
+      }
       const at = now();
-      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee, nowMs: at });
+      const c = checkSolanaPoolTx(wire, { program: cfg.program, pool, feePayer, fee: feeNow(), budget, nowMs: at });
       if (!c.ok) return no(c.status, c.code, c.detail);
       const nf = c.tx.nullifier;
       const failed = failedIn.get(nf);
@@ -445,7 +477,8 @@ export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>
     const urls = rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[3]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u, fetchFn ? { fetch: fetchFn } : {})) as unknown as readonly [SolanaRpc, SolanaRpc];
-    const s = solanaPoolSender({ cluster, program: program!, feePayerSecret: key!, fee: solanaPoolFee(fee!, names[2]) }, { providers });
+    if (!/^[1-9][0-9]{0,18}$/.test(fee!)) throw new Error(`${names[2]} must be a whole number of lamports`);
+    const s = solanaPoolSender({ cluster, program: program!, feePayerSecret: key!, fee: fee! }, { providers });
     out.set(s.pool, s);
   }
   return out;

@@ -18,7 +18,8 @@ import {
   type SolanaRpc,
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import { POOL_EPOCH_MS, SOLANA_PAGE_RELEASE_COST, SOLANA_RELEASE_COST, solanaPoolFee } from "./fee.ts";
+import { solanaPoolFee, solanaPoolPageReserve, solanaPoolPriorityBudget, solanaPoolReleaseCost, solanaRentMin, type SolanaRent } from "@blindfill/kit";
+import { POOL_EPOCH_MS, solanaConfiguredFee } from "./fee.ts";
 import { checkSolanaPoolTx, feePayerKey, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
 
 const testKey = (name: string) => {
@@ -36,8 +37,13 @@ const TIP_TO = testKey("TIP_TO").address;
 const TO = testKey("TO").address;
 const BLOCKHASH = testKey("BLOCKHASH").address;
 const FEE = 2_000_000n;
+/** A test rent whose kit fee is FEE: cost (128 + 8 + 72) x 8,500 + 10,000 = 1,778,000, up to 1,800,000, plus two steps. */
+const TEST_RENT: SolanaRent = { lamportsPerByte: 8_500n, factor: 1n };
+/** Mainnet's, read 2026-11-02 on two providers (the kit's pool-buy.ts): 5,080 a byte, factor 1.0. */
+const MAINNET: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
+const BUDGET = solanaPoolPriorityBudget(TEST_RENT, FEE);
 const NOW = 1_800_000_000_000; // 270 s before the releases' deadline
-const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE, nowMs: NOW };
+const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE, budget: BUDGET, nowMs: NOW };
 
 const field = (n: number): Uint8Array => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
 const release = (relayFee = FEE, nullifier = 2, deadlineMs = 1_800_000_270_000n): SolanaPoolRelease => ({
@@ -154,14 +160,11 @@ test("the fee payer named anywhere but the payer and the pool's account 2 is ref
 test("a relay fee off the published one is refused (fee_off); one under the cost with W's priority fee too (fee_below_cost)", () => {
   assert.equal(refusal(build({ fee: FEE + 100_000n })), "fee_off");
   assert.equal(refusal(build({ fee: FEE - 100_000n })), "fee_off");
-  // the fee leaves 2,000,000 - 1,026,000 = 974,000 for W's priority fee: 400,000 CU at 2,435,000 micro-lamports is
-  // exactly that; one micro-lamport more per CU rounds up past it
-  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_000n)] })), "ok");
-  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_001n)] })), "fee_below_cost");
-  // no limit given: the runtime's 200,000 per instruction
-  // 400,000 CU: the room is 2,000,000 - 1,026,000 = 974,000 lamports, so 2,435,000 micro-lamports a CU at most
-  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_001n)] })), "fee_below_cost");
-  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(2_435_000n)] })), "ok");
+  // the kit's budget: the fee less the cost and the page reserve; 400,000 CU at the highest price whose fee fits is
+  // carried, one micro-lamport more per CU rounds up past it
+  const top = (BUDGET * 1_000_000n) / 400_000n;
+  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(top)] })), "ok");
+  assert.equal(refusal(build({ pre: [cuLimit(400_000), cuPrice(top + 1n)] })), "fee_below_cost");
 });
 
 test("not a v0 transaction of the fee payer and W, or a fee payer slot already filled, is bad_shape", () => {
@@ -188,13 +191,14 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
     { url: `https://stub.invalid/${Math.random()}` },
   );
 }
-function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number } = {}) {
+function sender(simErr: unknown = null, calls: Calls = [], sent: Uint8Array[] = [], o: { fee?: bigint; ends?: () => Promise<string>; memory?: number; now?: () => number; rent?: SolanaRent } = {}) {
   return solanaPoolSender(
-    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: o.fee ?? FEE },
+    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(o.fee ?? FEE) },
     {
       providers: [rpcStub(simErr, calls), rpcStub()],
       ...(o.memory ? { memory: o.memory } : {}),
       now: o.now ?? (() => NOW),
+      rent: o.rent ?? TEST_RENT,
       send: (set) => {
         sent.push(set[0]!.wire);
         const sig = base58(set[0]!.wire.subarray(1, 65));
@@ -247,18 +251,20 @@ test("every refusal of the checks reaches the route before any read", async () =
   assert.equal(sent.length, 0);
 });
 
-test("the published fee: on its step, the same for every caller in every epoch, never under a release cost", () => {
+test("the published fee: the kit's for the rent read, the same for every caller in every epoch; any other refuses to start", () => {
   const s = sender();
   const a = s.fee(1_800_000_012_345);
   assert.deepEqual(a, { chain: "solana", cluster: "devnet", program: PROGRAM, pool: POOL, fee_payer: FP.address, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: 1_800_000_000_000, fee: "2000000", step: "100000" });
   assert.equal(s.fee(1_800_000_060_000).fee, a.fee);
-  assert.equal(solanaPoolFee("1900001", "x"), 2_000_000n);
-  assert.equal(SOLANA_RELEASE_COST, 1_026_000n, "release.rs row 8: spent mark, page entry, two signatures");
-  assert.equal(SOLANA_PAGE_RELEASE_COST - SOLANA_RELEASE_COST, 731_520n, "a page's opening costs 731,520 more");
-  assert.equal(solanaPoolFee("1026000", "x"), 1_100_000n, "a release's cost, rounded up to the step");
-  assert.throws(() => solanaPoolFee("1025999", "x"), /cover a release's cost/);
-  assert.throws(() => solanaPoolFee("1000000", "x"), /cover a release's cost/);
-  assert.throws(() => solanaPoolFee("0", "x"), /whole number/);
+  // M355 at mainnet rent: cost 1,066,640, fee 1,300,000, page reserve 715, priority budget 232,645
+  assert.equal(solanaPoolReleaseCost(MAINNET), 1_066_640n);
+  assert.equal(solanaPoolFee(MAINNET), 1_300_000n);
+  assert.equal(solanaPoolPageReserve(MAINNET), 715n);
+  assert.equal(solanaPoolPriorityBudget(MAINNET, 1_300_000n), 232_645n);
+  assert.equal(solanaConfiguredFee("1300000", MAINNET, "x"), 1_300_000n);
+  for (const off of ["1200000", "1400000", "1299999", "2000000"]) assert.throws(() => solanaConfiguredFee(off, MAINNET, "x"), /the kit's fee for this rent, 1300000/, off);
+  assert.throws(() => solanaConfiguredFee("0", MAINNET, "x"), /whole number/);
+  assert.throws(() => sender(null, [], [], { fee: 1_300_000n }), /the kit's fee/, "a fee off the kit's for the rent stops the sender");
 });
 
 test("the fee payer's key: 64 bytes whose public half is its seed's", () => {
@@ -275,8 +281,8 @@ test("the LiteSVM-landed tag 3 transaction, as W sent it, is carried, and the he
   const sent: Uint8Array[] = [];
   const fpSecret = base58(Uint8Array.from([...seedOf(f.fee_payer_seed), ...ed25519.getPublicKey(seedOf(f.fee_payer_seed))]));
   const s = solanaPoolSender(
-    { cluster: "devnet", program: f.program, feePayerSecret: fpSecret, fee: BigInt(f.relay_fee) },
-    { providers: [rpcStub(), rpcStub()], send: (set) => (sent.push(set[0]!.wire), { signatures: ["x"], done: Promise.resolve({ txs: [] }), stop() {} }) },
+    { cluster: "devnet", program: f.program, feePayerSecret: fpSecret, fee: f.relay_fee },
+    { providers: [rpcStub(), rpcStub()], rent: TEST_RENT, send: (set) => (sent.push(set[0]!.wire), { signatures: ["x"], done: Promise.resolve({ txs: [] }), stop() {} }) },
   );
   assert.equal(s.pool, f.pool);
   assert.equal(s.feePayer, f.fee_payer);
@@ -329,18 +335,20 @@ test("GET /v1/pool/fee answers the pool's epoch fee; POST /v1/pool/solana/send c
 
 // ---- M352: the average release's fee carries a page-opening one; one send per nullifier ----
 
-test("at the lowest fee (1,100,000), a release whose change opens a page is carried: simulated, signed, sent", async () => {
+test("at mainnet's fee (1,300,000), a release whose change opens a page is carried: simulated, signed, sent", async () => {
   const calls: Calls = [];
   const sent: Uint8Array[] = [];
-  const s = sender(null, calls, sent, { fee: 1_100_000n });
-  const wire = build({ fee: 1_100_000n, stateSize: 1024, pre: [cuLimit(400_000)] });
-  const opens = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, release(1_100_000n), 1024)[6]!.key;
-  assert.notEqual(opens, solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, release(1_100_000n), 1023)[6]!.key, "1,024 is page 1's first entry");
+  const s = sender(null, calls, sent, { fee: 1_300_000n, rent: MAINNET });
+  const wire = build({ fee: 1_300_000n, stateSize: 1024, pre: [cuLimit(400_000)] });
+  const opens = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, release(1_300_000n), 1024)[6]!.key;
+  assert.notEqual(opens, solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, release(1_300_000n), 1023)[6]!.key, "1,024 is page 1's first entry");
   const a = await s.carry(body(wire));
   assert.equal(a.status, 200, JSON.stringify(a.body));
   assert.equal(calls.filter((c) => c.method === "simulateTransaction").length, 1);
   assert.equal(sent.length, 1);
-  assert.ok(1_100_000n < SOLANA_PAGE_RELEASE_COST, "the fee is under this release's own cost, and it is carried");
+  // the page's opening is paid by the 715-lamport reserve every release keeps out of W's priority budget
+  assert.ok(1_300_000n < solanaPoolReleaseCost(MAINNET) + solanaRentMin(MAINNET, 16 + 72), "the fee is under this release's own cost, and it is carried");
+  assert.ok(solanaPoolPageReserve(MAINNET) * 1_024n >= solanaRentMin(MAINNET, 16), "1,024 reserves pay a page's opening");
 });
 
 test("one send per nullifier: a repeat in flight or landed, even as other bytes, gets the first signature and sends nothing", async () => {

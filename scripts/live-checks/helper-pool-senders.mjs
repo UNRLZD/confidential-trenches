@@ -15,7 +15,7 @@
 // never moves money. It passes only when:
 //   - the fee answers 200 with exactly the kit's 10 fields, the pool and program asked, a fee_payer address, a 60 s
 //     epoch with its start on the grid, a fee on its 100,000-lamport step and at least a release's worst cost
-//     (1,026,000 lamports, a release's cost, apps/helper/src/pool/fee.ts, M352 (1)), and the same fee for both callers;
+//     (1,066,640 lamports, the kit's solanaPoolReleaseCost at mainnet rent, M355 (3)), and the same fee for both callers;
 //   - every planted transaction answers 422 with its own code (PLANTS);
 //   - every answer carries a full-sha X-Helper-Commit, and APP_HOST is echoed only to the read that sent it.
 //   node scripts/live-checks/helper-pool-senders.mjs --pool <address> [--base <url>] [--record <file>]
@@ -27,7 +27,7 @@ import { writeFileSync } from "node:fs";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 const FIELDS = ["chain", "cluster", "program", "pool", "fee_payer", "epoch_ms", "epoch_start_ms", "fee", "step"];
-export const COST_MIN = 1_026_000n;
+export const COST_MIN = 1_066_640n; // the kit's solanaPoolReleaseCost at mainnet rent (M355 (3))
 /** Each planted transaction and the refusal it must get. */
 export const PLANTS = [
   ["changed", "bad_signature"],

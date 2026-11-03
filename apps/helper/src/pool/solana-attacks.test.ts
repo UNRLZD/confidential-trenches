@@ -24,6 +24,7 @@ import {
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { POOL_EPOCH_MS } from "./fee.ts";
+import { solanaPoolPriorityBudget, type SolanaRent } from "@blindfill/kit";
 import { checkSolanaPoolTx, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
 
 const key = (n: string) => {
@@ -39,9 +40,10 @@ const ATTACKER = key("ATTACKER_PROGRAM").address; // a program W deployed: passe
 const TO = key("TO").address;
 const BH = key("BH").address;
 const TABLE = key("TABLE").address;
-const FEE = 1_100_000n;
+const MAINNET: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
+const FEE = 1_300_000n; // the kit's fee at mainnet rent (M355)
 const NOW = 1_800_000_000_000;
-const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE, nowMs: NOW };
+const CFG = { program: PROGRAM, pool: POOL, feePayer: FP.address, fee: FEE, budget: solanaPoolPriorityBudget(MAINNET, FEE), nowMs: NOW };
 const u32 = (n: number) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
 const u64 = (n: bigint) => Array.from({ length: 8 }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn));
 const cuLimit = (n: number): SolanaApiInstruction => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([2, ...u32(n)]) });
@@ -125,10 +127,11 @@ const stub = (calls: Calls, tables: Record<string, Uint8Array | null> = {}): Sol
   );
 function sender(o: { a?: Calls; tablesA?: Record<string, Uint8Array | null>; tablesB?: Record<string, Uint8Array | null>; sent?: Uint8Array[]; end?: string; now?: () => number } = {}) {
   return solanaPoolSender(
-    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: FEE },
+    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
     {
       providers: [stub(o.a ?? [], o.tablesA), stub([], o.tablesB ?? o.tablesA)],
       now: o.now ?? (() => NOW),
+      rent: MAINNET,
       send: (set) => {
         o.sent?.push(set[0]!.wire);
         const sig = base58(set[0]!.wire.subarray(1, 65));
@@ -208,6 +211,14 @@ test("A4: 50 concurrent variants of one nullifier give one simulation and one se
   await Promise.all(variants.map((b) => s.carry(b)));
   assert.equal(sent.length, 1);
   assert.equal(calls.filter((c) => c === "simulateTransaction").length, 1);
+});
+
+test("A5: W's priority fee is held to the kit's budget, which keeps the 715-lamport page reserve (fee_below_cost)", () => {
+  const budget = solanaPoolPriorityBudget(MAINNET, FEE); // 1,300,000 - 1,066,640 - 715 = 232,645
+  assert.equal(budget, 232_645n);
+  const top = (budget * 1_000_000n) / 400_000n;
+  assert.equal(verdict(wire({ pre: [cuLimit(400_000), cuPrice(top)] })), "ok");
+  assert.equal(verdict(wire({ pre: [cuLimit(400_000), cuPrice(top + 1n)] })), "fee_below_cost");
 });
 
 test("A6: a compute unit price without a limit is refused before any read (no_cu_limit)", () => {
