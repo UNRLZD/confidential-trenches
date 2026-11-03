@@ -4,7 +4,9 @@
 // through evmPoolSender: chain id from both providers, the pending nonce, the gas price capped at fee / gas limit, the
 // signed type-2 transaction, eth_sendRawTransaction. Each mined transaction must read back from the sender, to the
 // pool, with input equal to the calldata received, status 1, consecutive nonces, maxFeePerGas x gas at most the fee;
-// the first nullifier sent again must answer its first hash and send nothing. The pool address holds no code here, so the call is
+// the first nullifier sent again must answer its first hash and send nothing. Each send passes the M356 checks on a real
+// node: the recipient's code read at pending and latest, then eth_call at pending with the gas and fee fields it signs
+// (anvil-grief.ts shows what they refuse). The pool address holds no code here, so the call is
 // accepted as is: this proves the send and the signature, not the pool's withdraw (pool-evm-core's forge tests do).
 // The sender key is a test key: sha256("helper-pool-senders/test-key/EVM_SENDER"), funded by anvil_setBalance.
 import { createHash } from "node:crypto";
@@ -14,7 +16,7 @@ import { epochStartOf } from "../../src/pool/fee.ts";
 const url = process.argv[2]!;
 const call = async (method: string, params: readonly unknown[]): Promise<any> => {
   const r = await (await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
-  if (r.error) throw new Error(JSON.stringify(r.error));
+  if (r.error) throw new Error(`RPC error ${r.error.code}: ${String(r.error.message).slice(0, 120)}`); // the kit client's wording
   return r.result;
 };
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
