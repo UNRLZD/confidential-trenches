@@ -5,7 +5,8 @@
 // the prover's setup files at assets/zk/<sha256>.<ext> and their licences (scripts/build-app.mjs copyServed, card
 // signpage-prover-host). The gate then reads the build's own _headers and runs the card's live check
 // (scripts/live-checks/signpage-skeleton.mjs) on the headers it sets for every path, checks the worker's own policy
-// rule (W:880), and reads every setup file back against its pin and the worker against a fresh build of the kit's;
+// rule (W:880) and the thread file's (card signpage-prover-threads), and reads every setup file back against its pin
+// and the worker and the thread file against a fresh build of the kit's;
 // any refusal stops here, before a token is read or a byte is uploaded.
 // --dry-run stops after the gate and keeps the build folder, so `wrangler pages dev` can serve it. The upload is
 // wrangler's `pages deploy`, at an exact version, run from an empty folder so no functions/ folder can ride along
@@ -18,11 +19,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
 import { WORKER_CSP, WORKER_PATH, ZK_CACHE } from "../../../scripts/live-checks/signpage-prover-host.mjs";
-import { proverWorkerSource } from "../../kit/src/prover/build.mjs";
+import { THREAD_CSP, THREAD_PATH } from "../../../scripts/live-checks/signpage-prover-threads.mjs";
+import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-release", "signpage-withdraw-form", "app-harness-signin-e2e"];
+export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "app-harness-signin-e2e"];
 // the arguments a check is run with after this deploy: signpage-release reads SIGN_HOST alone against this commit's
 // own build, and app-harness-signin-e2e SIGN_HOST's backdrop alone, so an APP_HOST that lags does not fail this deploy
 export const LIVE_ARGS = { "signpage-release": "--host sign", "app-harness-signin-e2e": "--host sign" };
@@ -33,11 +35,15 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
 
-// The whole _headers file, as an allow-list: these three rules, each exactly once, each setting exactly its own
+// The whole _headers file, as an allow-list: these four rules, each exactly once, each setting exactly its own
 // headers and removing none; any other rule, header or removal is refused. /* holds the site's policy (judged below by
-// signpage-skeleton's check); the worker's rule its own CSP (W:880), which Pages joins to /*'s; the setup files' rule
-// their one Cache-Control (vault.md 2.14).
-const EXACT = { [WORKER_PATH]: { "content-security-policy": WORKER_CSP }, "/assets/zk/*": { "cache-control": ZK_CACHE } };
+// signpage-skeleton's check); the worker's rule its own CSP (W:880) and the thread file's its own (card
+// signpage-prover-threads), each joined by Pages to /*'s; the setup files' rule their one Cache-Control (vault.md 2.14).
+const EXACT = {
+  [WORKER_PATH]: { "content-security-policy": WORKER_CSP },
+  [THREAD_PATH]: { "content-security-policy": THREAD_CSP },
+  "/assets/zk/*": { "cache-control": ZK_CACHE },
+};
 export const RULES = {
   "/*": ["content-security-policy", ...Object.keys(HEADERS)],
   ...Object.fromEntries(Object.entries(EXACT).map(([path, exact]) => [path, Object.keys(exact)])),
@@ -111,12 +117,14 @@ export function checkDir(dir) {
   return [...p, ...checkHeadersFile(readFileSync(join(dir, "_headers"), "utf8"))];
 }
 
-/** Problems with a build folder's prover files (empty = fine): the worker is the kit's build, the setup files are exactly the pinned six. */
+/** Problems with a build folder's prover files (empty = fine): the worker and the thread file are the kit's build, the setup files are exactly the pinned six. */
 export function checkProver(dir) {
   const p = [];
   const read = (f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f)) : null);
   const worker = read(WORKER_PATH.slice(1));
   if (!worker || !worker.equals(proverWorkerSource())) p.push(`${WORKER_PATH.slice(1)} is not the kit's prover worker build`);
+  const thread = read(THREAD_PATH.slice(1));
+  if (!thread || !thread.equals(proverThreadSource())) p.push(`${THREAD_PATH.slice(1)} is not the kit's prover thread build`);
   for (const e of SERVED) {
     const b = read(e.to);
     if (!b) p.push(`${e.to}: missing`);

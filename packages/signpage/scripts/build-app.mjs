@@ -3,20 +3,21 @@
 // public/app.js, and index.html with that file's sha384, since SIGN_HOST's Integrity-Policy blocks a script without
 // integrity metadata (public/_headers). It also writes public/prover-worker.js, the kit's prover worker as the kit's
 // build.mjs makes it (snarkjs 0.7.5's pinned browser build, then worker.js with the setup files' pins), unchanged: the
-// prover runs on SIGN_HOST only (card signpage-prover-host; vault.md 2.14, M304 D-8). The three files are committed,
+// prover runs on SIGN_HOST only (card signpage-prover-host; vault.md 2.14, M304 D-8), and public/prover-thread.js, the
+// one file that worker starts its threads from (the kit's build.mjs, card signpage-prover-threads). The four files are committed,
 // so the deploy's build (scripts/deploy.mjs, a copy of index.html and public/) and every harness serve exactly these
 // bytes, and a release can be checked byte for byte.
 // The six setup files (24 MB) are not copied into public/: the deploy's build copies them from packages/kit/zk/ to
 // /assets/zk/<sha256>.<ext> (vault.md V2's end state) with copyServed below, which refuses any whose size or sha256
 // is not its pin, and the licence texts beside them to /licenses/ (the worker's header names /licenses/GPL-3.0.txt).
-//   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html and public/prover-worker.js
+//   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html, public/prover-worker.js and public/prover-thread.js
 //   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the committed files differ from a fresh build
 import { createHash } from "node:crypto";
 import { constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PROVER_WORKER_FILE, proverWorkerSource } from "../../kit/src/prover/build.mjs";
+import { PROVER_THREAD_FILE, PROVER_WORKER_FILE, proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { isSignBuildInput, SIGN_BUILD_INPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 
@@ -28,6 +29,7 @@ export const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).di
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export const WORKER = `public/${PROVER_WORKER_FILE}`;
+export const THREAD = `public/${PROVER_THREAD_FILE}`;
 
 /**
  * What the deploy's build copies besides index.html and public/: { from, to, bytes?, sha256? }, `to` relative to the
@@ -83,7 +85,7 @@ export const page = (integrity) => `<!doctype html>
 </html>
 `;
 
-/** A fresh bundle: { js, html, worker } as bytes, text and bytes. */
+/** A fresh bundle: { js, html, worker, thread } as bytes, text, bytes and bytes. */
 export async function bundle(pkg = PKG) {
   const { build } = await import("vite");
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-app-"));
@@ -107,7 +109,7 @@ export async function bundle(pkg = PKG) {
       },
     });
     const js = readFileSync(join(out, "app.js"));
-    return { js, html: page(sha384(js)), worker: proverWorkerSource() };
+    return { js, html: page(sha384(js)), worker: proverWorkerSource(), thread: proverThreadSource() };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
@@ -128,6 +130,11 @@ export async function check(pkg = PKG, committed = pkg) {
     worker = readFileSync(join(committed, WORKER));
   } catch {}
   if (!worker || !worker.equals(fresh.worker)) p.push(`${WORKER} is not the kit's prover worker build: run node packages/signpage/scripts/build-app.mjs`);
+  let thread = null;
+  try {
+    thread = readFileSync(join(committed, THREAD));
+  } catch {}
+  if (!thread || !thread.equals(fresh.thread)) p.push(`${THREAD} is not the kit's prover thread build: run node packages/signpage/scripts/build-app.mjs`);
   return p;
 }
 
@@ -135,13 +142,15 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   if (process.argv.includes("--check")) {
     const p = await check();
     for (const l of p) console.error(`build-app: ${l}`);
-    if (!p.length) console.log(`build-app: public/app.js, index.html and ${WORKER} match a fresh build`);
+    if (!p.length) console.log(`build-app: public/app.js, index.html, ${WORKER} and ${THREAD} match a fresh build`);
     process.exit(p.length ? 1 : 0);
   }
-  const { js, html, worker } = await bundle();
+  const { js, html, worker, thread } = await bundle();
   writeFileSync(join(PKG, "public/app.js"), js);
   writeFileSync(join(PKG, "index.html"), html);
   writeFileSync(join(PKG, WORKER), worker);
+  writeFileSync(join(PKG, THREAD), thread);
   console.log(`build-app: public/app.js ${js.length} bytes, ${sha384(js)}`);
   console.log(`build-app: ${WORKER} ${worker.length} bytes, sha256 ${sha256(worker)}`);
+  console.log(`build-app: ${THREAD} ${thread.length} bytes, sha256 ${sha256(thread)}`);
 }
