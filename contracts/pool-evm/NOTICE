@@ -80,21 +80,27 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      signature at the tap picks which, so whoever sees a buy (a broken-in helper, the sequencer, anyone) cannot land
      it as a withdraw, and a signature for one proof of a note never takes another proof of it (the context and
      the value are signed, so a signature for a small chunk never takes a bigger proof of the same note and
-     request). The cost: one ecrecover a withdraw (withdraw gas 430,593 to 435,540 at depth 2, forge 1.7.1,
-     test_gas).
+     request). The cost: one ecrecover a withdraw (withdraw gas 485,765 to 492,420 at depth 2, PoolTest test_gas,
+     forge 1.7.1 with isolate on, at 5998168 and after).
 
-Gas, forge 1.7.1 (CI's), the kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH. The change
-commitment's insert hashes one level per level of the state tree, about 19,158 gas each, so a release at depth d
-costs G(d) = base + 19,158 x d (depth 2: the insert at index 3; depth 32: at index 2^32 - 1, all 32 levels):
+Gas, each pool call its own transaction (isolate = true in foundry.toml), so a figure is what a sender pays: the
+21,000 base, calldata and cold reads included. The kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH.
+The change commitment's insert hashes one level per level of the state tree, about 21,518 gas each, so a release
+at depth d costs G(d) = base + 21,518 x d (depth 2: the insert at index 3; depth 32: at index 2^32 - 1, all 32
+levels). Forge 1.7.1 (CI's) and 1.8.6 give the same withdraw and mock-adapter figures; through SwapRouter02 they
+differ by 19,900 inside the pool's buy frame (every call under it costs the same), so a sender plans for the
+higher one:
 
-  call                                   depth 2      depth 32     base (d = 0)
-  withdraw                               462,200    1,036,924        423,884
-  buy, mock adapter                      537,178    1,111,920        498,862
-  buy, SwapRouter02, one hop             620,228    1,194,972        581,912
+  call                             forge          depth 2      depth 32     base (d = 0)
+  withdraw                         1.7.1, 1.8.6   494,356    1,139,880        451,320
+  buy, mock adapter                1.7.1, 1.8.6   570,422    1,215,964        527,386
+  buy, SwapRouter02, one hop       1.8.6 (plan)   686,812    1,332,356        643,776
+  buy, SwapRouter02, one hop       1.7.1          666,912    1,312,456        623,876
 
-(test/Buy.t.sol test_gasWithdrawDepth*, test_gasBuyMockAdapterDepth*; test/BuyV3.t.sol test_gasRealRouterOneHop*.)
-The Base and Robinhood fork buys (test/BuyFork.t.sol, one hop at depth 2) measure 579,159 and 606,131 on forge
-1.7.1.
+(test/Buy.t.sol test_gasWithdrawDepth2/32, test_gasBuyMockAdapterDepth2/32; test/BuyV3.t.sol
+test_gasRealRouterOneHopDepth2/32.) The fork buys (test/BuyFork.t.sol test_aBuyLandsAndWHoldsAtLeastMinOut, one
+hop at depth 2): Base 619,727 on 1.8.6 (plan) and 599,827 on 1.7.1; Robinhood 646,879 on 1.8.6 (plan) and 626,979
+on 1.7.1.
 
 Spends are seen through two events: Withdrawn (withdraw) and Bought (buy), each with the spent nullifier and the
 new commitment. A reader of the pool's notes (card notes-per-pool-evm) reads both.
