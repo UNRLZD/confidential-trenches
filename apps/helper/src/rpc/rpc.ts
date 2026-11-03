@@ -10,6 +10,10 @@
 // What reaches the caller: the provider's status and JSON body. A provider that is down, slow, refusing our key (401,
 // 403), out of quota (429), failing (5xx), answering anything but JSON within the size cap, or whose answer holds its
 // own URL's key in any form answers 503 upstream, so the device falls back to its own providers (H2.3).
+// Throttling (card helper-abuse-limits, ../limits/limits.ts): each chain's provider is one budget every caller draws
+// from, RPC_CHAIN_MAX requests a window, and no caller more than RPC_CLIENT_MAX of them; a draw past either answers 429
+// rate_limited with the seconds to the window's end. A provider's own 429 is answered to the caller that drew it, as
+// 429 with the provider's reset (at most a minute), and pauses nobody else. A 503 is never a wait.
 //
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
@@ -18,12 +22,17 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { resetMs } from "../proxy/proxy.ts";
+import { throttled, upstreamBudget, upstreamRetryAfterS } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 
 export const RPC_ANSWER_MAX = 4 * 1024 * 1024; // a getMultipleAccounts of 100 accounts or an eth_getLogs page fits
 export const RPC_TIMEOUT_MS = 10_000; // NEAR send_tx waits for execution; the server's request timeout is 15 s
-export const RPC_PAUSE_MAX_MS = 60_000;
+/** Requests one chain's provider takes from every caller together per limit window [design: 50 a second, under a
+ * paid provider plan's rate; a provider that allows less answers its own 429, which goes to the caller that drew it]. */
+export const RPC_CHAIN_MAX = 500;
+/** Requests one caller draws per chain per window [design: 10 a second, about twice a device's busiest trade; a fifth
+ * of the chain's, so it takes five callers at their full share to throttle anyone else]. */
+export const RPC_CLIENT_MAX = 100;
 const ID_MAX = 128;
 
 /**
@@ -41,6 +50,7 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
 export type RpcAnswer = { status: number; body: string };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 type Deps = { fetch?: Fetch; now?: () => number };
+type Answer = RpcAnswer & { headers?: Record<string, string> };
 type Upstream = { url: string; forms: Buffer[] };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
@@ -113,7 +123,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const upstreams = readUpstreams(env);
-  const pausedUntil = new Map<RpcChain, number>();
+  const budget = upstreamBudget(RPC_CHAIN_MAX, RPC_CLIENT_MAX, now);
 
   async function readAnswer(r: Response): Promise<string | undefined> {
     if (Number(r.headers.get("content-length") ?? "0") > RPC_ANSWER_MAX) return undefined;
@@ -128,8 +138,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return Buffer.concat(chunks).toString("utf8");
   }
 
-  /** One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body. */
-  async function handle(chain: string, contentType: string | undefined, body: string): Promise<RpcAnswer> {
+  /**
+   * One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body, `client`
+   * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
+   * page) pass none and draw from no caller's share.
+   */
+  async function handle(chain: string, contentType: string | undefined, body: string, client?: string): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
     if (Buffer.byteLength(body) > RPC_BODY_MAX) return error(413, "too_large");
@@ -158,7 +172,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return REFUSED(); // nesting too deep to write back
     }
 
-    if ((pausedUntil.get(c) ?? 0) > now()) return UPSTREAM();
+    if (client !== undefined) {
+      const wait = budget.take(c, client);
+      if (wait > 0) return throttled(wait);
+    }
     const up = upstreams[c];
     let r: Response;
     let text: string | undefined;
@@ -171,9 +188,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
       });
       if (r.status === 429) {
-        pausedUntil.set(c, now() + Math.min(Math.max(resetMs(r.headers, now()), 0), RPC_PAUSE_MAX_MS));
         await r.body?.cancel();
-        return UPSTREAM();
+        return throttled(upstreamRetryAfterS(r.headers, now()));
       }
       text = await readAnswer(r);
     } catch {

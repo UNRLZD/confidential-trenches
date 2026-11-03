@@ -7,9 +7,13 @@
 // body byte for byte as JSON, and the key header. No header of the caller (no cookie, origin, user agent or address).
 // What reaches the caller: the vendor's status and JSON body, with X-Helper-Source and X-Fetched-At. A vendor that is
 // down, slow, out of quota, refusing our key, or answering anything but JSON within the size cap answers
-// 503 upstream, so the device falls back to its public path (H2.3). A 429 is honoured: the vendor is left alone until
-// its reset, and a request that would wait more than WAIT_MAX_MS for it answers 503 at once.
+// 503 upstream, so the device falls back to its public path (H2.3). Throttling (card helper-abuse-limits,
+// ../limits/limits.ts): each vendor is one budget every caller draws from, PROXY_VENDOR_MAX requests a window and no
+// caller more than PROXY_CLIENT_MAX of them; a draw past either answers 429 rate_limited with the seconds to the window's
+// end. A vendor's own 429 is waited out once when its reset is at most WAIT_MAX_MS, else answered to the caller that
+// drew it as 429 with the vendor's reset (at most a minute); it pauses nobody else.
 import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER, HELPER_V1_PATHS, type HelperV1Path } from "@blindfill/kit";
+import { throttled, upstreamBudget, upstreamRetryAfterS } from "../limits/limits.ts";
 import { VENDOR_NAMES, VENDORS, type Upstream, type Vendor, type VendorName } from "./vendors.ts";
 
 /** H7 "body 64 KB": the kit's /v1/proxy/{vendor}/{path} row of HELPER_V1_PATHS. */
@@ -18,7 +22,12 @@ export const QUERY_MAX = 4_096;
 export const ANSWER_MAX = 4 * 1024 * 1024; // a trending list is ~250 KB (D-S3); a build or quote a few KB
 export const TIMEOUT_MS = 8_000;
 export const WAIT_MAX_MS = 1_000;
-export const PAUSE_MAX_MS = 60_000;
+/** Requests one vendor takes from every caller together per limit window [design: 30 a second; a vendor whose key
+ * allows less answers its own 429, which goes to the caller that drew it]. */
+export const PROXY_VENDOR_MAX = 300;
+/** Requests one caller draws per vendor per window [design: 6 a second, a quote per keystroke with room; a fifth of the
+ * vendor's]. */
+export const PROXY_CLIENT_MAX = 60;
 export const CACHE_ENTRIES = 256;
 export const CACHE_BYTES = 32 * 1024 * 1024;
 const KEY_SHAPE = /^[\x21-\x7e]{8,4096}$/; // printable ASCII, no space or line break, so it can never split a header
@@ -80,7 +89,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const keys = readKeys(env);
   const forms = keyForms(keys);
-  const pausedUntil = new Map<VendorName, number>();
+  const budget = upstreamBudget(PROXY_VENDOR_MAX, PROXY_CLIENT_MAX, now);
   const cache = new Map<string, Read & { expires: number }>();
   let cacheBytes = 0;
   const inflight = new Map<string, Promise<Read | ProxyAnswer>>();
@@ -120,10 +129,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   }
 
   async function call(name: VendorName, v: Vendor, up: Upstream, path: string, query: string, body: string): Promise<Read | ProxyAnswer> {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const wait = (pausedUntil.get(name) ?? 0) - now();
-      if (wait > WAIT_MAX_MS) return UPSTREAM();
-      if (wait > 0) await sleep(wait);
+    for (let attempt = 0; ; attempt++) {
       const headers: Record<string, string> = { accept: "application/json" };
       const key = keys[name];
       if (key) headers[v.header] = key;
@@ -139,9 +145,14 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           signal: AbortSignal.timeout(TIMEOUT_MS),
         });
         if (r.status === 429) {
-          pausedUntil.set(name, now() + Math.min(Math.max(resetMs(r.headers, now()), 0), PAUSE_MAX_MS));
           await r.body?.cancel();
-          continue;
+          // a short reset is waited out once by this request alone; a longer one, or a second 429, is the caller's wait
+          const wait = Math.max(resetMs(r.headers, now()), 0);
+          if (attempt === 0 && wait <= WAIT_MAX_MS) {
+            await sleep(wait);
+            continue;
+          }
+          return { ...throttled(upstreamRetryAfterS(r.headers, now())) };
         }
         text = await readBody(r);
       } catch {
@@ -159,11 +170,14 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       if (holdsKey(text)) return UPSTREAM();
       return { status: r.status, body: text, fetchedAt };
     }
-    return UPSTREAM();
   }
 
-  /** One proxied call: `vendor` and `path` as the caller wrote them, `rawQuery` the text after "?" (or ""), `body` the request body. */
-  async function handle(vendor: string, path: string, rawQuery: string, body: string): Promise<ProxyAnswer> {
+  /**
+   * One proxied call: `vendor` and `path` as the caller wrote them, `rawQuery` the text after "?" (or ""), `body` the
+   * request body, `client` the caller's address (../limits/limits.ts clientOf). The helper's own reads (Discover's
+   * lists, the token page) pass none and draw from no caller's share.
+   */
+  async function handle(vendor: string, path: string, rawQuery: string, body: string, client?: string): Promise<ProxyAnswer> {
     if (!Object.hasOwn(VENDORS, vendor)) return error(404, "not_found");
     const name = vendor as VendorName;
     const v = VENDORS[name];
@@ -172,6 +186,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     const up = v.paths[path]!;
     if (Buffer.byteLength(body) > PROXY_BODY_MAX) return source(error(413, "too_large"));
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
+    // a draw on the vendor's budget for every call that may reach it (a cache hit reaches nothing and draws nothing)
+    const draw = (): number => (client === undefined ? 0 : budget.take(name, client));
     const params = new URLSearchParams(rawQuery);
     if (up.cacheMs) params.sort();
     const qs = params.size ? `?${params}` : "";
@@ -181,6 +197,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       const hit = cache.get(id);
       if (hit && hit.expires > now()) out = hit;
       else {
+        const wait = draw();
+        if (wait > 0) return source(throttled(wait));
         let p = inflight.get(id);
         if (!p) {
           p = call(name, v, up, path, qs, "").then((read) => {
@@ -192,7 +210,11 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         }
         out = await p;
       }
-    } else out = await call(name, v, up, path, qs, up.method === "POST" ? body : "");
+    } else {
+      const wait = draw();
+      if (wait > 0) return source(throttled(wait));
+      out = await call(name, v, up, path, qs, up.method === "POST" ? body : "");
+    }
     if (!("fetchedAt" in out)) return source(out);
     return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body });
   }

@@ -1,9 +1,12 @@
 // node --test apps/helper/src/proxy/proxy.test.ts: the proxy (markets paper H2.1-H2.3, H7) with a fake vendor. Keys
 // come only from the environment and never come back; only allowlisted paths are served; a vendor that fails, holds
-// back (429) or answers anything but JSON answers 503 upstream; only public lists are cached, never a quote.
+// back past a short wait answers 429 with its reset, one that answers anything but JSON answers 503 upstream; only public lists are cached, never a quote.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import * as proxyModule from "./proxy.ts";
 import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
+// read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
+const { PROXY_CLIENT_MAX, PROXY_VENDOR_MAX } = proxyModule as unknown as { PROXY_CLIENT_MAX: number; PROXY_VENDOR_MAX: number };
 import { VENDOR_NAMES, VENDORS } from "./vendors.ts";
 
 const ENV = {
@@ -175,7 +178,9 @@ test("an answer that holds one of our keys in any form is refused, never passed 
   assert.equal(b.status, 503);
 });
 
-test("429: the vendor is left alone until its reset; a short wait is waited once, a long one answers 503 at once", async () => {
+// card helper-abuse-limits: a vendor's 429 is answered to the caller that drew it, as 429 with the vendor's reset, and
+// pauses nobody else (at be4b353 a long reset held the vendor for every caller and answered 503)
+test("429: a short reset is waited once by that request; a long one answers 429 with the reset as Retry-After, code only, and the next caller still goes", async () => {
   const c = clock();
   const f = vendor((_, n) => (n === 1 ? json({ e: "slow down" }, 429, { "retry-after": "0.5" }) : json({ ok: n })));
   const p = createProxy(ENV, { fetch: f.fetch, now: c.now, sleep: c.sleep });
@@ -185,17 +190,37 @@ test("429: the vendor is left alone until its reset; a short wait is waited once
   assert.equal(c.now() - t0, 500, "waited the vendor's Retry-After");
 
   const c2 = clock();
-  const g = vendor(() => json({ e: "slow down" }, 429, { "x-ratelimit-reset": "30" }));
+  let throttle = true;
+  const g = vendor(() => (throttle ? json({ e: "slow down, key fake" }, 429, { "x-ratelimit-reset": "30" }) : json({ ok: 1 })));
   const q = createProxy(ENV, { fetch: g.fetch, now: c2.now, sleep: c2.sleep });
-  assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 503);
-  assert.equal((await q.handle("lifi", "/v1/quote", "", "")).status, 503);
-  assert.equal(g.seen.length, 1, "no call while the vendor's reset is ahead");
-  assert.equal((await q.handle("relay", "/intents/status/v3", "", "")).status, 503, "relay's own (429ing fake) call");
-  c2.add(30_001);
-  g.seen.length = 0;
-  assert.equal((await q.handle("lifi", "/v1/status", "", "")).status, 503);
-  assert.equal(g.seen.length, 1, "after the reset the vendor is called again (and 429s again here)");
+  const t = await q.handle("lifi", "/v1/status", "", "", "heavy");
+  assert.deepEqual([t.status, t.headers["Retry-After"], JSON.parse(t.body)], [429, "30", { error: { code: "rate_limited" } }], "the code only: no vendor text");
+  assert.equal(g.seen.length, 1, "a long reset is not waited by the request");
+  throttle = false;
+  assert.equal((await q.handle("lifi", "/v1/quote", "", "", "honest")).status, 200, "the next caller is not paused");
+  assert.equal(g.seen.length, 2);
   assert.ok(WAIT_MAX_MS < 30_000);
+});
+
+test("each vendor is one budget callers draw from fairly: a heavy caller is throttled at PROXY_CLIENT_MAX while an honest one still goes; a cache hit draws nothing", async () => {
+  const c = clock();
+  const f = vendor(() => json({ ok: 1 }));
+  const p = createProxy(ENV, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: c.sleep });
+  for (let i = 0; i < PROXY_CLIENT_MAX; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "heavy")).status, 200);
+  const h = await p.handle("jupiter", "/swap/v2/build", "n=x", "", "heavy");
+  assert.equal(h.status, 429);
+  assert.deepEqual(JSON.parse(h.body), { error: { code: "rate_limited" } });
+  const wait = Number(h.headers["Retry-After"]);
+  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 10, `Retry-After ${wait}`);
+  assert.equal(f.seen.length, PROXY_CLIENT_MAX, "the throttled draw never reached the vendor");
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=y", "", "honest")).status, 200, "an honest caller in the same window");
+  assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "heavy")).status, 200, "another vendor is its own budget");
+  // a cached list: the first read draws, a hit draws nothing, so a heavy reader of a hit is never throttled by it
+  assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 200);
+  for (let i = 0; i < PROXY_CLIENT_MAX * 2; i++) assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 200, `hit ${i}`);
+  c.add(wait * 1000);
+  assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=z", "", "heavy")).status, 200, "after the named wait the heavy caller goes again");
+  assert.ok(PROXY_CLIENT_MAX * 5 <= PROXY_VENDOR_MAX);
 });
 
 test("reset headers: seconds, an epoch in s or ms, an HTTP date; none means 1 s", () => {

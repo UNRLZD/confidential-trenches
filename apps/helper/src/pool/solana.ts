@@ -35,9 +35,13 @@
 //                       failure per nullifier per epoch);
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
 //   upstream (503)      the simulation or the blockhash read could not be made, this epoch's rent could not be read,
-//                       or (mainnet tag 3) every block engine was busy or refused it;
-//   in_flight (429)     mainnet tag 3: this client already has POOL_JITO_IN_FLIGHT_MAX carries waiting for their fill
-//                       (M369 (M1): the block engines' seconds are shared by every caller);
+//                       or (mainnet tag 3) every block engine failed (a 5xx) or refused it;
+//   in_flight (429)     mainnet tag 3: this client already holds POOL_JITO_IN_FLIGHT_MAX requests open waiting for a
+//                       fill, repeats of one carry each counted (M369 (M1), M374 (5): the block engines' seconds are
+//                       shared by every caller); Retry-After POOL_IN_FLIGHT_RETRY_S;
+//   rate_limited (429)  mainnet tag 3: the block engines throttled it (every second booked, a 429 or rate-limit words
+//                       from a region); Retry-After 1. A nullifier whose last send expired goes again only into a second
+//                       free now (M374 (4)), else this;
 //   not_landed          mainnet tag 3: the send ended without a fill: expired (503; never landed, the nullifier is free
 //                       again), unknown (503; held to the release's deadline) or failed (422, detail "failed";
 //                       failed_this_epoch after).
@@ -90,6 +94,7 @@ import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
 import { jitoSender, type JitoSender } from "./jito.ts";
 import { oncePerNullifier } from "./once.ts";
+import { heldPerClient } from "../limits/limits.ts";
 import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, type PoolFeeAnswer } from "./fee.ts";
 import { POOL_LIFE_MAX_MS } from "./evm.ts";
 
@@ -107,6 +112,8 @@ export const SOLANA_POOL_LOOKUPS_MAX = 4;
 /** The most mainnet tag 3 carries one client may have waiting for their fill (M369 (M1)) [design: a buy and a sell at
  * once; each holds its request open until the fill, and every caller shares the block engines' seconds]. */
 export const POOL_JITO_IN_FLIGHT_MAX = 2;
+/** The wait an in_flight refusal names [design: a fill lands in about 2 s (M369 (1))]. */
+export const POOL_IN_FLIGHT_RETRY_S = 2;
 
 export type PoolSendCode =
   | "bad_shape"
@@ -121,12 +128,14 @@ export type PoolSendCode =
   | "inner_program"
   | "tip_low"
   | "in_flight"
+  | "rate_limited"
   | "not_landed"
   | "bad_table"
   | "failed_this_epoch"
   | "simulation_failed"
   | "upstream";
-export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } } };
+/** `retryAfterS` on a 429 only: the whole seconds the route names in Retry-After (card helper-abuse-limits). */
+export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } }; retryAfterS?: number };
 
 /** What a pool instruction carries that the checks read: its tag, its relay fee and the accounts tag 3's inner instructions name. */
 export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; tip: bigint; innerAccounts: number[]; innerPrograms: number[] };
@@ -430,8 +439,10 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   const failedIn = new Map<string, number>();
   // a mainnet tag 3's unknown end holds its answer (no signature) instead of once's entry (M369 (H1))
   const heldUntil = new Map<string, { entry: Promise<PoolSendAnswer> | undefined; answer?: PoolSendAnswer; deadline: number }>();
-  // M369 (M1): the mainnet tag 3 carries each client has waiting for their fill
-  const inFlight = new Map<string, number>();
+  // M369 (M1), M374 (5): the mainnet tag 3 requests each client holds open, a repeat of one carry counted as its own
+  const holding = heldPerClient(POOL_JITO_IN_FLIGHT_MAX);
+  // M374 (4): nullifiers whose last bundle send expired (never landed): sent again only into a free second
+  const expired = new Map<string, true>();
   const bounded = <V>(m: Map<string, V>, k: string, v: V) => {
     m.delete(k);
     m.set(k, v);
@@ -487,22 +498,17 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         if (held.entry !== undefined && once.get(nf) === held.entry) once.forget(nf);
       } else if (held?.answer !== undefined) return held.answer;
       // one send per nullifier (./once.ts): a repeat gets the first answer and sends nothing
-      if (jito === null || c.tx.tag !== 3 || once.get(nf) !== undefined) return once.run(nf, () => simulateSignSend(raw, c.tx));
-      // M369 (M1): a mainnet tag 3 holds its request until the fill, so a client keeps at most POOL_JITO_IN_FLIGHT_MAX
-      const n = inFlight.get(client) ?? 0;
-      if (n >= POOL_JITO_IN_FLIGHT_MAX) return no(429, "in_flight");
-      inFlight.set(client, n + 1);
-      const leave = () => {
-        const m = (inFlight.get(client) ?? 1) - 1;
-        if (m > 0) inFlight.set(client, m);
-        else inFlight.delete(client);
-      };
-      const p = once.run(nf, () => simulateSignSend(raw, c.tx));
+      if (jito === null || c.tx.tag !== 3) return once.run(nf, () => simulateSignSend(raw, c.tx));
+      // M369 (M1), M374 (5): a mainnet tag 3 holds its request until the fill, a repeat of a carry in flight included,
+      // so a client holds at most POOL_JITO_IN_FLIGHT_MAX requests open
+      if (!holding.enter(client)) return { ...no(429, "in_flight"), retryAfterS: POOL_IN_FLIGHT_RETRY_S };
+      const leave = () => holding.leave(client);
+      const p = once.run(nf, () => simulateSignSend(raw, c.tx, expired.has(nf) ? 0 : undefined));
       p.then(leave, leave);
       return p;
     },
   };
-  async function simulateSignSend(raw: string, tx: SolanaPoolChecked): Promise<PoolSendAnswer> {
+  async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number): Promise<PoolSendAnswer> {
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
       // a message that loads keys: its tables on both providers first, then the pool and inner programs they resolve to
@@ -545,9 +551,10 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         // M362 (4): bundle-only, so a tag 3 that would fail on chain never lands; rebroadcast the same way, one a
         // second, to the region that took it only (./jito.ts), its pacer shared by every carry rebroadcasting there
         const sig = base58(signed.wire.subarray(1, 65));
-        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig);
+        const j = await jito.send(Buffer.from(signed.wire).toString("base64"), sig, queueMaxMs);
         // M374 (1): the code only. A block engine's words never reach the caller: they could carry the fee payer's
-        // signature before the send is decided (M369 (H1))
+        // signature before the send is decided (M369 (H1)). A throttle is a 429 with its wait, a failure a 503.
+        if (j.kind === "busy" && j.throttled) return { ...no(429, "rate_limited"), retryAfterS: 1 };
         if (j.kind === "busy" || j.kind === "refused") return no(503, "upstream");
         if (j.kind === "ok") {
           const region = j.region;
@@ -584,12 +591,18 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         } catch {
           state = undefined;
         }
-        if (state === "filled") return { status: 200, body: { signature: h.signatures[0]! } };
+        if (state === "filled") {
+          expired.delete(nf);
+          return { status: 200, body: { signature: h.signatures[0]! } };
+        }
         if (state === "failed") {
           bounded(failedIn, nf, epochStartOf(now()));
           return no(422, "not_landed", "failed");
         }
-        if (state === "expired") return no(503, "not_landed"); // never landed: once frees the nullifier
+        if (state === "expired") {
+          bounded(expired, nf, true); // M374 (4): its next send only into a free second
+          return no(503, "not_landed"); // never landed: once frees the nullifier
+        }
         const unknown = no(503, "not_landed");
         bounded(heldUntil, nf, { entry: undefined, answer: unknown, deadline: Number(tx.deadlineMs) });
         return unknown;

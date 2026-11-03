@@ -25,7 +25,10 @@
 //                    EVM_GAS_MAX;
 //   fee_stale        the fee's cap per gas (fee / gas limit) is under the current base fee: it could not be mined, so
 //                    the device re-proves at a newer epoch's fee (M356 (2));
-//   busy (503)       EVM_QUEUE_MAX sends are already waiting;
+//   rate_limited (429) EVM_QUEUE_MAX sends are already waiting (Retry-After EVM_BUSY_RETRY_S; card helper-abuse-limits:
+//                    the helper's own budget is a wait, never a 503);
+//   in_flight (429)  this client already holds EVM_IN_FLIGHT_MAX requests open (M374 (5) on this route too: one client
+//                    cannot fill the shared queue); Retry-After EVM_BUSY_RETRY_S;
 //   upstream (503)   a read could not be made (a transport error, an HTTP status such as 429, another JSON-RPC error),
 //                    or the two providers name different chains.
 // A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing; a repeat after that send
@@ -38,6 +41,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { solanaJsonRpc } from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
+import { heldPerClient } from "../limits/limits.ts";
 
 /** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 27 = 868 bytes). */
 export const POOL_EVM_BODY_MAX = 4_096;
@@ -129,6 +133,10 @@ const EPOCH_MEMORY = 64;
 export const EVM_POOL_SEND_MARGIN_MS = 60_000;
 /** The most sends waiting behind the one in flight; past it 503 busy (M356 (3)) [design: about a minute of sends]. */
 export const EVM_QUEUE_MAX = 64;
+/** The requests one client holds open on this route [design: a buy and a sell at once, as on Solana]. */
+export const EVM_IN_FLIGHT_MAX = 2;
+/** The wait a full queue or a client's held limit names [design: a send's reads and send take about a second]. */
+export const EVM_BUSY_RETRY_S = 2;
 
 export type EvmBlock = { number: bigint; timestamp: bigint; hash: string; baseFeePerGas: bigint };
 const blockOf = (v: unknown): EvmBlock => {
@@ -178,8 +186,9 @@ export function evmEpochFee(floor: bigint, baseFeePerGas: bigint): bigint {
 
 export type EvmRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type PoolEvmCode =
-  | "bad_shape" | "not_pool" | "fee_recipient" | "fee_off" | "fee_over_cap" | "epoch_off" | "deadline_near" | "reverted" | "recipient_code" | "simulation_failed" | "fee_stale" | "busy" | "upstream";
-export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } } };
+  | "bad_shape" | "not_pool" | "fee_recipient" | "fee_off" | "fee_over_cap" | "epoch_off" | "deadline_near" | "reverted" | "recipient_code" | "simulation_failed" | "fee_stale" | "rate_limited" | "in_flight" | "upstream";
+/** `retryAfterS` on a 429 only: the whole seconds the route names in Retry-After. */
+export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } }; retryAfterS?: number };
 export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 export type EvmPoolSender = {
@@ -188,7 +197,8 @@ export type EvmPoolSender = {
   readonly sender: string;
   /** GET /v1/pool/fee: the epoch's fee (the epoch holding `atMs`), in wei; null while the chain has no block in it yet. */
   fee(atMs: number): Promise<EvmFeeAnswer | null>;
-  carry(body: unknown): Promise<PoolEvmAnswer>;
+  /** POST /v1/pool/evm/send for a parsed body, from `client` (server.ts's clientOf: the caller's address). */
+  carry(body: unknown, client?: string): Promise<PoolEvmAnswer>;
 };
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
@@ -262,7 +272,18 @@ export function evmPoolSender(
     while (fees.size > EPOCH_MEMORY) fees.delete(fees.keys().next().value as number);
     return p;
   };
-  const carry = async (body: unknown): Promise<PoolEvmAnswer> => {
+  // M374 (5): the requests each client holds open, the queue's wait included
+  const held = heldPerClient(EVM_IN_FLIGHT_MAX);
+  // (a caller with no address, a test or the helper itself, is not counted)
+  const carry = (body: unknown, client?: string): Promise<PoolEvmAnswer> => {
+    if (client === undefined) return carryHeld(body);
+    if (!held.enter(client)) return Promise.resolve({ ...no(429, "in_flight"), retryAfterS: EVM_BUSY_RETRY_S });
+    const p = carryHeld(body);
+    const leave = () => held.leave(client);
+    p.then(leave, leave);
+    return p;
+  };
+  const carryHeld = async (body: unknown): Promise<PoolEvmAnswer> => {
     if (typeof body !== "object" || body === null || Array.isArray(body) || Object.keys(body).length !== 3) return no(400, "bad_shape");
     const { pool: p, data, epoch } = body as { pool?: unknown; data?: unknown; epoch?: unknown };
     if (p !== pool || typeof data !== "string" || data.length > 2 + 2 * EVM_BODY_DATA_MAX || !HEX.test(data)) return no(400, "bad_shape");
@@ -308,7 +329,7 @@ export function evmPoolSender(
       if (was === epoch) return no(422, "reverted");
     }
     const entry = once.run(w.nullifier, () => {
-      if (waiting >= EVM_QUEUE_MAX) return Promise.resolve(no(503, "busy"));
+      if (waiting >= EVM_QUEUE_MAX) return Promise.resolve({ ...no(429, "rate_limited"), retryAfterS: EVM_BUSY_RETRY_S });
       waiting++;
       const run = queue.then(() => {
         waiting--;

@@ -13,6 +13,10 @@
 // failure goes on to the next region. A rebroadcast goes only to the region that took the carry's first send and never
 // walks the regions. So rebroadcasts, however many carries are in flight, never keep a first send out of a region for
 // more than the second already started there.
+// A throttle (card helper-abuse-limits): a busy send says whether any region throttled it (a 429, rate-limit words, or
+// every second booked past the queue limit), which the route answers as 429 with a wait; a 5xx alone is not one. A
+// nullifier whose last send expired goes again with a queue limit of 0 (M374 (4)): only into a second free now, so
+// re-sends of unlanded notes never queue ahead of fresh sends.
 
 import { SOLANA_KEYLESS_PATH_INTERVAL_MS } from "@blindfill/kit";
 
@@ -34,12 +38,13 @@ export const JITO_QUEUE_MAX_MS = 2_000;
 const ANSWER_MAX = 16_384;
 
 /** One whole first send: accepted by a region, every region busy or refusing, or every region failing on transport. */
-export type JitoSend = { kind: "ok"; region: string } | { kind: "busy" | "refused"; detail: string } | { kind: "transport"; detail: string };
-/** One rebroadcast: sent and accepted, or not sent (its region's second is taken), or the region's answer. */
-export type JitoTry = { kind: "ok" | "busy" | "transport" | "refused"; detail: string };
+export type JitoSend = { kind: "ok"; region: string } | { kind: "busy"; detail: string; throttled: boolean } | { kind: "refused"; detail: string } | { kind: "transport"; detail: string };
+/** One rebroadcast: sent and accepted, or not sent (its region's second is taken), or the region's answer; `throttled`
+ * when a busy region said so (a 429 or rate-limit words, not a 5xx). */
+export type JitoTry = { kind: "ok" | "busy" | "transport" | "refused"; detail: string; throttled?: boolean };
 export type JitoSender = {
-  /** A carry's first send. */
-  send(base64Tx: string, signature: string): Promise<JitoSend>;
+  /** A carry's first send; `queueMaxMs` (default the sender's) is the longest it waits for a region's second. */
+  send(base64Tx: string, signature: string, queueMaxMs?: number): Promise<JitoSend>;
   /** A rebroadcast to `region` (the one that took the first send) only, only in a second nobody booked. */
   rebroadcast(region: string, base64Tx: string, signature: string): Promise<JitoTry>;
 };
@@ -100,7 +105,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     } catch (e) {
       return { kind: "transport", detail: String((e as Error)?.message ?? e).slice(0, 120) };
     }
-    if (r.status === 429 || r.status >= 500) return { kind: "busy", detail: `HTTP ${r.status}` };
+    if (r.status === 429 || r.status >= 500) return { kind: "busy", detail: `HTTP ${r.status}`, ...(r.status === 429 ? { throttled: true } : {}) };
     let j: unknown;
     try {
       j = JSON.parse(text);
@@ -110,7 +115,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     const o = (typeof j === "object" && j !== null && !Array.isArray(j) ? j : {}) as { result?: unknown; error?: { code?: unknown; message?: unknown } };
     if (o.error !== undefined) {
       const msg = `${String(o.error?.code)}: ${String(o.error?.message).slice(0, 120)}`;
-      return /rate.?limit|too many/i.test(msg) ? { kind: "busy", detail: msg } : { kind: "refused", detail: msg };
+      return /rate.?limit|too many/i.test(msg) ? { kind: "busy", detail: msg, throttled: true } : { kind: "refused", detail: msg };
     }
     if (!r.ok) return { kind: "refused", detail: `HTTP ${r.status}` };
     if (o.result !== signature) return { kind: "refused", detail: "the answer is not this transaction's signature" };
@@ -118,9 +123,10 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
   }
 
   return {
-    async send(b64, signature) {
+    async send(b64, signature, queueMaxMs = queueMax) {
       const tried = new Set<number>();
       let transportOnly = true;
+      let throttled = false;
       let last = "";
       while (tried.size < regions.length) {
         // the untried region whose next second comes first: sends spread over the regions, the least recently used
@@ -130,8 +136,9 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
         tried.add(at);
         const now = clock();
         const go = Math.max(now, free[at]!);
-        if (go - now > queueMax) {
+        if (go - now > queueMaxMs) {
           transportOnly = false;
+          throttled = true;
           last = "every region's next second is booked";
           break;
         }
@@ -144,9 +151,10 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
         if (t.kind === "ok") return { kind: "ok", region: regions[at]! };
         if (t.kind === "refused") return { kind: "refused", detail: t.detail };
         if (t.kind === "busy") transportOnly = false;
+        if (t.throttled) throttled = true;
         last = t.detail;
       }
-      return transportOnly ? { kind: "transport", detail: last } : { kind: "busy", detail: last };
+      return transportOnly ? { kind: "transport", detail: last } : { kind: "busy", detail: last, throttled };
     },
     async rebroadcast(region, b64, signature) {
       const i = regions.indexOf(region);

@@ -1,7 +1,9 @@
 // node --test apps/helper/src/server.test.ts: the helper answers /v1/health with the six parts and its commit, and
 // allows cross-origin reads for exactly the two origins (markets paper H7), on a real server on a free port.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { readFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -75,7 +77,8 @@ test("each of the two origins is echoed byte for byte, with Vary: Origin and no 
     assert.equal(r.headers["access-control-allow-origin"], o);
     assert.equal(r.headers["vary"], "Origin");
     assert.equal(r.headers["access-control-allow-credentials"], undefined);
-    assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At");
+    // card helper-abuse-limits (M367 (2)): Retry-After is exposed, so a browser reads every 429's wait
+    assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After");
   }
 });
 
@@ -499,4 +502,116 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
   } finally {
     await Promise.all(stubs.map((s) => new Promise((ok) => (s.closeAllConnections(), s.close(ok)))));
   }
+});
+
+// card helper-abuse-limits: one throttling contract on every route, keyed on the forwarded address in memory only.
+// A helper on a real socket, its clock a fake that moves with time; the address is the last X-Forwarded-For hop, as
+// Caddy writes it.
+async function limited(o: { rpc?: ReturnType<typeof createRpc> } = {}) {
+  let t = 1_800_000_000_000;
+  const now = () => (t += 3);
+  const h = createServer(handler(COMMIT, undefined, o.rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), now));
+  await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
+  const to = (h.address() as AddressInfo).port;
+  return {
+    to,
+    jump: (ms: number) => (t += ms),
+    close: () => new Promise<void>((ok) => (h.closeAllConnections(), h.close(() => ok()))),
+  };
+}
+const IP_A = "203.0.113.7";
+const IP_B = "203.0.113.8";
+/** The 429 contract: status, a whole-second Retry-After of 1 to 60 that CORS lets the browser read, the code only. */
+function isThrottle(r: { status: number; headers: Record<string, string | string[] | undefined>; body: string }, origin = APP) {
+  assert.equal(r.status, 429);
+  const wait = Number(r.headers["retry-after"]);
+  assert.ok(Number.isInteger(wait) && wait >= 1 && wait <= 60, `Retry-After ${String(r.headers["retry-after"])}`);
+  assert.equal(r.headers["access-control-allow-origin"], origin);
+  assert.ok(String(r.headers["access-control-expose-headers"]).split(", ").includes("Retry-After"), "Retry-After is exposed");
+  assert.deepEqual(JSON.parse(r.body), { error: { code: "rate_limited" } });
+  return wait;
+}
+
+test("every route without its own budget: one client past API_RATE_MAX in a window gets 429 with a readable Retry-After; a second client in the same window still goes; after the wait the first goes again", async () => {
+  const { API_RATE_MAX } = await import("./server.ts");
+  const L = await limited();
+  try {
+    for (let i = 0; i < API_RATE_MAX; i++) assert.equal((await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to)).status, 200);
+    const over = await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to);
+    const wait = isThrottle(over);
+    for (const p of ["/v1/token-status?token=x", "/v1/withdraw/fee?token=x", "/v1/market/lists?chain=solana", "/nope"]) isThrottle(await call("GET", p, { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to));
+    isThrottle(await call("POST", "/v1/bind", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to));
+    isThrottle(await call("POST", "/v1/withdraw", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to));
+    assert.equal((await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_B }, undefined, L.to)).status, 200, "a second client in the same window");
+    assert.ok(!over.body.includes(IP_A) && !JSON.stringify(over.headers).includes(IP_A), "the address is never answered");
+    L.jump(wait * 1000);
+    assert.equal((await call("GET", "/v1/health", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to)).status, 200, "after the named wait");
+  } finally {
+    await L.close();
+  }
+});
+
+test("the pool routes: past POOL_RATE_MAX the same 429 contract (at be4b353 the wait was not readable by a browser)", async () => {
+  const { POOL_RATE_MAX } = await import("./server.ts");
+  const L = await limited();
+  try {
+    for (let i = 0; i < POOL_RATE_MAX; i++) assert.equal((await call("GET", "/v1/pool/fee?pool=x", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to)).status, 404);
+    isThrottle(await call("GET", "/v1/pool/fee?pool=x", { origin: APP, "x-forwarded-for": IP_A }, undefined, L.to));
+    isThrottle(await call("POST", "/v1/pool/solana/send", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to));
+    isThrottle(await call("POST", "/v1/pool/evm/send", { ...JSON_H, "x-forwarded-for": IP_A }, "{}", L.to), APP);
+    isThrottle(await call("GET", "/v1/pool/fee?pool=x", { origin: SIGN, "x-forwarded-for": IP_A }, undefined, L.to), SIGN);
+    assert.equal((await call("GET", "/v1/pool/fee?pool=x", { origin: APP, "x-forwarded-for": IP_B }, undefined, L.to)).status, 404, "a second client");
+  } finally {
+    await L.close();
+  }
+});
+
+test("the RPC route: the caller's address reaches the chain's budget, and a provider's 429 reaches only that caller as a readable 429", async () => {
+  let throttle = false;
+  const rpc = createRpc({}, { fetch: async () => (throttle ? new Response("provider says slow down", { status: 429, headers: { "retry-after": "7" } }) : new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } })) });
+  const L = await limited({ rpc });
+  const body = rpcBody("getBalance");
+  try {
+    const { RPC_CLIENT_MAX } = (await import("./rpc/rpc.ts")) as unknown as { RPC_CLIENT_MAX: number };
+    for (let i = 0; i < RPC_CLIENT_MAX; i++) assert.equal((await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, body, L.to)).status, 200);
+    isThrottle(await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, body, L.to));
+    throttle = true;
+    const up = await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_B }, body, L.to);
+    assert.equal(isThrottle(up), 7, "the provider's reset");
+    assert.ok(!up.body.includes("slow down"), "no provider text");
+    throttle = false;
+    assert.equal((await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": "203.0.113.9" }, body, L.to)).status, 200, "nobody else is paused");
+  } finally {
+    await L.close();
+  }
+});
+
+// End state 5: no limit path writes or logs the address. Every console method (the helper's only logger) and every fs
+// write are stubbed while each limit is driven past its edge from one address.
+test("no IP stored: driving every limit past its edge logs nothing and writes nothing that holds the address", async () => {
+  const IP = "198.51.100.77";
+  const out: string[] = [];
+  const keep = (...a: unknown[]) => void out.push(a.map(String).join(" "));
+  const mocks = [
+    ...(["log", "error", "warn", "info", "debug", "trace"] as const).map((m) => mock.method(console, m, keep)),
+    ...(["writeFileSync", "appendFileSync", "writeFile", "appendFile", "writeSync", "write", "createWriteStream", "openSync", "open", "renameSync", "mkdirSync"] as const).map((m) => mock.method(fs, m, (...a: unknown[]) => void keep("fs." + m, ...a))),
+    ...(["writeFile", "appendFile", "open", "mkdir", "rename"] as const).map((m) => mock.method(fs.promises, m, async (...a: unknown[]) => void keep("fs.promises." + m, ...a))),
+  ];
+  syncBuiltinESMExports();
+  const rpc = createRpc({}, { fetch: async () => new Response("slow", { status: 429, headers: { "retry-after": "2" } }) });
+  const L = await limited({ rpc });
+  try {
+    const { API_RATE_MAX, POOL_RATE_MAX } = await import("./server.ts");
+    const h = { ...JSON_H, "x-forwarded-for": IP };
+    for (let i = 0; i <= API_RATE_MAX; i++) await call("GET", "/v1/health", h, undefined, L.to);
+    for (let i = 0; i <= POOL_RATE_MAX; i++) await call("GET", "/v1/pool/fee?pool=x", h, undefined, L.to);
+    await call("POST", "/v1/pool/solana/send", h, "{}", L.to);
+    await call("POST", "/v1/rpc/solana", h, rpcBody("getBalance"), L.to);
+  } finally {
+    await L.close();
+    for (const m of mocks) m.mock.restore();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(out.filter((l) => l.startsWith("fs.")), [], "no file written");
+  assert.deepEqual(out.filter((l) => l.includes(IP) || l.includes("198.51.100")), [], "nothing logged holds the address");
 });
