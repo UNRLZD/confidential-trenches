@@ -69,8 +69,7 @@ const SERVED: ReadonlySet<Part> = new Set(Object.keys(MOUNTED) as Part[]);
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
 export const ORIGINS: ReadonlySet<string> = new Set(HELPER_CORS.origins);
-// and Retry-After (card helper-abuse-limits, M367 (2)): every 429 names its wait, which a browser reads only when exposed
-const EXPOSE = [...HELPER_CORS.exposeHeaders, "Retry-After"].join(", ");
+const EXPOSE = HELPER_CORS.exposeHeaders.join(", ");
 /** Requests one client makes to the pool routes per limit window [design: a device sends one release per tap and reads
  * the fee once an epoch; 30 per 10 s leaves room for a ladder of sells while one client cannot flood the RPC reads]. */
 export const POOL_RATE_MAX = 30;
