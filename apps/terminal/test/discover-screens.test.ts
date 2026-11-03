@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ROW_FIELDS, ROW_REQUIRED, SNAPSHOT_LISTS } from "../src/screens/discover/fields.ts";
 import type { MarketRow } from "../src/screens/discover/fields.ts";
-import { age, count, price, usd } from "../src/screens/discover/format.ts";
+import { age, count, price, priceTile, usd } from "../src/screens/discover/format.ts";
 import { COLUMNS, columnRows, level, rowView } from "../src/screens/discover/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/discover/words.ts";
 import { bare, edges, edgy, empty, NOW_MS, RECORDED_FIELDS, solana } from "./discover-screens/snapshots.ts";
@@ -63,6 +63,24 @@ test("route map: Discover is routed, the same way the token page is (card app-di
   const src = readFileSync(new URL("../src/routes/Screen.tsx", import.meta.url), "utf8");
   assert.match(src, /discover:\s*DiscoverRoute/);
   assert.match(src, /token:\s*TokenRoute/);
+});
+
+test("price tile: at most 8 characters (the strip tile's width), compact from $100,000, decimals cut before a digit is dropped (card app-shell-cls-chrome)", () => {
+  assert.equal(priceTile("184223.5"), "$184.2K");
+  assert.equal(priceTile("100000"), "$100.0K");
+  assert.equal(priceTile("99999.999"), "$99,999");
+  assert.equal(priceTile("99999.99"), "$99,999");
+  assert.equal(priceTile("12345.67"), "$12,345");
+  assert.equal(priceTile("1234.56"), "$1,234.5");
+  assert.equal(priceTile("1000"), "$1,000.0");
+  assert.equal(priceTile("911.692423199483"), "$911.69");
+  assert.equal(priceTile("5.68"), "$5.68");
+  assert.equal(priceTile("0.00273"), "$0.00273");
+  assert.equal(priceTile("0.000001234"), "$0.0₅123");
+  assert.equal(priceTile("0"), "$0");
+  assert.equal(priceTile("-1"), "—");
+  assert.equal(priceTile(null), "—");
+  for (const v of ["184223.5", "99999.99", "12345.67", "1234.56", "1000", "999.999", "100.5", "5.68", "0.5", "0.0123"]) assert.ok(priceTile(v).length <= 8, `${v} -> ${priceTile(v)}`);
 });
 
 test("price: tiny prices take the subscript zero count; garbage, negatives and null are the dash", () => {

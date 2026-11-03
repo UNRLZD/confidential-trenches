@@ -50,6 +50,13 @@ test("planted on the good answer: a late shift above 0.1 on one load, and inside
   assert.deepEqual(b, [`BAD phone / (token): CLS 0.1422 above 0.1`, "BAD phone inside the shell, 4 link(s): CLS 0.0500 inside the shell"]);
 });
 
+test("planted on the good answer: a shift inside the shell names its element and its rects", () => {
+  const rec = structuredClone(ANSWERS.good);
+  rec.inShell[1].cls = 0.0047;
+  rec.inShell[1].shifts = [{ at: 490, value: 0.0047, input: false, sources: ["div.tkp-strip 234,50 861x49 -> 548,50 547x49", "div.tkp-idtext 59,59 165x30 -> 59,56 479x37"] }];
+  assert.deepEqual(bad(judge(rec).lines), ["BAD desktop inside the shell, 6 link(s): CLS 0.0047 inside the shell [+490ms 0.0047: div.tkp-strip 234,50 861x49 -> 548,50 547x49 | div.tkp-idtext 59,59 165x30 -> 59,56 479x37]"]);
+});
+
 test("recorded bad answer: one script without its integrity: FAIL", () => {
   const r = judge(ANSWERS.badIntegrity);
   assert.equal(r.ok, false);

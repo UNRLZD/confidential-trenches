@@ -9,7 +9,8 @@
 //   - every script tag carries an integrity equal to the sha384 of the bytes served, no script is inline, and every
 //     script an APP_HOST document loaded is one of those tags (the shell's own scripts are SIGN_HOST's to check);
 //   - each route draws its own screen (main[data-route]), not the fallback;
-//   - CLS at most 0.1 per load and 0 inside the shell (clicking through the navigation), every shift counted, the
+//   - CLS at most 0.1 per load and 0 inside the shell (from the first screen's load through the click-through; a FAIL names each shift's element and its
+//     rects before and after), every shift counted, the
 //     hadRecentInput exclusion not applied (BAR-04, app.md:1102);
 //   - no horizontal scroll, no text under 11 px, and on the phone no tap target under 44 px (BAR-10, app.md:1108; the
 //     tests of R5's design/proto/tools/shoot.mjs:68, :76-91, :92-108).
@@ -51,6 +52,10 @@ const SETTLE_MS = 2000;
 
 const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("base64")}`;
 
+/** What moved, for a FAIL line: each layout shift's time, value and sources (element, rect before -> after). */
+const shiftsOf = (shifts) =>
+  shifts?.length ? ` [${shifts.map((e) => `+${e.at}ms ${e.value.toFixed(4)}${e.input ? " after input" : ""}: ${e.sources.join(" | ") || "no source"}`).join("; ")}]` : "";
+
 // ------------------------------------------------------------------------------------------------ the verdict
 export function judge(rec) {
   const lines = [];
@@ -82,7 +87,7 @@ export function judge(rec) {
     if (l.route !== l.expect) bad.push(`drew ${l.route ?? "nothing"}`);
     if (l.violations.length) bad.push(`CSP violation: ${l.violations.map((v) => `${v.directive} ${v.blocked}`).join("; ")}`);
     if (l.consoleErrors.length) bad.push(`console error: ${l.consoleErrors.join("; ")}`);
-    if (!(l.cls <= CLS_MAX)) bad.push(`CLS ${l.cls.toFixed(4)} above ${CLS_MAX}`);
+    if (!(l.cls <= CLS_MAX)) bad.push(`CLS ${l.cls.toFixed(4)} above ${CLS_MAX}${shiftsOf(l.shifts)}`);
     if (l.hscroll) bad.push("horizontal scroll");
     if (l.smallText.length) bad.push(`text under 11 px: ${l.smallText.join(", ")}`);
     if (l.smallTaps.length) bad.push(`tap under 44 px: ${l.smallTaps.join(", ")}`);
@@ -95,7 +100,7 @@ export function judge(rec) {
   for (const s of shells) {
     const bad = [];
     if (s.framed !== true) bad.push("not inside SIGN_HOST's shell");
-    if (s.cls !== 0) bad.push(`CLS ${s.cls.toFixed(4)} inside the shell`);
+    if (s.cls !== 0) bad.push(`CLS ${s.cls.toFixed(4)} inside the shell${shiftsOf(s.shifts)}`);
     if (s.steps.length === 0) bad.push("no navigation link");
     for (const st of s.steps) {
       if (st.reloaded) bad.push(`${st.href} reloaded the page`);
@@ -110,10 +115,16 @@ export function judge(rec) {
 // ------------------------------------------------------------------------------------------------ the live read
 // runs in the page before any of its own code: CSP violations and every layout shift
 export const INIT = () => {
-  window.__ct = { violations: [], shifts: [], doc: Math.random() };
+  window.__ct = { violations: [], shifts: [], shiftLog: [], doc: Math.random() };
   document.addEventListener("securitypolicyviolation", (e) => window.__ct.violations.push({ directive: e.violatedDirective, blocked: e.blockedURI }));
   new PerformanceObserver((list) => {
-    for (const e of list.getEntries()) window.__ct.shifts.push(e.value);
+    for (const e of list.getEntries()) {
+      window.__ct.shifts.push(e.value);
+      // what moved: each source's element and its rects before and after (a shift with no source is logged as such)
+      const rect = (r) => `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+      const name = (n) => (n ? `${n.nodeName.toLowerCase()}${n.id ? `#${n.id}` : ""}${typeof n.className === "string" && n.className ? `.${n.className.trim().split(/\s+/).join(".")}` : ""}${n.nodeType === 1 && n.dataset?.state ? `[data-state=${n.dataset.state}]` : ""}` : "(removed)");
+      window.__ct.shiftLog.push({ at: Math.round(e.startTime), value: e.value, input: e.hadRecentInput, sources: e.sources.map((x) => `${name(x.node)} ${rect(x.previousRect)} -> ${rect(x.currentRect)}`) });
+    }
   }).observe({ type: "layout-shift", buffered: true });
 };
 
@@ -160,6 +171,7 @@ export const MEASURE = ({ phone, vw }) => {
     violations: window.__ct.violations,
     cls: window.__ct.shifts.reduce((a, b) => a + b, 0),
     shiftCount: window.__ct.shifts.length,
+    shiftLog: window.__ct.shiftLog,
     doc: window.__ct.doc,
   };
 };
@@ -236,7 +248,7 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         await page.screenshot({ path: shot });
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
-        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, cls: m.cls, shiftCount: m.shiftCount, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
+        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
         await page.close();
       }
       // inside the shell: load the first route, then click every navigation link in turn
@@ -257,7 +269,7 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
       }
       const end = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       await page.screenshot({ path: path.join(shots, `${w.name}-in-shell.png`) });
-      rec.inShell.push({ width: w.name, framed, steps, cls: end.cls - start.cls, violations: end.violations, consoleErrors: seenBy.consoleErrors });
+      rec.inShell.push({ width: w.name, framed, steps, cls: end.cls, shifts: end.shiftLog, violations: end.violations, consoleErrors: seenBy.consoleErrors });
       await ctx.close();
     }
   } finally {

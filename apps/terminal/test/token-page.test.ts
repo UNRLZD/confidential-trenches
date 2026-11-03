@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { ROW_FIELDS, ROW_REQUIRED } from "../src/screens/discover/fields.ts";
 import type { MarketRow } from "../src/screens/discover/fields.ts";
 import { FIXTURE_NOW_MS, TOKENS } from "./token-page/fixtures.ts";
-import { change24, curve, tokenView } from "../src/screens/token/model.ts";
+import { change24, changeTile, curve, tokenView } from "../src/screens/token/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/token/words.ts";
 
 const base = TOKENS.curve!;
@@ -40,6 +40,9 @@ test("header edges: tiny, huge, zero, rounding into the next unit, garbage and m
   assert.equal(at({ price_usd: "0.00000000001234" }).price, "$0.0₁₀123");
   assert.equal(at({ price_usd: "184223.5" }).price, "$184,223.50");
   assert.equal(at({ price_usd: "0" }).price, "$0");
+  // the strip tile's price is cut to its width; the header's price is not (card app-shell-cls-chrome)
+  assert.equal(at({ price_usd: "184223.5" }).priceTile, "$184.2K");
+  assert.equal(at({ price_usd: "0.00273" }).priceTile, "$0.00273");
   assert.equal(at({ price_usd: null }).price, "—");
   assert.equal(at({ price_usd: "-1" }).price, "—");
   assert.equal(at({ mc_usd: "999999" }).mc, "$1.00M");
@@ -52,6 +55,36 @@ test("header edges: tiny, huge, zero, rounding into the next unit, garbage and m
   assert.equal(at({ holders: 999_999 }).holders, "1.00M");
   assert.equal(at({ holders: -3 }).holders, "—");
   assert.equal(at({ holders: null }).holders, "—");
+});
+
+test("strip tiles: the change reads without decimals from 1,000% and compact from 100,000%; every tile value is at most 8 characters (card app-shell-cls-chrome)", () => {
+  assert.equal(changeTile(802), "+8.02%");
+  assert.equal(changeTile(-517), "−5.17%");
+  assert.equal(changeTile(99_999), "+999.99%");
+  assert.equal(changeTile(100_000), "+1,000%");
+  assert.equal(changeTile(5_140_400), "+51,404%");
+  assert.equal(changeTile(-5_140_400), "−51,404%");
+  assert.equal(changeTile(9_999_999), "+99,999%");
+  assert.equal(changeTile(10_000_000), "+100.0K%");
+  assert.equal(changeTile(51_404_099), "+514.0K%");
+  assert.equal(changeTile(99_990_000_000), "+999.9M%");
+  assert.equal(changeTile(99_999_999_999), "+1.00B%");
+  assert.equal(changeTile(null), "—");
+  assert.equal(changeTile(1.5), "—");
+  // the header's and the phone pill's change keeps its two places
+  assert.equal(at({ chg_24h_bps: 5_140_400 }).chg.text, "+51,404.00%");
+  // every value a tile draws, at the stress fixture and at each unit's edge, fits the 8 characters a tile is drawn for
+  const stress: Partial<MarketRow>[] = [
+    { price_usd: "184223.5", mc_usd: "123456789012345", vol_24h_usd: "987654321987", liq_usd: "999999999.9", chg_24h_bps: 5_140_400, holders: 12_345_678 },
+    { price_usd: "99999.999", mc_usd: "990000000000000", vol_24h_usd: "999999.99", liq_usd: "0.00000000001234", chg_24h_bps: -99_999_999_999, holders: 999_999_999 },
+    { price_usd: "0.00000000001234", mc_usd: "0.00000000001234", vol_24h_usd: "9999.996", liq_usd: "999.996", chg_24h_bps: 99_999, holders: 9_999 },
+    { price_usd: "1234.56", mc_usd: "1", vol_24h_usd: "0", liq_usd: "1000", chg_24h_bps: 100_000, holders: 0 },
+    { price_usd: "0.00273", mc_usd: "999999", vol_24h_usd: "999.99", liq_usd: "1e5", chg_24h_bps: 0, holders: 1 },
+  ];
+  for (const row of stress) {
+    const v = at(row);
+    for (const [k, t] of Object.entries({ priceTile: v.priceTile, chgTile: v.chgTile, mc: v.mc, vol: v.vol, liq: v.liq, holders: v.holders })) assert.ok(t.length <= 8, `${k} ${t} (${JSON.stringify(row)})`);
+  }
 });
 
 test("age: whole units rounded down against the page's clock; a launch ahead of it is 1s; none is the dash", () => {
