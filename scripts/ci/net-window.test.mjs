@@ -37,6 +37,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-token-watch.mjs",
   "scripts/live-checks/helper-usdc-event-watch.mjs",
   "scripts/live-checks/index-evm-swaps.mjs",
+  "scripts/live-checks/index-sol-trades.mjs",
   "scripts/live-checks/kit-entry-signpage-api.mjs",
   "scripts/live-checks/kit-freeze-helper-api.mjs",
   "scripts/live-checks/kit-freeze-keys.mjs",

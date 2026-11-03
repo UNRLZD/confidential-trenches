@@ -1,0 +1,85 @@
+{
+ "good": {
+  "base": "http://127.0.0.1:8799",
+  "coin": "6pR8bKtfoBa5VCk1dhrFruV8LtvVVEWQSLpzkBqCpump",
+  "fresh": {
+   "sig": "5jUW7yLN5oBN8zC5bRcG2LpB3TFKqJYfEgq1yMScDnksXbkeP4kkja4ZaZZq6XECywB9yuuxqai56ftsHZATud85",
+   "heldAtMs": 1793739633853,
+   "side": "s",
+   "ts": 1793739633,
+   "user": "Hs5TE2Awk8R89ejKsr4PtNgwTxm3yX7Ev5X1ZwecXszY",
+   "venue": "pump"
+  },
+  "polls": [
+   {
+    "atMs": 1793739633853,
+    "answeredMs": 1793739633856,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-length": "758",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Tue, 03 Nov 2026 21:00:33 GMT",
+     "keep-alive": "timeout=65",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-fetched-at": "2026-11-03T21:00:33.851Z",
+     "x-helper-commit": "0123456789abcdef0123456789abcdef01234567",
+     "x-helper-source": "chain"
+    },
+    "body": "{\"trades\":[{\"t_ms\":1793739633000,\"side\":\"s\",\"usd\":\"4.65137376904638999\",\"amt\":\"1775453.92413\",\"trader\":\"Hs5TE2Awk8R89ejKsr4PtNgwTxm3yX7Ev5X1ZwecXszY\",\"tx\":\"5jUW7yLN5oBN8zC5bRcG2LpB3TFKqJYfEgq1yMScDnksXbkeP4kkja4ZaZZq6XECywB9yuuxqai56ftsHZATud85\"},{\"t_ms\":1793739595000,\"side\":\"b\",\"usd\":\"4.65087524245172384\",\"amt\":\"1775453.92413\",\"trader\":\"7iVCXQn4u6tiTEfNVqbWSEsRdEi69E9oYsSMiepuECwi\",\"tx\":\"2DkNE5PkWXJ1Ykyayjq6HxaXbGDh5Z9LAVEq7v6Ad2P4hUeqP5oBPGCvMKqnUyWZ41HcaN9mUCbR8cHcU9HzEzc\"},{\"t_ms\":1793739565000,\"side\":\"b\",\"usd\":\"1.17428163546448933\",\"amt\":\"449208.878043\",\"trader\":\"CCdvqS1xUCeiA8RNEsHWKq4c1RttsAXQ9KGvfCfjoDJY\",\"tx\":\"61Pxx4fQzYQLw38RbGrSK46nDEmB8kvjnWK1HRSaSk4Fu51yVSUtL8JS8n6VvcWGro89PoP2fHCprNd6zuyq7EpV\"}],\"src\":\"chain\",\"as_of_ms\":1793739633851}"
+   }
+  ],
+  "candles": {
+   "atMs": 1793739633856,
+   "answeredMs": 1793739633859,
+   "status": 200,
+   "headers": {
+    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+    "cache-control": "no-store",
+    "connection": "keep-alive",
+    "content-length": "611",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Tue, 03 Nov 2026 21:00:33 GMT",
+    "keep-alive": "timeout=65",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-fetched-at": "2026-11-03T21:00:33.851Z",
+    "x-helper-commit": "0123456789abcdef0123456789abcdef01234567",
+    "x-helper-source": "chain"
+   },
+   "body": "{\"tf\":\"1s\",\"candles\":[[1793739565,\"0.000002614110479250329018190588\",\"0.000002614110479250329018190588\",\"0.000002614110479250329018190588\",\"0.000002614110479250329018190588\",\"1.17428163546448933\"],[1793739595,\"0.000002619541503861174515333717\",\"0.000002619541503861174515333717\",\"0.000002619541503861174515333717\",\"0.000002619541503861174515333717\",\"4.65087524245172384\"],[1793739633,\"0.000002619822292107994514210756\",\"0.000002619822292107994514210756\",\"0.000002619822292107994514210756\",\"0.000002619822292107994514210756\",\"4.65137376904638999\"]],\"src\":\"chain\",\"own_from_s\":1793739565,\"as_of_ms\":1793739633851}"
+  }
+ },
+ "bad_not_deployed": {
+  "base": "https://api.confidential.unrealized.trade",
+  "coin": "6XWAopwaU2zL9AyQgQYejYSSAKaPh39zwXj5EP3hpump",
+  "fresh": null,
+  "polls": [
+   {
+    "atMs": 1793739552905,
+    "answeredMs": 1793739553079,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "30",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Tue, 03 Nov 2026 20:59:13 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "5584fdf22ecd856ce7505b9acd7798bfc15cb088"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  ],
+  "candles": null
+ }
+}
