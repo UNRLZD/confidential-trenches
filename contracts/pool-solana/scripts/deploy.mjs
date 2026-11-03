@@ -500,6 +500,9 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     return f;
   };
   const programFile = resumeId ? null : fileOf(program, "program.json");
+  // the CLI deploys from a file: the very bytes hashed above, written into the run's own folder
+  const codeFile = path.join(dir, "code.so");
+  writeFileSync(codeFile, so, { mode: 0o600 });
   const funderFile = fileOf(funder, "funder.json");
   const common = ["--url", url, "--keypair", funderFile, "--commitment", "confirmed"];
   const cli = runCli;
@@ -535,7 +538,7 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
       for (const sig of prior) txs.push({ step: "first run (--prior)", signature: sig });
       log(`resume: ${prior.length} prior transaction(s) kept for the record`);
     } else {
-      const dep = cli(["program", "deploy", soFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
+      const dep = cli(["program", "deploy", codeFile, "--program-id", programFile, "--upgrade-authority", funderFile, "--max-len", String(so.length),
         "--final", "--use-rpc", "--output", "json", ...common]);
       const out = JSON.parse(dep.stdout.slice(dep.stdout.indexOf("{")));
       if (out.programId !== program.id) throw new Error(`deployed ${out.programId}, not ${program.id}`);

@@ -458,3 +458,39 @@ test("devnet refuses a host build and --no-build: only --ci-run, before any key 
   await assert.rejects(run(["--ci-run", "41677243428"], { gh: f.gh }), /pool-solana job is failure/);
   assert.equal(f.calls.length, 1);
 });
+
+test("the CLI deploys the very bytes hashed: CI's artifact, from a file in the run's own folder", async () => {
+  const f = fakeGh();
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result }) });
+    switch (method) {
+      case "getGenesisHash": return ok("FakeLocalGenesis1111111111111111111111111111");
+      case "getMinimumBalanceForRentExemption": return ok((params[0] + 128) * 6960);
+      case "getBalance": return ok({ value: 1_000_000_000 });
+      case "getSignaturesForAddress": case "getProgramAccounts": return ok([]);
+      case "getAccountInfo": return ok({ value: null });
+      default: throw new Error(`unexpected ${method}`);
+    }
+  };
+  let deployed = null;
+  const cli = (args) => {
+    if (args[0] === "program" && args[1] === "deploy") {
+      deployed = { file: args[2], sha: createHash("sha256").update(readFileSync(args[2])).digest("hex") };
+      throw new Error("stop after the deploy call");
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  const before = new Set(ls(tmpdir()).filter((x) => x.startsWith("pool-sol-deploy-")));
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await assert.rejects(main(["--url", "http://127.0.0.1:1", "--ci-run", "41677243428", "--return", RETURN], fetchFn, { wait: async () => {}, cli, gh: f.gh }), /stop after the deploy call/);
+  } finally {
+    console.log = realLog;
+    for (const k of ls(tmpdir()).filter((x) => x.startsWith("pool-sol-deploy-") && !before.has(x))) rmSync(path.join(tmpdir(), k), { recursive: true, force: true });
+  }
+  assert.ok(deployed, "the CLI was asked to deploy");
+  assert.equal(deployed.sha, f.sha);
+  assert.match(path.basename(path.dirname(deployed.file)), /^pool-sol-deploy-/);
+});
