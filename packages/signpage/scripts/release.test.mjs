@@ -231,20 +231,21 @@ test("planted: any change to what SIGN_HOST serves, with no new release, fails: 
   }
 });
 
-test("planted: the newest list is picked by N, not by text (release-10 after release-9)", () => {
+test("planted: the newest list is picked by N, not by text (release-100 after release-99)", () => {
   const dir = releasesCopy();
   try {
     const newest = Object.keys(RELEASED).at(-1);
-    // release-9 an old list (release-1's, not this build), release-10 this build's: release-10 is the newest
-    writeFileSync(join(dir, "release-9.json"), readFileSync(join(dir, "release-1.json")));
-    writeFileSync(join(dir, "release-10.json"), readFileSync(join(dir, `${newest}.json`)));
-    const ledger = { ...RELEASED, "release-9": RELEASED["release-1"], "release-10": RELEASED[newest] };
+    // release-99 an old list (release-1's, not this build), release-100 this build's: release-100 is the newest. Both
+    // past any real release, so a real list is never overwritten ("release-100" sorts before "release-99" as text)
+    writeFileSync(join(dir, "release-99.json"), readFileSync(join(dir, "release-1.json")));
+    writeFileSync(join(dir, "release-100.json"), readFileSync(join(dir, `${newest}.json`)));
+    const ledger = { ...RELEASED, "release-99": RELEASED["release-1"], "release-100": RELEASED[newest] };
     assert.deepEqual(releaseProblems(dir, ledger), []);
-    // and the other way round, release-10 the stale one, fails on release-10
-    writeFileSync(join(dir, "release-9.json"), readFileSync(join(dir, `${newest}.json`)));
-    writeFileSync(join(dir, "release-10.json"), readFileSync(join(dir, "release-1.json")));
-    const p = releaseProblems(dir, { ...RELEASED, "release-9": RELEASED[newest], "release-10": RELEASED["release-1"] });
-    assert.ok(p.length && p.every((l) => l.startsWith(`release-10 ${STALE}`) && l.endsWith(": write release-11")), p.join("\n"));
+    // and the other way round, release-100 the stale one, fails on release-100
+    writeFileSync(join(dir, "release-99.json"), readFileSync(join(dir, `${newest}.json`)));
+    writeFileSync(join(dir, "release-100.json"), readFileSync(join(dir, "release-1.json")));
+    const p = releaseProblems(dir, { ...RELEASED, "release-99": RELEASED[newest], "release-100": RELEASED["release-1"] });
+    assert.ok(p.length && p.every((l) => l.startsWith(`release-100 ${STALE}`) && l.endsWith(": write release-101")), p.join("\n"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
