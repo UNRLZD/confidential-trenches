@@ -239,8 +239,8 @@ test("A4: 50 concurrent variants of one nullifier give one simulation and one se
 });
 
 test("A5: W's priority fee is held to the kit's budget, which keeps the 715-lamport page reserve (fee_below_cost)", () => {
-  const budget = solanaPoolPriorityBudget(MAINNET, FEE); // 1,300,000 - 1,066,640 - 715 = 232,645
-  assert.equal(budget, 232_645n);
+  const budget = solanaPoolPriorityBudget(MAINNET, FEE); // 1,300,000 - 1,086,960 - 715 = 212,325
+  assert.equal(budget, 212_325n);
   const top = (budget * 1_000_000n) / 400_000n;
   assert.equal(verdict(wire({ pre: [cuLimit(400_000), cuPrice(top)] })), "ok");
   assert.equal(verdict(wire({ pre: [cuLimit(400_000), cuPrice(top + 1n)] })), "fee_below_cost");
@@ -507,7 +507,7 @@ test("M369 (H1), R3-H1 inverted: no answer carries the fee payer's signature whi
   const d = deferred();
   let sent: Sent | undefined;
   const s = mainnet({ engine, done: (x) => ((sent = x), d.p) });
-  const w = tipped({ pre: [cuLimit(1_400_000), cuPrice(166_175n)] });
+  const w = tipped({ pre: [cuLimit(1_400_000), cuPrice((solanaPoolPriorityBudget(MAINNET, FEE) * 1_000_000n) / 1_400_000n)] });
   const p = s.carry(body(w), "c");
   await sleep(20);
   assert.ok(await pending(p), "filled: no answer before the fill");

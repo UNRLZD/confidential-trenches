@@ -1,10 +1,11 @@
 // Restore of the Solana pool's notes from the 12 words (card notes-per-pool-sol; ../notes/restore.ts is the NEAR
 // vault's, whose walk and follow rules this keeps).
 //
-// - No request names a note or a wallet of the user's. The program's marks are its only accounts of 8 and 16 bytes
-//   (src/state.rs, M353, M355 (3)): a spent mark ["spent", nullifierHash] records the release's withdrawnValue u64 LE,
-//   and a precommitment mark ["pre", precommitment] its deposit, value u64 LE then the nonce u64 LE its label hashes.
-//   Two getProgramAccounts reads (dataSize 8 and dataSize 16, withContext) on each of two RPCs return every mark of
+// - No request names a note or a wallet of the user's. The program's marks are its only accounts of 12 and 16 bytes
+//   (src/state.rs, M353, M355 (3), M376): a spent mark ["spent", nullifierHash] records the release's withdrawnValue
+//   u64 LE then the release's number u32 LE, and a precommitment mark ["pre", precommitment] its deposit, value u64 LE
+//   then the nonce u64 LE its label hashes.
+//   Two getProgramAccounts reads (dataSize 12 and dataSize 16, withContext) on each of two RPCs return every mark of
 //   every user. The marks are the union of the two RPCs' (M355 (4)): two honest RPCs at different finalized slots differ
 //   by the marks between them, and an RPC cannot invent a mark of ours, since a note's nullifier hash and precommitment
 //   stay secret until used; a key both hold with different bytes stops the restore. Then the pages, on both RPCs at or
@@ -24,7 +25,7 @@
 //   landing the restore reads on as the chain moves (a round is a pages read and a marks read, about a second or two),
 //   and the signal stops it.
 // - The leaf count: a deposit writes its precommitment mark, one state leaf and one label leaf (contracts/pool-solana/
-//   src/deposit.rs:85, 95-96), a release its spent mark and one state leaf (release.rs:252, 256), and nothing else
+//   src/deposit.rs:85, 95-96), a release its spent mark and one state leaf (release.rs:260, 268), and nothing else
 //   writes a leaf or a mark. At a read with no new mark the pages hold every leaf of the marks and no other, so the walk
 //   runs only when the label leaves number the deposit marks and the state leaves the deposit and spent marks together.
 //   An RPC that pages short (a relayer that knows a change commitment can cut just before it) is refused on every
@@ -46,7 +47,7 @@
 // - Each spent note's W is W_{sol, l, j}: its address is returned and its secret key, derived for it, is zeroed at once.
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
+import { SOLANA_POOL_SPENT_MARK_LEN, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
@@ -76,7 +77,8 @@ export type SolanaMarkCall = { slot: number; keys: ReadonlySet<string> };
 /** One read of the marks: their union, and each RPC's two answers, [spent, pre]. */
 export type SolanaMarksRead = SolanaMarks & { calls: readonly [readonly [SolanaMarkCall, SolanaMarkCall], readonly [SolanaMarkCall, SolanaMarkCall]] };
 
-export const SOL_SPENT_MARK_LEN = 8;
+/** The kit's one definition of the spent mark's length (src/state.rs SPENT_MARK_LEN). */
+export const SOL_SPENT_MARK_LEN = SOLANA_POOL_SPENT_MARK_LEN;
 export const SOL_PRE_MARK_LEN = 16;
 
 /** Each RPC's answers so far, by size: seen[k][z], RPC k's answers of size z (0 spent, 1 pre). */
@@ -85,7 +87,7 @@ const solanaMarkCalls = (): SolanaMarkCalls => [[[], []], [[], []]];
 
 /**
  * The never-closed rule. A mark is never closed (contracts/pool-solana/src/state.rs:12 "Nothing is ever removed or
- * closed"; the program's one debit is the pool account's, release.rs:260), so a mark one RPC gives at slot s is in every
+ * closed"; the program's one debit is the pool account's, release.rs:272), so a mark one RPC gives at slot s is in every
  * answer of the other RPC at slot s or later. An answer that lacks it is a lie of one of the two, refused whoever's note
  * it would be: the device never judges an RPC's answer by its own notes. next (one read: each RPC's [spent, pre]) is
  * checked against the other RPC's earlier answers in seen, both ways, and against itself, then added to seen.
