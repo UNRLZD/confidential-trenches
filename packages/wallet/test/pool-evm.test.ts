@@ -607,6 +607,10 @@ test("F2b bind refuses a deadline the chain has passed, whatever one RPC says th
   const late = chain([...deps(PP, [10, 12, 30]), { block: 31, kind: "wd", leaf: 999n }], 400, 350);
   const p = evmPool({ pin: PIN, rpcs: pair(late, late, {}, { latestBlock: fakeLatest(400, T0 + 61n) }), relayFee: async () => answer(), epochFee: () => 3n * 10n ** 13n, salt: () => new Uint8Array(16), ...noWait });
   await assert.rejects(p.bind(bindArgs()), /too close to send/);
+  // an honest RPC behind the other (its latest block 100, T0 + 200 s): the agreed time is block 100's, but the send
+  // margin is checked at the higher latest time (block 400's), so the deadline the chain has passed is refused
+  const p2 = evmPool({ pin: PIN, rpcs: pair(late, late, {}, { latest: () => 100 }), relayFee: async () => answer(), epochFee: () => 3n * 10n ** 13n, salt: () => new Uint8Array(16), ...noWait });
+  await assert.rejects(p2.bind(bindArgs()), /too close to send/);
 });
 
 const HEAD_LAG_TEXT = "RPC error -32602: block range extends beyond current head block: requested 53811322, head 53811277"; // sepolia.base.org, 3 Nov 05:35Z
@@ -695,6 +699,12 @@ test("F6 a read that fails on one RPC stops the other RPC's paging: nothing runs
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(callsB, atReject, `RPC b made ${callsB - atReject} more eth_getLogs calls after trees() had failed`);
   assert.ok(atReject <= 2, `RPC b paged on (${atReject} calls) while RPC a had failed`);
+  // RPC a fails while RPC b's page is in flight: the read fails only once that page has settled
+  let open = 0;
+  const failLate = { getLogs: () => 5, logs: (): Record<string, unknown>[] => { throw new Error("RPC error 429: too many requests"); } };
+  const slowB = { getLogs: () => (open++, 40), logs: (l: Record<string, unknown>[]) => (open--, l) };
+  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, failLate, slowB), pin: PIN, sleep: async () => {} }).trees(after(25)), /429/);
+  assert.equal(open, 0, "RPC b's page was still in flight when trees() rejected");
 });
 
 test("F7 a reorg of the epoch's first block under the search is a retry; the search runs below the agreed newest block", async () => {
@@ -790,6 +800,7 @@ test("X11 depthAt past the newest agreed block is a lag, then refused", async ()
 
 test("X12 two reads at once run one after the other: neither sees the other's half-made cache", async () => {
   const c = C3();
+  c.events.push({ block: 60, kind: "dep", leaf: 1234n, label: 4321n });
   let fin = 50;
   let slow = true;
   // the first read's first page is slow: without one round at a time, the second read caches first and the first then
@@ -799,9 +810,9 @@ test("X12 two reads at once run one after the other: neither sees the other's ha
   await s.trees(after(25));
   fin = 90;
   slow = true;
-  const [x, y] = await Promise.all([s.trees(after(25)), s.trees(after(25))]);
-  assert.equal(x.stateTree.size, 4);
-  assert.equal(y.stateTree.size, 4);
+  const [x, y] = await Promise.all([s.trees(after(61)), s.trees(after(61))]);
+  assert.equal(x.stateTree.size, 5);
+  assert.equal(y.stateTree.size, 5);
 });
 
 test("X13 a cut with a state leaf but no label is refused (no leaf before)", async () => {
