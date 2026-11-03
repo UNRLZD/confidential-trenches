@@ -3,7 +3,7 @@
 // on every mutant. The file is changed in place and put back after each mutant (and checked to be back); exits 1 when a
 // named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in the file
 // exactly once. R1-R14 are the evm-pool-buy-tx review's mutants (R10 moved with the digest's data check, now the hook
-// data hex check); K1-K15 are the fold's (merge note M366).
+// data hex check); K1-K16 are the fold's (merge note M366).
 //   node packages/kit/test/evm-pool-buy-mutants.mjs     (a heavy job: run it on a machine with spare cores)
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -86,6 +86,7 @@ export const MUTANTS = [
   // the venue list the checks and the signer read is frozen at every level, never a mutable copy (M366 (4))
   ["(venues ??= Object.freeze({", "(venues ??= ({", "V1 "],
   ["    base: Object.freeze({", "    base: ({", "V1 "],
+  ["    robinhood: Object.freeze({", "    robinhood: ({", "V1 "],
   ['middles: Object.freeze(["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"])', 'middles: (["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"])', "V1 "],
   ['middles: Object.freeze(["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"])', 'middles: (["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"])', "V1 "],
   ["Object.freeze({ chain, adapter, data: toHex(data), minOut, token })", "({ chain, adapter, data: toHex(data), minOut, token })", "F2b "],

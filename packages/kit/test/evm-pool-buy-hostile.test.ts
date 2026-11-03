@@ -205,6 +205,8 @@ test("V1 the venue list is frozen all the way down: every write throws, and the 
   assert.throws(() => void (v.base!.weth = X), TypeError);
   assert.throws(() => void v.base!.middles.push(Z), TypeError);
   assert.throws(() => void (v.base!.middles[0] = Z), TypeError);
+  assert.throws(() => void (v.robinhood!.chainId = 8453), TypeError);
+  assert.throws(() => void (v.robinhood!.weth = X), TypeError);
   assert.throws(() => void (v.robinhood!.middles[0] = Z), TypeError);
   assert.equal(code(() => evmPoolBuild("base", ADAPTER, v4(ZERO, hop(Z), hop(X)), 1n, X)), "middle_not_listed");
   assert.equal(code(() => evmPoolBuild("ethereum" as EvmPoolChain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "bad_route");
