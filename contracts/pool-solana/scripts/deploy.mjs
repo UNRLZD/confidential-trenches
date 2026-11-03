@@ -3,7 +3,7 @@
 // Deploys the Blindfill pool program to Solana devnet (or a local validator, the dry run), immutable, then makes its
 // SOL pool and one test deposit. Every key lives only in this run.
 //
-//   node contracts/pool-solana/scripts/deploy.mjs --return <address> [--url <rpc>] [--no-build] [--out <file>]
+//   node contracts/pool-solana/scripts/deploy.mjs --return <address> [--url <rpc>] [--ci-run <id> | --no-build] [--out <file>]
 //     [--program <id> [--prior <sig>,...]]     a resume: the program is final already, init (if missing) and deposit only
 //   node contracts/pool-solana/scripts/deploy.mjs --rebuild-record <deployment.json> [--url <rpc>]
 //     rewrites a record's transactions and funders from chain reads alone: no key, no transaction
@@ -13,7 +13,9 @@
 //     deploy is the owner's, on a program id of its own: M351).
 //  2. The build: cargo-build-sbf --sbf-out-dir out -- --locked (CI's command, refused when a stack frame overflows), its
 //     sha256 and length printed. The keypair cargo-build-sbf writes beside the .so is deleted unread: the program id
-//     is made here, fresh.
+//     is made here, fresh. Devnet takes only CI's build (--ci-run <run id>: the pool-solana job's artifact, refused
+//     unless its sha256 is the one that job's log printed), so anyone can match the program to a public build; the
+//     record names the run, the commit and the toolchain read from the binaries that built it.
 //  3. Two keys made in memory: the program's and the run's funder. The solana CLI reads keys only from files, so both
 //     go to a 0700 temp folder, files 0600; neither is ever printed. The folder is removed only once the cleanup reads
 //     the funder at 0 on two RPCs with no buffer or upgradeable program of its left; otherwise it is kept and its path
@@ -381,7 +383,47 @@ export function buildOf(sbfVersion, cliVersion) {
   return `${sbf.join("; ")}; ${sol[0]}; cargo-build-sbf --sbf-out-dir out -- --locked`;
 }
 
-export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = cli } = {}) {
+export const CI_REPO = "UNRLZD/confidential-trenches";
+export const CI_ARTIFACT = "pool-solana-so";
+const ghCli = (args) => {
+  const r = spawnSync("gh", args, { encoding: "utf8", maxBuffer: 64 << 20 });
+  if (r.status !== 0) throw new Error(`gh ${args.slice(0, 3).join(" ")}: exit ${r.status}: ${String(r.stderr).trim().split("\n").pop()}`);
+  return r.stdout;
+};
+
+/**
+ * The code a public cluster deploys: CI's build, byte for byte, since a build on another host gives other bytes and
+ * nobody could rebuild the program to its hash. Reads ci run <runId>'s pool-solana job (it must have passed), the
+ * sha256, size, commit and toolchain its log printed, and the pool-solana-so artifact it uploaded; refused unless the
+ * file's sha256 and size are the ones the log printed.
+ */
+export function ciCode(runId, { gh = ghCli } = {}) {
+  if (!/^\d{1,20}$/.test(String(runId))) throw new Error(`--ci-run ${runId}: not a run id`);
+  const view = JSON.parse(gh(["run", "view", String(runId), "-R", CI_REPO, "--json", "databaseId,workflowName,headSha,jobs"]));
+  if (view.workflowName !== "ci") throw new Error(`run ${runId} is ${view.workflowName}'s, not ci's`);
+  const job = (view.jobs ?? []).find((j) => j.name === "pool-solana");
+  if (job?.conclusion !== "success") throw new Error(`run ${runId}'s pool-solana job is ${job ? job.conclusion || job.status : "missing"}, not a success`);
+  const lines = gh(["api", `repos/${CI_REPO}/actions/jobs/${job.databaseId}/logs`]).split("\n").map((l) => l.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z /, "").trimEnd());
+  const said = lines.map((l) => l.match(/^pool-solana code: sha256 ([0-9a-f]{64}), (\d+) bytes, commit ([0-9a-f]{40})$/)).filter(Boolean);
+  if (said.length !== 1) throw new Error(`run ${runId}'s pool-solana log states the code ${said.length} times, not once`);
+  const [, sha, len, commit] = said[0];
+  const tool = (re) => lines.filter((l) => l.startsWith("pool-solana toolchain: ")).map((l) => l.slice(23)).filter((l) => re.test(l)).join("\n");
+  const build = buildOf(tool(/^(cargo-build-sbf|Default )/), tool(/^solana-cli /));
+  const dir = mkdtempSync(path.join(tmpdir(), "pool-sol-ci-"));
+  try {
+    gh(["run", "download", String(runId), "-R", CI_REPO, "-n", CI_ARTIFACT, "-D", dir]);
+    const so = readFileSync(path.join(dir, "blindfill_pool_solana.so"));
+    const got = createHash("sha256").update(so).digest("hex");
+    const listed = readFileSync(path.join(dir, "blindfill_pool_solana.so.sha256"), "utf8").trim().split(/\s+/)[0];
+    if (got !== sha || listed !== sha || so.length !== Number(len))
+      throw new Error(`run ${runId}'s artifact is ${so.length} bytes, sha256 ${got} (its sha256 file says ${listed}); its log says ${len} bytes, sha256 ${sha}`);
+    return { so, sha, commit, run: String(runId), build: `${build}; CI run ${runId}, pool-solana job ${job.databaseId}, commit ${commit}` };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = cli, gh = ghCli } = {}) {
   const opt = (n, d) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
   const url = opt("--url", "https://api.devnet.solana.com");
   const genesis = await rpc(fetchFn, url, "getGenesisHash", []);
@@ -419,8 +461,11 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
   log(`cluster ${cluster} (genesis ${genesis}) at ${url}`);
 
   // the toolchain the record names: read from the binaries that build, never written by hand
-  let build = "--no-build: the code was built before this run, by a toolchain this record does not name";
-  if (!argv.includes("--no-build")) {
+  const ciRun = opt("--ci-run");
+  if (cluster !== "localnet" && !ciRun) throw new Error(`${cluster} takes CI's build only: --ci-run <the ci run id whose pool-solana job built it>`);
+  const ci = ciRun ? ciCode(ciRun, { gh }) : null;
+  let build = ci?.build ?? "--no-build: the code was built before this run, by a toolchain this record does not name";
+  if (!ci && !argv.includes("--no-build")) {
     build = buildOf(spawnSync("cargo-build-sbf", ["--version"], { encoding: "utf8" }).stdout, spawnSync("solana", ["--version"], { encoding: "utf8" }).stdout);
     const b = spawnSync("cargo-build-sbf", ["--sbf-out-dir", "out", "--", "--locked"], { cwd: POOL_DIR, encoding: "utf8" });
     const out = `${b.stdout}${b.stderr}`;
@@ -429,10 +474,9 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     log(`built with ${build}`);
   }
   rmSync(path.join(POOL_DIR, "out/blindfill_pool_solana-keypair.json"), { force: true }); // unread: the id is made below
-  const soFile = opt("--so", SO); // the test passes its own code
-  const so = readFileSync(soFile);
+  const so = ci ? ci.so : readFileSync(opt("--so", SO)); // the test passes its own code
   const soSha = createHash("sha256").update(so).digest("hex");
-  log(`code ${so.length} bytes, sha256 ${soSha}`);
+  log(`code ${so.length} bytes, sha256 ${soSha}, built by ${build}`);
 
   const second = cluster === "devnet" ? DEVNET_RPCS.find((u) => u !== url) ?? DEVNET_RPCS[1] : url.replace("127.0.0.1", "localhost");
   let poolExists = false;
@@ -553,7 +597,7 @@ export async function main(argv, fetchFn = fetch, { wait = sleep, cli: runCli = 
     result = {
       cluster, genesis_hash: genesis, rpc: url, at: new Date().toISOString(),
       program_id: program.id, programdata: programDataAddress(program.id), pool: pool.address, scope: hex(scope),
-      so_len: so.length, so_sha256: soSha, build,
+      so_len: so.length, so_sha256: soSha, build, ci_run: ci?.run ?? null, commit: ci?.commit ?? null,
       deposit: { value: String(value), nonce: String(nonce), precommitment: hex(pre), label: hex(label), commitment: hex(commitment) },
       funder: funder.id, return_to: returnTo, need: String(need.total), need_parts: Object.fromEntries(Object.entries(need.parts).map(([k, v]) => [k, String(v)])),
     };

@@ -252,8 +252,9 @@ test("the resume refuses a program another loader owns, programdata another prog
 });
 
 // ---- the cleanup's keys and the two-transaction --final (review of bc57e12) ----
-import { buildOf, chainOps, chainRecord, main } from "./deploy.mjs";
+import { buildOf, chainOps, chainRecord, ciCode, main } from "./deploy.mjs";
 import { existsSync, mkdtempSync, readdirSync as ls, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 
 test("main keeps the run's key folder when the sweep fails: the funder still holds its lamports", async () => {
@@ -387,4 +388,73 @@ test("the record names the toolchain read at build time: cargo-build-sbf's --ver
   const src = readFileSync(new URL("./deploy.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(src, /build: "cargo-build-sbf/);
   assert.match(src, /so_sha256: soSha, build,/);
+});
+
+// a fake gh: run <id>'s view, its pool-solana job log and its artifact, each one changeable
+function fakeGh({ code = recordedCode(), view = {}, log = (l) => l, files = (f) => f } = {}) {
+  const sha = createHash("sha256").update(code).digest("hex");
+  const commit = "e3f946dc4b7a208318986c80698efa16d27e5200";
+  const calls = [];
+  const gh = (args) => {
+    calls.push(args.join(" "));
+    if (args[0] === "run" && args[1] === "view")
+      return JSON.stringify({ databaseId: 41677243428, workflowName: "ci", headSha: "fa4cd79e25fa11326c74541ccbdd05da11da2adb", jobs: [{ name: "gitleaks", conclusion: "success", databaseId: 1 }, { name: "pool-solana", conclusion: "success", databaseId: 126061058748 }], ...view });
+    if (args[0] === "api") {
+      assert.equal(args[1], "repos/UNRLZD/confidential-trenches/actions/jobs/126061058748/logs");
+      return log([
+        "2026-11-03T16:45:30.5Z ##[group]Run sha256sum blindfill_pool_solana.so | tee blindfill_pool_solana.so.sha256",
+        `2026-11-03T16:45:30.5Z \u001b[36;1mecho "pool-solana code: sha256 $(cut -d' ' -f1 blindfill_pool_solana.so.sha256), $(wc -c < blindfill_pool_solana.so) bytes, commit $(git rev-parse HEAD)"\u001b[0m`,
+        `2026-11-03T16:45:30.6Z ${sha}  blindfill_pool_solana.so`,
+        `2026-11-03T16:45:30.6Z pool-solana code: sha256 ${sha}, ${code.length} bytes, commit ${commit}`,
+        "2026-11-03T16:45:30.7Z pool-solana toolchain: cargo-build-sbf 4.5.0",
+        "2026-11-03T16:45:30.7Z pool-solana toolchain: Default platform-tools: v1.57",
+        "2026-11-03T16:45:30.7Z pool-solana toolchain: Default Rust: 1.95.0",
+        "2026-11-03T16:45:30.8Z pool-solana toolchain: solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave)",
+      ].join("\n"));
+    }
+    if (args[0] === "run" && args[1] === "download") {
+      assert.deepEqual(args.slice(2, 7), ["41677243428", "-R", "UNRLZD/confidential-trenches", "-n", "pool-solana-so"]);
+      const dir = args[args.indexOf("-D") + 1];
+      const f = files({ "blindfill_pool_solana.so": code, "blindfill_pool_solana.so.sha256": `${sha}  blindfill_pool_solana.so\n` });
+      for (const [name, body] of Object.entries(f)) writeFileSync(path.join(dir, name), body);
+      return "";
+    }
+    throw new Error(`unexpected gh ${args.join(" ")}`);
+  };
+  return { gh, sha, commit, calls };
+}
+
+test("a public cluster's code is CI's build: the artifact whose sha256 and size the pool-solana job's log printed", () => {
+  const f = fakeGh();
+  const c = ciCode("41677243428", { gh: f.gh });
+  assert.ok(c.so.equals(recordedCode()));
+  assert.equal(c.sha, f.sha);
+  assert.equal(c.commit, f.commit);
+  assert.equal(c.build, `cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41677243428, pool-solana job 126061058748, commit ${f.commit}`);
+  const refused = (opts, re) => assert.throws(() => ciCode("41677243428", { gh: fakeGh(opts).gh }), re);
+  // another file than the one CI built, or a sha256 file that disagrees
+  refused({ files: (x) => ({ ...x, "blindfill_pool_solana.so": Buffer.concat([recordedCode(), Buffer.of(0)]) }) }, /artifact is .* its log says/);
+  refused({ files: (x) => { const c = Buffer.from(recordedCode()); c[100] ^= 1; return { ...x, "blindfill_pool_solana.so": c }; } }, /artifact is .* its log says/);
+  refused({ files: (x) => ({ ...x, "blindfill_pool_solana.so.sha256": `${"0".repeat(64)}  blindfill_pool_solana.so\n` }) }, /its sha256 file says 0{64}/);
+  // a log that states the code twice, never, or names no toolchain
+  refused({ log: (l) => l + "\n" + l.split("\n")[3] }, /states the code 2 times/);
+  refused({ log: (l) => l.split("\n").filter((x) => !x.includes("pool-solana code: sha256 ") || x.includes("echo")).join("\n") }, /states the code 0 times/);
+  refused({ log: (l) => l.split("\n").filter((x) => !x.includes("toolchain: solana-cli")).join("\n") }, /solana --version: not a version answer/);
+  // a run whose pool-solana job failed or is missing, another workflow's run, a run id that is not one
+  refused({ view: { jobs: [{ name: "pool-solana", conclusion: "failure", databaseId: 126061058748 }] } }, /pool-solana job is failure, not a success/);
+  refused({ view: { jobs: [] } }, /pool-solana job is missing/);
+  refused({ view: { workflowName: "live" } }, /is live's, not ci's/);
+  assert.throws(() => ciCode("1; rm -rf /", { gh: f.gh }), /not a run id/);
+});
+
+test("devnet refuses a host build and --no-build: only --ci-run, before any key or transaction", async () => {
+  const devnet = async (u, init) => {
+    if (JSON.parse(init.body).method === "getGenesisHash") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" }) };
+    throw new Error("no other call before the code is CI's");
+  };
+  const run = (args, opts = {}) => main(["--url", "https://api.devnet.solana.com", "--return", RETURN, ...args], devnet, opts);
+  for (const args of [[], ["--no-build"], ["--no-build", "--so", "x.so"]]) await assert.rejects(run(args), /devnet takes CI's build only: --ci-run/);
+  const f = fakeGh({ view: { jobs: [{ name: "pool-solana", conclusion: "failure", databaseId: 126061058748 }] } });
+  await assert.rejects(run(["--ci-run", "41677243428"], { gh: f.gh }), /pool-solana job is failure/);
+  assert.equal(f.calls.length, 1);
 });

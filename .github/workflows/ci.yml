@@ -388,6 +388,15 @@ jobs:
           cargo-build-sbf --sbf-out-dir out -- --locked 2>&1 | tee "$RUNNER_TEMP/sbf.log"
           test "${PIPESTATUS[0]}" = 0
           if grep -q "overflows the maximum allowed frame space" "$RUNNER_TEMP/sbf.log"; then echo "a stack frame overflows 4 KiB"; exit 1; fi
+      # The code a devnet pool deploys is this build, byte for byte (a build on another host gives other bytes): its sha256,
+      # the commit built and the toolchain go in this log, which deploy.mjs --ci-run reads, and the file is uploaded below.
+      - name: the pool program's code hash, commit and toolchain
+        working-directory: contracts/pool-solana/out
+        run: |
+          sha256sum blindfill_pool_solana.so | tee blindfill_pool_solana.so.sha256
+          echo "pool-solana code: sha256 $(cut -d' ' -f1 blindfill_pool_solana.so.sha256), $(wc -c < blindfill_pool_solana.so) bytes, commit $(git rev-parse HEAD)"
+          cargo-build-sbf --version | sed 's/^/pool-solana toolchain: /'
+          solana --version | sed 's/^/pool-solana toolchain: /'
       # svm-tests' tag 3 tests: a hostile venue (re-entry, a venue taking pool lamports), and copies of mainnet's pump,
       # PumpSwap and fee programs, whose code is not committed (closed source) and must hash as the fixtures' JSON says:
       # a pump upgrade fails here until the fixtures are re-dumped.
@@ -403,3 +412,12 @@ jobs:
         run: |
           POOL_SO="$PWD/contracts/pool-solana/out/blindfill_pool_solana.so" \
             cargo +1.97.1 test --locked --manifest-path contracts/pool-solana/svm-tests/Cargo.toml
+      # uploaded only once its tests passed: the file deploy.mjs --ci-run deploys
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pool-solana-so
+          path: |
+            contracts/pool-solana/out/blindfill_pool_solana.so
+            contracts/pool-solana/out/blindfill_pool_solana.so.sha256
+          if-no-files-found: error
+          retention-days: 90
