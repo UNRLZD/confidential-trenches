@@ -374,7 +374,38 @@ export type Pool = {
   token: string;
   tokenIs0: boolean;
   quote: { kind: "usd" | "eth"; decimals: number };
+  /** A v4 pool's hook when its address carries a return-delta flag (hookOf): the hook may then take from or add to
+   *  what the swapper pays or gets, after the `Swap` log is written. */
+  hook?: string;
 };
+
+/** v4-core Hooks.sol: BEFORE_SWAP_RETURNS_DELTA_FLAG (1 << 3) and AFTER_SWAP_RETURNS_DELTA_FLAG (1 << 2), read in the
+ *  sources Sourcify holds for PonsV2MemeHook on chain 4663. A hook's permissions are the low bits of its address. */
+const BEFORE_SWAP_DELTA = 1n << 3n;
+const AFTER_SWAP_DELTA = 1n << 2n;
+
+/**
+ * The hook of a v4 PoolKey (abi-encoded, its fifth word) when it may change a swapper's amounts, else undefined. The
+ * PoolManager writes `Swap` with the pool's own amounts, then calls the hook's afterSwap, whose returned delta is taken
+ * from the swapper's unspecified leg (a beforeSwap delta from the specified one) and settled by the hook itself in the
+ * same call: on Robinhood PonsV2MemeHook 0xe5e70264... takes 2.75% of a buy's token leg, so the buyer of tx 0x2446469c
+ * got 22,193.91 of the 22,821.50 the log shows (receipt read on two providers, 2026-11-04 20:1xZ).
+ */
+export function hookOf(key: string): string | undefined {
+  if (!/^0x[0-9a-f]{320}$/.test(key)) return undefined;
+  const h = `0x${key.slice(2 + 64 * 4 + 24)}`;
+  return (BigInt(h) & (BEFORE_SWAP_DELTA | AFTER_SWAP_DELTA)) !== 0n ? h : undefined;
+}
+
+/** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
+ *  (Pool.hook) the token's transfers between the PoolManager and the hook, which are the hook's cut (hookTakes). Two
+ *  filters, never one with two addresses: api.blockvectra.com refuses an address list (-32602, 2026-11-04 20:2xZ). */
+export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
+  const swaps = swapFilter(pool, from, to, chain);
+  if (pool.venue !== "v4" || pool.hook === undefined) return [swaps];
+  const ends = [VENUES[chain].poolManager, pool.hook].map((a) => `0x${a.slice(2).padStart(64, "0")}`);
+  return [swaps, { address: pool.token, topics: [TOPIC.transfer, ends, ends], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock }];
+}
 
 /** The `eth_getLogs` filter for a pool's swaps over blocks `from` to `to`. */
 export function swapFilter(pool: Pick<Pool, "venue" | "id">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown> {
@@ -429,6 +460,52 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
   if (d0 === null || d1 === null || d0 === 0n || d1 === 0n || d0 > 0n === d1 > 0n) return null; // one leg in, one out
   const [dt, dq] = pool.tokenIs0 ? [d0, d1] : [d1, d0];
   return { kind: "swap", block: l.block, index: l.index, tx: l.tx, side: dt < 0n ? "b" : "s", amt: dt < 0n ? -dt : dt, quote: dq < 0n ? -dq : dq };
+}
+
+/**
+ * A hooked v4 pool's (Pool.hook) cut of the token in each of its swaps, by the swap log's `tx:index`: what the token's
+ * transfers between the PoolManager and the hook moved to the hook (less what they moved back), in the logs read with
+ * the swaps (poolFilters). A hook settles its delta inside its own call, so its transfers sit next to the swap's log:
+ * an afterSwap hook's after it (before the transaction's next swap of the pool), a beforeSwap-only hook's before it.
+ * A swap the hook sends itself is no one's trade through the hook (v4 calls no hook for its own swaps): no cut.
+ */
+export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "base"): Map<string, bigint> {
+  const takes = new Map<string, bigint>();
+  if (pool.venue !== "v4" || pool.hook === undefined) return takes;
+  const pm = VENUES[chain].poolManager;
+  const hook = pool.hook;
+  const after = (BigInt(hook) & AFTER_SWAP_DELTA) !== 0n;
+  const byTx = new Map<string, { swaps: Log[]; moves: { index: number; take: bigint }[] }>();
+  const at = (tx: string) => byTx.get(tx) ?? byTx.set(tx, { swaps: [], moves: [] }).get(tx)!;
+  for (const l of logs) {
+    if (l.address === pm && l.topics.length === 3 && l.topics[0] === TOPIC.swap4 && l.topics[1] === pool.id && addrOf(l.topics[2]!.slice(2)) !== hook) at(l.tx).swaps.push(l);
+    else if (l.address === pool.token && l.topics.length === 3 && l.topics[0] === TOPIC.transfer && l.data.length === 66) {
+      const [from, to] = [addrOf(l.topics[1]!.slice(2)), addrOf(l.topics[2]!.slice(2))];
+      const v = BigInt(l.data);
+      if (from === pm && to === hook) at(l.tx).moves.push({ index: l.index, take: v });
+      else if (from === hook && to === pm) at(l.tx).moves.push({ index: l.index, take: -v });
+    }
+  }
+  for (const { swaps, moves } of byTx.values()) {
+    if (swaps.length === 0) continue;
+    swaps.sort((a, b) => a.index - b.index);
+    for (const m of moves) {
+      const before = swaps.filter((s) => s.index < m.index).at(-1);
+      const next = swaps.find((s) => s.index > m.index);
+      const owner = after ? (before ?? next)! : (next ?? before)!;
+      const k = `${owner.tx}:${owner.index}`;
+      takes.set(k, (takes.get(k) ?? 0n) + m.take);
+    }
+  }
+  return takes;
+}
+
+/** The token leg the trader got (a buy) or paid (a sell) when a hook's cut `take` makes it differ from the pool's
+ *  `amt`; undefined when it does not, or when the cut would leave nothing (no trader's leg, so the pool's stands). */
+export function traderLeg(s: Pick<Swap, "side" | "amt">, take: bigint | undefined): bigint | undefined {
+  if (take === undefined || take === 0n) return undefined;
+  const got = s.side === "b" ? s.amt - take : s.amt + take;
+  return got > 0n ? got : undefined;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -621,8 +698,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed. */
-  async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown>, from: number, to: number): Promise<Log[] | null> {
-    const parts = await agreedLogs(urls, spans(from, to).map(([lo, hi]) => filter(lo, hi)));
+  async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number): Promise<Log[] | null> {
+    const parts = await agreedLogs(urls, spans(from, to).flatMap(([lo, hi]) => [filter(lo, hi)].flat()));
     return parts.some((x) => x == null) ? null : (parts as Log[][]).flat();
   }
 
@@ -727,7 +804,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         if (!tokenIs0 && c1 !== token) return;
         const other = tokenIs0 ? c1 : c0;
         const quote = other === V.usd ? ({ kind: "usd", decimals: 6 } as const) : other === V.weth || other === ZERO ? ({ kind: "eth", decimals: 18 } as const) : null;
-        if (quote !== null) cands.push({ venue: "v4", id, token, tokenIs0, quote });
+        const hook = hookOf(k);
+        if (quote !== null) cands.push({ venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) });
       });
     }
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
@@ -745,7 +823,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (cands.length === 0) return null;
     // the pool with most swaps in the window is the main pool (ties: the lower id); its logs are the book's first read
     const [swaps, [d], refOk] = await Promise.all([
-      Promise.all(cands.map((c) => agreedRange(head.with, (lo, hi) => swapFilter(c, lo, hi, chain), from, head.n))),
+      Promise.all(cands.map((c) => agreedRange(head.with, (lo, hi) => poolFilters(c, lo, hi, chain), from, head.n))),
       callsAgreed(head.n, [{ to: token, data: SEL.decimals }]),
       cands.some((c) => c.quote.kind === "eth") ? readRef(head.with, head.n, from) : Promise.resolve(true),
     ]);
@@ -757,7 +835,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     let logs = swaps[best.i]!;
     let n = best.n;
     if (n < TRADES_MAX && from > head.n - V.cold + 1) {
-      const w = await walk(head.with, (lo, hi) => swapFilter(best.c, lo, hi, chain), from - 1, TRADES_MAX - n, (part) => part.filter((l) => decodeSwap(best.c, l, chain) !== null).length, head.n - V.cold + 1);
+      const w = await walk(head.with, (lo, hi) => poolFilters(best.c, lo, hi, chain), from - 1, TRADES_MAX - n, (part) => part.filter((l) => decodeSwap(best.c, l, chain) !== null).length, head.n - V.cold + 1);
       if (w == null) throw new Error("swaps not agreed");
       logs = w.logs.concat(logs);
       n += w.logs.filter((l) => decodeSwap(best.c, l, chain) !== null).length;
@@ -832,7 +910,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** A filter's logs walked back from `to` one step at a time, newest first, until `want` of them count (`count`) or
    *  the chain's cold window is read: an active pool costs one step, as before, and only a quiet one the whole window. */
-  async function walk(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown>, to: number, want: number, count: (logs: Log[]) => number, start = to - V.cold + 1): Promise<{ from: number; logs: Log[] } | null> {
+  async function walk(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], to: number, want: number, count: (logs: Log[]) => number, start = to - V.cold + 1): Promise<{ from: number; logs: Log[] } | null> {
     let hi = to;
     let logs: Log[] = [];
     let n = 0;
@@ -853,6 +931,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function apply(e: Entry, from: number, to: number, headN: number, logs: Log[]): boolean {
     const events: Event[] = [];
     let last = 0;
+    const takes = hookTakes(e.pool, logs, chain);
     for (const l of logs) {
       if (l.block < from || l.block > to) return false;
       const s = decodeSwap(e.pool, l, chain);
@@ -861,7 +940,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = timeOf(l);
       if (t === null || t < last) return false;
       last = t;
-      events.push({ ...s, t });
+      // the tape's leg is the trader's: the pool's less a hook's cut (hookTakes)
+      const got = traderLeg(s, takes.get(`${l.tx}:${l.index}`));
+      events.push({ ...s, t, ...(got === undefined ? {} : { got }) });
     }
     let merged: Event[] = events;
     if (e.pool.quote.kind === "eth") {
@@ -884,7 +965,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const first = e.book.settledTo < 0 && e.readAt === null;
     if (first) {
       // a first read with no discovery's seed: newest first, until the tape's TRADES_MAX swaps or the cold window
-      const w = await walk(urls, (lo, hi) => swapFilter(e.pool, lo, hi, chain), head.n, TRADES_MAX, (part) => part.filter((l) => decodeSwap(e.pool, l, chain) !== null).length);
+      const w = await walk(urls, (lo, hi) => poolFilters(e.pool, lo, hi, chain), head.n, TRADES_MAX, (part) => part.filter((l) => decodeSwap(e.pool, l, chain) !== null).length);
       if (w == null || (e.pool.quote.kind === "eth" && !((await refReady) && (await readRef(urls, head.n, w.from))))) return false;
       return apply(e, w.from, head.n, head.n, w.logs);
     }
@@ -892,7 +973,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // one tick reads at most a step, or CHUNKS_MAX spans past it; the rest is read the next tick
     const to = Math.min(head.n, from + Math.max(V.step, CHUNKS_MAX * V.span) - 1);
     if (from > to) return true;
-    const logs = await agreedRange(urls, (lo, hi) => swapFilter(e.pool, lo, hi, chain), from, to);
+    const logs = await agreedRange(urls, (lo, hi) => poolFilters(e.pool, lo, hi, chain), from, to);
     if (logs == null || (e.pool.quote.kind === "eth" && !(await refReady))) return false;
     return apply(e, from, to, head.n, logs);
   }
