@@ -13,13 +13,9 @@
 //   not_pool            the instruction after the compute budget is not the configured pool program's tag 2 or tag 3,
 //                       or its first account is not the pool;
 //   extra_instruction   any instruction other than at most one compute unit limit and one compute unit price, before
-//                       exactly one pool instruction; after it, nothing, except on a tag 2 exactly one System Transfer
-//                       from W (the release's recipient, account 1) to a static key that is not the pool or its
-//                       program (the signing page's withdraw: the release and W's onward send to the typed address,
-//                       one atomic transaction; card signpage-pool-withdraw-form);
+//                       exactly one pool instruction;
 //   fee_payer_named     the fee payer named anywhere but the payer (key 0) and the pool instruction's account 2: as a
-//                       program, another account of any instruction (a tag 2's trailing transfer included), or an
-//                       account a tag 3 inner instruction names
+//                       program, another account of any instruction, or an account a tag 3 inner instruction names
 //                       (lookup tables cannot name it: the runtime refuses a key loaded twice);
 //   fee_off             relay_fee is not the fee this helper publishes for the pool;
 //   fee_below_cost      the priority fee W set (CU limit x price) over the kit's solanaPoolPriorityBudget: the fee
@@ -78,7 +74,6 @@ import {
   SOLANA_POOL_TAG3_MAX_INNER,
   SOLANA_POOL_TAG_RELEASE,
   SOLANA_POOL_TAG_RELEASE_AND_BUY,
-  SOLANA_SYSTEM_PROGRAM,
   sendSolanaSet,
   solanaDecodeLookupTable,
   solanaDecodePoolRelease,
@@ -250,9 +245,7 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
     else if (accounts.length === 0 && data.length === 9 && data[0] === 3 && price === null) price = dv.getBigUint64(1, true);
     else return no("extra_instruction", "a compute budget instruction other than one limit and one price");
   }
-  // the pool instruction, then at most one more: a tag 2's onward transfer, checked once the tag is read
-  if (ixs.length !== k + 1 && ixs.length !== k + 2) return no("extra_instruction", "not one pool instruction after the compute budget, with at most one transfer after it");
-  if (ixs.length === k + 2 && keyOf(ixs[k]!.programIndex) !== cfg.program) return no("extra_instruction", "an instruction between the compute budget and the pool's");
+  if (ixs.length !== k + 1) return no("extra_instruction", "not exactly one instruction after the compute budget");
   if (price !== null && limit === null) return no("no_cu_limit", "a compute unit price needs a compute unit limit");
   const pix = ixs[k]!;
   if (pix.programIndex === 0) return no("fee_payer_named", "as a program");
@@ -272,21 +265,6 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   // tag 3's inner instructions index this instruction's accounts: position 2 is the fee payer
   if (p.innerAccounts.includes(2) || p.innerPrograms.includes(2)) return no("fee_payer_named", "in an inner instruction");
   if ([...p.innerAccounts, ...p.innerPrograms].some((i) => i >= pix.accounts.length)) return no("not_pool", "an inner index past the accounts");
-  // a tag 2's one trailing instruction: a System Transfer (u32 2, u64 lamports) from W, account 1, to a static key that
-  // is neither the fee payer nor the pool nor its program; the fee payer signs nothing that moves its own lamports, and
-  // nothing else rides on the release
-  if (ixs.length === k + 2) {
-    const t = ixs[k + 1]!;
-    if (p.tag !== 2) return no("extra_instruction", "an instruction after a tag 3");
-    if (t.programIndex === 0) return no("fee_payer_named", "as the transfer's program");
-    if (keyOf(t.programIndex) !== SOLANA_SYSTEM_PROGRAM) return no("extra_instruction", "the instruction after the release is not the System program's");
-    const td = new DataView(t.data.buffer, t.data.byteOffset, t.data.byteLength);
-    if (t.data.length !== 12 || td.getUint32(0, true) !== 2 || t.accounts.length !== 2) return no("extra_instruction", "the instruction after the release is not one System Transfer");
-    if (t.accounts.includes(0)) return no("fee_payer_named", "in the transfer");
-    if (t.accounts[0] !== 1) return no("extra_instruction", "the transfer is not from W");
-    const dest = t.accounts[1]!;
-    if (dest >= m.staticKeys.length || dest === 1 || dest === pix.accounts[0] || keyOf(dest) === cfg.pool || keyOf(dest) === cfg.program) return no("extra_instruction", "the transfer's destination is W, the pool, its program or a loaded key");
-  }
 
   if (p.relayFee !== cfg.fee) return no("fee_off", `relay_fee ${p.relayFee}, published ${cfg.fee}`);
   const priority = priorityFee(price ?? 0n, limit ?? 0n); // a price comes with a limit (no_cu_limit)

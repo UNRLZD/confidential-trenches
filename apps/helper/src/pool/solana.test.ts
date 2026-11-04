@@ -140,38 +140,11 @@ test("another program or another pool is refused (not_pool)", () => {
 });
 
 test("an instruction besides one compute limit, one price and the pool's is refused (extra_instruction)", () => {
+  assert.equal(refusal(build({ post: [transfer(W.address, TO, 1n)] })), "extra_instruction");
   assert.equal(refusal(build({ pre: [cuLimit(400_000), transfer(W.address, TO, 1n)] })), "extra_instruction");
   assert.equal(refusal(build({ pre: [cuLimit(400_000), cuLimit(400_000)] })), "extra_instruction");
   assert.equal(refusal(build({ pre: [{ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([1, 0, 0, 1, 0]) }] })), "extra_instruction");
   assert.equal(refusal(build({ pre: [] })), "ok");
-});
-
-// card signpage-pool-withdraw-form: the signing page's withdraw is one atomic transaction, the release to W and W's
-// transfer of it to the address the user typed; a tag 2 takes exactly that one trailing System Transfer and nothing else
-test("a tag 2 with one System Transfer from W to another key after it passes (the page's withdraw)", () => {
-  assert.equal(refusal(build({ post: [transfer(W.address, TO, 47_000_000n)] })), "ok");
-  assert.equal(refusal(build({ pre: [], post: [transfer(W.address, TO, 1n)] })), "ok");
-});
-
-test("a tag 2's trailing instruction other than one transfer from W to another key is refused", () => {
-  const notSigned = (from: string, to: string): SolanaApiInstruction => ({ ...transfer(from, to, 1n), accounts: [{ key: from, signer: false, writable: true }, { key: to, signer: false, writable: true }] });
-  // two transfers
-  assert.equal(refusal(build({ post: [transfer(W.address, TO, 1n), transfer(W.address, TO, 1n)] })), "extra_instruction");
-  // a transfer from the fee payer (its lamports moved by the caller's bytes)
-  assert.equal(refusal(build({ post: [transfer(FP.address, TO, 1n)] })), "fee_payer_named");
-  // a transfer to the fee payer
-  assert.equal(refusal(build({ post: [transfer(W.address, FP.address, 1n)] })), "fee_payer_named");
-  // a non-System instruction after the release
-  assert.equal(refusal(build({ post: [{ ...transfer(W.address, TO, 1n), program: OTHER_PROGRAM }] })), "extra_instruction");
-  assert.equal(refusal(build({ post: [cuLimit(400_000)] })), "extra_instruction");
-  // a transfer on another tag (tag 3)
-  assert.equal(refusal(build({ tag: 3, post: [transfer(W.address, TO, 1n)] })), "extra_instruction");
-  // not a Transfer of the System program (Assign: u32 1), or a Transfer from another key than W
-  assert.equal(refusal(build({ post: [{ ...transfer(W.address, TO, 1n), data: Uint8Array.from([1, 0, 0, 0, ...u64(1n)]) }] })), "extra_instruction");
-  assert.equal(refusal(build({ post: [notSigned(TO, OTHER.address)] })), "extra_instruction");
-  // to the pool or the pool's program
-  assert.equal(refusal(build({ post: [transfer(W.address, POOL, 1n)] })), "extra_instruction");
-  assert.equal(refusal(build({ post: [transfer(W.address, PROGRAM, 1n)] })), "extra_instruction");
 });
 
 test("the fee payer named anywhere but the payer and the pool's account 2 is refused (fee_payer_named)", () => {
