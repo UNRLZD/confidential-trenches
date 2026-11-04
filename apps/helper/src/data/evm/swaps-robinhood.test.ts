@@ -259,3 +259,66 @@ test("a listed token our reads find no pool of: its candles are GeckoTerminal's 
   s.stop();
   quiet.stop();
 });
+
+test("card helper-chart-fresh: a listed token with no pool of ours, its GeckoTerminal bars past their hour while the lists hold the budget at the refresh lane's room: the re-read is a page read and the chart is dated now, never its first read", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const budget = geckoBudget(() => clock.t);
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: budget });
+  const token = `0x${"34".repeat(20)}`;
+  const first = JSON.parse((await s.candles(token, "1m", null, 60)).body);
+  assert.equal(first.as_of_ms, clock.t, "the first read, dated now");
+  for (const hours of [2, 3, 4]) {
+    clock.t = Date.parse("2026-11-02T13:53:00Z") + hours * 3_600_000; // past GT_FRESH_MS and the pool's 10 minutes
+    // the EVM lists and one other held read keep the window at the refresh lane's room
+    for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+    assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
+    const again = await s.candles(token, "1m", null, 60);
+    assert.equal(again.status, 200, again.body);
+    assert.equal(JSON.parse(again.body).as_of_ms, clock.t, `${hours} h on, the bars are read again, not served from ${new Date(first.as_of_ms).toISOString()}`);
+    clock.t += WINDOW_MS;
+  }
+  s.stop();
+});
+
+test("card helper-chart-fresh: GeckoTerminal history before a time held past its hour stays a refresh: with the window at the refresh lane's room it is served as held, no call made, and a cold token's first read finds its calls", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget, GT_LIMIT_PER_MIN, PAGE_RESERVE, REFRESH_SLOT } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const start = Date.parse("2026-11-02T13:53:00Z");
+  const clock = { t: start };
+  const ohlcv: string[] = [];
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
+    ohlcv.push(url);
+    return new Response(JSON.stringify(FX.gt_ohlcv), { status: 200 });
+  };
+  const budget = geckoBudget(() => clock.t);
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: budget });
+  const before = Math.floor(start / 1000) - 600;
+  const first = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
+  assert.ok(first.candles.length > 0 && ohlcv.length === 1);
+  clock.t = start + 2 * 3_600_000;
+  for (let i = 0; i < GT_LIMIT_PER_MIN - PAGE_RESERVE - REFRESH_SLOT; i++) assert.equal(budget.take("lists"), true);
+  assert.equal(budget.take("refresh"), true, "and one other held read: the window at the refresh lane's room");
+  const held = JSON.parse((await s.candles(`0x${"34".repeat(20)}`, "1m", before, 60)).body);
+  assert.deepEqual([held.candles, ohlcv.length], [first.candles, 1], "the history held is served, not read again");
+  const cold = await s.candles(`0x${"35".repeat(20)}`, "1m", null, 60);
+  assert.equal(cold.status, 200, cold.body);
+  assert.equal(JSON.parse(cold.body).src, "geckoterminal", "a cold token's first read finds its calls");
+  s.stop();
+});

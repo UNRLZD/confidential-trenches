@@ -21,7 +21,7 @@
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, dec, toRow, type Row } from "./lists.ts";
 import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -643,11 +643,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
    *  the answer for a token with known history). */
   const kept = bounded<{ bars: Candle[]; at: number }>(CACHE_MAX);
   // the newest range (no `to`) moves with every trade: CANDLES_FRESH_MS; a range before a time is history: an hour
-  // a re-read of bars held (this range's, or the newest range's kept bars, a swap's handover included) is a refresh:
-  // refused, candles() serves the kept bars, dated by their read
+  // a re-read of bars held is a refresh: refused, candles() serves the kept bars, dated by their read. The newest range
+  // is a refresh while its kept bars (a swap's handover included) are under REFRESH_URGENT_MS old, a page read past it,
+  // so a chart read now and then is never served the same bars for good (../gecko.ts refreshLane, card
+  // helper-chart-fresh); history before a time stays a refresh
   const bars = cached((key) => (key.endsWith(":") ? CANDLES_FRESH_MS : HISTORY_FRESH_MS), now, async (key, _client, held) => {
     const [mint, tf, to] = key.split(":") as [string, Tf, string];
-    const lane = held === true || (to === "" && kept.get(`${mint}:${tf}`) !== undefined) ? "refresh" : "pages";
+    const lane = to === "" ? refreshLane(kept.get(`${mint}:${tf}`)?.at ?? null, now()) : held === true ? "refresh" : "pages";
     const p = await pools.get(mint);
     if (p.status !== 200) {
       if (p.status === 404) return NOT_FOUND;
