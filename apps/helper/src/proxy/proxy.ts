@@ -34,11 +34,11 @@ export const VENDOR_WINDOW_MS = 60_000;
  * the share is what one device asks of that vendor in a 10 s window.
  * - jupiter: "Free | 1 | 60" requests a second and a minute, on a 60-second sliding window, Swap, Price and Token
  *   requests in one bucket (developers.jup.ag/docs/api-rate-limit, read 2026-11-03 09:15Z): 60. The helper's own reads
- *   draw from it: token search at most one per JUP_GAP_MS 4 s, at most 15 a minute (data/solana/token.ts), and
- *   Discover's three lists once per 12 s refresh through a 10 s cache (data/solana/lists.ts), about 15 a minute; 30 of
- *   the 60 at most, the rest for devices. Share 4: a device's one trade asks /swap/v2/build at most four times, a capped
- *   build and its uncapped retry (packages/kit/src/trade/solana/build.ts l.243-246), twice when the route's floor needs
- *   a rebuild (packages/kit/src/trade/solana/flow.ts l.318, l.325).
+ *   draw from it: token search at most SEARCH_PER_SPAN 16 a counted minute (data/solana/token.ts), and
+ *   Discover's three lists once per 12 s refresh through a 10 s cache (data/solana/lists.ts), about 15 a minute; 34 of
+ *   the 60 at most (PROXY_RESERVE), the rest for devices. Share 4: a device's one trade asks /swap/v2/build at most
+ *   four times, a capped build and its uncapped retry (packages/kit/src/trade/solana/build.ts l.243-246), twice when
+ *   the route's floor needs a rebuild (packages/kit/src/trade/solana/flow.ts l.318, l.325).
  * - relay: "`/quote` | 50 requests per minute" for a self-serve key, other endpoints 200 (docs.relay.link/references/
  *   api/api-keys, read 09:15Z): 50, the quote's. Share 2: no kit call yet; a tap's hop is one quote and one status.
  * - lifi: keys "currently default to **100 requests per minute**" (docs.li.fi/api-reference/rate-limits, read 09:15Z):
@@ -55,10 +55,11 @@ export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
 };
 /**
  * Requests kept in each vendor's total for the helper's own reads that serve every user, which only those reads may
- * draw, whatever PROXY_BUDGET_<VENDOR> says. Jupiter: token search at most one per JUP_GAP_MS 4 s, 15 a minute
- * (data/solana/token.ts), and Discover's three lists once per FRESH_MS 12 s, 3 x 5 = 15 a minute (data/solana/lists.ts
- * READS), 30 a minute. The budget counts a draw until the end of its second plus the minute (limits.ts upstreamBudget),
- * so a counted minute spans up to 61 whole seconds: search 16 (0, 4, .., 60) and lists 6 refreshes x 3 = 18, so 34.
+ * draw, whatever PROXY_BUDGET_<VENDOR> says. Jupiter: Discover's three lists once per FRESH_MS 12 s (data/solana/
+ * lists.ts READS) and the token page's search. The budget counts a draw until the end of its second plus the minute
+ * (limits.ts upstreamBudget), so a counted minute spans up to 61 whole seconds: lists 6 refreshes x 3 = 18, and search
+ * at most SEARCH_PER_SPAN 16 in that span, however they come (data/solana/token.ts: a cold mint's at once, a refresh
+ * batched), so 34.
  * Callers get 26 of Free's 60 and 566 of a Developer key's 600. Relay, LI.FI and 1Click: the helper reads none on its
  * own, so 0.
  */

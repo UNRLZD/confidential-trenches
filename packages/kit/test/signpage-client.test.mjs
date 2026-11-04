@@ -630,6 +630,38 @@ test("state.pools tap_max: the most one ready proof can spend at the tap, option
   for (const [name, e] of Object.entries(bad)) assert.equal(at(e), false, name);
 });
 
+test("state.pools price: the pool asset's USD price as the page read it, optional, exact, on a chain with a feed only (card signpage-pool-price)", () => {
+  const ok = S.SIGNPAGE_RESULT_SCHEMAS.state;
+  const at = (e) => ok({ ...STATE, pools: [e] });
+  const P = { price: "9301048308", expo: -8, published_s: 1793802229, read_ms: 1793802231000 };
+  const sol = { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" };
+  // present: with or without the proof fields, on each chain with a feed
+  assert.equal(at({ ...sol, price: P }), true, "a price on Solana");
+  assert.equal(at({ chain: "solana", asset: "SOL", balance: "0.01", price: P }), true, "a price with no ready");
+  assert.equal(at({ chain: "base", asset: "ETH", balance: "1", price: { ...P, price: "350012345678" } }), true, "a price on Base");
+  assert.equal(at({ chain: "robinhood", asset: "ETH", balance: "1", price: { ...P, expo: 0, price: "3500" } }), true, "a price on Robinhood, exponent 0");
+  assert.equal(at({ ...sol, price: { ...P, expo: -18 } }), true, "exponent -18");
+  // malformed: refused
+  const bad = {
+    "a price on NEAR (no feed)": { chain: "near", asset: "USDC", balance: "1", price: P },
+    "a price of 0": { ...sol, price: { ...P, price: "0" } },
+    "a leading zero": { ...sol, price: { ...P, price: "09301048308" } },
+    "a decimal price": { ...sol, price: { ...P, price: "93.01" } },
+    "a negative price": { ...sol, price: { ...P, price: "-9301048308" } },
+    "a number price": { ...sol, price: { ...P, price: 9301048308 } },
+    "a price past 78 digits": { ...sol, price: { ...P, price: "1".repeat(79) } },
+    "exponent above 0": { ...sol, price: { ...P, expo: 1 } },
+    "exponent below -18": { ...sol, price: { ...P, expo: -19 } },
+    "a fractional exponent": { ...sol, price: { ...P, expo: -8.5 } },
+    "no published_s": { ...sol, price: { price: P.price, expo: P.expo, read_ms: P.read_ms } },
+    "no read_ms": { ...sol, price: { price: P.price, expo: P.expo, published_s: P.published_s } },
+    "a negative read_ms": { ...sol, price: { ...P, read_ms: -1 } },
+    "an extra key": { ...sol, price: { ...P, source: "server" } },
+    "null": { ...sol, price: null },
+  };
+  for (const [name, e] of Object.entries(bad)) assert.equal(at(e), false, name);
+});
+
 // ------------------------------------------------------------------------------------------------ refusals
 test("answers dropped with no state change: wrong origin, wrong source, wrong id, bad keys, bad arrays, over 4 MiB, not plain", async () => {
   const { h, c } = await readyClient();

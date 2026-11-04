@@ -623,8 +623,8 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   let last: (ListsAnswer & { asOfMs: number }) | null = null;
   let running: Promise<void> | null = null;
 
-  async function gt(path: string, urgent: boolean): Promise<Read | null> {
-    if (!gecko.take("lists", urgent)) return null;
+  async function gt(path: string, urgent: boolean, first: boolean): Promise<Read | null> {
+    if (!gecko.take("lists", urgent, first)) return null;
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
@@ -664,7 +664,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     // the stalest list first (a missing one before any), one call at a time while the lists lane yields one
     const age = (k: ListKey) => (reads[k] === undefined ? Infinity : now() - reads[k]!.at);
     for (const k of LIST_KEYS.filter((x) => age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
-      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS);
+      const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS, reads[k] === undefined);
       if (r === null) break;
       reads[k] = r;
     }

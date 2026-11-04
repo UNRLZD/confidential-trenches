@@ -18,7 +18,8 @@
 //   pickOps (:86-106), which drops the oldest ops until the rest of the state holding them fits. withPools re-runs
 //   pickOps with `pools` in that rest, so pools take the room as any other field of the state does. When no ops are left
 //   to give and the rest of the state still leaves pools no room, the state goes without pools, as it was.
-import type { SignpageState } from "../../kit/src/signpage/messages.ts";
+import type { Chain } from "../../kit/src/orders/record.ts";
+import type { PoolStatePrice, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { poolBalances, type BalancePool, type BalanceProof } from "../../wallet/src/pool/balances.ts";
@@ -37,18 +38,24 @@ const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v))
 
 /**
  * `state` with `pools` from the notes `readNotes` gives, when signed in. `ready`: the proof queue's ready proofs;
- * undefined while no queue runs, and then no entry has `ready`.
+ * undefined while no queue runs, and then no entry has `ready`. `price`: the page's own USD price read per chain
+ * (src/pool-price.ts, card signpage-pool-price); an entry gets `price` only when it gives one.
  */
 export async function withPools(
   state: SignpageState,
   readNotes: () => Promise<readonly NoteRecord[]>,
   pools: readonly BalancePool[],
   ready?: readonly BalanceProof[],
+  price?: (chain: Chain) => PoolStatePrice | null,
 ): Promise<SignpageState> {
   if (!state.signed_in) return state;
   try {
     const notes = pools.length === 0 ? [] : await readNotes();
-    const out: SignpageState = { ...state, pools: poolBalances(notes, pools, ready) };
+    const sums = poolBalances(notes, pools, ready).map((e) => {
+      const p = price?.(e.chain) ?? null;
+      return p === null ? e : { ...e, price: p };
+    });
+    const out: SignpageState = { ...state, pools: sums };
     if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) out.ops = pickOps({ ...out, ops: [] }, state.ops.map((op, t) => ({ op, t })));
     // the ops gave all they hold and the rest of the state still leaves pools no room: the state as it was, which fits
     if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) return state;

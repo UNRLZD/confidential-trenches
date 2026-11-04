@@ -29,9 +29,10 @@ interface IPoolDeposit {
  *         pays the gas, since W holds no ETH). W authorizes each sell with an EIP-712 signature of Sell, under the
  *         domain {name "Blindfill", version "1", chainId, verifyingContract: W}: 65 bytes, s in the lower half. The
  *         delegate approves the router exactly the amount, calls it with W's calldata, refuses unless the router took
- *         the whole approval (the approval ends at 0), unwraps the WETH the sale paid W, refuses an ETH gain under
- *         minOut, pays the sender the fee it names (at most W's fee cap), and deposits the rest into the pool with W's
- *         precommitment. A sell whose target is the chain's v4 PoolManager (card evm-sell-v4) goes through it
+ *         the whole approval (the approval ends at 0), refuses unless W's balance of the token fell by exactly the
+ *         amount (on v4 too, card evm-selldelegate-exact-debit), unwraps the WETH the sale paid W, refuses an ETH gain
+ *         under minOut, pays the sender the fee it names (at most W's fee cap), and deposits the rest into the pool
+ *         with W's precommitment. A sell whose target is the chain's v4 PoolManager (card evm-sell-v4) goes through it
  *         directly instead, as v4-periphery's V4Router does: W unlocks the PoolManager, which calls W's
  *         unlockCallback; that swaps exactly the amount along the signed route (abi.encode(PathKey[]), ending in the
  *         native asset or WETH), settles the token with a transfer from W (no approval at all) and takes the whole
@@ -105,6 +106,7 @@ contract SellDelegate {
   error InvalidRoute();
   error PartialFill();
   error TransferFailed();
+  error DebitNotExact();
 
   constructor(IWETH _weth, IPoolManager _poolManager) {
     WETH = _weth;
@@ -147,6 +149,7 @@ contract SellDelegate {
 
     uint256 _eth = address(this).balance;
     uint256 _weth = WETH.balanceOf(address(this));
+    uint256 _held = IERC20Sell(_sell.token).balanceOf(address(this));
 
     if (_sell.target == address(POOL_MANAGER)) {
       // v4: no approval; the PoolManager calls unlockCallback back once, with this payload, and reverts unless
@@ -165,6 +168,11 @@ contract SellDelegate {
       }
       if (IERC20Sell(_sell.token).allowance(address(this), _sell.target) != 0) revert LeftoverApproval();
     }
+    // W's balance of the token fell by exactly the amount it signed, on v3 and v4 alike (card
+    // evm-selldelegate-exact-debit): a token that takes more only on chain (only inside the unlock, only toward the
+    // pool, only in transferFrom, where an eth_call probe cannot see it) reverts the whole sell, as does one that
+    // takes less (a target giving tokens back); a balance that rose is an underflow revert (Panic 0x11)
+    if (_held - IERC20Sell(_sell.token).balanceOf(address(this)) != _sell.amount) revert DebitNotExact();
 
     uint256 _wethGained = WETH.balanceOf(address(this)) - _weth;
     if (_wethGained != 0) WETH.withdraw(_wethGained);
