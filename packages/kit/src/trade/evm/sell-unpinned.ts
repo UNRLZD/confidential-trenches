@@ -187,7 +187,7 @@ function swapData(chain: EvmPoolChain, token: string, route: unknown, target: st
 }
 
 /** SellDelegate's v4 data: abi.encode(PathKey[]) of a checked copy of `hopsIn` (see the header). */
-function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown): string {
+function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown, anyHook = false): string {
   const venue = venueOf(chain);
   const hops = copyList(hopsIn).map((h) => {
     if (typeof h !== "object" || h === null) return refuse("bad_route", "a hop is an object");
@@ -215,7 +215,7 @@ function v4Data(chain: EvmPoolChain, token: string, hopsIn: unknown): string {
     // hook data is the device's, and the device makes none: a listed hook that reads a trade referrer from it would
     // let whoever wrote it name itself (review of a22060d, item 5)
     if (hookData !== "0x") refuse("bad_route", "a sell's hook data is the device's own: empty");
-    if (lower(hooks as string) !== NATIVE) {
+    if (!anyHook && lower(hooks as string) !== NATIVE) {
       // a hook only of a launchpad the venue lists, with that launchpad's own fee and tick spacing, on any hop: the buy
       // takes a pinned hook on any pool the device finds (checks/evm/quote.ts `pinned`), and the sell leaves through
       // every pool the buy enters through (card evm-route-parity; a Zora coin pairs its creator coin, which pairs ZORA,
@@ -316,6 +316,12 @@ export function evmPoolSignSellUnpinned(secretKey: Uint8Array, chain: EvmPoolCha
   checkKey(secretKey);
   if (!BUILT.has(built) || built.chain !== chain) return refuse("not_built", "W signs only a sell evmPoolBuildSellUnpinned returned for this chain");
   if (addressOf(secretKey) !== lower(built.w)) return refuse("bad_key", "the key is not W's");
+  return signDigest(secretKey, sellDigest(built));
+}
+
+/** SellDelegate._sellDigest of `s` under W's own address, on the chain it was built for. */
+function sellDigest(s: Omit<EvmPoolSell, "data"> & { data: string }): Uint8Array {
+  const built = s;
   const chainId = venueOf(built.chain).chainId;
   const domain = keccak_256(
     concat(
@@ -344,7 +350,12 @@ export function evmPoolSignSellUnpinned(secretKey: Uint8Array, chain: EvmPoolCha
       word(built.nonce),
     ),
   );
-  const rec = secp256k1.sign(keccak_256(concat(Uint8Array.of(0x19, 0x01), domain, struct)), secretKey, { prehash: false, lowS: true, format: "recovered" });
+  return keccak_256(concat(Uint8Array.of(0x19, 0x01), domain, struct));
+}
+
+/** 65 bytes r ‖ s ‖ v of `digest` by `secretKey`, s low, v 27 or 28. */
+function signDigest(secretKey: Uint8Array, digest: Uint8Array): Uint8Array {
+  const rec = secp256k1.sign(digest, secretKey, { prehash: false, lowS: true, format: "recovered" });
   // noble's recovered form is the recovery bit, then r and s
   const out = new Uint8Array(65);
   out.set(rec.slice(1, 65), 0);
@@ -377,6 +388,89 @@ export function evmPoolSignSellAuthorizationUnpinned(secretKey: Uint8Array, chai
   return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });
 }
 
+// The sim sell (card evm-quote-exec-sim): the device prices a route only where W's own sell through it executes, shown
+// by an eth_call of SellDelegate.sell from W at the quote's agreed block on both providers (checks/evm/quote.ts). That
+// call needs W's signature, so W signs a sim Sell, which can never land on chain for one reason: its pool is
+// EVM_SELL_SIM, which has no code, so SellDelegate's deposit call to it reverts when its empty answer is decoded as a
+// uint256 (the eth_call puts code there that returns msg.value). Its deadline is the agreed block's own timestamp (an
+// eth_call at a block hash runs at that block's timestamp: test/evm-sim-facts.test.ts), but that does not stop it
+// landing: SellDelegate.sell reverts only once block.timestamp > deadline (SellDelegate.sol:140), and later blocks can
+// share the agreed block's timestamp (Robinhood blocks 105948851-105948858 share 1793800266, read on
+// rpc.mainnet.chain.robinhood.com 2026-11-04 14:2xZ, so a deadline at 105948851's time holds for the 7 blocks after it).
+// The signer takes only a sim whose pool is EVM_SELL_SIM and whose deadline is at most the agreed block's timestamp,
+// itself at most the device's clock. A sim may carry any route (one the sell builder refuses can still be the
+// reference: the sim is what drops the fake ones); its nonce is W's real one, read at the block (a hook can read
+// nonce(), so no other nonce is ever shown to it).
+
+/** The sim sell's pool: the low 20 bytes of keccak256("blindfill.sell.sim.v1"). No key and no init code is known
+ *  for it, so no code and no 7702 delegation can ever be put there. */
+export const EVM_SELL_SIM = toHex(keccak_256(utf8("blindfill.sell.sim.v1")).slice(12));
+
+/** The sale as the helper's EVM pool sender sends it, which the sim's eth_call copies (checks/evm/quote.ts): its gas
+ *  limit, and its tip per chain (maxPriorityFeePerGas; maxFeePerGas is at least the base fee plus it, so tx.gasprice is
+ *  the base fee plus it). Pins, never reads: the helper's sell sender signs with exactly these. The gas is the bound
+ *  above every measured sell (contracts/pool-evm/script/testnet-run.mjs GAS.sell); each tip is what
+ *  eth_maxPriorityFeePerGas answered on the chain's providers (mainnet.base.org, base-rpc.publicnode.com,
+ *  sepolia.base.org, rpc.mainnet.chain.robinhood.com, rpc.testnet.chain.robinhood.com, 2026-11-04 14:10Z): Base's
+ *  1,000,000 wei, Robinhood's 0 (an Arbitrum chain, whose gas price is the base fee). */
+export const EVM_POOL_SELL_GAS = 1_000_000n;
+// a function, not a table: no top-level call (the kit's index reaches the signing page's bundle)
+export const evmPoolSellTip = (chain: EvmPoolChain): bigint => (chain === "base" || chain === "base-sepolia" ? 1_000_000n : 0n);
+/** The intrinsic gas of the sale's one EIP-7702 authorization (PER_EMPTY_ACCOUNT_COST), which an eth_call with no
+ *  authorization list does not charge: the sim's gas is EVM_POOL_SELL_GAS less it, so its execution is given what the
+ *  sale's is. */
+export const EVM_7702_AUTH_GAS = 25_000n;
+
+/** A sim sell: as EvmPoolSell, into EVM_SELL_SIM, with no fee and no precommitment. */
+export type EvmSellSim = EvmPoolSell & { readonly sim: true };
+const SIMS = new WeakSet<EvmSellSim>();
+
+/** The sim of W selling `amount` of `token` through the v4 route `hops` (any hook) for at least `minOut`, at W's
+ *  sell nonce `nonce`, with the deadline `deadline` (the agreed block's timestamp). */
+export function evmPoolBuildSimSellUnpinned(chain: EvmPoolChain, req: { w: string; token: string; amount: bigint; hops: unknown; minOut: bigint; nonce: bigint; deadline: bigint }): EvmSellSim {
+  if (typeof req !== "object" || req === null) return refuse("bad_route", "a sim is an object");
+  const { w, token, amount, hops, minOut, nonce, deadline } = req;
+  const venue = venueOf(chain);
+  if (!isWallet(w) || !isWallet(token)) return refuse("bad_route", "W or the token is not an address");
+  if (!isUint(amount, U256) || amount === 0n || !isUint(minOut, U256) || minOut === 0n || !isUint(nonce, U256)) return refuse("bad_amount", "amount, minOut or the nonce");
+  if (!isUint(deadline, U64)) return refuse("bad_deadline", "the deadline is a block's timestamp");
+  const pm = Object.hasOwn(venue, "poolManager") && isAddress(venue.poolManager) ? lower(venue.poolManager) : undefined;
+  if (pm === undefined) return refuse("not_deployed", `${chain} has no pinned PoolManager`);
+  const data = v4Data(chain, token, hops, true);
+  const sim: EvmSellSim = Object.freeze({ chain, w: lower(w), token: lower(token), amount, target: pm, data, minOut, pool: EVM_SELL_SIM, precommitment: 0n, feeCap: 0n, deadline, nonce, sim: true as const });
+  SIMS.add(sim);
+  return sim;
+}
+
+/** W's signature of a sim evmPoolBuildSimSellUnpinned returned, only where its pool is EVM_SELL_SIM and its deadline
+ *  <= `blockTimestamp` (the agreed block's, unix seconds) <= the device's clock `nowMs`. */
+export function evmPoolSignSimSellUnpinned(secretKey: Uint8Array, chain: EvmPoolChain, sim: EvmSellSim, blockTimestamp: bigint, nowMs: number): Uint8Array {
+  checkKey(secretKey);
+  if (!SIMS.has(sim) || sim.chain !== chain) return refuse("not_built", "W signs only a sim evmPoolBuildSimSellUnpinned returned for this chain");
+  if (lower(sim.pool) !== EVM_SELL_SIM) return refuse("not_pinned", "a sim's pool is EVM_SELL_SIM");
+  if (typeof blockTimestamp !== "bigint" || typeof sim.deadline !== "bigint" || sim.deadline > blockTimestamp) return refuse("bad_deadline", "a sim's deadline is at most the agreed block's timestamp");
+  if (!Number.isFinite(nowMs) || blockTimestamp * 1000n > BigInt(Math.floor(nowMs))) return refuse("bad_deadline", "the agreed block's timestamp is past the device's clock");
+  if (addressOf(secretKey) !== lower(sim.w)) return refuse("bad_key", "the key is not W's");
+  return signDigest(secretKey, sellDigest(sim));
+}
+
+/** The calldata of SellDelegate.sell(sell, fee, signature). */
+export function evmSellCallData(s: EvmPoolSell, fee: bigint, signature: Uint8Array): string {
+  const data = fromHex(s.data);
+  const pad = (b: Uint8Array) => {
+    const out = new Uint8Array(Math.ceil(b.length / 32) * 32);
+    out.set(b);
+    return out;
+  };
+  // the tuple (10 words of head, `data` its one dynamic field at 0x140), then fee, then the signature
+  const tuple = concat(
+    addressWord(s.token), word(s.amount), addressWord(s.target), word(0x140n), word(s.minOut), addressWord(s.pool),
+    word(s.precommitment), word(s.feeCap), word(s.deadline), word(s.nonce), word(BigInt(data.length)), pad(data),
+  );
+  const selector = keccak_256(utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)")).slice(0, 4);
+  return toHex(concat(selector, word(0x60n), word(fee), word(BigInt(0x60 + tuple.length)), tuple, word(BigInt(signature.length)), pad(signature)));
+}
+
 // The pinned sell (M370): what the kit's index exports as evmPoolBuildSell, evmPoolSignSell and
 // evmPoolSignSellAuthorization (sell.ts), here with the venue list as an input so the tests can pin a list of their own;
 // the index's functions pass evmPoolVenues(). W's proceeds go only to the chain's pinned pool, and W delegates only to
@@ -403,6 +497,12 @@ export function pinnedSignSell(venues: EvmPoolVenueList, secretKey: Uint8Array, 
   // a sell the builder did not return is left to the unpinned signer, which refuses it (not_built)
   if (BUILT.has(built) && lower(built.pool) !== lower(pool)) return refuse("not_pinned", `the sell's pool is not ${chain}'s pinned pool`);
   return evmPoolSignSellUnpinned(secretKey, chain, built);
+}
+
+/** evmPoolSignSimSellUnpinned on a chain that pins a sell delegate (only there does the device sim a sell). */
+export function pinnedSignSimSell(venues: EvmPoolVenueList, secretKey: Uint8Array, chain: EvmPoolChain, sim: EvmSellSim, blockTimestamp: bigint, nowMs: number): Uint8Array {
+  if (pinsOf(venues, chain).sellDelegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);
+  return evmPoolSignSimSellUnpinned(secretKey, chain, sim, blockTimestamp, nowMs);
 }
 
 /** evmPoolSignSellAuthorizationUnpinned of the chain's pinned sell delegate only. */

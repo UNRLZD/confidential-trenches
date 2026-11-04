@@ -1,7 +1,7 @@
 {
  "release": "release-20",
- "commit": "051929735b269c45b30ed8bdcfd28e9a490995db",
- "tree": "31c705ae3a71442bcb3910e0b27de75429b1c674",
+ "commit": "d9da727084f3415cdcb441fe35ef721f44872444",
+ "tree": "b81bcb44cd0abe9d66e0d41195db7726c6868ed2",
  "hosts": {
   "SIGN_HOST": {
    "origin": "https://sign.confidential.unrealized.trade",
@@ -14,8 +14,8 @@
     {
      "path": "/",
      "bytes": 382,
-     "sha256": "b46610eb9a2e619e1e0e4721f17919679dc5db18cc4672275d3493cc0024d0ef",
-     "sha384": "sha384-YGOajUr8O2A0nQ7s9OkM6Enb2f1X/XZQpcu87A4tvZ+3TJy3FzlSq4wjd8rjP3tj",
+     "sha256": "1e620819a8cac757b5daaf9cc2a825113e39b5f39d70169931978824819b0820",
+     "sha384": "sha384-SOJC5tOSPEavwHOX2VhF2/ODoy2M3sernzBSo04cTLnUx9vffCE2q4jIvM7DR1Co",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
       "integrity-policy": "blocked-destinations=(script)",
@@ -30,9 +30,9 @@
     },
     {
      "path": "/app.js",
-     "bytes": 380546,
-     "sha256": "8884c07fc2205350509d1c4363d8ceec57daf70520ef34726078fa68b9a31feb",
-     "sha384": "sha384-XJpu3DwSkGh+Zj0WxRsIFbNmRFFSIT9cS7kBmGA42HrOW7nz3F7+jEerwbi5e7TG",
+     "bytes": 380409,
+     "sha256": "c243deb837a04c7365a6dcd74befc9651e6b05765b0a7d8389dbecdc9f31bbb9",
+     "sha384": "sha384-ph8jD6WHbU5bCQRbPM6o55SdYFhMkik4qecQF/YTRMZiRE+5UAAHRAbgznc9MSPf",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
       "integrity-policy": "blocked-destinations=(script)",
@@ -268,8 +268,8 @@
     {
      "path": "/",
      "bytes": 3919,
-     "sha256": "2adb8db79040073534185679d00f4a1c435255a4fe60435afb8eed259c823442",
-     "sha384": "sha384-9ntXT1JbjEARBEkPlftK9kWqvFmpQxOwtmcmAY7BX+Acvou3iPCiJale6+rmnwcs",
+     "sha256": "ef04a0cb7aabb37bac338c8beea3a3915949d2faf7b63a910810123151ae9147",
+     "sha384": "sha384-yyCbxd0aAk1ZpXkpOV9AMmus5+cOrwi/U3HLdqQHRb/SjqlxUOLIaI71a9+APAyP",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
       "integrity-policy": "blocked-destinations=(script)",
@@ -506,10 +506,10 @@
      }
     },
     {
-     "path": "/assets/index-BqB1l2a4.js",
-     "bytes": 773718,
-     "sha256": "fbee7c505d57b3e43019cebc27dbe965c27b74c84ef03558ab290409444f7848",
-     "sha384": "sha384-dmhA1Y8EtHko/TxOBKpt1kse7LLbrJZgcpkr+D2Skq2kaIEKSf1TRHlTQ8MBErHn",
+     "path": "/assets/index-B2gyYlk5.js",
+     "bytes": 777922,
+     "sha256": "f415d17a971db04a2f8f3e33306858ce7906bc479357da6eae8f93d69c4b4b87",
+     "sha384": "sha384-gxf7pLZDOOQzAaieE/lhX73UWbUTdPc7l6fQ41b+TUy/YkvL9fFLSiEUwSw5Nnzj",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
       "integrity-policy": "blocked-destinations=(script)",
