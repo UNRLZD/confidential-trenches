@@ -1,6 +1,7 @@
-// Weakens src/price/pool-usd.ts's agreement and staleness checks (Robinhood's hold to Base's ETH/USD among them), and
+// Weakens src/price/pool-usd.ts's agreement and staleness checks (Robinhood's hold to Base's ETH/USD among them) and its
+// bounded retry of a slow or lagging provider (card signpage-price-read-retry), and
 // src/trade/solana/pool-buy.ts's refusal of a Token-2022 mint that lists an extension twice, one at a time, and runs
-// the tests named for each (test/pool-usd.test.ts "agreement" and "staleness", test/solana-pool-buy.test.ts
+// the tests named for each (test/pool-usd.test.ts "agreement", "staleness" and "retry", test/solana-pool-buy.test.ts
 // "Token-2022"): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
@@ -20,6 +21,7 @@ const BUY_TEST = path.join(BASE, "test/solana-pool-buy.test.ts");
 
 const AGREE = "agreement";
 const STALE = "staleness";
+const RETRY = "retry";
 const T22 = "Token-2022";
 
 // [file, text, replacement, the tests that must fail, their file (test/pool-usd.test.ts when none)]
@@ -61,6 +63,19 @@ export const MUTANTS = [
   [PRICE, "maxAgeS: 1_500 }", "maxAgeS: 15_000 }", STALE],
   [PRICE, "maxAgeS: 86_700 }", "maxAgeS: 867_000 }", STALE],
   [PRICE, "if (updatedAt === 0n || updatedAt >= U64) fail(", "if (updatedAt >= U64) fail(", STALE],
+  // retry: a provider behind (-32016) or slow (no answer in a try's bound, its own or its client's) is asked again, alone,
+  // after a doubling backoff, inside the read's bound; nothing else is asked again
+  [PRICE, "if (!behind(e) && !slow(e)) throw e;", "throw e;", RETRY],
+  [PRICE, "if (!behind(e) && !slow(e)) throw e;", "", RETRY],
+  [PRICE, 'e.message.startsWith("RPC error -32016:")', "false", RETRY],
+  [PRICE, "e instanceof NoAnswer || (e instanceof", "(e instanceof", RETRY],
+  [PRICE, '(e instanceof SolanaRpcTransportError && e.fault === "timeout")', "false", RETRY],
+  [PRICE, '(e instanceof SolanaRpcTransportError && e.fault === "timeout")', "e instanceof SolanaRpcTransportError", RETRY],
+  [PRICE, "const waitMs = POOL_USD_RETRY_BACKOFF_MS * 2 ** (tries - 1);", "const waitMs = 0;", RETRY],
+  [PRICE, "const waitMs = POOL_USD_RETRY_BACKOFF_MS * 2 ** (tries - 1);", "const waitMs = POOL_USD_RETRY_BACKOFF_MS;", RETRY],
+  [PRICE, "if (Date.now() + waitMs >= end) return fail(", "if (false) return fail(", RETRY],
+  [PRICE, "Math.min(POOL_USD_CALL_TIMEOUT_MS, left)", "POOL_USD_CALL_TIMEOUT_MS", RETRY],
+  [PRICE, "export const POOL_USD_READ_DEADLINE_MS = 12_000;", "export const POOL_USD_READ_DEADLINE_MS = 120_000;", RETRY],
   // a Token-2022 mint that lists one extension type twice
   [BUY, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
   [BUY, "    seen.add(type);\n", "", T22, BUY_TEST],
