@@ -537,6 +537,9 @@ test("N1d a listed pool the PoolManager does not hold is dropped, and one only o
   // held with no price, or with no liquidity: dropped
   assert.equal((await quoteOn([seeded(token), { ...real(token), state: [5n << 160n, 10n ** 20n] }], token, seededRoute(token), undefined, [real(token).key])).accepted, true);
   assert.equal((await quoteOn([seeded(token), { ...real(token), state: [1n << 100n, 1n << 128n] }], token, seededRoute(token), undefined, [real(token).key])).accepted, true);
+  // a pool behind a pinned hook, which the prune never drops, held with no price: dropped all the same
+  const pinned: ModelPool = { key: keyOf(token, NATIVE, 0x800000, 200, CLANKER), give: (a) => a, state: [5n << 160n, 10n ** 20n] };
+  assert.equal((await quoteOn([seeded(token), pinned], token, seededRoute(token), undefined, [pinned.key])).accepted, true);
   assert.deepEqual(await quoteOn([seeded(token), real(token)], token, seededRoute(token), undefined, [real(token).key]), below);
   // held by one provider only: the two disagree, and nothing is trusted
   assert.deepEqual(await quoteOn([seeded(token), { ...real(token), only: 0 }], token, seededRoute(token), undefined, [real(token).key]), { accepted: false, code: "rpc_disagree" });
@@ -1537,7 +1540,8 @@ test("KB3 a held X pool whose markets pass what EVM_QUOTE_MAX_KEYS leaves refuse
   // two left for X's markets: its standard and pinned shapes are more than two
   const t3 = "0x00000000000000000000000000000000000ddd00";
   const x3 = xAt(0x1800);
-  const p3: ModelPool = { key: keyOf(t3, x3, 3000, 60, NATIVE), give: (a) => a };
+  // at the best route's price, so the prune keeps X's markets
+  const p3: ModelPool = { key: keyOf(t3, x3, 3000, 60, NATIVE), give: (a) => 10n * a, state: pricedAt(10n) };
   const logs3 = [{ key: p3.key, at: 4_999_000 }, { key: marketOf(x3).key, at: 4_999_001 }, ...empties(t3, EVM_QUOTE_MAX_KEYS - 3)];
   assert.deepEqual(await quoteOn([best(t3), p3, marketOf(x3)], t3, bestRoute(t3), scanner(5_000_000, logs3)), { accepted: false, code: "too_many_pools" });
 });
