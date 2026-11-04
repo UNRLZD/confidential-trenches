@@ -6,8 +6,10 @@
 import { mock, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
-import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey, type EvmRoute } from "../src/index.ts";
+import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
 import { evmJsonRpc, evmPoolBuyQuoteWith, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+// the builder as a namespace: the red run before the fix reads it where evmPoolRouteDataQuoted is not there yet
+import * as builder from "../src/trade/evm/buy-unpinned.ts";
 
 const W = (v: bigint) => v.toString(16).padStart(64, "0");
 const NATIVE = "0x0000000000000000000000000000000000000000";
@@ -249,7 +251,7 @@ const RH_PM = "0x8366a39cc670b4001a1121b8f6a443a643e40951"; // Robinhood Chain's
 const CLANKER = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc";
 const UNPINNED = "0x00000000000000000000000000000000000020cc";
 const kk = (h: string) => Buffer.from(keccak_256(Buffer.from(h, "hex"))).toString("hex");
-type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint) | undefined; only?: 0 | 1; state?: [bigint, bigint] };
+type ModelPool = { key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; only?: 0 | 1; state?: [bigint, bigint] };
 const pidOf = (k: EvmPoolKey) => kk(W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks)));
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {
   const [currency0, currency1] = BigInt(other) < BigInt(token) ? [other, token] : [token, other];
@@ -260,6 +262,7 @@ const keyOf = (token: string, other: string, fee: number, tickSpacing: number, h
 type Overridden = { replaces: string[]; hooks: string[][] };
 function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: Overridden[]): EvmRpc {
   const live = pools.filter((p) => p.only === undefined || p.only === who);
+  const byPid = new Map(live.map((p) => [pidOf(p.key), p]));
   const slots = new Map<string, bigint>();
   for (const p of live) {
     const s = BigInt("0x" + kk(pidOf(p.key) + W(6n)));
@@ -274,9 +277,11 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     let [from, amount] = [q.from, q.amount];
     for (let i = 0; i < q.hops; i++) {
       const k = keyOf(q.to[i]!, from, q.fees[i]!, q.spacings[i]!, q.hooks[i]!);
-      const p = live.find((x) => pidOf(x.key) === pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
+      const p = byPid.get(pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
       if (p === undefined) return null;
-      amount = p.key.hooks !== NATIVE && !overridden.has(p.key.hooks) && p.lie !== undefined ? p.lie(amount) : p.give(amount);
+      const next = p.key.hooks !== NATIVE && !overridden.has(p.key.hooks) && p.lie !== undefined ? p.lie(amount) : p.give(amount);
+      if (next === null) return null;
+      amount = next;
       from = q.to[i]!;
     }
     return amount;
@@ -314,20 +319,22 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     });
 }
 /** The scan provider: its head, and the Initialize logs of `pools` at `at`; `asked` keeps each getLogs range. */
-function scanner(headNo: number, logs: { key: EvmPoolKey; at: number }[], asked: [number, number][] = []): EvmRpc {
+/** `orSpan`: the most blocks a request with more than one value in a topic position may span, as Robinhood's RPC
+ *  answers (-32602 "only 100000 are allowed for this request"). */
+function scanner(headNo: number, logs: { key: EvmPoolKey; at: number }[], asked: [number, number][] = [], orSpan = Infinity): EvmRpc {
+  const all = logs.map((l) => ({ ...l, topics: [null, "0x" + pidOf(l.key), "0x" + W(BigInt(l.key.currency0)), "0x" + W(BigInt(l.key.currency1))] }));
   return async (calls) =>
     calls.map((c, id) => {
       if (c.method === "eth_blockNumber") return { jsonrpc: "2.0", id, result: "0x" + headNo.toString(16) };
       assert.equal(c.method, "eth_getLogs");
-      const f = c.params[0] as { address: string; fromBlock: string; toBlock: string; topics: (string | null)[] };
+      const f = c.params[0] as { address: string; fromBlock: string; toBlock: string; topics: (string | string[] | null)[] };
       const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
       asked.push([a, b]);
-      const result = logs
-        // as eth_getLogs filters: topic 1 is the pool id, 2 currency0, 3 currency1; a null or missing topic matches any
-        .filter((l) => {
-          const topics = [null, "0x" + pidOf(l.key), "0x" + W(BigInt(l.key.currency0)), "0x" + W(BigInt(l.key.currency1))];
-          return l.at >= a && l.at <= b && f.topics.every((t, i) => i === 0 || t === null || t === undefined || t === topics[i]);
-        })
+      if (f.topics.some(Array.isArray) && b - a + 1 > orSpan) return { jsonrpc: "2.0", id, error: { code: -32602, message: `query spans ${b - a + 1} blocks, but only ${orSpan} are allowed for this request` } };
+      const result = all
+        // as eth_getLogs filters: topic 1 is the pool id, 2 currency0, 3 currency1; a null or missing topic matches any,
+        // a list matches any of its topics
+        .filter((l) => l.at >= a && l.at <= b && f.topics.every((t, i) => i === 0 || t === null || t === undefined || (Array.isArray(t) ? t.includes(l.topics[i]!) : t === l.topics[i])))
         .map((l) => ({
           address: f.address, // the PoolManager the filter names, as a node filters by address
           blockNumber: "0x" + l.at.toString(16),
@@ -513,7 +520,7 @@ test("S3 a Zora coin whose real pool pairs with ZORA is held to it through ZORA'
   assert.equal((await quoteOn([seeded(token), real], token, seededRoute(token), scanner(5_000_000, [{ key: real.key, at: 4_500_000 }]))).accepted, true);
 });
 
-const RH_X = "0x4a0e650000000000000000000000000000005eea"; // stand-in for the coordinator's 0x4a0e65…5eea
+const RH_X = "0x4a0e650000000000000000000000000000005eea"; // stand-in for Robinhood's 0x4a0e65…5eea
 test("S3b on Robinhood a Doppler /8 token paired with another currency is held to it through that currency's market; with none it adds nothing", async () => {
   await assert.rejects(xCase("0x00000000000000000000000000000000000a66a6", RH_X, "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544", 8, "robinhood"), heldTo(RH_X));
   const token = "0x00000000000000000000000000000000000a67a6";
@@ -606,14 +613,14 @@ test("K1 a coin paired only with the token (KIMPHIL with USDG) that holds less o
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
 });
 
-test("K1b the backstop: a pool no route prices that holds more of the token than R's pool refuses the buy", async () => {
+test("K1b a pool no route from the native asset prices adds nothing, however much it reports holding: the buy goes through", async () => {
   const token = "0x00000000000000000000000000000000000ad3ad";
-  // the same price as R's pool, ten thousand times its liquidity
+  // the same price as R's pool, ten thousand times its liquidity (a narrow range makes that a dust position), and no
+  // market for its currency
   const kimphil: ModelPool = { key: keyOf(token, xAt(3), 0x800000, 8, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] };
   const v = await quoteOn([best(token), kimphil], token, bestRoute(token), scanner(5_000_000, [{ key: kimphil.key, at: 4_500_000 }]));
-  assert.deepEqual(v, { accepted: false, code: "no_reference" });
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
 });
-
 test("K2 a pool of X with a currency other than the native asset or WETH is not a market: it cannot raise R", async () => {
   const token = "0x00000000000000000000000000000000000ad2ad";
   const x = xAt(1);
@@ -637,19 +644,23 @@ test("X1 nine currencies: the real one, oldest, is priced, and eight newer ones 
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)), heldTo(x0));
 });
 
-test("X2 past sixteen currencies the one holding the least of the token is not priced: shallower than R's pool, it cannot raise R or block", async () => {
+test("X2 seventeen currencies, the shallowest by liquidity included: each is priced through its market, and the one that gives most sets R", async () => {
   const token = "0x00000000000000000000000000000000000ff2ff";
   const deeper = Array.from({ length: 16 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x200 + i), 3000, 60, NATIVE), give: (a) => a }));
   const x17 = xAt(0x210);
-  // the oldest, and a hundredth of the others' liquidity: last by depth
+  // a hundredth of the others' liquidity, and its market a hundred times the price
   const shallow: ModelPool = { key: keyOf(token, x17, 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 18n] };
   const market: ModelPool = { key: keyOf(x17, NATIVE, 2500, 50, NATIVE), give: (a) => 100n * a };
   const logs = [{ key: shallow.key, at: 4_050_000 }, ...deeper.map((o, i) => ({ key: o.key, at: 4_100_000 + i })), { key: market.key, at: 4_060_000 }];
-  const v = await quoteOn([best(token), ...deeper, shallow, market], token, bestRoute(token), scanner(5_000_000, logs));
-  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) }, [chain([best(token), ...deeper, shallow, market], 0), chain([best(token), ...deeper, shallow, market], 1)], NOW, scanner(5_000_000, logs)), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference", String(e));
+    const r = e.reference!.route as EvmV4Route;
+    assert.deepEqual(r.hops.map((h) => h.currency), [x17, token]);
+    assert.equal(e.reference!.amountOut, 100n * AMOUNT);
+    return true;
+  });
 });
-
-test("X3 an X with more pools than a quote reads prices nothing: its pools of the token are held to the backstop", async () => {
+test("X3 an X with more markets than a quote reads prices nothing, and refuses nothing", async () => {
   const token = "0x00000000000000000000000000000000000ff7ff";
   const x = xAt(0x900);
   const pool: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 18n] };
@@ -661,15 +672,23 @@ test("X3 an X with more pools than a quote reads prices nothing: its pools of th
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
 });
 
-test("T1b a token with more pools than a quote reads refuses: one past them could be its market", async () => {
+test("T1b a crowd of 20,000 junk pools of the token still quotes its standard route, and holds a seeded one to it", async () => {
   const token = "0x00000000000000000000000000000000000fe5fe";
-  // one more than EVM_QUOTE_MAX_KEYS (16,384)
-  const junk = Array.from({ length: 16_385 }, (_, i) => keyOf(token, NATIVE, 1000 + i, 1, NATIVE));
-  // spread over the scan's depth, a thousand to a span (a span's answer holds at most 10,000 logs)
-  const v = await quoteOn([best(token)], token, bestRoute(token), scanner(5_000_000, junk.map((k, i) => ({ key: k, at: 4_100_000 + 50 * i }))));
-  assert.deepEqual(v, { accepted: false, code: "no_reference" });
+  // 20,000 pools of the token with the native asset, past every bound (EVM_QUOTE_MAX_KEYS 16,384): 19,400 empty and
+  // 600 that hold a dust position (past EVM_QUOTE_MAX_QUOTED, 64)
+  const junk = Array.from({ length: 20_000 }, (_, i) => keyOf(token, NATIVE, 1000 + i, 1, NATIVE));
+  const dust = junk.slice(0, 600).map((key): ModelPool => ({ key, give: (a) => a / 1000n }));
+  // spread over the scan's depth (a span's answer holds at most 10,000 logs)
+  const logs = junk.map((k, i) => ({ key: k, at: 4_000_001 + 49 * i }));
+  const t = Date.now();
+  const v = await quoteOn([best(token), ...dust], token, bestRoute(token), scanner(5_000_000, logs));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(Date.now() - t < 30_000, `${Date.now() - t} ms`);
+  // the scan is cached: a seeded route is held to the standard one
+  const seeded1: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+  assert.deepEqual(await quoteOn([best(token), seeded1, ...dust], token, route, scanner(5_000_000, logs)), below);
 });
-
 test("G1 every scan of one quote, the token's and each X's, shares the chain's limit of requests at once", async () => {
   const token = "0x00000000000000000000000000000000000ff3ff";
   const xs = Array.from({ length: 8 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x700 + i), 3000, 60, NATIVE), give: (a) => a }));
@@ -692,15 +711,20 @@ test("G1 every scan of one quote, the token's and each X's, shares the chain's l
 
 test("G2 an X whose scan fails refuses the quote, as the token's own scan does: nothing is priced on a partial read", async () => {
   const token = "0x00000000000000000000000000000000000ff4ff";
-  const x = xAt(0x400);
+  const x = xAt(0x430);
   const real: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
   const market = marketOf(x);
   const inner = scanner(5_000_000, [{ key: real.key, at: 4_500_000 }, { key: market.key, at: 4_100_000 }]);
   const tx = "0x" + x.slice(2).padStart(64, "0");
-  // the scan provider answers the token's logs, and no logs for x's
+  // the scan provider answers the token's logs and every other scan, and no logs for x's markets (x with the native
+  // asset or WETH): a quote that went on without them would find x unpriced and pass the seeded route
+  const pair = ["0x" + "0".repeat(64), "0x" + WETH.slice(2).padStart(64, "0")];
   const broken: EvmRpc = async (calls) => {
     const out = (await inner(calls)) as { result?: unknown }[];
-    return out.map((a, i) => (calls[i]!.method === "eth_getLogs" && (calls[i]!.params[0] as { topics: unknown[] }).topics.includes(tx) ? { ...a, result: null } : a));
+    return out.map((a, i) => {
+      const t = calls[i]!.method === "eth_getLogs" ? (calls[i]!.params[0] as { topics: unknown[] }).topics.flat() : [];
+      return t.includes(tx) && t.some((x) => pair.includes(x as string)) ? { ...a, result: null } : a;
+    });
   };
   assert.deepEqual(await quoteOn([seeded(token), real, market], token, seededRoute(token), broken), { accepted: false, code: "rpc_error" });
 });
@@ -858,4 +882,131 @@ test("T6 a provider that answers a batch state read with one slot short is refus
   const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain([seeded(token), real], 0), lying], NOW, scanner(5_000_000, logs)));
   assert.ok(short > 0);
   assert.deepEqual(v, { accepted: false, code: "rpc_error" });
+});
+
+// review of 2afa8b6 (fold 7): no number an attacker can inflate cheaply decides what is quoted or refused; no bound
+// refuses a token whose standard route fills; a reference through unlisted v4 middles is a route the device builds
+test("A1 64 narrow-range pools that outranked the real pool by liquidity no longer change R: every held pool is quoted at the user's amount", async () => {
+  const token = "0x00000000000000000000000000000000000fa1fa";
+  // the real pool, hookless native of a shape no standard route reads, with a hundredth of the default liquidity; 64
+  // dust pools of the token whose liquidity reads 10^30 at their price (a range one tick wide), each giving a thousandth
+  const realPool: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 18n] };
+  const narrow = Array.from({ length: 64 }, (_, i): ModelPool => ({ key: keyOf(token, NATIVE, i + 1, 1, NATIVE), give: (a) => a / 1000n, state: [DEEP_PRICE, 10n ** 30n] }));
+  const logs = [{ key: realPool.key, at: 4_100_000 }, ...narrow.map((p, i) => ({ key: p.key, at: 4_200_000 + i }))];
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain([seeded(token), realPool, ...narrow], 0), chain([seeded(token), realPool, ...narrow], 1)], NOW, scanner(5_000_000, logs)), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference", String(e));
+    assert.equal(e.reference!.amountOut, AMOUNT);
+    assert.deepEqual((e.reference!.route as EvmV4Route).hops.map((h) => [h.fee, h.tickSpacing]), [[2500, 50]]);
+    return true;
+  });
+});
+
+test("B1 USDG on Robinhood: its standard ETH pool quotes, though twenty currencies paired with it have no market and report deep pools", async () => {
+  // USDG's shape on Robinhood (2026-11-04 05:5xZ): the hookless ETH/USDG 0.01% pool, thousands of pools of other
+  // currencies, a few with a market of their own (JITC's, tiny), most with none
+  const token = USDG;
+  const eth: ModelPool = { key: keyOf(token, NATIVE, 100, 1, NATIVE), give: (a) => 3000n * a };
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 100, tickSpacing: 1, hooks: NATIVE, hookData: "0x" }] };
+  const lonely = Array.from({ length: 20 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x800 + i), 0x800000, 8, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] }));
+  const jitc = xAt(0x8ff);
+  const jitcPool: ModelPool = { key: keyOf(token, jitc, 3000, 60, NATIVE), give: (a) => a / 5n, state: [DEEP_PRICE, 10n ** 15n] };
+  const jitcMarket: ModelPool = { key: keyOf(jitc, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const pools = [eth, jitcPool, jitcMarket, ...lonely];
+  const logs = [...lonely.map((p, i) => ({ key: p.key, at: 45_000_000 + i })), { key: jitcPool.key, at: 46_000_000 }, { key: jitcMarket.key, at: 44_000_000 }];
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, 50_000_000), chain(pools, 1, 50_000_000)], NOW, scanner(50_000_000, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal((v as { amountOut: bigint }).amountOut, 3000n * AMOUNT);
+});
+
+test("D1 the reference through unlisted v4 middles is a route the device quotes and builds; the same route unquoted, or on v3, is refused", async () => {
+  const token = "0x00000000000000000000000000000000000fd1fd";
+  const creator = xAt(0x420);
+  const coinPool: ModelPool = { key: keyOf(token, creator, 0x800000, 200, ZORA_HOOK), give: (a) => a };
+  const creatorPool: ModelPool = { key: keyOf(creator, ZORA, 0x800000, 200, ZORA_HOOK), give: (a) => a };
+  const zoraMarket = marketOf(ZORA);
+  const logs = [{ key: coinPool.key, at: 4_500_000 }, { key: creatorPool.key, at: 4_400_000 }, { key: zoraMarket.key, at: 4_050_000 }];
+  const pools = [seeded(token), coinPool, creatorPool, zoraMarket];
+  const rpcs = [chain(pools, 0), chain(pools, 1)] as const;
+  let ref: EvmRoute | undefined;
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, rpcs, NOW, scanner(5_000_000, logs)), (e: unknown) => {
+    ref = (e as EvmQuoteError).reference?.route;
+    return e instanceof EvmQuoteError && e.code === "below_reference";
+  });
+  // the caller quotes the reference: ZORA and the creator coin are not listed middles on Base
+  const q = await evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: ref! }, rpcs, NOW, scanner(5_000_000, logs));
+  assert.equal(q.amountOut, AMOUNT);
+  const ADAPTER = "0x000000000000000000000000000000000000ada4";
+  const built = builder.evmPoolBuildUnpinned("base", ADAPTER, q.route, q.minOut, token, true);
+  assert.equal(built.data, "0x" + Buffer.from(builder.evmPoolRouteDataQuoted("base", q.route).data).toString("hex"));
+  assert.equal(built.minOut, q.minOut);
+  const code = (f: () => unknown) => {
+    try {
+      f();
+    } catch (e) {
+      return (e as { code?: string }).code;
+    }
+    return "built";
+  };
+  // the same route through the public route encoder, or built as if no quote held it, is refused
+  assert.equal(code(() => builder.evmPoolRouteData("base", q.route)), "middle_not_listed");
+  assert.equal(code(() => builder.evmPoolBuildUnpinned("base", ADAPTER, q.route, q.minOut, token)), "middle_not_listed");
+  // a v3 route's middles stay listed-only, quoted or not
+  assert.equal(code(() => builder.evmPoolBuildUnpinned("base", ADAPTER, { venue: "uniswap-v3", tokens: [WETH, ZORA, token], fees: [3000, 3000] }, 1n, token, true)), "middle_not_listed");
+});
+
+test("H2 a found pool whose hook reverts every swap cannot set R; one whose hook takes half counts for that half", async () => {
+  const token = "0x00000000000000000000000000000000000ab3ab";
+  const HOOK = "0x00000000000000000000000000000000000050cc";
+  // ten times the standard pool's price with the hook replaced; as it is, the hook lets no swap through (a pool only
+  // its own router may swap in, as one of USDG's WETH pools on Robinhood)
+  const closed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, HOOK), give: (a) => 100n * a, lie: () => null };
+  const logs = [{ key: closed.key, at: 4_500_000 }];
+  const v = await quoteOn([best(token), closed], token, bestRoute(token), scanner(5_000_000, logs));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  const t2 = "0x00000000000000000000000000000000000ab4ab";
+  const half: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, HOOK), give: (a) => 100n * a, lie: (a) => 50n * a };
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token: t2, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(t2) }, [chain([best(t2), half], 0), chain([best(t2), half], 1)], NOW, scanner(5_000_000, [{ key: half.key, at: 4_500_000 }])), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference", String(e));
+    assert.equal(e.reference!.amountOut, 50n * AMOUNT);
+    return true;
+  });
+});
+
+test("T7 a provider that answers 429 is asked again a little later; one that keeps answering 429 is a refusal", { timeout: 20_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000fe8fe";
+  const inner = chain([best(token)], 1);
+  // a fetch for provider 2 that answers 429 to its first `n` requests, then as the chain does
+  const limited = (n: number) => {
+    let left = n;
+    return evmJsonRpc("https://b.example", (async (_u: string, init: { body: string }) => {
+      if (left-- > 0) return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code: 429, message: "Too Many Requests" } }), { status: 429 });
+      const calls = JSON.parse(init.body) as { id: number; method: string; params: unknown[] }[];
+      const answers = await inner(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    }) as unknown as typeof fetch);
+  };
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  const v = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), limited(2)], NOW));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), limited(1000)], NOW)), { accepted: false, code: "rpc_error" });
+  // mainnet.base.org's limit: HTTP 200, each call of the batch an error naming it (2026-11-04 07:4xZ)
+  let left = 2;
+  const inBatch: EvmRpc = async (calls) => (left-- > 0 ? calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32016, message: "25/second request limit reached" } })) : inner(calls));
+  const w = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), inBatch], NOW));
+  assert.equal(w.accepted, true, String((w as { code?: string }).code));
+});
+
+test("T8 a quote's reads go to each provider at most the chain's limit at once (Robinhood's own RPC answers 429 to four)", async () => {
+  const token = "0x00000000000000000000000000000000000fe9fe";
+  const inner = chain([best(token)], 1, 50_000_000);
+  let [now, most] = [0, 0];
+  const slow: EvmRpc = async (calls) => {
+    most = Math.max(most, ++now);
+    await new Promise((r) => setTimeout(r, 2));
+    now--;
+    return inner(calls);
+  };
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) }, [chain([best(token)], 0, 50_000_000), slow], NOW));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(most >= 1 && most <= 2, `${most} requests at once`);
 });

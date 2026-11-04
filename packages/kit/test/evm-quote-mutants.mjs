@@ -1,5 +1,6 @@
-// Removes each of the EVM buy quote's checks (src/checks/evm/quote.ts, and the quoted builder and signer in
-// src/trade/evm/buy.ts), one at a time, and runs the test named for it in test/evm-quote.test.ts or
+// Removes each of the EVM buy quote's checks (src/checks/evm/quote.ts, the quoted builder and signer in
+// src/trade/evm/buy.ts, and the builder's admission of a device-quoted route's v4 middles in
+// src/trade/evm/buy-unpinned.ts), one at a time, and runs the test named for it in test/evm-quote.test.ts or
 // test/evm-quote-attacks.test.ts: each named test passes on the code as it is and fails on every mutant. The mutants are
 // made in a copy of the kit's sources and tests in a fresh temporary folder inside the kit (so the copy resolves the
 // same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named test passes on its
@@ -13,6 +14,7 @@ import { fileURLToPath } from "node:url";
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 const QUOTE = "src/checks/evm/quote.ts";
 const BUY = "src/trade/evm/buy.ts";
+const BUYU = "src/trade/evm/buy-unpinned.ts";
 const Q = "test/evm-quote.test.ts";
 const R = "test/evm-quote-attacks.test.ts";
 
@@ -29,7 +31,6 @@ export const MUTANTS = [
   [QUOTE, " || back.timestamp !== lo.timestamp) {", ") {", R, "R5 "],
   [QUOTE, '? [a, rpcs[1], "provider 2"] : [b, rpcs[0], "provider 1"]', '? [a, rpcs[0], "provider 2"] : [b, rpcs[1], "provider 1"]', R, "R5 "],
   [QUOTE, 'if (confirmed.status === "rejected") throw confirmed.reason;', "", R, "R1b "],
-  [QUOTE, "  if (!behind) return out;", "  return out;", R, "R10 "],
   [QUOTE, "if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (false) return refuse(", Q, "Q14 "],
   [QUOTE, "if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) return refuse(", "if (nowMs - Number(lo.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS + 1000) return refuse(", R, "R6 "],
   [QUOTE, 'if (!Number.isFinite(nowMs)) return refuse("bad_request", "the device\'s clock");', "", Q, "Q14 "],
@@ -57,24 +58,9 @@ export const MUTANTS = [
   [QUOTE, 'const from = h.from === "native" ? NATIVE : v.weth;', "const from = NATIVE;", R, "R9 "],
   [QUOTE, 'if (reference === null) return refuse("no_reference", "no standard pool and no pinned launchpad pool answers for the token");', "if (reference === null) return refuse(\"no_quote\", \"\");", R, "R4 "],
   // the union (review of 9a8265b, N1): the device's scan, the caller's list and the PoolManager's state of each
-  [QUOTE, "for (const k of keys) {", "for (const k of [] as EvmPoolKey[]) {", R, "N1a "],
-  // review of f44fbdb: every key's state before any bound, bounds by depth, the backstop, the fetch timeout, the full reference
-  [QUOTE, "for (const k of keys) {", "for (const k of keys.slice(0, EVM_QUOTE_MAX_FOUND)) {", R, "T1 "],
-  [QUOTE, "if (keys.length > EVM_QUOTE_MAX_KEYS) return refuse(", "if (false) return refuse(", R, "T1b "],
-  [QUOTE, "(a.d > b.d ? -1 : a.d < b.d ? 1 : a.i - b.i)", "(a.i - b.i)", R, "X2 "],
-  [QUOTE, "const xs = deepest([...xDeep.keys()], (x) => xDeep.get(x)!).slice(0, EVM_QUOTE_MAX_OTHER);", "const xs = deepest([...xDeep.keys()], (x) => xDeep.get(x)!);", R, "X2 "],
-  [QUOTE, "    if (ks.size > budget) return null;\n", "", R, "X3 "],
-  [QUOTE, "if (ms.length === 0) for (const via of", "if (false) for (const via of", R, "T3 "],
-  [QUOTE, "const deeper = unpriced.find((f) => r === null || d(stateOf(f))! > r);", "const deeper = unpriced.find(() => false);", R, "K1b "],
-  [QUOTE, "const deeper = unpriced.find((f) => r === null || d(stateOf(f))! > r);", "const deeper = unpriced.find((f) => r === null || d(stateOf(f))! < r);", R, "K1 "],
-  [QUOTE, "    if (priced.length === 0) unpriced.push(f);\n", "", R, "K1b "],
-  [QUOTE, "const pool = b.pool ?? lastPool(b.route, fifth);", "const pool = b.pool;", R, "K1 "],
   [QUOTE, ", signal: AbortSignal.timeout(timeoutMs) }", " }", R, "T4 "],
   [QUOTE, "  if (r.length !== 2 + 2 * (64 + 32 * n)) return refuse(", "  if (false) return refuse(", R, "T6 "],
-  [QUOTE, "hops: [hopTo(ys.c, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
-  [QUOTE, "const keys = [...(scanned?.pools ?? []), ...hints].filter(", "const keys = [...hints].filter(", R, "N1a "],
   [QUOTE, "const hints = (Array.isArray(req.pools) ?", "const hints = (false ?", R, "N1b "],
-  [QUOTE, "const from = cached === undefined || cached.to < floor ? floor : cached.to + 1;", "const from = floor;", R, "N1a "],
   [QUOTE, "if (!Array.isArray(r) || r.length > SCAN_MAX_LOGS) return refuse(", "if (false) return refuse(", R, "N1a "],
   [QUOTE, "return p !== null && (p & ((1n << 160n) - 1n)) !== 0n && l !== null && (l & ((1n << 128n) - 1n)) !== 0n;", "return true;", R, "N1d "],
   [QUOTE, "(p & ((1n << 160n) - 1n)) !== 0n &&", "", R, "N1d "],
@@ -83,13 +69,10 @@ export const MUTANTS = [
   [QUOTE, "const replaced = (h: string) => h !== NATIVE && !pinned.has(h);", "const replaced = (h: string) => false;", R, "N1e "],
   [QUOTE, "const hs = [...new Set(hooks.filter(replaced))].sort();", "const hs: string[] = [];", R, "N1e "],
   // the scan reads Initialize's currencies (topics 2 and 3), up to the agreed block, kept once the block is confirmed
-  [QUOTE, 'f(["0x" + INITIALIZE, null, null, t])', 'f(["0x" + INITIALIZE, t])', R, "N1a "],
   [QUOTE, "if (scanHead - b > maxLag || b - scanHead > maxLag) return refuse(", "if (false) return refuse(", R, "S2 "],
   [QUOTE, "  scanned?.commit();", "", R, "N1a "],
-  [QUOTE, "  return { pools, commit };", "  commit();\n  return { pools, commit };", R, "S2b "],
   // review of 5452011: no override for a pool the PoolManager does not hold, one hook per override, never an address
   // the reads call; the route's own pools are not R; pools of other currencies priced through them, bounded
-  [QUOTE, "deepest(held.filter((f) => startsBuy(f.other)), inToken)", "deepest(found.filter((f) => startsBuy(f.other)), inToken)", R, "S1c "],
   [QUOTE, "groups.set(r.group, [...(groups.get(r.group) ?? []), i]);", 'groups.set("one", [...(groups.get("one") ?? []), i]);', R, "S1c "],
   [QUOTE, "(v.called.has(k.hooks) || k.hooks", "(k.hooks", R, "S1e "],
   [QUOTE, "k.hooks !== NATIVE && (v.called.has", "(v.called.has", R, "H1 "],
@@ -97,18 +80,41 @@ export const MUTANTS = [
   [QUOTE, '...v.routers, own("v3"), own("v4"), pin("poolManager")', '...v.routers, own("v3"), pin("poolManager")', R, "S1e "],
   [QUOTE, '  for (const k of route.venue === "uniswap-v4" ? hopKeys(route) : []) seen.add(poolId(k));', "", R, "L1 "],
   [QUOTE, "  if (c0 !== t && c1 !== t) return null;", "  if (![c0, c1].includes(NATIVE) || (c0 !== t && c1 !== t)) return null;", R, "S3 "],
-  // X's markets: the deepest X first, at most EVM_QUOTE_MAX_OTHER; a market whose hook is replaced only once it exists,
-  // in one override with the pool's hook
-  // (no mutant drops holds() from a side's market ranking: among pools with no state the four standard hookless
-  // shapes always come first, so a market the PoolManager does not hold never reaches the top EVM_QUOTE_X_MARKETS)
-  [QUOTE, "const xs = deepest([...xDeep.keys()], (x) => xDeep.get(x)!).slice(0, EVM_QUOTE_MAX_OTHER);", "const xs = [...xDeep.keys()].slice(0, EVM_QUOTE_MAX_OTHER);", R, "X2 "],
-  [QUOTE, "v4At(r, amountIn, [mk.key.hooks, p.key.hooks], third), twice: v4At(r, 2n * amountIn, [mk.key.hooks, p.key.hooks], third)", "v4At(r, amountIn, [p.key.hooks], third), twice: v4At(r, 2n * amountIn, [p.key.hooks], third)", R, "S3c "],
   // every scan of a quote shares one gate and one head; X's scan failing refuses the quote
-  [QUOTE, "v.maxLag, gate, (headOfScan ??= scanHeadOf(scan, gate)))", "v.maxLag, gateOf(v.scan.parallel), (headOfScan ??= scanHeadOf(scan, gate)))", R, "G1 "],
+  // (no mutant gives each scan its own gate: the token's scan and the one scan of every X run one after the other, so
+  // a gate per scan never has more in flight; G1 holds the gate's own limit)
   [QUOTE, "(headOfScan ??= scanHeadOf(scan, gate))", "scanHeadOf(scan, gate)", R, "G3 "],
-  [QUOTE, "await Promise.all(xs.map((x) => scanOf(x)));", "await Promise.all(xs.map((x) => (scanOf(x) ?? Promise.resolve(null)).catch(() => null)));", R, "G2 "],
   [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "G1 "],
-  [QUOTE, "(startsBuy(f.other) ? side.markets : side.vias).push(f);", "side.markets.push(f);", R, "K2 "],
+  // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
+  // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
+  // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once
+  [QUOTE, "    if (!behind || i === 3) return out;", "    return out;", R, "R10 "],
+  [QUOTE, "for (const { k, id } of ordered) {", "for (const { k, id } of [] as typeof ordered) {", R, "N1a "],
+  [QUOTE, "  for (const f of held) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", "  for (const f of [] as Found[]) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", R, "A1 "],
+  [QUOTE, "  for (const f of held) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", "  for (const f of found) {\n    if (!startsBuy(f.other) || f.quotes.length > 0) continue;", R, "S1c "],
+  [QUOTE, "    keysLeft -= ordered.length;", "    if (keys.length > EVM_QUOTE_MAX_KEYS) return refuse(\"no_reference\", \"more pools than a quote reads\");\n    keysLeft -= ordered.length;", R, "T1b "],
+  [QUOTE, "      if (markets.has(x)) further.push(x);\n      continue;", "      return refuse(\"no_reference\", `${x} has no market`);", R, "B1 "],
+  [QUOTE, "      if (markets.has(x)) further.push(x);\n", "", R, "T3 "],
+  [QUOTE, "    if (ks.size > keysLeft) return null;\n", "", R, "X3 "],
+  [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
+  [QUOTE, "    return a < b ? a : b;", "    return a;", R, "H2 "],
+  [QUOTE, "      const span = part.length === 1 ? s.span : Math.min(s.span, s.orSpan ?? s.span);", "      const span = s.span;", R, "B1 "],
+  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X2 "],
+  [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
+  [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],
+  [QUOTE, "const keys = [...(scanned?.pools.get(lower(token)) ?? []), ...hints].flatMap(", "const keys = [...hints].flatMap(", R, "N1a "],
+  [QUOTE, "from: cached === undefined || cached.to < floor ? floor : cached.to + 1,", "from: floor,", R, "G4 "],
+  [QUOTE, "  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };", "  commit();\n  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };", R, "S2b "],
+  [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
+  [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key.hooks, p.key.hooks]);", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key.hooks]);", R, "S3c "],
+  [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
+  [QUOTE, "    if (res.status === 429) throw new RateLimited(", "    if (false) throw new RateLimited(", R, "T7 "],
+  [QUOTE, "      if (!(e instanceof RateLimited) || i === 3) return refuse(", "      if (true) return refuse(", R, "T7 "],
+  [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
+  [QUOTE, "    return (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));", "    return (calls: readonly EvmRpcCall[]) => rpc(calls);", R, "T8 "],
+  [BUYU, "  if (!(quoted && route.venue === \"uniswap-v4\")) {", "  if (!quoted) {", R, "D1 "],
+  [BUYU, "  return routeData(chain, route, true);", "  return routeData(chain, route, false);", R, "D1 "],
+  [BUYU, "  const { data, token: buys } = routeData(chain, route, quoted);", "  const { data, token: buys } = routeData(chain, route, false);", R, "D1 "],
   // the hook's take, and minOut from the route the hook runs in
   [QUOTE, "const take = h === null ? null : h > q ? h - q : 0n;", "const take = h === null ? null : h - q;", Q, "Q4 "],
   [QUOTE, "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / h)", "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / q)", Q, "Q4 "],
@@ -134,7 +140,7 @@ export const MUTANTS = [
   // the request and the providers
   [QUOTE, "amountIn <= 0n || amountIn >= MAX_IN", "amountIn <= 0n", Q, "Q8 "],
   [QUOTE, "slippageBps < 0 || slippageBps >= 10000", "slippageBps < 0", Q, "Q8 "],
-  [QUOTE, "|| rpcs[0] === rpcs[1]) {", ") {", Q, "Q8 "],
+  [QUOTE, "|| rpcsIn[0] === rpcsIn[1]) {", ") {", Q, "Q8 "],
   [QUOTE, 'if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);', "", Q, "Q8 "],
   [QUOTE, 'if (hosts[0] === hosts[1]) return refuse("bad_request", "the two providers are on one host");', "", Q, "Q8 "],
   [QUOTE, 'if (typeof url !== "string" || !/^https:\\/\\//.test(url)) return refuse(', "if (false) return refuse(", Q, "Q8 "],
@@ -163,7 +169,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let bad = 0;
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
-    const src = new Map([QUOTE, BUY].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
     for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
       const r = run(dir, file, t);
       if (r !== "pass") {

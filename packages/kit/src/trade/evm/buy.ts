@@ -52,7 +52,8 @@ export function evmPoolBuildQuoted(adapter: string, quote: EvmPoolBuyQuote): Evm
   if (!Number.isFinite(nowMs) || nowMs - Number(quote.block.timestamp) * 1000 > EVM_QUOTE_MAX_AGE_MS) {
     throw new EvmQuoteError("stale_quote", "the quote's block is more than 30 s old");
   }
-  const built = pinnedBuild(evmPoolVenues(), quote.chain, adapter, quote.route, quote.minOut, quote.token);
+  // the device quoted this route itself on both providers, so a v4 route may pass through a middle that is not listed
+  const built = pinnedBuild(evmPoolVenues(), quote.chain, adapter, quote.route, quote.minOut, quote.token, true);
   QUOTED_BUILDS.add(built);
   return built;
 }

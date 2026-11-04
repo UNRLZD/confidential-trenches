@@ -43,8 +43,6 @@ export type EvmPoolVenue = {
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
   readonly quoters?: Readonly<{ v3?: string; v4?: string }>;
-  /** Uniswap v3's factory (the v3 quoter's factory()), whose pools the device finds by CREATE2 to read their state. */
-  readonly v3Factory?: string;
   /** A route starts from the native asset whenever a native v4 pool exists and its route quotes at least as much as the
    *  WETH route (the chain's WETH is behind an upgradeable proxy). */
   readonly nativeFirst?: boolean;
@@ -58,7 +56,7 @@ export type EvmPoolVenue = {
    *  the provider it scans for the PoolManager's Initialize logs: `span` blocks a request, `depth` blocks back, at most
    *  `parallel` requests at once. */
   readonly poolManager?: string;
-  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number }>;
+  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number }>;
 };
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
 
@@ -85,9 +83,6 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
-      // QuoterV2.factory() on mainnet.base.org and base-rpc.publicnode.com; its getPool(WETH, USDC, 500) is the CREATE2
-      // address with Uniswap v3's init code hash (2026-11-03 20:34Z)
-      v3Factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
       providers: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
       maxLag: 5, // 2 s blocks: 10 s
       // Each launchpad factory's recent creations (apps/helper/src/data/evm/lists.ts) and the PoolManager Initialize log in
@@ -119,9 +114,6 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // and robinhood.drpc.org, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak 0x3db0868d…96a28, and
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
-      // QuoterV2.factory() on both providers; its getPool(aeWETH, USDG, 100) is the CREATE2 address with Uniswap v3's
-      // init code hash (2026-11-03 20:34Z)
-      v3Factory: "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
       nativeFirst: true,
       providers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
@@ -140,8 +132,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // over 10,000,000 blocks a request but at most 10,000 logs ("logs matched by query exceeds limit of 10000" over
       // 10M blocks; robinhood.drpc.org: 10,000 blocks on its free plan), so 1M-block spans
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
-      // (it answers 429 to 4 at once, 2026-11-03 20:27Z)
-      scan: bare({ url: "https://rpc.mainnet.chain.robinhood.com", span: 1_000_000, depth: 10_000_000, parallel: 2 }),
+      // (it answers 429 to 4 at once, 2026-11-03 20:27Z); a request with more than one value in a topic position spans
+      // at most 100,000 blocks ("query spans 1000000 blocks …, but only 100000 are allowed for this request; narrow the
+      // block range, or send one value per position", 2026-11-04 06:55Z): `orSpan`
+      scan: bare({ url: "https://rpc.mainnet.chain.robinhood.com", span: 1_000_000, depth: 10_000_000, parallel: 2, orSpan: 100_000 }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
@@ -268,8 +262,13 @@ export function copyRoute(route: unknown): EvmRoute {
 
 /** The route's tokens in order (v3: its tokens; v4: currencyIn then each hop's currency), with the chain's checks:
  *  shape, WETH only first (INFO-1), every middle on the venue list (INFO-2). Returns the token bought. `route` is
- *  copyRoute's copy. */
-function checkRoute(chain: EvmPoolChain, route: EvmRoute): string {
+ *  copyRoute's copy. `quoted`: a v4 route the device quotes itself (checks/evm/quote.ts) or builds from its own
+ *  quote (buy.ts evmPoolBuildQuoted) may pass through a middle that is not listed. A v4 middle never moves a token:
+ *  the adapter swaps hop by hop inside one PoolManager unlock and takes only the last currency (UniswapV4Adapter
+ *  unlockCallback), so a middle's deltas net to zero there, and its only effect on the buy is through the route's
+ *  hooks, which ran in the device's quote on both providers and which minOut, set from that quote, bounds. A v3
+ *  middle is a real ERC-20 transfer between pools, so a v3 route's middles stay listed-only. */
+function checkRoute(chain: EvmPoolChain, route: EvmRoute, quoted = false): string {
   const venue = venueOf(chain);
   let tokens: string[];
   if (route.venue === "uniswap-v3") {
@@ -302,7 +301,9 @@ function checkRoute(chain: EvmPoolChain, route: EvmRoute): string {
   const weth = lower(venue.weth);
   if (tokens.slice(1).some((t) => lower(t) === weth)) return refuse("weth_after_first", "WETH may only start a route");
   const listed = new Set(venue.middles.map(lower));
-  for (const t of tokens.slice(1, -1)) if (!listed.has(lower(t))) refuse("middle_not_listed", `${t} is not on the venue list`);
+  if (!(quoted && route.venue === "uniswap-v4")) {
+    for (const t of tokens.slice(1, -1)) if (!listed.has(lower(t))) refuse("middle_not_listed", `${t} is not on the venue list`);
+  }
   const out = tokens[tokens.length - 1]!;
   if (lower(out) === NATIVE || lower(out) === lower(tokens[tokens.length - 2]!)) return refuse("bad_route", "the route buys no token");
   return out;
@@ -311,8 +312,16 @@ function checkRoute(chain: EvmPoolChain, route: EvmRoute): string {
 /** The adapter's `data` for `route` on `chain`, after every check; and the token it buys. Checks and encodes one
  *  frozen copy of `route`. */
 export function evmPoolRouteData(chain: EvmPoolChain, route: EvmRoute): { data: Uint8Array; token: string } {
+  return routeData(chain, route, false);
+}
+/** evmPoolRouteData for a route the device quotes itself: a v4 route's middles need not be listed (see checkRoute).
+ *  checks/evm/quote.ts reads only through this; the kit's index does not export it. */
+export function evmPoolRouteDataQuoted(chain: EvmPoolChain, route: EvmRoute): { data: Uint8Array; token: string } {
+  return routeData(chain, route, true);
+}
+function routeData(chain: EvmPoolChain, route: EvmRoute, quoted: boolean): { data: Uint8Array; token: string } {
   const r = copyRoute(route);
-  const token = checkRoute(chain, r);
+  const token = checkRoute(chain, r, quoted);
   if (r.venue === "uniswap-v3") {
     const parts = [addressBytes(r.tokens[0]!)];
     r.fees.forEach((f, i) => parts.push(Uint8Array.of(f >> 16, (f >> 8) & 0xff, f & 0xff), addressBytes(r.tokens[i + 1]!)));
@@ -343,11 +352,11 @@ const BUILT = new WeakSet<EvmPoolBuy>();
 /** The buy of `token`, the token the user picked, for `route` through `adapter` with at least `minOut` of it for W
  *  (minOut comes from the device's own reads; never 0, as the pool refuses it). A route that buys any other token is
  *  refused (token_mismatch): the pool checks only the named token's balance (M366 (1)). */
-export function evmPoolBuildUnpinned(chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string): EvmPoolBuy {
+export function evmPoolBuildUnpinned(chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string, quoted = false): EvmPoolBuy {
   if (!isAddress(adapter) || lower(adapter) === NATIVE) return refuse("bad_route", "the adapter is not an address");
   if (!isAddress(token) || lower(token) === NATIVE) return refuse("bad_route", "the token is not an address");
   if (typeof minOut !== "bigint" || minOut <= 0n || minOut >= 1n << 256n) return refuse("bad_amount", "minOut is a uint256 above 0");
-  const { data, token: buys } = evmPoolRouteData(chain, route);
+  const { data, token: buys } = routeData(chain, route, quoted);
   if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);
   const built: EvmPoolBuy = Object.freeze({ chain, adapter, data: toHex(data), minOut, token });
   BUILT.add(built);
@@ -418,14 +427,14 @@ export function venuePins(venues: EvmPoolVenueList, chain: EvmPoolChain): { pool
 }
 const samePin = (a: unknown, pin: string) => typeof a === "string" && lower(a) === lower(pin);
 
-/** evmPoolBuildUnpinned through the chain's pinned adapter for the route's venue only. */
-export function pinnedBuild(venues: EvmPoolVenueList, chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string): EvmPoolBuy {
+/** evmPoolBuildUnpinned through the chain's pinned adapter for the route's venue only (`quoted`: see checkRoute). */
+export function pinnedBuild(venues: EvmPoolVenueList, chain: EvmPoolChain, adapter: string, route: EvmRoute, minOut: bigint, token: string, quoted = false): EvmPoolBuy {
   const v = venuePins(venues, chain);
   const r = copyRoute(route);
   const pin = r.venue === "uniswap-v3" ? v.v3 : v.v4;
   if (pin === undefined) return refuse("not_deployed", `${chain} has no pinned ${r.venue} adapter yet`);
   if (!samePin(adapter, pin)) return refuse("not_pinned", `the adapter is not ${chain}'s pinned ${r.venue} adapter`);
-  return evmPoolBuildUnpinned(chain, adapter, r, minOut, token);
+  return evmPoolBuildUnpinned(chain, adapter, r, minOut, token, quoted);
 }
 
 /** evmPoolSignBuyUnpinned into the chain's pinned pool only, of a buy through a pinned adapter. */
