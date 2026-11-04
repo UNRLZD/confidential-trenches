@@ -17,7 +17,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ROW_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
-import { allowed, COLUMNS, judge, keysFault, LISTS_URL, parseCsp, WIDTHS } from "./app-discover-live.mjs";
+import { allowed, APP_HOST, COLUMNS, frameErrors, HELPER_HOST, judge, keysFault, LISTS_URL, parseCsp, WIDTHS } from "./app-discover-live.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-discover-live.answers.json"), "utf8"));
@@ -118,4 +118,24 @@ test("allowed: a request must be on the host its kind of request is allowed to r
   assert.equal(allowed(csp, "font", `${self}/f.woff2`, self), false, "font-src falls back to default-src 'none'");
   assert.equal(allowed(csp, "document", "https://sign.confidential.unrealized.trade/", self), true);
   assert.equal(allowed(csp, "document", "https://evil.example/", self), false);
+});
+
+test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
+  const text = "Failed to load resource: the server responded with a status of 429 ()";
+  const kept = frameErrors(
+    [
+      { text, src: `${HELPER_HOST}/v1/market/lists?chain=solana` },
+      { text: "from another site", src: "https://cdn.example/x.js" },
+      { text: "Uncaught boom", src: "" },
+    ],
+    APP_HOST,
+  );
+  assert.deepEqual(kept, [`${text} (${HELPER_HOST}/v1/market/lists)`, "Uncaught boom"]);
+  let r = mut((rec) => rec.loads[0].consoleErrors.push(kept[0]));
+  assert.equal(r.ok, false);
+  assert.ok(bad(r.lines).some((l) => l.startsWith("BAD phone /discover: console error: ") && l.endsWith(`status of 429 () (${HELPER_HOST}/v1/market/lists)`)), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.includes("chain=solana)")), "no query in a console line");
+  r = mut((rec) => rec.loads[1].consoleErrors.push(kept[1]));
+  assert.equal(r.ok, false);
+  assert.ok(bad(r.lines).some((l) => l === "BAD desktop /discover: console error: Uncaught boom"), r.lines.join("\n"));
 });

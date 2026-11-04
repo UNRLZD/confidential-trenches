@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, ENGINES, judge, KINDS, MOVE_TO, PATH, SIGN_HOST, WIDTHS } from "./app-in-shell.mjs";
+import { APP_HOST, ENGINES, frameErrors, judge, KINDS, MOVE_TO, PATH, SIGN_HOST, WIDTHS } from "./app-in-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-in-shell.answers.json"), "utf8"));
@@ -157,5 +157,27 @@ test("harness: GET /v1/market/lists and /v1/market/token are answered from the r
     assert.equal(other.status, 404);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
+  const text = "Failed to load resource: the server responded with a status of 429 ()";
+  const helper = "https://api.confidential.unrealized.trade";
+  const kept = frameErrors([
+    { url: `${helper}/v1/market/token?chain=solana&mint=So11111111111111111111111111111111111111112`, text },
+    { url: `${SIGN_HOST}/assets/shell.js`, text: "the shell's own" },
+    { url: "", text: "Uncaught boom" },
+  ]);
+  assert.deepEqual(kept, [`${text} (${helper}/v1/market/token)`, "Uncaught boom"]);
+  for (const [line, want] of [
+    [kept[0], (l) => l.endsWith(`status of 429 () (${helper}/v1/market/token)`)],
+    [kept[1], (l) => l.endsWith(": Uncaught boom")],
+  ]) {
+    const rec = structuredClone(ANSWERS.good);
+    rec.runs.find((x) => x.kind === "signed").app.errors.push(line);
+    const r = judge(rec);
+    assert.equal(r.ok, false);
+    assert.ok(r.lines.some((l) => /^BAD \w+ \w+: /.test(l) && want(l)), r.lines.join("\n"));
+    assert.ok(!r.lines.some((l) => l.includes("mint=")), "no query in a line");
   }
 });

@@ -42,6 +42,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { consoleLine } from "./console-errors.mjs";
 
 const KEY = "app-in-shell";
 // what a PASS line calls each engine: Chromium runs as the installed Google Chrome (scripts/browsers.mjs)
@@ -75,6 +76,12 @@ export const CONTROL = "signin-passkey";
 const SETTLE_MS = 1_500;
 
 // ------------------------------------------------------------------------------------------------ the verdict
+/** The console errors a run keeps: all but the shell's (SIGN_HOST's are its own check's), each through the shared
+ *  collector (console-errors.mjs) as its text and its address's origin and path; one with no address is kept. */
+export function frameErrors(entries) {
+  return entries.filter((e) => originOf(e.url) !== SIGN_HOST).map((e) => consoleLine(e.text, e.url));
+}
+
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -329,7 +336,7 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
     if (f) {
       run.app = await f.evaluate(READ_APP);
       if (kind === "late" || kind === "silent") run.reloaded = run.app.doc === null || run.app.doc !== run.docAt;
-      run.app.errors = errors.filter((e) => originOf(e.url) !== SIGN_HOST).map((e) => e.text);
+      run.app.errors = frameErrors(errors);
     } else if (originOf(page.url()) === APP_HOST) {
       // today's layout: the terminal top-level; read it the same way, so the record shows what it drew
       run.app = null;
