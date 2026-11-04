@@ -30,8 +30,8 @@ const venue = (v: { kind: "pump-curve" | "pumpswap"; tokenAccountSize: number; c
 const SIZES = [165, ...new Set(Array.from({ length: 16 }, (_, m) => 170 + [12, 4, 5, 4].reduce((s, x, i) => s + (m & (1 << i) ? x : 0), 0)))];
 const VENUES = (["pump-curve", "pumpswap"] as const).flatMap((kind) => [false, true].flatMap((cashback) => SIZES.map((tokenAccountSize) => ({ kind, tokenAccountSize, cashback }))));
 
-test("the worst venue: PumpSwap with cashback and the largest token account the venue reader admits (195 bytes)", () => {
-  assert.deepEqual({ ...SOLANA_POOL_WORST_BUY_VENUE }, { kind: "pumpswap", tokenAccountSize: 195, cashback: true });
+test("the worst venue: pump's curve on a cashback coin (its sell after graduation makes both PumpSwap cashback accounts) and the largest token account the venue reader admits (195 bytes)", () => {
+  assert.deepEqual({ ...SOLANA_POOL_WORST_BUY_VENUE }, { kind: "pump-curve", tokenAccountSize: 195, cashback: true });
   assert.equal(SOLANA_TOKEN_ACCOUNT_MAX_SIZE, 195);
   // a Token-2022 mint with each of the four extensions that add to a new account: TransferFeeConfig, NonTransferable,
   // TransferHook, Pausable (each once: Token-2022 holds one of each type)
@@ -82,9 +82,10 @@ test("Solana: the max spend is the chunk less the fee, the tip, W's new accounts
   const rent = RENTS[0]!;
   const fee = solanaPoolFee(rent); // 1,300,000
   const r = (n: number) => solanaRentMin(rent, n);
-  // W's token account (195), the volume accumulator (137), the cashback account (165), then what the sell needs up
-  // front on PumpSwap: its fee (5,000) and the wrapped-SOL account (165) it makes before any proceeds arrive
-  assert.equal(solanaPoolBuyMaxSpend(release(SOL / 10n, fee), SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent), SOL / 10n - fee - SOLANA_JITO_TIP_MIN - r(195) - r(137) - r(165) - 5_000n - r(165));
+  // W's token account (195), pump's volume accumulator (137), then what the sell needs up front once the coin has
+  // graduated to PumpSwap: its fee (5,000), the wrapped-SOL account (165) it makes before any proceeds arrive, and on
+  // a cashback coin W's PumpSwap volume account (137) and its wrapped-SOL account (165), which a curve buy never makes
+  assert.equal(solanaPoolBuyMaxSpend(release(SOL / 10n, fee), SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent), SOL / 10n - fee - SOLANA_JITO_TIP_MIN - r(195) - r(137) - 5_000n - r(165) - r(137) - r(165));
 });
 
 // The review of signpage-pool-sell 4b6223a (critical): W pays its sell's fee before anything runs, and the runtime
@@ -92,17 +93,21 @@ test("Solana: the max spend is the chunk less the fee, the tip, W's new accounts
 // W's wrapped-SOL account (165 bytes) before any proceeds arrive. A max-spend buy left W at 0 (pump's curve) or at the
 // wrapped-SOL rent (PumpSwap), so its sell could never pass simulation. The need is written out here, not read from the
 // kit, so the test says what the runtime asks.
-test("Solana: a max-spend buy leaves W what its sell needs up front, on both venues", () => {
+// The re-review of 3bdca74 (critical): a coin bought on pump's curve that graduates sells on PumpSwap only, which needs
+// the fee and rent(165) up front, and on a cashback coin W's PumpSwap volume account and its wrapped-SOL account too
+// (the sell names both, writable; a curve buy makes neither). A curve buy that kept the curve's own need stranded W.
+const sellNeedAfter = (rent: SolanaRent, v: { kind: "pump-curve" | "pumpswap"; cashback: boolean }): bigint =>
+  5_000n + solanaRentMin(rent, 165) + (v.kind === "pump-curve" && v.cashback ? solanaRentMin(rent, 137) + solanaRentMin(rent, 165) : 0n);
+test("Solana: a max-spend buy leaves W what its sell needs up front on every venue the coin sells on, PumpSwap after a curve coin graduates", () => {
   for (const rent of RENTS) {
     const fee = solanaPoolFee(rent);
-    const need = { "pump-curve": 5_000n + solanaRentMin(rent, 0), pumpswap: 5_000n + solanaRentMin(rent, 165) };
     for (const chunk of CHUNKS) {
       for (const v of VENUES) {
         const max = solanaPoolBuyMaxSpend(release(chunk, fee), v, SOLANA_JITO_TIP_MIN, rent);
         if (max === 0n) continue;
         const { left } = solanaPoolBuyFunds(release(chunk, fee), venue(v), { spend: max, tip: SOLANA_JITO_TIP_MIN }, rent);
         const at = `rent ${rent.lamportsPerByte}x${rent.factor} ${JSON.stringify(v)} chunk ${chunk}`;
-        assert.ok(left >= need[v.kind], `${at}: W keeps ${left}, its sell needs ${need[v.kind]}`);
+        assert.ok(left >= sellNeedAfter(rent, v), `${at}: W keeps ${left}, its sell needs ${sellNeedAfter(rent, v)}`);
         // after the fee W holds at least rent(0), never between 0 and it
         assert.ok(left - 5_000n >= solanaRentMin(rent, 0), at);
       }
@@ -115,12 +120,13 @@ test("Solana: a buy that would leave W short of its sell's up-front need is refu
   const fee = solanaPoolFee(rent);
   for (const v of VENUES) {
     const max = solanaPoolBuyMaxSpend(release(SOL / 10n, fee), v, 0n, rent);
-    const need = 5_000n + solanaRentMin(rent, v.kind === "pumpswap" ? 165 : 0);
+    const need = sellNeedAfter(rent, v);
     assert.equal(solanaPoolBuyFunds(release(SOL / 10n, fee), venue(v), { spend: max, tip: 0n }, rent).left, need, JSON.stringify(v));
-    // a spend that leaves W 1 lamport short, the fee short, or at the old max (W at 0 on the curve, the wrapped-SOL rent
-    // on PumpSwap) is refused
-    const oldMax = max + (v.kind === "pumpswap" ? 5_000n : need);
-    for (const spend of [max + 1n, max + 5_000n, oldMax])
+    // a spend that leaves W 1 lamport short, the fee short, at the first max (W at 0 on the curve, the wrapped-SOL rent
+    // on PumpSwap) or at 3bdca74's (the curve's own need, fee and rent(0), run 5's W) is refused
+    const firstMax = max + (v.kind === "pumpswap" ? 5_000n : need);
+    const curveOwn = max + need - (5_000n + solanaRentMin(rent, 0));
+    for (const spend of [max + 1n, max + 5_000n, firstMax, ...(v.kind === "pump-curve" ? [curveOwn] : [])])
       assert.match(String(solanaPoolBuyFunds(release(SOL / 10n, fee), venue(v), { spend, tip: 0n }, rent).problem), /its sell needs up front/, `${JSON.stringify(v)} spend ${spend}`);
   }
 });

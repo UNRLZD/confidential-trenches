@@ -264,15 +264,18 @@ test("a chunk too small to land is refused: W's token account, the volume accoun
     // the review's GAP-2: the spend takes the whole chunk, nothing for W's accounts
     assert.match(at(chunk).problem ?? "", /does not cover/);
     // the review's GAP-3: W would keep 1 lamport (on PumpSwap the wrapped SOL account's rent is not there at the peak)
-    assert.match(at(chunk - ata - vol - 1n).problem ?? "", v === "pump" ? /under the 655240 its sell needs up front/ : /does not cover/);
+    assert.match(at(chunk - ata - vol - 1n).problem ?? "", v === "pump" ? /under the 1493440 its sell needs up front/ : /does not cover/);
     // W keeps exactly 0 (pump) or the wrapped SOL's rent (PumpSwap), the old max spend: refused, its sell could never
     // pay the fee and, on PumpSwap, the wrapped SOL account it makes first (the review of signpage-pool-sell 4b6223a)
-    assert.match(at(chunk - ata - vol).problem ?? "", v === "pump" ? /W would keep 0 lamports, under the 655240/ : /does not cover/);
+    assert.match(at(chunk - ata - vol).problem ?? "", v === "pump" ? /W would keep 0 lamports, under the 1493440/ : /does not cover/);
     assert.notEqual(at(chunk - ata - vol - wsol).problem, null);
     // W keeps rent(0) only: after the sell's fee it would hold less than rent(0), refused
     assert.match(at(chunk - ata - vol - 650_240n).problem ?? "", v === "pump" ? /its sell needs up front/ : /does not cover/);
-    // W keeps the sell's fee and the rent of what it makes before proceeds arrive: lands
-    const need = 5_000n + (v === "pumpswap" ? wsol : 650_240n);
+    // a curve coin's W keeps only the curve's own need (fee and rent(0), 3bdca74's rule): refused, since once the coin
+    // graduates it sells on PumpSwap, which needs the fee and the wrapped SOL account up front (the re-review, critical)
+    if (v === "pump") assert.match(at(chunk - ata - vol - 655_240n).problem ?? "", /its sell needs up front on any venue/);
+    // W keeps the sell's fee and the rent of what it makes before proceeds arrive, on PumpSwap for both: lands
+    const need = 5_000n + solanaRentMin(rent, 165);
     assert.equal(at(chunk - ata - vol - need).problem, null);
     assert.equal(at(chunk - ata - vol - need).left, need);
     assert.match(solanaPoolBuyFunds(release, venue, { spend: 1n, tip: release.withdrawnValue }, rent).problem ?? "", /more than the release/);

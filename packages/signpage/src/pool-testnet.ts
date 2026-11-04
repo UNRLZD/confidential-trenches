@@ -40,7 +40,7 @@ import { TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { poolSellKind, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { poolSellKind, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -348,6 +348,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (mine.some((n) => n.state === "INCOMING")) await settle();
         if (mine.some((n) => n.state === "RESERVED")) await settleReserved();
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();
+        // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
+        if (locks) await settleDeadSellOps(await page.store(), locks);
       } catch {
         // a state read never fails for this; the next read tries again
       }
