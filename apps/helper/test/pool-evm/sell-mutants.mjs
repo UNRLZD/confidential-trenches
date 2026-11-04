@@ -14,7 +14,9 @@
 // other), the % 32 length test (the word count test refuses the same), and either fee_low test without the other
 // (fee >= gas x (base + tip) + L1 exactly when (fee - L1) / gas >= base + tip; both are removed together below), and a
 // replacement's "a base fee of 0 prices no poster gas" test on Robinhood (without it the poster gas's division by that 0
-// throws all the same, failing the tend).
+// throws all the same, failing the tend), and a tend's return at a nonce whose replacement would be over
+// EVM_SELL_MAX_FEE_PER_GAS against going on to the next nonce (a send above a nonce left unreplaced is never mined before
+// it, so what lands is the same either way, and the lane is tended again at its next read).
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -203,8 +205,8 @@ export const MUTANTS = [
   [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (false) {", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "    if (low !== undefined && lane.key !== undefined && now() - lane.heldTendAt >= EVM_LANE_RETRY_S * 1000) {", "    if (low !== undefined && lane.key !== undefined) {", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "      low = await heldLow(lane);", "", T, "a lane held behind a nonce the chain dropped"],
-  [EVM, "      if (!(await receiptOf(low[1].hash))) return low;", "      return low;", T, "a lane held while the chain halts"],
-  [EVM, "    return rc.some((x) => x.status === \"fulfilled\" && x.value !== null && typeof x.value === \"object\");", "    return rc.every((x) => x.status === \"fulfilled\" && x.value !== null && typeof x.value === \"object\");", T, "a lane held while the chain halts"],
+  [EVM, "      if (!(await usedAt(low[1]))) return low;", "      return low;", T, "a lane held while the chain halts"],
+  [EVM, "    return rc.some((y) => y.status === \"fulfilled\" && y.value !== null && typeof y.value === \"object\");", "    return rc.every((y) => y.status === \"fulfilled\" && y.value !== null && typeof y.value === \"object\");", T, "a lane held while the chain halts"],
   [EVM, "    prune(lane, lower(c.la, c.lb));", "    prune(lane, higher(c.la, c.lb));", T, "a lane's watch ends at its bound"],
   [EVM, "bound: bound ?? stuckAfter + EVM_LANE_WATCH_MS,", "bound: stuckAfter + EVM_LANE_WATCH_MS,", T, "a lane held behind a nonce the chain dropped"],
   [EVM, "    const bound = mine?.bound ?? until + EVM_LANE_WATCH_MS;", "    const bound = until + EVM_LANE_WATCH_MS;", T, "a lane held behind a nonce the chain dropped"],
@@ -227,6 +229,36 @@ export const MUTANTS = [
   [EVM, "      every = Math.min(every * 2, first * EVM_RECEIPT_POLL_BACKOFF);", "", T, "the receipt watch backs off"],
   // fold 2, L-pin: a chain with no pin starts with sales off
   [EVM, '    const sells = sellKey !== "" && pin !== undefined;', '    const sells = sellKey !== "";', T2, "the EVM pool sell sender's address"],
+  // fold 6, M1: a nonce is used once either provider returns a receipt for any send the lane made at it
+  [EVM, "    const rc = await Promise.allSettled([x.hash, ...x.prior].flatMap(", "    const rc = await Promise.allSettled([x.hash].flatMap(", T, "a replaced sale that mined is counted"],
+  [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])].slice(-EVM_LANE_PRIOR_MAX);", "    const prior: string[] = [];", T, "a replaced sale that mined is counted"],
+  [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])]", "    const prior = old === undefined ? [] : [...old.prior]", T, "a replaced sale that mined is counted"],
+  [EVM, "        if (await usedAt(old!)) {", "        if (false) {", T, "a stuck replacement whose earlier send mined"],
+  [EVM, "        lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used", "        if (lane.sent.get(nonce) === mine) lane.sent.delete(nonce);", T, "a sale that mines as its replacement goes"],
+  // fold 6, M2: a held answer whose tend sent something waits one block
+  [EVM, "retryAfterS: sent > 0 ? EVM_LANE_SENT_RETRY_S : EVM_LANE_RETRY_S }", "retryAfterS: EVM_LANE_RETRY_S }", T, "a held answer whose tend sent something"],
+  [EVM, "retryAfterS: sent > 0 ? EVM_LANE_SENT_RETRY_S : EVM_LANE_RETRY_S }", "retryAfterS: EVM_LANE_SENT_RETRY_S }", T, "a held answer whose tend sent something"],
+  [EVM, "      sent = await tendOnce(lane);", "      await tendOnce(lane);", T, "a held answer whose tend sent something"],
+  [EVM, "        made.n++;\n        const until = now() + EVM_SELL_DROP_MARGIN_MS;\n        sentAt(lane, n, until, old!.maxFee", "        const until = now() + EVM_SELL_DROP_MARGIN_MS;\n        sentAt(lane, n, until, old!.maxFee", T, "a held answer whose tend sent something"],
+  [EVM, "      made.n++;\n      lane.ceilingSaid = false;", "      lane.ceilingSaid = false;", T, "a lane's watch ends at its bound"],
+  // fold 6, M3: the rebroadcast, the busy lane and the hold's reads
+  [EVM, "        if (sent.every((x) => x.status === \"rejected\")) throw new Error(`both providers refused the replacement at nonce ${n} again:", "        if (false) throw new Error(`both providers refused the replacement at nonce ${n} again:", T, "a held answer whose tend sent something"],
+  [EVM, "        watch(lane, n, old!.hash, until);", "", T, "a dropped replacement within its nonce's bound"],
+  [EVM, "        const until = now() + EVM_SELL_DROP_MARGIN_MS;\n        sentAt(lane, n, until, old!.maxFee", "        const until = old!.stuckAfter;\n        sentAt(lane, n, until, old!.maxFee", T, "a rebroadcast's watch starts its margin again"],
+  [EVM, "      if (low === undefined || now() <= low[1].bound) return undefined;", "      if (low === undefined) return undefined;", T, "a busy lane is held only"],
+  [EVM, "    if (![...lane.sent.values()].some((x) => now() > x.bound)) return null;", "", T, "a lane with no send past its bound reads no counts"],
+  // fold 6, L1: a stuck send's reads at most once per margin
+  [EVM, "        if (now() - old!.checkedAt < EVM_SELL_DROP_MARGIN_MS) continue;", "", T, "a halt's stuck sends are each read"],
+  [EVM, "        old!.checkedAt = now();", "", T, "a halt's stuck sends are each read"],
+  // fold 6, L2: a provider whose latest count stays below a sent nonce is logged once
+  [EVM, "      if (x !== null && !x.said && now() - x.since >= EVM_LANE_WATCH_MS) {", "      if (x !== null && !x.said) {", T, "a provider whose latest count stays below"],
+  [EVM, "        x.said = true;", "", T, "a provider whose latest count stays below"],
+  [EVM, "      if (x !== null && l > x.nonce) x = null;", "", T, "a provider whose latest count stays below"],
+  [EVM, "      if (x !== null && l > x.nonce) x = null;", "      if (x !== null && l >= x.nonce) x = null;", T, "a provider whose latest count stays below"],
+  [EVM, "      if (x === null && l < lane.nextNonce) x = {", "      if (x === null) x = {", T, "a provider whose latest count stays below"],
+  [EVM, "    behindOf(sellLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
+  [EVM, "    behindOf(withdrawLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
+  [EVM, "    behindOf(lane, la!, lb!);", "", T, "a held answer whose tend sent something"],
 ];
 
 // "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a

@@ -10,7 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolChainFee, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
-import { EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmEpochFee, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import { EVM_LANE_SENT_RETRY_S, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmEpochFee, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
 import * as evmModule from "./evm.ts";
 
 // read by name, so a build without the ceiling fails only the tests that use it
@@ -983,7 +983,7 @@ const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ st
     await settle(() => false, 80);
   };
   for (const st of o2.then ?? []) await step(st);
-  return { s, x, hash, early, replaced, raws: sends(x).map(fieldsOf), lines, step, setMined: (n: bigint) => (mined = n), setMinedB: (n: bigint | undefined) => (minedB = n), at: () => clock, opts: o };
+  return { s, x, hash, early, replaced, raws: sends(x).map(fieldsOf), lines, step, setMined: (n: bigint) => (mined = n), setMinedB: (n: bigint | undefined) => (minedB = n), at: () => clock, opts: o, optsB: ob };
 };
 /** The tip and maxFeePerGas a replacement takes over `old`: each over the old by more than a tenth, the tip at least the
  *  providers' eth_maxPriorityFeePerGas (the mock's 1), maxFeePerGas at least 2 x the base fee + that tip. */
@@ -1017,7 +1017,9 @@ test("at a steady base fee, a stuck sale priced under 2 x base + tip is replaced
   const saleReads = () => r.x.filter((c) => c.method === "eth_getTransactionReceipt" && c.params[0] === r.hash).length;
   const readsThen = saleReads();
   await r.step({ atMs: deadlineMs + 400_000 });
-  assert.equal(saleReads(), readsThen, "the sale's watch ended when the replacement took its nonce");
+  // the sale's watch ended when the replacement took its nonce: its hash is read only by the lane's tends (a send it
+  // replaced may yet be the one mined), at most once per EVM_SELL_DROP_MARGIN_MS on each provider
+  assert.ok(saleReads() - readsThen <= 2 * Math.ceil(200_000 / 60_000), `the sale's hash read ${saleReads() - readsThen} times in 200 s`);
   const [sale, repl] = r.raws as [ReturnType<typeof fieldsOf>, ReturnType<typeof fieldsOf>];
   // the providers' tip now the replacement's own: 2 x base + tip is exactly its maxFeePerGas, which it covers
   await r.step({ atMs: deadlineMs + 500_000, tip: repl.tip });
@@ -1095,7 +1097,7 @@ test("a lane's watch ends at its bound with one log line; while the lowest unmin
   await r.step({ atMs: deadlineMs + 60_000 + 700_000 });
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the watch has ended");
   const held = await r.s.sell(freshBody("W-behind", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
-  assert.deepEqual([held.status, code(held), held.retryAfterS], [503, "upstream", 60], JSON.stringify(held.body));
+  assert.deepEqual([held.status, code(held), held.retryAfterS], [503, "upstream", 2], `its tend sent: one block: ${JSON.stringify(held.body)}`);
   assert.deepEqual(sends(r.x).map((t) => fieldsOf(t).nonce), [7n, 7n], "nothing sent behind it; the held answer's tend replaced 7 once the base fee fell");
   await r.step({ atMs: r.at() + 1_000 });
   assert.equal(r.lines.filter((l) => l.includes("unmined past its watch")).length, 1, "the held tend's replacement, its watch started past the bound, ends with no second line");
@@ -1257,17 +1259,18 @@ test("a stuck replacement whose maxFeePerGas still covers 2 x base + tip but who
 });
 
 /** A chain for the held-lane tests, read the same on both providers: the sell sender's latest count `c`, pending past
- *  each nonce from `c` that a send holds; a send at `c` and those after it mine at once, unless `drop` (every send
- *  vanishes: no count, no tx) or `halt` (sends held unmined: counted at pending, returned by hash). `lagB` freezes
+ *  each nonce from `c` that a send holds; a send at `c` and those after it mine `blockMs` after they were sent (by
+ *  `clock`), unless `drop` (every send vanishes: no count, no tx; `dropAt`: only those at that nonce) or `halt` (sends
+ *  held unmined: counted at pending, returned by hash). `refuse`: both providers refuse every send. `lagB` freezes
  *  provider b's latest count at 7, and it returns no receipt. A W's own count stays at 7. */
-const chainOf = () => {
-  const st = { c: 7n, drop: false, halt: false, lagB: false };
-  const held = new Map<bigint, string>();
+const chainOf = (clock: () => number = () => 0, blockMs = 0) => {
+  const st = { c: 7n, drop: false, halt: false, lagB: false, refuse: false, dropAt: -1n };
+  const held = new Map<bigint, { h: string; at: number }>();
   const mined = new Map<string, unknown>();
   const mine = () => {
     if (st.halt) return;
-    while (held.has(st.c)) {
-      mined.set(held.get(st.c)!, { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: `0x${(BASE + 1n).toString(16)}` });
+    while (held.has(st.c) && clock() >= held.get(st.c)!.at + blockMs) {
+      mined.set(held.get(st.c)!.h, { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: `0x${(BASE + 1n).toString(16)}` });
       held.delete(st.c);
       st.c++;
     }
@@ -1276,7 +1279,7 @@ const chainOf = () => {
   const prov = (b: boolean, calls: Calls): EvmRpc => {
     const r = rpc(calls, {
       receipt: (h) => (mine(), b && st.lagB ? null : (mined.get(h) ?? null)),
-      tx: (h) => (mined.has(h) || [...held.values()].includes(h) ? { hash: h } : null),
+      tx: (h) => (mined.has(h) || [...held.values()].some((x) => x.h === h) ? { hash: h } : null),
       count: (t, who) => {
         if (who !== SENDER) return 7n;
         mine();
@@ -1287,10 +1290,14 @@ const chainOf = () => {
       },
     });
     return async (method, params) => {
+      if (method === "eth_sendRawTransaction" && st.refuse) {
+        calls.push({ method, params });
+        throw new Error("RPC error -32000: already known");
+      }
       const out = await r(method, params);
       if (method === "eth_sendRawTransaction" && !st.drop) {
         const n = fieldsOf(params[0] as string).nonce;
-        if (n >= st.c) held.set(n, out as string);
+        if (n >= st.c && n !== st.dropAt) held.set(n, { h: out as string, at: clock() });
         mine();
       }
       return out;
@@ -1314,7 +1321,7 @@ test("a lane held behind a nonce the chain dropped recovers once the chain does:
   const later = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
   const before = sends(ch.x).length;
   const h1 = await later("W-held-1");
-  assert.deepEqual([h1.status, code(h1), h1.retryAfterS], [503, "upstream", 60], JSON.stringify(h1.body));
+  assert.deepEqual([h1.status, code(h1), h1.retryAfterS], [503, "upstream", 2], `its tend sent 7 again: one block: ${JSON.stringify(h1.body)}`);
   assert.equal(sends(ch.x).length, before + 1, "the held answer sent 7 again");
   clock += 30_000;
   assert.equal((await later("W-held-2")).status, 503);
@@ -1357,6 +1364,210 @@ test("a lane held while the chain halts recovers when it resumes, though provide
   const resumed = await later("W-resumed");
   assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
   assert.deepEqual(sends(ch.x).map((r) => fieldsOf(r).nonce).at(-1), 8n);
+});
+
+test("a held answer whose tend sent something answers Retry-After EVM_LANE_SENT_RETRY_S (one block), and the try after it goes once the block mines it; a rebroadcast both providers refuse fails the tend, logged, and its answer waits EVM_LANE_RETRY_S", async () => {
+  let clock = NOW;
+  const ch = chainOf(() => clock, 2_000);
+  ch.st.drop = true;
+  const lines: string[] = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1, log: (l: string) => lines.push(l) }, ch.providers, () => clock);
+  assert.equal((await s.sell(body())).status, 200);
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  for (const at of [60_001, 200_000, 400_000, 700_000, 900_000]) {
+    clock = deadlineMs + at;
+    await settle(() => false, 60);
+  }
+  const later = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
+  ch.st.refuse = true; // the chain is back, but both providers refuse the rebroadcast
+  const refused = await later("W-ra-refused");
+  assert.deepEqual([refused.status, refused.retryAfterS], [503, 60], "a tend that sent nothing: EVM_LANE_RETRY_S");
+  assert.ok(lines.some((l) => l.includes("refused the replacement at nonce 7 again")), lines.join(" | "));
+  assert.ok(lines.some((l) => l.includes("provider a's latest count")), "the hold's own count reads see the stall");
+  ch.st.refuse = false;
+  ch.st.drop = false; // the chain heals
+  clock += 60_000;
+  const held = await later("W-ra-held");
+  assert.deepEqual([held.status, held.retryAfterS], [503, EVM_LANE_SENT_RETRY_S], "its tend sent 7 again: one block");
+  clock += EVM_LANE_SENT_RETRY_S * 1000; // one block on: 7 is mined
+  const next = await later("W-ra-next");
+  assert.equal(next.status, 200, JSON.stringify(next.body));
+});
+
+test("a replaced sale that mined is counted: the lane's earlier send at a nonce whose receipt a provider returns marks it used, though the other's latest count stays behind and it still holds the replacement (M1)", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  const r = await stuck((s) => s.sell(body()), deadlineMs, { base: 2n * BASE });
+  assert.equal(r.replaced, 2, "the sale S replaced by R at 7");
+  await r.step({ atMs: deadlineMs + 60_000 + 600_001 }); // past 7's bound: every watch at 7 has ended
+  assert.ok(r.lines.some((l) => l.includes("unmined past its watch")), r.lines.join(" | "));
+  // then S mines at 7: provider a returns its receipt and latest 8; provider b's latest stays at 7, no receipts, still holds R
+  r.opts.receipt = (h: string) => (h === r.hash ? { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x1" } : null);
+  r.optsB.receipt = () => null;
+  r.setMined(8n);
+  r.setMinedB(7n);
+  await r.step({ atMs: deadlineMs + 60_000 + 660_002 });
+  const next = await r.s.sell(freshBody("W-m1", { sell: { deadline: BigInt(Math.floor(r.at() / 1000)) + 300n } }));
+  assert.equal(next.status, 200, JSON.stringify(next.body));
+  assert.equal(fieldsOf(sends(r.x).at(-1)!).nonce, 8n);
+});
+
+test("a provider whose latest count stays below a nonce the lane sent for EVM_LANE_WATCH_MS is logged once, naming the provider and the nonce: here one forging every receipt while the chain never mines 7", async () => {
+  let clock = NOW;
+  const x: Calls = [];
+  const lines: string[] = [];
+  const forged = { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x1" };
+  let latestA = 7n;
+  const a: Opts = { receipt: () => null, tx: () => null, count: (t) => (t === "latest" ? latestA : 7n) };
+  const b: Opts = { receipt: () => forged, tx: () => null, count: (t, who) => (who === SENDER && t === "pending" ? 1007n : 7n) };
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1, log: (l: string) => lines.push(l) }, [rpc(x, a), rpc([], b)], () => clock);
+  const said = () => lines.filter((l) => l.includes("latest count"));
+  for (const m of [0, 5, 10, 14]) {
+    clock = NOW + m * 60_000;
+    assert.equal((await s.sell(freshBody(`W-forged-${m}`, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }))).status, 200);
+    await settle(() => false, 20);
+  }
+  assert.equal(said().length, 0, "under EVM_LANE_WATCH_MS: nothing yet");
+  for (const m of [15, 16, 20]) {
+    clock = NOW + m * 60_000;
+    assert.equal((await s.sell(freshBody(`W-forged-${m}`, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }))).status, 200);
+    await settle(() => false, 20);
+  }
+  assert.ok(said().some((l) => l.includes("provider a's") && l.includes("nonce 7")), said().join(" | "));
+  assert.equal(said().filter((l) => l.includes("provider a's")).length, 1, "once");
+  // provider a's count moves past 7 and stays at 8: logged again, at 8, once EVM_LANE_WATCH_MS on
+  latestA = 8n;
+  for (const m of [21, 25, 30, 31, 35]) {
+    clock = NOW + m * 60_000;
+    assert.equal((await s.sell(freshBody(`W-forged-${m}`, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }))).status, 200);
+    await settle(() => false, 20);
+  }
+  assert.equal(said().filter((l) => l.includes("provider a's") && l.includes("stayed at 8")).length, 1, said().join(" | "));
+  assert.ok(!said().some((l) => /https?:|0x[0-9a-f]{64}/.test(l)), "no URL, no key");
+  // the withdraw lane alike: its sender's count on provider a stays at 7 past its sends for EVM_LANE_WATCH_MS
+  clock = NOW;
+  const wl: string[] = [];
+  // the chain's blocks at the clock, so each withdraw's epoch has its block
+  const clocked = (r: EvmRpc): EvmRpc => async (m, p) => {
+    if (m !== "eth_getBlockByNumber") return r(m, p);
+    const blk = (await r(m, p)) as Record<string, string>;
+    return { ...blk, timestamp: `0x${(BigInt(Math.floor(clock / 1000)) - 2n * (100n - BigInt(blk.number!))).toString(16)}` };
+  };
+  const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, floor: 1n, feeRecipient: FEE_TO, receiptPollMs: 1, log: (l: string) => wl.push(l) }, [clocked(rpc([], { receipt: () => null, tx: () => null })), clocked(rpc([], { receipt: () => forged, tx: () => null, count: (at) => (at === "pending" ? 1007n : 7n) }))], () => clock);
+  const fee = evmEpochFee(1n, BASE);
+  for (const m of [0, 1, 11, 12]) {
+    clock = NOW + m * 60_000;
+    const w = await t.carry({ pool: POOL, data: withdrawData(fee, 0xa0n + BigInt(m), clock + 300_000), epoch: clock });
+    assert.equal(w.status, 200, JSON.stringify(w.body));
+    await settle(() => false, 20);
+  }
+  assert.ok(wl.some((l) => l.includes("provider a's latest count for " + evmAddressOf(KEY))), wl.join(" | "));
+});
+
+test("a halt's stuck sends are each read at most once per EVM_SELL_DROP_MARGIN_MS by the tends (L1): five sales held unmined, every watch alive, read by hash at most once a margin each on each provider", async () => {
+  let clock = NOW;
+  const ch = chainOf(() => clock);
+  ch.st.halt = true;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, ch.providers, () => clock);
+  for (let i = 0; i < 5; i++) assert.equal((await s.sell(freshBody(`W-l1-${i}`, { sell: { deadline: NOW_S + 300n } }))).status, 200);
+  const deadlineMs = Number(NOW_S + 300n) * 1000;
+  for (clock = deadlineMs + 60_001; clock < deadlineMs + 120_000; clock += 2_000) await settle(() => false, 10);
+  const byHash = () => reads(ch.x, "eth_getTransactionByHash");
+  const then = byHash();
+  for (; clock < deadlineMs + 240_000; clock += 2_000) await settle(() => false, 10);
+  assert.ok(byHash() - then <= 5 * Math.ceil(120_000 / 60_000) + 5, `${byHash() - then} reads by hash in 120 s`);
+});
+
+test("a stuck replacement whose earlier send mined is dropped by the tend, not sent again: a provider's receipt for the sale it replaced uses its nonce, though both latest counts stay behind and neither returns the replacement by hash", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  const r = await stuck((s) => s.sell(body()), deadlineMs, { base: 2n * BASE });
+  assert.equal(r.replaced, 2, "the sale S replaced by R at 7");
+  r.opts.receipt = (h: string) => (h === r.hash ? { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x1" } : null);
+  r.opts.tx = () => null;
+  await r.step({ atMs: deadlineMs + 60_001 + 61_000 });
+  await r.step({ atMs: deadlineMs + 60_001 + 200_000 });
+  assert.equal(sends(r.x).length, 2, "nothing sent again at 7");
+});
+
+test("a sale that mines as its replacement goes ends every watch at its nonce: the sale's watch reads its receipt and drops the nonce's record, so the replacement's watch ends at its next read", async () => {
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  let minedS = false;
+  let sHash = "";
+  const r = await stuck(async (s) => {
+    const first = await s.sell(body());
+    sHash = (first.body as { hash: string }).hash;
+    return first;
+  }, deadlineMs, { base: 2n * BASE, refuse: (m) => (m === "eth_sendRawTransaction" && (minedS = true), false) });
+  assert.equal(r.replaced, 2);
+  // S was in a block as R went: both providers return its receipt from then (the counts stay behind)
+  r.opts.receipt = (h: string) => (minedS && h === sHash ? { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x1" } : null);
+  const rReads = () => r.x.filter((c) => c.method === "eth_getTransactionReceipt" && c.params[0] !== sHash).length;
+  await settle(() => false, 40);
+  const then = rReads();
+  await settle(() => false, 40);
+  assert.equal(rReads(), then, "R's watch ended");
+});
+
+test("a rebroadcast's watch starts its margin again: a nonce sent again as it was is not stuck until EVM_SELL_DROP_MARGIN_MS after, though another nonce's watch tends the lane meanwhile", async () => {
+  let clock = NOW;
+  const ch = chainOf(() => clock);
+  ch.st.drop = true;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, ch.providers, () => clock);
+  assert.equal((await s.sell(freshBody("W-re-a", { sell: { deadline: NOW_S + 300n } }))).status, 200);
+  clock = NOW + 30_000;
+  assert.equal((await s.sell(freshBody("W-re-b", { sell: { deadline: NOW_S + 330n } }))).status, 200);
+  const dA = Number(NOW_S + 300n) * 1000;
+  for (const at of [60_001, 90_001, 121_000, 151_000]) {
+    clock = dA + at;
+    await settle(() => false, 60);
+  }
+  // 7 and 8, each replaced past its deadline plus the margin, then each sent again by its replacement's watch: 7 not
+  // again at 151 s, 30 s after its rebroadcast, when 8's watch tends the lane
+  assert.deepEqual(sends(ch.x).map((t) => fieldsOf(t).nonce), [7n, 8n, 7n, 8n, 7n, 8n]);
+});
+
+test("a dropped replacement within its nonce's bound is broadcast again by its own watch until it mines, at most once per EVM_SELL_DROP_MARGIN_MS, with no sale to tend it", async () => {
+  let clock = NOW;
+  const ch = chainOf(() => clock);
+  ch.st.drop = true;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, ch.providers, () => clock);
+  assert.equal((await s.sell(body())).status, 200);
+  const deadlineMs = Number(SELL.deadline) * 1000;
+  clock = deadlineMs + 60_001;
+  await settle(() => sends(ch.x).length > 1); // R at 7
+  clock += 61_000;
+  await settle(() => sends(ch.x).length > 2); // R again: its watch's tend
+  const n = sends(ch.x).length;
+  clock += 30_000;
+  await settle(() => false, 60);
+  assert.equal(sends(ch.x).length, n, "not again within the margin");
+  ch.st.drop = false; // the chain heals, still within 7's bound
+  clock += 31_000;
+  await settle(() => ch.st.c > 7n);
+  assert.equal(ch.st.c, 8n, "R mined with no sale behind it");
+});
+
+test("a busy lane is held only while its lowest unmined send is past its bound: a later nonce past its own bound, behind a hole a new sale filled, holds nothing", async () => {
+  let clock = NOW;
+  const ch = chainOf(() => clock);
+  ch.st.dropAt = 7n; // the chain drops every send at 7
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, floor: 1n, receiptPollMs: 1 }, ch.providers, () => clock);
+  const at = (label: string) => s.sell(freshBody(label, { sell: { deadline: BigInt(Math.floor(clock / 1000)) + 300n } }));
+  assert.equal((await at("W-busy-a")).status, 200); // A at 7, dropped
+  assert.equal((await at("W-busy-b")).status, 200); // B at 8, held behind 7
+  clock += 61_000;
+  assert.equal((await at("W-busy-c")).status, 200); // C fills the hole at 7 (dropped again), its bound 61 s after B's
+  assert.deepEqual(sends(ch.x).map((r) => fieldsOf(r).nonce), [7n, 8n, 7n]);
+  clock = NOW + 300_000 + 60_000 + 600_000 + 1_000; // past B's bound, not past C's
+  const d = await at("W-busy-d");
+  assert.equal(d.status, 200, JSON.stringify(d.body));
+});
+
+test("a lane with no send past its bound reads no counts for the hold: one sale reads the sender's and W's counts only", async () => {
+  const x: Calls = [];
+  const s = senderOf(x, {}, [], {});
+  assert.equal((await s.sell(body())).status, 200);
+  const counts = x.filter((c) => c.method === "eth_getTransactionCount").map((c) => `${c.params[0] === W ? "W" : "S"} ${c.params[1]}`);
+  assert.deepEqual(counts.sort(), ["S latest", "S pending", "W pending"], "provider a: W's pending, the sender's pending and latest, once each");
 });
 
 test("the sender's whole budget holds every sale (H1): 20 clients, each with one paid landing, then their reverting sales from fresh Ws and tokens stop at EVM_SELL_UNPAID_BUDGET_WEI with 429 and its wait", async () => {
